@@ -211,6 +211,111 @@ final class SkillLoaderTests: XCTestCase {
         XCTAssertEqual(outcome.skills.map(\.name), ["blank-name"])
     }
 
+    func testLoadsOptionalOpenAIMetadataLikeRust() throws {
+        let tmp = try SkillLoaderTemporaryDirectory()
+        let cwd = tmp.url.appendingPathComponent("repo", isDirectory: true)
+        let codexHome = tmp.url.appendingPathComponent("home", isDirectory: true)
+        let skillPath = codexHome.appendingPathComponent("skills/metadata-rich/SKILL.md", isDirectory: false)
+        let skillDirectory = skillPath.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: cwd, withIntermediateDirectories: true)
+        try writeSkill(name: "metadata-rich", description: "metadata skill", to: skillPath)
+        try FileManager.default.createDirectory(
+            at: skillDirectory.appendingPathComponent("assets", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try Data().write(to: skillDirectory.appendingPathComponent("assets/small.png", isDirectory: false))
+        try Data().write(to: skillDirectory.appendingPathComponent("assets/large.svg", isDirectory: false))
+        try writeOpenAIMetadata(
+            """
+            interface:
+              display_name: "Metadata Skill"
+              short_description: "  short   metadata description "
+              icon_small: "./assets/small.png"
+              icon_large: assets/large.svg
+              brand_color: "#3B82F6"
+              default_prompt: "  use   this skill "
+            dependencies:
+              tools:
+                - type: mcp
+                  value: github
+                  description: " GitHub access "
+                  transport: stdio
+                  command: npx -y server
+                  url: https://example.com
+            policy:
+              allow_implicit_invocation: false
+              products:
+                - CODEX
+                - CHATGPT
+            """,
+            for: skillPath
+        )
+
+        let outcome = SkillLoader.load(cwd: cwd, codexHome: codexHome, includeSystemSkills: false)
+
+        let skill = try XCTUnwrap(outcome.skills.first)
+        let expectedSkillDirectory = URL(fileURLWithPath: skill.path).deletingLastPathComponent()
+        XCTAssertEqual(outcome.errors, [])
+        let interface = try XCTUnwrap(skill.interface)
+        XCTAssertEqual(interface.displayName, "Metadata Skill")
+        XCTAssertEqual(interface.shortDescription, "short metadata description")
+        XCTAssertEqual(
+            normalizedTemporaryPath(interface.iconSmall),
+            normalizedTemporaryPath(expectedSkillDirectory.appendingPathComponent("assets/small.png").path)
+        )
+        XCTAssertEqual(
+            normalizedTemporaryPath(interface.iconLarge),
+            normalizedTemporaryPath(expectedSkillDirectory.appendingPathComponent("assets/large.svg").path)
+        )
+        XCTAssertEqual(interface.brandColor, "#3B82F6")
+        XCTAssertEqual(interface.defaultPrompt, "use this skill")
+        XCTAssertEqual(
+            skill.dependencies,
+            SkillDependencies(tools: [
+                SkillToolDependency(
+                    type: "mcp",
+                    value: "github",
+                    description: "GitHub access",
+                    transport: "stdio",
+                    command: "npx -y server",
+                    url: "https://example.com"
+                )
+            ])
+        )
+        XCTAssertEqual(skill.policy, SkillPolicy(allowImplicitInvocation: false, products: [.codex, .chatgpt]))
+    }
+
+    func testInvalidOpenAIMetadataFieldsFailOpenLikeRust() throws {
+        let tmp = try SkillLoaderTemporaryDirectory()
+        let cwd = tmp.url.appendingPathComponent("repo", isDirectory: true)
+        let codexHome = tmp.url.appendingPathComponent("home", isDirectory: true)
+        let skillPath = codexHome.appendingPathComponent("skills/invalid-metadata/SKILL.md", isDirectory: false)
+        try FileManager.default.createDirectory(at: cwd, withIntermediateDirectories: true)
+        try writeSkill(name: "invalid-metadata", description: "metadata skill", to: skillPath)
+        try writeOpenAIMetadata(
+            """
+            interface:
+              icon_small: ../outside.png
+              brand_color: blue
+            dependencies:
+              tools:
+                - type: mcp
+            policy:
+              products:
+                - UNKNOWN
+            """,
+            for: skillPath
+        )
+
+        let outcome = SkillLoader.load(cwd: cwd, codexHome: codexHome, includeSystemSkills: false)
+
+        let skill = try XCTUnwrap(outcome.skills.first)
+        XCTAssertEqual(outcome.errors, [])
+        XCTAssertNil(skill.interface)
+        XCTAssertNil(skill.dependencies)
+        XCTAssertEqual(skill.policy, SkillPolicy(allowImplicitInvocation: nil, products: []))
+    }
+
     func testSystemSkillParseErrorsAreSuppressedLikeRust() throws {
         let tmp = try SkillLoaderTemporaryDirectory()
         let cwd = tmp.url.appendingPathComponent("repo", isDirectory: true)
@@ -247,6 +352,18 @@ final class SkillLoaderTests: XCTestCase {
 
         # Body
         """.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    private func writeOpenAIMetadata(_ contents: String, for skillPath: URL) throws {
+        let metadataPath = skillPath
+            .deletingLastPathComponent()
+            .appendingPathComponent("agents/openai.yaml", isDirectory: false)
+        try FileManager.default.createDirectory(at: metadataPath.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try contents.write(to: metadataPath, atomically: true, encoding: .utf8)
+    }
+
+    private func normalizedTemporaryPath(_ path: String?) -> String? {
+        path?.replacingOccurrences(of: "/private/var/", with: "/var/")
     }
 
     private func writePluginManifest(name: String, to url: URL) throws {

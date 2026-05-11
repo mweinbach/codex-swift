@@ -165,11 +165,15 @@ public enum SkillLoader {
                 "exceeds maximum length of 1024 characters"
             )
         }
+        let metadata = loadSkillMetadata(for: url, fileManager: fileManager)
 
         return SkillMetadata(
             name: name,
             description: description,
             shortDescription: shortDescription?.isEmpty == false ? shortDescription : nil,
+            interface: metadata.interface,
+            dependencies: metadata.dependencies,
+            policy: metadata.policy,
             path: url.resolvingSymlinksInPath().standardizedFileURL.path,
             scope: scope,
             pluginID: pluginID
@@ -352,6 +356,238 @@ public enum SkillLoader {
         return parentName
     }
 
+    private static func loadSkillMetadata(
+        for skillPath: URL,
+        fileManager: FileManager
+    ) -> LoadedSkillMetadata {
+        let skillDirectory = skillPath.deletingLastPathComponent()
+        let metadataPath = skillDirectory
+            .appendingPathComponent("agents", isDirectory: true)
+            .appendingPathComponent("openai.yaml", isDirectory: false)
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: metadataPath.path, isDirectory: &isDirectory),
+              !isDirectory.boolValue,
+              let contents = try? String(contentsOf: metadataPath, encoding: .utf8),
+              let object = parseSkillMetadataDocument(contents)
+        else {
+            return LoadedSkillMetadata()
+        }
+        return LoadedSkillMetadata(
+            interface: resolveInterface(object["interface"] as? [String: Any], skillDirectory: skillDirectory),
+            dependencies: resolveDependencies(object["dependencies"] as? [String: Any]),
+            policy: resolvePolicy(object["policy"] as? [String: Any])
+        )
+    }
+
+    private static func parseSkillMetadataDocument(_ contents: String) -> [String: Any]? {
+        if let data = contents.data(using: .utf8),
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            return object
+        }
+        return parseSkillMetadataYAML(contents)
+    }
+
+    private static func parseSkillMetadataYAML(_ contents: String) -> [String: Any]? {
+        var object: [String: Any] = [:]
+        var section: String?
+        var inTools = false
+        var currentTool: [String: Any]?
+        var tools: [[String: Any]] = []
+        var inProducts = false
+        var products: [String] = []
+
+        func finishTool() {
+            if let currentTool {
+                tools.append(currentTool)
+            }
+            currentTool = nil
+        }
+
+        for rawLine in contents.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
+            let trimmed = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else {
+                continue
+            }
+            let indent = rawLine.prefix { $0 == " " || $0 == "\t" }.count
+            if indent == 0, trimmed.hasSuffix(":") {
+                finishTool()
+                if inTools {
+                    object["dependencies"] = ["tools": tools]
+                }
+                if inProducts {
+                    object["policy"] = (object["policy"] as? [String: Any] ?? [:]).merging(["products": products]) { _, new in new }
+                }
+                section = String(trimmed.dropLast())
+                inTools = false
+                inProducts = false
+                if object[section ?? ""] == nil {
+                    object[section ?? ""] = [String: Any]()
+                }
+                continue
+            }
+            guard let section else {
+                continue
+            }
+            if section == "dependencies", trimmed == "tools:" {
+                inTools = true
+                continue
+            }
+            if section == "policy", trimmed == "products:" {
+                inProducts = true
+                continue
+            }
+            if inProducts, trimmed.hasPrefix("- ") {
+                if let product = yamlScalar(String(trimmed.dropFirst(2))) as? String {
+                    products.append(product)
+                }
+                continue
+            }
+            if inTools, trimmed.hasPrefix("- ") {
+                finishTool()
+                currentTool = [:]
+                let remainder = String(trimmed.dropFirst(2))
+                if let (key, value) = yamlKeyValue(remainder) {
+                    currentTool?[key] = value
+                }
+                continue
+            }
+            if inTools, let (key, value) = yamlKeyValue(trimmed) {
+                currentTool?[key] = value
+                continue
+            }
+            if let (key, value) = yamlKeyValue(trimmed) {
+                var sectionObject = object[section] as? [String: Any] ?? [:]
+                sectionObject[key] = value
+                object[section] = sectionObject
+            }
+        }
+
+        finishTool()
+        if inTools || !tools.isEmpty {
+            object["dependencies"] = ["tools": tools]
+        }
+        if inProducts || !products.isEmpty {
+            object["policy"] = (object["policy"] as? [String: Any] ?? [:]).merging(["products": products]) { _, new in new }
+        }
+        return object.isEmpty ? nil : object
+    }
+
+    private static func yamlKeyValue(_ line: String) -> (String, Any)? {
+        guard let colon = line.firstIndex(of: ":") else {
+            return nil
+        }
+        let key = String(line[..<colon]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let valueStart = line.index(after: colon)
+        let value = yamlScalar(String(line[valueStart...]))
+        return key.isEmpty ? nil : (key, value)
+    }
+
+    private static func yamlScalar(_ rawValue: String) -> Any {
+        let value = trimmingMatchingQuotes(rawValue.trimmingCharacters(in: .whitespacesAndNewlines))
+        switch value.lowercased() {
+        case "true":
+            return true
+        case "false":
+            return false
+        default:
+            return value
+        }
+    }
+
+    private static func resolveInterface(_ raw: [String: Any]?, skillDirectory: URL) -> SkillInterface? {
+        guard let raw else {
+            return nil
+        }
+        let interface = SkillInterface(
+            displayName: resolveString(raw["display_name"], maxLength: 64),
+            shortDescription: resolveString(raw["short_description"], maxLength: 1024),
+            iconSmall: resolveAssetPath(raw["icon_small"], skillDirectory: skillDirectory),
+            iconLarge: resolveAssetPath(raw["icon_large"], skillDirectory: skillDirectory),
+            brandColor: resolveColorString(raw["brand_color"]),
+            defaultPrompt: resolveString(raw["default_prompt"], maxLength: 1024)
+        )
+        if interface.displayName == nil,
+           interface.shortDescription == nil,
+           interface.iconSmall == nil,
+           interface.iconLarge == nil,
+           interface.brandColor == nil,
+           interface.defaultPrompt == nil {
+            return nil
+        }
+        return interface
+    }
+
+    private static func resolveDependencies(_ raw: [String: Any]?) -> SkillDependencies? {
+        guard let raw, let rawTools = raw["tools"] as? [[String: Any]] else {
+            return nil
+        }
+        let tools = rawTools.compactMap(resolveDependencyTool)
+        return tools.isEmpty ? nil : SkillDependencies(tools: tools)
+    }
+
+    private static func resolveDependencyTool(_ raw: [String: Any]) -> SkillToolDependency? {
+        guard let type = resolveString(raw["type"], maxLength: 64),
+              let value = resolveString(raw["value"], maxLength: 1024)
+        else {
+            return nil
+        }
+        return SkillToolDependency(
+            type: type,
+            value: value,
+            description: resolveString(raw["description"], maxLength: 1024),
+            transport: resolveString(raw["transport"], maxLength: 64),
+            command: resolveString(raw["command"], maxLength: 1024),
+            url: resolveString(raw["url"], maxLength: 1024)
+        )
+    }
+
+    private static func resolvePolicy(_ raw: [String: Any]?) -> SkillPolicy? {
+        guard let raw else {
+            return nil
+        }
+        let products = (raw["products"] as? [String] ?? []).compactMap(Product.init(sessionSourceName:))
+        return SkillPolicy(allowImplicitInvocation: raw["allow_implicit_invocation"] as? Bool, products: products)
+    }
+
+    private static func resolveString(_ raw: Any?, maxLength: Int) -> String? {
+        guard let raw = raw as? String else {
+            return nil
+        }
+        let value = sanitizeSkillLine(raw)
+        guard let value, !value.isEmpty, value.count <= maxLength else {
+            return nil
+        }
+        return value
+    }
+
+    private static func resolveColorString(_ raw: Any?) -> String? {
+        guard let raw = raw as? String else {
+            return nil
+        }
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard value.count == 7, value.first == "#", value.dropFirst().allSatisfy(\.isHexDigit) else {
+            return nil
+        }
+        return value
+    }
+
+    private static func resolveAssetPath(_ raw: Any?, skillDirectory: URL) -> String? {
+        guard let raw = raw as? String else {
+            return nil
+        }
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, !value.hasPrefix("/") else {
+            return nil
+        }
+        let components = value.split(separator: "/").map(String.init).filter { !$0.isEmpty && $0 != "." }
+        guard components.first == "assets", !components.contains("..") else {
+            return nil
+        }
+        return components.reduce(skillDirectory) { url, component in
+            url.appendingPathComponent(component, isDirectory: false)
+        }.path
+    }
+
     private static func trimmingMatchingQuotes(_ value: String) -> String {
         guard value.count >= 2 else {
             return value
@@ -421,6 +657,12 @@ public enum SkillLoader {
             return 3
         }
     }
+}
+
+private struct LoadedSkillMetadata {
+    var interface: SkillInterface?
+    var dependencies: SkillDependencies?
+    var policy: SkillPolicy?
 }
 
 private extension ConfigLayerSource {

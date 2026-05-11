@@ -18214,6 +18214,63 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual((data[0]["errors"] as? [Any])?.count, 0)
     }
 
+    func testSkillsListProjectsOpenAIMetadataLikeRust() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let userSkill = codexHome.url.appendingPathComponent("skills/user/SKILL.md", isDirectory: false)
+        let skillDirectory = userSkill.deletingLastPathComponent()
+        try FileManager.default.createDirectory(
+            at: skillDirectory.appendingPathComponent("assets", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: skillDirectory.appendingPathComponent("agents", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try skillContents(name: "alpha", description: "user skill")
+            .write(to: userSkill, atomically: true, encoding: .utf8)
+        try Data().write(to: skillDirectory.appendingPathComponent("assets/small.png", isDirectory: false))
+        try """
+        interface:
+          display_name: Alpha
+          icon_small: assets/small.png
+          brand_color: "#00AA88"
+        dependencies:
+          tools:
+            - type: mcp
+              value: github
+              description: GitHub access
+        """.write(
+            to: skillDirectory.appendingPathComponent("agents/openai.yaml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"skills/list","params":{"cwds":["\#(cwd.url.path)"],"forceReload":true}}"#,
+            codexHome: codexHome.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        let skills = try XCTUnwrap(data[0]["skills"] as? [[String: Any]])
+        let skill = try XCTUnwrap(skills.first)
+        let interface = try XCTUnwrap(skill["interface"] as? [String: Any])
+        let expectedSkillPath = try XCTUnwrap(skill["path"] as? String)
+        let expectedSkillDirectory = URL(fileURLWithPath: expectedSkillPath).deletingLastPathComponent()
+        XCTAssertEqual(interface["displayName"] as? String, "Alpha")
+        XCTAssertEqual(
+            (interface["iconSmall"] as? String)?.replacingOccurrences(of: "/private/var/", with: "/var/"),
+            expectedSkillDirectory.appendingPathComponent("assets/small.png").path
+                .replacingOccurrences(of: "/private/var/", with: "/var/")
+        )
+        XCTAssertEqual(interface["brandColor"] as? String, "#00AA88")
+        let dependencies = try XCTUnwrap(skill["dependencies"] as? [String: Any])
+        let tools = try XCTUnwrap(dependencies["tools"] as? [[String: Any]])
+        XCTAssertEqual(tools.first?["type"] as? String, "mcp")
+        XCTAssertEqual(tools.first?["value"] as? String, "github")
+        XCTAssertEqual(tools.first?["description"] as? String, "GitHub access")
+    }
+
     func testSkillsListReportsInvalidUserSkillErrors() throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()

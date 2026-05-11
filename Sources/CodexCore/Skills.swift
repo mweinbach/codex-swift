@@ -11,6 +11,9 @@ public struct SkillMetadata: Codable, Equatable, Sendable {
     public let name: String
     public let description: String
     public let shortDescription: String?
+    public let interface: SkillInterface?
+    public let dependencies: SkillDependencies?
+    public let policy: SkillPolicy?
     public let path: String
     public let scope: SkillScope
     public let pluginID: String?
@@ -19,6 +22,8 @@ public struct SkillMetadata: Codable, Equatable, Sendable {
         case name
         case description
         case shortDescription = "short_description"
+        case interface
+        case dependencies
         case path
         case scope
         case pluginID = "plugin_id"
@@ -28,6 +33,9 @@ public struct SkillMetadata: Codable, Equatable, Sendable {
         name: String,
         description: String,
         shortDescription: String? = nil,
+        interface: SkillInterface? = nil,
+        dependencies: SkillDependencies? = nil,
+        policy: SkillPolicy? = nil,
         path: String,
         scope: SkillScope,
         pluginID: String? = nil
@@ -35,6 +43,9 @@ public struct SkillMetadata: Codable, Equatable, Sendable {
         self.name = name
         self.description = description
         self.shortDescription = shortDescription
+        self.interface = interface
+        self.dependencies = dependencies
+        self.policy = policy
         self.path = path
         self.scope = scope
         self.pluginID = pluginID
@@ -45,6 +56,9 @@ public struct SkillMetadata: Codable, Equatable, Sendable {
         self.name = try container.decode(String.self, forKey: .name)
         self.description = try container.decode(String.self, forKey: .description)
         self.shortDescription = try container.decodeIfPresent(String.self, forKey: .shortDescription)
+        self.interface = try container.decodeIfPresent(SkillInterface.self, forKey: .interface)
+        self.dependencies = try container.decodeIfPresent(SkillDependencies.self, forKey: .dependencies)
+        self.policy = nil
         self.path = try container.decode(String.self, forKey: .path)
         self.scope = try container.decode(SkillScope.self, forKey: .scope)
         self.pluginID = try container.decodeIfPresent(String.self, forKey: .pluginID)
@@ -55,9 +69,93 @@ public struct SkillMetadata: Codable, Equatable, Sendable {
         try container.encode(name, forKey: .name)
         try container.encode(description, forKey: .description)
         try container.encodeIfPresent(shortDescription, forKey: .shortDescription)
+        try container.encodeIfPresent(interface, forKey: .interface)
+        try container.encodeIfPresent(dependencies, forKey: .dependencies)
         try container.encode(path, forKey: .path)
         try container.encode(scope, forKey: .scope)
         try container.encodeIfPresent(pluginID, forKey: .pluginID)
+    }
+}
+
+public struct SkillPolicy: Codable, Equatable, Sendable {
+    public let allowImplicitInvocation: Bool?
+    public let products: [Product]
+
+    private enum CodingKeys: String, CodingKey {
+        case allowImplicitInvocation = "allow_implicit_invocation"
+        case products
+    }
+
+    public init(allowImplicitInvocation: Bool? = nil, products: [Product] = []) {
+        self.allowImplicitInvocation = allowImplicitInvocation
+        self.products = products
+    }
+}
+
+public struct SkillInterface: Codable, Equatable, Sendable {
+    public let displayName: String?
+    public let shortDescription: String?
+    public let iconSmall: String?
+    public let iconLarge: String?
+    public let brandColor: String?
+    public let defaultPrompt: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case displayName = "display_name"
+        case shortDescription = "short_description"
+        case iconSmall = "icon_small"
+        case iconLarge = "icon_large"
+        case brandColor = "brand_color"
+        case defaultPrompt = "default_prompt"
+    }
+
+    public init(
+        displayName: String? = nil,
+        shortDescription: String? = nil,
+        iconSmall: String? = nil,
+        iconLarge: String? = nil,
+        brandColor: String? = nil,
+        defaultPrompt: String? = nil
+    ) {
+        self.displayName = displayName
+        self.shortDescription = shortDescription
+        self.iconSmall = iconSmall
+        self.iconLarge = iconLarge
+        self.brandColor = brandColor
+        self.defaultPrompt = defaultPrompt
+    }
+}
+
+public struct SkillDependencies: Codable, Equatable, Sendable {
+    public let tools: [SkillToolDependency]
+
+    public init(tools: [SkillToolDependency]) {
+        self.tools = tools
+    }
+}
+
+public struct SkillToolDependency: Codable, Equatable, Sendable {
+    public let type: String
+    public let value: String
+    public let description: String?
+    public let transport: String?
+    public let command: String?
+    public let url: String?
+
+    public init(
+        type: String,
+        value: String,
+        description: String? = nil,
+        transport: String? = nil,
+        command: String? = nil,
+        url: String? = nil
+    ) {
+        self.type = type
+        self.value = value
+        self.description = description
+        self.transport = transport
+        self.command = command
+        self.url = url
     }
 }
 

@@ -5219,11 +5219,12 @@ public enum CodexAppServer {
             }
             return $0.path < $1.path
         }.map { skill in
-            [
-                "name": "\(pluginName):\(skill.name)",
+            let displayName = skill.name.hasPrefix("\(pluginName):") ? skill.name : "\(pluginName):\(skill.name)"
+            return [
+                "name": displayName,
                 "description": skill.description,
                 "shortDescription": nullable(skill.shortDescription),
-                "interface": NSNull(),
+                "interface": nullable(skillInterfaceObject(skill.interface)),
                 "path": skill.path,
                 "enabled": isSkillEnabled(skill, rules: rules)
             ].nullStripped(keepNulls: true)
@@ -19130,39 +19131,18 @@ public enum CodexAppServer {
     }
 
     private static func parseSkillFile(_ url: URL, scope: SkillScope) throws -> SkillMetadata {
-        let contents = try String(contentsOf: url, encoding: .utf8)
-        guard let frontmatter = extractSkillFrontmatter(contents) else {
-            throw SkillParseError.missingFrontmatter
+        do {
+            return try SkillLoader.parseSkillFile(url, scope: scope)
+        } catch let error as CodexCore.SkillParseError {
+            switch error {
+            case .missingFrontmatter:
+                throw SkillParseError.missingFrontmatter
+            case let .missingField(field):
+                throw SkillParseError.missingField(field)
+            case let .invalidField(field, reason):
+                throw SkillParseError.invalidField(field, reason)
+            }
         }
-        let fields = parseSkillFrontmatter(frontmatter)
-        let name = sanitizeSkillLine(fields["name"]).flatMap { $0.isEmpty ? nil : $0 } ??
-            defaultSkillName(for: url)
-        let description = sanitizeSkillLine(fields["description"])
-        let shortDescription = sanitizeSkillLine(fields["metadata.short-description"])
-
-        guard name.count <= 64 else {
-            throw SkillParseError.invalidField("name", "exceeds maximum length of 64 characters")
-        }
-        guard let description, !description.isEmpty else {
-            throw SkillParseError.missingField("description")
-        }
-        guard description.count <= 1024 else {
-            throw SkillParseError.invalidField("description", "exceeds maximum length of 1024 characters")
-        }
-        if let shortDescription, shortDescription.count > 1024 {
-            throw SkillParseError.invalidField(
-                "metadata.short-description",
-                "exceeds maximum length of 1024 characters"
-            )
-        }
-
-        return SkillMetadata(
-            name: name,
-            description: description,
-            shortDescription: shortDescription?.isEmpty == false ? shortDescription : nil,
-            path: url.resolvingSymlinksInPath().standardizedFileURL.path,
-            scope: scope
-        )
     }
 
     private static func extractSkillFrontmatter(_ contents: String) -> String? {
@@ -19230,8 +19210,44 @@ public enum CodexAppServer {
             "name": skill.name,
             "description": skill.description,
             "shortDescription": skill.shortDescription as Any,
+            "interface": skillInterfaceObject(skill.interface) as Any,
+            "dependencies": skillDependenciesObject(skill.dependencies) as Any,
             "path": skill.path,
             "scope": skill.scope.rawValue
+        ].nullStripped()
+    }
+
+    private static func skillInterfaceObject(_ interface: SkillInterface?) -> [String: Any]? {
+        guard let interface else {
+            return nil
+        }
+        return [
+            "displayName": interface.displayName as Any,
+            "shortDescription": interface.shortDescription as Any,
+            "iconSmall": interface.iconSmall as Any,
+            "iconLarge": interface.iconLarge as Any,
+            "brandColor": interface.brandColor as Any,
+            "defaultPrompt": interface.defaultPrompt as Any
+        ].nullStripped()
+    }
+
+    private static func skillDependenciesObject(_ dependencies: SkillDependencies?) -> [String: Any]? {
+        guard let dependencies else {
+            return nil
+        }
+        return [
+            "tools": dependencies.tools.map(skillToolDependencyObject)
+        ]
+    }
+
+    private static func skillToolDependencyObject(_ dependency: SkillToolDependency) -> [String: Any] {
+        [
+            "type": dependency.type,
+            "value": dependency.value,
+            "description": dependency.description as Any,
+            "transport": dependency.transport as Any,
+            "command": dependency.command as Any,
+            "url": dependency.url as Any
         ].nullStripped()
     }
 
