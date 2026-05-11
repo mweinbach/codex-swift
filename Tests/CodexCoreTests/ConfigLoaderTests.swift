@@ -781,6 +781,124 @@ final class ConfigLoaderTests: XCTestCase {
         ])
     }
 
+    func testAgentRoleDiscoveryLoadsStandaloneFilesLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let agentsDir = dir.url.appendingPathComponent("agents", isDirectory: true)
+        let nestedDir = agentsDir.appendingPathComponent("nested", isDirectory: true)
+        try FileManager.default.createDirectory(at: nestedDir, withIntermediateDirectories: true)
+        let researcherFile = agentsDir.appendingPathComponent("researcher.toml")
+        let reviewerFile = nestedDir.appendingPathComponent("reviewer.toml")
+        try """
+        name = "researcher"
+        description = "Researches sources"
+        developer_instructions = "Research carefully"
+        nickname_candidates = [" Researcher ", "Scout"]
+        """.write(to: researcherFile, atomically: true, encoding: .utf8)
+        try """
+        name = "reviewer"
+        description = "Reviews changes"
+        developer_instructions = "Review carefully"
+        """.write(to: reviewerFile, atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.agentRoles, [
+            "researcher": AgentRoleConfig(
+                description: "Researches sources",
+                configFile: researcherFile.path,
+                nicknameCandidates: ["Researcher", "Scout"]
+            ),
+            "reviewer": AgentRoleConfig(
+                description: "Reviews changes",
+                configFile: reviewerFile.path
+            )
+        ])
+    }
+
+    func testAgentRoleDiscoverySkipsMalformedStandaloneFilesUntilWarningsArePorted() throws {
+        let dir = try CoreTemporaryDirectory()
+        let agentsDir = dir.url.appendingPathComponent("agents", isDirectory: true)
+        try FileManager.default.createDirectory(at: agentsDir, withIntermediateDirectories: true)
+        try """
+        name = "broken"
+        description = "Missing developer instructions"
+        """.write(
+            to: agentsDir.appendingPathComponent("broken.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        name = "usable"
+        description = "Usable role"
+        developer_instructions = "Use this role"
+        """.write(
+            to: agentsDir.appendingPathComponent("usable.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.agentRoles, [
+            "usable": AgentRoleConfig(
+                description: "Usable role",
+                configFile: agentsDir.appendingPathComponent("usable.toml").path
+            )
+        ])
+    }
+
+    func testDeclaredAgentRoleConfigFileIsNotDiscoveredTwiceLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let agentsDir = dir.url.appendingPathComponent("agents", isDirectory: true)
+        try FileManager.default.createDirectory(at: agentsDir, withIntermediateDirectories: true)
+        let roleFile = agentsDir.appendingPathComponent("researcher.toml")
+        try """
+        name = "renamed-researcher"
+        description = "Role metadata from file"
+        developer_instructions = "Research carefully"
+        """.write(to: roleFile, atomically: true, encoding: .utf8)
+        try """
+        [agents.researcher]
+        description = "Role metadata from config"
+        config_file = "agents/researcher.toml"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.agentRoles, [
+            "renamed-researcher": AgentRoleConfig(
+                description: "Role metadata from file",
+                configFile: roleFile.path
+            )
+        ])
+    }
+
+    func testProjectLocalAgentRoleDeclarationsAreLoadedLikeRust() throws {
+        let codexHome = try CoreTemporaryDirectory()
+        let repo = try CoreTemporaryDirectory()
+        try FileManager.default.createDirectory(at: repo.url.appendingPathComponent(".git"), withIntermediateDirectories: true)
+        let dotCodex = repo.url.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(at: dotCodex, withIntermediateDirectories: true)
+        try """
+        [agents.project_reviewer]
+        description = "Reviews this project"
+        nickname_candidates = ["Project Reviewer"]
+        """.write(to: dotCodex.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(
+            codexHome: codexHome.url,
+            cwd: repo.url,
+            systemConfigFile: nil
+        )
+
+        XCTAssertEqual(config.agentRoles, [
+            "project_reviewer": AgentRoleConfig(
+                description: "Reviews this project",
+                nicknameCandidates: ["Project Reviewer"]
+            )
+        ])
+    }
+
     func testAgentRoleConfigRejectsMissingFileLikeRust() throws {
         let dir = try CoreTemporaryDirectory()
         let missing = dir.url.appendingPathComponent("missing.toml")

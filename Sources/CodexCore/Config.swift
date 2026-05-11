@@ -1034,6 +1034,7 @@ public enum CodexConfigLoader {
     ) throws -> CodexRuntimeConfig {
         var parsed = ParsedCodexConfigToml()
         let userConfigFile = codexHome.appendingPathComponent("config.toml", isDirectory: false).standardizedFileURL
+        parsed.agentRoleDiscoveryDirs.append(codexHome.appendingPathComponent("agents", isDirectory: true))
         for configFile in baseConfigLayerFiles(
             codexHome: codexHome,
             systemConfigFile: systemConfigFile
@@ -1801,6 +1802,7 @@ private struct ParsedCodexConfigToml {
     var profileAnalytics: [String: [String: ConfigValue]] = [:]
     var agents: [String: ConfigValue] = [:]
     var agentRoles: [String: [String: ConfigValue]] = [:]
+    var agentRoleDiscoveryDirs: [URL] = []
     var realtimeAudio: [String: ConfigValue] = [:]
     var realtime: [String: ConfigValue] = [:]
     var tui: [String: ConfigValue] = [:]
@@ -1822,12 +1824,14 @@ private struct ParsedCodexConfigToml {
         profileAppsMcpPathOverride.removeAll()
         profileAnalytics.removeAll()
         profileTui.removeAll()
-        agentRoles.removeAll()
     }
 
     static func parse(_ contents: String, baseURL: URL? = nil) throws -> ParsedCodexConfigToml {
         var parsed = ParsedCodexConfigToml()
         var section = ConfigSection.topLevel
+        if let baseURL {
+            parsed.agentRoleDiscoveryDirs.append(baseURL.appendingPathComponent("agents", isDirectory: true))
+        }
 
         for line in try logicalTomlLines(contents) {
             if line.hasPrefix("[") {
@@ -2475,6 +2479,7 @@ private struct ParsedCodexConfigToml {
             }
             agentRoles[roleName] = mergedRole
         }
+        agentRoleDiscoveryDirs.append(contentsOf: overlay.agentRoleDiscoveryDirs)
 
         for (profileName, profileValue) in overlay.permissions {
             permissions[profileName, default: ParsedPermissionProfileToml()].merge(profileValue)
@@ -2743,7 +2748,10 @@ private struct ParsedCodexConfigToml {
         config.analyticsEnabled = try Self.enabledConfigValue(analytics, key: "analytics") ?? config.analyticsEnabled
         config.feedbackEnabled = try Self.enabledConfigValue(feedback, key: "feedback") ?? true
         config.agents = try Self.agentRuntimeConfigValue(agents, key: "agents")
-        config.agentRoles = try Self.agentRoleConfigsValue(agentRoles)
+        config.agentRoles = try Self.agentRoleConfigsValue(
+            declaredRoles: agentRoles,
+            discoveryDirs: agentRoleDiscoveryDirs
+        )
         let activeProfileName = try topLevel["profile"].map { try Self.stringValue($0, key: "profile") }
         config.tui = try Self.tuiRuntimeConfigValue(
             tui,
@@ -4013,9 +4021,11 @@ private struct ParsedCodexConfigToml {
     }
 
     private static func agentRoleConfigsValue(
-        _ roles: [String: [String: ConfigValue]]
+        declaredRoles roles: [String: [String: ConfigValue]],
+        discoveryDirs: [URL]
     ) throws -> [String: AgentRoleConfig] {
         var configs: [String: AgentRoleConfig] = [:]
+        var declaredConfigFiles = Set<String>()
         for roleName in roles.keys.sorted() {
             guard let values = roles[roleName] else { continue }
             var config = AgentRoleConfig(
@@ -4031,6 +4041,7 @@ private struct ParsedCodexConfigToml {
             )
 
             if let configFile = config.configFile {
+                declaredConfigFiles.insert(URL(fileURLWithPath: configFile).standardizedFileURL.path)
                 let fileMetadata = try agentRoleFileConfigValue(
                     path: configFile,
                     roleNameHint: roleName
@@ -4067,7 +4078,52 @@ private struct ParsedCodexConfigToml {
             }
             configs[roleName] = config
         }
+
+        for roleFile in discoveredAgentRoleFiles(in: discoveryDirs) where !declaredConfigFiles.contains(roleFile.path) {
+            guard let fileMetadata = try? agentRoleFileConfigValue(path: roleFile.path, roleNameHint: nil),
+                  let roleName = fileMetadata.name
+            else {
+                continue
+            }
+            guard configs[roleName] == nil else {
+                continue
+            }
+            configs[roleName] = AgentRoleConfig(
+                description: fileMetadata.config.description,
+                configFile: roleFile.path,
+                nicknameCandidates: fileMetadata.config.nicknameCandidates
+            )
+        }
         return configs
+    }
+
+    private static func discoveredAgentRoleFiles(in directories: [URL]) -> [URL] {
+        var seenDirectories = Set<String>()
+        var files: [URL] = []
+        for directory in directories {
+            let standardizedDirectory = directory.standardizedFileURL
+            guard seenDirectories.insert(standardizedDirectory.path).inserted else {
+                continue
+            }
+            collectAgentRoleFiles(in: standardizedDirectory, into: &files)
+        }
+        return files.sorted { $0.path < $1.path }
+    }
+
+    private static func collectAgentRoleFiles(in directory: URL, into files: inout [URL]) {
+        guard let enumerator = FileManager.default.enumerator(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: []
+        ) else {
+            return
+        }
+        for case let file as URL in enumerator where file.pathExtension == "toml" {
+            let resourceValues = try? file.resourceValues(forKeys: [.isRegularFileKey])
+            if resourceValues?.isRegularFile == true {
+                files.append(file.standardizedFileURL)
+            }
+        }
     }
 
     private static func agentRoleFileConfigValue(
@@ -4105,16 +4161,28 @@ private struct ParsedCodexConfigToml {
         }
 
         let name = try values["name"].flatMap {
-            try agentRoleOptionalTrimmedStringValue($0, fieldLabel: "name")
+            try agentRoleOptionalTrimmedNameValue($0, fieldLabel: "name")
+        }
+        if roleNameHint == nil, name == nil {
+            throw CodexConfigLoadError.invalidConfig(
+                "agent role file at \(path) must define a non-empty `name`"
+            )
         }
         let description = try values["description"].flatMap {
-            try agentRoleDescriptionValue($0, key: "description")
+            try agentRoleDescriptionValue($0, key: "agent role file \(path).description")
         }
         let nicknameCandidates = try values["nickname_candidates"].map {
-            try agentRoleNicknameCandidatesValue($0, key: "nickname_candidates")
+            try agentRoleNicknameCandidatesValue($0, key: "agent role file \(path).nickname_candidates")
         }
         if let developerInstructions = values["developer_instructions"] {
-            _ = try agentRoleDescriptionValue(developerInstructions, key: "developer_instructions")
+            _ = try agentRoleDescriptionValue(
+                developerInstructions,
+                key: "agent role file \(path).developer_instructions"
+            )
+        } else if roleNameHint == nil {
+            throw CodexConfigLoadError.invalidConfig(
+                "agent role file at \(path) must define `developer_instructions`"
+            )
         }
         return (name, AgentRoleConfig(
             description: description,
@@ -4147,6 +4215,14 @@ private struct ParsedCodexConfigToml {
 
     private static func agentRoleDescriptionValue(_ value: ConfigValue, key: String) throws -> String? {
         try agentRoleOptionalTrimmedStringValue(value, fieldLabel: key)
+    }
+
+    private static func agentRoleOptionalTrimmedNameValue(
+        _ value: ConfigValue,
+        fieldLabel: String
+    ) throws -> String? {
+        let trimmed = try stringValue(value, key: fieldLabel).trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private static func agentRoleOptionalTrimmedStringValue(
