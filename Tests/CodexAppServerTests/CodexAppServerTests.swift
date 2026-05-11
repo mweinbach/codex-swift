@@ -18304,6 +18304,29 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: configFile, encoding: .utf8), "")
     }
 
+    func testConfigValueWriteNoOpClearPreservesExistingFileLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        let original = """
+        # Keep this comment
+        model = "gpt-old"
+
+        [features]
+        unified_exec = true
+
+        """
+        try original.write(to: configFile, atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/value/write","params":{"keyPath":"features.personality","value":null,"mergeStrategy":"replace"}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["status"] as? String, "ok")
+        XCTAssertTrue(result["overriddenMetadata"] is NSNull)
+        XCTAssertEqual(try String(contentsOf: configFile, encoding: .utf8), original)
+    }
+
     func testConfigValueWriteRejectsInvalidUserValueEvenWhenManagedOverridesLikeRust() throws {
         let temp = try TemporaryDirectory()
         let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)

@@ -19092,8 +19092,20 @@ public enum CodexAppServer {
 
         var nextConfig = userConfig
         var editedPaths: [[String]] = []
+        var changedEdits: [ConfigWriteEdit] = []
         for edit in edits {
-            editedPaths.append(try applyConfigWriteEdit(edit, to: &nextConfig))
+            let path = try configWriteKeyPath(edit.keyPath)
+            let originalValue = configValue(at: path, in: nextConfig)
+            if let value = edit.value {
+                setConfigValue(value, at: path, mergeStrategy: edit.mergeStrategy, in: &nextConfig)
+            } else {
+                _ = removeConfigValue(at: path, in: &nextConfig)
+            }
+            let updatedValue = configValue(at: path, in: nextConfig)
+            if originalValue != updatedValue {
+                changedEdits.append(edit)
+            }
+            editedPaths.append(path)
         }
 
         let updatedStack: ConfigLayerStack
@@ -19126,13 +19138,15 @@ public enum CodexAppServer {
             effectiveConfig: updatedStack.effectiveConfig(),
             editedPaths: editedPaths
         )
-        try FileManager.default.createDirectory(at: configuration.codexHome, withIntermediateDirectories: true)
-        let renderedConfig = configTomlForWrite(
-            nextConfig,
-            edits: edits,
-            existingContents: try? String(contentsOf: configFile, encoding: .utf8)
-        )
-        try renderedConfig.write(to: configFile, atomically: true, encoding: .utf8)
+        if !changedEdits.isEmpty {
+            try FileManager.default.createDirectory(at: configuration.codexHome, withIntermediateDirectories: true)
+            let renderedConfig = configTomlForWrite(
+                nextConfig,
+                edits: changedEdits,
+                existingContents: try? String(contentsOf: configFile, encoding: .utf8)
+            )
+            try renderedConfig.write(to: configFile, atomically: true, encoding: .utf8)
+        }
 
         return [
             "status": overridden == nil ? "ok" : "okOverridden",
@@ -19277,17 +19291,6 @@ public enum CodexAppServer {
                 data: ["config_write_error_code": "configValidationError"]
             )
         }
-    }
-
-    private static func applyConfigWriteEdit(_ edit: ConfigWriteEdit, to config: inout ConfigValue) throws -> [String] {
-        let path = try configWriteKeyPath(edit.keyPath)
-
-        if let value = edit.value {
-            setConfigValue(value, at: path, mergeStrategy: edit.mergeStrategy, in: &config)
-        } else {
-            _ = removeConfigValue(at: path, in: &config)
-        }
-        return path
     }
 
     private static func configTomlForWrite(
