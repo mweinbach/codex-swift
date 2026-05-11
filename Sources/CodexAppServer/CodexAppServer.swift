@@ -13477,7 +13477,7 @@ public enum CodexAppServer {
         )
         let includeLayers = boolParam(params?["includeLayers"], defaultValue: false)
         var response: [String: Any] = [
-            "config": configValueObject(
+            "config": configReadConfigObject(
                 effectiveConfig(
                     stack.effectiveConfig(),
                     applyingRuntimeFeatureEnablement: runtimeFeatureEnablement
@@ -17717,7 +17717,7 @@ public enum CodexAppServer {
         [
             "name": sourceObject(layer.name),
             "version": layer.version,
-            "config": configValueObject(layer.config)
+            "config": configReadConfigObject(layer.config)
         ]
     }
 
@@ -17766,6 +17766,66 @@ public enum CodexAppServer {
         case let .table(table):
             return table.mapValues(configValueObject)
         }
+    }
+
+    private static func configReadConfigObject(_ value: ConfigValue) -> Any {
+        guard case let .table(table) = value else {
+            return configValueObject(value)
+        }
+        var object = table.mapValues(configValueObject)
+        if case let .table(toolsTable)? = table["tools"] {
+            object["tools"] = configReadToolsObject(toolsTable)
+        }
+        return object
+    }
+
+    private static func configReadToolsObject(_ table: [String: ConfigValue]) -> [String: Any] {
+        var object: [String: Any] = [
+            "web_search": NSNull(),
+            "view_image": NSNull()
+        ]
+        if case let .table(webSearchTable)? = table["web_search"] {
+            object["web_search"] = configReadWebSearchToolObject(webSearchTable)
+        }
+        if case let .bool(viewImage)? = table["view_image"] {
+            object["view_image"] = viewImage
+        }
+        return object
+    }
+
+    private static func configReadWebSearchToolObject(_ table: [String: ConfigValue]) -> [String: Any] {
+        [
+            "context_size": stringConfigValue(table["context_size"]) as Any? ?? NSNull(),
+            "allowed_domains": stringArrayConfigValue(table["allowed_domains"]) as Any? ?? NSNull(),
+            "location": configReadWebSearchLocationObject(table["location"])
+        ]
+    }
+
+    private static func configReadWebSearchLocationObject(_ value: ConfigValue?) -> Any {
+        guard case let .table(table)? = value else {
+            return NSNull()
+        }
+        return [
+            "country": stringConfigValue(table["country"]) as Any? ?? NSNull(),
+            "region": stringConfigValue(table["region"]) as Any? ?? NSNull(),
+            "city": stringConfigValue(table["city"]) as Any? ?? NSNull(),
+            "timezone": stringConfigValue(table["timezone"]) as Any? ?? NSNull()
+        ]
+    }
+
+    private static func stringConfigValue(_ value: ConfigValue?) -> String? {
+        guard case let .string(string)? = value else {
+            return nil
+        }
+        return string
+    }
+
+    private static func stringArrayConfigValue(_ value: ConfigValue?) -> [String]? {
+        guard case let .array(array)? = value else {
+            return nil
+        }
+        let strings = array.compactMap(stringConfigValue)
+        return strings.count == array.count ? strings : nil
     }
 
     private static let supportedExperimentalFeatureEnablement = [

@@ -15285,8 +15285,11 @@ final class CodexAppServerTests: XCTestCase {
         model = "gpt-user"
         sandbox_mode = "workspace-write"
 
+        [tools.web_search]
+        context_size = "low"
+        allowed_domains = ["example.com"]
+
         [tools]
-        web_search = true
         view_image = false
         """.write(
             to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
@@ -15303,7 +15306,10 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(config["model"] as? String, "gpt-user")
         XCTAssertEqual(config["sandbox_mode"] as? String, "workspace-write")
         let tools = try XCTUnwrap(config["tools"] as? [String: Any])
-        XCTAssertEqual(tools["web_search"] as? Bool, true)
+        let webSearch = try XCTUnwrap(tools["web_search"] as? [String: Any])
+        XCTAssertEqual(webSearch["context_size"] as? String, "low")
+        XCTAssertEqual(webSearch["allowed_domains"] as? [String], ["example.com"])
+        XCTAssertTrue(webSearch["location"] is NSNull)
         XCTAssertEqual(tools["view_image"] as? Bool, false)
 
         let origins = try XCTUnwrap(result["origins"] as? [String: Any])
@@ -15315,14 +15321,72 @@ final class CodexAppServerTests: XCTestCase {
             temp.url.appendingPathComponent("config.toml", isDirectory: false).standardizedFileURL.path
         )
 
-        let webSearchOrigin = try XCTUnwrap(origins["tools.web_search"] as? [String: Any])
+        let webSearchOrigin = try XCTUnwrap(origins["tools.web_search.context_size"] as? [String: Any])
         let webSearchOriginName = try XCTUnwrap(webSearchOrigin["name"] as? [String: Any])
         XCTAssertEqual(webSearchOriginName["type"] as? String, "user")
+        XCTAssertNotNil(origins["tools.web_search.allowed_domains.0"] as? [String: Any])
+        XCTAssertNotNil(origins["tools.view_image"] as? [String: Any])
         XCTAssertTrue((modelOrigin["version"] as? String)?.hasPrefix("sha256:") == true)
 
         let layers = try XCTUnwrap(result["layers"] as? [[String: Any]])
         XCTAssertEqual(layers.first?["name"].flatMap { ($0 as? [String: Any])?["type"] as? String }, "user")
         XCTAssertEqual((layers.first?["config"] as? [String: Any])?["model"] as? String, "gpt-user")
+    }
+
+    func testConfigReadIncludesNestedWebSearchToolConfigLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        web_search = "live"
+
+        [tools.web_search]
+        context_size = "high"
+        allowed_domains = ["example.com"]
+        location = { country = "US", city = "New York", timezone = "America/New_York" }
+        """.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/read","params":{}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let config = try XCTUnwrap(result["config"] as? [String: Any])
+        XCTAssertEqual(config["web_search"] as? String, "live")
+        let tools = try XCTUnwrap(config["tools"] as? [String: Any])
+        let webSearch = try XCTUnwrap(tools["web_search"] as? [String: Any])
+        XCTAssertEqual(webSearch["context_size"] as? String, "high")
+        XCTAssertEqual(webSearch["allowed_domains"] as? [String], ["example.com"])
+        let location = try XCTUnwrap(webSearch["location"] as? [String: Any])
+        XCTAssertEqual(location["country"] as? String, "US")
+        XCTAssertTrue(location["region"] is NSNull)
+        XCTAssertEqual(location["city"] as? String, "New York")
+        XCTAssertEqual(location["timezone"] as? String, "America/New_York")
+        XCTAssertTrue(tools["view_image"] is NSNull)
+    }
+
+    func testConfigReadIgnoresBoolWebSearchToolConfigLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [tools]
+        web_search = true
+        """.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/read","params":{}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let config = try XCTUnwrap(result["config"] as? [String: Any])
+        let tools = try XCTUnwrap(config["tools"] as? [String: Any])
+        XCTAssertTrue(tools["web_search"] is NSNull)
+        XCTAssertTrue(tools["view_image"] is NSNull)
     }
 
     func testConfigReadReportsManagedOverrideOverSessionFlagsLikeRust() throws {
