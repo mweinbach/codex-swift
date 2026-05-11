@@ -4659,6 +4659,47 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: copiedLink.path), "nested")
     }
 
+    func testFsCopyIgnoresSpecialFilesInRecursiveCopyLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let source = temp.url.appendingPathComponent("source", isDirectory: true)
+        let copied = temp.url.appendingPathComponent("copied", isDirectory: true)
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        try "hello".write(
+            to: source.appendingPathComponent("note.txt", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try createFIFO(at: source.appendingPathComponent("named-pipe", isDirectory: false))
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"fs/copy","params":{"sourcePath":"\#(source.path)","destinationPath":"\#(copied.path)","recursive":true}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertNotNil(response["result"] as? [String: Any])
+        XCTAssertEqual(
+            try String(contentsOf: copied.appendingPathComponent("note.txt", isDirectory: false), encoding: .utf8),
+            "hello"
+        )
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: copied.appendingPathComponent("named-pipe", isDirectory: false).path
+        ))
+    }
+
+    func testFsCopyRejectsStandaloneFIFOSourceLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let fifo = temp.url.appendingPathComponent("named-pipe", isDirectory: false)
+        try createFIFO(at: fifo)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"fs/copy","params":{"sourcePath":"\#(fifo.path)","destinationPath":"\#(temp.url.appendingPathComponent("copied").path)","recursive":false}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertEqual(
+            (response["error"] as? [String: Any])?["message"] as? String,
+            "fs/copy only supports regular files, directories, and symlinks"
+        )
+    }
+
     func testFsWatchReportsDirectoryChangesAndUnwatchStopsNotifications() async throws {
         let temp = try TemporaryDirectory()
         let watched = temp.url.appendingPathComponent("repo", isDirectory: true)
@@ -18383,6 +18424,27 @@ final class CodexAppServerTests: XCTestCase {
         let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         XCTAssertEqual(process.terminationStatus, 0, "git \(args.joined(separator: " ")) failed: \(stderr)")
         return (stdout, stderr)
+    }
+
+    private func createFIFO(at path: URL) throws {
+        let mkfifo = "/usr/bin/mkfifo"
+        guard FileManager.default.isExecutableFile(atPath: mkfifo) else {
+            throw XCTSkip("mkfifo is unavailable on this platform")
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: mkfifo)
+        process.arguments = [path.path]
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+        try process.run()
+        process.waitUntilExit()
+
+        let stdout = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        XCTAssertEqual(process.terminationStatus, 0, "mkfifo failed: \(stderr)\(stdout)")
     }
 
     private func remotePluginBundleTarGzBytes(pluginRoot: URL, in tempRoot: URL) throws -> Data {
