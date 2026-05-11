@@ -11042,13 +11042,16 @@ public enum CodexAppServer {
 
     fileprivate static func mcpServerRefreshResult(
         rawParams: Any?,
-        configuration: CodexAppServerConfiguration
+        configuration: CodexAppServerConfiguration,
+        loadedThreadIDs: () -> [String] = { [] },
+        queueThreadRefresh: (String, McpServerRefreshConfig) throws -> Void = { _, _ in }
     ) throws -> [String: Any] {
         if let rawParams, !(rawParams is NSNull) {
             throw AppServerError.invalidParams("invalid params for config/mcpServer/reload")
         }
+        let runtimeConfig: CodexRuntimeConfig
         do {
-            _ = try CodexConfigLoader.load(
+            runtimeConfig = try CodexConfigLoader.load(
                 codexHome: configuration.codexHome,
                 systemConfigFile: nil,
                 environment: configuration.environment
@@ -11056,7 +11059,103 @@ public enum CodexAppServer {
         } catch {
             throw AppServerError.internalError("failed to refresh MCP servers: failed to reload config: \(error)")
         }
+        let refreshConfig = mcpServerRefreshConfig(runtimeConfig: runtimeConfig)
+        for threadID in loadedThreadIDs() {
+            do {
+                try queueThreadRefresh(threadID, refreshConfig)
+            } catch {
+                throw AppServerError.internalError(
+                    "failed to refresh MCP servers: failed to queue MCP refresh for thread \(threadID): \(error)"
+                )
+            }
+        }
         return [:]
+    }
+
+    private static func mcpServerRefreshConfig(runtimeConfig: CodexRuntimeConfig) -> McpServerRefreshConfig {
+        McpServerRefreshConfig(
+            mcpServers: mcpServersRefreshJSONValue(runtimeConfig.mcpServers),
+            mcpOAuthCredentialsStoreMode: .string(runtimeConfig.mcpOAuthCredentialsStoreMode.rawValue)
+        )
+    }
+
+    private static func mcpServersRefreshJSONValue(_ servers: [String: McpServerConfig]) -> JSONValue {
+        .object(Dictionary(uniqueKeysWithValues: servers.map { name, server in
+            (name, mcpServerRefreshJSONValue(server))
+        }))
+    }
+
+    private static func mcpServerRefreshJSONValue(_ server: McpServerConfig) -> JSONValue {
+        var object: [String: JSONValue] = [:]
+        switch server.transport {
+        case let .stdio(command, args, env, envVars, cwd):
+            object["command"] = .string(command)
+            if !args.isEmpty {
+                object["args"] = .array(args.map(JSONValue.string))
+            }
+            if let env, !env.isEmpty {
+                object["env"] = .object(env.mapValues(JSONValue.string))
+            }
+            if !envVars.isEmpty {
+                object["env_vars"] = .array(envVars.map(JSONValue.string))
+            }
+            if let cwd {
+                object["cwd"] = .string(cwd)
+            }
+        case let .streamableHttp(url, bearerTokenEnvVar, httpHeaders, envHttpHeaders):
+            object["url"] = .string(url)
+            if let bearerTokenEnvVar {
+                object["bearer_token_env_var"] = .string(bearerTokenEnvVar)
+            }
+            if let httpHeaders, !httpHeaders.isEmpty {
+                object["http_headers"] = .object(httpHeaders.mapValues(JSONValue.string))
+            }
+            if let envHttpHeaders, !envHttpHeaders.isEmpty {
+                object["env_http_headers"] = .object(envHttpHeaders.mapValues(JSONValue.string))
+            }
+        }
+        if !server.enabled {
+            object["enabled"] = .bool(false)
+        }
+        if server.required {
+            object["required"] = .bool(true)
+        }
+        if server.supportsParallelToolCalls {
+            object["supports_parallel_tool_calls"] = .bool(true)
+        }
+        if let startupTimeoutSec = server.startupTimeoutSec {
+            object["startup_timeout_sec"] = .double(startupTimeoutSec)
+        }
+        if let toolTimeoutSec = server.toolTimeoutSec {
+            object["tool_timeout_sec"] = .double(toolTimeoutSec)
+        }
+        if let defaultToolsApprovalMode = server.defaultToolsApprovalMode {
+            object["default_tools_approval_mode"] = .string(defaultToolsApprovalMode.rawValue)
+        }
+        if let enabledTools = server.enabledTools {
+            object["enabled_tools"] = .array(enabledTools.map(JSONValue.string))
+        }
+        if let disabledTools = server.disabledTools {
+            object["disabled_tools"] = .array(disabledTools.map(JSONValue.string))
+        }
+        if let scopes = server.scopes {
+            object["scopes"] = .array(scopes.map(JSONValue.string))
+        }
+        if let oauthResource = server.oauthResource {
+            object["oauth_resource"] = .string(oauthResource)
+        }
+        if !server.tools.isEmpty {
+            object["tools"] = .object(server.tools.mapValues(mcpServerToolRefreshJSONValue))
+        }
+        return .object(object)
+    }
+
+    private static func mcpServerToolRefreshJSONValue(_ tool: McpServerToolConfig) -> JSONValue {
+        var object: [String: JSONValue] = [:]
+        if let approvalMode = tool.approvalMode {
+            object["approval_mode"] = .string(approvalMode.rawValue)
+        }
+        return .object(object)
     }
 
     fileprivate static func mcpResourceReadResult(
@@ -20681,6 +20780,23 @@ final class CodexAppServerMessageProcessor {
         }) ?? []
     }
 
+    private func queueMcpServerRefresh(threadID: String, config: McpServerRefreshConfig) throws {
+        let manager = threadStateManager
+        let queued = try CodexAppServer.runAsyncBlocking {
+            await manager.queueMcpServerRefresh(threadID: threadID, config: config)
+        }
+        if !queued {
+            throw AppServerError.invalidRequest("thread not found: \(threadID)")
+        }
+    }
+
+    func pendingMcpServerRefreshConfig(threadID: String) throws -> McpServerRefreshConfig? {
+        let manager = threadStateManager
+        return try CodexAppServer.runAsyncBlocking {
+            await manager.pendingMcpServerRefreshConfig(threadID: threadID)
+        }
+    }
+
     private func accountRateLimitsResult() throws -> [String: Any] {
         try CodexAppServer.accountRateLimitsResult(
             configuration: configuration,
@@ -21797,7 +21913,9 @@ final class CodexAppServerMessageProcessor {
                         id: id,
                         result: try CodexAppServer.mcpServerRefreshResult(
                             rawParams: object["params"],
-                            configuration: configuration
+                            configuration: configuration,
+                            loadedThreadIDs: { self.listLoadedThreadIDs() },
+                            queueThreadRefresh: { try self.queueMcpServerRefresh(threadID: $0, config: $1) }
                         )
                     )
                 case "mcpServer/resource/read":

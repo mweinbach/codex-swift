@@ -15053,6 +15053,40 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(result.isEmpty)
     }
 
+    func testMcpServerReloadQueuesRefreshForLoadedThreads() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        mcp_oauth_credentials_store = "file"
+
+        [mcp_servers.docs]
+        command = "docs-server"
+        args = ["--stdio"]
+        startup_timeout_sec = 12
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let start = try decodeMessages(processor.processLine(
+            Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)
+        ))
+        let threadID = try XCTUnwrap(((start[0]["result"] as? [String: Any])?["thread"] as? [String: Any])?["id"] as? String)
+
+        let response = try decode(processor.processLine(
+            Data(#"{"id":2,"method":"config/mcpServer/reload"}"#.utf8)
+        ))
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertTrue(result.isEmpty)
+        let refresh = try XCTUnwrap(processor.pendingMcpServerRefreshConfig(threadID: threadID))
+        XCTAssertEqual(refresh.mcpOAuthCredentialsStoreMode, .string("file"))
+        guard case let .object(servers) = refresh.mcpServers,
+              case let .object(docs)? = servers["docs"]
+        else {
+            return XCTFail("expected docs MCP server refresh config")
+        }
+        XCTAssertEqual(docs["command"], .string("docs-server"))
+        XCTAssertEqual(docs["args"], .array([.string("--stdio")]))
+        XCTAssertEqual(docs["startup_timeout_sec"], .double(12))
+    }
+
     func testMcpServerReloadRejectsObjectParams() throws {
         let temp = try TemporaryDirectory()
 

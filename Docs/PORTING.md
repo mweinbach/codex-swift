@@ -623,7 +623,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/app-server/src/request_processors/windows_sandbox_processor.rs` Windows sandbox setup start
   - `windowsSandbox/setupStart` now validates setup mode and absolute `cwd`, returns Rust's immediate `{ started: true }` response, and emits the Rust-shaped `windowsSandbox/setupCompleted` notification with the non-Windows setup error. Real Windows setup execution/persistence remains pending.
 - `codex-rs/app-server/src/request_processors/mcp_processor.rs` MCP config reload
-  - `config/mcpServer/reload` now accepts only Rust's omitted/null params shape, reloads configured MCP servers from current config, reports config reload failures with the Rust route-level internal error prefix, and returns Rust's empty response object. Queueing strict refreshes for loaded threads remains pending with the broader live-thread manager port.
+  - `config/mcpServer/reload` now accepts only Rust's omitted/null params shape, reloads configured MCP servers from current config, reports config reload failures with the Rust route-level internal error prefix, queues Rust-shaped `refresh_mcp_servers` config snapshots for loaded Swift app-server threads, and returns Rust's empty response object. Dispatching the queued refresh into a full live MCP connection manager remains pending with the broader live-thread manager port.
 - `codex-rs/app-server/src/request_processors/catalog_processor.rs` collaboration mode listing
   - `collaborationMode/list` now returns the Rust-ordered collaboration mode presets for Plan and Default, with mode aliases and `reasoning_effort` wire keys matching the protocol.
 - `codex-rs/app-server/src/request_processors/config_processor.rs` requirements listing
