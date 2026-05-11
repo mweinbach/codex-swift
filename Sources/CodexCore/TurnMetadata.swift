@@ -4,6 +4,38 @@ private let modelKey = "model"
 private let reasoningEffortKey = "reasoning_effort"
 private let turnStartedAtUnixMsKey = "turn_started_at_unix_ms"
 
+public func buildTurnMetadataHeader(cwd: URL, sandbox: String? = nil) -> String? {
+    let repoRoot = GitInfoCollector.gitRepoRoot(baseDir: cwd)?.path
+    let latestGitCommitHash = GitInfoCollector.headCommitHash(cwd: cwd)
+    let associatedRemoteURLs = GitInfoCollector.remoteURLsByNameAssumingGitRepo(cwd: cwd)
+    let hasChanges = GitInfoCollector.hasChanges(cwd: cwd)
+
+    if latestGitCommitHash == nil,
+       associatedRemoteURLs == nil,
+       hasChanges == nil,
+       sandbox == nil
+    {
+        return nil
+    }
+
+    let workspaceGitMetadata = WorkspaceGitMetadata(
+        associatedRemoteURLs: associatedRemoteURLs,
+        latestGitCommitHash: latestGitCommitHash,
+        hasChanges: hasChanges
+    )
+    return TurnMetadataState.asciiJSONString(
+        TurnMetadataState.buildTurnMetadataBag(
+            sessionID: nil,
+            threadID: nil,
+            threadSource: nil,
+            turnID: nil,
+            sandbox: sandbox,
+            repoRoot: repoRoot,
+            workspaceGitMetadata: workspaceGitMetadata
+        )
+    )
+}
+
 public struct McpTurnMetadataContext: Equatable, Sendable {
     public let model: String
     public let reasoningEffort: ReasoningEffort?
@@ -29,17 +61,13 @@ public final class TurnMetadataState: @unchecked Sendable {
         turnID: String,
         sandbox: String? = nil
     ) {
-        var metadata: [String: Any] = [
-            "session_id": sessionID,
-            "thread_id": threadID,
-            "turn_id": turnID
-        ]
-        if let threadSource {
-            metadata["thread_source"] = threadSource.rawValue
-        }
-        if let sandbox {
-            metadata["sandbox"] = sandbox
-        }
+        let metadata = Self.buildTurnMetadataBag(
+            sessionID: sessionID,
+            threadID: threadID,
+            threadSource: threadSource,
+            turnID: turnID,
+            sandbox: sandbox
+        )
         baseHeader = Self.asciiJSONString(metadata) ?? "{}"
     }
 
@@ -119,7 +147,41 @@ public final class TurnMetadataState: @unchecked Sendable {
         return object
     }
 
-    private static func asciiJSONString(_ object: [String: Any]) -> String? {
+    fileprivate static func buildTurnMetadataBag(
+        sessionID: String?,
+        threadID: String?,
+        threadSource: ThreadSource?,
+        turnID: String?,
+        sandbox: String?,
+        repoRoot: String? = nil,
+        workspaceGitMetadata: WorkspaceGitMetadata? = nil
+    ) -> [String: Any] {
+        var metadata: [String: Any] = [:]
+        if let sessionID {
+            metadata["session_id"] = sessionID
+        }
+        if let threadID {
+            metadata["thread_id"] = threadID
+        }
+        if let threadSource {
+            metadata["thread_source"] = threadSource.rawValue
+        }
+        if let turnID {
+            metadata["turn_id"] = turnID
+        }
+        if let sandbox {
+            metadata["sandbox"] = sandbox
+        }
+        if let repoRoot,
+           let workspace = workspaceGitMetadata?.jsonObject,
+           !workspace.isEmpty
+        {
+            metadata["workspaces"] = [repoRoot: workspace]
+        }
+        return metadata
+    }
+
+    fileprivate static func asciiJSONString(_ object: [String: Any]) -> String? {
         guard JSONSerialization.isValidJSONObject(object),
               let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
               let json = String(data: data, encoding: .utf8)
@@ -141,5 +203,25 @@ public final class TurnMetadataState: @unchecked Sendable {
             let low = 0xDC00 + (value & 0x3FF)
             return String(format: "\\u%04X\\u%04X", high, low)
         }
+    }
+}
+
+fileprivate struct WorkspaceGitMetadata {
+    let associatedRemoteURLs: [String: String]?
+    let latestGitCommitHash: String?
+    let hasChanges: Bool?
+
+    var jsonObject: [String: Any] {
+        var object: [String: Any] = [:]
+        if let associatedRemoteURLs {
+            object["associated_remote_urls"] = associatedRemoteURLs
+        }
+        if let latestGitCommitHash {
+            object["latest_git_commit_hash"] = latestGitCommitHash
+        }
+        if let hasChanges {
+            object["has_changes"] = hasChanges
+        }
+        return object
     }
 }

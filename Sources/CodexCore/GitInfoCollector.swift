@@ -126,6 +126,25 @@ public enum GitInfoCollector {
         return GitDiffToRemote(sha: baseSha, diff: diff)
     }
 
+    public static func headCommitHash(cwd: URL) -> String? {
+        guard let output = runGit(["rev-parse", "HEAD"], cwd: cwd),
+              output.exitCode == 0
+        else {
+            return nil
+        }
+        let hash = output.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        return hash.isEmpty ? nil : hash
+    }
+
+    public static func hasChanges(cwd: URL) -> Bool? {
+        guard let output = runGit(["status", "--porcelain"], cwd: cwd),
+              output.exitCode == 0
+        else {
+            return nil
+        }
+        return !output.stdout.isEmpty
+    }
+
     public static func resolveRootGitProjectForTrust(cwd: URL, fileManager: FileManager = .default) -> URL? {
         let base: URL
         if isDirectory(cwd, fileManager: fileManager) {
