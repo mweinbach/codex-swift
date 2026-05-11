@@ -3372,7 +3372,7 @@ public enum CodexAppServer {
                 throw AppServerError.invalidRequest("cursor \(start) exceeds total apps \(total)")
             }
         }
-        let limit = max(1, intParam(params?["limit"], defaultValue: total))
+        let limit = try rustU32PaginationLimit(params?["limit"], total: total)
         let end = min(total, start + limit)
         return [
             "data": Array(apps[start..<end]),
@@ -10531,7 +10531,7 @@ public enum CodexAppServer {
             .filter { includeHidden || $0.showInPicker }
         let total = models.count
         let start = try modelListStart(cursor: stringParam(params?["cursor"]), total: total)
-        let effectiveLimit = min(max(intParam(params?["limit"], defaultValue: total), 1), max(total, 1))
+        let effectiveLimit = try rustU32PaginationLimit(params?["limit"], total: total)
         let end = min(start + effectiveLimit, total)
         let items = start < end ? Array(models[start..<end]) : []
 
@@ -10564,7 +10564,7 @@ public enum CodexAppServer {
         ).sorted()
         let total = serverNames.count
         let start = try mcpServerStatusStart(cursor: stringParam(params?["cursor"]), total: total)
-        let effectiveLimit = min(max(intParam(params?["limit"], defaultValue: total), 1), max(total, 1))
+        let effectiveLimit = try rustU32PaginationLimit(params?["limit"], total: total)
         let end = min(start + effectiveLimit, total)
         let statuses = McpAuthStatusResolver.authStatuses(
             for: runtimeMcpConfig.configuredMcpServers,
@@ -13259,7 +13259,7 @@ public enum CodexAppServer {
         }
 
         let start = try experimentalFeatureListStart(cursor: stringParam(params?["cursor"]), total: total)
-        let effectiveLimit = min(max(intParam(params?["limit"], defaultValue: total), 1), total)
+        let effectiveLimit = try rustU32PaginationLimit(params?["limit"], total: total)
         let end = min(start + effectiveLimit, total)
         return [
             "data": start < end ? Array(data[start..<end]) : [],
@@ -15481,6 +15481,10 @@ public enum CodexAppServer {
 
     private static func rustU32ListLimit(_ value: Any?) throws -> Int {
         min(max(try rustU32Param(value, defaultValue: defaultListLimit), 1), maxListLimit)
+    }
+
+    private static func rustU32PaginationLimit(_ value: Any?, total: Int) throws -> Int {
+        max(try rustU32Param(value, defaultValue: total), 1)
     }
 
     private static func modelListStart(cursor: String?, total: Int) throws -> Int {

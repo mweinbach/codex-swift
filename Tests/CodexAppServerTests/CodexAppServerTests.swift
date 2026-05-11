@@ -14009,6 +14009,36 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
+    func testCatalogListRoutesMatchRustU32LimitDecoding() throws {
+        let temp = try TemporaryDirectory()
+        let invalidLimits: [(String, String)] = [
+            (#"true"#, "Invalid request: invalid type: boolean `true`, expected u32"),
+            (#""small""#, #"Invalid request: invalid type: string "small", expected u32"#),
+            (#"1.5"#, "Invalid request: invalid type: floating point `1.5`, expected u32"),
+            (#"-1"#, "Invalid request: invalid value: integer `-1`, expected u32")
+        ]
+        let methods = [
+            "app/list",
+            "model/list",
+            "mcpServerStatus/list",
+            "experimentalFeature/list"
+        ]
+
+        var requestID = 1
+        for method in methods {
+            for invalidLimit in invalidLimits {
+                let response = try appServerResponse(
+                    #"{"id":\#(requestID),"method":"\#(method)","params":{"limit":\#(invalidLimit.0)}}"#,
+                    codexHome: temp.url
+                )
+                let error = try XCTUnwrap(response["error"] as? [String: Any])
+                XCTAssertEqual(error["code"] as? Int, -32600, method)
+                XCTAssertEqual(error["message"] as? String, invalidLimit.1, method)
+                requestID += 1
+            }
+        }
+    }
+
     func testExperimentalFeatureEnablementSetAppliesToFeatureListAndConfigRead() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
