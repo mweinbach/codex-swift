@@ -1087,7 +1087,7 @@ final class CommandSurfaceCLITests: XCTestCase {
 
         let result = try await DebugCommandRuntime.run(CodexCLI.DebugCommandRequest(
             action: .models(bundled: true)
-        ))
+        ), dependencies: debugModelDependencies())
 
         XCTAssertEqual(result.exitCode, 0)
         XCTAssertNil(result.stderrMessage)
@@ -1102,9 +1102,7 @@ final class CommandSurfaceCLITests: XCTestCase {
         let expected = ModelsResponse(models: [])
         let result = try await DebugCommandRuntime.run(CodexCLI.DebugCommandRequest(
             action: .models(bundled: false)
-        ), dependencies: DebugCommandRuntime.Dependencies(
-            findCodexHome: { URL(fileURLWithPath: "/tmp/codex-home", isDirectory: true) },
-            loadConfig: { _, _ in CodexRuntimeConfig(modelProvider: "openai") },
+        ), dependencies: debugModelDependencies(
             loadRawModelCatalog: { _, _ in
                 // Keep this async path suspended at least once; Swift 6.2 XCTest can crash
                 // when this focused test completes entirely synchronously.
@@ -1189,5 +1187,31 @@ final class CommandSurfaceCLITests: XCTestCase {
         init(_ description: String) {
             self.description = description
         }
+    }
+
+    private func debugModelDependencies(
+        loadRawModelCatalog: @escaping (URL, CodexRuntimeConfig) async throws -> ModelsResponse = { _, _ in
+            ModelsResponse(models: [])
+        }
+    ) -> DebugCommandRuntime.Dependencies {
+        DebugCommandRuntime.Dependencies(
+            findCodexHome: { URL(fileURLWithPath: "/tmp/codex-home", isDirectory: true) },
+            loadConfig: { _, _ in CodexRuntimeConfig(modelProvider: "openai") },
+            loadConfigLayerStack: { codexHome, _ in
+                try ConfigLayerStack(layers: [
+                    ConfigLayerEntry(
+                        name: .user(file: try AbsolutePath(absolutePath: codexHome.appendingPathComponent("config.toml").path)),
+                        config: .table([:])
+                    )
+                ])
+            },
+            loadConfiguredEnvironments: { _, cwd in
+                [TurnEnvironmentSelection(environmentID: "local", cwd: cwd)]
+            },
+            currentDateAndTimezone: { ("2026-05-11", "America/New_York") },
+            loadRawModelCatalog: loadRawModelCatalog,
+            currentExecutable: { URL(fileURLWithPath: "/tmp/codex-swift-test", isDirectory: false) },
+            sendAppServerMessageV2: { _, _, _ in CodexCLI.CommandExecutionResult(exitCode: 0) }
+        )
     }
 }

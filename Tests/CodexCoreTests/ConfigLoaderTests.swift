@@ -74,6 +74,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertNil(config.ossProvider)
         XCTAssertEqual(config.toolSuggest, ToolSuggestConfig())
         XCTAssertTrue(config.checkForUpdateOnStartup)
+        XCTAssertEqual(config.tui, TuiRuntimeConfig())
         XCTAssertEqual(config.terminalResizeReflow, TerminalResizeReflowConfig())
     }
 
@@ -357,7 +358,21 @@ final class ConfigLoaderTests: XCTestCase {
         voice = "cedar"
 
         [tui]
+        animations = false
+        show_tooltips = false
+        vim_mode_default = true
+        raw_output_mode = true
+        alternate_screen = "never"
+        status_line = ["model-with-reasoning", "current-dir"]
+        status_line_use_colors = false
+        terminal_title = ["activity", "project"]
+        theme = "dark-plus"
+        session_picker_view = "comfortable"
         terminal_resize_reflow_max_rows = 9000
+
+        [tui.model_availability_nux]
+        "gpt-5.4" = 2
+        "gpt-oss" = 4
 
         [skills]
         include_instructions = false
@@ -431,6 +446,22 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.backgroundTerminalMaxTimeoutMS, 12_345)
         XCTAssertEqual(config.ossProvider, "ollama")
         XCTAssertFalse(config.checkForUpdateOnStartup)
+        XCTAssertEqual(config.tui, TuiRuntimeConfig(
+            animations: false,
+            showTooltips: false,
+            vimModeDefault: true,
+            rawOutputMode: true,
+            alternateScreen: .never,
+            statusLine: ["model-with-reasoning", "current-dir"],
+            statusLineUseColors: false,
+            terminalTitle: ["activity", "project"],
+            theme: "dark-plus",
+            sessionPickerView: .comfortable,
+            modelAvailabilityNuxShownCount: [
+                "gpt-5.4": 2,
+                "gpt-oss": 4,
+            ]
+        ))
         XCTAssertEqual(config.terminalResizeReflow.maxRows, .limit(9000))
     }
 
@@ -1048,6 +1079,9 @@ final class ConfigLoaderTests: XCTestCase {
         tools_view_image = false
         oss_provider = "top-oss"
 
+        [tui]
+        session_picker_view = "dense"
+
         [profiles.work]
         model = "profile-model"
         model_provider = "lmstudio"
@@ -1068,6 +1102,9 @@ final class ConfigLoaderTests: XCTestCase {
         tools_web_search = true
         tools_view_image = true
         oss_provider = "profile-oss"
+
+        [profiles.work.tui]
+        session_picker_view = "comfortable"
         """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
 
         let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
@@ -1095,6 +1132,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.toolsWebSearch, true)
         XCTAssertEqual(config.toolsViewImage, true)
         XCTAssertEqual(config.ossProvider, "profile-oss")
+        XCTAssertEqual(config.tui.sessionPickerView, .comfortable)
     }
 
     func testPromptOverridesLoadFromFilesAndTrimLikeRust() throws {

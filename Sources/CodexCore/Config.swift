@@ -72,6 +72,57 @@ public struct TerminalResizeReflowConfig: Equatable, Sendable {
     }
 }
 
+public enum TuiAlternateScreenMode: String, Codable, Equatable, Sendable {
+    case auto
+    case always
+    case never
+}
+
+public enum TuiSessionPickerViewMode: String, Codable, Equatable, Sendable {
+    case comfortable
+    case dense
+}
+
+public struct TuiRuntimeConfig: Equatable, Sendable {
+    public var animations: Bool
+    public var showTooltips: Bool
+    public var vimModeDefault: Bool
+    public var rawOutputMode: Bool
+    public var alternateScreen: TuiAlternateScreenMode
+    public var statusLine: [String]?
+    public var statusLineUseColors: Bool
+    public var terminalTitle: [String]?
+    public var theme: String?
+    public var sessionPickerView: TuiSessionPickerViewMode
+    public var modelAvailabilityNuxShownCount: [String: Int]
+
+    public init(
+        animations: Bool = true,
+        showTooltips: Bool = true,
+        vimModeDefault: Bool = false,
+        rawOutputMode: Bool = false,
+        alternateScreen: TuiAlternateScreenMode = .auto,
+        statusLine: [String]? = nil,
+        statusLineUseColors: Bool = true,
+        terminalTitle: [String]? = nil,
+        theme: String? = nil,
+        sessionPickerView: TuiSessionPickerViewMode = .dense,
+        modelAvailabilityNuxShownCount: [String: Int] = [:]
+    ) {
+        self.animations = animations
+        self.showTooltips = showTooltips
+        self.vimModeDefault = vimModeDefault
+        self.rawOutputMode = rawOutputMode
+        self.alternateScreen = alternateScreen
+        self.statusLine = statusLine
+        self.statusLineUseColors = statusLineUseColors
+        self.terminalTitle = terminalTitle
+        self.theme = theme
+        self.sessionPickerView = sessionPickerView
+        self.modelAvailabilityNuxShownCount = modelAvailabilityNuxShownCount
+    }
+}
+
 public struct CodexRuntimeConfig: Equatable, Sendable {
     public var model: String?
     public var modelProvider: String?
@@ -142,6 +193,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var checkForUpdateOnStartup: Bool
     public var modelContextWindow: Int64?
     public var modelAutoCompactTokenLimit: Int64?
+    public var tui: TuiRuntimeConfig
     public var terminalResizeReflow: TerminalResizeReflowConfig
 
     public var runtimeMcpConfig: RuntimeMcpConfig {
@@ -297,6 +349,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.checkForUpdateOnStartup = true
         self.modelContextWindow = nil
         self.modelAutoCompactTokenLimit = nil
+        self.tui = TuiRuntimeConfig()
         self.terminalResizeReflow = TerminalResizeReflowConfig()
     }
 
@@ -1543,6 +1596,8 @@ private struct ParsedCodexConfigToml {
     var realtimeAudio: [String: ConfigValue] = [:]
     var realtime: [String: ConfigValue] = [:]
     var tui: [String: ConfigValue] = [:]
+    var tuiModelAvailabilityNux: [String: ConfigValue] = [:]
+    var profileTui: [String: [String: ConfigValue]] = [:]
     var shellEnvironmentPolicy: [String: ConfigValue] = [:]
     var toolSuggest: [String: ConfigValue] = [:]
     var toolSuggestDisabledToolLayers: [[ToolSuggestDisabledTool]] = []
@@ -1565,6 +1620,11 @@ private struct ParsedCodexConfigToml {
                     }
                 }
                 if case let .profileFeatures(name) = section {
+                    if parsed.profiles[name] == nil {
+                        parsed.profiles[name] = [:]
+                    }
+                }
+                if case let .profileTui(name) = section {
                     if parsed.profiles[name] == nil {
                         parsed.profiles[name] = [:]
                     }
@@ -1616,6 +1676,14 @@ private struct ParsedCodexConfigToml {
                     baseURL: baseURL
                 )
             case let .profile(name):
+                if key == "tui",
+                   case let .table(tuiTable) = try ConfigValueParser.parseTomlLiteral(valueText)
+                {
+                    for (tuiKey, tuiValue) in tuiTable {
+                        parsed.profileTui[name, default: [:]][tuiKey] = tuiValue
+                    }
+                    continue
+                }
                 guard isRelevantProfileKey(key) else { continue }
                 parsed.profiles[name, default: [:]][key] = try normalizePathLikeValue(
                     ConfigValueParser.parseTomlLiteral(valueText),
@@ -1680,7 +1748,19 @@ private struct ParsedCodexConfigToml {
             case .realtime:
                 parsed.realtime[key] = try ConfigValueParser.parseTomlLiteral(valueText)
             case .tui:
-                parsed.tui[key] = try ConfigValueParser.parseTomlLiteral(valueText)
+                let value = try ConfigValueParser.parseTomlLiteral(valueText)
+                if key == "model_availability_nux", case let .table(nuxTable) = value {
+                    for (nuxKey, nuxValue) in nuxTable {
+                        parsed.tuiModelAvailabilityNux[try parseDottedKey(nuxKey).joined(separator: ".")] = nuxValue
+                    }
+                    continue
+                }
+                parsed.tui[key] = value
+            case .tuiModelAvailabilityNux:
+                parsed.tuiModelAvailabilityNux[try parseDottedKey(key).joined(separator: ".")] =
+                    try ConfigValueParser.parseTomlLiteral(valueText)
+            case let .profileTui(name):
+                parsed.profileTui[name, default: [:]][key] = try ConfigValueParser.parseTomlLiteral(valueText)
             case .shellEnvironmentPolicy:
                 parsed.shellEnvironmentPolicy[key] = try ConfigValueParser.parseTomlLiteral(valueText)
             case .shellEnvironmentPolicySet:
@@ -1901,6 +1981,16 @@ private struct ParsedCodexConfigToml {
                 continue
             }
 
+            if parts.count == 3, parts[0] == "tui", parts[1] == "model_availability_nux" {
+                tuiModelAvailabilityNux[try Self.parseDottedKey(path).dropFirst(2).joined(separator: ".")] = value
+                continue
+            }
+
+            if parts.count == 4, parts[0] == "profiles", parts[2] == "tui" {
+                profileTui[parts[1], default: [:]][parts[3]] = value
+                continue
+            }
+
             if parts.count == 2, parts[0] == "skills", parts[1] == "include_instructions" {
                 skillsIncludeInstructions = try Self.boolValue(value, key: path)
                 continue
@@ -2023,6 +2113,18 @@ private struct ParsedCodexConfigToml {
             tui[key] = value
         }
 
+        for (key, value) in overlay.tuiModelAvailabilityNux {
+            tuiModelAvailabilityNux[key] = value
+        }
+
+        for (profileName, profileValue) in overlay.profileTui {
+            var mergedProfile = profileTui[profileName] ?? [:]
+            for (key, value) in profileValue {
+                mergedProfile[key] = value
+            }
+            profileTui[profileName] = mergedProfile
+        }
+
         for (key, value) in overlay.shellEnvironmentPolicy {
             shellEnvironmentPolicy[key] = value
         }
@@ -2123,6 +2225,12 @@ private struct ParsedCodexConfigToml {
 
         if case let .table(tuiTable) = table["tui"] {
             for (key, value) in tuiTable {
+                if key == "model_availability_nux", case let .table(nuxTable) = value {
+                    for (nuxKey, nuxValue) in nuxTable {
+                        tuiModelAvailabilityNux[try Self.parseDottedKey(nuxKey).joined(separator: ".")] = nuxValue
+                    }
+                    continue
+                }
                 tui[key] = value
             }
         }
@@ -2200,6 +2308,12 @@ private struct ParsedCodexConfigToml {
                     {
                         Self.mergeWebSearchToolConfig(value: webSearchValue, into: &profiles[profileName, default: [:]])
                     }
+
+                    if key == "tui", case let .table(tuiTable) = value {
+                        for (tuiKey, tuiValue) in tuiTable {
+                            profileTui[profileName, default: [:]][tuiKey] = tuiValue
+                        }
+                    }
                 }
             }
         }
@@ -2211,6 +2325,13 @@ private struct ParsedCodexConfigToml {
         try Self.applyRuntimeFields(from: topLevel, to: &config, keyPrefix: "")
         config.realtimeAudio = try Self.realtimeAudioConfigValue(realtimeAudio, key: "audio")
         config.realtime = try Self.realtimeConfigValue(realtime, key: "realtime")
+        let activeProfileName = try topLevel["profile"].map { try Self.stringValue($0, key: "profile") }
+        config.tui = try Self.tuiRuntimeConfigValue(
+            tui,
+            modelAvailabilityNux: tuiModelAvailabilityNux,
+            profile: activeProfileName.flatMap { profileTui[$0] },
+            key: "tui"
+        )
         config.terminalResizeReflow = try Self.terminalResizeReflowConfigValue(tui, key: "tui")
         config.shellEnvironmentPolicy = try Self.shellEnvironmentPolicyValue(
             shellEnvironmentPolicy,
@@ -2294,7 +2415,7 @@ private struct ParsedCodexConfigToml {
             )
         }
 
-        let activeProfile = try topLevel["profile"].map { try Self.stringValue($0, key: "profile") }
+        let activeProfile = activeProfileName
         if let activeProfile {
             guard let profile = profiles[activeProfile] else {
                 throw CodexConfigLoadError.profileNotFound(activeProfile)
@@ -3261,18 +3382,92 @@ private struct ParsedCodexConfigToml {
         )
     }
 
+    private static func tuiRuntimeConfigValue(
+        _ table: [String: ConfigValue],
+        modelAvailabilityNux: [String: ConfigValue],
+        profile: [String: ConfigValue]?,
+        key: String
+    ) throws -> TuiRuntimeConfig {
+        let knownFields = Set([
+            "animations",
+            "show_tooltips",
+            "vim_mode_default",
+            "raw_output_mode",
+            "alternate_screen",
+            "status_line",
+            "status_line_use_colors",
+            "terminal_title",
+            "theme",
+            "session_picker_view",
+            "terminal_resize_reflow_max_rows"
+        ])
+        for field in table.keys where !knownFields.contains(field) {
+            throw CodexConfigLoadError.invalidConfigLine("\(key).\(field)")
+        }
+        if let profile {
+            for field in profile.keys where field != "session_picker_view" {
+                throw CodexConfigLoadError.invalidConfigLine("profiles.\(field)")
+            }
+        }
+
+        let defaults = TuiRuntimeConfig()
+        let sessionPickerValue = profile?["session_picker_view"] ?? table["session_picker_view"]
+        return TuiRuntimeConfig(
+            animations: try table["animations"].map {
+                try boolValue($0, key: "\(key).animations")
+            } ?? defaults.animations,
+            showTooltips: try table["show_tooltips"].map {
+                try boolValue($0, key: "\(key).show_tooltips")
+            } ?? defaults.showTooltips,
+            vimModeDefault: try table["vim_mode_default"].map {
+                try boolValue($0, key: "\(key).vim_mode_default")
+            } ?? defaults.vimModeDefault,
+            rawOutputMode: try table["raw_output_mode"].map {
+                try boolValue($0, key: "\(key).raw_output_mode")
+            } ?? defaults.rawOutputMode,
+            alternateScreen: try table["alternate_screen"].map {
+                try stringEnumValue(TuiAlternateScreenMode.self, $0, key: "\(key).alternate_screen")
+            } ?? defaults.alternateScreen,
+            statusLine: try table["status_line"].map {
+                try stringArrayValue($0, key: "\(key).status_line")
+            },
+            statusLineUseColors: try table["status_line_use_colors"].map {
+                try boolValue($0, key: "\(key).status_line_use_colors")
+            } ?? defaults.statusLineUseColors,
+            terminalTitle: try table["terminal_title"].map {
+                try stringArrayValue($0, key: "\(key).terminal_title")
+            },
+            theme: try table["theme"].map {
+                try stringValue($0, key: "\(key).theme")
+            },
+            sessionPickerView: try sessionPickerValue.map {
+                try stringEnumValue(TuiSessionPickerViewMode.self, $0, key: "\(key).session_picker_view")
+            } ?? defaults.sessionPickerView,
+            modelAvailabilityNuxShownCount: try modelAvailabilityNuxCountValue(
+                modelAvailabilityNux,
+                key: "\(key).model_availability_nux"
+            )
+        )
+    }
+
     private static func terminalResizeReflowConfigValue(
         _ table: [String: ConfigValue],
         key: String
     ) throws -> TerminalResizeReflowConfig {
-        for field in table.keys where field != "terminal_resize_reflow_max_rows" {
-            throw CodexConfigLoadError.invalidConfigLine("\(key).\(field)")
-        }
         guard let maxRows = table["terminal_resize_reflow_max_rows"] else {
             return TerminalResizeReflowConfig()
         }
         let rows = try nonNegativeIntValue(maxRows, key: "\(key).terminal_resize_reflow_max_rows")
         return TerminalResizeReflowConfig(maxRows: rows == 0 ? .disabled : .limit(rows))
+    }
+
+    private static func modelAvailabilityNuxCountValue(
+        _ table: [String: ConfigValue],
+        key: String
+    ) throws -> [String: Int] {
+        try table.reduce(into: [:]) { result, pair in
+            result[pair.key] = try nonNegativeIntValue(pair.value, key: "\(key).\(pair.key)")
+        }
     }
 
     private static func shellEnvironmentPolicyValue(
@@ -3511,6 +3706,9 @@ private struct ParsedCodexConfigToml {
         if parts.count == 1, parts[0] == "tui" {
             return .tui
         }
+        if parts.count == 2, parts[0] == "tui", parts[1] == "model_availability_nux" {
+            return .tuiModelAvailabilityNux
+        }
         if parts.count == 1, parts[0] == "shell_environment_policy" {
             return .shellEnvironmentPolicy
         }
@@ -3543,6 +3741,9 @@ private struct ParsedCodexConfigToml {
         }
         if parts.count == 2, parts[0] == "profiles" {
             return .profile(parts[1])
+        }
+        if parts.count == 3, parts[0] == "profiles", parts[2] == "tui" {
+            return .profileTui(parts[1])
         }
         if parts.count == 3, parts[0] == "profiles", parts[2] == "features" {
             return .profileFeatures(parts[1])
@@ -3741,6 +3942,8 @@ private enum ConfigSection {
     case audio
     case realtime
     case tui
+    case tuiModelAvailabilityNux
+    case profileTui(String)
     case shellEnvironmentPolicy
     case shellEnvironmentPolicySet
     case skills
