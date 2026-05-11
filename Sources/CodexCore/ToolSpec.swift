@@ -750,6 +750,8 @@ public struct ToolsConfig: Equatable, Sendable {
     public let toolSearch: Bool
     public let toolSuggest: Bool
     public let allowLoginShell: Bool
+    public let agentJobTools: Bool
+    public let agentJobWorkerTools: Bool
 
     public init(
         shellType: ConfigShellToolType,
@@ -763,7 +765,9 @@ public struct ToolsConfig: Equatable, Sendable {
         namespaceTools: Bool = true,
         toolSearch: Bool = true,
         toolSuggest: Bool = true,
-        allowLoginShell: Bool = true
+        allowLoginShell: Bool = true,
+        agentJobTools: Bool = false,
+        agentJobWorkerTools: Bool = false
     ) {
         self.shellType = shellType
         self.applyPatchToolType = applyPatchToolType
@@ -777,6 +781,8 @@ public struct ToolsConfig: Equatable, Sendable {
         self.toolSearch = toolSearch
         self.toolSuggest = toolSuggest
         self.allowLoginShell = allowLoginShell
+        self.agentJobTools = agentJobTools
+        self.agentJobWorkerTools = agentJobWorkerTools
     }
 }
 
@@ -849,10 +855,10 @@ public enum ToolSpecFactory {
         if config.experimentalSupportedTools.contains("test_sync_tool") {
             specs.append(ConfiguredToolSpec(spec: createTestSyncTool(), supportsParallelToolCalls: true))
         }
-        if config.experimentalSupportedTools.contains("spawn_agents_on_csv") {
+        if config.agentJobTools || config.experimentalSupportedTools.contains("spawn_agents_on_csv") {
             specs.append(ConfiguredToolSpec(spec: createSpawnAgentsOnCSVTool(), supportsParallelToolCalls: false))
         }
-        if config.experimentalSupportedTools.contains("report_agent_job_result") {
+        if config.agentJobWorkerTools || config.experimentalSupportedTools.contains("report_agent_job_result") {
             specs.append(ConfiguredToolSpec(spec: createReportAgentJobResultTool(), supportsParallelToolCalls: false))
         }
 

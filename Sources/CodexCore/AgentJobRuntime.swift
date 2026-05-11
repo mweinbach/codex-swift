@@ -5,6 +5,13 @@ public enum AgentJobRuntime {
     public static let maxConcurrency = 64
     public static let defaultItemTimeout: TimeInterval = 60 * 30
 
+    public static func isAgentJobWorkerSessionSource(_ sessionSource: SessionSource) -> Bool {
+        guard case let .subagent(.other(label)) = sessionSource else {
+            return false
+        }
+        return label.hasPrefix("agent_job:")
+    }
+
     public static func normalizeConcurrency(requested: Int?, maxThreads: Int?) -> Int {
         let requested = max(requested ?? defaultConcurrency, 1)
         let cappedRequested = min(requested, maxConcurrency)

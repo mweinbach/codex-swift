@@ -382,6 +382,36 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertFalse(names.contains("view_image"))
     }
 
+    func testToolSpecsExposeAgentJobToolsForFanoutWorkersLikeRust() {
+        var features = FeatureStates.withDefaults()
+        features.set(.spawnCsv, enabled: true)
+        let config = CodexRuntimeConfig(
+            toolsViewImage: false,
+            features: features
+        )
+        let modelFamily = ModelFamily(
+            slug: "test-model",
+            family: "test",
+            shellType: .disabled
+        )
+
+        let mainNames = NonInteractiveExec.toolSpecs(
+            modelFamily: modelFamily,
+            config: config,
+            sessionSource: .cli
+        ).map(\.spec.name)
+        XCTAssertTrue(mainNames.contains("spawn_agents_on_csv"))
+        XCTAssertFalse(mainNames.contains("report_agent_job_result"))
+
+        let workerNames = NonInteractiveExec.toolSpecs(
+            modelFamily: modelFamily,
+            config: config,
+            sessionSource: .subagent(.other("agent_job:test"))
+        ).map(\.spec.name)
+        XCTAssertTrue(workerNames.contains("spawn_agents_on_csv"))
+        XCTAssertTrue(workerNames.contains("report_agent_job_result"))
+    }
+
     func testResponsesOptionsCarriesServiceTier() {
         let options = NonInteractiveExec.responsesOptions(
             conversationID: ConversationId(),

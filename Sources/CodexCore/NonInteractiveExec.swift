@@ -189,7 +189,8 @@ public enum NonInteractiveExec {
 
     public static func toolsConfig(
         modelFamily: ModelFamily,
-        config: CodexRuntimeConfig
+        config: CodexRuntimeConfig,
+        sessionSource: SessionSource = .default
     ) -> ToolsConfig {
         let shellType: ConfigShellToolType
         if !config.features.isEnabled(.shellTool) {
@@ -217,15 +218,23 @@ public enum NonInteractiveExec {
             experimentalSupportedTools: modelFamily.experimentalSupportedTools,
             toolSearch: config.features.isEnabled(.toolSearch),
             toolSuggest: config.features.isEnabled(.toolSuggest),
-            allowLoginShell: config.allowLoginShell
+            allowLoginShell: config.allowLoginShell,
+            agentJobTools: config.features.isEnabled(.spawnCsv),
+            agentJobWorkerTools: config.features.isEnabled(.spawnCsv)
+                && AgentJobRuntime.isAgentJobWorkerSessionSource(sessionSource)
         )
     }
 
     public static func toolSpecs(
         modelFamily: ModelFamily,
-        config: CodexRuntimeConfig
+        config: CodexRuntimeConfig,
+        sessionSource: SessionSource = .default
     ) -> [ConfiguredToolSpec] {
-        ToolSpecFactory.buildSpecs(config: toolsConfig(modelFamily: modelFamily, config: config))
+        ToolSpecFactory.buildSpecs(config: toolsConfig(
+            modelFamily: modelFamily,
+            config: config,
+            sessionSource: sessionSource
+        ))
     }
 
     private static func webSearchMode(for config: CodexRuntimeConfig) -> WebSearchMode? {

@@ -355,7 +355,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/features/src/lib.rs` and `codex-rs/features/src/legacy.rs`
   - current feature registry ordering, stages, defaults, legacy feature aliases, feature-toggle CLI override validation, and Rust dependency normalization for `enable_fanout -> multi_agent` plus `code_mode_only -> code_mode`
 - `codex-rs/core/src/tools/handlers/agent_jobs_spec.rs`
-  - added Swift Responses tool specs for `spawn_agents_on_csv` and `report_agent_job_result`, preserving Rust names, descriptions, required fields, loose object schemas for `output_schema`/`result`, and explicit supported-tool exposure. Live app-server/session tool-handler registration remains pending.
+  - added Swift Responses tool specs for `spawn_agents_on_csv` and `report_agent_job_result`, preserving Rust names, descriptions, required fields, loose object schemas for `output_schema`/`result`, explicit supported-tool exposure, and Rust's `enable_fanout` tool gating that exposes `report_agent_job_result` only to `agent_job:<job_id>` worker subagents. Live app-server/session tool-handler registration remains pending.
 - `codex-rs/state/src/model/agent_job.rs` and `codex-rs/state/src/runtime/agent_jobs.rs`
   - added Swift SQLite agent-job and job-item persistence, including Rust-matching status strings, creation schema, row-order listing with status/limit filters, job lifecycle updates, item transition guards, thread-scoped atomic result reporting, and progress counts. The CSV fanout live runner and tool-handler registration remain pending.
 - `codex-rs/core/src/tools/handlers/agent_jobs.rs` helper layer

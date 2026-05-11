@@ -244,6 +244,33 @@ final class ToolSpecTests: XCTestCase {
         })
     }
 
+    func testBuildSpecsExposeAgentJobToolsFromRustFeatureFlags() {
+        let mainAgentSpecs = ToolSpecFactory.buildSpecs(config: ToolsConfig(
+            shellType: .disabled,
+            includeViewImageTool: false,
+            agentJobTools: true
+        ))
+        XCTAssertTrue(mainAgentSpecs.contains {
+            $0.spec.name == "spawn_agents_on_csv" && $0.supportsParallelToolCalls == false
+        })
+        XCTAssertFalse(mainAgentSpecs.contains {
+            $0.spec.name == "report_agent_job_result"
+        })
+
+        let workerSpecs = ToolSpecFactory.buildSpecs(config: ToolsConfig(
+            shellType: .disabled,
+            includeViewImageTool: false,
+            agentJobTools: true,
+            agentJobWorkerTools: true
+        ))
+        XCTAssertTrue(workerSpecs.contains {
+            $0.spec.name == "spawn_agents_on_csv" && $0.supportsParallelToolCalls == false
+        })
+        XCTAssertTrue(workerSpecs.contains {
+            $0.spec.name == "report_agent_job_result" && $0.supportsParallelToolCalls == false
+        })
+    }
+
     func testResponsesToolJSONShapeMatchesRustSerde() throws {
         let tool = ToolSpecFactory.createViewImageTool()
         let object = try JSONObject(tool)
