@@ -907,12 +907,13 @@ public enum NonInteractiveExec {
             case "exec_command":
                 let params = try decoder.decode(ExecCommandToolCallParams.self, from: Data(arguments.utf8))
                 let requestedShell = params.shell.map(ShellResolver.getShellByModelProvidedPath) ?? shell
+                let snapshotShell = params.shell == nil ? shell : nil
                 let command = ShellResolver.prefixPowerShellScriptWithUTF8(
                     requestedShell.deriveExecArgs(command: params.cmd, useLoginShell: params.login)
                 )
                 return await executeUnifiedExecCommand(
                     command: command,
-                    sessionShell: shell,
+                    sessionShell: snapshotShell,
                     workdir: params.workdir,
                     timeoutMS: params.yieldTimeMS,
                     sandboxPermissions: params.sandboxPermissions,

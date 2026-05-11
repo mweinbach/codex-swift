@@ -1148,6 +1148,64 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertFalse(payload.content.contains("from-snapshot"))
     }
 
+    func testUnifiedExecModelProvidedShellDoesNotUseSessionSnapshotLikeRust() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let snapshotPath = temp.url.appendingPathComponent("snapshot.sh")
+        try """
+        # Snapshot file
+        export CODEX_SWIFT_MODEL_SHELL_SNAPSHOT=from-snapshot
+        """.write(to: snapshotPath, atomically: true, encoding: .utf8)
+        let snapshot = ShellSnapshot(path: snapshotPath, cwd: temp.url)
+        let shell = Shell(shellType: .sh, shellPath: "/bin/sh", shellSnapshot: snapshot)
+        let command = try Self.jsonString(#"printf '%s' "${CODEX_SWIFT_MODEL_SHELL_SNAPSHOT-unset}""#)
+        let inheritedSnapshot = ResponseItem.functionCall(
+            name: "exec_command",
+            arguments: #"{"cmd":\#(command),"login":true,"yield_time_ms":1000}"#,
+            callID: "call-exec-inherited-snapshot"
+        )
+
+        let inheritedOutput = await NonInteractiveExec.executeFunctionCall(
+            inheritedSnapshot,
+            cwd: temp.url,
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: shell,
+            truncationPolicy: .bytes(10_000),
+            environment: ["PATH": "/bin:/usr/bin", "HOME": temp.url.path]
+        )
+
+        guard case let .functionCallOutput(inheritedCallID, inheritedPayload) = inheritedOutput else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(inheritedCallID, "call-exec-inherited-snapshot")
+        XCTAssertEqual(inheritedPayload.success, true)
+        XCTAssertTrue(inheritedPayload.content.contains("Output:\nfrom-snapshot"), inheritedPayload.content)
+
+        let modelProvidedShell = ResponseItem.functionCall(
+            name: "exec_command",
+            arguments: #"{"cmd":\#(command),"shell":"/bin/sh","login":true,"yield_time_ms":1000}"#,
+            callID: "call-exec-model-shell"
+        )
+
+        let modelShellOutput = await NonInteractiveExec.executeFunctionCall(
+            modelProvidedShell,
+            cwd: temp.url,
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: shell,
+            truncationPolicy: .bytes(10_000),
+            environment: ["PATH": "/bin:/usr/bin", "HOME": temp.url.path]
+        )
+
+        guard case let .functionCallOutput(modelCallID, modelPayload) = modelShellOutput else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(modelCallID, "call-exec-model-shell")
+        XCTAssertEqual(modelPayload.success, true)
+        XCTAssertTrue(modelPayload.content.contains("Output:\nunset"), modelPayload.content)
+        XCTAssertFalse(modelPayload.content.contains("from-snapshot"))
+    }
+
     func testEscalatedSandboxRequestReturnsFailureOutput() async throws {
         let item = ResponseItem.functionCall(
             name: "exec_command",
