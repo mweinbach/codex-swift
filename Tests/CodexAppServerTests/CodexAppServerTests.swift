@@ -15389,6 +15389,83 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(tools["view_image"] is NSNull)
     }
 
+    func testConfigReadIncludesAppsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [apps.app1]
+        enabled = false
+        destructive_enabled = false
+        default_tools_approval_mode = "prompt"
+        """.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/read","params":{"includeLayers":true}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let config = try XCTUnwrap(result["config"] as? [String: Any])
+        let apps = try XCTUnwrap(config["apps"] as? [String: Any])
+        XCTAssertTrue(apps["_default"] is NSNull)
+        let app1 = try XCTUnwrap(apps["app1"] as? [String: Any])
+        XCTAssertEqual(app1["enabled"] as? Bool, false)
+        XCTAssertEqual(app1["destructive_enabled"] as? Bool, false)
+        XCTAssertTrue(app1["open_world_enabled"] is NSNull)
+        XCTAssertEqual(app1["default_tools_approval_mode"] as? String, "prompt")
+        XCTAssertTrue(app1["default_tools_enabled"] is NSNull)
+        XCTAssertTrue(app1["tools"] is NSNull)
+
+        let origins = try XCTUnwrap(result["origins"] as? [String: Any])
+        XCTAssertNotNil(origins["apps.app1.enabled"] as? [String: Any])
+        XCTAssertNotNil(origins["apps.app1.destructive_enabled"] as? [String: Any])
+        XCTAssertNotNil(origins["apps.app1.default_tools_approval_mode"] as? [String: Any])
+
+        let layers = try XCTUnwrap(result["layers"] as? [[String: Any]])
+        XCTAssertEqual(layers.first?["name"].flatMap { ($0 as? [String: Any])?["type"] as? String }, "user")
+    }
+
+    func testConfigReadAppDefaultsAndToolConfigUseRustShape() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [apps._default]
+        enabled = false
+
+        [apps.app1]
+        default_tools_enabled = false
+
+        [apps.app1.tools.search]
+        enabled = true
+        approval_mode = "approve"
+        """.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/read","params":{}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let config = try XCTUnwrap(result["config"] as? [String: Any])
+        let apps = try XCTUnwrap(config["apps"] as? [String: Any])
+        let defaultConfig = try XCTUnwrap(apps["_default"] as? [String: Any])
+        XCTAssertEqual(defaultConfig["enabled"] as? Bool, false)
+        XCTAssertEqual(defaultConfig["destructive_enabled"] as? Bool, true)
+        XCTAssertEqual(defaultConfig["open_world_enabled"] as? Bool, true)
+        let app1 = try XCTUnwrap(apps["app1"] as? [String: Any])
+        XCTAssertEqual(app1["enabled"] as? Bool, true)
+        XCTAssertTrue(app1["destructive_enabled"] is NSNull)
+        XCTAssertEqual(app1["default_tools_enabled"] as? Bool, false)
+        let tools = try XCTUnwrap(app1["tools"] as? [String: Any])
+        let search = try XCTUnwrap(tools["search"] as? [String: Any])
+        XCTAssertEqual(search["enabled"] as? Bool, true)
+        XCTAssertEqual(search["approval_mode"] as? String, "approve")
+    }
+
     func testConfigReadReportsManagedOverrideOverSessionFlagsLikeRust() throws {
         let temp = try TemporaryDirectory()
         let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
@@ -15720,9 +15797,11 @@ final class CodexAppServerTests: XCTestCase {
         let result = try XCTUnwrap(read["result"] as? [String: Any])
         let config = try XCTUnwrap(result["config"] as? [String: Any])
         let apps = try XCTUnwrap(config["apps"] as? [String: Any])
+        XCTAssertTrue(apps["_default"] is NSNull)
         let app1 = try XCTUnwrap(apps["app1"] as? [String: Any])
         XCTAssertEqual(app1["enabled"] as? Bool, false)
         XCTAssertEqual(app1["default_tools_approval_mode"] as? String, "prompt")
+        XCTAssertTrue(app1["tools"] is NSNull)
     }
 
     func testConfigValueWriteSupportsCustomMCPServerApprovalModeLikeRust() throws {

@@ -17776,6 +17776,9 @@ public enum CodexAppServer {
         if case let .table(toolsTable)? = table["tools"] {
             object["tools"] = configReadToolsObject(toolsTable)
         }
+        if case let .table(appsTable)? = table["apps"] {
+            object["apps"] = configReadAppsObject(appsTable)
+        }
         return object
     }
 
@@ -17826,6 +17829,65 @@ public enum CodexAppServer {
         }
         let strings = array.compactMap(stringConfigValue)
         return strings.count == array.count ? strings : nil
+    }
+
+    private static func configReadAppsObject(_ table: [String: ConfigValue]) -> [String: Any] {
+        var object: [String: Any] = [
+            "_default": NSNull()
+        ]
+        if case let .table(defaultTable)? = table["_default"] {
+            object["_default"] = configReadAppsDefaultObject(defaultTable)
+        }
+        for key in table.keys.sorted() where key != "_default" {
+            guard case let .table(appTable)? = table[key] else {
+                continue
+            }
+            object[key] = configReadAppObject(appTable)
+        }
+        return object
+    }
+
+    private static func configReadAppsDefaultObject(_ table: [String: ConfigValue]) -> [String: Any] {
+        [
+            "enabled": boolConfigValue(table["enabled"]) ?? true,
+            "destructive_enabled": boolConfigValue(table["destructive_enabled"]) ?? true,
+            "open_world_enabled": boolConfigValue(table["open_world_enabled"]) ?? true
+        ]
+    }
+
+    private static func configReadAppObject(_ table: [String: ConfigValue]) -> [String: Any] {
+        [
+            "enabled": boolConfigValue(table["enabled"]) ?? true,
+            "destructive_enabled": boolConfigValue(table["destructive_enabled"]) as Any? ?? NSNull(),
+            "open_world_enabled": boolConfigValue(table["open_world_enabled"]) as Any? ?? NSNull(),
+            "default_tools_approval_mode": stringConfigValue(table["default_tools_approval_mode"]) as Any? ?? NSNull(),
+            "default_tools_enabled": boolConfigValue(table["default_tools_enabled"]) as Any? ?? NSNull(),
+            "tools": configReadAppToolsObject(table["tools"])
+        ]
+    }
+
+    private static func configReadAppToolsObject(_ value: ConfigValue?) -> Any {
+        guard case let .table(table)? = value else {
+            return NSNull()
+        }
+        var object: [String: Any] = [:]
+        for key in table.keys.sorted() {
+            guard case let .table(toolTable)? = table[key] else {
+                continue
+            }
+            object[key] = [
+                "enabled": boolConfigValue(toolTable["enabled"]) as Any? ?? NSNull(),
+                "approval_mode": stringConfigValue(toolTable["approval_mode"]) as Any? ?? NSNull()
+            ]
+        }
+        return object
+    }
+
+    private static func boolConfigValue(_ value: ConfigValue?) -> Bool? {
+        guard case let .bool(bool)? = value else {
+            return nil
+        }
+        return bool
     }
 
     private static let supportedExperimentalFeatureEnablement = [
