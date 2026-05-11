@@ -15499,6 +15499,76 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(((layers[2]["config"] as? [String: Any])?["model"]) as? String, "user")
     }
 
+    func testConfigReadIncludesManagedUserSandboxOriginsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let userRoot = temp.url.appendingPathComponent("user-root", isDirectory: true)
+        let managedRoot = temp.url.appendingPathComponent("managed-root", isDirectory: true)
+        try FileManager.default.createDirectory(at: userRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: managedRoot, withIntermediateDirectories: true)
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        try """
+        model = "gpt-user"
+        approval_policy = "on-request"
+        sandbox_mode = "workspace-write"
+
+        [sandbox_workspace_write]
+        writable_roots = ["\(userRoot.path)"]
+        network_access = true
+        """.write(to: configFile, atomically: true, encoding: .utf8)
+        let managedConfigFile = temp.url.appendingPathComponent("managed_config.toml", isDirectory: false)
+        try """
+        model = "gpt-system"
+        approval_policy = "never"
+
+        [sandbox_workspace_write]
+        writable_roots = ["\(managedRoot.path)"]
+        """.write(to: managedConfigFile, atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/read","params":{"includeLayers":true}}"#,
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                configLayerOverrides: ConfigLayerLoaderOverrides(managedConfigPath: managedConfigFile)
+            )
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let config = try XCTUnwrap(result["config"] as? [String: Any])
+        XCTAssertEqual(config["model"] as? String, "gpt-system")
+        XCTAssertEqual(config["approval_policy"] as? String, "never")
+        XCTAssertEqual(config["sandbox_mode"] as? String, "workspace-write")
+        let sandbox = try XCTUnwrap(config["sandbox_workspace_write"] as? [String: Any])
+        XCTAssertEqual(sandbox["writable_roots"] as? [String], [managedRoot.path])
+        XCTAssertEqual(sandbox["network_access"] as? Bool, true)
+
+        let origins = try XCTUnwrap(result["origins"] as? [String: Any])
+        let modelOriginName = try XCTUnwrap((origins["model"] as? [String: Any])?["name"] as? [String: Any])
+        XCTAssertEqual(modelOriginName["type"] as? String, "legacyManagedConfigTomlFromFile")
+        XCTAssertEqual(modelOriginName["file"] as? String, managedConfigFile.standardizedFileURL.path)
+        let approvalOriginName = try XCTUnwrap((origins["approval_policy"] as? [String: Any])?["name"] as? [String: Any])
+        XCTAssertEqual(approvalOriginName["type"] as? String, "legacyManagedConfigTomlFromFile")
+        let sandboxModeOriginName = try XCTUnwrap((origins["sandbox_mode"] as? [String: Any])?["name"] as? [String: Any])
+        XCTAssertEqual(sandboxModeOriginName["type"] as? String, "user")
+        let writableRootsOriginName = try XCTUnwrap(
+            (origins["sandbox_workspace_write.writable_roots.0"] as? [String: Any])?["name"] as? [String: Any]
+        )
+        XCTAssertEqual(writableRootsOriginName["type"] as? String, "legacyManagedConfigTomlFromFile")
+        let networkOriginName = try XCTUnwrap(
+            (origins["sandbox_workspace_write.network_access"] as? [String: Any])?["name"] as? [String: Any]
+        )
+        XCTAssertEqual(networkOriginName["type"] as? String, "user")
+
+        let layers = try XCTUnwrap(result["layers"] as? [[String: Any]])
+        XCTAssertEqual((layers[0]["name"] as? [String: Any])?["type"] as? String, "legacyManagedConfigTomlFromFile")
+        XCTAssertEqual((layers[1]["name"] as? [String: Any])?["type"] as? String, "user")
+        let managedLayerConfig = try XCTUnwrap(layers[0]["config"] as? [String: Any])
+        let managedSandbox = try XCTUnwrap(managedLayerConfig["sandbox_workspace_write"] as? [String: Any])
+        XCTAssertEqual(managedSandbox["writable_roots"] as? [String], [managedRoot.path])
+        let userLayerConfig = try XCTUnwrap(layers[1]["config"] as? [String: Any])
+        let userSandbox = try XCTUnwrap(userLayerConfig["sandbox_workspace_write"] as? [String: Any])
+        XCTAssertEqual(userSandbox["network_access"] as? Bool, true)
+    }
+
     func testConfigReadOmitsLayersByDefault() throws {
         let temp = try TemporaryDirectory()
         try #"model = "gpt-user""#.write(

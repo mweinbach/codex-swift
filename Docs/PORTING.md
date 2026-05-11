@@ -644,6 +644,8 @@ Source baseline inspected for this scaffold:
   - `config/read` now projects `[tools]` through Rust's v2 `ToolsV2` shape, including nested `tools.web_search` `context_size`, `allowed_domains`, and `location` fields, `view_image`, typed `null` values for absent optional fields, and Rust's legacy behavior of ignoring boolean `[tools] web_search = true`.
 - `codex-rs/app-server/src/request_processors/config_processor.rs` config apps projection
   - `config/read` now projects `[apps]` through Rust's v2 `AppsConfig` shape, including `_default`, app-level defaults, nullable optional app fields, nested app tool configs, and origin coverage for configured app fields.
+- `codex-rs/app-server/src/request_processors/config_processor.rs` config managed layer reads
+  - `config/read` now has Rust-parity coverage for legacy managed config overriding user/session fields while preserving lower-priority user sandbox fields, per-key origins, and managed/user layer order.
 - `codex-rs/core/src/config/mod.rs` workspace-write memory root handling
   - Runtime config loading now creates `codex_home/memories`, parses legacy `[sandbox_workspace_write]` roots/network/temp exclusions, and resolves workspace-write sandbox policies with the memories root appended exactly once, matching Rust's writable-memory-root behavior.
 - `codex-rs/app-server/src/command_exec.rs` command exec follow-up controls
