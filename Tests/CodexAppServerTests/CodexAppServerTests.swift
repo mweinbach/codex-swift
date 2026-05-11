@@ -15369,38 +15369,47 @@ final class CodexAppServerTests: XCTestCase {
         let cases = [
             (
                 #"{"method":"thread/realtime/start","params":{"threadId":"\#(threadID)"}}"#,
+                -32602,
                 "missing field `outputModality`"
             ),
             (
                 #"{"method":"thread/realtime/start","params":{"threadId":"\#(threadID)","outputModality":"video"}}"#,
+                -32602,
                 "unknown variant `video`, expected `text` or `audio`"
             ),
             (
                 #"{"method":"thread/realtime/start","params":{"threadId":"\#(threadID)","outputModality":"audio","transport":{"type":"webrtc"}}}"#,
+                -32602,
                 "missing field `sdp`"
             ),
             (
                 #"{"method":"thread/realtime/appendAudio","params":{"threadId":"\#(threadID)"}}"#,
+                -32602,
                 "missing field `audio`"
             ),
             (
                 #"{"method":"thread/realtime/appendAudio","params":{"threadId":"\#(threadID)","audio":{"sampleRate":24000,"numChannels":1}}}"#,
+                -32602,
                 "missing field `data`"
             ),
             (
                 #"{"method":"thread/realtime/appendAudio","params":{"threadId":"\#(threadID)","audio":{"data":"AA==","numChannels":1}}}"#,
+                -32602,
                 "missing field `sampleRate`"
             ),
             (
                 #"{"method":"thread/realtime/appendAudio","params":{"threadId":"\#(threadID)","audio":{"data":"AA==","sampleRate":24000.5,"numChannels":1}}}"#,
-                "invalid value for field `sampleRate`"
+                -32600,
+                "Invalid request: invalid type: floating point `24000.5`, expected u32"
             ),
             (
                 #"{"method":"thread/realtime/appendAudio","params":{"threadId":"\#(threadID)","audio":{"data":"AA==","sampleRate":24000,"numChannels":70000}}}"#,
-                "invalid value for field `numChannels`"
+                -32600,
+                "Invalid request: invalid value: integer `70000`, expected u16"
             ),
             (
                 #"{"method":"thread/realtime/appendText","params":{"threadId":"\#(threadID)"}}"#,
+                -32602,
                 "missing field `text`"
             )
         ]
@@ -15412,7 +15421,65 @@ final class CodexAppServerTests: XCTestCase {
                 experimentalAPIEnabled: true
             )
             let error = try XCTUnwrap(response["error"] as? [String: Any])
-            XCTAssertEqual(error["code"] as? Int, -32602)
+            XCTAssertEqual(error["code"] as? Int, testCase.1)
+            XCTAssertEqual(error["message"] as? String, testCase.2)
+        }
+    }
+
+    func testRealtimeConversationRoutesRejectMalformedAudioNumbersLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [features]
+        realtime_conversation = true
+        """.write(
+            to: temp.url.appendingPathComponent("config.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let startMessages = try decodeMessages(processor.processLine(
+            Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)
+        ))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let cases = [
+            (
+                #"{"method":"thread/realtime/appendAudio","params":{"threadId":"\#(threadID)","audio":{"data":"AA==","sampleRate":"24000","numChannels":1}}}"#,
+                "Invalid request: invalid type: string \"24000\", expected u32"
+            ),
+            (
+                #"{"method":"thread/realtime/appendAudio","params":{"threadId":"\#(threadID)","audio":{"data":"AA==","sampleRate":null,"numChannels":1}}}"#,
+                "Invalid request: invalid type: null, expected u32"
+            ),
+            (
+                #"{"method":"thread/realtime/appendAudio","params":{"threadId":"\#(threadID)","audio":{"data":"AA==","sampleRate":24000,"numChannels":true}}}"#,
+                "Invalid request: invalid type: boolean `true`, expected u16"
+            ),
+            (
+                #"{"method":"thread/realtime/appendAudio","params":{"threadId":"\#(threadID)","audio":{"data":"AA==","sampleRate":-1,"numChannels":1}}}"#,
+                "Invalid request: invalid value: integer `-1`, expected u32"
+            ),
+            (
+                #"{"method":"thread/realtime/appendAudio","params":{"threadId":"\#(threadID)","audio":{"data":"AA==","sampleRate":24000,"numChannels":1,"samplesPerChannel":"480"}}}"#,
+                "Invalid request: invalid type: string \"480\", expected u32"
+            ),
+            (
+                #"{"method":"thread/realtime/appendAudio","params":{"threadId":"\#(threadID)","audio":{"data":"AA==","sampleRate":24000,"numChannels":1,"samplesPerChannel":4294967296}}}"#,
+                "Invalid request: invalid value: integer `4294967296`, expected u32"
+            )
+        ]
+
+        for (index, testCase) in cases.enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 2),\#(testCase.0.dropFirst())"#,
+                codexHome: temp.url,
+                experimentalAPIEnabled: true
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
             XCTAssertEqual(error["message"] as? String, testCase.1)
         }
     }

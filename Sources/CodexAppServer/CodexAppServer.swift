@@ -13715,38 +13715,74 @@ public enum CodexAppServer {
             throw AppServerError.invalidParams("missing field `data`")
         }
         _ = try rustRequiredStringParam(data, field: "data")
-        _ = try unsignedIntegerParam(audio["sampleRate"], field: "sampleRate", upperBound: UInt64(UInt32.max))
-        _ = try unsignedIntegerParam(audio["numChannels"], field: "numChannels", upperBound: UInt64(UInt16.max))
+        _ = try rustRequiredUnsignedIntegerParam(
+            audio["sampleRate"],
+            field: "sampleRate",
+            typeName: "u32",
+            upperBound: UInt64(UInt32.max)
+        )
+        _ = try rustRequiredUnsignedIntegerParam(
+            audio["numChannels"],
+            field: "numChannels",
+            typeName: "u16",
+            upperBound: UInt64(UInt16.max)
+        )
         if let samplesPerChannel = audio["samplesPerChannel"], !(samplesPerChannel is NSNull) {
-            _ = try unsignedIntegerParam(samplesPerChannel, field: "samplesPerChannel", upperBound: UInt64(UInt32.max))
+            _ = try rustRequiredUnsignedIntegerParam(
+                samplesPerChannel,
+                field: "samplesPerChannel",
+                typeName: "u32",
+                upperBound: UInt64(UInt32.max)
+            )
         }
         if let itemID = audio["itemId"] {
             _ = try rustOptionalStringParam(itemID)
         }
     }
 
-    private static func unsignedIntegerParam(_ value: Any?, field: String, upperBound: UInt64) throws -> UInt64 {
+    private static func rustRequiredUnsignedIntegerParam(
+        _ value: Any?,
+        field: String,
+        typeName: String,
+        upperBound: UInt64
+    ) throws -> UInt64 {
+        guard let value else {
+            throw AppServerError.invalidParams("missing field `\(field)`")
+        }
         if let number = value as? NSNumber {
             guard CFGetTypeID(number) != CFBooleanGetTypeID() else {
-                throw AppServerError.invalidParams("missing field `\(field)`")
+                throw AppServerError.invalidRequest(
+                    "Invalid request: \(rustInvalidTypeDescription(number)), expected \(typeName)"
+                )
             }
             let double = number.doubleValue
             guard double.isFinite,
-                  double.rounded(.towardZero) == double,
-                  double >= 0,
+                  double.rounded(.towardZero) == double
+            else {
+                throw AppServerError.invalidRequest(
+                    "Invalid request: \(rustInvalidTypeDescription(number)), expected \(typeName)"
+                )
+            }
+            guard double >= 0,
                   double <= Double(upperBound)
             else {
-                throw AppServerError.invalidParams("invalid value for field `\(field)`")
+                throw AppServerError.invalidRequest(
+                    "Invalid request: invalid value: integer `\(Int64(double))`, expected \(typeName)"
+                )
             }
             return UInt64(double)
         } else if let int = value as? Int, int >= 0 {
             let integer = UInt64(int)
             guard integer <= upperBound else {
-                throw AppServerError.invalidParams("invalid value for field `\(field)`")
+                throw AppServerError.invalidRequest(
+                    "Invalid request: invalid value: integer `\(int)`, expected \(typeName)"
+                )
             }
             return integer
         }
-        throw AppServerError.invalidParams("missing field `\(field)`")
+        throw AppServerError.invalidRequest(
+            "Invalid request: \(rustInvalidTypeDescription(value)), expected \(typeName)"
+        )
     }
 
     fileprivate static func mockExperimentalMethodResult(params: [String: Any]?) -> [String: Any] {
