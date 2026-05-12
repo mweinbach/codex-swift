@@ -2469,6 +2469,24 @@ public enum CodexAppServer {
         }
     }
 
+    private static func collaborationModeJSONValue(_ mode: CollaborationMode) -> JSONValue {
+        var settings: [String: JSONValue] = [
+            "model": .string(mode.settings.model)
+        ]
+        if let reasoningEffort = mode.settings.reasoningEffort {
+            settings["reasoning_effort"] = .string(reasoningEffort.rawValue)
+        }
+        if let developerInstructions = mode.settings.developerInstructions {
+            settings["developer_instructions"] = .string(developerInstructions)
+        } else {
+            settings["developer_instructions"] = .null
+        }
+        return .object([
+            "mode": .string(mode.mode.rawValue),
+            "settings": .object(settings)
+        ])
+    }
+
     private static func strictStringParam(_ value: Any?, fieldName: String) throws -> String? {
         guard let value, !(value is NSNull) else {
             return nil
@@ -2555,10 +2573,17 @@ public enum CodexAppServer {
         _ rawEnvironments: Any?,
         configuration: CodexAppServerConfiguration
     ) throws {
+        _ = try turnEnvironmentSelections(rawEnvironments, configuration: configuration)
+    }
+
+    private static func turnEnvironmentSelections(
+        _ rawEnvironments: Any?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [TurnEnvironmentSelection]? {
         guard let rawEnvironments, !(rawEnvironments is NSNull),
               let environments = rawEnvironments as? [[String: Any]]
         else {
-            return
+            return nil
         }
 
         let snapshot = try ConfiguredEnvironmentLoader.load(
@@ -2566,6 +2591,7 @@ public enum CodexAppServer {
             environment: configuration.environment
         )
         var seenEnvironmentIDs = Set<String>()
+        var selections: [TurnEnvironmentSelection] = []
         for environment in environments {
             let environmentID = stringParam(environment["environment_id"]) ?? ""
             guard seenEnvironmentIDs.insert(environmentID).inserted else {
@@ -2574,7 +2600,12 @@ public enum CodexAppServer {
             guard snapshot.environment(id: environmentID) != nil else {
                 throw AppServerError.invalidRequest("unknown turn environment id `\(environmentID)`")
             }
+            selections.append(TurnEnvironmentSelection(
+                environmentID: environmentID,
+                cwd: stringParam(environment["cwd"]) ?? configuration.cwd.path
+            ))
         }
+        return selections
     }
 
     fileprivate static func requireThreadStartExperimentalFieldsAPI(
@@ -2762,6 +2793,100 @@ public enum CodexAppServer {
                 responsesAPIClientMetadata: responsesAPIClientMetadataParam(params?["responsesapiClientMetadata"])
             )
         )
+    }
+
+    fileprivate static func turnStartCoreOp(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> (threadID: String, turnID: String, op: Op) {
+        let input = v2UserInput(params?["input"])
+        try validateV2UserInputLimit((text: input.text, images: input.images))
+        _ = try approvalsReviewerParam(params?["approvalsReviewer"])
+        _ = try serviceTierParam(params?["serviceTier"])
+        let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
+        let conversationID: ConversationId
+        do {
+            conversationID = try ConversationId(string: threadID)
+        } catch {
+            throw AppServerError.invalidRequest("invalid thread id: \(error)")
+        }
+        let rolloutPath = try rolloutPathForConversation(conversationID, configuration: configuration)
+        let existing = try RolloutSummary(path: rolloutPath, defaultProvider: configuration.defaultModelProvider)
+        let environments = try turnEnvironmentSelections(params?["environments"], configuration: configuration)
+        let cwd = try optionalAbsolutePathParam(params?["cwd"], name: "cwd")
+        let approvalPolicy = try turnStartApprovalPolicyParam(params?["approvalPolicy"])
+        let approvalsReviewer = try approvalsReviewerParam(params?["approvalsReviewer"])
+        let sandboxPolicy = try commandExecSandboxPolicy(params?["sandboxPolicy"])
+        let permissionSelection = try permissionProfileSelectionParam(params?["permissions"])
+        let model = stringParam(params?["model"])
+        let effort = try turnStartReasoningEffortParam(params?["effort"])
+        let summary = try turnStartReasoningSummaryParam(params?["summary"])
+        let serviceTier = try serviceTierParam(params?["serviceTier"])
+        let collaborationMode = try turnStartCollaborationModeParam(params?["collaborationMode"])
+        let personality = try turnStartPersonalityParam(params?["personality"])
+        let outputSchema = try jsonValueParam(params?["outputSchema"], fieldName: "outputSchema")
+        let metadata = responsesAPIClientMetadataParam(params?["responsesapiClientMetadata"])
+
+        let permissionProfile: PermissionProfile?
+        let activePermissionProfile: ActivePermissionProfile?
+        if let permissionSelection {
+            let contextCwd = cwd ?? existing.cwd
+            let runtimeConfig = try loadRuntimeConfigForThreadStartup(
+                configuration: configuration,
+                cwd: URL(fileURLWithPath: contextCwd, isDirectory: true),
+                permissionSelection: permissionSelection
+            )
+            let baseSandboxPolicy = sandboxPolicy ?? runtimeConfig.legacySandboxPolicy()
+            permissionProfile = runtimeConfig.permissionProfile ?? PermissionProfile.fromLegacySandboxPolicyForCwd(
+                baseSandboxPolicy,
+                cwd: contextCwd
+            )
+            activePermissionProfile = runtimeConfig.activePermissionProfile
+        } else {
+            permissionProfile = nil
+            activePermissionProfile = nil
+        }
+
+        let hasAnyOverrides = cwd != nil
+            || approvalPolicy != nil
+            || approvalsReviewer != nil
+            || sandboxPolicy != nil
+            || permissionSelection != nil
+            || model != nil
+            || serviceTier.isPresent
+            || effort != nil
+            || summary != nil
+            || collaborationMode != nil
+            || personality != nil
+        let op: Op
+        if hasAnyOverrides {
+            op = .userInputWithTurnContext(UserInputWithTurnContextParams(
+                items: input.items,
+                environments: environments,
+                finalOutputJSONSchema: outputSchema,
+                responsesAPIClientMetadata: metadata,
+                cwd: cwd,
+                approvalPolicy: approvalPolicy,
+                approvalsReviewer: approvalsReviewer.map { .string($0.appServerRawValue) },
+                sandboxPolicy: sandboxPolicy,
+                permissionProfile: permissionProfile,
+                activePermissionProfile: activePermissionProfile,
+                model: model,
+                effort: effort.map { .string($0.rawValue) },
+                summary: summary,
+                serviceTier: serviceTier.jsonValue,
+                collaborationMode: collaborationMode.map(collaborationModeJSONValue),
+                personality: personality.map { .string($0.rawValue) }
+            ))
+        } else {
+            op = .userInput(
+                items: input.items,
+                environments: environments,
+                finalOutputJSONSchema: outputSchema,
+                responsesAPIClientMetadata: metadata
+            )
+        }
+        return (threadID, UUID().uuidString.lowercased(), op)
     }
 
     private static func validatedTurnSteer(
@@ -15385,7 +15510,7 @@ public enum CodexAppServer {
         return inProgressTurnObject(id: id, items: items)
     }
 
-    private static func inProgressTurnObject(id: String, items: [[String: Any]] = []) -> [String: Any] {
+    fileprivate static func inProgressTurnObject(id: String, items: [[String: Any]] = []) -> [String: Any] {
         [
             "id": id,
             "items": items,
@@ -25172,6 +25297,22 @@ final class CodexAppServerMessageProcessor {
                         experimentalAPIEnabled: experimentalAPIEnabled
                     )
                     try CodexAppServer.requireTurnStartContextOverrideCompatibility(params: params)
+                    if coreOpSubmitter != nil {
+                        let coreOp = try CodexAppServer.turnStartCoreOp(
+                            params: params,
+                            configuration: configuration
+                        )
+                        try submitCoreOp(
+                            requestID: id,
+                            threadID: coreOp.threadID,
+                            op: coreOp.op,
+                            failureMessage: "failed to start turn"
+                        )
+                        activeTurnIDs[coreOp.threadID] = coreOp.turnID
+                        let turn = CodexAppServer.inProgressTurnObject(id: coreOp.turnID)
+                        response = CodexAppServer.responseObject(id: id, result: ["turn": turn])
+                        break
+                    }
                     let pendingSessionStartSource = (params?["threadId"] as? String)
                         .flatMap { pendingSessionStartSources[$0] }
                     let loadedThreadMetadata = (params?["threadId"] as? String)
@@ -26695,6 +26836,17 @@ private enum NullableStringPatch {
             return false
         case .clear, .set:
             return true
+        }
+    }
+
+    var jsonValue: JSONValue? {
+        switch self {
+        case .absent:
+            return nil
+        case .clear:
+            return .null
+        case let .set(value):
+            return .string(value)
         }
     }
 

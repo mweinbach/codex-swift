@@ -2805,9 +2805,9 @@ final class CodexAppServerTests: XCTestCase {
         let steerResult = try XCTUnwrap(steer["result"] as? [String: Any])
         XCTAssertEqual(steerResult["turnId"] as? String, turnID)
         let submissions = capture.submissions
-        XCTAssertEqual(submissions.map(\.requestID), [.integer(3)])
-        XCTAssertEqual(submissions.map(\.threadID), [threadID])
-        guard case let .userInput(items, environments, outputSchema, metadata) = submissions[0].op else {
+        XCTAssertEqual(submissions.map(\.requestID), [.integer(2), .integer(3)])
+        XCTAssertEqual(submissions.map(\.threadID), [threadID, threadID])
+        guard case let .userInput(items, environments, outputSchema, metadata) = submissions[1].op else {
             XCTFail("expected runtime steer to submit user input")
             return
         }
@@ -2823,14 +2823,122 @@ final class CodexAppServerTests: XCTestCase {
         let resumeResult = try XCTUnwrap(resume["result"] as? [String: Any])
         let resumedThread = try XCTUnwrap(resumeResult["thread"] as? [String: Any])
         let turns = try XCTUnwrap(resumedThread["turns"] as? [[String: Any]])
-        XCTAssertEqual(turns.count, 1)
+        XCTAssertEqual(turns.count, 0)
+    }
+
+    func testTurnStartSubmitsCoreUserInputWhenRuntimeSubmitterIsAvailable() throws {
+        let temp = try TemporaryDirectory()
+        let capture = AppServerCoreOpCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            coreOpSubmitter: capture.submit,
+            experimentalAPIEnabled: true
+        )
+        let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+        let request: [String: Any] = [
+            "id": 2,
+            "method": "turn/start",
+            "params": [
+                "threadId": threadID,
+                "input": [
+                    ["type": "text", "text": "Live"],
+                    ["type": "image", "url": "https://example.test/live.png"]
+                ],
+                "responsesapiClientMetadata": ["fiber_run_id": "fiber-live-123"],
+                "outputSchema": ["type": "object"]
+            ]
+        ]
+
+        let messages = try decodeMessages(processor.processLine(try JSONSerialization.data(withJSONObject: request)))
+
+        let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
+        let turn = try XCTUnwrap(result["turn"] as? [String: Any])
+        XCTAssertEqual(turn["status"] as? String, "inProgress")
+        let turnID = try XCTUnwrap(turn["id"] as? String)
+        XCTAssertFalse(turnID.isEmpty)
+        XCTAssertEqual(messages.count, 1)
+        let submissions = capture.submissions
+        XCTAssertEqual(submissions.map(\.requestID), [.integer(2)])
+        XCTAssertEqual(submissions.map(\.threadID), [threadID])
+        guard case let .userInput(items, environments, outputSchema, metadata) = submissions[0].op else {
+            XCTFail("expected runtime turn start to submit user input")
+            return
+        }
+        XCTAssertEqual(items, [
+            .text("Live"),
+            .image(imageURL: "https://example.test/live.png")
+        ])
+        XCTAssertNil(environments)
+        XCTAssertEqual(outputSchema, .object(["type": .string("object")]))
+        XCTAssertEqual(metadata, ["fiber_run_id": "fiber-live-123"])
+    }
+
+    func testTurnStartRuntimeSubmitterPreservesContextOverridesLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let capture = AppServerCoreOpCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            coreOpSubmitter: capture.submit,
+            experimentalAPIEnabled: true
+        )
+        let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+        let request: [String: Any] = [
+            "id": 2,
+            "method": "turn/start",
+            "params": [
+                "threadId": threadID,
+                "input": [["type": "text", "text": "Override"]],
+                "cwd": temp.url.path,
+                "approvalPolicy": "never",
+                "approvalsReviewer": "guardian_subagent",
+                "sandboxPolicy": ["type": "readOnly", "networkAccess": true],
+                "model": "gpt-live",
+                "effort": "medium",
+                "summary": "auto",
+                "serviceTier": "fast",
+                "personality": "pragmatic"
+            ]
+        ]
+
+        _ = try decodeMessages(processor.processLine(try JSONSerialization.data(withJSONObject: request)))
+
+        let submissions = capture.submissions
+        XCTAssertEqual(submissions.count, 1)
+        guard case let .userInputWithTurnContext(params) = submissions[0].op else {
+            XCTFail("expected runtime turn start to submit context-aware user input")
+            return
+        }
+        XCTAssertEqual(params.items, [.text("Override")])
+        XCTAssertEqual(params.cwd, temp.url.path)
+        XCTAssertEqual(params.approvalPolicy, .never)
+        XCTAssertEqual(params.approvalsReviewer, .string("guardian_subagent"))
+        XCTAssertEqual(params.sandboxPolicy, .readOnlyWithNetworkAccess)
+        XCTAssertNil(params.permissionProfile)
+        XCTAssertNil(params.activePermissionProfile)
+        XCTAssertEqual(params.model, "gpt-live")
+        XCTAssertEqual(params.effort, .string("medium"))
+        XCTAssertEqual(params.summary, .auto)
+        XCTAssertEqual(params.serviceTier, .string("priority"))
+        XCTAssertEqual(params.personality, .string("pragmatic"))
     }
 
     func testTurnSteerRuntimeSubmitterFailuresReturnRustInternalErrors() throws {
         let temp = try TemporaryDirectory()
+        let capture = AppServerCoreOpCapture()
         let processor = try initializedProcessor(
             configuration: testConfiguration(codexHome: temp.url),
-            coreOpSubmitter: { _, _, _ in throw AppServerCoreOpCaptureError(message: "channel closed") }
+            coreOpSubmitter: { requestID, threadID, op in
+                if requestID == .integer(3) {
+                    throw AppServerCoreOpCaptureError(message: "channel closed")
+                }
+                capture.submit(requestID: requestID, threadID: threadID, op: op)
+            }
         )
         let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
         let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
