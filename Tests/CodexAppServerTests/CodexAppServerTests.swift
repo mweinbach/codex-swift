@@ -400,6 +400,103 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(response.id, .integer(1))
     }
 
+    func testRemoteControlAppServerExecutableRuntimeConnectsRunsSessionAndRecordsTerminalLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let clientID = RemoteControlClientID("client-1")
+        let streamID = RemoteControlStreamID("stream-1")
+        let initialize = ExecServerJSONRPCMessage.request(ExecServerJSONRPCRequest(
+            id: .integer(1),
+            method: "initialize",
+            params: .object([
+                "clientInfo": .object([
+                    "name": .string("test"),
+                    "version": .string("0")
+                ]),
+                "capabilities": .object([
+                    "experimentalApi": .bool(true)
+                ])
+            ])
+        ))
+        let transport = RemoteControlAppServerRecordingWebSocketTransport(incoming: [
+            .text(try remoteControlEnvelopeText(RemoteControlClientEnvelope(
+                event: .clientMessage(message: initialize),
+                clientID: clientID,
+                streamID: streamID,
+                seqID: 1,
+                cursor: nil
+            )))
+        ])
+        let connectionProbe = RemoteControlAppServerExecutableConnectionProbe()
+        var runtime = RemoteControlAppServerExecutableRuntime(
+            runtime: try RemoteControlRuntimeCore(
+                remoteControlURL: "https://chatgpt.com/backend-api",
+                installationID: "install-1",
+                requestedEnabled: true,
+                stateDatabaseAvailable: true
+            ),
+            configuration: testConfiguration(codexHome: temp.url),
+            connect: { target, appServerClientName in
+                await connectionProbe.record(target: target, appServerClientName: appServerClientName)
+                return RemoteControlAppServerExecutableConnection(
+                    transport: transport,
+                    environmentID: "env-1"
+                )
+            }
+        )
+
+        let steps = try await runtime.start(now: { 10 })
+
+        XCTAssertEqual(steps.count, 3)
+        XCTAssertEqual(steps[0].runtimeStep.action, .connect(RemoteControlTarget(
+            websocketURL: "wss://chatgpt.com/backend-api/wham/remote/control/server",
+            enrollURL: "https://chatgpt.com/backend-api/wham/remote/control/server/enroll"
+        ), appServerClientName: nil))
+        XCTAssertEqual(steps[1].runtimeStep, RemoteControlRuntimeStep(
+            action: .connected,
+            statusUpdates: [
+                RemoteControlStatusSnapshot(
+                    status: .connecting,
+                    installationID: "install-1",
+                    environmentID: "env-1"
+                ),
+                RemoteControlStatusSnapshot(
+                    status: .connected,
+                    installationID: "install-1",
+                    environmentID: "env-1"
+                ),
+            ]
+        ))
+        XCTAssertEqual(steps[2].terminalEnd, .reconnect("websocket stream ended"))
+        XCTAssertEqual(steps[2].runtimeStep.action, .reconnect(appServerClientName: nil))
+        XCTAssertEqual(steps[2].sessionSteps.count, 2)
+
+        let connections = await connectionProbe.connections()
+        XCTAssertEqual(connections, [RemoteControlAppServerExecutableConnectionProbe.Connection(
+            target: RemoteControlTarget(
+                websocketURL: "wss://chatgpt.com/backend-api/wham/remote/control/server",
+                enrollURL: "https://chatgpt.com/backend-api/wham/remote/control/server/enroll"
+            ),
+            appServerClientName: nil
+        )])
+
+        let frames = await transport.sentFrames()
+        let envelopes = try frames.map(remoteControlServerEnvelope(from:))
+        XCTAssertEqual(envelopes.count, 2)
+        guard case let .serverMessage(.response(response)) = envelopes[0].event else {
+            return XCTFail("initialize response was not forwarded before terminal websocket EOF")
+        }
+        XCTAssertEqual(response.id, .integer(1))
+        guard case let .serverMessage(.notification(notification)) = envelopes[1].event,
+              case let .object(params) = notification.params
+        else {
+            return XCTFail("connected remote-control status notification was not forwarded")
+        }
+        XCTAssertEqual(notification.method, "remoteControl/status/changed")
+        XCTAssertEqual(params["status"], .string("connected"))
+        XCTAssertEqual(params["installationId"], .string("install-1"))
+        XCTAssertEqual(params["environmentId"], .string("env-1"))
+    }
+
     func testRemoteControlAppServerBridgeDropsUnknownAndClosesConnectionLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let clientID = RemoteControlClientID("client-1")
@@ -26907,6 +27004,23 @@ private actor RemoteControlAppServerRecordingWebSocketTransport: RemoteControlWe
 
     func closeCount() -> Int {
         closes
+    }
+}
+
+private actor RemoteControlAppServerExecutableConnectionProbe {
+    struct Connection: Equatable, Sendable {
+        var target: RemoteControlTarget
+        var appServerClientName: String?
+    }
+
+    private var recordedConnections: [Connection] = []
+
+    func record(target: RemoteControlTarget, appServerClientName: String?) {
+        recordedConnections.append(Connection(target: target, appServerClientName: appServerClientName))
+    }
+
+    func connections() -> [Connection] {
+        recordedConnections
     }
 }
 

@@ -261,6 +261,158 @@ enum RemoteControlAppServerWebSocketSessionInput: Equatable, Sendable {
     case connection(RemoteControlWebsocketConnectionInput)
 }
 
+struct RemoteControlAppServerExecutableConnection<Transport: RemoteControlWebSocketTransport>: Sendable {
+    var transport: Transport
+    var environmentID: String?
+
+    init(
+        transport: Transport,
+        environmentID: String?
+    ) {
+        self.transport = transport
+        self.environmentID = environmentID
+    }
+}
+
+struct RemoteControlAppServerExecutableRuntimeStep: Equatable, Sendable {
+    var runtimeStep: RemoteControlRuntimeStep
+    var sessionSteps: [RemoteControlAppServerWebSocketSessionStep]
+    var terminalEnd: RemoteControlWebsocketConnectionEnd?
+
+    init(
+        runtimeStep: RemoteControlRuntimeStep,
+        sessionSteps: [RemoteControlAppServerWebSocketSessionStep] = [],
+        terminalEnd: RemoteControlWebsocketConnectionEnd? = nil
+    ) {
+        self.runtimeStep = runtimeStep
+        self.sessionSteps = sessionSteps
+        self.terminalEnd = terminalEnd
+    }
+}
+
+struct RemoteControlAppServerExecutableRuntime<Transport: RemoteControlWebSocketTransport>: Sendable {
+    typealias Connect = @Sendable (
+        RemoteControlTarget,
+        String?
+    ) async throws -> RemoteControlAppServerExecutableConnection<Transport>
+
+    private var runtime: RemoteControlRuntimeCore
+    private let configuration: CodexAppServerConfiguration
+    private let connect: Connect
+
+    init(
+        runtime: RemoteControlRuntimeCore,
+        configuration: CodexAppServerConfiguration,
+        connect: @escaping Connect
+    ) {
+        self.runtime = runtime
+        self.configuration = configuration
+        self.connect = connect
+    }
+
+    mutating func start(
+        appServerClientNameRequired: Bool = false,
+        now: @Sendable () -> TimeInterval = { Date().timeIntervalSinceReferenceDate },
+        maxReceives: Int? = nil
+    ) async throws -> [RemoteControlAppServerExecutableRuntimeStep] {
+        try await process(
+            runtime.start(appServerClientNameRequired: appServerClientNameRequired),
+            now: now,
+            maxReceives: maxReceives
+        )
+    }
+
+    private mutating func process(
+        _ runtimeStep: RemoteControlRuntimeStep,
+        now: @Sendable () -> TimeInterval,
+        maxReceives: Int?
+    ) async throws -> [RemoteControlAppServerExecutableRuntimeStep] {
+        var steps = [RemoteControlAppServerExecutableRuntimeStep(runtimeStep: runtimeStep)]
+        guard case let .connect(target, appServerClientName) = runtimeStep.action else {
+            return steps
+        }
+
+        let connection = try await connect(target, appServerClientName)
+        let connectedStep = runtime.connectionEstablished(environmentID: connection.environmentID)
+        steps.append(RemoteControlAppServerExecutableRuntimeStep(runtimeStep: connectedStep))
+
+        var session = RemoteControlAppServerWebSocketSession(
+            transport: connection.transport,
+            statusPublisher: RemoteControlStatusPublisherCore(snapshot: runtime.statusSnapshot),
+            configuration: configuration.withRemoteControlStatus(runtime.statusSnapshot)
+        )
+        let sessionSteps = try await session.runUntilTerminal(now: now, maxReceives: maxReceives)
+        guard let terminalEnd = sessionSteps.last?.terminalEnd else {
+            return steps + [
+                RemoteControlAppServerExecutableRuntimeStep(
+                    runtimeStep: RemoteControlRuntimeStep(action: .connected),
+                    sessionSteps: sessionSteps
+                ),
+            ]
+        }
+
+        let terminalStep = runtime.connectionEnded(Self.sessionEnd(for: terminalEnd))
+        steps.append(RemoteControlAppServerExecutableRuntimeStep(
+            runtimeStep: terminalStep,
+            sessionSteps: sessionSteps,
+            terminalEnd: terminalEnd
+        ))
+        return steps
+    }
+
+    private static func sessionEnd(
+        for websocketEnd: RemoteControlWebsocketConnectionEnd
+    ) -> RemoteControlSessionConnectionEnd {
+        switch websocketEnd {
+        case .disabled:
+            return .disabled
+        case .shutdown:
+            return .shutdown
+        case .reconnect:
+            return .workerEnded
+        }
+    }
+}
+
+private extension CodexAppServerConfiguration {
+    func withRemoteControlStatus(
+        _ snapshot: CodexCore.RemoteControlStatusSnapshot
+    ) -> CodexAppServerConfiguration {
+        CodexAppServerConfiguration(
+            codexHome: codexHome,
+            cwd: cwd,
+            defaultModelProvider: defaultModelProvider,
+            originator: originator,
+            version: version,
+            requiresOpenAIAuth: requiresOpenAIAuth,
+            authCredentialsStoreMode: authCredentialsStoreMode,
+            sessionSource: sessionSource,
+            environment: environment,
+            activeProfile: activeProfile,
+            feedback: feedback,
+            feedbackUploadTransport: feedbackUploadTransport,
+            acceptedLineAnalyticsUploader: acceptedLineAnalyticsUploader,
+            accountRateLimitsFetcher: accountRateLimitsFetcher,
+            addCreditsNudgeEmailSender: addCreditsNudgeEmailSender,
+            authRefreshTransport: authRefreshTransport,
+            authLoginTransport: authLoginTransport,
+            authDeviceCodeTransport: authDeviceCodeTransport,
+            mcpHTTPTransport: mcpHTTPTransport,
+            pluginHTTPTransport: pluginHTTPTransport,
+            accessibleConnectorProvider: accessibleConnectorProvider,
+            mcpOAuthLoginStarter: mcpOAuthLoginStarter,
+            cliConfigOverrides: cliConfigOverrides,
+            threadConfigSources: threadConfigSources,
+            configLayerOverrides: configLayerOverrides,
+            stateStore: stateStore,
+            configWarnings: configWarnings,
+            remoteControlStatusSnapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot(snapshot),
+            pluginStartupTasksEnabled: pluginStartupTasksEnabled,
+            curatedPluginStartupSyncEnabled: curatedPluginStartupSyncEnabled
+        )
+    }
+}
+
 struct RemoteControlAppServerBridge {
     private let configuration: CodexAppServerConfiguration
     private let threadStateManager: AppServerThreadStateManager
