@@ -950,6 +950,7 @@ Source baseline inspected for this scaffold:
   - Added Swift execpolicy parser support for `range(stop)`, `range(start, stop)`, and `range(start, stop, step)` over integer expressions, plus array indexing by integer constants or loop variables, covering range-driven loops and list comprehensions.
 - `codex-rs/execpolicy/src/parser.rs` Starlark range value semantics
   - Swift now preserves `range(...)` as a Rust-shaped Starlark range value for `str`, `repr`, `type`, equality, truthiness, membership, indexing, slicing, iteration, and `len(...)` instead of eagerly lowering it to a list.
+  - Tightened Swift `range(...)` and `enumerate(..., start)` argument binding to preserve Rust Starlark's signed 32-bit builtin parameter bounds, rejecting integer values outside `-2147483648...2147483647`.
 - `codex-rs/execpolicy/src/parser.rs` Starlark list and string slicing
   - Added Swift execpolicy parser support for Starlark slice expressions over supported list and string values, including omitted start/stop bounds, negative indexes, positive/negative steps, and slice results used in generated rules, hosts, and executable paths.
 - `codex-rs/execpolicy/src/parser.rs` Starlark string indexes

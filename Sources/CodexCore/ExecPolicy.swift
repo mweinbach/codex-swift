@@ -3431,7 +3431,7 @@ public final class PolicyParser {
         }
 
         let integers = try rawArguments.map { rawArgument in
-            try parseStarlarkInteger(rawArgument, constants: constants, functions: functions, expression: text)
+            try parseStarlarkInt32(rawArgument, constants: constants, functions: functions, expression: text)
         }
         let start: Int
         let end: Int
@@ -5729,7 +5729,7 @@ public final class PolicyParser {
             rawStart = positionalArguments[1]
         }
         if let rawStart {
-            start = Int64(try parseStarlarkInteger(
+            start = Int64(try parseStarlarkInt32(
                 rawStart,
                 constants: constants,
                 functions: functions,
@@ -6980,6 +6980,19 @@ public final class PolicyParser {
         guard case let .integer(raw) = value,
               let integer = Int(exactly: raw)
         else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        return integer
+    }
+
+    private static func parseStarlarkInt32(
+        _ text: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction],
+        expression: String
+    ) throws -> Int {
+        let integer = try parseStarlarkInteger(text, constants: constants, functions: functions, expression: expression)
+        guard integer >= Int(Int32.min), integer <= Int(Int32.max) else {
             throw ConfigOverrideError.invalidLiteral(expression)
         }
         return integer

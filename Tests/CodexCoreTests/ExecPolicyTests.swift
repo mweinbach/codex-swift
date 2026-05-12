@@ -1139,11 +1139,12 @@ final class ExecPolicyTests: XCTestCase {
         ALSO_EMPTY = range(0)
         SINGLE_A = range(4, 10, 20)
         SINGLE_B = range(4, 5)
+        LOW_BOUND = str(range(-2147483648, -2147483647))
         SLICE = range(1, 8, 2)[1:]
         REVERSED = range(5)[::-1]
         TEXT = f"{range(3)}"
 
-        if type(NUMBERS) == "range" and str(NUMBERS) == "range(2, 8, 2)" and repr(NUMBERS) == "range(2, 8, 2)" and TEXT == "range(3)":
+        if type(NUMBERS) == "range" and str(NUMBERS) == "range(2, 8, 2)" and repr(NUMBERS) == "range(2, 8, 2)" and LOW_BOUND == "range(-2147483648, -2147483647)" and TEXT == "range(3)":
             prefix_rule([TOOL, str(NUMBERS[1])], "allow", justification = repr(SLICE) + "/" + repr(REVERSED))
 
         if EMPTY == ALSO_EMPTY and SINGLE_A == SINGLE_B and 4 in NUMBERS and 5 not in NUMBERS and not EMPTY:
@@ -1162,6 +1163,23 @@ final class ExecPolicyTests: XCTestCase {
             NetworkRule(host: "range3.example.com", protocol: .https, decision: .allow)
         ])
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/6/git"]])
+    }
+
+    func testParserRejectsRustStarlarkInt32BuiltinArgumentOverflow() throws {
+        for source in [
+            #"prefix_rule(["git", str(range(2147483648))], "allow")"#,
+            #"prefix_rule(["git", str(range(-2147483649))], "allow")"#,
+            """
+            for index, tool in enumerate(["git"], 2147483648):
+                prefix_rule([tool, str(index)], "allow")
+            """,
+            """
+            for index, tool in enumerate(["git"], -2147483649):
+                prefix_rule([tool, str(index)], "allow")
+            """
+        ] {
+            XCTAssertThrowsError(try parsePolicy(source))
+        }
     }
 
     func testParserEvaluatesRustStarlarkListAndStringSlices() throws {
