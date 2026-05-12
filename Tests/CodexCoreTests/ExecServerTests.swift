@@ -2865,6 +2865,105 @@ final class ExecServerTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(ExecServerJSONRPCMessage.self, from: reassembled), message)
     }
 
+    func testRemoteControlWebsocketStateSequencesSplitsAndBuffersLikeRust() throws {
+        let clientID = RemoteControlClientID("client-1")
+        let streamID = RemoteControlStreamID("stream-1")
+        var state = RemoteControlWebsocketState()
+        let largePayload = String(repeating: "x", count: RemoteControlClientMessageObserver.segmentMaxBytes)
+        let largeMessage = ExecServerJSONRPCMessage.notification(ExecServerJSONRPCNotification(
+            method: "initialized",
+            params: .object(["payload": .string(largePayload)])
+        ))
+
+        let firstEnvelopes = try state.enqueueServerEvent(RemoteControlQueuedServerEnvelope(
+            event: .serverMessage(message: largeMessage),
+            clientID: clientID,
+            streamID: streamID
+        ))
+        let secondEnvelopes = try state.enqueueServerEvent(RemoteControlQueuedServerEnvelope(
+            event: .pong(status: .active),
+            clientID: clientID,
+            streamID: streamID
+        ))
+
+        XCTAssertGreaterThan(firstEnvelopes.count, 1)
+        XCTAssertTrue(firstEnvelopes.allSatisfy { $0.seqID == 1 })
+        XCTAssertEqual(secondEnvelopes, [
+            RemoteControlServerEnvelope(
+                event: .pong(status: .active),
+                clientID: clientID,
+                streamID: streamID,
+                seqID: 2
+            )
+        ])
+        XCTAssertEqual(state.bufferedEnvelopeCount, firstEnvelopes.count + secondEnvelopes.count)
+        XCTAssertEqual(state.replayBufferedServerEnvelopes(), firstEnvelopes + secondEnvelopes)
+    }
+
+    func testRemoteControlWebsocketStateAppliesRustAckCursorAndSubscribeCursorRules() throws {
+        let clientID = RemoteControlClientID("client-1")
+        let streamID = RemoteControlStreamID("stream-1")
+        var state = RemoteControlWebsocketState()
+        let payload = String(repeating: "x", count: RemoteControlClientMessageObserver.segmentMaxBytes)
+        let chunks = try state.enqueueServerEvent(RemoteControlQueuedServerEnvelope(
+            event: .serverMessage(message: .notification(ExecServerJSONRPCNotification(
+                method: "initialized",
+                params: .object(["payload": .string(payload)])
+            ))),
+            clientID: clientID,
+            streamID: streamID
+        ))
+        XCTAssertGreaterThan(chunks.count, 1)
+
+        let pendingChunk = RemoteControlClientEnvelope(
+            event: .clientMessageChunk(
+                segmentID: 0,
+                segmentCount: 2,
+                messageSizeBytes: 18,
+                messageChunkBase64: "eyJtZXRob2QiOiJpbml0"
+            ),
+            clientID: clientID,
+            streamID: streamID,
+            seqID: 9,
+            cursor: "cursor-before-complete"
+        )
+        XCTAssertEqual(
+            state.observeClientEnvelope(pendingChunk, wireSizeBytes: try JSONEncoder().encode(pendingChunk).count),
+            .pending
+        )
+        XCTAssertNil(state.subscribeCursor)
+
+        let ackChunk0 = RemoteControlClientEnvelope(
+            event: .ack(segmentID: 0),
+            clientID: clientID,
+            streamID: streamID,
+            seqID: 1,
+            cursor: "cursor-1"
+        )
+        XCTAssertEqual(
+            state.observeClientEnvelope(ackChunk0, wireSizeBytes: try JSONEncoder().encode(ackChunk0).count),
+            .forward(ackChunk0)
+        )
+        XCTAssertEqual(state.subscribeCursor, "cursor-1")
+        XCTAssertEqual(state.bufferedEnvelopeCount, chunks.count - 1)
+        XCTAssertFalse(state.replayBufferedServerEnvelopes().contains(chunks[0]))
+
+        let ackRest = RemoteControlClientEnvelope(
+            event: .ack(segmentID: nil),
+            clientID: clientID,
+            streamID: streamID,
+            seqID: 1,
+            cursor: nil
+        )
+        XCTAssertEqual(
+            state.observeClientEnvelope(ackRest, wireSizeBytes: try JSONEncoder().encode(ackRest).count),
+            .forward(ackRest)
+        )
+        XCTAssertEqual(state.subscribeCursor, "cursor-1")
+        XCTAssertEqual(state.bufferedEnvelopeCount, 0)
+        XCTAssertEqual(state.replayBufferedServerEnvelopes(), [])
+    }
+
     func testRemoteControlClientMessageObserverReassemblesChunksLikeRust() throws {
         var observer = RemoteControlClientMessageObserver()
         let message = ExecServerJSONRPCMessage.notification(ExecServerJSONRPCNotification(method: "initialized"))

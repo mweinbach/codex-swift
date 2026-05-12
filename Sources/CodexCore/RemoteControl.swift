@@ -387,6 +387,99 @@ public struct RemoteControlOutboundBuffer: Equatable, Sendable {
     }
 }
 
+public struct RemoteControlQueuedServerEnvelope: Equatable, Sendable {
+    public var event: RemoteControlServerEvent
+    public var clientID: RemoteControlClientID
+    public var streamID: RemoteControlStreamID
+
+    public init(
+        event: RemoteControlServerEvent,
+        clientID: RemoteControlClientID,
+        streamID: RemoteControlStreamID
+    ) {
+        self.event = event
+        self.clientID = clientID
+        self.streamID = streamID
+    }
+}
+
+public struct RemoteControlWebsocketState: Equatable, Sendable {
+    private struct StreamKey: Hashable, Sendable {
+        var clientID: RemoteControlClientID
+        var streamID: RemoteControlStreamID
+    }
+
+    private var outboundBuffer = RemoteControlOutboundBuffer()
+    private var nextSeqIDByStream: [StreamKey: UInt64] = [:]
+    private var clientMessageObserver = RemoteControlClientMessageObserver()
+    public private(set) var subscribeCursor: String?
+
+    public var bufferedEnvelopeCount: Int {
+        outboundBuffer.usedCount
+    }
+
+    public init() {}
+
+    public func replayBufferedServerEnvelopes() -> [RemoteControlServerEnvelope] {
+        outboundBuffer.serverEnvelopes()
+    }
+
+    public mutating func enqueueServerEvent(
+        _ queuedEnvelope: RemoteControlQueuedServerEnvelope
+    ) throws -> [RemoteControlServerEnvelope] {
+        let key = StreamKey(clientID: queuedEnvelope.clientID, streamID: queuedEnvelope.streamID)
+        let seqID = nextSeqIDByStream[key] ?? 1
+        let envelope = RemoteControlServerEnvelope(
+            event: queuedEnvelope.event,
+            clientID: queuedEnvelope.clientID,
+            streamID: queuedEnvelope.streamID,
+            seqID: seqID
+        )
+        let transportEnvelopes = try RemoteControlServerEnvelopeSplitter.splitForTransport(envelope)
+        for transportEnvelope in transportEnvelopes {
+            outboundBuffer.insert(transportEnvelope)
+        }
+        nextSeqIDByStream[key] = seqID == UInt64.max ? UInt64.max : seqID + 1
+        return transportEnvelopes
+    }
+
+    public mutating func observeClientEnvelope(
+        _ envelope: RemoteControlClientEnvelope,
+        wireSizeBytes: Int
+    ) -> RemoteControlClientSegmentObservation {
+        let observation = clientMessageObserver.observe(envelope, wireSizeBytes: wireSizeBytes)
+        guard case let .forward(forwardedEnvelope) = observation else {
+            return observation
+        }
+        if let cursor = forwardedEnvelope.cursor {
+            subscribeCursor = cursor
+        }
+        if case let .ack(segmentID) = forwardedEnvelope.event,
+           let ackedSeqID = forwardedEnvelope.seqID,
+           let streamID = forwardedEnvelope.streamID
+        {
+            outboundBuffer.ack(
+                clientID: forwardedEnvelope.clientID,
+                streamID: streamID,
+                ackedSeqID: ackedSeqID,
+                ackedSegmentID: segmentID
+            )
+        }
+        return observation
+    }
+
+    public mutating func invalidateClientMessageStream(
+        clientID: RemoteControlClientID,
+        streamID: RemoteControlStreamID
+    ) {
+        clientMessageObserver.invalidateStream(clientID: clientID, streamID: streamID)
+    }
+
+    public mutating func invalidateClientMessageClient(clientID: RemoteControlClientID) {
+        clientMessageObserver.invalidateClient(clientID: clientID)
+    }
+}
+
 public enum RemoteControlClientSegmentObservation: Equatable, Sendable {
     case forward(RemoteControlClientEnvelope)
     case pending
