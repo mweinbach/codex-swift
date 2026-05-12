@@ -3847,6 +3847,51 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/1-500000--2-000000/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkMultiClauseComprehensions() throws {
+        let policy = try parsePolicy("""
+        TOOLS = ["git", "gh"]
+        COMMANDS = ["status", "pr"]
+
+        PAIRS = [
+            tool + "-" + command
+            for tool in TOOLS
+            for command in COMMANDS
+            if tool != "gh" or command == "pr"
+            if command != "status" or tool == "git"
+        ]
+
+        HOSTS = {
+            tool + "-" + command: "api-" + tool + "-" + command + ".github.com"
+            for tool in TOOLS
+            for command in COMMANDS
+            if command != "status" or tool == "git"
+        }
+
+        for pair in PAIRS:
+            prefix_rule(["echo", pair], "allow")
+
+        prefix_rule(["curl", HOSTS["git-status"], HOSTS["gh-pr"]], "prompt")
+        """)
+
+        XCTAssertEqual(policy.rules(for: "echo"), [
+            PrefixRule(pattern: PrefixPattern(first: "echo", rest: [.single("git-status")]), decision: .allow),
+            PrefixRule(pattern: PrefixPattern(first: "echo", rest: [.single("git-pr")]), decision: .allow),
+            PrefixRule(pattern: PrefixPattern(first: "echo", rest: [.single("gh-pr")]), decision: .allow)
+        ])
+        XCTAssertEqual(policy.rules(for: "curl"), [
+            PrefixRule(
+                pattern: PrefixPattern(
+                    first: "curl",
+                    rest: [
+                        .single("api-git-status.github.com"),
+                        .single("api-gh-pr.github.com")
+                    ]
+                ),
+                decision: .prompt
+            )
+        ])
+    }
+
     func testStrictestDecisionWinsAcrossMatches() throws {
         let policy = try parsePolicy("""
         prefix_rule(pattern = ["git"], decision = "prompt")

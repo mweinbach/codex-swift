@@ -964,6 +964,8 @@ Source baseline inspected for this scaffold:
   - Added Swift execpolicy parser support for dictionary iteration as string keys plus `list(...)`, `tuple(...)`, `sorted(...)`, and `reversed(...)` over supported string/list/dictionary iterables, including `sorted(..., key = ..., reverse = ...)` keyword handling for supported key callables, covering deterministic map-driven rule, network, and host executable generation.
 - `codex-rs/execpolicy/src/parser.rs` Starlark dictionary comprehensions and iterable loops
   - Added Swift execpolicy parser support for single-generator dictionary comprehensions with optional `if` filters, plus direct string and dictionary iteration in top-level loops and list comprehensions for map-driven rules, network hosts, and executable paths.
+- `codex-rs/execpolicy/src/parser.rs` Starlark multi-clause comprehensions
+  - Extended Swift execpolicy parser support for list and dictionary comprehensions with multiple `for` generators and multiple top-level `if` filters evaluated left-to-right, matching Rust Starlark policy files that derive generated rule values from nested loops.
 - `codex-rs/execpolicy/src/parser.rs` Starlark unary plus and default split
   - Added Swift execpolicy parser support for unary `+` numeric expressions and zero-argument string `.split()` whitespace tokenization, matching Rust Starlark expression behavior for generated policy rules.
 - `codex-rs/shell-command/src/parse_command.rs` command parser `cd_target` parity
