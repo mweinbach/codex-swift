@@ -2655,6 +2655,49 @@ public enum CodexAppServer {
         configuration: CodexAppServerConfiguration,
         activeTurnID: String?
     ) throws -> [String: Any] {
+        let steer = try validatedTurnSteer(
+            params: params,
+            configuration: configuration,
+            activeTurnID: activeTurnID
+        )
+        let recorder = try RolloutRecorder.resume(path: URL(fileURLWithPath: steer.rolloutPath))
+        try recorder.recordItems([
+            .eventMsg(.userMessage(UserMessageEvent(message: steer.input.text, images: steer.input.images)))
+        ])
+        try recorder.shutdown()
+        return ["turnId": steer.turnID]
+    }
+
+    fileprivate static func turnSteerCoreOp(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration,
+        activeTurnID: String?
+    ) throws -> (threadID: String, turnID: String, op: Op) {
+        let steer = try validatedTurnSteer(
+            params: params,
+            configuration: configuration,
+            activeTurnID: activeTurnID
+        )
+        return (
+            threadID: steer.threadID,
+            turnID: steer.turnID,
+            op: .userInput(
+                items: steer.input.items,
+                responsesAPIClientMetadata: responsesAPIClientMetadataParam(params?["responsesapiClientMetadata"])
+            )
+        )
+    }
+
+    private static func validatedTurnSteer(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration,
+        activeTurnID: String?
+    ) throws -> (
+        threadID: String,
+        rolloutPath: String,
+        turnID: String,
+        input: (text: String, images: [String]?, items: [UserInput])
+    ) {
         let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
         let conversationID: ConversationId
         do {
@@ -2667,8 +2710,8 @@ public enum CodexAppServer {
         guard !expectedTurnID.isEmpty else {
             throw AppServerError.invalidRequest("expectedTurnId must not be empty")
         }
-        let input = v2UserInputs(params?["input"])
-        try validateV2UserInputLimit(input)
+        let input = v2UserInput(params?["input"])
+        try validateV2UserInputLimit((text: input.text, images: input.images))
         guard let activeTurnID else {
             throw AppServerError.invalidRequest("no active turn to steer")
         }
@@ -2680,12 +2723,7 @@ public enum CodexAppServer {
         guard !input.text.isEmpty || !(input.images?.isEmpty ?? true) else {
             throw AppServerError.invalidRequest("input must not be empty")
         }
-        let recorder = try RolloutRecorder.resume(path: URL(fileURLWithPath: rolloutPath))
-        try recorder.recordItems([
-            .eventMsg(.userMessage(UserMessageEvent(message: input.text, images: input.images)))
-        ])
-        try recorder.shutdown()
-        return ["turnId": activeTurnID]
+        return (threadID, rolloutPath, activeTurnID, input)
     }
 
     fileprivate static func requireTurnSteerResponsesAPIMetadataExperimentalAPI(
@@ -19123,20 +19161,28 @@ public enum CodexAppServer {
     }
 
     private static func v2UserInputs(_ value: Any?) -> (text: String, images: [String]?) {
+        let input = v2UserInput(value)
+        return (input.text, input.images)
+    }
+
+    private static func v2UserInput(_ value: Any?) -> (text: String, images: [String]?, items: [UserInput]) {
         guard let items = value as? [[String: Any]] else {
-            return ("", nil)
+            return ("", nil, [])
         }
         var texts: [String] = []
         var images: [String] = []
+        var userInputItems: [UserInput] = []
         for item in items {
             switch stringParam(item["type"]) {
             case "text":
                 if let text = stringParam(item["text"]), !text.isEmpty {
                     texts.append(text)
+                    userInputItems.append(.text(text))
                 }
             case "image":
                 if let url = stringParam(item["url"]), !url.isEmpty {
                     images.append(url)
+                    userInputItems.append(.image(imageURL: url))
                 }
             default:
                 continue
@@ -19144,8 +19190,21 @@ public enum CodexAppServer {
         }
         return (
             texts.joined(),
-            images.isEmpty ? nil : images
+            images.isEmpty ? nil : images,
+            userInputItems
         )
+    }
+
+    private static func responsesAPIClientMetadataParam(_ value: Any?) -> [String: String]? {
+        guard let object = value as? [String: Any] else {
+            return nil
+        }
+        return object.reduce(into: [String: String]()) { result, entry in
+            guard let stringValue = entry.value as? String else {
+                return
+            }
+            result[entry.key] = stringValue
+        }
     }
 
     private static func validateV2UserInputLimit(_ input: (text: String, images: [String]?)) throws {
@@ -24628,14 +24687,29 @@ final class CodexAppServerMessageProcessor {
                         experimentalAPIEnabled: experimentalAPIEnabled
                     )
                     let threadID = CodexAppServer.stringParam(params?["threadId"])
-                    response = CodexAppServer.responseObject(
-                        id: id,
-                        result: try CodexAppServer.turnSteerResult(
+                    if coreOpSubmitter != nil {
+                        let coreOp = try CodexAppServer.turnSteerCoreOp(
                             params: params,
                             configuration: configuration,
                             activeTurnID: threadID.flatMap { activeTurnIDs[$0] }
                         )
-                    )
+                        try submitCoreOp(
+                            requestID: id,
+                            threadID: coreOp.threadID,
+                            op: coreOp.op,
+                            failureMessage: "failed to steer turn"
+                        )
+                        response = CodexAppServer.responseObject(id: id, result: ["turnId": coreOp.turnID])
+                    } else {
+                        response = CodexAppServer.responseObject(
+                            id: id,
+                            result: try CodexAppServer.turnSteerResult(
+                                params: params,
+                                configuration: configuration,
+                                activeTurnID: threadID.flatMap { activeTurnIDs[$0] }
+                            )
+                        )
+                    }
                 case "turn/interrupt":
                     response = CodexAppServer.responseObject(
                         id: id,

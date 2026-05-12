@@ -2524,6 +2524,71 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(steeredContent[1]["url"] as? String, "https://example.test/two.png")
     }
 
+    func testTurnSteerSubmitsCoreUserInputWhenRuntimeSubmitterIsAvailable() throws {
+        let temp = try TemporaryDirectory()
+        let capture = AppServerCoreOpCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            coreOpSubmitter: capture.submit,
+            experimentalAPIEnabled: true
+        )
+        let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+        let turnMessages = try decodeMessages(processor.processLine(Data(#"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Start"}]}}"#.utf8)))
+        let turnResult = try XCTUnwrap(turnMessages[0]["result"] as? [String: Any])
+        let turn = try XCTUnwrap(turnResult["turn"] as? [String: Any])
+        let turnID = try XCTUnwrap(turn["id"] as? String)
+
+        let steer = try decode(processor.processLine(Data(#"{"id":3,"method":"turn/steer","params":{"threadId":"\#(threadID)","expectedTurnId":"\#(turnID)","responsesapiClientMetadata":{"fiber_run_id":"fiber-steer-456"},"input":[{"type":"text","text":"Steer"},{"type":"image","url":"https://example.test/two.png"}]}}"#.utf8)))
+
+        let steerResult = try XCTUnwrap(steer["result"] as? [String: Any])
+        XCTAssertEqual(steerResult["turnId"] as? String, turnID)
+        let submissions = capture.submissions
+        XCTAssertEqual(submissions.map(\.requestID), [.integer(3)])
+        XCTAssertEqual(submissions.map(\.threadID), [threadID])
+        guard case let .userInput(items, environments, outputSchema, metadata) = submissions[0].op else {
+            XCTFail("expected runtime steer to submit user input")
+            return
+        }
+        XCTAssertEqual(items, [
+            .text("Steer"),
+            .image(imageURL: "https://example.test/two.png")
+        ])
+        XCTAssertNil(environments)
+        XCTAssertNil(outputSchema)
+        XCTAssertEqual(metadata, ["fiber_run_id": "fiber-steer-456"])
+
+        let resume = try decode(processor.processLine(Data(#"{"id":4,"method":"thread/resume","params":{"threadId":"\#(threadID)"}}"#.utf8)))
+        let resumeResult = try XCTUnwrap(resume["result"] as? [String: Any])
+        let resumedThread = try XCTUnwrap(resumeResult["thread"] as? [String: Any])
+        let turns = try XCTUnwrap(resumedThread["turns"] as? [[String: Any]])
+        XCTAssertEqual(turns.count, 1)
+    }
+
+    func testTurnSteerRuntimeSubmitterFailuresReturnRustInternalErrors() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            coreOpSubmitter: { _, _, _ in throw AppServerCoreOpCaptureError(message: "channel closed") }
+        )
+        let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+        let turnMessages = try decodeMessages(processor.processLine(Data(#"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Start"}]}}"#.utf8)))
+        let turnResult = try XCTUnwrap(turnMessages[0]["result"] as? [String: Any])
+        let turn = try XCTUnwrap(turnResult["turn"] as? [String: Any])
+        let turnID = try XCTUnwrap(turn["id"] as? String)
+
+        let response = try decode(processor.processLine(Data(#"{"id":3,"method":"turn/steer","params":{"threadId":"\#(threadID)","expectedTurnId":"\#(turnID)","input":[{"type":"text","text":"Steer"}]}}"#.utf8)))
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32603)
+        XCTAssertEqual(error["message"] as? String, "failed to steer turn: channel closed")
+    }
+
     func testTurnSteerRejectsNoActiveMismatchedAndEmptyInputs() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
