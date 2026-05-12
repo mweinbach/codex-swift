@@ -12150,34 +12150,28 @@ public enum CodexAppServer {
         snapshot.toolsByServer[server] = try mcpToolsByRawName(from: toolsResponse, server: server)
 
         if detail == .full {
-            try mcpWriteStdioRequest(mcpListRequest(id: 2, method: "resources/list"), to: stdin.fileHandleForWriting, server: server)
-            let resourcesResponse = try mcpReadStdioResponse(
-                id: 2,
+            var requestID = 2
+            snapshot.resources[server] = try mcpReadStdioPaginatedArray(
+                key: "resources",
+                method: "resources/list",
+                nextRequestID: &requestID,
+                stdin: stdin.fileHandleForWriting,
                 stdout: stdout,
                 stderr: stderr,
                 process: process,
                 timeout: timeout,
-                server: server
-            )
-            snapshot.resources[server] = try mcpArrayResult(
-                "resources",
-                from: resourcesResponse,
                 server: server,
                 as: McpResource.self
             )
-
-            try mcpWriteStdioRequest(mcpListRequest(id: 3, method: "resources/templates/list"), to: stdin.fileHandleForWriting, server: server)
-            let templatesResponse = try mcpReadStdioResponse(
-                id: 3,
+            snapshot.resourceTemplates[server] = try mcpReadStdioPaginatedArray(
+                key: "resourceTemplates",
+                method: "resources/templates/list",
+                nextRequestID: &requestID,
+                stdin: stdin.fileHandleForWriting,
                 stdout: stdout,
                 stderr: stderr,
                 process: process,
                 timeout: timeout,
-                server: server
-            )
-            snapshot.resourceTemplates[server] = try mcpArrayResult(
-                "resourceTemplates",
-                from: templatesResponse,
                 server: server,
                 as: McpResourceTemplate.self
             )
@@ -12227,33 +12221,28 @@ public enum CodexAppServer {
         snapshot.toolsByServer[server] = try mcpToolsByRawName(from: toolsResponse.object, server: server)
 
         if detail == .full {
-            let resourcesResponse = try await mcpStreamableHTTPRequest(
+            var requestID = 2
+            snapshot.resources[server] = try await mcpReadHTTPPaginatedArray(
+                key: "resources",
+                method: "resources/list",
+                nextRequestID: &requestID,
                 url: url,
                 headers: headers,
                 sessionID: sessionID,
-                body: mcpListRequest(id: 2, method: "resources/list"),
                 transport: configuration.mcpHTTPTransport,
                 timeoutSeconds: timeoutSeconds,
-                server: server
-            )
-            snapshot.resources[server] = try mcpArrayResult(
-                "resources",
-                from: resourcesResponse.object,
                 server: server,
                 as: McpResource.self
             )
-            let templatesResponse = try await mcpStreamableHTTPRequest(
+            snapshot.resourceTemplates[server] = try await mcpReadHTTPPaginatedArray(
+                key: "resourceTemplates",
+                method: "resources/templates/list",
+                nextRequestID: &requestID,
                 url: url,
                 headers: headers,
                 sessionID: sessionID,
-                body: mcpListRequest(id: 3, method: "resources/templates/list"),
                 transport: configuration.mcpHTTPTransport,
                 timeoutSeconds: timeoutSeconds,
-                server: server
-            )
-            snapshot.resourceTemplates[server] = try mcpArrayResult(
-                "resourceTemplates",
-                from: templatesResponse.object,
                 server: server,
                 as: McpResourceTemplate.self
             )
@@ -12278,13 +12267,95 @@ public enum CodexAppServer {
         ]
     }
 
-    fileprivate static func mcpListRequest(id: Int, method: String) -> [String: Any] {
-        [
+    fileprivate static func mcpListRequest(id: Int, method: String, cursor: String? = nil) -> [String: Any] {
+        var params: [String: Any] = [:]
+        if let cursor {
+            params["cursor"] = cursor
+        }
+        return [
             "jsonrpc": "2.0",
             "id": id,
             "method": method,
-            "params": [:]
+            "params": params
         ]
+    }
+
+    fileprivate static func mcpReadStdioPaginatedArray<T: Codable>(
+        key: String,
+        method: String,
+        nextRequestID: inout Int,
+        stdin: FileHandle,
+        stdout: Pipe,
+        stderr: Pipe,
+        process: Process,
+        timeout: TimeInterval,
+        server: String,
+        as type: T.Type
+    ) throws -> [[String: Any]] {
+        var values: [[String: Any]] = []
+        var cursor: String?
+        while true {
+            let id = nextRequestID
+            nextRequestID += 1
+            try mcpWriteStdioRequest(
+                mcpListRequest(id: id, method: method, cursor: cursor),
+                to: stdin,
+                server: server
+            )
+            let response = try mcpReadStdioResponse(
+                id: id,
+                stdout: stdout,
+                stderr: stderr,
+                process: process,
+                timeout: timeout,
+                server: server
+            )
+            values += try mcpArrayResult(key, from: response, server: server, as: type)
+            guard let nextCursor = try mcpNextCursor(from: response, method: method, server: server) else {
+                return values
+            }
+            if cursor == nextCursor {
+                throw AppServerError.internalError("\(method) returned duplicate cursor")
+            }
+            cursor = nextCursor
+        }
+    }
+
+    fileprivate static func mcpReadHTTPPaginatedArray<T: Codable>(
+        key: String,
+        method: String,
+        nextRequestID: inout Int,
+        url: String,
+        headers: [String: String],
+        sessionID: String?,
+        transport: AppServerMcpHTTPTransport,
+        timeoutSeconds: Double?,
+        server: String,
+        as type: T.Type
+    ) async throws -> [[String: Any]] {
+        var values: [[String: Any]] = []
+        var cursor: String?
+        while true {
+            let id = nextRequestID
+            nextRequestID += 1
+            let response = try await mcpStreamableHTTPRequest(
+                url: url,
+                headers: headers,
+                sessionID: sessionID,
+                body: mcpListRequest(id: id, method: method, cursor: cursor),
+                transport: transport,
+                timeoutSeconds: timeoutSeconds,
+                server: server
+            )
+            values += try mcpArrayResult(key, from: response.object, server: server, as: type)
+            guard let nextCursor = try mcpNextCursor(from: response.object, method: method, server: server) else {
+                return values
+            }
+            if cursor == nextCursor {
+                throw AppServerError.internalError("\(method) returned duplicate cursor")
+            }
+            cursor = nextCursor
+        }
     }
 
     fileprivate static func mcpToolsByRawName(from response: [String: Any], server: String) throws -> [String: Any] {
@@ -12328,6 +12399,23 @@ public enum CodexAppServer {
             }
             return object
         }
+    }
+
+    fileprivate static func mcpNextCursor(from response: [String: Any], method: String, server: String) throws -> String? {
+        guard let result = response["result"] as? [String: Any] else {
+            if let error = response["error"] as? [String: Any],
+               let message = error["message"] as? String {
+                throw AppServerError.internalError(message)
+            }
+            throw AppServerError.internalError("MCP server \(server) returned a response without result")
+        }
+        guard let value = result["nextCursor"], !(value is NSNull) else {
+            return nil
+        }
+        guard let cursor = value as? String else {
+            throw AppServerError.internalError("MCP server \(server) returned a \(method) result with non-string nextCursor")
+        }
+        return cursor
     }
 
     fileprivate static func mcpServerRefreshResult(
