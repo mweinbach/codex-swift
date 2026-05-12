@@ -1,3 +1,4 @@
+import CodexCore
 import CryptoKit
 import Darwin
 import Foundation
@@ -29,9 +30,14 @@ public struct AppServerWebSocketTransport: Sendable {
     public typealias Announce = @Sendable (String) async throws -> Void
 
     private let configuration: CodexAppServerConfiguration
+    private let authPolicy: AppServerWebsocketAuthPolicy
 
-    public init(configuration: CodexAppServerConfiguration) {
+    public init(
+        configuration: CodexAppServerConfiguration,
+        authPolicy: AppServerWebsocketAuthPolicy = AppServerWebsocketAuthPolicy()
+    ) {
         self.configuration = configuration
+        self.authPolicy = authPolicy
     }
 
     public func run(host: String, port: UInt16, announce: @escaping Announce) async throws {
@@ -65,10 +71,12 @@ public struct AppServerWebSocketTransport: Sendable {
             }
 
             let configuration = configuration
+            let authPolicy = authPolicy
             Task.detached {
                 try? await Self.runConnectedClient(
                     fileDescriptor: clientFD,
-                    configuration: configuration
+                    configuration: configuration,
+                    authPolicy: authPolicy
                 )
             }
         }
@@ -76,7 +84,8 @@ public struct AppServerWebSocketTransport: Sendable {
 
     private static func runConnectedClient(
         fileDescriptor: Int32,
-        configuration: CodexAppServerConfiguration
+        configuration: CodexAppServerConfiguration,
+        authPolicy: AppServerWebsocketAuthPolicy
     ) async throws {
         defer {
             Darwin.shutdown(fileDescriptor, SHUT_RDWR)
@@ -84,7 +93,7 @@ public struct AppServerWebSocketTransport: Sendable {
         }
 
         do {
-            try performHandshake(fileDescriptor: fileDescriptor)
+            try performHandshake(fileDescriptor: fileDescriptor, authPolicy: authPolicy)
         } catch AppServerWebSocketTransportError.handledHTTPResponse {
             return
         }
@@ -132,7 +141,10 @@ public struct AppServerWebSocketTransport: Sendable {
         return text.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
     }
 
-    private static func performHandshake(fileDescriptor: Int32) throws {
+    private static func performHandshake(
+        fileDescriptor: Int32,
+        authPolicy: AppServerWebsocketAuthPolicy
+    ) throws {
         let request = try readHTTPRequest(fileDescriptor: fileDescriptor)
         guard request.method == "GET" else {
             throw AppServerWebSocketTransportError.invalidHandshake
@@ -154,6 +166,19 @@ public struct AppServerWebSocketTransport: Sendable {
               request.headers["sec-websocket-version"] == "13"
         else {
             throw AppServerWebSocketTransportError.invalidHandshake
+        }
+
+        if let authError = AppServerWebsocketAuthorizer.authorize(
+            authorizationHeader: request.headers["authorization"],
+            policy: authPolicy
+        ) {
+            try writeHTTPResponse(
+                fileDescriptor: fileDescriptor,
+                statusCode: authError.statusCode,
+                reason: "Unauthorized",
+                body: authError.description
+            )
+            throw AppServerWebSocketTransportError.handledHTTPResponse
         }
 
         let accept = websocketAcceptKey(for: key)
@@ -209,11 +234,20 @@ public struct AppServerWebSocketTransport: Sendable {
         return Data(digest).base64EncodedString()
     }
 
-    private static func writeHTTPResponse(fileDescriptor: Int32, statusCode: Int, reason: String) throws {
+    private static func writeHTTPResponse(
+        fileDescriptor: Int32,
+        statusCode: Int,
+        reason: String,
+        body: String = ""
+    ) throws {
+        let bodyBytes = Array(body.utf8)
+        let contentType = bodyBytes.isEmpty ? "" : "Content-Type: text/plain; charset=utf-8\r\n"
         let response = (
             "HTTP/1.1 \(statusCode) \(reason)\r\n" +
-            "Content-Length: 0\r\n" +
-            "\r\n"
+            contentType +
+            "Content-Length: \(bodyBytes.count)\r\n" +
+            "\r\n" +
+            body
         )
         try writeAll(fileDescriptor: fileDescriptor, bytes: Array(response.utf8))
     }

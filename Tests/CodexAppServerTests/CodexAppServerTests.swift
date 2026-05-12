@@ -1,5 +1,6 @@
 @testable import CodexAppServer
 import CodexCore
+import CryptoKit
 import Foundation
 import SQLite3
 import XCTest
@@ -116,6 +117,51 @@ final class CodexAppServerTests: XCTestCase {
         try await webSocket.send(.string(#"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"test","version":"0"}}}"#))
         let response = try decode(Data((try await receiveWebSocketText(webSocket)).utf8))
         XCTAssertEqual(response["id"] as? Int, 1)
+    }
+
+    func testAppServerWebSocketTransportEnforcesCapabilityTokenAuthLikeRust() async throws {
+        let token = "super-secret-token"
+        let digest = Array(SHA256.hash(data: Data(token.utf8)))
+        let temp = try TemporaryDirectory()
+        let transport = AppServerWebSocketTransport(
+            configuration: testConfiguration(codexHome: temp.url),
+            authPolicy: AppServerWebsocketAuthPolicy(mode: .capabilityToken(tokenSHA256: digest))
+        )
+        let (stream, continuation) = AsyncStream.makeStream(of: String.self)
+        let serverTask = Task.detached {
+            try await transport.run(host: "127.0.0.1", port: 0) { url in
+                continuation.yield(url.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+        }
+        defer {
+            serverTask.cancel()
+        }
+
+        var iterator = stream.makeAsyncIterator()
+        let announcedURL = await iterator.next()
+        let urlString = try XCTUnwrap(announcedURL)
+        let httpBaseURL = try httpURL(fromWebSocketURL: urlString)
+
+        var missingAuthRequest = webSocketUpgradeRequest(url: httpBaseURL)
+        let missingAuthStatus = try await httpStatus(request: missingAuthRequest)
+        XCTAssertEqual(missingAuthStatus, 401)
+
+        missingAuthRequest.setValue("Bearer wrong-token", forHTTPHeaderField: "Authorization")
+        let wrongAuthStatus = try await httpStatus(request: missingAuthRequest)
+        XCTAssertEqual(wrongAuthStatus, 401)
+
+        var webSocketRequest = URLRequest(url: try XCTUnwrap(URL(string: urlString)))
+        webSocketRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let webSocket = URLSession.shared.webSocketTask(with: webSocketRequest)
+        webSocket.resume()
+        defer {
+            webSocket.cancel(with: .goingAway, reason: nil)
+        }
+
+        try await webSocket.send(.string(#"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"test","version":"0"}}}"#))
+        let response = try decode(Data((try await receiveWebSocketText(webSocket)).utf8))
+        XCTAssertEqual(response["id"] as? Int, 1)
+        XCTAssertNotNil(response["result"] as? [String: Any])
     }
 
     func testThreadListReturnsRolloutsWithRustAppServerShape() throws {
@@ -24418,6 +24464,15 @@ final class CodexAppServerTests: XCTestCase {
         var components = try XCTUnwrap(URLComponents(string: urlString))
         components.scheme = "http"
         return try XCTUnwrap(components.url)
+    }
+
+    private func webSocketUpgradeRequest(url: URL) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.setValue("websocket", forHTTPHeaderField: "Upgrade")
+        request.setValue("Upgrade", forHTTPHeaderField: "Connection")
+        request.setValue("dGhlIHNhbXBsZSBub25jZQ==", forHTTPHeaderField: "Sec-WebSocket-Key")
+        request.setValue("13", forHTTPHeaderField: "Sec-WebSocket-Version")
+        return request
     }
 
     private func httpStatus(url: URL) async throws -> Int {

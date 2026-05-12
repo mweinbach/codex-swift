@@ -455,7 +455,11 @@ private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) as
         case .stdio:
             try CodexAppServer.run(configuration: configuration)
         case let .webSocket(host, port):
-            try await AppServerWebSocketTransport(configuration: configuration).run(host: host, port: port) { url in
+            let authPolicy = try AppServerWebsocketAuthPolicyBuilder.policy(from: websocketAuth)
+            try await AppServerWebSocketTransport(
+                configuration: configuration,
+                authPolicy: authPolicy
+            ).run(host: host, port: port) { url in
                 printAppServerWebSocketStartupBanner(listenURL: url)
             }
         case .unixSocket, .off:

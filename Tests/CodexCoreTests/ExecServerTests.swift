@@ -2398,19 +2398,13 @@ final class ExecServerTests: XCTestCase {
         }
     }
 
-    func testAppServerExecutableTransportValidatorRejectsWebSocketAuthUntilEnforced() {
-        XCTAssertThrowsError(try AppServerExecutableTransportValidator.validateSupportedTransport(
+    func testAppServerExecutableTransportValidatorAllowsWebSocketAuthAfterPolicyEnforcement() {
+        XCTAssertNoThrow(try AppServerExecutableTransportValidator.validateSupportedTransport(
             .webSocket(host: "::1", port: 4500),
             websocketAuth: AppServerWebsocketAuthSettings(config: .capabilityToken(source: .tokenSHA256([]))),
             remoteControlFeatureEnabled: false,
             stateStoreAvailable: false
-        )) { error in
-            XCTAssertEqual(error as? AppServerExecutableTransportError, .webSocketAuthPending("ws://[::1]:4500"))
-            XCTAssertEqual(
-                String(describing: error),
-                "live app-server websocket auth for --listen `ws://[::1]:4500` is not implemented yet"
-            )
-        }
+        ))
     }
 
     func testRemoteExecutorConfigurationNormalizesRustValues() throws {
