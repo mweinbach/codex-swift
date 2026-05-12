@@ -5469,6 +5469,54 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNil(persistedGoal)
     }
 
+    func testThreadGoalSetReplacesCompletedSameObjectiveLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [features]
+        goals = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T07-34-00",
+            timestamp: "2025-01-06T07:34:00Z",
+            preview: "completed goal thread",
+            provider: "mock_provider"
+        )
+        let stateStore = try await createAppServerGoalStateStore(
+            codexHome: temp.url,
+            threadID: threadID,
+            title: "completed goal thread"
+        )
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url, stateStore: stateStore),
+            experimentalAPIEnabled: true
+        )
+
+        let completeMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/goal/set","params":{"threadId":"\#(threadID)","objective":"keep polishing","status":"complete","tokenBudget":10}}"#.utf8
+        )))
+        let completeGoal = try XCTUnwrap((completeMessages[0]["result"] as? [String: Any])?["goal"] as? [String: Any])
+        XCTAssertEqual(completeGoal["status"] as? String, "complete")
+        XCTAssertEqual(completeGoal["tokenBudget"] as? Int, 10)
+
+        let replacementMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"thread/goal/set","params":{"threadId":"\#(threadID)","objective":"keep polishing"}}"#.utf8
+        )))
+        XCTAssertEqual(replacementMessages.count, 2)
+        let replacementGoal = try XCTUnwrap((replacementMessages[0]["result"] as? [String: Any])?["goal"] as? [String: Any])
+        XCTAssertEqual(replacementGoal["threadId"] as? String, threadID)
+        XCTAssertEqual(replacementGoal["objective"] as? String, "keep polishing")
+        XCTAssertEqual(replacementGoal["status"] as? String, "active")
+        XCTAssertEqual(replacementGoal["tokenBudget"] as? NSNull, NSNull())
+        XCTAssertEqual(replacementGoal["tokensUsed"] as? Int, 0)
+        XCTAssertEqual(replacementGoal["timeUsedSeconds"] as? Int, 0)
+        XCTAssertEqual(replacementMessages[1]["method"] as? String, "thread/goal/updated")
+
+        let persistedGoal = try await stateStore.getThreadGoal(threadID: try ThreadId(string: threadID))
+        XCTAssertEqual(persistedGoal?.status, .active)
+        XCTAssertNil(persistedGoal?.tokenBudget)
+    }
+
     func testThreadResumeEmitsGoalSnapshotWhenFeatureEnabled() async throws {
         let temp = try TemporaryDirectory()
         try """
