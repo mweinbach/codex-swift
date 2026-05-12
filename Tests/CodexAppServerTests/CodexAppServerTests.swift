@@ -22567,6 +22567,38 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: configFile, encoding: .utf8), expected)
     }
 
+    func testConfigValueWriteFollowsUserConfigSymlinkLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let targetFile = temp.url.appendingPathComponent("target-config.toml", isDirectory: false)
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        try #"model = "gpt-old""#.write(to: targetFile, atomically: true, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(
+            at: configFile,
+            withDestinationURL: targetFile
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/value/write","params":{"keyPath":"model","value":"gpt-new","mergeStrategy":"replace"}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["status"] as? String, "ok")
+        XCTAssertEqual(result["filePath"] as? String, configFile.standardizedFileURL.path)
+        XCTAssertEqual(try String(contentsOf: targetFile, encoding: .utf8), #"model = "gpt-new""# + "\n")
+
+        let attributes = try FileManager.default.attributesOfItem(atPath: configFile.path)
+        XCTAssertEqual(attributes[.type] as? FileAttributeType, .typeSymbolicLink)
+
+        let targetResponse = try appServerResponse(
+            #"{"id":2,"method":"config/value/write","params":{"filePath":"\#(targetFile.path)","keyPath":"model","value":"gpt-target","mergeStrategy":"replace"}}"#,
+            codexHome: temp.url
+        )
+        let targetResult = try XCTUnwrap(targetResponse["result"] as? [String: Any])
+        XCTAssertEqual(targetResult["status"] as? String, "ok")
+        XCTAssertEqual(targetResult["filePath"] as? String, targetFile.standardizedFileURL.path)
+        XCTAssertEqual(try String(contentsOf: targetFile, encoding: .utf8), #"model = "gpt-target""# + "\n")
+    }
+
     func testConfigValueWriteSupportsNestedAppPathsLikeRust() throws {
         let temp = try TemporaryDirectory()
         let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)

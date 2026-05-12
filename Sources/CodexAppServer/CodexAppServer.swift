@@ -20979,12 +20979,13 @@ public enum CodexAppServer {
         let allowedPath = configFile.standardizedFileURL.path
         let providedPath = filePath.map { URL(fileURLWithPath: $0, isDirectory: false).standardizedFileURL.path }
             ?? allowedPath
-        guard providedPath == allowedPath else {
+        guard configWritePathsMatch(allowedPath, providedPath) else {
             throw AppServerError.invalidRequestWithData(
                 "Only writes to the user config are allowed",
                 data: ["config_write_error_code": "configLayerReadonly"]
             )
         }
+        let writePaths = configSymlinkWritePaths(configFile)
 
         let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
             codexHome: configuration.codexHome,
@@ -21030,7 +21031,7 @@ public enum CodexAppServer {
                 featureRequirements: stack.requirementsToml.featureRequirements
             )
             updatedStack = stack.withUserConfig(
-                configToml: try AbsolutePath(absolutePath: allowedPath),
+                configToml: try AbsolutePath(absolutePath: providedPath),
                 userConfig: nextConfig
             )
             try CodexConfigLoader.validateForConfigWrite(
@@ -21054,17 +21055,70 @@ public enum CodexAppServer {
             let renderedConfig = configTomlForWrite(
                 nextConfig,
                 edits: changedEdits,
-                existingContents: try? String(contentsOf: configFile, encoding: .utf8)
+                existingContents: writePaths.readURL.flatMap { try? String(contentsOf: $0, encoding: .utf8) }
             )
-            try renderedConfig.write(to: configFile, atomically: true, encoding: .utf8)
+            try FileManager.default.createDirectory(
+                at: writePaths.writeURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try renderedConfig.write(to: writePaths.writeURL, atomically: true, encoding: .utf8)
         }
 
         return [
             "status": overridden == nil ? "ok" : "okOverridden",
             "version": ConfigFingerprint.version(for: nextConfig),
-            "filePath": allowedPath,
+            "filePath": providedPath,
             "overriddenMetadata": overridden.map(overriddenMetadataObject) ?? NSNull()
         ]
+    }
+
+    private struct ConfigSymlinkWritePaths {
+        var readURL: URL?
+        var writeURL: URL
+    }
+
+    private static func configWritePathsMatch(_ expected: String, _ provided: String) -> Bool {
+        let expectedURL = URL(fileURLWithPath: expected, isDirectory: false)
+        let providedURL = URL(fileURLWithPath: provided, isDirectory: false)
+        let expectedResolved = expectedURL.resolvingSymlinksInPath().standardizedFileURL.path
+        let providedResolved = providedURL.resolvingSymlinksInPath().standardizedFileURL.path
+        if FileManager.default.fileExists(atPath: expectedResolved),
+           FileManager.default.fileExists(atPath: providedResolved) {
+            return expectedResolved == providedResolved
+        }
+        return expected == provided
+    }
+
+    private static func configSymlinkWritePaths(_ url: URL) -> ConfigSymlinkWritePaths {
+        let root = url.standardizedFileURL
+        var current = root
+        var visited: Set<String> = []
+
+        while true {
+            let currentPath = current.standardizedFileURL.path
+            do {
+                let attributes = try FileManager.default.attributesOfItem(atPath: currentPath)
+                guard attributes[.type] as? FileAttributeType == .typeSymbolicLink else {
+                    return ConfigSymlinkWritePaths(readURL: current, writeURL: current)
+                }
+                guard visited.insert(currentPath).inserted else {
+                    return ConfigSymlinkWritePaths(readURL: nil, writeURL: root)
+                }
+                let target = try FileManager.default.destinationOfSymbolicLink(atPath: currentPath)
+                let targetURL: URL
+                if target.hasPrefix("/") {
+                    targetURL = URL(fileURLWithPath: target, isDirectory: false)
+                } else {
+                    targetURL = current.deletingLastPathComponent().appendingPathComponent(target, isDirectory: false)
+                }
+                current = targetURL.standardizedFileURL
+            } catch let error as NSError where error.domain == NSCocoaErrorDomain
+                && error.code == NSFileReadNoSuchFileError {
+                return ConfigSymlinkWritePaths(readURL: current, writeURL: current)
+            } catch {
+                return ConfigSymlinkWritePaths(readURL: nil, writeURL: root)
+            }
+        }
     }
 
     private static func setSkillConfig(selector: SkillConfigSelector, enabled: Bool, in config: inout ConfigValue) {
