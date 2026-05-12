@@ -5560,16 +5560,42 @@ public final class PolicyParser {
         constants: [String: ConfigValue],
         functions: [String: StarlarkFunction]
     ) throws -> ConfigValue {
-        guard rawArguments.count == 1 || rawArguments.count == 2,
-              let iterableArgument = rawArguments.first
+        var positionalArguments: [String] = []
+        var rawStart: String?
+        var sawKeywordArgument = false
+
+        for rawArgument in rawArguments {
+            if let equalsIndex = topLevelEqualsIndex(in: rawArgument) {
+                sawKeywordArgument = true
+                let rawName = String(rawArgument[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let valueStart = rawArgument.index(after: equalsIndex)
+                let rawValue = String(rawArgument[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard rawName == "start", rawStart == nil else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                rawStart = rawValue
+                continue
+            }
+
+            guard !sawKeywordArgument else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            positionalArguments.append(rawArgument)
+        }
+
+        guard (1...2).contains(positionalArguments.count),
+              rawStart == nil || positionalArguments.count == 1
         else {
             throw ConfigOverrideError.invalidLiteral(expression)
         }
 
         let start: Int64
-        if rawArguments.count == 2 {
+        if positionalArguments.count == 2 {
+            rawStart = positionalArguments[1]
+        }
+        if let rawStart {
             start = Int64(try parseStarlarkInteger(
-                rawArguments[1],
+                rawStart,
                 constants: constants,
                 functions: functions,
                 expression: expression
@@ -5577,7 +5603,7 @@ public final class PolicyParser {
         } else {
             start = 0
         }
-        let iterable = try parsePolicyLiteral(iterableArgument, constants: constants, functions: functions)
+        let iterable = try parsePolicyLiteral(positionalArguments[0], constants: constants, functions: functions)
         let items = try starlarkIterableItems(iterable, expression: expression)
         return .array(items.enumerated().map { offset, item in
             .array([.integer(start + Int64(offset)), item])
@@ -5632,10 +5658,6 @@ public final class PolicyParser {
         constants: [String: ConfigValue],
         functions: [String: StarlarkFunction]
     ) throws -> ConfigValue {
-        guard !rawArguments.isEmpty else {
-            throw ConfigOverrideError.invalidLiteral(expression)
-        }
-
         let iterables = try rawArguments.map { rawArgument in
             try starlarkIterableItems(
                 parsePolicyLiteral(rawArgument, constants: constants, functions: functions),
@@ -5654,12 +5676,13 @@ public final class PolicyParser {
         constants: [String: ConfigValue],
         functions: [String: StarlarkFunction]
     ) throws -> ConfigValue {
-        guard rawArguments.count == 1,
-              let rawArgument = rawArguments.first
-        else {
+        guard rawArguments.count <= 1 else {
             throw ConfigOverrideError.invalidLiteral(expression)
         }
 
+        guard let rawArgument = rawArguments.first else {
+            return .array([])
+        }
         let iterable = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
         return try .array(starlarkIterableItems(iterable, expression: expression))
     }

@@ -884,6 +884,29 @@ final class ExecPolicyTests: XCTestCase {
         ])
     }
 
+    func testParserEvaluatesRustStarlarkIterableBuiltinEmptyAndKeywordForms() throws {
+        let policy = try parsePolicy("""
+        EMPTY_LIST = list()
+        EMPTY_TUPLE = tuple()
+        EMPTY_ZIP = zip()
+        NUMBERED = enumerate(["status", "diff"], start = 5)
+
+        prefix_rule(["git", NUMBERED[0][1], str(NUMBERED[0][0])], "allow")
+        if len(EMPTY_LIST) == 0 and len(EMPTY_TUPLE) == 0 and len(EMPTY_ZIP) == 0:
+            network_rule("iterable" + str(NUMBERED[1][0]) + ".github.com", "https", "allow")
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status"), .single("5")]),
+                decision: .allow
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "iterable6.github.com", protocol: .https, decision: .allow)
+        ])
+    }
+
     func testParserEvaluatesRustStarlarkIterableBuiltinsAndDictIteration() throws {
         let policy = try parsePolicy("""
         TOOLS = {
