@@ -870,10 +870,10 @@ public enum CodexAppServer {
         let sortDirection = try threadListSortDirection(params?["sortDirection"])
         let cursor = try threadListCursor(params?["cursor"])
         let pageSize = try rustU32ListLimit(params?["limit"])
-        let modelProviders = modelProviderFilter(params?["modelProviders"], defaultProvider: configuration.defaultModelProvider)
+        let modelProviders = try modelProviderFilter(params?["modelProviders"], defaultProvider: configuration.defaultModelProvider)
         let cwdFilters = try threadListCwdFilters(params?["cwd"])
         let archivedOnly = try rustOptionalBoolParam(params?["archived"], defaultValue: false)
-        let searchTerm = stringParam(params?["searchTerm"])
+        let searchTerm = try rustOptionalStringParam(params?["searchTerm"])
         let hasExplicitMetadataFilter = params?["cwd"] != nil
             || params?["modelProviders"] != nil
             || params?["sourceKinds"] != nil
@@ -18274,8 +18274,8 @@ public enum CodexAppServer {
         return "invalid type"
     }
 
-    private static func modelProviderFilter(_ value: Any?, defaultProvider: String) -> [String]? {
-        guard let providers = stringArrayParam(value) else {
+    private static func modelProviderFilter(_ value: Any?, defaultProvider: String) throws -> [String]? {
+        guard let providers = try rustStringArrayParam(value) else {
             return [defaultProvider]
         }
         return providers.isEmpty ? nil : providers
@@ -18283,12 +18283,24 @@ public enum CodexAppServer {
 
     private static func threadListCwdFilters(_ value: Any?) throws -> [String]? {
         let rawFilters: [String]
-        if let cwd = stringParam(value) {
-            rawFilters = [cwd]
-        } else if let cwds = stringArrayParam(value) {
-            rawFilters = cwds
-        } else {
+        guard let value, !(value is NSNull) else {
             return nil
+        }
+        if let cwd = value as? String {
+            rawFilters = [cwd]
+        } else if let cwds = value as? [Any] {
+            rawFilters = try cwds.map { item in
+                guard let string = item as? String else {
+                    throw AppServerError.invalidRequest(
+                        "Invalid request: data did not match any variant of untagged enum ThreadListCwdFilter"
+                    )
+                }
+                return string
+            }
+        } else {
+            throw AppServerError.invalidRequest(
+                "Invalid request: data did not match any variant of untagged enum ThreadListCwdFilter"
+            )
         }
 
         return rawFilters.map { cwd in
@@ -18297,7 +18309,7 @@ public enum CodexAppServer {
     }
 
     private static func threadListCursor(_ value: Any?) throws -> ConversationCursor? {
-        guard let cursor = stringParam(value) else {
+        guard let cursor = try rustOptionalStringParam(value) else {
             return nil
         }
         guard !cursor.contains("|"), let parsed = RolloutListing.parseCursor(cursor) else {
@@ -18408,7 +18420,7 @@ public enum CodexAppServer {
     }
 
     private static func threadListSortKey(_ value: Any?) throws -> ConversationSortKey {
-        guard let value = stringParam(value) else {
+        guard let value = try rustOptionalStringParam(value) else {
             return .createdAt
         }
         switch value {
@@ -18422,7 +18434,7 @@ public enum CodexAppServer {
     }
 
     private static func threadListSortDirection(_ value: Any?) throws -> ConversationSortDirection {
-        guard let value = stringParam(value) else {
+        guard let value = try rustOptionalStringParam(value) else {
             return .descending
         }
         switch value {
@@ -18438,7 +18450,7 @@ public enum CodexAppServer {
     private static func threadListSourceFilter(
         _ value: Any?
     ) throws -> (allowedSources: [SessionSource], matcher: SessionSourceMatcher?) {
-        guard let values = stringArrayParam(value), !values.isEmpty else {
+        guard let values = try rustStringArrayParam(value), !values.isEmpty else {
             return (interactiveSessionSources, nil)
         }
 

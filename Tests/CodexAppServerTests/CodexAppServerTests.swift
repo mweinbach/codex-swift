@@ -4507,6 +4507,32 @@ final class CodexAppServerTests: XCTestCase {
         }
     }
 
+    func testThreadListRejectsMalformedTypedParamsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cases: [(String, String)] = [
+            (#""cursor":1"#, "Invalid request: invalid type: integer `1`, expected a string"),
+            (#""sortKey":1"#, "Invalid request: invalid type: integer `1`, expected a string"),
+            (#""sortDirection":false"#, "Invalid request: invalid type: boolean `false`, expected a string"),
+            (#""modelProviders":"openai""#, #"Invalid request: invalid type: string "openai", expected a sequence"#),
+            (#""modelProviders":[1]"#, "Invalid request: invalid type: integer `1`, expected a string"),
+            (#""sourceKinds":"cli""#, #"Invalid request: invalid type: string "cli", expected a sequence"#),
+            (#""sourceKinds":[1]"#, "Invalid request: invalid type: integer `1`, expected a string"),
+            (#""searchTerm":1"#, "Invalid request: invalid type: integer `1`, expected a string"),
+            (#""cwd":1"#, "Invalid request: data did not match any variant of untagged enum ThreadListCwdFilter"),
+            (#""cwd":[1]"#, "Invalid request: data did not match any variant of untagged enum ThreadListCwdFilter")
+        ]
+
+        for (index, testCase) in cases.enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 1),"method":"thread/list","params":{\#(testCase.0)}}"#,
+                codexHome: temp.url
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, testCase.1)
+        }
+    }
+
     func testThreadLifecycleRejectsMalformedBooleanParamsLikeRust() throws {
         let temp = try TemporaryDirectory()
         let cases: [(String, String, String)] = [
@@ -14144,6 +14170,15 @@ final class CodexAppServerTests: XCTestCase {
         let repoB = temp.url.appendingPathComponent("repo-b", isDirectory: true).path
         _ = try writeRollout(
             codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T12-00-00",
+            timestamp: "2025-01-06T12:00:00Z",
+            preview: "exec normalized cwd",
+            provider: "openai",
+            source: .exec,
+            cwd: repoA + "/subdir/.."
+        )
+        _ = try writeRollout(
+            codexHome: temp.url,
             filenameTimestamp: "2025-01-05T12-00-00",
             timestamp: "2025-01-05T12:00:00Z",
             preview: "exec target match",
@@ -14176,6 +14211,13 @@ final class CodexAppServerTests: XCTestCase {
         )
         let execData = try XCTUnwrap((execResponse["result"] as? [String: Any])?["data"] as? [[String: Any]])
         XCTAssertEqual(execData.map { $0["preview"] as? String }, ["exec target match"])
+
+        let normalizedCwdResponse = try appServerResponse(
+            #"{"id":3,"method":"thread/list","params":{"sourceKinds":["exec"],"cwd":"\#(repoA)","searchTerm":"normalized"}}"#,
+            codexHome: temp.url
+        )
+        let normalizedCwdData = try XCTUnwrap((normalizedCwdResponse["result"] as? [String: Any])?["data"] as? [[String: Any]])
+        XCTAssertEqual(normalizedCwdData.map { $0["preview"] as? String }, ["exec normalized cwd"])
 
         let archivedResponse = try appServerResponse(
             #"{"id":2,"method":"thread/list","params":{"archived":true,"cwd":["\#(repoA)"],"searchTerm":"target"}}"#,

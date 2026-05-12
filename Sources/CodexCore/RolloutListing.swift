@@ -286,7 +286,7 @@ public enum RolloutListing {
 
                 if let cwdFilters {
                     guard let cwd = summary.cwd,
-                          cwdFilters.contains(cwd)
+                          cwdFilters.contains(where: { pathsMatchAfterNormalization(cwd, $0) })
                     else {
                         continue
                     }
@@ -382,6 +382,11 @@ public enum RolloutListing {
             numScannedFiles: scannedFiles,
             reachedScanCap: reachedScanCap
         )
+    }
+
+    private static func pathsMatchAfterNormalization(_ lhs: String, _ rhs: String) -> Bool {
+        URL(fileURLWithPath: lhs, isDirectory: true).standardizedFileURL.path ==
+            URL(fileURLWithPath: rhs, isDirectory: true).standardizedFileURL.path
     }
 
     private static func pageCandidates(

@@ -545,7 +545,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/app-server/tests/suite/conversation_summary.rs` relative rollout path lookup
   - legacy `getConversationSummary` now resolves relative `rolloutPath` values from the configured Codex home before loading the rollout, matching Rust's local thread-store behavior.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` thread list filters
-  - file-backed `thread/list` now honors Rust's `sourceKinds`, `cwd`, `archived`, and `searchTerm` filters while preserving default interactive-source and default-provider filtering.
+  - file-backed `thread/list` now honors Rust's `sourceKinds`, `cwd`, `archived`, and `searchTerm` filters while preserving default interactive-source and default-provider filtering. Nullable string/sequence/filter params now reject malformed values with Rust-shaped serde errors instead of silently falling back to defaults, and cwd filter matching normalizes candidate/filter paths like Rust.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` thread list ordering
   - file-backed `thread/list` now accepts Rust's `sortKey` and `sortDirection` values, returns RFC3339 timestamp `nextCursor`/`backwardsCursor` fields, orders by created-at filename timestamps or updated-at file modification times, and rejects malformed v2 cursor tokens with Rust's `invalid cursor: ...` invalid-request error.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` thread list state DB mode
