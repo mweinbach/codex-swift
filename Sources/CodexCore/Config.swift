@@ -320,6 +320,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var disablePasteBurst: Bool
     public var analyticsEnabled: Bool?
     public var feedbackEnabled: Bool
+    public var notices: NoticeConfig
     public var modelContextWindow: Int64?
     public var modelAutoCompactTokenLimit: Int64?
     public var history: HistoryConfig
@@ -506,6 +507,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.disablePasteBurst = false
         self.analyticsEnabled = nil
         self.feedbackEnabled = true
+        self.notices = NoticeConfig()
         self.modelContextWindow = nil
         self.modelAutoCompactTokenLimit = nil
         self.history = HistoryConfig()
@@ -966,6 +968,56 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
             contextWindow: modelContextWindow,
             autoCompactTokenLimit: modelAutoCompactTokenLimit
         )
+    }
+}
+
+public struct ExternalConfigMigrationPromptsConfig: Equatable, Sendable {
+    public var home: Bool?
+    public var homeLastPromptedAt: Int64?
+    public var projects: [String: Bool]
+    public var projectLastPromptedAt: [String: Int64]
+
+    public init(
+        home: Bool? = nil,
+        homeLastPromptedAt: Int64? = nil,
+        projects: [String: Bool] = [:],
+        projectLastPromptedAt: [String: Int64] = [:]
+    ) {
+        self.home = home
+        self.homeLastPromptedAt = homeLastPromptedAt
+        self.projects = projects
+        self.projectLastPromptedAt = projectLastPromptedAt
+    }
+}
+
+public struct NoticeConfig: Equatable, Sendable {
+    public var hideFullAccessWarning: Bool?
+    public var hideWorldWritableWarning: Bool?
+    public var fastDefaultOptOut: Bool?
+    public var hideRateLimitModelNudge: Bool?
+    public var hideGPT51MigrationPrompt: Bool?
+    public var hideGPT51CodexMaxMigrationPrompt: Bool?
+    public var modelMigrations: [String: String]
+    public var externalConfigMigrationPrompts: ExternalConfigMigrationPromptsConfig
+
+    public init(
+        hideFullAccessWarning: Bool? = nil,
+        hideWorldWritableWarning: Bool? = nil,
+        fastDefaultOptOut: Bool? = nil,
+        hideRateLimitModelNudge: Bool? = nil,
+        hideGPT51MigrationPrompt: Bool? = nil,
+        hideGPT51CodexMaxMigrationPrompt: Bool? = nil,
+        modelMigrations: [String: String] = [:],
+        externalConfigMigrationPrompts: ExternalConfigMigrationPromptsConfig = ExternalConfigMigrationPromptsConfig()
+    ) {
+        self.hideFullAccessWarning = hideFullAccessWarning
+        self.hideWorldWritableWarning = hideWorldWritableWarning
+        self.fastDefaultOptOut = fastDefaultOptOut
+        self.hideRateLimitModelNudge = hideRateLimitModelNudge
+        self.hideGPT51MigrationPrompt = hideGPT51MigrationPrompt
+        self.hideGPT51CodexMaxMigrationPrompt = hideGPT51CodexMaxMigrationPrompt
+        self.modelMigrations = modelMigrations
+        self.externalConfigMigrationPrompts = externalConfigMigrationPrompts
     }
 }
 
@@ -1822,6 +1874,7 @@ private struct ParsedCodexConfigToml {
     var modelProviders: [String: ConfigValue] = [:]
     var sandboxWorkspaceWrite: [String: ConfigValue] = [:]
     var history: [String: ConfigValue] = [:]
+    var notice: [String: ConfigValue] = [:]
     var analytics: [String: ConfigValue] = [:]
     var feedback: [String: ConfigValue] = [:]
     var profileAnalytics: [String: [String: ConfigValue]] = [:]
@@ -1963,6 +2016,14 @@ private struct ParsedCodexConfigToml {
                     }
                     continue
                 }
+                if key == "notice" {
+                    let value = try ConfigValueParser.parseTomlLiteral(valueText)
+                    guard case let .table(table) = value else {
+                        throw CodexConfigLoadError.invalidConfigLine(key)
+                    }
+                    parsed.mergeNotice(table)
+                    continue
+                }
                 if key == "windows" {
                     let value = try ConfigValueParser.parseTomlLiteral(valueText)
                     guard case let .table(table) = value else {
@@ -2083,6 +2144,33 @@ private struct ParsedCodexConfigToml {
                 parsed.sandboxWorkspaceWrite[key] = try ConfigValueParser.parseTomlLiteral(valueText)
             case .history:
                 parsed.history[key] = try ConfigValueParser.parseTomlLiteral(valueText)
+            case .notice:
+                parsed.notice[try parseDottedKey(key).joined(separator: ".")] =
+                    try ConfigValueParser.parseTomlLiteral(valueText)
+            case .noticeModelMigrations:
+                var migrations = parsed.notice["model_migrations"] ?? .table([:])
+                migrations.merge(overlay: .table([
+                    try parseDottedKey(key).joined(separator: "."): try ConfigValueParser.parseTomlLiteral(valueText)
+                ]))
+                parsed.notice["model_migrations"] = migrations
+            case .noticeExternalConfigMigrationPrompts:
+                var prompts = parsed.notice["external_config_migration_prompts"] ?? .table([:])
+                prompts.merge(overlay: .table([
+                    try parseDottedKey(key).joined(separator: "."): try ConfigValueParser.parseTomlLiteral(valueText)
+                ]))
+                parsed.notice["external_config_migration_prompts"] = prompts
+            case .noticeExternalConfigMigrationPromptProjects:
+                parsed.mergeNoticeExternalConfigMigrationPromptMap(
+                    mapKey: "projects",
+                    entryKey: try parseDottedKey(key).joined(separator: "."),
+                    value: try ConfigValueParser.parseTomlLiteral(valueText)
+                )
+            case .noticeExternalConfigMigrationPromptProjectLastPromptedAt:
+                parsed.mergeNoticeExternalConfigMigrationPromptMap(
+                    mapKey: "project_last_prompted_at",
+                    entryKey: try parseDottedKey(key).joined(separator: "."),
+                    value: try ConfigValueParser.parseTomlLiteral(valueText)
+                )
             case .windows:
                 parsed.windows[key] = try ConfigValueParser.parseTomlLiteral(valueText)
             case .analytics:
@@ -2324,6 +2412,34 @@ private struct ParsedCodexConfigToml {
                 continue
             }
 
+            if parts.count == 2, parts[0] == "notice" {
+                notice[parts[1]] = value
+                continue
+            }
+
+            if parts.count == 3, parts[0] == "notice", parts[1] == "model_migrations" {
+                var migrations = notice["model_migrations"] ?? .table([:])
+                migrations.merge(overlay: .table([parts[2]: value]))
+                notice["model_migrations"] = migrations
+                continue
+            }
+
+            if parts.count == 3, parts[0] == "notice", parts[1] == "external_config_migration_prompts" {
+                var prompts = notice["external_config_migration_prompts"] ?? .table([:])
+                prompts.merge(overlay: .table([parts[2]: value]))
+                notice["external_config_migration_prompts"] = prompts
+                continue
+            }
+
+            if parts.count == 4,
+               parts[0] == "notice",
+               parts[1] == "external_config_migration_prompts",
+               ["projects", "project_last_prompted_at"].contains(parts[2])
+            {
+                mergeNoticeExternalConfigMigrationPromptMap(mapKey: parts[2], entryKey: parts[3], value: value)
+                continue
+            }
+
             if parts.count == 2, parts[0] == "sandbox_workspace_write" {
                 sandboxWorkspaceWrite[parts[1]] = value
                 continue
@@ -2537,6 +2653,8 @@ private struct ParsedCodexConfigToml {
         for (key, value) in overlay.history {
             history[key] = value
         }
+
+        mergeNotice(overlay.notice)
 
         for (key, value) in overlay.windows {
             windows[key] = value
@@ -2771,6 +2889,10 @@ private struct ParsedCodexConfigToml {
             }
         }
 
+        if case let .table(noticeTable) = table["notice"] {
+            mergeNotice(noticeTable)
+        }
+
         if case let .table(skillsTable) = table["skills"],
            let includeInstructions = skillsTable["include_instructions"]
         {
@@ -2851,6 +2973,7 @@ private struct ParsedCodexConfigToml {
 
     func resolvedConfig(environment: [String: String] = ProcessInfo.processInfo.environment) throws -> CodexRuntimeConfig {
         var config = CodexRuntimeConfig()
+        config.notices = try Self.noticeConfigValue(notice, key: "notice")
 
         try Self.applyRuntimeFields(from: topLevel, to: &config, keyPrefix: "")
         config.realtimeAudio = try Self.realtimeAudioConfigValue(realtimeAudio, key: "audio")
@@ -3163,6 +3286,33 @@ private struct ParsedCodexConfigToml {
             return
         }
         modelProviders[name] = existing.merging(overlay: overlay)
+    }
+
+    private mutating func mergeNotice(_ table: [String: ConfigValue]) {
+        var noticeValue = ConfigValue.table(notice)
+        noticeValue.merge(overlay: .table(table))
+        if case let .table(merged) = noticeValue {
+            notice = merged
+        }
+    }
+
+    private mutating func mergeNoticeExternalConfigMigrationPromptMap(
+        mapKey: String,
+        entryKey: String,
+        value: ConfigValue
+    ) {
+        var prompts = notice["external_config_migration_prompts"] ?? .table([:])
+        var mapValue: ConfigValue
+        if case let .table(promptTable) = prompts,
+           case let .table(existingMap)? = promptTable[mapKey]
+        {
+            mapValue = .table(existingMap)
+        } else {
+            mapValue = .table([:])
+        }
+        mapValue.merge(overlay: .table([entryKey: value]))
+        prompts.merge(overlay: .table([mapKey: mapValue]))
+        notice["external_config_migration_prompts"] = prompts
     }
 
     private mutating func mergeAgentRole(
@@ -3576,7 +3726,12 @@ private struct ParsedCodexConfigToml {
             )
         }
         if let serviceTier = values["service_tier"] {
-            config.serviceTier = try stringValue(serviceTier, key: "\(keyPrefix)service_tier")
+            if serviceTier == .none {
+                config.serviceTier = nil
+                config.notices.fastDefaultOptOut = true
+            } else {
+                config.serviceTier = try stringValue(serviceTier, key: "\(keyPrefix)service_tier")
+            }
         }
         if let baseURL = values["chatgpt_base_url"] {
             config.chatgptBaseURL = try stringValue(baseURL, key: "\(keyPrefix)chatgpt_base_url")
@@ -4119,6 +4274,77 @@ private struct ParsedCodexConfigToml {
             consolidationModel: try table["consolidation_model"].map {
                 try stringValue($0, key: "\(key).consolidation_model")
             }
+        )
+    }
+
+    private static func noticeConfigValue(
+        _ table: [String: ConfigValue],
+        key: String
+    ) throws -> NoticeConfig {
+        let knownFields = Set([
+            "hide_full_access_warning",
+            "hide_world_writable_warning",
+            "fast_default_opt_out",
+            "hide_rate_limit_model_nudge",
+            "hide_gpt5_1_migration_prompt",
+            "hide_gpt-5.1-codex-max_migration_prompt",
+            "model_migrations",
+            "external_config_migration_prompts"
+        ])
+        for field in table.keys where !knownFields.contains(field) {
+            throw CodexConfigLoadError.invalidConfigLine("\(key).\(field)")
+        }
+
+        return NoticeConfig(
+            hideFullAccessWarning: try table["hide_full_access_warning"].map {
+                try boolValue($0, key: "\(key).hide_full_access_warning")
+            },
+            hideWorldWritableWarning: try table["hide_world_writable_warning"].map {
+                try boolValue($0, key: "\(key).hide_world_writable_warning")
+            },
+            fastDefaultOptOut: try table["fast_default_opt_out"].map {
+                try boolValue($0, key: "\(key).fast_default_opt_out")
+            },
+            hideRateLimitModelNudge: try table["hide_rate_limit_model_nudge"].map {
+                try boolValue($0, key: "\(key).hide_rate_limit_model_nudge")
+            },
+            hideGPT51MigrationPrompt: try table["hide_gpt5_1_migration_prompt"].map {
+                try boolValue($0, key: "\(key).hide_gpt5_1_migration_prompt")
+            },
+            hideGPT51CodexMaxMigrationPrompt: try table["hide_gpt-5.1-codex-max_migration_prompt"].map {
+                try boolValue($0, key: "\(key).hide_gpt-5.1-codex-max_migration_prompt")
+            },
+            modelMigrations: try table["model_migrations"].map {
+                try stringMapValue($0, key: "\(key).model_migrations")
+            } ?? [:],
+            externalConfigMigrationPrompts: try table["external_config_migration_prompts"].map {
+                try externalConfigMigrationPromptsValue($0, key: "\(key).external_config_migration_prompts")
+            } ?? ExternalConfigMigrationPromptsConfig()
+        )
+    }
+
+    private static func externalConfigMigrationPromptsValue(
+        _ value: ConfigValue,
+        key: String
+    ) throws -> ExternalConfigMigrationPromptsConfig {
+        guard case let .table(table) = value else {
+            throw CodexConfigLoadError.invalidConfigLine(key)
+        }
+        let knownFields = Set(["home", "home_last_prompted_at", "projects", "project_last_prompted_at"])
+        for field in table.keys where !knownFields.contains(field) {
+            throw CodexConfigLoadError.invalidConfigLine("\(key).\(field)")
+        }
+        return ExternalConfigMigrationPromptsConfig(
+            home: try table["home"].map { try boolValue($0, key: "\(key).home") },
+            homeLastPromptedAt: try table["home_last_prompted_at"].map {
+                try int64Value($0, key: "\(key).home_last_prompted_at")
+            },
+            projects: try table["projects"].map {
+                try boolMapValue($0, key: "\(key).projects")
+            } ?? [:],
+            projectLastPromptedAt: try table["project_last_prompted_at"].map {
+                try int64MapValue($0, key: "\(key).project_last_prompted_at")
+            } ?? [:]
         )
     }
 
@@ -4710,6 +4936,24 @@ private struct ParsedCodexConfigToml {
         }
     }
 
+    private static func boolMapValue(_ value: ConfigValue, key: String) throws -> [String: Bool] {
+        guard case let .table(table) = value else {
+            throw CodexConfigLoadError.invalidConfigLine(key)
+        }
+        return try table.reduce(into: [:]) { result, pair in
+            result[pair.key] = try boolValue(pair.value, key: "\(key).\(pair.key)")
+        }
+    }
+
+    private static func int64MapValue(_ value: ConfigValue, key: String) throws -> [String: Int64] {
+        guard case let .table(table) = value else {
+            throw CodexConfigLoadError.invalidConfigLine(key)
+        }
+        return try table.reduce(into: [:]) { result, pair in
+            result[pair.key] = try int64Value(pair.value, key: "\(key).\(pair.key)")
+        }
+    }
+
     private static func absolutePathArrayValue(_ value: ConfigValue?, key: String) throws -> [AbsolutePath] {
         guard let value else {
             return []
@@ -4864,6 +5108,29 @@ private struct ParsedCodexConfigToml {
         }
         if parts.count == 1, parts[0] == "history" {
             return .history
+        }
+        if parts.count == 1, parts[0] == "notice" {
+            return .notice
+        }
+        if parts.count == 2, parts[0] == "notice", parts[1] == "model_migrations" {
+            return .noticeModelMigrations
+        }
+        if parts.count == 2, parts[0] == "notice", parts[1] == "external_config_migration_prompts" {
+            return .noticeExternalConfigMigrationPrompts
+        }
+        if parts.count == 3,
+           parts[0] == "notice",
+           parts[1] == "external_config_migration_prompts",
+           parts[2] == "projects"
+        {
+            return .noticeExternalConfigMigrationPromptProjects
+        }
+        if parts.count == 3,
+           parts[0] == "notice",
+           parts[1] == "external_config_migration_prompts",
+           parts[2] == "project_last_prompted_at"
+        {
+            return .noticeExternalConfigMigrationPromptProjectLastPromptedAt
         }
         if parts.count == 1, parts[0] == "windows" {
             return .windows
@@ -5140,6 +5407,11 @@ private enum ConfigSection {
     case memories
     case sandboxWorkspaceWrite
     case history
+    case notice
+    case noticeModelMigrations
+    case noticeExternalConfigMigrationPrompts
+    case noticeExternalConfigMigrationPromptProjects
+    case noticeExternalConfigMigrationPromptProjectLastPromptedAt
     case windows
     case analytics
     case feedback

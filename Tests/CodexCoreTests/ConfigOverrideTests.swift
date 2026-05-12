@@ -13,6 +13,11 @@ final class ConfigOverrideTests: XCTestCase {
         XCTAssertEqual(try overrides.parseOverrides().first?.1, .string("o3"))
     }
 
+    func testNullOverrideParsesAsExplicitNone() throws {
+        let overrides = CliConfigOverrides(rawOverrides: ["service_tier=null"])
+        XCTAssertEqual(try overrides.parseOverrides().first?.1, ConfigValue.none)
+    }
+
     func testOnlySplitsOnFirstEquals() throws {
         let overrides = CliConfigOverrides(rawOverrides: ["env.VALUE=a=b=c"])
         XCTAssertEqual(try overrides.parseOverrides().first?.0, "env.VALUE")

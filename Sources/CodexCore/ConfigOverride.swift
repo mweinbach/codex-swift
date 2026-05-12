@@ -352,10 +352,14 @@ public struct CliConfigOverrides: Equatable, Sendable {
             }
 
             let value: ConfigValue
-            do {
-                value = try ConfigValueParser.parseTomlLiteral(valueText)
-            } catch {
-                value = .string(valueText.trimmingMatchingQuotes())
+            if valueText == "null" {
+                value = .none
+            } else {
+                do {
+                    value = try ConfigValueParser.parseTomlLiteral(valueText)
+                } catch {
+                    value = .string(valueText.trimmingMatchingQuotes())
+                }
             }
             return (key, value)
         }

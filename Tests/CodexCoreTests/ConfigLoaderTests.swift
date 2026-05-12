@@ -90,12 +90,92 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertFalse(config.disablePasteBurst)
         XCTAssertNil(config.analyticsEnabled)
         XCTAssertTrue(config.feedbackEnabled)
+        XCTAssertEqual(config.notices, NoticeConfig())
         XCTAssertEqual(config.history, HistoryConfig())
         XCTAssertEqual(config.agents, AgentRuntimeConfig())
         XCTAssertEqual(config.agentRoles, [:])
         XCTAssertEqual(config.fileOpener, .vsCode)
         XCTAssertEqual(config.tui, TuiRuntimeConfig())
         XCTAssertEqual(config.terminalResizeReflow, TerminalResizeReflowConfig())
+    }
+
+    func testNoticeConfigLoadsRustNoticeTable() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [notice]
+        hide_full_access_warning = true
+        hide_world_writable_warning = false
+        fast_default_opt_out = true
+        hide_rate_limit_model_nudge = true
+        hide_gpt5_1_migration_prompt = true
+        "hide_gpt-5.1-codex-max_migration_prompt" = true
+
+        [notice.model_migrations]
+        "gpt-4.1" = "gpt-5"
+
+        [notice.external_config_migration_prompts]
+        home = true
+        home_last_prompted_at = 123
+
+        [notice.external_config_migration_prompts.projects]
+        "/repo" = true
+
+        [notice.external_config_migration_prompts.project_last_prompted_at]
+        "/repo" = 456
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.notices, NoticeConfig(
+            hideFullAccessWarning: true,
+            hideWorldWritableWarning: false,
+            fastDefaultOptOut: true,
+            hideRateLimitModelNudge: true,
+            hideGPT51MigrationPrompt: true,
+            hideGPT51CodexMaxMigrationPrompt: true,
+            modelMigrations: ["gpt-4.1": "gpt-5"],
+            externalConfigMigrationPrompts: ExternalConfigMigrationPromptsConfig(
+                home: true,
+                homeLastPromptedAt: 123,
+                projects: ["/repo": true],
+                projectLastPromptedAt: ["/repo": 456]
+            )
+        ))
+    }
+
+    func testNoticeConfigSupportsInlineAndOverrideMergingLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        notice = { fast_default_opt_out = false, model_migrations = { "gpt-4" = "gpt-5" } }
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(
+            codexHome: dir.url,
+            overrides: CliConfigOverrides(rawOverrides: [
+                "notice.fast_default_opt_out=true",
+                #"notice.model_migrations."gpt-4.1"="gpt-5.1""#
+            ]),
+            systemConfigFile: nil
+        )
+
+        XCTAssertEqual(config.notices.fastDefaultOptOut, true)
+        XCTAssertEqual(config.notices.modelMigrations, [
+            "gpt-4": "gpt-5",
+            "gpt-4.1": "gpt-5.1"
+        ])
+    }
+
+    func testExplicitNullServiceTierOverrideSetsFastDefaultOptOutLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+
+        let config = try CodexConfigLoader.load(
+            codexHome: dir.url,
+            overrides: CliConfigOverrides(rawOverrides: ["service_tier=null"]),
+            systemConfigFile: nil
+        )
+
+        XCTAssertNil(config.serviceTier)
+        XCTAssertEqual(config.notices.fastDefaultOptOut, true)
     }
 
     func testWindowsSandboxConfigResolvesRustSandboxModeAndPrivateDesktop() throws {
