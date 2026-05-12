@@ -23665,7 +23665,9 @@ final class CodexAppServerMessageProcessor {
     ) {
         let manager = threadStateManager
         let connectionID = connectionID
+        let outgoing = outgoingRequestBroker
         _ = try? CodexAppServer.runAsyncBlocking {
+            await outgoing.updateOptOutNotificationMethods(optOutNotificationMethods)
             await manager.connectionInitialized(
                 connectionID,
                 capabilities: AppServerConnectionCapabilities(

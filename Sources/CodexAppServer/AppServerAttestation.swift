@@ -203,6 +203,7 @@ enum AppServerExternalAuthRefreshRequestResult: Equatable, Sendable {
 actor AppServerOutgoingRequestBroker {
     private let notificationSink: AppServerNotificationSink?
     private var nextRequestID: Int64 = 1
+    private var optOutNotificationMethods: Set<String> = []
     private var pendingAttestationRequests: [String: CheckedContinuation<AppServerAttestationRequestResult, Never>] = [:]
     private var pendingExternalAuthRefreshRequests: [String: CheckedContinuation<AppServerExternalAuthRefreshRequestResult, Never>] = [:]
     private var pendingDynamicToolCallRequests: [String: CheckedContinuation<AppServerDynamicToolCallRequestResult, Never>] = [:]
@@ -214,6 +215,10 @@ actor AppServerOutgoingRequestBroker {
 
     init(notificationSink: AppServerNotificationSink?) {
         self.notificationSink = notificationSink
+    }
+
+    func updateOptOutNotificationMethods(_ methods: Set<String>) {
+        optOutNotificationMethods = methods
     }
 
     func requestAttestationGenerate(
@@ -623,6 +628,10 @@ actor AppServerOutgoingRequestBroker {
     }
 
     private func sendServerRequestResolvedNotification(key: String, requestID: RequestID?) async {
+        guard !optOutNotificationMethods.contains("serverRequest/resolved") else {
+            pendingServerRequestThreadIDs.removeValue(forKey: key)
+            return
+        }
         guard let notificationSink,
               let requestID,
               let threadID = pendingServerRequestThreadIDs.removeValue(forKey: key)

@@ -4139,6 +4139,61 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(decision, .approved)
     }
 
+    func testServerRequestResolvedNotificationCanBeOptedOutLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let coreOpCapture = AppServerCoreOpCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) },
+            coreOpSubmitter: coreOpCapture.submit,
+            optOutNotificationMethods: ["serverRequest/resolved"]
+        )
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-runtime",
+            event: .requestUserInput(RequestUserInputEvent(
+                callID: "input-1",
+                turnID: "turn-runtime",
+                questions: [
+                    RequestUserInputQuestion(
+                        id: "choice",
+                        header: "Choice",
+                        question: "Pick",
+                        options: [RequestUserInputQuestionOption(label: "A", description: "Alpha")]
+                    )
+                ]
+            ))
+        )
+        let userInputRequest = try await nextClientRequest(
+            notificationCapture,
+            method: "item/tool/requestUserInput"
+        )
+        let userInputRequestID = try XCTUnwrap(userInputRequest["id"])
+
+        let userInputResponse = try JSONSerialization.data(withJSONObject: [
+            "method": "item/tool/requestUserInput",
+            "id": userInputRequestID,
+            "response": [
+                "answers": [
+                    "choice": ["answers": ["A"]]
+                ]
+            ]
+        ])
+        XCTAssertNil(processor.processLine(userInputResponse))
+
+        let submissions = try await waitForSubmissions(coreOpCapture, count: 1)
+        XCTAssertEqual(submissions[0].threadID, "thread-1")
+        guard case .userInputAnswer = submissions[0].op else {
+            return XCTFail("expected user input answer")
+        }
+        for payload in await notificationCapture.payloadsData() {
+            let messages = try decodeMessages(payload)
+            XCTAssertFalse(messages.contains { $0["method"] as? String == "serverRequest/resolved" })
+        }
+    }
+
     func testRuntimeDynamicToolCallResponseFallbacksMatchRust() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()
