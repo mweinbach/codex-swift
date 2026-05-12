@@ -2046,6 +2046,173 @@ public enum RemoteControlWebSocketConnectErrorFormatter {
     }
 }
 
+public enum RemoteControlWebSocketConnectionError: Error, CustomStringConvertible, Equatable, Sendable {
+    case http(websocketURL: String, statusCode: Int, headers: [String: String], body: Data)
+    case other(websocketURL: String, message: String)
+
+    public var httpStatusCode: Int? {
+        switch self {
+        case let .http(_, statusCode, _, _):
+            return statusCode
+        case .other:
+            return nil
+        }
+    }
+
+    public var description: String {
+        switch self {
+        case let .http(websocketURL, statusCode, headers, body):
+            return RemoteControlWebSocketConnectErrorFormatter.formatHTTPError(
+                websocketURL: websocketURL,
+                statusCode: statusCode,
+                headers: headers,
+                body: body
+            )
+        case let .other(websocketURL, message):
+            return "failed to connect app-server remote control websocket `\(websocketURL)`: \(message)"
+        }
+    }
+}
+
+public struct RemoteControlWebSocketConnectorResult: Sendable {
+    public var request: URLRequest
+    public var enrollment: RemoteControlEnrollment
+    public var updatedEnrollment: RemoteControlEnrollment?
+    public var statusUpdates: [RemoteControlStatusSnapshot]
+
+    public init(
+        request: URLRequest,
+        enrollment: RemoteControlEnrollment,
+        updatedEnrollment: RemoteControlEnrollment?,
+        statusUpdates: [RemoteControlStatusSnapshot]
+    ) {
+        self.request = request
+        self.enrollment = enrollment
+        self.updatedEnrollment = updatedEnrollment
+        self.statusUpdates = statusUpdates
+    }
+}
+
+public struct RemoteControlWebSocketConnector<Auth: APIAuthProvider>: Sendable {
+    public typealias Enroll = @Sendable (RemoteControlTarget) async throws -> RemoteControlEnrollment
+    public typealias Connect = @Sendable (URLRequest, RemoteControlEnrollment) async throws -> Void
+
+    private let auth: RemoteControlConnectionAuth<Auth>
+    private let installationID: String
+    private let appServerClientName: String?
+    private let enroll: Enroll
+    private let connect: Connect
+
+    public init(
+        auth: RemoteControlConnectionAuth<Auth>,
+        installationID: String,
+        appServerClientName: String?,
+        enroll: @escaping Enroll,
+        connect: @escaping Connect
+    ) {
+        self.auth = auth
+        self.installationID = installationID
+        self.appServerClientName = appServerClientName
+        self.enroll = enroll
+        self.connect = connect
+    }
+
+    public func connect(
+        target: RemoteControlTarget,
+        store: RemoteControlEnrollmentStore?,
+        currentEnrollment: RemoteControlEnrollment?,
+        subscribeCursor: String?,
+        statusPublisher: RemoteControlStatusPublisherCore
+    ) async throws -> RemoteControlWebSocketConnectorResult {
+        guard store != nil else {
+            throw RemoteControlWebSocketConnectionError.other(
+                websocketURL: target.websocketURL,
+                message: "remote control requires sqlite state db"
+            )
+        }
+
+        var statusPublisher = statusPublisher
+        var statusUpdates: [RemoteControlStatusSnapshot] = []
+        var enrollment = currentEnrollment
+        if enrollment?.accountID != nil, enrollment?.accountID != auth.accountID {
+            enrollment = nil
+            append(statusPublisher.publishEnvironmentID(nil), to: &statusUpdates)
+        }
+        if let existing = enrollment {
+            append(statusPublisher.publishEnvironmentID(existing.environmentID), to: &statusUpdates)
+        }
+
+        if enrollment == nil {
+            enrollment = try await RemoteControlEnrollmentPersistence.load(
+                store: store,
+                target: target,
+                accountID: auth.accountID,
+                appServerClientName: appServerClientName
+            )
+            if let loaded = enrollment {
+                append(statusPublisher.publishEnvironmentID(loaded.environmentID), to: &statusUpdates)
+            }
+        }
+
+        if enrollment == nil {
+            let newEnrollment = try await enroll(target)
+            try await RemoteControlEnrollmentPersistence.update(
+                store: store,
+                target: target,
+                accountID: auth.accountID,
+                appServerClientName: appServerClientName,
+                enrollment: newEnrollment
+            )
+            append(statusPublisher.publishEnvironmentID(newEnrollment.environmentID), to: &statusUpdates)
+            enrollment = newEnrollment
+        }
+
+        guard let resolvedEnrollment = enrollment else {
+            throw RemoteControlWebSocketConnectionError.other(
+                websocketURL: target.websocketURL,
+                message: "missing remote control enrollment after enrollment step"
+            )
+        }
+        let request = try RemoteControlWebSocketRequestBuilder(
+            auth: auth,
+            installationID: installationID
+        ).buildRequest(
+            websocketURL: target.websocketURL,
+            enrollment: resolvedEnrollment,
+            subscribeCursor: subscribeCursor
+        )
+
+        do {
+            try await connect(request, resolvedEnrollment)
+            return RemoteControlWebSocketConnectorResult(
+                request: request,
+                enrollment: resolvedEnrollment,
+                updatedEnrollment: resolvedEnrollment,
+                statusUpdates: statusUpdates
+            )
+        } catch let error as RemoteControlWebSocketConnectionError where error.httpStatusCode == 404 {
+            try? await RemoteControlEnrollmentPersistence.update(
+                store: store,
+                target: target,
+                accountID: auth.accountID,
+                appServerClientName: appServerClientName,
+                enrollment: nil
+            )
+            append(statusPublisher.publishEnvironmentID(nil), to: &statusUpdates)
+            throw error
+        }
+    }
+
+    private func append(
+        _ snapshot: RemoteControlStatusSnapshot?,
+        to statusUpdates: inout [RemoteControlStatusSnapshot]
+    ) {
+        if let snapshot {
+            statusUpdates.append(snapshot)
+        }
+    }
+}
+
 public struct RemoteControlEnrollmentClient<Auth: APIAuthProvider>: Sendable {
     public typealias Send = @Sendable (URLRequest) async throws -> URLSessionTransportResponse
 

@@ -2977,6 +2977,175 @@ final class ExecServerTests: XCTestCase {
         )
     }
 
+    func testRemoteControlWebSocketConnectorReusesPersistedEnrollmentBeforeEnrolling() async throws {
+        let target = try RemoteControlURLNormalizer.normalize("https://chatgpt.com/backend-api")
+        let store = RemoteControlEnrollmentMemoryStore()
+        let persistedEnrollment = RemoteControlEnrollment(
+            accountID: "account_id",
+            environmentID: "env_persisted",
+            serverID: "srv_e_persisted",
+            serverName: "persisted-server"
+        )
+        try await RemoteControlEnrollmentPersistence.update(
+            store: store,
+            target: target,
+            accountID: "account_id",
+            appServerClientName: nil,
+            enrollment: persistedEnrollment
+        )
+        let probe = RemoteControlWebSocketConnectorProbe()
+        let connector = RemoteControlWebSocketConnector(
+            auth: RemoteControlConnectionAuth(
+                authProvider: StaticAPIAuthProvider(bearerToken: "chatgpt-token"),
+                accountID: "account_id"
+            ),
+            installationID: "install-123",
+            appServerClientName: nil,
+            enroll: { target in
+                await probe.enroll(target: target, returning: RemoteControlEnrollment(
+                    accountID: "account_id",
+                    environmentID: "env_new",
+                    serverID: "srv_e_new",
+                    serverName: "new-server"
+                ))
+            },
+            connect: { request, enrollment in
+                try await probe.connect(request: request, enrollment: enrollment)
+            }
+        )
+
+        let result = try await connector.connect(
+            target: target,
+            store: store,
+            currentEnrollment: nil,
+            subscribeCursor: "cursor-1",
+            statusPublisher: RemoteControlStatusPublisherCore(snapshot: RemoteControlStatusSnapshot(
+                status: .connecting,
+                installationID: "install-123",
+                environmentID: nil
+            ))
+        )
+
+        XCTAssertEqual(result.enrollment, persistedEnrollment)
+        XCTAssertEqual(result.statusUpdates, [
+            RemoteControlStatusSnapshot(
+                status: .connecting,
+                installationID: "install-123",
+                environmentID: "env_persisted"
+            ),
+        ])
+        let enrollCount = await probe.enrollCount()
+        let connectedServerIDs = await probe.connectedServerIDs()
+        XCTAssertEqual(enrollCount, 0)
+        XCTAssertEqual(connectedServerIDs, ["srv_e_persisted"])
+        XCTAssertEqual(result.request.value(forHTTPHeaderField: "x-codex-server-id"), "srv_e_persisted")
+        XCTAssertEqual(result.request.value(forHTTPHeaderField: "x-codex-subscribe-cursor"), "cursor-1")
+    }
+
+    func testRemoteControlWebSocketConnectorClearsStaleEnrollmentAfter404ThenReenrolls() async throws {
+        let target = try RemoteControlURLNormalizer.normalize("https://chatgpt.com/backend-api")
+        let store = RemoteControlEnrollmentMemoryStore()
+        let staleEnrollment = RemoteControlEnrollment(
+            accountID: "account_id",
+            environmentID: "env_stale",
+            serverID: "srv_e_stale",
+            serverName: "stale-server"
+        )
+        let refreshedEnrollment = RemoteControlEnrollment(
+            accountID: "account_id",
+            environmentID: "env_refreshed",
+            serverID: "srv_e_refreshed",
+            serverName: "test-host"
+        )
+        try await RemoteControlEnrollmentPersistence.update(
+            store: store,
+            target: target,
+            accountID: "account_id",
+            appServerClientName: nil,
+            enrollment: staleEnrollment
+        )
+        let probe = RemoteControlWebSocketConnectorProbe(staleServerID: staleEnrollment.serverID)
+        let connector = RemoteControlWebSocketConnector(
+            auth: RemoteControlConnectionAuth(
+                authProvider: StaticAPIAuthProvider(bearerToken: "chatgpt-token"),
+                accountID: "account_id"
+            ),
+            installationID: "install-123",
+            appServerClientName: nil,
+            enroll: { target in
+                await probe.enroll(target: target, returning: refreshedEnrollment)
+            },
+            connect: { request, enrollment in
+                try await probe.connect(request: request, enrollment: enrollment)
+            }
+        )
+
+        do {
+            _ = try await connector.connect(
+                target: target,
+                store: store,
+                currentEnrollment: nil,
+                subscribeCursor: nil,
+                statusPublisher: RemoteControlStatusPublisherCore(snapshot: RemoteControlStatusSnapshot(
+                    status: .connecting,
+                    installationID: "install-123",
+                    environmentID: nil
+                ))
+            )
+            XCTFail("stale websocket enrollment should fail with HTTP 404 before re-enrolling")
+        } catch let error as RemoteControlWebSocketConnectionError {
+            XCTAssertEqual(
+                error.description,
+                "failed to connect app-server remote control websocket `wss://chatgpt.com/backend-api/wham/remote/control/server`: HTTP error: 404 Not Found, request-id: req-404, cf-ray: <none>, body: stale enrollment"
+            )
+        }
+
+        let clearedEnrollment = try await RemoteControlEnrollmentPersistence.load(
+            store: store,
+            target: target,
+            accountID: "account_id",
+            appServerClientName: nil
+        )
+        XCTAssertNil(clearedEnrollment)
+
+        let result = try await connector.connect(
+            target: target,
+            store: store,
+            currentEnrollment: nil,
+            subscribeCursor: nil,
+            statusPublisher: RemoteControlStatusPublisherCore(snapshot: RemoteControlStatusSnapshot(
+                status: .connecting,
+                installationID: "install-123",
+                environmentID: nil
+            ))
+        )
+
+        XCTAssertEqual(result.enrollment, refreshedEnrollment)
+        XCTAssertEqual(result.statusUpdates, [
+            RemoteControlStatusSnapshot(
+                status: .connecting,
+                installationID: "install-123",
+                environmentID: "env_refreshed"
+            ),
+        ])
+        let enrollCount = await probe.enrollCount()
+        let connectedServerIDs = await probe.connectedServerIDs()
+        let records = await store.records()
+        XCTAssertEqual(enrollCount, 1)
+        XCTAssertEqual(connectedServerIDs, ["srv_e_stale", "srv_e_refreshed"])
+        XCTAssertEqual(
+            records,
+            [RemoteControlEnrollmentRecord(
+                websocketURL: target.websocketURL,
+                accountID: "account_id",
+                appServerClientName: nil,
+                serverID: "srv_e_refreshed",
+                environmentID: "env_refreshed",
+                serverName: "test-host"
+            )]
+        )
+    }
+
     func testRemoteControlClientEnvelopeWireShapesMatchRust() throws {
         let envelope = RemoteControlClientEnvelope(
             event: .clientMessage(message: .request(ExecServerJSONRPCRequest(
@@ -4701,6 +4870,47 @@ final class ExecServerTests: XCTestCase {
 
         func reloadCount() -> Int {
             reloads
+        }
+    }
+
+    private actor RemoteControlWebSocketConnectorProbe {
+        private let staleServerID: String?
+        private var enrolls = 0
+        private var serverIDs: [String] = []
+
+        init(staleServerID: String? = nil) {
+            self.staleServerID = staleServerID
+        }
+
+        func enroll(
+            target _: RemoteControlTarget,
+            returning enrollment: RemoteControlEnrollment
+        ) -> RemoteControlEnrollment {
+            enrolls += 1
+            return enrollment
+        }
+
+        func connect(
+            request _: URLRequest,
+            enrollment: RemoteControlEnrollment
+        ) throws {
+            serverIDs.append(enrollment.serverID)
+            if enrollment.serverID == staleServerID {
+                throw RemoteControlWebSocketConnectionError.http(
+                    websocketURL: "wss://chatgpt.com/backend-api/wham/remote/control/server",
+                    statusCode: 404,
+                    headers: ["x-request-id": "req-404"],
+                    body: Data("stale enrollment".utf8)
+                )
+            }
+        }
+
+        func enrollCount() -> Int {
+            enrolls
+        }
+
+        func connectedServerIDs() -> [String] {
+            serverIDs
         }
     }
 
