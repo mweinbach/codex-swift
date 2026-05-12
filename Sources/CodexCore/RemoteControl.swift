@@ -84,9 +84,9 @@ public enum RemoteControlEnrollmentError: Error, CustomStringConvertible, Equata
         case let .requestFailed(enrollURL, message):
             return "failed to enroll remote control server at `\(enrollURL)`: \(message)"
         case let .enrollmentFailed(enrollURL, statusCode, headers, bodyPreview):
-            return "remote control server enrollment failed at `\(enrollURL)`: HTTP \(Self.statusDescription(statusCode)), \(Self.formattedHeaders(headers)), body: \(bodyPreview)"
+            return "remote control server enrollment failed at `\(enrollURL)`: HTTP \(RemoteControlHTTPFormatting.statusDescription(statusCode)), \(RemoteControlHTTPFormatting.formattedHeaders(headers)), body: \(bodyPreview)"
         case let .decodeFailed(enrollURL, statusCode, headers, bodyPreview, message):
-            return "failed to parse remote control enrollment response from `\(enrollURL)`: HTTP \(Self.statusDescription(statusCode)), \(Self.formattedHeaders(headers)), body: \(bodyPreview), decode error: \(message)"
+            return "failed to parse remote control enrollment response from `\(enrollURL)`: HTTP \(RemoteControlHTTPFormatting.statusDescription(statusCode)), \(RemoteControlHTTPFormatting.formattedHeaders(headers)), body: \(bodyPreview), decode error: \(message)"
         }
     }
 
@@ -98,8 +98,10 @@ public enum RemoteControlEnrollmentError: Error, CustomStringConvertible, Equata
             return false
         }
     }
+}
 
-    private static func formattedHeaders(_ headers: [String: String]) -> String {
+private enum RemoteControlHTTPFormatting {
+    static func formattedHeaders(_ headers: [String: String]) -> String {
         let normalized = Dictionary(uniqueKeysWithValues: headers.map { key, value in
             (key.lowercased(), value)
         })
@@ -108,7 +110,7 @@ public enum RemoteControlEnrollmentError: Error, CustomStringConvertible, Equata
         return "request-id: \(requestID), cf-ray: \(cfRay)"
     }
 
-    private static func statusDescription(_ statusCode: Int) -> String {
+    static func statusDescription(_ statusCode: Int) -> String {
         switch statusCode {
         case 400:
             return "400 Bad Request"
@@ -131,6 +133,134 @@ public enum RemoteControlEnrollmentError: Error, CustomStringConvertible, Equata
         default:
             return "\(statusCode)"
         }
+    }
+
+    static func previewResponseBody(_ body: Data) -> String {
+        let trimmed = String(decoding: body, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return "<empty>"
+        }
+        guard trimmed.utf8.count > 4_096 else {
+            return trimmed
+        }
+        let bytes = Array(trimmed.utf8)
+        var end = 4_096
+        while end > 0, String(data: Data(bytes.prefix(end)), encoding: .utf8) == nil {
+            end -= 1
+        }
+        return "\(String(decoding: bytes.prefix(end), as: UTF8.self))..."
+    }
+}
+
+public enum RemoteControlWebSocketRequestError: Error, CustomStringConvertible, Equatable, Sendable {
+    case invalidWebSocketURL(websocketURL: String, message: String)
+    case invalidHeader(name: String, message: String)
+
+    public var description: String {
+        switch self {
+        case let .invalidWebSocketURL(websocketURL, message):
+            return "invalid remote control websocket URL `\(websocketURL)`: \(message)"
+        case let .invalidHeader(name, message):
+            return "invalid remote control header `\(name)`: \(message)"
+        }
+    }
+}
+
+public struct RemoteControlWebSocketRequestBuilder<Auth: APIAuthProvider>: Sendable {
+    public static var protocolVersion: String { "3" }
+    public static var serverIDHeader: String { "x-codex-server-id" }
+    public static var serverNameHeader: String { "x-codex-name" }
+    public static var protocolVersionHeader: String { "x-codex-protocol-version" }
+    public static var accountIDHeader: String { "chatgpt-account-id" }
+    public static var installationIDHeader: String { "x-codex-installation-id" }
+    public static var subscribeCursorHeader: String { "x-codex-subscribe-cursor" }
+
+    private let auth: RemoteControlConnectionAuth<Auth>
+    private let installationID: String
+
+    public init(auth: RemoteControlConnectionAuth<Auth>, installationID: String) {
+        self.auth = auth
+        self.installationID = installationID
+    }
+
+    public func buildRequest(
+        websocketURL: String,
+        enrollment: RemoteControlEnrollment,
+        subscribeCursor: String? = nil
+    ) throws -> URLRequest {
+        guard let components = URLComponents(string: websocketURL),
+              let scheme = components.scheme,
+              scheme == "ws" || scheme == "wss",
+              let url = components.url
+        else {
+            throw RemoteControlWebSocketRequestError.invalidWebSocketURL(
+                websocketURL: websocketURL,
+                message: "expected ws:// or wss:// URL"
+            )
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try setHeader(name: Self.serverIDHeader, value: enrollment.serverID, on: &request)
+        try setHeader(
+            name: Self.serverNameHeader,
+            value: Data(enrollment.serverName.utf8).base64EncodedString(),
+            on: &request
+        )
+        try setHeader(name: Self.protocolVersionHeader, value: Self.protocolVersion, on: &request)
+        try addAuthHeaders(to: &request)
+        try setHeader(name: Self.accountIDHeader, value: enrollment.accountID, on: &request)
+        try setHeader(name: Self.installationIDHeader, value: installationID, on: &request)
+        if let subscribeCursor {
+            try setHeader(name: Self.subscribeCursorHeader, value: subscribeCursor, on: &request)
+        }
+        return request
+    }
+
+    private func addAuthHeaders(to request: inout URLRequest) throws {
+        if let bearerToken = auth.authProvider.bearerToken {
+            try setHeader(name: APIAuthHeaders.authorization, value: "Bearer \(bearerToken)", on: &request)
+        }
+        if let providerAccountID = auth.authProvider.accountID {
+            try setHeader(name: APIAuthHeaders.chatGPTAccountID, value: providerAccountID, on: &request)
+        }
+    }
+
+    private func setHeader(name: String, value: String, on request: inout URLRequest) throws {
+        guard isHeaderName(name) else {
+            throw RemoteControlWebSocketRequestError.invalidHeader(name: name, message: "invalid header name")
+        }
+        guard isHeaderValue(value) else {
+            throw RemoteControlWebSocketRequestError.invalidHeader(name: name, message: "invalid header value")
+        }
+        request.setValue(value, forHTTPHeaderField: name)
+    }
+
+    private func isHeaderName(_ value: String) -> Bool {
+        !value.isEmpty && value.unicodeScalars.allSatisfy { scalar in
+            scalar.value >= 0x21 && scalar.value <= 0x7E && !"()<>@,;:\\\"/[]?={} \t".unicodeScalars.contains(scalar)
+        }
+    }
+
+    private func isHeaderValue(_ value: String) -> Bool {
+        value.unicodeScalars.allSatisfy { scalar in
+            scalar.value == 0x09 || (scalar.value >= 0x20 && scalar.value != 0x7F)
+        }
+    }
+}
+
+public enum RemoteControlWebSocketConnectErrorFormatter {
+    public static func formatHTTPError(
+        websocketURL: String,
+        statusCode: Int,
+        headers: [String: String],
+        body: Data
+    ) -> String {
+        var message = "failed to connect app-server remote control websocket `\(websocketURL)`: HTTP error: \(RemoteControlHTTPFormatting.statusDescription(statusCode)), \(RemoteControlHTTPFormatting.formattedHeaders(headers))"
+        if !body.isEmpty {
+            message += ", body: \(RemoteControlHTTPFormatting.previewResponseBody(body))"
+        }
+        return message
     }
 }
 
@@ -233,19 +363,7 @@ public struct RemoteControlEnrollmentClient<Auth: APIAuthProvider>: Sendable {
     }
 
     public static func previewResponseBody(_ body: Data) -> String {
-        let trimmed = String(decoding: body, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            return "<empty>"
-        }
-        guard trimmed.utf8.count > 4_096 else {
-            return trimmed
-        }
-        let bytes = Array(trimmed.utf8)
-        var end = 4_096
-        while end > 0, String(data: Data(bytes.prefix(end)), encoding: .utf8) == nil {
-            end -= 1
-        }
-        return "\(String(decoding: bytes.prefix(end), as: UTF8.self))..."
+        RemoteControlHTTPFormatting.previewResponseBody(body)
     }
 
     private func addAuthHeaders(to request: inout URLRequest) {

@@ -2601,6 +2601,80 @@ final class ExecServerTests: XCTestCase {
         XCTAssertEqual(preview, "\(String(repeating: "a", count: 4_095))...")
     }
 
+    func testRemoteControlWebSocketRequestBuilderBuildsRustHandshakeShape() throws {
+        let target = try RemoteControlURLNormalizer.normalize("https://chatgpt.com/backend-api")
+        let builder = RemoteControlWebSocketRequestBuilder(
+            auth: RemoteControlConnectionAuth(
+                authProvider: StaticAPIAuthProvider(bearerToken: "chatgpt-token", accountID: "provider-account"),
+                accountID: "connection-account"
+            ),
+            installationID: "install-123"
+        )
+        let enrollment = RemoteControlEnrollment(
+            accountID: "remote-account",
+            environmentID: "env_123",
+            serverID: "srv_123",
+            serverName: "test-server"
+        )
+
+        let request = try builder.buildRequest(
+            websocketURL: target.websocketURL,
+            enrollment: enrollment,
+            subscribeCursor: "cursor-1"
+        )
+
+        XCTAssertEqual(request.url?.absoluteString, "wss://chatgpt.com/backend-api/wham/remote/control/server")
+        XCTAssertEqual(request.httpMethod, "GET")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "authorization"), "Bearer chatgpt-token")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "x-codex-server-id"), "srv_123")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "x-codex-name"), "dGVzdC1zZXJ2ZXI=")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "x-codex-protocol-version"), "3")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "chatgpt-account-id"), "remote-account")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "x-codex-installation-id"), "install-123")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "x-codex-subscribe-cursor"), "cursor-1")
+    }
+
+    func testRemoteControlWebSocketRequestBuilderRejectsInvalidHeaderLikeRust() throws {
+        let target = try RemoteControlURLNormalizer.normalize("https://chatgpt.com/backend-api")
+        let builder = RemoteControlWebSocketRequestBuilder(
+            auth: RemoteControlConnectionAuth(
+                authProvider: StaticAPIAuthProvider(bearerToken: "chatgpt-token"),
+                accountID: "connection-account"
+            ),
+            installationID: "install-123"
+        )
+        let enrollment = RemoteControlEnrollment(
+            accountID: "remote-account",
+            environmentID: "env_123",
+            serverID: "srv_123",
+            serverName: "test-server"
+        )
+
+        XCTAssertThrowsError(try builder.buildRequest(
+            websocketURL: target.websocketURL,
+            enrollment: enrollment,
+            subscribeCursor: "bad\ncursor"
+        )) { error in
+            XCTAssertTrue(
+                String(describing: error).hasPrefix("invalid remote control header `x-codex-subscribe-cursor`:")
+            )
+        }
+    }
+
+    func testRemoteControlWebSocketConnectErrorFormatsRustHTTPDetails() {
+        let message = RemoteControlWebSocketConnectErrorFormatter.formatHTTPError(
+            websocketURL: "wss://chatgpt.com/backend-api/wham/remote/control/server",
+            statusCode: 503,
+            headers: ["x-trace-id": "trace", "x-region": "us-east-1"],
+            body: Data("upstream unavailable".utf8)
+        )
+
+        XCTAssertEqual(
+            message,
+            "failed to connect app-server remote control websocket `wss://chatgpt.com/backend-api/wham/remote/control/server`: HTTP error: 503 Service Unavailable, request-id: <none>, cf-ray: <none>, body: upstream unavailable"
+        )
+    }
+
     func testRemoteExecutorConfigurationNormalizesRustValues() throws {
         let config = try ExecServerRemoteExecutorConfiguration.fromEnvironment(
             baseURL: " https://registry.example.test/// ",
