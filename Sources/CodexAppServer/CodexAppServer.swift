@@ -3965,7 +3965,8 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration,
         cachedFeaturedPluginIDs: [String]? = nil,
-        cacheFeaturedPluginIDs: (([String]) -> Void)? = nil
+        cacheFeaturedPluginIDs: (([String]) -> Void)? = nil,
+        cacheRemoteInstalledPlugins: (([RemoteInstalledPluginReference]) -> Void)? = nil
     ) throws -> [String: Any] {
         let cwds = try rustStringArrayParam(params?["cwds"]) ?? []
         for cwd in cwds {
@@ -4025,6 +4026,9 @@ public enum CodexAppServer {
             }
         }
         let updatedMarketplaces = result["marketplaces"] as? [[String: Any]] ?? []
+        if includeDefaultRemote || includeWorkspaceDirectory || includeSharedWithMe {
+            cacheRemoteInstalledPlugins?(remoteInstalledPluginReferences(from: updatedMarketplaces))
+        }
         result["featuredPluginIds"] = featuredPluginIDs(
             for: updatedMarketplaces,
             runtimeConfig: runtimeConfig,
@@ -4033,6 +4037,38 @@ public enum CodexAppServer {
             cacheFeaturedPluginIDs: cacheFeaturedPluginIDs
         )
         return result
+    }
+
+    private static func remoteInstalledPluginReferences(
+        from marketplaces: [[String: Any]]
+    ) -> [RemoteInstalledPluginReference] {
+        var plugins: [RemoteInstalledPluginReference] = []
+        var seen: Set<String> = []
+        for marketplace in marketplaces {
+            guard let marketplaceName = marketplace["name"] as? String,
+                  marketplaceName == "chatgpt-global" || marketplaceName == "workspace-directory",
+                  let summaries = marketplace["plugins"] as? [[String: Any]]
+            else {
+                continue
+            }
+            for summary in summaries {
+                guard summary["installed"] as? Bool == true,
+                      let pluginName = summary["name"] as? String
+                else {
+                    continue
+                }
+                let key = "\(pluginName)@\(marketplaceName)"
+                guard seen.insert(key).inserted else {
+                    continue
+                }
+                plugins.append(RemoteInstalledPluginReference(
+                    marketplaceName: marketplaceName,
+                    pluginName: pluginName,
+                    enabled: summary["enabled"] as? Bool ?? true
+                ))
+            }
+        }
+        return plugins
     }
 
     private static func localPluginListResult(
@@ -14084,7 +14120,8 @@ public enum CodexAppServer {
 
     fileprivate static func skillsListResult(
         params: [String: Any]?,
-        configuration: CodexAppServerConfiguration
+        configuration: CodexAppServerConfiguration,
+        remoteInstalledPlugins: [RemoteInstalledPluginReference] = []
     ) -> [String: Any] {
         let rawCwds = stringArrayParam(params?["cwds"]) ?? []
         let cwds = rawCwds.isEmpty ? [configuration.cwd.standardizedFileURL.path] : rawCwds
@@ -14100,7 +14137,8 @@ public enum CodexAppServer {
                 var outcome = loadSkills(
                     cwd: URL(fileURLWithPath: cwd, isDirectory: true),
                     codexHome: configuration.codexHome,
-                    configLayerStack: configLayerStack
+                    configLayerStack: configLayerStack,
+                    remoteInstalledPlugins: remoteInstalledPlugins
                 )
                 outcome.skills = outcome.skills.filter { isSkillEnabled($0, rules: configRules) }
                 return [
@@ -18831,7 +18869,8 @@ public enum CodexAppServer {
     private static func loadSkills(
         cwd: URL,
         codexHome: URL,
-        configLayerStack: ConfigLayerStack?
+        configLayerStack: ConfigLayerStack?,
+        remoteInstalledPlugins: [RemoteInstalledPluginReference] = []
     ) -> SkillLoadOutcome {
         var outcome = SkillLoadOutcome()
         var skillRoots = skillRoots(cwd: cwd, codexHome: codexHome)
@@ -18839,7 +18878,8 @@ public enum CodexAppServer {
         if let configLayerStack {
             skillRoots.append(contentsOf: SkillLoader.configuredPluginSkillRoots(
                 codexHome: codexHome,
-                configLayerStack: configLayerStack
+                configLayerStack: configLayerStack,
+                remoteInstalledPlugins: remoteInstalledPlugins
             ).map { (path: $0.path, scope: SkillScope.user, pluginID: Optional($0.pluginID)) })
         }
         for root in skillRoots {
@@ -21714,6 +21754,7 @@ final class CodexAppServerMessageProcessor {
     private var cachedAppList: [[String: Any]]?
     private var lastGlobalAppListRefreshFailed = false
     private var featuredPluginIDsCache: FeaturedPluginIDsCache?
+    private var remoteInstalledPluginsCache: [RemoteInstalledPluginReference] = []
     private var fsWatches: [String: AppServerFSWatch] = [:]
     private var fuzzyFileSearchSessions: [String: [String]] = [:]
     private var activeTurnIDs: [String: String] = [:]
@@ -21902,7 +21943,18 @@ final class CodexAppServerMessageProcessor {
             cachedFeaturedPluginIDs: cachedIDs,
             cacheFeaturedPluginIDs: { ids in
                 self.featuredPluginIDsCache = FeaturedPluginIDsCache(key: cacheKey, ids: ids)
+            },
+            cacheRemoteInstalledPlugins: { plugins in
+                self.remoteInstalledPluginsCache = plugins
             }
+        )
+    }
+
+    private func skillsListResult(params: [String: Any]?) -> [String: Any] {
+        CodexAppServer.skillsListResult(
+            params: params,
+            configuration: configuration,
+            remoteInstalledPlugins: remoteInstalledPluginsCache
         )
     }
 
@@ -23567,7 +23619,7 @@ final class CodexAppServerMessageProcessor {
                 case "skills/list":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: CodexAppServer.skillsListResult(params: params, configuration: configuration)
+                        result: skillsListResult(params: params)
                     )
                 case "skills/config/write":
                     response = CodexAppServer.responseObject(

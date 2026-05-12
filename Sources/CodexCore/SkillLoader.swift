@@ -23,13 +23,19 @@ public enum SkillLoader {
         codexHome: URL,
         configLayerStack: ConfigLayerStack? = nil,
         pluginSkillRoots: [PluginSkillRoot] = [],
+        remoteInstalledPlugins: [RemoteInstalledPluginReference] = [],
         includeSystemSkills: Bool = true,
         restrictionProduct: Product? = .codex,
         fileManager: FileManager = .default
     ) -> SkillLoadOutcome {
         var outcome = SkillLoadOutcome()
         let configuredPluginRoots = configLayerStack.map {
-            configuredPluginSkillRoots(codexHome: codexHome, configLayerStack: $0, fileManager: fileManager)
+            configuredPluginSkillRoots(
+                codexHome: codexHome,
+                configLayerStack: $0,
+                remoteInstalledPlugins: remoteInstalledPlugins,
+                fileManager: fileManager
+            )
         } ?? []
         for root in resolvedSkillRoots(
             cwd: cwd,
@@ -82,22 +88,38 @@ public enum SkillLoader {
     public static func configuredPluginSkillRoots(
         codexHome: URL,
         configLayerStack: ConfigLayerStack,
+        remoteInstalledPlugins: [RemoteInstalledPluginReference] = [],
         fileManager: FileManager = .default
     ) -> [PluginSkillRoot] {
         let effectiveConfig = configLayerStack.effectiveConfig()
-        guard configFeatureEnabled("plugins", in: effectiveConfig, defaultValue: true),
-              let userConfig = configLayerStack.getUserLayer()?.config,
-              let root = configTable(userConfig),
-              let plugins = root["plugins"].flatMap(configTable)
-        else {
+        guard configFeatureEnabled("plugins", in: effectiveConfig, defaultValue: true) else {
             return []
+        }
+
+        var pluginEnablement: [String: Bool] = [:]
+        if let userConfig = configLayerStack.getUserLayer()?.config,
+           let root = configTable(userConfig),
+           let plugins = root["plugins"].flatMap(configTable) {
+            for pluginID in plugins.keys {
+                guard let pluginConfig = plugins[pluginID].flatMap(configTable) else {
+                    continue
+                }
+                pluginEnablement[pluginID] = boolConfig(pluginConfig, "enabled") ?? true
+            }
+        }
+        if configFeatureEnabled("remote_plugin", in: effectiveConfig, defaultValue: false) {
+            for plugin in remoteInstalledPlugins {
+                guard let pluginID = remoteInstalledPluginID(plugin) else {
+                    continue
+                }
+                pluginEnablement[pluginID] = plugin.enabled
+            }
         }
 
         var roots: [PluginSkillRoot] = []
         var seenPaths: Set<String> = []
-        for pluginID in plugins.keys.sorted() {
-            guard let pluginConfig = plugins[pluginID].flatMap(configTable),
-                  boolConfig(pluginConfig, "enabled") ?? true,
+        for pluginID in pluginEnablement.keys.sorted() {
+            guard pluginEnablement[pluginID] == true,
                   let pluginRoot = activeLocalPluginRoot(id: pluginID, codexHome: codexHome, fileManager: fileManager)
             else {
                 continue
@@ -256,6 +278,21 @@ public enum SkillLoader {
             .appendingPathComponent(parts[1], isDirectory: true)
             .appendingPathComponent(parts[0], isDirectory: true)
             .appendingPathComponent(version, isDirectory: true)
+    }
+
+    private static func remoteInstalledPluginID(_ plugin: RemoteInstalledPluginReference) -> String? {
+        guard isValidPluginSegment(plugin.pluginName),
+              isValidPluginSegment(plugin.marketplaceName)
+        else {
+            return nil
+        }
+        return "\(plugin.pluginName)@\(plugin.marketplaceName)"
+    }
+
+    private static func isValidPluginSegment(_ segment: String) -> Bool {
+        !segment.isEmpty && segment.allSatisfy { character in
+            character.isASCII && (character.isLetter || character.isNumber || character == "_" || character == "-")
+        }
     }
 
     private static func activeLocalPluginVersion(id: String, codexHome: URL, fileManager: FileManager) -> String? {

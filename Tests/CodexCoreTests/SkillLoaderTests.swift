@@ -238,6 +238,98 @@ final class SkillLoaderTests: XCTestCase {
         ).isEmpty)
     }
 
+    func testRemoteInstalledPluginSkillRootsLoadFromCacheWithoutUserPluginConfigLikeRustManager() throws {
+        let tmp = try SkillLoaderTemporaryDirectory()
+        let cwd = tmp.url.appendingPathComponent("repo", isDirectory: true)
+        let codexHome = tmp.url.appendingPathComponent("home", isDirectory: true)
+        let pluginRoot = codexHome.appendingPathComponent(
+            "plugins/cache/chatgpt-global/linear/local",
+            isDirectory: true
+        )
+        let skillPath = pluginRoot.appendingPathComponent("skills/search/SKILL.md", isDirectory: false)
+        try FileManager.default.createDirectory(at: cwd, withIntermediateDirectories: true)
+        try writeSkill(name: "search", description: "search Linear data", to: skillPath)
+        try writePluginManifest(name: "linear", to: pluginRoot.appendingPathComponent(".codex-plugin/plugin.json"))
+        let stack = try remotePluginFeatureConfigStack(codexHome: codexHome)
+        let remoteInstalled = [
+            RemoteInstalledPluginReference(
+                marketplaceName: "chatgpt-global",
+                pluginName: "linear",
+                enabled: true
+            )
+        ]
+
+        let roots = SkillLoader.configuredPluginSkillRoots(
+            codexHome: codexHome,
+            configLayerStack: stack,
+            remoteInstalledPlugins: remoteInstalled
+        )
+        let outcome = SkillLoader.load(
+            cwd: cwd,
+            codexHome: codexHome,
+            configLayerStack: stack,
+            remoteInstalledPlugins: remoteInstalled,
+            includeSystemSkills: false
+        )
+
+        XCTAssertEqual(roots, [
+            PluginSkillRoot(path: pluginRoot.appendingPathComponent("skills", isDirectory: true), pluginID: "linear@chatgpt-global")
+        ])
+        XCTAssertEqual(outcome.errors, [])
+        XCTAssertEqual(outcome.skills.map(\.name), ["linear:search"])
+        XCTAssertEqual(outcome.skills.map(\.pluginID), ["linear@chatgpt-global"])
+    }
+
+    func testRemoteInstalledPluginSkillRootsRespectFeatureEnablementAndLocalCacheLikeRustManager() throws {
+        let tmp = try SkillLoaderTemporaryDirectory()
+        let codexHome = tmp.url.appendingPathComponent("home", isDirectory: true)
+        let pluginRoot = codexHome.appendingPathComponent(
+            "plugins/cache/chatgpt-global/linear/local",
+            isDirectory: true
+        )
+        try writeSkill(
+            name: "search",
+            description: "search Linear data",
+            to: pluginRoot.appendingPathComponent("skills/search/SKILL.md", isDirectory: false)
+        )
+        try writePluginManifest(name: "linear", to: pluginRoot.appendingPathComponent(".codex-plugin/plugin.json"))
+        let remoteInstalled = [
+            RemoteInstalledPluginReference(
+                marketplaceName: "chatgpt-global",
+                pluginName: "linear",
+                enabled: true
+            )
+        ]
+
+        XCTAssertTrue(SkillLoader.configuredPluginSkillRoots(
+            codexHome: codexHome,
+            configLayerStack: try remotePluginFeatureConfigStack(codexHome: codexHome, remotePluginEnabled: false),
+            remoteInstalledPlugins: remoteInstalled
+        ).isEmpty)
+        XCTAssertTrue(SkillLoader.configuredPluginSkillRoots(
+            codexHome: codexHome,
+            configLayerStack: try remotePluginFeatureConfigStack(codexHome: codexHome),
+            remoteInstalledPlugins: [
+                RemoteInstalledPluginReference(
+                    marketplaceName: "chatgpt-global",
+                    pluginName: "linear",
+                    enabled: false
+                )
+            ]
+        ).isEmpty)
+        XCTAssertTrue(SkillLoader.configuredPluginSkillRoots(
+            codexHome: codexHome,
+            configLayerStack: try remotePluginFeatureConfigStack(codexHome: codexHome),
+            remoteInstalledPlugins: [
+                RemoteInstalledPluginReference(
+                    marketplaceName: "chatgpt-global",
+                    pluginName: "missing",
+                    enabled: true
+                )
+            ]
+        ).isEmpty)
+    }
+
     func testFallsBackToDirectoryNameWhenSkillNameIsMissingLikeRust() throws {
         let tmp = try SkillLoaderTemporaryDirectory()
         let cwd = tmp.url.appendingPathComponent("repo", isDirectory: true)
@@ -511,6 +603,24 @@ final class SkillLoaderTests: XCTestCase {
                         pluginID: .table([
                             "enabled": .bool(enabled)
                         ])
+                    ])
+                ])
+            )
+        ])
+    }
+
+    private func remotePluginFeatureConfigStack(
+        codexHome: URL,
+        pluginsFeatureEnabled: Bool = true,
+        remotePluginEnabled: Bool = true
+    ) throws -> ConfigLayerStack {
+        try ConfigLayerStack(layers: [
+            ConfigLayerEntry(
+                name: .user(file: try AbsolutePath(absolutePath: codexHome.appendingPathComponent("config.toml").path)),
+                config: .table([
+                    "features": .table([
+                        "plugins": .bool(pluginsFeatureEnabled),
+                        "remote_plugin": .bool(remotePluginEnabled)
                     ])
                 ])
             )

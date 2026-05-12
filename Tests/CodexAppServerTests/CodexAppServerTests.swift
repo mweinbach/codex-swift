@@ -18386,6 +18386,90 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue((skills[0]["path"] as? String)?.hasSuffix("/plugins/cache/test/sample/local/skills/search/SKILL.md") == true)
     }
 
+    func testSkillsListIncludesRemoteInstalledPluginCacheAfterPluginListLikeRustManager() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let pluginID = "plugins_123"
+        let pluginRoot = codexHome.url.appendingPathComponent(
+            "plugins/cache/chatgpt-global/linear/1.2.3",
+            isDirectory: true
+        )
+        let skillPath = pluginRoot.appendingPathComponent("skills/search/SKILL.md", isDirectory: false)
+        try FileManager.default.createDirectory(at: skillPath.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try skillContents(name: "search", description: "search Linear data")
+            .write(to: skillPath, atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(
+            at: pluginRoot.appendingPathComponent(".codex-plugin", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try #"{"name":"linear"}"#.write(
+            to: pluginRoot.appendingPathComponent(".codex-plugin/plugin.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        plugins = true
+        remote_plugin = true
+        """.write(
+            to: codexHome.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: codexHome.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+        let remoteDirectoryBody = remotePluginListPageBody(
+            id: pluginID,
+            name: "linear",
+            displayName: "Linear"
+        )
+        let remoteInstalledBody = remotePluginListPageBody(
+            id: pluginID,
+            name: "linear",
+            displayName: "Linear",
+            enabled: true
+        )
+        let configuration = testConfiguration(
+            codexHome: codexHome.url,
+            pluginHTTPTransport: { request in
+                switch (request.url?.path, request.url?.query) {
+                case ("/backend-api/ps/plugins/list", "scope=GLOBAL&limit=200"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(remoteDirectoryBody.utf8))
+                case ("/backend-api/ps/plugins/installed", "scope=GLOBAL"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(remoteInstalledBody.utf8))
+                case ("/backend-api/plugins/featured", "platform=codex"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data("[]".utf8))
+                default:
+                    return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
+                }
+            }
+        )
+        let processor = try initializedProcessor(configuration: configuration)
+
+        _ = try decode(processor.processLine(Data(#"{"id":1,"method":"plugin/list","params":{}}"#.utf8)))
+        let response = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"skills/list","params":{"cwds":["\#(cwd.url.path)"],"forceReload":true}}"#.utf8
+        )))
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        let skills = try XCTUnwrap(data[0]["skills"] as? [[String: Any]])
+
+        XCTAssertEqual(skills.map { $0["name"] as? String }, ["linear:search"])
+        XCTAssertTrue((skills[0]["path"] as? String)?.hasSuffix("/plugins/cache/chatgpt-global/linear/1.2.3/skills/search/SKILL.md") == true)
+    }
+
     func testSkillsListReportsInvalidUserSkillErrors() throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
@@ -23738,6 +23822,41 @@ private func workspaceRemotePluginPageBody(
               "name": "Ada"
             }
           ],
+          "release": {
+            "display_name": "\(displayName)",
+            "description": "Track work",
+            "app_ids": [],
+            "interface": {},
+            "skills": []
+          }\(enabledField)
+        }
+      ],
+      "pagination": {
+        "limit": 50,
+        "next_page_token": null
+      }
+    }
+    """
+}
+
+private func remotePluginListPageBody(
+    id: String,
+    name: String,
+    displayName: String,
+    scope: String = "GLOBAL",
+    enabled: Bool? = nil
+) -> String {
+    let enabledField = enabled.map { #", "enabled": \#($0), "disabled_skill_names": []"# } ?? ""
+    return """
+    {
+      "plugins": [
+        {
+          "id": "\(id)",
+          "name": "\(name)",
+          "scope": "\(scope)",
+          "installation_policy": "AVAILABLE",
+          "authentication_policy": "ON_USE",
+          "status": "ENABLED",
           "release": {
             "display_name": "\(displayName)",
             "description": "Track work",

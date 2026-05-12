@@ -180,6 +180,18 @@ public struct PluginSkillRoot: Equatable, Sendable {
     }
 }
 
+public struct RemoteInstalledPluginReference: Equatable, Sendable {
+    public let marketplaceName: String
+    public let pluginName: String
+    public let enabled: Bool
+
+    public init(marketplaceName: String, pluginName: String, enabled: Bool) {
+        self.marketplaceName = marketplaceName
+        self.pluginName = pluginName
+        self.enabled = enabled
+    }
+}
+
 public struct SkillErrorInfo: Codable, Equatable, Sendable {
     public let path: String
     public let message: String
