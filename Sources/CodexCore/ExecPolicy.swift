@@ -6522,7 +6522,7 @@ public final class PolicyParser {
                 "upper"
             ]
         case .array:
-            names = ["append", "clear", "extend", "index", "insert", "pop", "remove"]
+            names = ["append", "clear", "extend", "index", "insert", "pop", "remove", "reverse", "sort"]
         case .table:
             names = ["clear", "get", "items", "keys", "pop", "popitem", "setdefault", "update", "values"]
         case .range:

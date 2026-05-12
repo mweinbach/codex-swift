@@ -3942,7 +3942,7 @@ final class ExecPolicyTests: XCTestCase {
         if "startswith" in STRING_ATTRS and "split" in STRING_ATTRS and hasattr(TOOL, "removeprefix"):
             prefix_rule([TOOL, "string-" + str(len(STRING_ATTRS))], "allow", justification = ",".join(sorted(["split", "startswith"])))
 
-        if "append" in LIST_ATTRS and "remove" in LIST_ATTRS and not hasattr(COMMANDS, "sort") and not hasattr(COMMANDS, "reverse") and not hasattr(COMMANDS, "keys"):
+        if "append" in LIST_ATTRS and "remove" in LIST_ATTRS and hasattr(COMMANDS, "sort") and hasattr(COMMANDS, "reverse") and not hasattr(COMMANDS, "keys"):
             network_rule("list-" + str(len(LIST_ATTRS)) + ".github.com", "https", "allow")
 
         if "items" in DICT_ATTRS and hasattr(METADATA, "setdefault") and not hasattr(1, "split"):
@@ -3957,7 +3957,7 @@ final class ExecPolicyTests: XCTestCase {
             )
         ])
         XCTAssertEqual(policy.networkRules(), [
-            NetworkRule(host: "list-7.github.com", protocol: .https, decision: .allow)
+            NetworkRule(host: "list-9.github.com", protocol: .https, decision: .allow)
         ])
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/dict-9/git"]])
     }
@@ -4016,6 +4016,8 @@ final class ExecPolicyTests: XCTestCase {
         getattr(COMMANDS, "append")("diff")
         APPENDED = getattr(COMMANDS, "append")("branch")
         INSERTED = getattr(COMMANDS, "insert")(0, "show")
+        SORTED = getattr(COMMANDS, "sort")(reverse = True)
+        REVERSED = getattr(COMMANDS, "reverse")()
         REMOVED = getattr(COMMANDS, "pop")()
         SETTINGS = {"tool": "git", "remove": "gone"}
         getattr(SETTINGS, "update")({"command": COMMANDS[0]})
@@ -4035,15 +4037,15 @@ final class ExecPolicyTests: XCTestCase {
             changed = getattr(table, "update")({"tail": popped})
             return repr(added) + ":" + table["command"] + ":" + table["tail"]
 
-        if APPENDED == None and INSERTED == None and UPDATED == None and CLEARED == None and REMOVED == "branch" and REMOVED_SETTING == "gone" and DEFAULT_SETTING == "diff" and len(SCRATCH) == 0:
+        if APPENDED == None and INSERTED == None and SORTED == None and REVERSED == None and UPDATED == None and CLEARED == None and REMOVED == "status" and REMOVED_SETTING == "gone" and DEFAULT_SETTING == "show" and len(SCRATCH) == 0:
             prefix_rule([SETTINGS["tool"], SETTINGS["command"]], "allow", justification = repr(APPENDED) + "/" + SETTINGS["extra"] + "/" + helper())
         """)
 
         XCTAssertEqual(policy.rules(for: "git"), [
             PrefixRule(
-                pattern: PrefixPattern(first: "git", rest: [.single("show")]),
+                pattern: PrefixPattern(first: "git", rest: [.single("branch")]),
                 decision: .allow,
-                justification: "None/status/None:branch:tree"
+                justification: "None/diff/None:branch:tree"
             )
         ])
     }
