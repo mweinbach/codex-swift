@@ -7249,6 +7249,90 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(plugins[0]["id"] as? String, "gmail@openai-curated")
     }
 
+    func testAppServerStartupFallsBackToGitHubHTTPZipballWhenCuratedGitSyncFailsLikeRustManager() throws {
+        let temp = try TemporaryDirectory()
+        let bin = temp.url.appendingPathComponent("bin", isDirectory: true)
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        let git = bin.appendingPathComponent("git", isDirectory: false)
+        try """
+        #!/bin/sh
+        echo "git unavailable" >&2
+        exit 1
+        """.write(to: git, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: git.path)
+        try """
+        [features]
+        plugins = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let sha = "abcdef0123456789abcdef0123456789abcdef01"
+        let zipball = try curatedRepoZipballBytes(sha: sha, in: temp.url)
+        let capture = MCPHTTPTransportCapture()
+        let processor = try initializedProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            environment: ["PATH": "\(bin.path):/usr/bin:/bin"],
+            pluginHTTPTransport: { request in
+                capture.append(request)
+                switch request.url?.absoluteString {
+                case "https://api.github.com/repos/openai/plugins":
+                    return URLSessionTransportResponse(
+                        statusCode: 200,
+                        body: Data(#"{"default_branch":"main"}"#.utf8)
+                    )
+                case "https://api.github.com/repos/openai/plugins/git/ref/heads/main":
+                    return URLSessionTransportResponse(
+                        statusCode: 200,
+                        body: Data(#"{"object":{"sha":"\#(sha)"}}"#.utf8)
+                    )
+                case "https://api.github.com/repos/openai/plugins/zipball/\(sha)":
+                    return URLSessionTransportResponse(statusCode: 200, body: zipball)
+                default:
+                    return URLSessionTransportResponse(statusCode: 500, body: Data("boom".utf8))
+                }
+            },
+            pluginStartupTasksEnabled: true,
+            curatedPluginStartupSyncEnabled: true
+        ))
+
+        let curatedRepo = temp.url.appendingPathComponent(".tmp/plugins", isDirectory: true)
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: curatedRepo.appendingPathComponent(".git", isDirectory: true).path
+        ))
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: curatedRepo.appendingPathComponent(".agents/plugins/marketplace.json").path
+        ))
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: curatedRepo.appendingPathComponent("plugins/gmail/.codex-plugin/plugin.json").path
+        ))
+        XCTAssertEqual(
+            try String(contentsOf: temp.url.appendingPathComponent(".tmp/plugins.sha"), encoding: .utf8),
+            "\(sha)\n"
+        )
+
+        let githubRequests = capture.requests.filter { $0.url?.host == "api.github.com" }
+        XCTAssertEqual(githubRequests.map { $0.url?.absoluteString }, [
+            "https://api.github.com/repos/openai/plugins",
+            "https://api.github.com/repos/openai/plugins/git/ref/heads/main",
+            "https://api.github.com/repos/openai/plugins/zipball/\(sha)"
+        ])
+        XCTAssertTrue(githubRequests.allSatisfy {
+            $0.value(forHTTPHeaderField: "Accept") == "application/vnd.github+json" &&
+                $0.value(forHTTPHeaderField: "X-GitHub-Api-Version") == "2022-11-28" &&
+                $0.value(forHTTPHeaderField: "User-Agent") == "codex"
+        })
+
+        let response = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"plugin/list","params":{}}"#.utf8
+        )))
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let marketplaces = try XCTUnwrap(result["marketplaces"] as? [[String: Any]])
+        XCTAssertEqual(marketplaces.count, 1)
+        XCTAssertEqual(marketplaces[0]["name"] as? String, "openai-curated")
+        let plugins = try XCTUnwrap(marketplaces[0]["plugins"] as? [[String: Any]])
+        XCTAssertEqual(plugins.count, 1)
+        XCTAssertEqual(plugins[0]["id"] as? String, "gmail@openai-curated")
+    }
+
     func testPluginListIncludesRemoteGlobalMarketplaceWhenRemotePluginEnabled() throws {
         let temp = try TemporaryDirectory()
         try """
@@ -23831,6 +23915,57 @@ final class CodexAppServerTests: XCTestCase {
         let stdout = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         XCTAssertEqual(process.terminationStatus, 0, "tar remote plugin bundle failed: \(stderr)\(stdout)")
+        return try Data(contentsOf: archive)
+    }
+
+    private func curatedRepoZipballBytes(sha: String, in tempRoot: URL) throws -> Data {
+        let sourceParent = tempRoot.appendingPathComponent("curated-zip-source-\(UUID().uuidString)", isDirectory: true)
+        let sourceRoot = sourceParent.appendingPathComponent("openai-plugins-\(sha)", isDirectory: true)
+        let manifestDirectory = sourceRoot.appendingPathComponent(".agents/plugins", isDirectory: true)
+        let pluginManifestDirectory = sourceRoot
+            .appendingPathComponent("plugins/gmail", isDirectory: true)
+            .appendingPathComponent(".codex-plugin", isDirectory: true)
+        try FileManager.default.createDirectory(at: manifestDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: pluginManifestDirectory, withIntermediateDirectories: true)
+        try """
+        {
+          "name": "openai-curated",
+          "plugins": [
+            {
+              "name": "gmail",
+              "source": "./plugins/gmail"
+            }
+          ]
+        }
+        """.write(
+            to: manifestDirectory.appendingPathComponent("marketplace.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        {
+          "name": "gmail",
+          "description": "Search mail"
+        }
+        """.write(
+            to: pluginManifestDirectory.appendingPathComponent("plugin.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let archive = tempRoot.appendingPathComponent("curated-repo-\(UUID().uuidString).zip", isDirectory: false)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
+        process.arguments = ["-qry", archive.path, sourceRoot.lastPathComponent]
+        process.currentDirectoryURL = sourceParent
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+        try process.run()
+        process.waitUntilExit()
+        let stdout = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        XCTAssertEqual(process.terminationStatus, 0, "zip curated repo failed: \(stderr)\(stdout)")
         return try Data(contentsOf: archive)
     }
 

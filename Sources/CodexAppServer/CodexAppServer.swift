@@ -4687,6 +4687,23 @@ public enum CodexAppServer {
     }
 
     @discardableResult
+    fileprivate static func syncOpenAICuratedPluginsRepo(
+        codexHome: URL,
+        environment: [String: String],
+        pluginHTTPTransport: AppServerPluginHTTPTransport
+    ) throws -> String {
+        do {
+            return try syncOpenAICuratedPluginsRepoViaGit(codexHome: codexHome, environment: environment)
+        } catch {
+            return try syncOpenAICuratedPluginsRepoViaHTTP(
+                codexHome: codexHome,
+                environment: environment,
+                pluginHTTPTransport: pluginHTTPTransport
+            )
+        }
+    }
+
+    @discardableResult
     fileprivate static func syncOpenAICuratedPluginsRepoViaGit(
         codexHome: URL,
         environment: [String: String]
@@ -4728,6 +4745,40 @@ public enum CodexAppServer {
         return remoteSHA
     }
 
+    @discardableResult
+    fileprivate static func syncOpenAICuratedPluginsRepoViaHTTP(
+        codexHome: URL,
+        environment: [String: String],
+        pluginHTTPTransport: AppServerPluginHTTPTransport
+    ) throws -> String {
+        let repoPath = curatedPluginsRepoPath(codexHome: codexHome)
+        let shaPath = curatedPluginsSHAPath(codexHome: codexHome)
+        let remoteSHA = try fetchCuratedRepoRemoteSHA(pluginHTTPTransport: pluginHTTPTransport)
+        let localSHA = readCuratedPluginsSHA(codexHome: codexHome)
+        if localSHA == remoteSHA, FileManager.default.fileExists(atPath: repoPath.path) {
+            return remoteSHA
+        }
+
+        let parent = repoPath.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        let stagedPath = parent.appendingPathComponent("plugins-http-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            if FileManager.default.fileExists(atPath: stagedPath.path) {
+                try? FileManager.default.removeItem(at: stagedPath)
+            }
+        }
+
+        let zipball = try fetchCuratedRepoZipball(
+            remoteSHA: remoteSHA,
+            pluginHTTPTransport: pluginHTTPTransport
+        )
+        try extractCuratedPluginsZipball(zipball, destination: stagedPath, environment: environment)
+        try ensureCuratedMarketplaceManifestExists(repoPath: stagedPath)
+        try activateCuratedPluginsRepo(repoPath: repoPath, stagedPath: stagedPath)
+        try writeCuratedPluginsSHA(shaPath: shaPath, sha: remoteSHA)
+        return remoteSHA
+    }
+
     private static func curatedPluginsRepoPath(codexHome: URL) -> URL {
         codexHome.appendingPathComponent(".tmp/plugins", isDirectory: true)
     }
@@ -4741,6 +4792,132 @@ public enum CodexAppServer {
         return (try? String(contentsOf: path, encoding: .utf8))
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    private static let curatedPluginsGitHubAPIBaseURL = "https://api.github.com"
+    private static let curatedPluginsGitHubAcceptHeader = "application/vnd.github+json"
+    private static let curatedPluginsGitHubAPIVersionHeader = "2022-11-28"
+
+    private struct CuratedPluginsGitHubRepositorySummary: Decodable {
+        let defaultBranch: String
+
+        private enum CodingKeys: String, CodingKey {
+            case defaultBranch = "default_branch"
+        }
+    }
+
+    private struct CuratedPluginsGitHubGitRefSummary: Decodable {
+        struct Object: Decodable {
+            let sha: String
+        }
+
+        let object: Object
+    }
+
+    private static func fetchCuratedRepoRemoteSHA(
+        pluginHTTPTransport: AppServerPluginHTTPTransport
+    ) throws -> String {
+        let apiBaseURL = curatedPluginsGitHubAPIBaseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let repoURL = "\(apiBaseURL)/repos/openai/plugins"
+        let repoBody = try fetchCuratedPluginsGitHubText(
+            urlString: repoURL,
+            context: "get curated plugins repository",
+            pluginHTTPTransport: pluginHTTPTransport
+        )
+        let repoSummary: CuratedPluginsGitHubRepositorySummary
+        do {
+            repoSummary = try JSONDecoder().decode(
+                CuratedPluginsGitHubRepositorySummary.self,
+                from: Data(repoBody.utf8)
+            )
+        } catch {
+            throw AppServerError.internalError(
+                "failed to parse curated plugins repository response from \(repoURL): \(error)"
+            )
+        }
+        guard !repoSummary.defaultBranch.isEmpty else {
+            throw AppServerError.internalError(
+                "curated plugins repository response from \(repoURL) did not include a default branch"
+            )
+        }
+
+        let gitRefURL = "\(repoURL)/git/ref/heads/\(repoSummary.defaultBranch)"
+        let gitRefBody = try fetchCuratedPluginsGitHubText(
+            urlString: gitRefURL,
+            context: "get curated plugins HEAD ref",
+            pluginHTTPTransport: pluginHTTPTransport
+        )
+        let gitRef: CuratedPluginsGitHubGitRefSummary
+        do {
+            gitRef = try JSONDecoder().decode(
+                CuratedPluginsGitHubGitRefSummary.self,
+                from: Data(gitRefBody.utf8)
+            )
+        } catch {
+            throw AppServerError.internalError(
+                "failed to parse curated plugins ref response from \(gitRefURL): \(error)"
+            )
+        }
+        guard !gitRef.object.sha.isEmpty else {
+            throw AppServerError.internalError(
+                "curated plugins ref response from \(gitRefURL) did not include a HEAD sha"
+            )
+        }
+        return gitRef.object.sha
+    }
+
+    private static func fetchCuratedRepoZipball(
+        remoteSHA: String,
+        pluginHTTPTransport: AppServerPluginHTTPTransport
+    ) throws -> Data {
+        let apiBaseURL = curatedPluginsGitHubAPIBaseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let zipballURL = "\(apiBaseURL)/repos/openai/plugins/zipball/\(remoteSHA)"
+        return try fetchCuratedPluginsGitHubBytes(
+            urlString: zipballURL,
+            context: "download curated plugins archive",
+            pluginHTTPTransport: pluginHTTPTransport
+        )
+    }
+
+    private static func fetchCuratedPluginsGitHubText(
+        urlString: String,
+        context: String,
+        pluginHTTPTransport: AppServerPluginHTTPTransport
+    ) throws -> String {
+        let body = try fetchCuratedPluginsGitHubBytes(
+            urlString: urlString,
+            context: context,
+            pluginHTTPTransport: pluginHTTPTransport
+        )
+        return String(decoding: body, as: UTF8.self)
+    }
+
+    private static func fetchCuratedPluginsGitHubBytes(
+        urlString: String,
+        context: String,
+        pluginHTTPTransport: AppServerPluginHTTPTransport
+    ) throws -> Data {
+        guard let url = URL(string: urlString) else {
+            throw AppServerError.internalError("invalid curated plugins GitHub URL: \(urlString)")
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue(curatedPluginsGitHubAcceptHeader, forHTTPHeaderField: "Accept")
+        request.setValue(curatedPluginsGitHubAPIVersionHeader, forHTTPHeaderField: "X-GitHub-Api-Version")
+        request.setValue("codex", forHTTPHeaderField: "User-Agent")
+        let response: URLSessionTransportResponse
+        do {
+            response = try pluginHTTPTransport(request)
+        } catch {
+            throw AppServerError.internalError("failed to \(context) from \(urlString): \(error)")
+        }
+        guard (200..<300).contains(response.statusCode) else {
+            let bodyText = String(decoding: response.body, as: UTF8.self)
+            throw AppServerError.internalError(
+                "\(context) from \(urlString) failed with status \(response.statusCode): \(bodyText)"
+            )
+        }
+        return response.body
     }
 
     private static func gitCuratedPluginsRemoteHeadSHA(environment: [String: String]) throws -> String {
@@ -4787,6 +4964,126 @@ public enum CodexAppServer {
                 "curated plugins archive missing marketplace manifest at \(manifest.path)"
             )
         }
+    }
+
+    private static func extractCuratedPluginsZipball(
+        _ bytes: Data,
+        destination: URL,
+        environment: [String: String]
+    ) throws {
+        let fileManager = FileManager.default
+        let extractionRoot = destination.deletingLastPathComponent()
+            .appendingPathComponent("plugins-zip-\(UUID().uuidString)", isDirectory: true)
+        let rawRoot = extractionRoot.appendingPathComponent("raw", isDirectory: true)
+        let archivePath = extractionRoot.appendingPathComponent("archive.zip", isDirectory: false)
+        defer {
+            if fileManager.fileExists(atPath: extractionRoot.path) {
+                try? fileManager.removeItem(at: extractionRoot)
+            }
+        }
+        do {
+            try fileManager.createDirectory(at: rawRoot, withIntermediateDirectories: true)
+            try bytes.write(to: archivePath)
+            let entries = try curatedPluginsZipballEntries(archivePath: archivePath, environment: environment)
+            try validateCuratedPluginsZipballEntries(entries)
+            _ = try runCuratedPluginsArchiveTool(
+                executablePath: "/usr/bin/ditto",
+                arguments: ["-x", "-k", archivePath.path, rawRoot.path],
+                environment: environment,
+                context: "extract curated plugins zip archive"
+            )
+            try stripCuratedPluginsZipballRoot(rawRoot: rawRoot, destination: destination)
+        } catch let error as AppServerError {
+            throw error
+        } catch {
+            throw AppServerError.internalError("\(error)")
+        }
+    }
+
+    private static func curatedPluginsZipballEntries(
+        archivePath: URL,
+        environment: [String: String]
+    ) throws -> [String] {
+        let listing = try runCuratedPluginsArchiveTool(
+            executablePath: "/usr/bin/zipinfo",
+            arguments: ["-1", archivePath.path],
+            environment: environment,
+            context: "read curated plugins zip archive"
+        )
+        return listing.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+    }
+
+    private static func validateCuratedPluginsZipballEntries(_ entries: [String]) throws {
+        for entry in entries {
+            if entry.hasPrefix("/") {
+                throw AppServerError.internalError("curated plugins zip entry `\(entry)` escapes extraction root")
+            }
+            let components = entry.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+            if components.contains("..") || components.contains(".") {
+                throw AppServerError.internalError("curated plugins zip entry `\(entry)` escapes extraction root")
+            }
+        }
+    }
+
+    private static func stripCuratedPluginsZipballRoot(rawRoot: URL, destination: URL) throws {
+        let fileManager = FileManager.default
+        try fileManager.createDirectory(at: destination, withIntermediateDirectories: true)
+        let topLevelItems = try fileManager.contentsOfDirectory(
+            at: rawRoot,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: []
+        )
+        for topLevelItem in topLevelItems {
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: topLevelItem.path, isDirectory: &isDirectory),
+                  isDirectory.boolValue
+            else {
+                continue
+            }
+            let children = try fileManager.contentsOfDirectory(
+                at: topLevelItem,
+                includingPropertiesForKeys: nil,
+                options: []
+            )
+            for child in children {
+                try fileManager.copyItem(
+                    at: child,
+                    to: destination.appendingPathComponent(child.lastPathComponent, isDirectory: false)
+                )
+            }
+        }
+    }
+
+    private static func runCuratedPluginsArchiveTool(
+        executablePath: String,
+        arguments: [String],
+        environment: [String: String],
+        context: String
+    ) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executablePath)
+        process.arguments = arguments
+        process.environment = environment
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+        do {
+            try process.run()
+        } catch {
+            throw AppServerError.internalError("failed to run \(context): \(error)")
+        }
+        process.waitUntilExit()
+        let stdout = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        guard process.terminationStatus == 0 else {
+            let message = [stderr, stdout]
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+            throw AppServerError.internalError("\(context) failed with status \(process.terminationStatus): \(message)")
+        }
+        return stdout
     }
 
     private static func activateCuratedPluginsRepo(repoPath: URL, stagedPath: URL) throws {
@@ -22302,9 +22599,10 @@ final class CodexAppServerMessageProcessor {
     }
 
     private func syncOpenAICuratedPluginsRepo() {
-        _ = try? CodexAppServer.syncOpenAICuratedPluginsRepoViaGit(
+        _ = try? CodexAppServer.syncOpenAICuratedPluginsRepo(
             codexHome: configuration.codexHome,
-            environment: configuration.environment
+            environment: configuration.environment,
+            pluginHTTPTransport: configuration.pluginHTTPTransport
         )
     }
 
