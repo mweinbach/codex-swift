@@ -3690,6 +3690,164 @@ final class ExecServerTests: XCTestCase {
         XCTAssertEqual(state.bufferedEnvelopeCount, RemoteControlWebsocketState.channelCapacity)
     }
 
+    func testRemoteControlWebsocketConnectionCoreRoutesWriterReaderAndStopEventsLikeRust() throws {
+        let clientID = RemoteControlClientID("client-1")
+        let streamID = RemoteControlStreamID("stream-1")
+        let queued = RemoteControlQueuedServerEnvelope(
+            event: .pong(status: .active),
+            clientID: clientID,
+            streamID: streamID
+        )
+        var core = RemoteControlWebsocketConnectionCore(statusPublisher: RemoteControlStatusPublisherCore(
+            snapshot: RemoteControlStatusSnapshot(
+                status: .connected,
+                installationID: "install-1",
+                environmentID: "env-1"
+            )
+        ))
+        var state = RemoteControlWebsocketState()
+        var tracker = RemoteControlClientTracker()
+
+        let queuedStep = try core.process(.queuedServerEvent(queued), state: &state, clientTracker: &tracker)
+        XCTAssertEqual(queuedStep.frames.count, 1)
+        XCTAssertNil(queuedStep.end)
+
+        let replayStep = try core.process(.connectionOpened, state: &state, clientTracker: &tracker)
+        XCTAssertEqual(replayStep.frames, queuedStep.frames)
+        XCTAssertEqual(
+            try remoteControlServerEnvelope(from: replayStep.frames[0]),
+            RemoteControlServerEnvelope(
+                event: .pong(status: .active),
+                clientID: clientID,
+                streamID: streamID,
+                seqID: 1
+            )
+        )
+
+        XCTAssertEqual(
+            try core.process(.pingTick, state: &state, clientTracker: &tracker).frames,
+            [.ping]
+        )
+
+        let initialize = remoteControlInitializeEnvelope(clientID: clientID, streamID: streamID, seqID: 0)
+        XCTAssertEqual(
+            try core.process(
+                .incoming(.text(try remoteControlEnvelopeText(initialize)), now: 10),
+                state: &state,
+                clientTracker: &tracker
+            ).trackerEffects,
+            [
+                .connectionOpened(
+                    connectionID: RemoteControlVirtualConnectionID(1),
+                    clientID: clientID,
+                    streamID: streamID
+                ),
+                .incomingMessage(
+                    connectionID: RemoteControlVirtualConnectionID(1),
+                    message: tryInitializeMessage()
+                )
+            ]
+        )
+        XCTAssertNil(try core.process(.incoming(.pong, now: 11), state: &state, clientTracker: &tracker).end)
+        XCTAssertEqual(
+            try core.process(.incoming(.close, now: 12), state: &state, clientTracker: &tracker).end,
+            .reconnect("websocket disconnected")
+        )
+        XCTAssertEqual(
+            try core.process(.workerEnded, state: &state, clientTracker: &tracker).end,
+            .reconnect("remote control websocket worker stopped")
+        )
+
+        let disabledStep = try core.process(.disabled, state: &state, clientTracker: &tracker)
+        XCTAssertEqual(disabledStep.end, .disabled)
+        XCTAssertEqual(disabledStep.statusUpdates, [
+            RemoteControlStatusSnapshot(status: .disabled, installationID: "install-1", environmentID: nil)
+        ])
+        XCTAssertEqual(try core.process(.shutdown, state: &state, clientTracker: &tracker).end, .shutdown)
+    }
+
+    func testRemoteControlWebsocketConnectionCoreSweepsIdleClientsAndPongDeadlineLikeRust() throws {
+        let clientID = RemoteControlClientID("client-1")
+        let streamID = RemoteControlStreamID("stream-1")
+        let message = ExecServerJSONRPCMessage.notification(ExecServerJSONRPCNotification(method: "initialized"))
+        let raw = try JSONEncoder().encode(message)
+        let split = raw.count / 2
+        let firstChunk = remoteControlClientChunkEnvelope(
+            clientID: clientID.rawValue,
+            streamID: streamID.rawValue,
+            seqID: 4,
+            segmentID: 0,
+            segmentCount: 2,
+            messageSizeBytes: raw.count,
+            chunk: raw.prefix(split)
+        )
+        let secondChunk = remoteControlClientChunkEnvelope(
+            clientID: clientID.rawValue,
+            streamID: streamID.rawValue,
+            seqID: 4,
+            segmentID: 1,
+            segmentCount: 2,
+            messageSizeBytes: raw.count,
+            chunk: raw.suffix(raw.count - split)
+        )
+        var core = RemoteControlWebsocketConnectionCore(statusPublisher: RemoteControlStatusPublisherCore(
+            snapshot: RemoteControlStatusSnapshot(status: .connected, installationID: "install-1", environmentID: nil)
+        ))
+        var state = RemoteControlWebsocketState()
+        var tracker = RemoteControlClientTracker()
+
+        _ = try core.process(
+            .incoming(.text(try remoteControlEnvelopeText(remoteControlInitializeEnvelope(
+                clientID: clientID,
+                streamID: streamID,
+                seqID: 0
+            ))), now: 10),
+            state: &state,
+            clientTracker: &tracker
+        )
+        XCTAssertEqual(
+            try core.process(.incoming(.text(try remoteControlEnvelopeText(firstChunk)), now: 11), state: &state, clientTracker: &tracker),
+            RemoteControlWebsocketConnectionStep()
+        )
+        XCTAssertEqual(
+            try core.process(.incoming(.text(try remoteControlEnvelopeText(secondChunk)), now: 12), state: &state, clientTracker: &tracker).trackerEffects,
+            [
+                .incomingMessage(
+                    connectionID: RemoteControlVirtualConnectionID(1),
+                    message: message
+                )
+            ]
+        )
+        XCTAssertEqual(
+            state.observeClientEnvelope(firstChunk, wireSizeBytes: try JSONEncoder().encode(firstChunk).count),
+            .dropped
+        )
+
+        let notExpired = try core.process(
+            .idleSweep(now: 12 + RemoteControlClientTracker.idleTimeoutSeconds - 1),
+            state: &state,
+            clientTracker: &tracker
+        )
+        XCTAssertEqual(notExpired, RemoteControlWebsocketConnectionStep())
+
+        let expired = try core.process(
+            .idleSweep(now: 12 + RemoteControlClientTracker.idleTimeoutSeconds),
+            state: &state,
+            clientTracker: &tracker
+        )
+        XCTAssertEqual(expired.trackerEffects, [
+            .connectionClosed(connectionID: RemoteControlVirtualConnectionID(1))
+        ])
+        XCTAssertEqual(
+            state.observeClientEnvelope(firstChunk, wireSizeBytes: try JSONEncoder().encode(firstChunk).count),
+            .pending
+        )
+        XCTAssertEqual(
+            try core.process(.pongDeadline, state: &state, clientTracker: &tracker).end,
+            .reconnect("remote control websocket pong timeout")
+        )
+    }
+
     func testRemoteControlWebsocketStateSequencesSplitsAndBuffersLikeRust() throws {
         let clientID = RemoteControlClientID("client-1")
         let streamID = RemoteControlStreamID("stream-1")

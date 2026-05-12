@@ -754,6 +754,22 @@ public enum RemoteControlClientTrackerEffect: Equatable, Sendable {
     case serverEvent(RemoteControlQueuedServerEnvelope)
 }
 
+public struct RemoteControlClosedClientStream: Equatable, Sendable {
+    public var clientID: RemoteControlClientID
+    public var streamID: RemoteControlStreamID
+    public var effects: [RemoteControlClientTrackerEffect]
+
+    public init(
+        clientID: RemoteControlClientID,
+        streamID: RemoteControlStreamID,
+        effects: [RemoteControlClientTrackerEffect]
+    ) {
+        self.clientID = clientID
+        self.streamID = streamID
+        self.effects = effects
+    }
+}
+
 public struct RemoteControlClientTracker: Equatable, Sendable {
     public static var idleTimeoutSeconds: TimeInterval { 10 * 60 }
 
@@ -898,11 +914,21 @@ public struct RemoteControlClientTracker: Equatable, Sendable {
     public mutating func closeExpiredClients(
         now: TimeInterval
     ) -> [RemoteControlClientTrackerEffect] {
+        closeExpiredClientStreams(now: now).flatMap(\.effects)
+    }
+
+    public mutating func closeExpiredClientStreams(
+        now: TimeInterval
+    ) -> [RemoteControlClosedClientStream] {
         let expiredKeys = clients.compactMap { key, client in
             now - client.lastActivityAt >= Self.idleTimeoutSeconds ? key : nil
         }
-        return expiredKeys.flatMap { key in
-            closeClient(clientID: key.clientID, streamID: key.streamID)
+        return expiredKeys.map { key in
+            RemoteControlClosedClientStream(
+                clientID: key.clientID,
+                streamID: key.streamID,
+                effects: closeClient(clientID: key.clientID, streamID: key.streamID)
+            )
         }
     }
 
@@ -1166,6 +1192,114 @@ public struct RemoteControlWebsocketReaderCore: Equatable, Sendable {
             return nil
         }
         return (envelope.clientID, envelope.streamID)
+    }
+}
+
+public enum RemoteControlWebsocketConnectionInput: Equatable, Sendable {
+    case connectionOpened
+    case incoming(RemoteControlWebsocketIncomingMessage, now: TimeInterval)
+    case queuedServerEvent(RemoteControlQueuedServerEnvelope)
+    case pingTick
+    case idleSweep(now: TimeInterval)
+    case pongDeadline
+    case disabled
+    case shutdown
+    case workerEnded
+}
+
+public enum RemoteControlWebsocketConnectionEnd: Equatable, Sendable {
+    case reconnect(String)
+    case disabled
+    case shutdown
+}
+
+public struct RemoteControlWebsocketConnectionStep: Equatable, Sendable {
+    public var frames: [RemoteControlWebsocketWriterFrame]
+    public var trackerEffects: [RemoteControlClientTrackerEffect]
+    public var statusUpdates: [RemoteControlStatusSnapshot]
+    public var end: RemoteControlWebsocketConnectionEnd?
+
+    public init(
+        frames: [RemoteControlWebsocketWriterFrame] = [],
+        trackerEffects: [RemoteControlClientTrackerEffect] = [],
+        statusUpdates: [RemoteControlStatusSnapshot] = [],
+        end: RemoteControlWebsocketConnectionEnd? = nil
+    ) {
+        self.frames = frames
+        self.trackerEffects = trackerEffects
+        self.statusUpdates = statusUpdates
+        self.end = end
+    }
+}
+
+public struct RemoteControlWebsocketConnectionCore: Equatable, Sendable {
+    public var statusPublisher: RemoteControlStatusPublisherCore
+    private var reader = RemoteControlWebsocketReaderCore()
+    private var writer = RemoteControlWebsocketWriterCore()
+
+    public init(statusPublisher: RemoteControlStatusPublisherCore) {
+        self.statusPublisher = statusPublisher
+    }
+
+    public mutating func process(
+        _ input: RemoteControlWebsocketConnectionInput,
+        state: inout RemoteControlWebsocketState,
+        clientTracker: inout RemoteControlClientTracker
+    ) throws -> RemoteControlWebsocketConnectionStep {
+        switch input {
+        case .connectionOpened:
+            return RemoteControlWebsocketConnectionStep(
+                frames: try writer.process(.connectionOpened, state: &state)
+            )
+        case let .incoming(message, now):
+            do {
+                return RemoteControlWebsocketConnectionStep(
+                    trackerEffects: try reader.process(
+                        message,
+                        state: &state,
+                        clientTracker: &clientTracker,
+                        now: now
+                    )
+                )
+            } catch {
+                return RemoteControlWebsocketConnectionStep(end: .reconnect(String(describing: error)))
+            }
+        case let .queuedServerEvent(queuedEnvelope):
+            return RemoteControlWebsocketConnectionStep(
+                frames: try writer.process(.queuedServerEvent(queuedEnvelope), state: &state)
+            )
+        case .pingTick:
+            return RemoteControlWebsocketConnectionStep(
+                frames: try writer.process(.pingTick, state: &state)
+            )
+        case let .idleSweep(now):
+            let closedStreams = clientTracker.closeExpiredClientStreams(now: now)
+            for closedStream in closedStreams {
+                state.invalidateClientMessageStream(
+                    clientID: closedStream.clientID,
+                    streamID: closedStream.streamID
+                )
+            }
+            return RemoteControlWebsocketConnectionStep(
+                trackerEffects: closedStreams.flatMap(\.effects)
+            )
+        case .pongDeadline:
+            return RemoteControlWebsocketConnectionStep(
+                end: .reconnect("remote control websocket pong timeout")
+            )
+        case .disabled:
+            var updates = [RemoteControlStatusSnapshot]()
+            if let update = statusPublisher.publishStatus(.disabled) {
+                updates.append(update)
+            }
+            return RemoteControlWebsocketConnectionStep(statusUpdates: updates, end: .disabled)
+        case .shutdown:
+            return RemoteControlWebsocketConnectionStep(end: .shutdown)
+        case .workerEnded:
+            return RemoteControlWebsocketConnectionStep(
+                end: .reconnect("remote control websocket worker stopped")
+            )
+        }
     }
 }
 
