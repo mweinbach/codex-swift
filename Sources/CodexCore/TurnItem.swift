@@ -203,9 +203,8 @@ public struct HookPromptItem: Equatable, Codable, Sendable {
     }
 
     private static func isStandardContextualUserText(_ text: String) -> Bool {
-        text.hasPrefix(UserInstructions.prefix)
-            || text.hasPrefix(UserInstructions.legacyOpenTag)
-            || text.hasPrefix(SkillInstructions.prefix)
+        UserInstructions.matchesText(text)
+            || SkillInstructions.matchesText(text)
             || UserShellCommand.isUserShellCommandText(text)
             || text.trimmingCharacters(in: .whitespacesAndNewlines)
                 .lowercased()

@@ -2,7 +2,9 @@ import Foundation
 
 public struct UserInstructions: Equatable, Codable, Sendable {
     public static let legacyOpenTag = "<user_instructions>"
+    public static let legacyCloseTag = "</user_instructions>"
     public static let prefix = "# AGENTS.md instructions for "
+    public static let closeTag = "</INSTRUCTIONS>"
 
     public let directory: String
     public let text: String
@@ -16,7 +18,12 @@ public struct UserInstructions: Equatable, Codable, Sendable {
         guard message.count == 1, case let .inputText(text) = message[0] else {
             return false
         }
-        return text.hasPrefix(prefix) || text.hasPrefix(legacyOpenTag)
+        return matchesText(text)
+    }
+
+    public static func matchesText(_ text: String) -> Bool {
+        contextualFragmentMatches(text, startMarker: prefix, endMarker: closeTag)
+            || contextualFragmentMatches(text, startMarker: legacyOpenTag, endMarker: legacyCloseTag)
     }
 
     public func intoText() -> String {
@@ -34,7 +41,8 @@ public struct UserInstructions: Equatable, Codable, Sendable {
 }
 
 public struct SkillInstructions: Equatable, Codable, Sendable {
-    public static let prefix = "<skill"
+    public static let prefix = "<skill>"
+    public static let closeTag = "</skill>"
 
     public let name: String
     public let path: String
@@ -50,7 +58,11 @@ public struct SkillInstructions: Equatable, Codable, Sendable {
         guard message.count == 1, case let .inputText(text) = message[0] else {
             return false
         }
-        return text.hasPrefix(prefix)
+        return matchesText(text)
+    }
+
+    public static func matchesText(_ text: String) -> Bool {
+        contextualFragmentMatches(text, startMarker: prefix, endMarker: closeTag)
     }
 
     public func asResponseItem() -> ResponseItem {
@@ -60,6 +72,37 @@ public struct SkillInstructions: Equatable, Codable, Sendable {
                 text: "<skill>\n<name>\(name)</name>\n<path>\(path)</path>\n\(contents)\n</skill>"
             )]
         )
+    }
+}
+
+private func contextualFragmentMatches(_ text: String, startMarker: String, endMarker: String) -> Bool {
+    guard !startMarker.isEmpty, !endMarker.isEmpty else {
+        return false
+    }
+    let leadingTrimmed = text.trimmingPrefix { $0.isWhitespace }
+    guard leadingTrimmed.count >= startMarker.count else {
+        return false
+    }
+    let startCandidate = String(leadingTrimmed.prefix(startMarker.count))
+    guard startCandidate.caseInsensitiveCompare(startMarker) == .orderedSame else {
+        return false
+    }
+
+    let trailingTrimmed = leadingTrimmed.trimmingSuffix { $0.isWhitespace }
+    guard trailingTrimmed.count >= endMarker.count else {
+        return false
+    }
+    let endCandidate = String(trailingTrimmed.suffix(endMarker.count))
+    return endCandidate.caseInsensitiveCompare(endMarker) == .orderedSame
+}
+
+private extension String {
+    func trimmingPrefix(where shouldTrim: (Character) -> Bool) -> String {
+        String(drop(while: shouldTrim))
+    }
+
+    func trimmingSuffix(where shouldTrim: (Character) -> Bool) -> String {
+        String(reversed().drop(while: shouldTrim).reversed())
     }
 }
 

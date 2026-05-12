@@ -438,9 +438,8 @@ public struct ContextManager: Equatable, Sendable {
             return true
         }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.hasPrefix(UserInstructions.prefix)
-            || text.hasPrefix(UserInstructions.legacyOpenTag)
-            || text.hasPrefix(SkillInstructions.prefix)
+        return UserInstructions.matchesText(text)
+            || SkillInstructions.matchesText(text)
             || UserShellCommand.isUserShellCommandText(text)
             || trimmed.lowercased().hasPrefix("<environment_context>")
             || trimmed.lowercased().hasPrefix("<turn_aborted>")

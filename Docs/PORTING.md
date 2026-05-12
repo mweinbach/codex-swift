@@ -310,6 +310,7 @@ Source baseline inspected for this scaffold:
   - smart shell-output byte decoding for UTF-8, Cyrillic legacy code pages, Windows-1252 punctuation collisions, Latin-1, ANSI-preserving output, and lossy fallback behavior
 - `codex-rs/core/src/user_instructions.rs`
   - AGENTS.md/user instruction formatting and detection, skill instruction envelopes, and developer-role instruction response items
+  - tightened injected AGENTS and skill fragment detection to require Rust's trimmed, case-insensitive start/end markers before filtering contextual user messages
 - `codex-rs/core/src/project_doc.rs`
   - AGENTS.md/AGENTS.override.md discovery from configured project root markers to cwd, empty-marker current-directory behavior, regular-file-only candidate filtering, project-doc byte limits, fallback filenames, configured instruction merging, and Rust's separation between project-doc user instructions and available-skill developer instructions
 - `codex-rs/core-skills/src/{loader,manager,config_rules}.rs` and `codex-rs/core/src/session/mod.rs`

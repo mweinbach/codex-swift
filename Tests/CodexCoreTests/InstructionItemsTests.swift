@@ -20,8 +20,17 @@ final class InstructionItemsTests: XCTestCase {
         XCTAssertTrue(UserInstructions.isUserInstructions(message: [
             .inputText(text: "<user_instructions>test_text</user_instructions>")
         ]))
+        XCTAssertTrue(UserInstructions.isUserInstructions(message: [
+            .inputText(text: "  # agents.md instructions for test_directory\n\n<INSTRUCTIONS>\ntest_text\n</instructions>\n")
+        ]))
         XCTAssertFalse(UserInstructions.isUserInstructions(message: [
             .inputText(text: "test_text")
+        ]))
+        XCTAssertFalse(UserInstructions.isUserInstructions(message: [
+            .inputText(text: "# AGENTS.md instructions for test_directory")
+        ]))
+        XCTAssertFalse(UserInstructions.isUserInstructions(message: [
+            .inputText(text: "<user_instructions>test_text")
         ]))
         XCTAssertFalse(UserInstructions.isUserInstructions(message: [
             .inputText(text: "# AGENTS.md instructions for test_directory"),
@@ -51,8 +60,17 @@ final class InstructionItemsTests: XCTestCase {
         XCTAssertTrue(SkillInstructions.isSkillInstructions(message: [
             .inputText(text: "<skill>\n<name>demo-skill</name>\n<path>skills/demo/SKILL.md</path>\nbody\n</skill>")
         ]))
+        XCTAssertTrue(SkillInstructions.isSkillInstructions(message: [
+            .inputText(text: "  <SKILL>\nbody\n</SKILL>\n")
+        ]))
         XCTAssertFalse(SkillInstructions.isSkillInstructions(message: [
             .inputText(text: "regular text")
+        ]))
+        XCTAssertFalse(SkillInstructions.isSkillInstructions(message: [
+            .inputText(text: "<skill>\nbody")
+        ]))
+        XCTAssertFalse(SkillInstructions.isSkillInstructions(message: [
+            .inputText(text: "<skillish>\nbody\n</skill>")
         ]))
         XCTAssertFalse(SkillInstructions.isSkillInstructions(message: [
             .inputText(text: "<skill>\nbody\n</skill>"),
