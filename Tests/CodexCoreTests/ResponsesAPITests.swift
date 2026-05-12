@@ -149,6 +149,51 @@ final class ResponsesAPITests: XCTestCase {
         XCTAssertEqual(request.headers["x-openai-subagent"], "review")
     }
 
+    func testBuilderReattachesAzureStoredItemIDsForRustSkippedRuntimeVariants() throws {
+        let provider = apiProvider(name: "azure", baseURL: "https://example.openai.azure.com/v1")
+        let request = try ResponsesRequestBuilder(model: "gpt-test", instructions: "inst", input: [
+            .message(id: "msg-1", role: "assistant", content: []),
+            .reasoning(id: "rs-1", summary: []),
+            .localShellCall(
+                id: "shell-1",
+                callID: "shell-call",
+                status: .completed,
+                action: .exec(LocalShellExecAction(command: ["echo", "hi"]))
+            ),
+            .functionCall(id: "fc-1", name: "run", arguments: "{}", callID: "call-1"),
+            .toolSearchCall(
+                id: "ts-1",
+                callID: "search-1",
+                status: "completed",
+                execution: "client",
+                arguments: .object(["query": .string("docs")])
+            ),
+            .customToolCall(id: "ct-1", status: "completed", callID: "custom-1", name: "patch", input: "{}"),
+            .webSearchCall(id: "ws-1", status: "completed", action: .search(query: "weather")),
+            .message(id: "", role: "assistant", content: []),
+            .reasoning(id: "", summary: []),
+            .functionCallOutput(callID: "call-1", output: FunctionCallOutputPayload(content: "done")),
+            .imageGenerationCall(id: "ig-1", status: "completed", result: "base64")
+        ])
+        .build(provider: provider)
+
+        let body = try JSONObject(request.body)
+        let items = try XCTUnwrap(body["input"] as? [[String: Any]])
+        XCTAssertEqual(items.map { $0["id"] as? String }, [
+            "msg-1",
+            "rs-1",
+            "shell-1",
+            "fc-1",
+            "ts-1",
+            "ct-1",
+            "ws-1",
+            nil,
+            nil,
+            nil,
+            "ig-1"
+        ])
+    }
+
     func testBuilderHonorsStoreOverrideAndExtraHeaders() throws {
         let provider = apiProvider(name: "openai", baseURL: "https://api.openai.com/v1")
 

@@ -393,9 +393,8 @@ private extension ResponseItem {
             return id
         case let .webSearchCall(id, _, _):
             return id
-        case let .imageGenerationCall(id, _, _, _):
-            return id
         case .functionCallOutput,
+             .imageGenerationCall,
              .customToolCallOutput,
              .toolSearchOutput,
              .ghostSnapshot,
