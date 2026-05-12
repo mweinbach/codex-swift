@@ -868,7 +868,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/execpolicy/src/parser.rs` Starlark delete statements
   - Added Swift execpolicy parser support for `del NAME[index]`, `del NAME[key]`, and nested indexed delete statements over supported list and dictionary constants before generated rules, network hosts, and host executable paths.
 - `codex-rs/execpolicy/src/parser.rs` Starlark length, comparison, and membership conditions
-  - Added Swift execpolicy parser support for `len(...)` over strings/lists/dicts, ordered comparisons over strings and numbers, `not in`, and string membership checks in supported policy conditions.
+  - Added Swift execpolicy parser support for `len(...)` over strings/lists/dicts, ordered and chained comparisons over strings and numbers, `not in`, and string membership checks in supported policy conditions.
 - `codex-rs/execpolicy/src/parser.rs` Starlark string methods
   - Added Swift execpolicy parser support for string `.join(...)`, `.startswith(...)`, and `.endswith(...)` method calls across supported policy literals and conditions.
 - `codex-rs/execpolicy/src/parser.rs` Starlark string predicate methods

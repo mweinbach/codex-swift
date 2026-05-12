@@ -6645,48 +6645,145 @@ public final class PolicyParser {
             return try !evaluateStarlarkCondition(operand, constants: constants, functions: functions)
         }
 
-        if let range = topLevelOperatorRange("==", in: trimmed) {
-            let lhs = try parsePolicyLiteral(String(trimmed[..<range.lowerBound]), constants: constants, functions: functions)
-            let rhs = try parsePolicyLiteral(String(trimmed[range.upperBound...]), constants: constants, functions: functions)
-            return lhs == rhs
-        }
-        if let range = topLevelOperatorRange("!=", in: trimmed) {
-            let lhs = try parsePolicyLiteral(String(trimmed[..<range.lowerBound]), constants: constants, functions: functions)
-            let rhs = try parsePolicyLiteral(String(trimmed[range.upperBound...]), constants: constants, functions: functions)
-            return lhs != rhs
-        }
-        if let range = topLevelOperatorRange("<=", in: trimmed) {
-            let lhs = try parsePolicyLiteral(String(trimmed[..<range.lowerBound]), constants: constants, functions: functions)
-            let rhs = try parsePolicyLiteral(String(trimmed[range.upperBound...]), constants: constants, functions: functions)
-            return try compareStarlarkValues(lhs, rhs, expression: condition) <= 0
-        }
-        if let range = topLevelOperatorRange(">=", in: trimmed) {
-            let lhs = try parsePolicyLiteral(String(trimmed[..<range.lowerBound]), constants: constants, functions: functions)
-            let rhs = try parsePolicyLiteral(String(trimmed[range.upperBound...]), constants: constants, functions: functions)
-            return try compareStarlarkValues(lhs, rhs, expression: condition) >= 0
-        }
-        if let range = topLevelOperatorRange("<", in: trimmed) {
-            let lhs = try parsePolicyLiteral(String(trimmed[..<range.lowerBound]), constants: constants, functions: functions)
-            let rhs = try parsePolicyLiteral(String(trimmed[range.upperBound...]), constants: constants, functions: functions)
-            return try compareStarlarkValues(lhs, rhs, expression: condition) < 0
-        }
-        if let range = topLevelOperatorRange(">", in: trimmed) {
-            let lhs = try parsePolicyLiteral(String(trimmed[..<range.lowerBound]), constants: constants, functions: functions)
-            let rhs = try parsePolicyLiteral(String(trimmed[range.upperBound...]), constants: constants, functions: functions)
-            return try compareStarlarkValues(lhs, rhs, expression: condition) > 0
-        }
-        if let range = topLevelKeywordRange("not in", in: trimmed) {
-            let needle = try parsePolicyLiteral(String(trimmed[..<range.lowerBound]), constants: constants, functions: functions)
-            let haystack = try parsePolicyLiteral(String(trimmed[range.upperBound...]), constants: constants, functions: functions)
-            return try !containsStarlarkValue(needle, in: haystack, expression: condition)
-        }
-        if let range = topLevelKeywordRange("in", in: trimmed) {
-            let needle = try parsePolicyLiteral(String(trimmed[..<range.lowerBound]), constants: constants, functions: functions)
-            let haystack = try parsePolicyLiteral(String(trimmed[range.upperBound...]), constants: constants, functions: functions)
-            return try containsStarlarkValue(needle, in: haystack, expression: condition)
+        let comparisonPieces = splitTopLevelComparisonExpression(trimmed)
+        if comparisonPieces.count > 1 {
+            guard comparisonPieces[0].operator == nil,
+                  !comparisonPieces[0].text.isEmpty
+            else {
+                throw ConfigOverrideError.invalidLiteral(condition)
+            }
+
+            var previous = try parsePolicyLiteral(comparisonPieces[0].text, constants: constants, functions: functions)
+            for piece in comparisonPieces.dropFirst() {
+                guard let operatorText = piece.operator,
+                      !piece.text.isEmpty
+                else {
+                    throw ConfigOverrideError.invalidLiteral(condition)
+                }
+
+                let next = try parsePolicyLiteral(piece.text, constants: constants, functions: functions)
+                let comparison: Bool
+                switch operatorText {
+                case "==":
+                    comparison = previous == next
+                case "!=":
+                    comparison = previous != next
+                case "<=":
+                    comparison = try compareStarlarkValues(previous, next, expression: condition) <= 0
+                case ">=":
+                    comparison = try compareStarlarkValues(previous, next, expression: condition) >= 0
+                case "<":
+                    comparison = try compareStarlarkValues(previous, next, expression: condition) < 0
+                case ">":
+                    comparison = try compareStarlarkValues(previous, next, expression: condition) > 0
+                case "not in":
+                    comparison = try !containsStarlarkValue(previous, in: next, expression: condition)
+                case "in":
+                    comparison = try containsStarlarkValue(previous, in: next, expression: condition)
+                default:
+                    throw ConfigOverrideError.invalidLiteral(condition)
+                }
+
+                if !comparison {
+                    return false
+                }
+                previous = next
+            }
+            return true
         }
 
         return try truthy(parsePolicyLiteral(trimmed, constants: constants, functions: functions))
+    }
+
+    private static func splitTopLevelComparisonExpression(_ text: String) -> [(operator: String?, text: String)] {
+        var pieces: [(operator: String?, text: String)] = []
+        var current = ""
+        var currentOperator: String?
+        var squareDepth = 0
+        var braceDepth = 0
+        var parenDepth = 0
+        var quote: Character?
+        var previousWasBackslash = false
+        var index = text.startIndex
+
+        while index < text.endIndex {
+            let character = text[index]
+            if let activeQuote = quote {
+                current.append(character)
+                if character == activeQuote && !previousWasBackslash {
+                    quote = nil
+                }
+                previousWasBackslash = character == "\\" && !previousWasBackslash
+                if character != "\\" {
+                    previousWasBackslash = false
+                }
+                index = text.index(after: index)
+                continue
+            }
+
+            switch character {
+            case "\"", "'":
+                quote = character
+                current.append(character)
+            case "[":
+                squareDepth += 1
+                current.append(character)
+            case "]":
+                squareDepth -= 1
+                current.append(character)
+            case "{":
+                braceDepth += 1
+                current.append(character)
+            case "}":
+                braceDepth -= 1
+                current.append(character)
+            case "(":
+                parenDepth += 1
+                current.append(character)
+            case ")":
+                parenDepth -= 1
+                current.append(character)
+            default:
+                if squareDepth == 0,
+                   braceDepth == 0,
+                   parenDepth == 0,
+                   let operatorText = comparisonOperator(at: index, in: text) {
+                    pieces.append((currentOperator, current.trimmingCharacters(in: .whitespacesAndNewlines)))
+                    current = ""
+                    currentOperator = operatorText
+                    index = text.index(index, offsetBy: operatorText.count)
+                    continue
+                }
+                current.append(character)
+            }
+
+            index = text.index(after: index)
+        }
+
+        pieces.append((currentOperator, current.trimmingCharacters(in: .whitespacesAndNewlines)))
+        return pieces
+    }
+
+    private static func comparisonOperator(at index: String.Index, in text: String) -> String? {
+        for keyword in ["not in", "in"] where text[index...].hasPrefix(keyword) {
+            let end = text.index(index, offsetBy: keyword.count)
+            if isIdentifierBoundaryBefore(index, in: text),
+               isIdentifierBoundaryAfter(end, in: text) {
+                return keyword
+            }
+        }
+
+        for operatorText in ["==", "!=", "<=", ">="] where text[index...].hasPrefix(operatorText) {
+            return operatorText
+        }
+
+        let operatorText = String(text[index])
+        guard operatorText == "<" || operatorText == ">",
+              !isShiftTokenPart(index..<text.index(after: index), operatorText: operatorText, in: text)
+        else {
+            return nil
+        }
+        return operatorText
     }
 
     private static func compareStarlarkValues(

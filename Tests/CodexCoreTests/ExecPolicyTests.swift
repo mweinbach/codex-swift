@@ -2536,17 +2536,20 @@ final class ExecPolicyTests: XCTestCase {
         TOOL = "git"
         COMMANDS = ["status", "diff", "log"]
         HOSTS = {"github": "api.github.com", "npm": "registry.npmjs.org"}
+        LIMITS = [1, len(COMMANDS), 5]
         MESSAGE = "inspect git history"
 
-        if len(COMMANDS) >= 3 and len(HOSTS) == 2 and "git" in MESSAGE:
+        if 1 < len(COMMANDS) <= LIMITS[2] and len(HOSTS) == 2 == LIMITS[1] - 1 and "git" in MESSAGE:
             prefix_rule([TOOL, COMMANDS[0]], "allow")
 
-        if len(COMMANDS) > 4:
+        if 1 < len(COMMANDS) < 3:
+            prefix_rule([TOOL, "short-chain"], "forbidden")
+        elif len(COMMANDS) > 4:
             prefix_rule([TOOL, "too-many"], "forbidden")
-        elif "missing" not in HOSTS and len(TOOL) < 4 and "svn" not in MESSAGE:
+        elif "missing" not in HOSTS and 2 <= len(TOOL) < 4 and "svn" not in MESSAGE:
             prefix_rule([TOOL, COMMANDS[-1]], "prompt", justification = MESSAGE)
 
-        if len(COMMANDS) <= 3 and "github" in HOSTS:
+        if 2 <= len(COMMANDS) <= 3 and "github" in HOSTS:
             network_rule(HOSTS["github"], "https", "allow")
         """)
 
