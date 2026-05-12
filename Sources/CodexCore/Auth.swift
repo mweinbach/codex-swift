@@ -735,6 +735,7 @@ public enum CodexAuthStorage {
         codexHome: URL,
         mode: AuthCredentialsStoreMode = .file,
         now: Date = Date(),
+        forceRefresh: Bool = false,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         refreshTransport: RefreshTransport? = nil,
         decoder: JSONDecoder = JSONDecoder(),
@@ -757,7 +758,7 @@ public enum CodexAuthStorage {
         }
 
         let refreshThreshold = now.addingTimeInterval(-Double(tokenRefreshIntervalDays) * 24 * 60 * 60)
-        guard lastRefresh < refreshThreshold else {
+        guard forceRefresh || lastRefresh < refreshThreshold else {
             return tokens
         }
 

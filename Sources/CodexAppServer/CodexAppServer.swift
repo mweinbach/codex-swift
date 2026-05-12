@@ -17361,31 +17361,55 @@ public enum CodexAppServer {
         )
     }
 
-    fileprivate static func refreshTokenIfRequested(
+    private enum AppServerAuthRefreshResult: Equatable {
+        case notAttemptedOrSucceeded
+        case failedTransiently
+        case failedPermanently
+    }
+
+    private static func refreshManagedChatGPTAuthIfNeeded(
         params: [String: Any]?,
-        configuration: CodexAppServerConfiguration
-    ) {
-        guard boolParam(params?["refreshToken"], defaultValue: false) else {
-            return
+        configuration: CodexAppServerConfiguration,
+        forceRefresh: Bool? = nil
+    ) -> AppServerAuthRefreshResult {
+        let shouldForceRefresh = forceRefresh ?? boolParam(params?["refreshToken"], defaultValue: false)
+        guard shouldForceRefresh || configuration.requiresOpenAIAuth else {
+            return .notAttemptedOrSucceeded
         }
         do {
             if try externalChatGPTAuthActive(configuration: configuration) {
-                return
+                return .notAttemptedOrSucceeded
             }
         } catch {
-            return
+            return .failedTransiently
+        }
+        guard let auth = try? currentAuth(configuration: configuration),
+              case .chatGPT = auth.kind,
+              auth.method == "chatgpt"
+        else {
+            return .notAttemptedOrSucceeded
+        }
+        if AppServerPermanentRefreshFailures.hasFailure(for: auth, configuration: configuration) {
+            return .failedPermanently
         }
         do {
             _ = try runAsyncBlocking {
                 try await CodexAuthStorage.loadFreshTokenData(
                     codexHome: configuration.codexHome,
                     mode: configuration.authCredentialsStoreMode,
+                    forceRefresh: shouldForceRefresh,
                     environment: configuration.environment,
                     refreshTransport: configuration.authRefreshTransport
                 )
             }
+            AppServerPermanentRefreshFailures.clearFailure(for: auth, configuration: configuration)
+            return .notAttemptedOrSucceeded
         } catch {
-            return
+            if isPermanentRefreshFailure(error) {
+                AppServerPermanentRefreshFailures.recordFailure(for: auth, configuration: configuration)
+                return .failedPermanently
+            }
+            return .failedTransiently
         }
     }
 
@@ -17393,7 +17417,7 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        refreshTokenIfRequested(params: params, configuration: configuration)
+        let refreshResult = refreshManagedChatGPTAuthIfNeeded(params: params, configuration: configuration)
 
         guard configuration.requiresOpenAIAuth else {
             return [
@@ -17405,9 +17429,11 @@ public enum CodexAppServer {
 
         let includeToken = boolParam(params?["includeToken"], defaultValue: false)
         let auth = try currentAuth(configuration: configuration)
+        let hideToken = refreshResult == .failedPermanently
+            || auth.map { AppServerPermanentRefreshFailures.hasFailure(for: $0, configuration: configuration) } == true
         return [
             "authMethod": auth?.method ?? NSNull(),
-            "authToken": includeToken ? (auth?.token ?? NSNull()) : NSNull(),
+            "authToken": includeToken && !hideToken ? (auth?.token ?? NSNull()) : NSNull(),
             "requiresOpenAIAuth": true
         ].nullStripped(keepNulls: true)
     }
@@ -17416,7 +17442,7 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        refreshTokenIfRequested(params: params, configuration: configuration)
+        _ = refreshManagedChatGPTAuthIfNeeded(params: params, configuration: configuration)
 
         guard configuration.requiresOpenAIAuth else {
             return [
@@ -17426,6 +17452,12 @@ public enum CodexAppServer {
         }
 
         guard let auth = try currentAuth(configuration: configuration) else {
+            return [
+                "account": NSNull(),
+                "requiresOpenAIAuth": true
+            ]
+        }
+        if AppServerPermanentRefreshFailures.hasFailure(for: auth, configuration: configuration) {
             return [
                 "account": NSNull(),
                 "requiresOpenAIAuth": true
@@ -17453,6 +17485,15 @@ public enum CodexAppServer {
             "account": account,
             "requiresOpenAIAuth": true
         ]
+    }
+
+    private static func isPermanentRefreshFailure(_ error: Error) -> Bool {
+        switch error as? CodexAuthStorageError {
+        case .refreshTokenExpired, .refreshTokenReused, .refreshTokenInvalidated, .refreshTokenUnknown:
+            return true
+        default:
+            return false
+        }
     }
 
     fileprivate static func accountRateLimitsResult(configuration: CodexAppServerConfiguration) throws -> [String: Any] {
@@ -22049,6 +22090,55 @@ private struct AppServerAuth {
 private enum AppServerAuthKind {
     case apiKey
     case chatGPT(IdTokenInfo)
+}
+
+private enum AppServerPermanentRefreshFailures {
+    private static let store = AppServerPermanentRefreshFailureStore()
+
+    static func hasFailure(for auth: AppServerAuth, configuration: CodexAppServerConfiguration) -> Bool {
+        store.hasFailure(key(for: auth, configuration: configuration))
+    }
+
+    static func recordFailure(for auth: AppServerAuth, configuration: CodexAppServerConfiguration) {
+        store.recordFailure(key(for: auth, configuration: configuration))
+    }
+
+    static func clearFailure(for auth: AppServerAuth, configuration: CodexAppServerConfiguration) {
+        store.clearFailure(key(for: auth, configuration: configuration))
+    }
+
+    private static func key(for auth: AppServerAuth, configuration: CodexAppServerConfiguration) -> String {
+        [
+            configuration.codexHome.resolvingSymlinksInPath().path,
+            configuration.authCredentialsStoreMode.rawValue,
+            auth.method,
+            auth.accountID ?? "",
+            auth.token
+        ].joined(separator: "\u{1f}")
+    }
+}
+
+private final class AppServerPermanentRefreshFailureStore: @unchecked Sendable {
+    private let lock = NSLock()
+    private var keys = Set<String>()
+
+    func hasFailure(_ key: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return keys.contains(key)
+    }
+
+    func recordFailure(_ key: String) {
+        lock.lock()
+        keys.insert(key)
+        lock.unlock()
+    }
+
+    func clearFailure(_ key: String) {
+        lock.lock()
+        keys.remove(key)
+        lock.unlock()
+    }
 }
 
 private final class BlockingAsyncResult<T>: @unchecked Sendable {

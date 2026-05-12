@@ -18465,6 +18465,89 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(result["requiresOpenAIAuth"] as? Bool, true)
     }
 
+    func testAuthStatusRefreshTokenForcesFreshManagedChatGPTRefreshLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        try CodexAuthStorage.saveChatGPTTokens(
+            codexHome: temp.url,
+            apiKey: nil,
+            idToken: fakeJWT(email: "user@example.com", plan: "pro"),
+            accessToken: "old-access-token",
+            refreshToken: "old-refresh-token"
+        )
+        let capture = AppServerRefreshCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            authRefreshTransport: { request in
+                await capture.append(request)
+                return AuthRefreshHTTPResponse(
+                    statusCode: 200,
+                    body: Data(#"{"access_token":"forced-access-token","refresh_token":"forced-refresh-token"}"#.utf8)
+                )
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"getAuthStatus","params":{"includeToken":true,"refreshToken":true}}"#,
+            configuration: configuration
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["authMethod"] as? String, "chatgpt")
+        XCTAssertEqual(result["authToken"] as? String, "forced-access-token")
+        let stored = try CodexAuthStorage.loadAuthDotJSON(codexHome: temp.url, mode: .file)
+        XCTAssertEqual(stored?.tokens?.accessToken, "forced-access-token")
+        XCTAssertEqual(stored?.tokens?.refreshToken, "forced-refresh-token")
+        let requests = await capture.requests
+        XCTAssertEqual(requests.count, 1)
+    }
+
+    func testAuthStatusOmitsTokenAfterPermanentManagedRefreshFailureLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        try CodexAuthStorage.saveChatGPTTokens(
+            codexHome: temp.url,
+            apiKey: nil,
+            idToken: fakeJWT(email: "user@example.com", plan: "pro", accountID: "acct_123"),
+            accessToken: "stale-access-token",
+            refreshToken: "stale-refresh-token"
+        )
+        let capture = AppServerRefreshCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            authRefreshTransport: { request in
+                await capture.append(request)
+                return AuthRefreshHTTPResponse(
+                    statusCode: 401,
+                    body: Data(#"{"error":{"code":"refresh_token_reused"}}"#.utf8)
+                )
+            }
+        )
+        let processor = try initializedProcessor(configuration: configuration)
+
+        let first = try decode(
+            processor.processLine(Data(#"{"id":1,"method":"getAuthStatus","params":{"includeToken":true,"refreshToken":true}}"#.utf8))
+        )
+        let firstResult = try XCTUnwrap(first["result"] as? [String: Any])
+        XCTAssertEqual(firstResult["authMethod"] as? String, "chatgpt")
+        XCTAssertTrue(firstResult["authToken"] is NSNull)
+        XCTAssertEqual(firstResult["requiresOpenAIAuth"] as? Bool, true)
+
+        let account = try decode(
+            processor.processLine(Data(#"{"id":2,"method":"account/read","params":{"refreshToken":false}}"#.utf8))
+        )
+        let accountResult = try XCTUnwrap(account["result"] as? [String: Any])
+        XCTAssertTrue(accountResult["account"] is NSNull)
+        XCTAssertEqual(accountResult["requiresOpenAIAuth"] as? Bool, true)
+
+        let second = try decode(
+            processor.processLine(Data(#"{"id":3,"method":"getAuthStatus","params":{"includeToken":true,"refreshToken":true}}"#.utf8))
+        )
+        let secondResult = try XCTUnwrap(second["result"] as? [String: Any])
+        XCTAssertEqual(secondResult["authMethod"] as? String, "chatgpt")
+        XCTAssertTrue(secondResult["authToken"] is NSNull)
+        let requests = await capture.requests
+        XCTAssertEqual(requests.count, 1)
+    }
+
     func testAccountRateLimitsReadRequiresAuthentication() throws {
         let temp = try TemporaryDirectory()
 
