@@ -997,6 +997,8 @@ Source baseline inspected for this scaffold:
   - added Swift shell-stem matching for bash/zsh/sh wrappers so path-qualified `.exe` shells unwrap like Rust's file-stem based detector.
 - `codex-rs/shell-command/src/command_safety/is_dangerous_command.rs` dangerous-command heuristic
   - aligned Swift `commandMightBeDangerous` with Rust's narrow generic-shell heuristic: only direct `rm -f`/`rm -rf` and `sudo` wrapping those commands are treated as dangerous here; git subcommands continue to be handled by the safe-command and execpolicy paths rather than this dangerous-command classifier.
+- `codex-rs/shell-command/src/command_safety/is_dangerous_command.rs` executable lookup key
+  - matched Rust's Windows executable-name lookup for the safe-command allowlist by normalizing backslash paths, lowercasing names, and stripping `.exe`, `.cmd`, `.bat`, and `.com` suffixes while preserving POSIX basename behavior on non-Windows platforms.
 - `codex-rs/shell-command/src/bash.rs` word-only shell parser rejection
   - tightened Swift bash-script fallback detection so expansion and subshell constructs collapse to a whole-script unknown instead of being simplified as word-only command sequences, while preserving Rust's literal handling for escaped `$` and backtick characters inside double-quoted words.
 - `codex-rs/shell-command/src/bash.rs` word-only shell line continuations

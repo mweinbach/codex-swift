@@ -1299,8 +1299,25 @@ public enum CommandSafety {
     }
 
     private static func commandBasename(_ command: String) -> String? {
+        #if os(Windows)
+        let normalized = command.replacingOccurrences(of: "\\", with: "/")
+        guard var basename = normalized.split(separator: "/", omittingEmptySubsequences: true)
+            .last
+            .map({ String($0).lowercased() }) ?? (command.isEmpty ? nil : command.lowercased())
+        else {
+            return nil
+        }
+        for suffix in [".exe", ".cmd", ".bat", ".com"] {
+            if basename.hasSuffix(suffix) {
+                basename.removeLast(suffix.count)
+                break
+            }
+        }
+        return basename
+        #else
         let parts = command.split(separator: "/", omittingEmptySubsequences: true)
         return parts.last.map(String.init) ?? (command.isEmpty ? nil : command)
+        #endif
     }
 
     private static func isValidSedNArgument(_ argument: String?) -> Bool {

@@ -109,6 +109,29 @@ final class CommandSafetyTests: XCTestCase {
         }
     }
 
+    func testWindowsExecutableLookupMatchesRustSuffixAndPathRules() {
+        #if os(Windows)
+        XCTAssertTrue(CommandSafety.isSafeToCallWithExec([
+            #"C:\Windows\System32\where.exe"#,
+            "git",
+        ]))
+        XCTAssertTrue(CommandSafety.isSafeToCallWithExec([
+            #"C:\Program Files\Git\cmd\git.exe"#,
+            "status",
+        ]))
+        XCTAssertFalse(CommandSafety.isSafeToCallWithExec([
+            #"C:\Program Files\Git\cmd\git.exe"#,
+            "-C",
+            ".",
+            "status",
+        ]))
+        XCTAssertTrue(CommandSafety.isSafeToCallWithExec([
+            "LS.CMD",
+            ".",
+        ]))
+        #endif
+    }
+
     func testBashLcSafeExamples() {
         XCTAssertTrue(CommandSafety.isKnownSafeCommand(["bash", "-lc", "ls"]))
         XCTAssertTrue(CommandSafety.isKnownSafeCommand(["bash", "-lc", "ls -1"]))
