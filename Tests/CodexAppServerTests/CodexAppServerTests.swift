@@ -81,6 +81,118 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(result["platformFamily"] as? String, "unix")
     }
 
+    func testRemoteControlAppServerBridgeRoutesVirtualConnectionRequestsLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let clientID = RemoteControlClientID("client-1")
+        let streamID = RemoteControlStreamID("stream-1")
+        let connectionID = RemoteControlVirtualConnectionID(1)
+        let initialize = ExecServerJSONRPCMessage.request(ExecServerJSONRPCRequest(
+            id: .integer(1),
+            method: "initialize",
+            params: .object([
+                "clientInfo": .object([
+                    "name": .string("test"),
+                    "version": .string("0")
+                ]),
+                "capabilities": .object([
+                    "experimentalApi": .bool(true)
+                ])
+            ])
+        ))
+        var transport = RemoteControlVirtualTransportCore()
+        var bridge = RemoteControlAppServerBridge(configuration: testConfiguration(codexHome: temp.url))
+
+        let transportStep = transport.handleClientEnvelope(RemoteControlClientEnvelope(
+            event: .clientMessage(message: initialize),
+            clientID: clientID,
+            streamID: streamID,
+            seqID: 1,
+            cursor: nil
+        ), now: 10)
+        XCTAssertEqual(transportStep.transportEvents, [
+            .connectionOpened(connectionID: connectionID, clientID: clientID, streamID: streamID),
+            .incomingMessage(connectionID: connectionID, message: initialize)
+        ])
+
+        let bridgeStep = await bridge.handle(transportStep.transportEvents)
+        XCTAssertEqual(bridgeStep.droppedUnknownConnectionIDs, [])
+        let initializeResponse = try response(with: .integer(1), in: bridgeStep.outgoingMessages)
+        guard case let .object(result) = initializeResponse.result else {
+            return XCTFail("initialize response did not include an object result")
+        }
+        XCTAssertEqual(result["codexHome"], .string(temp.url.standardizedFileURL.path))
+        XCTAssertEqual(result["platformFamily"], .string("unix"))
+
+        let queued = try XCTUnwrap(transport.enqueueOutgoingMessage(
+            connectionID: connectionID,
+            message: .response(initializeResponse)
+        ))
+        XCTAssertEqual(
+            queued,
+            RemoteControlQueuedServerEnvelope(
+                event: .serverMessage(message: .response(initializeResponse)),
+                clientID: clientID,
+                streamID: streamID
+            )
+        )
+    }
+
+    func testRemoteControlAppServerBridgeDropsUnknownAndClosesConnectionLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let clientID = RemoteControlClientID("client-1")
+        let streamID = RemoteControlStreamID("stream-1")
+        let connectionID = RemoteControlVirtualConnectionID(7)
+        let threadStateManager = AppServerThreadStateManager()
+        var bridge = RemoteControlAppServerBridge(
+            configuration: testConfiguration(codexHome: temp.url),
+            threadStateManager: threadStateManager
+        )
+        let initialize = ExecServerJSONRPCMessage.request(ExecServerJSONRPCRequest(
+            id: .integer(1),
+            method: "initialize",
+            params: .object([
+                "clientInfo": .object([
+                    "name": .string("test"),
+                    "version": .string("0")
+                ])
+            ])
+        ))
+        let startThread = ExecServerJSONRPCMessage.request(ExecServerJSONRPCRequest(
+            id: .integer(2),
+            method: "thread/start",
+            params: .object(["modelProvider": .string("mock_provider")])
+        ))
+
+        let unknownStep = await bridge.handle(.incomingMessage(connectionID: connectionID, message: initialize))
+        XCTAssertEqual(unknownStep.droppedUnknownConnectionIDs, [connectionID])
+
+        _ = await bridge.handle(.connectionOpened(
+            connectionID: connectionID,
+            clientID: clientID,
+            streamID: streamID
+        ))
+        _ = await bridge.handle(.incomingMessage(connectionID: connectionID, message: initialize))
+        let startStep = await bridge.handle(.incomingMessage(connectionID: connectionID, message: startThread))
+        let startResponse = try response(with: .integer(2), in: startStep.outgoingMessages)
+        guard case let .object(startResult) = startResponse.result,
+              case let .object(thread)? = startResult["thread"],
+              case let .string(threadID)? = thread["id"]
+        else {
+            return XCTFail("thread/start response did not include a thread id")
+        }
+        let subscribedBeforeClose = await threadStateManager.subscribedConnectionIDs(forThreadID: threadID)
+        XCTAssertEqual(subscribedBeforeClose, [7])
+
+        _ = await bridge.handle(.connectionClosed(connectionID: connectionID))
+
+        let subscribedAfterClose = await threadStateManager.subscribedConnectionIDs(forThreadID: threadID)
+        let loadedThreadIDs = await threadStateManager.listLoadedThreadIDs()
+        XCTAssertEqual(subscribedAfterClose, [])
+        XCTAssertEqual(loadedThreadIDs, [threadID])
+        let afterClose = await bridge.handle(.incomingMessage(connectionID: connectionID, message: startThread))
+        XCTAssertEqual(afterClose.droppedUnknownConnectionIDs, [connectionID])
+    }
+
     func testAppServerWebSocketTransportServesHealthAndRejectsOriginLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let transport = AppServerWebSocketTransport(configuration: testConfiguration(codexHome: temp.url))
@@ -24640,6 +24752,21 @@ final class CodexAppServerTests: XCTestCase {
             let lineData = Data(line.utf8)
             return try XCTUnwrap(JSONSerialization.jsonObject(with: lineData) as? [String: Any])
         }
+    }
+
+    private func response(
+        with id: RequestID,
+        in messages: [RemoteControlAppServerBridgeOutgoingMessage],
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws -> ExecServerJSONRPCResponse {
+        for outgoing in messages {
+            if case let .response(response) = outgoing.message, response.id == id {
+                return response
+            }
+        }
+        XCTFail("missing response with id \(id)", file: file, line: line)
+        throw AppServerTestTimeout()
     }
 
     private func receiveWebSocketText(_ webSocket: URLSessionWebSocketTask) async throws -> String {
