@@ -2386,6 +2386,34 @@ final class ExecServerTests: XCTestCase {
         }
     }
 
+    func testAppServerExecutableTransportValidatorValidatesRemoteControlURLLikeRustStartup() {
+        XCTAssertNoThrow(try AppServerExecutableTransportValidator.validateSupportedTransport(
+            .stdio,
+            remoteControlFeatureEnabled: true,
+            stateStoreAvailable: true,
+            remoteControlBaseURL: "https://chatgpt.com/backend-api"
+        ))
+
+        XCTAssertThrowsError(try AppServerExecutableTransportValidator.validateSupportedTransport(
+            .stdio,
+            remoteControlFeatureEnabled: true,
+            stateStoreAvailable: true,
+            remoteControlBaseURL: "https://example.com/backend-api"
+        )) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "invalid remote control URL `https://example.com/backend-api`; expected HTTPS URL for chatgpt.com or chatgpt-staging.com, or HTTP/HTTPS URL for localhost"
+            )
+        }
+
+        XCTAssertNoThrow(try AppServerExecutableTransportValidator.validateSupportedTransport(
+            .stdio,
+            remoteControlFeatureEnabled: true,
+            stateStoreAvailable: false,
+            remoteControlBaseURL: "https://example.com/backend-api"
+        ))
+    }
+
     func testAppServerExecutableTransportValidatorAllowsUnixSocketAfterControlSocketPort() {
         XCTAssertNoThrow(try AppServerExecutableTransportValidator.validateSupportedTransport(
             .unixSocket(socketPath: "/tmp/codex.sock"),

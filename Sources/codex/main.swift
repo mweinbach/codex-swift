@@ -433,7 +433,8 @@ private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) as
             request.listenTransport,
             websocketAuth: websocketAuth,
             remoteControlFeatureEnabled: settings.features.isEnabled(.remoteControl),
-            stateStoreAvailable: stateStore != nil
+            stateStoreAvailable: stateStore != nil,
+            remoteControlBaseURL: settings.chatgptBaseURL
         )
         let remoteControlEnabled = settings.features.isEnabled(.remoteControl) && stateStore != nil
         let remoteControlStatusSnapshot = CodexAppServerConfiguration.RemoteControlStatusSnapshot(
