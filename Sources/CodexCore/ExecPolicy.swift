@@ -2710,7 +2710,7 @@ public final class PolicyParser {
             return .bool(false)
         }
         if trimmed == "None" {
-            return .none
+            return ConfigValue.none
         }
         if let conditional = try parseStarlarkConditionalExpression(
             trimmed,
@@ -3504,7 +3504,7 @@ public final class PolicyParser {
             if rawArguments.count == 2 {
                 return try parsePolicyLiteral(rawArguments[1], constants: constants, functions: functions)
             }
-            throw ConfigOverrideError.invalidLiteral(text)
+            return ConfigValue.none
         case "keys":
             try requireNoStringMethodArguments(rawArguments, expression: text)
             return .array(items.keys.map(ConfigValue.string))

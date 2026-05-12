@@ -1615,17 +1615,18 @@ final class ExecPolicyTests: XCTestCase {
             },
         }
         DEFAULT = SETTINGS.get("missing", {"command": "fallback", "decision": "forbidden"})
+        MISSING_SETTINGS = SETTINGS.get("missing")
 
         if "git" in SETTINGS.keys() and all([entry["enabled"] for entry in SETTINGS.values()]):
             for tool, config in SETTINGS.items():
                 prefix_rule(
                     [tool, config.get("command", DEFAULT["command"])],
                     config.get("decision", DEFAULT["decision"]),
-                    justification = "dict " + tool,
+                    justification = "dict " + tool + "-" + type(config.get("missing")),
                 )
 
         GIT = SETTINGS.get("git", DEFAULT)
-        if GIT.get("host", "") != "":
+        if MISSING_SETTINGS is None and GIT.get("host", "") != "":
             network_rule(GIT.get("host", "blocked.example.com"), "https", "allow")
         if GIT.get("path", "") != "":
             host_executable("git", [GIT.get("path", "/usr/bin/git")])
@@ -1635,14 +1636,14 @@ final class ExecPolicyTests: XCTestCase {
             PrefixRule(
                 pattern: PrefixPattern(first: "git", rest: [.single("status")]),
                 decision: .prompt,
-                justification: "dict git"
+                justification: "dict git-NoneType"
             )
         ])
         XCTAssertEqual(policy.rules(for: "jj"), [
             PrefixRule(
                 pattern: PrefixPattern(first: "jj", rest: [.single("log")]),
                 decision: .allow,
-                justification: "dict jj"
+                justification: "dict jj-NoneType"
             )
         ])
         XCTAssertEqual(policy.networkRules(), [

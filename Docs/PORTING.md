@@ -840,7 +840,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/execpolicy/src/parser.rs` Starlark dict literals and indexing
   - Added Swift execpolicy parser support for Starlark dict literals with string keys, expression-derived string keys, nested dict/list values, string-key indexing, and dictionary membership checks across supported policy literals and conditions.
 - `codex-rs/execpolicy/src/parser.rs` Starlark dict methods
-  - Added Swift execpolicy parser support for supported dictionary `.get(...)`, `.keys()`, `.values()`, and `.items()` calls, including generated rules from dictionary item loops and default-value lookups that stay within the Swift port's current `ConfigValue` surface.
+  - Added Swift execpolicy parser support for supported dictionary `.get(...)`, `.keys()`, `.values()`, and `.items()` calls, including generated rules from dictionary item loops, explicit default-value lookups, and Rust Starlark's missing-key `.get(...)` result of `None`.
 - `codex-rs/execpolicy/src/parser.rs` Starlark tuple literals
   - Added Swift execpolicy parser support for parenthesized Starlark tuple literals as array-equivalent policy values, covering tuple-shaped constants, loop iterables, destructured loop items, positional builtin arguments, examples, host executable paths, and nested pattern alternatives.
 - `codex-rs/execpolicy/src/parser.rs` Starlark list mutation statements
