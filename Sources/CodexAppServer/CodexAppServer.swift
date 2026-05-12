@@ -1832,7 +1832,9 @@ public enum CodexAppServer {
     fileprivate static func threadTurnsListResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration,
-        experimentalAPIEnabled: Bool
+        experimentalAPIEnabled: Bool,
+        loadedEphemeralThread: (String) -> [String: Any]? = { _ in nil },
+        isThreadLoaded: (String) -> Bool = { _ in false }
     ) throws -> [String: Any] {
         try requireExperimentalAPI(method: "thread/turns/list", experimentalAPIEnabled: experimentalAPIEnabled)
         let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
@@ -1849,6 +1851,14 @@ public enum CodexAppServer {
             idString: conversationID.description,
             includeArchived: true
         ) else {
+            if loadedEphemeralThread(conversationID.description) != nil {
+                throw AppServerError.invalidRequest("ephemeral threads do not support thread/turns/list")
+            }
+            if isThreadLoaded(conversationID.description) {
+                throw AppServerError.invalidRequest(
+                    "thread \(conversationID) is not materialized yet; thread/turns/list is unavailable before first user message"
+                )
+            }
             throw AppServerError.invalidRequest("thread not loaded: \(conversationID)")
         }
 
@@ -24608,7 +24618,9 @@ final class CodexAppServerMessageProcessor {
                         result: try CodexAppServer.threadTurnsListResult(
                             params: params,
                             configuration: configuration,
-                            experimentalAPIEnabled: experimentalAPIEnabled
+                            experimentalAPIEnabled: experimentalAPIEnabled,
+                            loadedEphemeralThread: { self.loadedEphemeralThreadSnapshot(threadID: $0) },
+                            isThreadLoaded: { self.isThreadLoaded($0) }
                         )
                     )
                 case "thread/turns/items/list":

@@ -15064,6 +15064,49 @@ final class CodexAppServerTests: XCTestCase {
         }
     }
 
+    func testThreadTurnsListRejectsLoadedEphemeralThreadLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
+        )
+        let start = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"ephemeral":true}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(start[0]["result"] as? [String: Any])
+        let startedThread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(startedThread["id"] as? String)
+
+        let response = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"thread/turns/list","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "ephemeral threads do not support thread/turns/list")
+    }
+
+    func testThreadTurnsListRejectsUnmaterializedLoadedThreadLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let threadStateManager = AppServerThreadStateManager()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            threadStateManager: threadStateManager,
+            experimentalAPIEnabled: true
+        )
+        let threadID = UUID().uuidString.lowercased()
+        await threadStateManager.tryAddConnectionToThread(threadID: threadID, connectionID: 0)
+
+        let response = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"thread/turns/list","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(
+            error["message"] as? String,
+            "thread \(threadID) is not materialized yet; thread/turns/list is unavailable before first user message"
+        )
+    }
+
     func testThreadRollbackPersistsMarkerAndReturnsPrunedThread() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(
