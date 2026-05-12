@@ -386,7 +386,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/core/src/rollout/list.rs`
   - conversation listing over `sessions/YYYY/MM/DD`, newest-first timestamp/UUID ordering, cursor serialization/parsing, source/provider filters, head-summary extraction, updated-at fallback, scan caps, and conversation-id path lookup
 - `codex-rs/core/src/state/turn.rs`
-  - turn-local task ordering/replacement/removal semantics, pending approval map behavior, pending input buffering, take-and-clear behavior, and active-turn pending cleanup
+  - turn-local task ordering/replacement/removal semantics, pending approval/request-permissions/user-input/elicitation/dynamic-tool map behavior, pending input buffering and prepend ordering, mailbox-delivery phase, strict auto-review and memory-citation turn flags, token-usage-at-start storage, take-and-clear behavior, and active-turn pending cleanup
 - `codex-rs/login/src/pkce.rs`
   - PKCE verifier generation from 64 random bytes, base64url no-padding encoding, and S256 code-challenge derivation
 - `codex-rs/ollama/src/url.rs` and `codex-rs/ollama/src/parser.rs`

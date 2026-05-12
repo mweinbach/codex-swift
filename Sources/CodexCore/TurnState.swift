@@ -14,6 +14,33 @@ public struct PendingApprovalSender: Equatable, Sendable {
     }
 }
 
+public struct PendingRequestPermissions: Equatable, Sendable {
+    public let sender: PendingApprovalSender
+    public let requestedPermissions: RequestPermissionProfile
+    public let cwd: String
+
+    public init(sender: PendingApprovalSender, requestedPermissions: RequestPermissionProfile, cwd: String) {
+        self.sender = sender
+        self.requestedPermissions = requestedPermissions
+        self.cwd = cwd
+    }
+}
+
+public struct ElicitationKey: Equatable, Hashable, Sendable {
+    public let serverName: String
+    public let requestID: String
+
+    public init(serverName: String, requestID: String) {
+        self.serverName = serverName
+        self.requestID = requestID
+    }
+}
+
+public enum MailboxDeliveryPhase: String, Codable, Equatable, Sendable {
+    case currentTurn
+    case nextTurn
+}
+
 public struct RunningTask: Equatable, Sendable {
     public let subID: String
     public let kind: TaskKind
@@ -28,22 +55,77 @@ public struct RunningTask: Equatable, Sendable {
 
 public struct TurnState: Equatable, Sendable {
     private var pendingApprovals: [String: PendingApprovalSender]
+    private var pendingRequestPermissions: [String: PendingRequestPermissions]
+    private var pendingUserInput: [String: PendingApprovalSender]
+    private var pendingElicitations: [ElicitationKey: PendingApprovalSender]
+    private var pendingDynamicTools: [String: PendingApprovalSender]
     private var pendingInput: [ResponseInputItem]
+    private var mailboxDeliveryPhase: MailboxDeliveryPhase
+    public private(set) var toolCallCount: UInt64
+    public var hasMemoryCitation: Bool
+    public private(set) var tokenUsageAtTurnStart: TokenUsage
+    private var strictAutoReviewEnabled: Bool
 
     public init(
         pendingApprovals: [String: PendingApprovalSender] = [:],
-        pendingInput: [ResponseInputItem] = []
+        pendingRequestPermissions: [String: PendingRequestPermissions] = [:],
+        pendingUserInput: [String: PendingApprovalSender] = [:],
+        pendingElicitations: [ElicitationKey: PendingApprovalSender] = [:],
+        pendingDynamicTools: [String: PendingApprovalSender] = [:],
+        pendingInput: [ResponseInputItem] = [],
+        mailboxDeliveryPhase: MailboxDeliveryPhase = .currentTurn,
+        toolCallCount: UInt64 = 0,
+        hasMemoryCitation: Bool = false,
+        tokenUsageAtTurnStart: TokenUsage = TokenUsage(),
+        strictAutoReviewEnabled: Bool = false
     ) {
         self.pendingApprovals = pendingApprovals
+        self.pendingRequestPermissions = pendingRequestPermissions
+        self.pendingUserInput = pendingUserInput
+        self.pendingElicitations = pendingElicitations
+        self.pendingDynamicTools = pendingDynamicTools
         self.pendingInput = pendingInput
+        self.mailboxDeliveryPhase = mailboxDeliveryPhase
+        self.toolCallCount = toolCallCount
+        self.hasMemoryCitation = hasMemoryCitation
+        self.tokenUsageAtTurnStart = tokenUsageAtTurnStart
+        self.strictAutoReviewEnabled = strictAutoReviewEnabled
     }
 
     public var pendingApprovalCount: Int {
         pendingApprovals.count
     }
 
+    public var pendingRequestPermissionsCount: Int {
+        pendingRequestPermissions.count
+    }
+
+    public var pendingUserInputCount: Int {
+        pendingUserInput.count
+    }
+
+    public var pendingElicitationCount: Int {
+        pendingElicitations.count
+    }
+
+    public var pendingDynamicToolCount: Int {
+        pendingDynamicTools.count
+    }
+
     public var pendingInputCount: Int {
         pendingInput.count
+    }
+
+    public var hasPendingInput: Bool {
+        !pendingInput.isEmpty
+    }
+
+    public var acceptsMailboxDeliveryForCurrentTurn: Bool {
+        mailboxDeliveryPhase == .currentTurn
+    }
+
+    public var isStrictAutoReviewEnabled: Bool {
+        strictAutoReviewEnabled
     }
 
     @discardableResult
@@ -61,13 +143,84 @@ public struct TurnState: Equatable, Sendable {
         pendingApprovals.removeValue(forKey: key)
     }
 
+    @discardableResult
+    public mutating func insertPendingRequestPermissions(
+        key: String,
+        pending: PendingRequestPermissions
+    ) -> PendingRequestPermissions? {
+        let previous = pendingRequestPermissions[key]
+        pendingRequestPermissions[key] = pending
+        return previous
+    }
+
+    @discardableResult
+    public mutating func removePendingRequestPermissions(key: String) -> PendingRequestPermissions? {
+        pendingRequestPermissions.removeValue(forKey: key)
+    }
+
+    @discardableResult
+    public mutating func insertPendingUserInput(
+        key: String,
+        sender: PendingApprovalSender
+    ) -> PendingApprovalSender? {
+        let previous = pendingUserInput[key]
+        pendingUserInput[key] = sender
+        return previous
+    }
+
+    @discardableResult
+    public mutating func removePendingUserInput(key: String) -> PendingApprovalSender? {
+        pendingUserInput.removeValue(forKey: key)
+    }
+
+    @discardableResult
+    public mutating func insertPendingElicitation(
+        key: ElicitationKey,
+        sender: PendingApprovalSender
+    ) -> PendingApprovalSender? {
+        let previous = pendingElicitations[key]
+        pendingElicitations[key] = sender
+        return previous
+    }
+
+    @discardableResult
+    public mutating func removePendingElicitation(key: ElicitationKey) -> PendingApprovalSender? {
+        pendingElicitations.removeValue(forKey: key)
+    }
+
+    @discardableResult
+    public mutating func insertPendingDynamicTool(
+        key: String,
+        sender: PendingApprovalSender
+    ) -> PendingApprovalSender? {
+        let previous = pendingDynamicTools[key]
+        pendingDynamicTools[key] = sender
+        return previous
+    }
+
+    @discardableResult
+    public mutating func removePendingDynamicTool(key: String) -> PendingApprovalSender? {
+        pendingDynamicTools.removeValue(forKey: key)
+    }
+
     public mutating func clearPending() {
         pendingApprovals.removeAll()
+        pendingRequestPermissions.removeAll()
+        pendingUserInput.removeAll()
+        pendingElicitations.removeAll()
+        pendingDynamicTools.removeAll()
         pendingInput.removeAll()
     }
 
     public mutating func pushPendingInput(_ input: ResponseInputItem) {
         pendingInput.append(input)
+    }
+
+    public mutating func prependPendingInput(_ input: [ResponseInputItem]) {
+        guard !input.isEmpty else {
+            return
+        }
+        pendingInput = input + pendingInput
     }
 
     public mutating func takePendingInput() -> [ResponseInputItem] {
@@ -77,6 +230,30 @@ public struct TurnState: Equatable, Sendable {
         let input = pendingInput
         pendingInput.removeAll(keepingCapacity: false)
         return input
+    }
+
+    public mutating func setMailboxDeliveryPhase(_ phase: MailboxDeliveryPhase) {
+        mailboxDeliveryPhase = phase
+    }
+
+    public mutating func acceptMailboxDeliveryForCurrentTurn() {
+        setMailboxDeliveryPhase(.currentTurn)
+    }
+
+    public mutating func incrementToolCallCount() {
+        toolCallCount += 1
+    }
+
+    public mutating func recordMemoryCitationForTurn() {
+        hasMemoryCitation = true
+    }
+
+    public mutating func setTokenUsageAtTurnStart(_ tokenUsage: TokenUsage) {
+        tokenUsageAtTurnStart = tokenUsage
+    }
+
+    public mutating func enableStrictAutoReview() {
+        strictAutoReviewEnabled = true
     }
 }
 
