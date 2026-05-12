@@ -497,6 +497,64 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(params["environmentId"], .string("env-1"))
     }
 
+    func testRemoteControlAppServerExecutableRuntimeRetriesAccountIDWaitBeforeConnectingLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let clientID = RemoteControlClientID("client-1")
+        let streamID = RemoteControlStreamID("stream-1")
+        let transport = RemoteControlAppServerRecordingWebSocketTransport(incoming: [
+            .text(try remoteControlEnvelopeText(RemoteControlClientEnvelope(
+                event: .ping,
+                clientID: clientID,
+                streamID: streamID,
+                seqID: nil,
+                cursor: nil
+            ))),
+        ])
+        let probe = RemoteControlAppServerExecutableRetryProbe(transport: transport)
+        var runtime = RemoteControlAppServerExecutableRuntime(
+            runtime: try RemoteControlRuntimeCore(
+                remoteControlURL: "https://chatgpt.com/backend-api",
+                installationID: "install-1",
+                requestedEnabled: true,
+                stateDatabaseAvailable: true
+            ),
+            configuration: testConfiguration(codexHome: temp.url),
+            connect: { target, appServerClientName in
+                try await probe.connect(target: target, appServerClientName: appServerClientName)
+            }
+        )
+
+        try await runtime.run(maxReceives: 1, sleep: { seconds in
+            await probe.sleep(seconds)
+        })
+
+        let attempts = await probe.connections()
+        XCTAssertEqual(attempts.count, 2)
+        XCTAssertEqual(attempts.map(\.target), [
+            RemoteControlTarget(
+                websocketURL: "wss://chatgpt.com/backend-api/wham/remote/control/server",
+                enrollURL: "https://chatgpt.com/backend-api/wham/remote/control/server/enroll"
+            ),
+            RemoteControlTarget(
+                websocketURL: "wss://chatgpt.com/backend-api/wham/remote/control/server",
+                enrollURL: "https://chatgpt.com/backend-api/wham/remote/control/server/enroll"
+            ),
+        ])
+        let sleeps = await probe.sleeps()
+        XCTAssertEqual(sleeps, [RemoteControlConnectLoopCore.accountIDRetryIntervalSeconds])
+        let frames = await transport.sentFrames()
+        XCTAssertEqual(frames.count, 1)
+        XCTAssertEqual(
+            try remoteControlServerEnvelope(from: try XCTUnwrap(frames.first)),
+            RemoteControlServerEnvelope(
+                event: .pong(status: .unknown),
+                clientID: clientID,
+                streamID: streamID,
+                seqID: 1
+            )
+        )
+    }
+
     func testRemoteControlAppServerBridgeDropsUnknownAndClosesConnectionLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let clientID = RemoteControlClientID("client-1")
@@ -27021,6 +27079,44 @@ private actor RemoteControlAppServerExecutableConnectionProbe {
 
     func connections() -> [Connection] {
         recordedConnections
+    }
+}
+
+private actor RemoteControlAppServerExecutableRetryProbe {
+    typealias Connection = RemoteControlAppServerExecutableConnectionProbe.Connection
+
+    private let transport: RemoteControlAppServerRecordingWebSocketTransport
+    private var recordedConnections: [Connection] = []
+    private var recordedSleeps: [TimeInterval] = []
+
+    init(transport: RemoteControlAppServerRecordingWebSocketTransport) {
+        self.transport = transport
+    }
+
+    func connect(
+        target: RemoteControlTarget,
+        appServerClientName: String?
+    ) throws -> RemoteControlAppServerExecutableConnection<RemoteControlAppServerRecordingWebSocketTransport> {
+        recordedConnections.append(Connection(target: target, appServerClientName: appServerClientName))
+        if recordedConnections.count == 1 {
+            throw RemoteControlAuthLoadError.waitingForChatGPTAccountID
+        }
+        return RemoteControlAppServerExecutableConnection(
+            transport: transport,
+            environmentID: "env-1"
+        )
+    }
+
+    func sleep(_ seconds: TimeInterval) {
+        recordedSleeps.append(seconds)
+    }
+
+    func connections() -> [Connection] {
+        recordedConnections
+    }
+
+    func sleeps() -> [TimeInterval] {
+        recordedSleeps
     }
 }
 

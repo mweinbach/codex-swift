@@ -2361,6 +2361,13 @@ final class ExecServerTests: XCTestCase {
     }
 
     func testAppServerExecutableTransportValidatorRejectsUnsupportedRuntimeModes() {
+        XCTAssertNoThrow(try AppServerExecutableTransportValidator.validateSupportedTransport(
+            .off,
+            remoteControlFeatureEnabled: true,
+            stateStoreAvailable: true,
+            remoteControlBaseURL: "https://chatgpt.com/backend-api"
+        ))
+
         XCTAssertThrowsError(try AppServerExecutableTransportValidator.validateSupportedTransport(
             .off,
             remoteControlFeatureEnabled: false,

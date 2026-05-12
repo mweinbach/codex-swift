@@ -295,6 +295,7 @@ struct RemoteControlAppServerExecutableRuntime<Transport: RemoteControlWebSocket
         RemoteControlTarget,
         String?
     ) async throws -> RemoteControlAppServerExecutableConnection<Transport>
+    typealias Sleep = @Sendable (TimeInterval) async throws -> Void
 
     private var runtime: RemoteControlRuntimeCore
     private let configuration: CodexAppServerConfiguration
@@ -322,6 +323,39 @@ struct RemoteControlAppServerExecutableRuntime<Transport: RemoteControlWebSocket
         )
     }
 
+    mutating func run(
+        appServerClientNameRequired: Bool = false,
+        now: @Sendable () -> TimeInterval = { Date().timeIntervalSinceReferenceDate },
+        maxReceives: Int? = nil,
+        sleep: @escaping Sleep = Self.sleep
+    ) async throws {
+        var step = runtime.start(appServerClientNameRequired: appServerClientNameRequired)
+        while true {
+            let steps = try await process(step, now: now, maxReceives: maxReceives)
+            guard let action = steps.last?.runtimeStep.action else {
+                return
+            }
+            switch action {
+            case .connected:
+                return
+            case .reconnect:
+                step = runtime.reconnect()
+            case .retryAfterAccountID:
+                try await sleep(RemoteControlConnectLoopCore.accountIDRetryIntervalSeconds)
+                step = runtime.reconnect()
+            case let .retryAfterBackoff(delay):
+                try await sleep(Self.backoffSeconds(for: delay))
+                step = runtime.reconnect()
+            case .waitForDisableAfterInvalidURL:
+                return
+            case .waitForAppServerClientName, .waitUntilEnabled, .shutdownTracker:
+                return
+            case .connect:
+                step = RemoteControlRuntimeStep(action: action)
+            }
+        }
+    }
+
     private mutating func process(
         _ runtimeStep: RemoteControlRuntimeStep,
         now: @Sendable () -> TimeInterval,
@@ -332,7 +366,14 @@ struct RemoteControlAppServerExecutableRuntime<Transport: RemoteControlWebSocket
             return steps
         }
 
-        let connection = try await connect(target, appServerClientName)
+        let connection: RemoteControlAppServerExecutableConnection<Transport>
+        do {
+            connection = try await connect(target, appServerClientName)
+        } catch {
+            let failureStep = runtime.connectionFailed(Self.connectionFailure(for: error))
+            steps.append(RemoteControlAppServerExecutableRuntimeStep(runtimeStep: failureStep))
+            return steps
+        }
         let connectedStep = runtime.connectionEstablished(environmentID: connection.environmentID)
         steps.append(RemoteControlAppServerExecutableRuntimeStep(runtimeStep: connectedStep))
 
@@ -360,6 +401,22 @@ struct RemoteControlAppServerExecutableRuntime<Transport: RemoteControlWebSocket
         return steps
     }
 
+    private static func connectionFailure(for error: Error) -> RemoteControlConnectLoopFailure {
+        if case RemoteControlAuthLoadError.waitingForChatGPTAccountID = error {
+            return .waitingForAccountID
+        }
+        return .failed(String(describing: error))
+    }
+
+    private static func backoffSeconds(for delay: RemoteControlReconnectDelay) -> TimeInterval {
+        TimeInterval(delay.baseMilliseconds) / 1_000
+    }
+
+    private static func sleep(seconds: TimeInterval) async throws {
+        let nanoseconds = UInt64(max(0, seconds) * 1_000_000_000)
+        try await Task.sleep(nanoseconds: nanoseconds)
+    }
+
     private static func sessionEnd(
         for websocketEnd: RemoteControlWebsocketConnectionEnd
     ) -> RemoteControlSessionConnectionEnd {
@@ -371,6 +428,105 @@ struct RemoteControlAppServerExecutableRuntime<Transport: RemoteControlWebSocket
         case .reconnect:
             return .workerEnded
         }
+    }
+}
+
+private actor RemoteControlURLSessionWebSocketBox {
+    private var transport: RemoteControlURLSessionWebSocket?
+
+    func store(_ transport: RemoteControlURLSessionWebSocket) {
+        self.transport = transport
+    }
+
+    func take() -> RemoteControlURLSessionWebSocket? {
+        let current = transport
+        transport = nil
+        return current
+    }
+}
+
+public extension CodexAppServer {
+    static func runRemoteControlExecutable(
+        configuration: CodexAppServerConfiguration,
+        startState: RemoteControlStartState,
+        codexHome: URL,
+        authCredentialsStoreMode: AuthCredentialsStoreMode,
+        stateStore: SQLiteAgentGraphStore
+    ) async throws {
+        var runtime = RemoteControlAppServerExecutableRuntime(
+            runtime: try RemoteControlRuntimeCore(
+                remoteControlURL: startState.remoteControlURL,
+                installationID: startState.statusSnapshot.installationID,
+                requestedEnabled: startState.requestedEnabled,
+                stateDatabaseAvailable: startState.stateDatabaseAvailable
+            ),
+            configuration: configuration,
+            connect: { target, appServerClientName in
+                try await Self.remoteControlExecutableConnection(
+                    target: target,
+                    appServerClientName: appServerClientName,
+                    startState: startState,
+                    codexHome: codexHome,
+                    authCredentialsStoreMode: authCredentialsStoreMode,
+                    stateStore: stateStore,
+                    appServerVersion: configuration.version
+                )
+            }
+        )
+        try await runtime.run()
+    }
+
+    private static func remoteControlExecutableConnection(
+        target: RemoteControlTarget,
+        appServerClientName: String?,
+        startState: RemoteControlStartState,
+        codexHome: URL,
+        authCredentialsStoreMode: AuthCredentialsStoreMode,
+        stateStore: SQLiteAgentGraphStore,
+        appServerVersion: String
+    ) async throws -> RemoteControlAppServerExecutableConnection<RemoteControlURLSessionWebSocket> {
+        let authLoader = RemoteControlAuthLoader(
+            loadAuth: {
+                try CodexAuthStorage.loadEffectiveAuthDotJSON(
+                    codexHome: codexHome,
+                    mode: authCredentialsStoreMode
+                )
+            },
+            reloadAuth: {
+                _ = try await CodexAuthStorage.loadFreshTokenData(
+                    codexHome: codexHome,
+                    mode: authCredentialsStoreMode
+                )
+            }
+        )
+        let auth = try await authLoader.load()
+        let enrollmentClient = RemoteControlEnrollmentClient(
+            auth: auth,
+            installationID: startState.statusSnapshot.installationID,
+            appServerVersion: appServerVersion
+        )
+        let socketBox = RemoteControlURLSessionWebSocketBox()
+        let connector = RemoteControlWebSocketConnector(
+            auth: auth,
+            installationID: startState.statusSnapshot.installationID,
+            appServerClientName: appServerClientName,
+            enroll: enrollmentClient.enroll,
+            connect: { request, _ in
+                await socketBox.store(RemoteControlURLSessionWebSocket(request: request))
+            }
+        )
+        let result = try await connector.connect(
+            target: target,
+            store: stateStore,
+            currentEnrollment: nil,
+            subscribeCursor: nil,
+            statusPublisher: startState.statusPublisher
+        )
+        let transport = await socketBox.take() ?? RemoteControlURLSessionWebSocket(request: result.request)
+        return RemoteControlAppServerExecutableConnection(
+            transport: transport,
+            environmentID: result.updatedEnrollment?.environmentID ?? result.enrollment.environmentID
+        )
     }
 }
 

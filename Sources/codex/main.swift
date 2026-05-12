@@ -469,7 +469,16 @@ private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) as
         case let .unixSocket(socketPath):
             try await AppServerWebSocketTransport(configuration: configuration).run(socketPath: socketPath)
         case .off:
-            throw AppServerExecutableTransportError.liveTransportPending(request.listenTransport.listenURLDescription)
+            guard let stateStore else {
+                throw AppServerExecutableTransportError.remoteControlUnavailableWithoutStateDB
+            }
+            try await CodexAppServer.runRemoteControlExecutable(
+                configuration: configuration,
+                startState: remoteControlStartState,
+                codexHome: codexHome,
+                authCredentialsStoreMode: settings.cliAuthCredentialsStoreMode,
+                stateStore: stateStore
+            )
         }
         return CodexCLI.CommandExecutionResult(exitCode: 0)
     case let .proxy(socketPath):

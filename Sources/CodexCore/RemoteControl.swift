@@ -614,6 +614,10 @@ public struct RemoteControlRuntimeCore: Equatable, Sendable {
         )
     }
 
+    public mutating func reconnect() -> RemoteControlRuntimeStep {
+        beginConnect(appServerClientName: sessionLoop.appServerClientName)
+    }
+
     private mutating func waitUntilEnabledOrConnect(
         appServerClientName: String?
     ) -> RemoteControlRuntimeStep {

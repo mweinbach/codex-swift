@@ -127,7 +127,6 @@ public enum AppServerListenURLParser {
 public enum AppServerExecutableTransportError: Error, CustomStringConvertible, Equatable, Sendable {
     case noTransportConfigured
     case remoteControlUnavailableWithoutStateDB
-    case liveTransportPending(String)
 
     public var description: String {
         switch self {
@@ -135,8 +134,6 @@ public enum AppServerExecutableTransportError: Error, CustomStringConvertible, E
             return "no transport configured; use --listen or enable remote control"
         case .remoteControlUnavailableWithoutStateDB:
             return "no transport configured; remote control disabled because sqlite state db is unavailable"
-        case let .liveTransportPending(listenURL):
-            return "live app-server transport for --listen `\(listenURL)` is not implemented yet"
         }
     }
 }
@@ -163,7 +160,7 @@ public enum AppServerExecutableTransportValidator {
             guard stateStoreAvailable else {
                 throw AppServerExecutableTransportError.remoteControlUnavailableWithoutStateDB
             }
-            throw AppServerExecutableTransportError.liveTransportPending(transport.listenURLDescription)
+            return
         case .unixSocket:
             return
         case .webSocket:
