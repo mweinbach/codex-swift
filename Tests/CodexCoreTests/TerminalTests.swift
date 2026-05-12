@@ -188,6 +188,18 @@ final class TerminalTests: XCTestCase {
         XCTAssertEqual(terminal, info(.unknown, term: "xterm-256color"))
         XCTAssertEqual(terminal.userAgentToken, "xterm-256color")
 
+        terminal = detect(["TERM": "wezterm"])
+        XCTAssertEqual(terminal, info(.wezTerm, term: "wezterm"))
+        XCTAssertEqual(terminal.userAgentToken, "wezterm")
+
+        terminal = detect(["TERM": "wezterm-mux"])
+        XCTAssertEqual(terminal, info(.wezTerm, term: "wezterm-mux"))
+        XCTAssertEqual(terminal.userAgentToken, "wezterm-mux")
+
+        terminal = detect(["TERM": "dumb"])
+        XCTAssertEqual(terminal, info(.dumb, term: "dumb"))
+        XCTAssertEqual(terminal.userAgentToken, "dumb")
+
         terminal = detect([:])
         XCTAssertEqual(terminal, info(.unknown))
         XCTAssertEqual(terminal.userAgentToken, "unknown")
@@ -197,6 +209,7 @@ final class TerminalTests: XCTestCase {
         XCTAssertEqual(Terminal.terminalName(fromTermProgram: "iTerm.app"), .iterm2)
         XCTAssertEqual(Terminal.terminalName(fromTermProgram: "Warp-Terminal"), .warpTerminal)
         XCTAssertEqual(Terminal.terminalName(fromTermProgram: "Windows_Terminal"), .windowsTerminal)
+        XCTAssertEqual(Terminal.terminalName(fromTermProgram: "dumb"), .dumb)
         XCTAssertNil(Terminal.terminalName(fromTermProgram: "Mystery Term"))
 
         let terminal = info(.unknown, termProgram: "Bad Term", version: "1.0(beta)")

@@ -202,7 +202,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/core/src/path_utils.rs`
   - path canonicalization for comparison and WSL `/mnt/<drive>` case-insensitive path normalization
 - `codex-rs/core/src/terminal.rs`
-  - terminal metadata detection from environment variables, tmux/zellij multiplexer metadata, tmux client fallbacks, terminal-name normalization, and user-agent token sanitization
+  - terminal metadata detection from environment variables, tmux/zellij multiplexer metadata, tmux client fallbacks, terminal-name normalization, Rust's `TERM=dumb` / WezTerm fallback classification, and user-agent token sanitization
 - `codex-rs/core/src/user_shell_command.rs` and exec-output formatting dependency from `codex-rs/core/src/tools/mod.rs`
   - user shell command start/end tag detection, duration formatting, aggregated-output records, timeout prefixes, truncation-policy integration, and message response-item wire shape
 - `codex-rs/core/src/client_common.rs` tool models and `codex-rs/core/src/tools/spec.rs`

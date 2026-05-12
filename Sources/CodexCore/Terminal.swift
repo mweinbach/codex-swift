@@ -53,6 +53,8 @@ public struct TerminalInfo: Equatable, Sendable {
                 raw = Terminal.formatTerminalVersion("VTE", version: version)
             case .windowsTerminal:
                 raw = "WindowsTerminal"
+            case .dumb:
+                raw = "dumb"
             case .unknown:
                 raw = "unknown"
             }
@@ -75,6 +77,7 @@ public enum TerminalName: Equatable, Sendable {
     case gnomeTerminal
     case vte
     case windowsTerminal
+    case dumb
     case unknown
 }
 
@@ -192,7 +195,11 @@ public enum Terminal {
         }
 
         if let term = nonWhitespace(environment["TERM"]) {
-            return TerminalInfo(name: .unknown, term: term, multiplexer: multiplexer)
+            return TerminalInfo(
+                name: terminalName(fromTerm: term),
+                term: term,
+                multiplexer: multiplexer
+            )
         }
 
         return TerminalInfo(name: .unknown, multiplexer: multiplexer)
@@ -234,8 +241,21 @@ public enum Terminal {
             return .vte
         case "windowsterminal":
             return .windowsTerminal
+        case "dumb":
+            return .dumb
         default:
             return nil
+        }
+    }
+
+    private static func terminalName(fromTerm value: String) -> TerminalName {
+        switch value {
+        case "dumb":
+            return .dumb
+        case "wezterm", "wezterm-mux":
+            return .wezTerm
+        default:
+            return .unknown
         }
     }
 
