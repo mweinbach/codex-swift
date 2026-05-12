@@ -1787,7 +1787,8 @@ public enum CodexAppServer {
     fileprivate static func threadReadResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration,
-        loadedEphemeralThread: (String) -> [String: Any]? = { _ in nil }
+        loadedEphemeralThread: (String) -> [String: Any]? = { _ in nil },
+        loadedThreadStatus: (String) -> [String: Any]? = { _ in nil }
     ) throws -> [String: Any] {
         let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
 
@@ -1805,20 +1806,26 @@ public enum CodexAppServer {
             idString: conversationID.description,
             includeArchived: true
         ) else {
-            if let thread = loadedEphemeralThread(conversationID.description) {
+            if var thread = loadedEphemeralThread(conversationID.description) {
                 if includeTurns {
                     throw AppServerError.invalidRequest("ephemeral threads do not support includeTurns")
+                }
+                if let status = loadedThreadStatus(conversationID.description) {
+                    thread["status"] = status
                 }
                 return ["thread": thread]
             }
             throw AppServerError.invalidRequest("thread not loaded: \(conversationID)")
         }
         let item = ConversationItem(path: rolloutPath, head: [], createdAt: nil, updatedAt: nil)
-        let thread = try threadObject(
+        var thread = try threadObject(
             for: item,
             defaultProvider: configuration.defaultModelProvider,
             turns: includeTurns ? buildTurnsFromRolloutEvents(at: rolloutPath) : []
         )
+        if let status = loadedThreadStatus(conversationID.description) {
+            thread["status"] = status
+        }
         return ["thread": thread]
     }
 
@@ -23026,6 +23033,7 @@ final class CodexAppServerMessageProcessor {
     private var runtimeTurnErrors: [String: [String: [String: Any]]] = [:]
     private var runtimePendingApprovalCounts: [String: Int] = [:]
     private var runtimePendingUserInputCounts: [String: Int] = [:]
+    private var runtimeSystemErrorThreadIDs: Set<String> = []
     private var runtimeCommandExecutionStarted: [String: Set<String>] = [:]
     private var pendingRollbackRequests: [String: RequestID] = [:]
     private var pendingSessionStartSources: [String: HookSessionStartSource] = [:]
@@ -23206,6 +23214,20 @@ final class CodexAppServerMessageProcessor {
         return (try? CodexAppServer.runAsyncBlocking {
             await manager.isThreadLoaded(threadID)
         }) ?? false
+    }
+
+    private func loadedThreadStatus(threadID: String) -> [String: Any]? {
+        guard isThreadLoaded(threadID) else {
+            return nil
+        }
+        if runtimeSystemErrorThreadIDs.contains(threadID) {
+            return CodexAppServer.systemErrorThreadStatus()
+        }
+        let flags = runtimeActiveFlags(threadID: threadID)
+        if activeTurnIDs[threadID] != nil || !flags.isEmpty {
+            return CodexAppServer.activeThreadStatus(activeFlags: flags)
+        }
+        return CodexAppServer.idleThreadStatus()
     }
 
     private func rejectMetadataUpdateForLoadedEphemeralThread(params: [String: Any]?) throws {
@@ -23426,6 +23448,7 @@ final class CodexAppServerMessageProcessor {
         case let .taskStarted(event):
             let runtimeTurnID = event.turnID
             activeTurnIDs[threadID] = runtimeTurnID
+            runtimeSystemErrorThreadIDs.remove(threadID)
             if let startedAt = event.startedAt {
                 runtimeTurnStartedAt[threadID, default: [:]][runtimeTurnID] = startedAt
             }
@@ -23451,6 +23474,7 @@ final class CodexAppServerMessageProcessor {
             if activeTurnIDs[threadID] == runtimeTurnID {
                 activeTurnIDs[threadID] = nil
             }
+            runtimeSystemErrorThreadIDs.remove(threadID)
             notifications = [
                 threadStatusChangedNotification(
                     threadID: threadID,
@@ -23474,6 +23498,7 @@ final class CodexAppServerMessageProcessor {
             if activeTurnIDs[threadID] == runtimeTurnID {
                 activeTurnIDs[threadID] = nil
             }
+            runtimeSystemErrorThreadIDs.remove(threadID)
             notifications = [
                 threadStatusChangedNotification(
                     threadID: threadID,
@@ -23510,6 +23535,7 @@ final class CodexAppServerMessageProcessor {
                     additionalDetails: nil
                 )
             }
+            runtimeSystemErrorThreadIDs.insert(threadID)
             notifications = projected
         case .applyPatchApprovalRequest, .execApprovalRequest, .elicitationRequest, .requestPermissions:
             notifications = [
@@ -24543,7 +24569,8 @@ final class CodexAppServerMessageProcessor {
                         result: try CodexAppServer.threadReadResult(
                             params: params,
                             configuration: configuration,
-                            loadedEphemeralThread: { self.loadedEphemeralThreadSnapshot(threadID: $0) }
+                            loadedEphemeralThread: { self.loadedEphemeralThreadSnapshot(threadID: $0) },
+                            loadedThreadStatus: { self.loadedThreadStatus(threadID: $0) }
                         )
                     )
                 case "thread/unsubscribe":

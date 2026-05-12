@@ -5081,6 +5081,69 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual((thread["turns"] as? [Any])?.count, 0)
     }
 
+    func testThreadReadOverlaysLoadedRuntimeStatusLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "Saved user message",
+            provider: "mock_provider"
+        )
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        _ = try decode(processor.processLine(Data(#"{"id":1,"method":"thread/resume","params":{"threadId":"\#(threadID)"}}"#.utf8)))
+
+        var read = try decode(processor.processLine(Data(#"{"id":2,"method":"thread/read","params":{"threadId":"\#(threadID)"}}"#.utf8)))
+        var result = try XCTUnwrap(read["result"] as? [String: Any])
+        var thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        var status = try XCTUnwrap(thread["status"] as? [String: Any])
+        XCTAssertEqual(status["type"] as? String, "idle")
+
+        await processor.handleRuntimeEvent(
+            threadID: threadID,
+            turnID: "fallback-turn",
+            event: .taskStarted(TaskStartedEvent(
+                turnID: "turn-1",
+                startedAt: 1_778_320_000,
+                modelContextWindow: nil,
+                collaborationModeKind: nil
+            ))
+        )
+        read = try decode(processor.processLine(Data(#"{"id":3,"method":"thread/read","params":{"threadId":"\#(threadID)"}}"#.utf8)))
+        result = try XCTUnwrap(read["result"] as? [String: Any])
+        thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        status = try XCTUnwrap(thread["status"] as? [String: Any])
+        XCTAssertEqual(status["type"] as? String, "active")
+        XCTAssertEqual(status["activeFlags"] as? [String], [])
+
+        await processor.handleRuntimeEvent(
+            threadID: threadID,
+            turnID: "turn-1",
+            event: .error(ErrorEvent(message: "simulated failure", codexErrorInfo: .badRequest))
+        )
+        read = try decode(processor.processLine(Data(#"{"id":4,"method":"thread/read","params":{"threadId":"\#(threadID)"}}"#.utf8)))
+        result = try XCTUnwrap(read["result"] as? [String: Any])
+        thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        status = try XCTUnwrap(thread["status"] as? [String: Any])
+        XCTAssertEqual(status["type"] as? String, "systemError")
+
+        await processor.handleRuntimeEvent(
+            threadID: threadID,
+            turnID: "fallback-turn",
+            event: .taskComplete(TaskCompleteEvent(
+                turnID: "turn-1",
+                lastAgentMessage: nil,
+                completedAt: 1_778_320_010,
+                durationMilliseconds: 10_000
+            ))
+        )
+        read = try decode(processor.processLine(Data(#"{"id":5,"method":"thread/read","params":{"threadId":"\#(threadID)"}}"#.utf8)))
+        result = try XCTUnwrap(read["result"] as? [String: Any])
+        thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        status = try XCTUnwrap(thread["status"] as? [String: Any])
+        XCTAssertEqual(status["type"] as? String, "idle")
+    }
+
     func testThreadResumeUsesLatestTurnContextCwd() throws {
         let temp = try TemporaryDirectory()
         let staleCwd = temp.url.appendingPathComponent("stale", isDirectory: true)
