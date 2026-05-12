@@ -865,7 +865,7 @@ final class CommandSurfaceCLITests: XCTestCase {
         XCTAssertEqual(request?.action, .run)
         XCTAssertEqual(request?.listenTransport, .webSocket(host: "127.0.0.1", port: 4500))
         XCTAssertEqual(request?.analyticsDefaultEnabled, true)
-        XCTAssertEqual(request?.websocketAuth, CodexCLI.AppServerWebsocketAuthArguments(
+        XCTAssertEqual(request?.websocketAuth, AppServerWebsocketAuthArguments(
             mode: .signedBearerToken,
             sharedSecretFile: "/tmp/secret",
             issuer: "issuer",
@@ -897,7 +897,7 @@ final class CommandSurfaceCLITests: XCTestCase {
         XCTAssertEqual(exitCode, 0)
         XCTAssertEqual(request?.action, .proxy(socketPath: nil))
         XCTAssertEqual(request?.listenTransport, .off)
-        XCTAssertEqual(request?.websocketAuth, CodexCLI.AppServerWebsocketAuthArguments(
+        XCTAssertEqual(request?.websocketAuth, AppServerWebsocketAuthArguments(
             mode: .capabilityToken,
             tokenFile: "/tmp/token",
             tokenSHA256: "abc123"

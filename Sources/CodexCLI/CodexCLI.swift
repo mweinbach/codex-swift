@@ -366,39 +366,6 @@ public struct CodexCLI: Sendable {
         case generateInternalJSONSchema(outDir: String)
     }
 
-    public enum AppServerWebsocketAuthMode: Equatable, Sendable {
-        case capabilityToken
-        case signedBearerToken
-    }
-
-    public struct AppServerWebsocketAuthArguments: Equatable, Sendable {
-        public let mode: AppServerWebsocketAuthMode?
-        public let tokenFile: String?
-        public let tokenSHA256: String?
-        public let sharedSecretFile: String?
-        public let issuer: String?
-        public let audience: String?
-        public let maxClockSkewSeconds: UInt64?
-
-        public init(
-            mode: AppServerWebsocketAuthMode? = nil,
-            tokenFile: String? = nil,
-            tokenSHA256: String? = nil,
-            sharedSecretFile: String? = nil,
-            issuer: String? = nil,
-            audience: String? = nil,
-            maxClockSkewSeconds: UInt64? = nil
-        ) {
-            self.mode = mode
-            self.tokenFile = tokenFile
-            self.tokenSHA256 = tokenSHA256
-            self.sharedSecretFile = sharedSecretFile
-            self.issuer = issuer
-            self.audience = audience
-            self.maxClockSkewSeconds = maxClockSkewSeconds
-        }
-    }
-
     public struct AppServerCommandRequest: Equatable, Sendable {
         public let action: AppServerCommandAction
         public let listenTransport: AppServerListenTransport
