@@ -1132,6 +1132,39 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserPreservesRustStarlarkRangeValueSemantics() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        NUMBERS = range(2, 8, 2)
+        EMPTY = range(5, 1, 1)
+        ALSO_EMPTY = range(0)
+        SINGLE_A = range(4, 10, 20)
+        SINGLE_B = range(4, 5)
+        SLICE = range(1, 8, 2)[1:]
+        REVERSED = range(5)[::-1]
+        TEXT = f"{range(3)}"
+
+        if type(NUMBERS) == "range" and str(NUMBERS) == "range(2, 8, 2)" and repr(NUMBERS) == "range(2, 8, 2)" and TEXT == "range(3)":
+            prefix_rule([TOOL, str(NUMBERS[1])], "allow", justification = repr(SLICE) + "/" + repr(REVERSED))
+
+        if EMPTY == ALSO_EMPTY and SINGLE_A == SINGLE_B and 4 in NUMBERS and 5 not in NUMBERS and not EMPTY:
+            network_rule("range" + str(len(NUMBERS)) + ".example.com", "https", "allow")
+            host_executable(TOOL, ["/opt/" + str(list(NUMBERS)[-1]) + "/" + TOOL])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("4")]),
+                decision: .allow,
+                justification: "range(3, 9, 2)/range(4, -1, -1)"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "range3.example.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/6/git"]])
+    }
+
     func testParserEvaluatesRustStarlarkListAndStringSlices() throws {
         let policy = try parsePolicy("""
         TOOL = "git"

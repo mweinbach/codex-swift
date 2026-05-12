@@ -310,7 +310,7 @@ public enum HookConfig {
             return UInt64(double)
         case let .string(string)?:
             return UInt64(string)
-        case .bool?, .array?, .table?, .integer?, .double?, .none?, nil:
+        case .bool?, .array?, .table?, .range?, .integer?, .double?, .none?, nil:
             return nil
         }
     }

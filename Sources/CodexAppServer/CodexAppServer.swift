@@ -19935,7 +19935,7 @@ public enum CodexAppServer {
             return UInt64(double)
         case let .string(string)?:
             return UInt64(string)
-        case .bool?, .array?, .table?, .integer?, .double?, .none?, nil:
+        case .bool?, .array?, .table?, .range?, .integer?, .double?, .none?, nil:
             return nil
         }
     }
@@ -20769,6 +20769,8 @@ public enum CodexAppServer {
             return array.map(configValueObject)
         case let .table(table):
             return table.mapValues(configValueObject)
+        case let .range(start, stop, step):
+            return configRangeValues(start: start, stop: stop, step: step)
         }
     }
 
@@ -21404,7 +21406,7 @@ public enum CodexAppServer {
 
     private static func sourcePreservingTomlLiteral(_ value: ConfigValue) -> String? {
         switch value {
-        case .none, .table:
+        case .none, .table, .range:
             return nil
         case .string, .integer, .double, .bool:
             return tomlLiteral(value)
@@ -21601,7 +21603,7 @@ public enum CodexAppServer {
                     return nil
                 }
                 current = items[index]
-            case .none, .string, .integer, .double, .bool:
+            case .none, .string, .integer, .double, .bool, .range:
                 return nil
             }
         }
@@ -21751,7 +21753,29 @@ public enum CodexAppServer {
                 "\(tomlKey(key)) = \(tomlLiteral(table[key]!))"
             }.joined(separator: ", ")
             return "{\(body)}"
+        case let .range(start, stop, step):
+            return "[\(configRangeValues(start: start, stop: stop, step: step).map { String($0) }.joined(separator: ", "))]"
         }
+    }
+
+    private static func configRangeValues(start: Int, stop: Int, step: Int) -> [Int] {
+        guard step != 0 else {
+            return []
+        }
+        var values: [Int] = []
+        var current = start
+        if step > 0 {
+            while current < stop {
+                values.append(current)
+                current += step
+            }
+        } else {
+            while current > stop {
+                values.append(current)
+                current += step
+            }
+        }
+        return values
     }
 
     private static func tomlKey(_ value: String) -> String {

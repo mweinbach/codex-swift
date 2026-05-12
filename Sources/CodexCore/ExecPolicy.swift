@@ -3308,6 +3308,8 @@ public final class PolicyParser {
             return String(value)
         case let .bool(value):
             return value ? "True" : "False"
+        case let .range(start, stop, step):
+            return starlarkRangeDisplay(start: start, stop: stop, step: step)
         default:
             throw ConfigOverrideError.invalidLiteral(expression)
         }
@@ -3392,6 +3394,8 @@ public final class PolicyParser {
             return .integer(Int64(items.count))
         case let .table(items):
             return .integer(Int64(items.count))
+        case let .range(start, stop, step):
+            return .integer(Int64(starlarkRangeLength(start: start, stop: stop, step: step)))
         default:
             throw ConfigOverrideError.invalidLiteral(text)
         }
@@ -3448,20 +3452,7 @@ public final class PolicyParser {
             throw ConfigOverrideError.invalidLiteral(text)
         }
 
-        var values: [ConfigValue] = []
-        var current = start
-        if step > 0 {
-            while current < end {
-                values.append(.integer(Int64(current)))
-                current += step
-            }
-        } else {
-            while current > end {
-                values.append(.integer(Int64(current)))
-                current += step
-            }
-        }
-        return .array(values)
+        return .range(start: start, stop: end, step: step)
     }
 
     private static func parseStarlarkStringMethodCall(
@@ -6395,6 +6386,8 @@ public final class PolicyParser {
             names = ["append", "clear", "extend", "index", "insert", "pop", "remove"]
         case .table:
             names = ["clear", "get", "items", "keys", "pop", "popitem", "setdefault", "update", "values"]
+        case .range:
+            names = []
         default:
             names = []
         }
@@ -6417,6 +6410,8 @@ public final class PolicyParser {
             return "list"
         case .table:
             return "dict"
+        case .range:
+            return "range"
         }
     }
 
@@ -6532,6 +6527,8 @@ public final class PolicyParser {
             return "{" + items.keys.sorted().map { key in
                 "\(starlarkQuotedString(key)): \(starlarkRepresentation(items[key]!))"
             }.joined(separator: ", ") + "}"
+        case let .range(start, stop, step):
+            return starlarkRangeDisplay(start: start, stop: stop, step: step)
         }
     }
 
@@ -6561,8 +6558,79 @@ public final class PolicyParser {
             return value.map { .string(String($0)) }
         case let .table(items):
             return items.keys.map(ConfigValue.string)
+        case let .range(start, stop, step):
+            return starlarkRangeValues(start: start, stop: stop, step: step).map { .integer(Int64($0)) }
         default:
             throw ConfigOverrideError.invalidLiteral(expression)
+        }
+    }
+
+    private static func starlarkRangeValues(start: Int, stop: Int, step: Int) -> [Int] {
+        guard step != 0 else {
+            return []
+        }
+        var values: [Int] = []
+        var current = start
+        if step > 0 {
+            while current < stop {
+                values.append(current)
+                current += step
+            }
+        } else {
+            while current > stop {
+                values.append(current)
+                current += step
+            }
+        }
+        return values
+    }
+
+    private static func starlarkRangeLength(for value: ConfigValue) -> Int {
+        guard case let .range(start, stop, step) = value else {
+            return 0
+        }
+        return starlarkRangeLength(start: start, stop: stop, step: step)
+    }
+
+    private static func starlarkRangeLength(start: Int, stop: Int, step: Int) -> Int {
+        guard step != 0 else {
+            return 0
+        }
+        if start == stop {
+            return 0
+        }
+        if (stop >= start) != (step > 0) {
+            return 0
+        }
+        let distance = step > 0 ? stop - start : start - stop
+        let stride = abs(step)
+        return (distance - 1) / stride + 1
+    }
+
+    private static func starlarkRangeDisplay(start: Int, stop: Int, step: Int) -> String {
+        if step != 1 {
+            return "range(\(start), \(stop), \(step))"
+        }
+        if start != 0 {
+            return "range(\(start), \(stop))"
+        }
+        return "range(\(stop))"
+    }
+
+    private static func starlarkRangeContains(_ value: Int, start: Int, stop: Int, step: Int) -> Bool {
+        guard starlarkRangeLength(start: start, stop: stop, step: step) > 0 else {
+            return false
+        }
+        if step > 0 {
+            guard value >= start, value < stop else {
+                return false
+            }
+            return (value - start) % step == 0
+        } else {
+            guard value <= start, value > stop else {
+                return false
+            }
+            return (start - value) % abs(step) == 0
         }
     }
 
@@ -6665,6 +6733,19 @@ public final class PolicyParser {
                 throw ConfigOverrideError.invalidLiteral(text)
             }
             return items[resolvedIndex]
+        case let .range(start, stop, step):
+            let itemIndex = try parseStarlarkInteger(
+                indexText,
+                constants: constants,
+                functions: functions,
+                expression: text
+            )
+            let length = starlarkRangeLength(start: start, stop: stop, step: step)
+            let resolvedIndex = itemIndex >= 0 ? itemIndex : length + itemIndex
+            guard resolvedIndex >= 0, resolvedIndex < length else {
+                throw ConfigOverrideError.invalidLiteral(text)
+            }
+            return .integer(Int64(start + step * resolvedIndex))
         case let .string(value):
             let characters = Array(value)
             let itemIndex = try parseStarlarkInteger(
@@ -6738,6 +6819,23 @@ public final class PolicyParser {
                 expression: expression
             )
             return .array(indexes.map { items[$0] })
+        case let .range(rangeStart, _, rangeStep):
+            let length = starlarkRangeLength(for: base)
+            let indexes = try starlarkSliceIndexes(
+                count: length,
+                start: start,
+                stop: stop,
+                step: step,
+                expression: expression
+            )
+            guard let first = indexes.first else {
+                return .range(start: 0, stop: 0, step: 1)
+            }
+            let sliceStep = (indexes.dropFirst().first ?? (first + 1)) - first
+            let newStart = rangeStart + rangeStep * first
+            let newStep = rangeStep * sliceStep
+            let newStop = rangeStart + rangeStep * (indexes.last! + sliceStep)
+            return .range(start: newStart, stop: newStop, step: newStep)
         case let .string(value):
             let characters = Array(value)
             let indexes = try starlarkSliceIndexes(
@@ -7365,9 +7463,9 @@ public final class PolicyParser {
                 let comparison: Bool
                 switch operatorText {
                 case "==":
-                    comparison = previous == next
+                    comparison = starlarkValuesEqual(previous, next)
                 case "!=":
-                    comparison = previous != next
+                    comparison = !starlarkValuesEqual(previous, next)
                 case "<=":
                     comparison = try compareStarlarkValues(previous, next, expression: condition) <= 0
                 case ">=":
@@ -7519,9 +7617,74 @@ public final class PolicyParser {
                 }
             }
             return lhs.count == rhs.count ? 0 : (lhs.count < rhs.count ? -1 : 1)
+        case let (.range(lhsStart, lhsStop, lhsStep), .range(rhsStart, rhsStop, rhsStep)):
+            if starlarkRangesEqual(
+                lhsStart: lhsStart,
+                lhsStop: lhsStop,
+                lhsStep: lhsStep,
+                rhsStart: rhsStart,
+                rhsStop: rhsStop,
+                rhsStep: rhsStep
+            ) {
+                return 0
+            }
+            throw ConfigOverrideError.invalidLiteral(expression)
         default:
             throw ConfigOverrideError.invalidLiteral(expression)
         }
+    }
+
+    private static func starlarkValuesEqual(_ lhs: ConfigValue, _ rhs: ConfigValue) -> Bool {
+        switch (lhs, rhs) {
+        case let (.range(lhsStart, lhsStop, lhsStep), .range(rhsStart, rhsStop, rhsStep)):
+            return starlarkRangesEqual(
+                lhsStart: lhsStart,
+                lhsStop: lhsStop,
+                lhsStep: lhsStep,
+                rhsStart: rhsStart,
+                rhsStop: rhsStop,
+                rhsStep: rhsStep
+            )
+        case let (.array(lhs), .array(rhs)):
+            guard lhs.count == rhs.count else {
+                return false
+            }
+            return zip(lhs, rhs).allSatisfy(starlarkValuesEqual)
+        case let (.table(lhs), .table(rhs)):
+            guard lhs.keys == rhs.keys else {
+                return false
+            }
+            return lhs.allSatisfy { key, value in
+                guard let rhsValue = rhs[key] else {
+                    return false
+                }
+                return starlarkValuesEqual(value, rhsValue)
+            }
+        default:
+            return lhs == rhs
+        }
+    }
+
+    private static func starlarkRangesEqual(
+        lhsStart: Int,
+        lhsStop: Int,
+        lhsStep: Int,
+        rhsStart: Int,
+        rhsStop: Int,
+        rhsStep: Int
+    ) -> Bool {
+        let lhsLength = starlarkRangeLength(start: lhsStart, stop: lhsStop, step: lhsStep)
+        let rhsLength = starlarkRangeLength(start: rhsStart, stop: rhsStop, step: rhsStep)
+        if lhsLength == 0 || rhsLength == 0 {
+            return lhsLength == rhsLength
+        }
+        guard lhsStart == rhsStart else {
+            return false
+        }
+        if lhsLength == 1 || rhsLength == 1 {
+            return lhsLength == rhsLength
+        }
+        return lhsStep == rhsStep && lhsLength == rhsLength
     }
 
     private static func containsStarlarkValue(
@@ -7531,7 +7694,7 @@ public final class PolicyParser {
     ) throws -> Bool {
         switch haystack {
         case let .array(items):
-            return items.contains(needle)
+            return items.contains { starlarkValuesEqual($0, needle) }
         case let .table(items):
             guard case let .string(key) = needle else {
                 throw ConfigOverrideError.invalidLiteral(expression)
@@ -7542,6 +7705,13 @@ public final class PolicyParser {
                 throw ConfigOverrideError.invalidLiteral(expression)
             }
             return value.contains(needle)
+        case let .range(start, stop, step):
+            guard case let .integer(rawNeedle) = needle,
+                  let needle = Int(exactly: rawNeedle)
+            else {
+                return false
+            }
+            return starlarkRangeContains(needle, start: start, stop: stop, step: step)
         default:
             throw ConfigOverrideError.invalidLiteral(expression)
         }
@@ -7581,6 +7751,8 @@ public final class PolicyParser {
             return !items.isEmpty
         case let .table(items):
             return !items.isEmpty
+        case let .range(start, stop, step):
+            return starlarkRangeLength(start: start, stop: stop, step: step) > 0
         case let .integer(value):
             return value != 0
         case let .double(value):

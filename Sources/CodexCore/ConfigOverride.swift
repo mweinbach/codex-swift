@@ -8,6 +8,7 @@ public indirect enum ConfigValue: Equatable, Sendable {
     case bool(Bool)
     case array([ConfigValue])
     case table([String: ConfigValue])
+    case range(start: Int, stop: Int, step: Int)
 
     public func merging(overlay: ConfigValue) -> ConfigValue {
         var base = self
@@ -152,7 +153,29 @@ public enum ConfigTomlRenderer {
                 "\(tomlKey(key)) = \(tomlLiteral(table[key]!))"
             }.joined(separator: ", ")
             return "{\(body)}"
+        case let .range(start, stop, step):
+            return "[\(starlarkRangeValues(start: start, stop: stop, step: step).map { String($0) }.joined(separator: ", "))]"
         }
+    }
+
+    static func starlarkRangeValues(start: Int, stop: Int, step: Int) -> [Int] {
+        guard step != 0 else {
+            return []
+        }
+        var values: [Int] = []
+        var current = start
+        if step > 0 {
+            while current < stop {
+                values.append(current)
+                current += step
+            }
+        } else {
+            while current > stop {
+                values.append(current)
+                current += step
+            }
+        }
+        return values
     }
 
     private static func tomlKey(_ value: String) -> String {
@@ -280,6 +303,9 @@ extension ConfigValue: Codable {
         case let .table(values):
             var container = encoder.singleValueContainer()
             try container.encode(values)
+        case let .range(start, stop, step):
+            var container = encoder.singleValueContainer()
+            try container.encode(ConfigTomlRenderer.starlarkRangeValues(start: start, stop: stop, step: step).map { ConfigValue.integer(Int64($0)) })
         }
     }
 }

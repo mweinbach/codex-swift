@@ -383,7 +383,7 @@ public struct ConfigLayerStack: Equatable, Sendable {
                 recordOrigins(value: nestedValue, metadata: metadata, path: &path, origins: &origins)
                 path.removeLast()
             }
-        case .string, .integer, .double, .bool, .none:
+        case .string, .integer, .double, .bool, .none, .range:
             if !path.isEmpty {
                 origins[path.joined(separator: ".")] = metadata
             }
@@ -427,6 +427,9 @@ public enum ConfigFingerprint {
                 return "\(encodedKey):\(encodedValue)"
             }
             return "{" + entries.joined(separator: ",") + "}"
+        case let .range(start, stop, step):
+            let entries = ConfigTomlRenderer.starlarkRangeValues(start: start, stop: stop, step: step).map(String.init)
+            return "[" + entries.joined(separator: ",") + "]"
         }
     }
 

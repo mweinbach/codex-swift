@@ -945,6 +945,8 @@ Source baseline inspected for this scaffold:
   - Added Swift execpolicy parser support for simple list/tuple-style target destructuring in top-level `for` loops and list comprehensions over supported array values, matching Rust Starlark policy files that iterate pairs such as `for tool, subcommand in commands:`.
 - `codex-rs/execpolicy/src/parser.rs` Starlark numeric ranges and computed indexes
   - Added Swift execpolicy parser support for `range(stop)`, `range(start, stop)`, and `range(start, stop, step)` over integer expressions, plus array indexing by integer constants or loop variables, covering range-driven loops and list comprehensions.
+- `codex-rs/execpolicy/src/parser.rs` Starlark range value semantics
+  - Swift now preserves `range(...)` as a Rust-shaped Starlark range value for `str`, `repr`, `type`, equality, truthiness, membership, indexing, slicing, iteration, and `len(...)` instead of eagerly lowering it to a list.
 - `codex-rs/execpolicy/src/parser.rs` Starlark list and string slicing
   - Added Swift execpolicy parser support for Starlark slice expressions over supported list and string values, including omitted start/stop bounds, negative indexes, positive/negative steps, and slice results used in generated rules, hosts, and executable paths.
 - `codex-rs/execpolicy/src/parser.rs` Starlark string indexes
