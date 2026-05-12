@@ -47,6 +47,38 @@ final class CodexAppServerTests: XCTestCase {
     }
     """
 
+    func testAppServerWebSocketTransportRoutesInitializeLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let transport = AppServerWebSocketTransport(configuration: testConfiguration(codexHome: temp.url))
+        let (stream, continuation) = AsyncStream.makeStream(of: String.self)
+        let serverTask = Task.detached {
+            try await transport.run(host: "127.0.0.1", port: 0) { url in
+                continuation.yield(url.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+        }
+        defer {
+            serverTask.cancel()
+        }
+
+        var iterator = stream.makeAsyncIterator()
+        let announcedURL = await iterator.next()
+        let urlString = try XCTUnwrap(announcedURL)
+        XCTAssertTrue(urlString.hasPrefix("ws://127.0.0.1:"))
+
+        let webSocket = URLSession.shared.webSocketTask(with: try XCTUnwrap(URL(string: urlString)))
+        webSocket.resume()
+        defer {
+            webSocket.cancel(with: .goingAway, reason: nil)
+        }
+
+        try await webSocket.send(.string(#"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"test","version":"0"},"capabilities":{"experimentalApi":true}}}"#))
+        let response = try decode(Data((try await receiveWebSocketText(webSocket)).utf8))
+        XCTAssertEqual(response["id"] as? Int, 1)
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["codexHome"] as? String, temp.url.standardizedFileURL.path)
+        XCTAssertEqual(result["platformFamily"] as? String, "unix")
+    }
+
     func testThreadListReturnsRolloutsWithRustAppServerShape() throws {
         let temp = try TemporaryDirectory()
         let newestID = try writeRollout(
@@ -24328,6 +24360,18 @@ final class CodexAppServerTests: XCTestCase {
         return try payload.split(separator: "\n", omittingEmptySubsequences: false).map { line in
             let lineData = Data(line.utf8)
             return try XCTUnwrap(JSONSerialization.jsonObject(with: lineData) as? [String: Any])
+        }
+    }
+
+    private func receiveWebSocketText(_ webSocket: URLSessionWebSocketTask) async throws -> String {
+        switch try await webSocket.receive() {
+        case let .string(text):
+            return text
+        case let .data(data):
+            return String(decoding: data, as: UTF8.self)
+        @unknown default:
+            XCTFail("unexpected websocket message")
+            return ""
         }
     }
 
