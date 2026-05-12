@@ -2403,6 +2403,70 @@ final class ExecServerTests: XCTestCase {
         ))
     }
 
+    func testRemoteControlURLNormalizerAcceptsRustSupportedTargets() throws {
+        XCTAssertEqual(
+            try RemoteControlURLNormalizer.normalize("https://chatgpt.com/backend-api"),
+            RemoteControlTarget(
+                websocketURL: "wss://chatgpt.com/backend-api/wham/remote/control/server",
+                enrollURL: "https://chatgpt.com/backend-api/wham/remote/control/server/enroll"
+            )
+        )
+        XCTAssertEqual(
+            try RemoteControlURLNormalizer.normalize("https://api.chatgpt-staging.com/backend-api"),
+            RemoteControlTarget(
+                websocketURL: "wss://api.chatgpt-staging.com/backend-api/wham/remote/control/server",
+                enrollURL: "https://api.chatgpt-staging.com/backend-api/wham/remote/control/server/enroll"
+            )
+        )
+        XCTAssertEqual(
+            try RemoteControlURLNormalizer.normalize("http://localhost:8080/backend-api"),
+            RemoteControlTarget(
+                websocketURL: "ws://localhost:8080/backend-api/wham/remote/control/server",
+                enrollURL: "http://localhost:8080/backend-api/wham/remote/control/server/enroll"
+            )
+        )
+        XCTAssertEqual(
+            try RemoteControlURLNormalizer.normalize("https://localhost:8443/backend-api"),
+            RemoteControlTarget(
+                websocketURL: "wss://localhost:8443/backend-api/wham/remote/control/server",
+                enrollURL: "https://localhost:8443/backend-api/wham/remote/control/server/enroll"
+            )
+        )
+        XCTAssertEqual(
+            try RemoteControlURLNormalizer.normalize("http://127.0.0.1:8080/backend-api"),
+            RemoteControlTarget(
+                websocketURL: "ws://127.0.0.1:8080/backend-api/wham/remote/control/server",
+                enrollURL: "http://127.0.0.1:8080/backend-api/wham/remote/control/server/enroll"
+            )
+        )
+        XCTAssertEqual(
+            try RemoteControlURLNormalizer.normalize("https://[::1]:8443/backend-api"),
+            RemoteControlTarget(
+                websocketURL: "wss://[::1]:8443/backend-api/wham/remote/control/server",
+                enrollURL: "https://[::1]:8443/backend-api/wham/remote/control/server/enroll"
+            )
+        )
+    }
+
+    func testRemoteControlURLNormalizerRejectsUnsupportedTargetsLikeRust() {
+        for remoteControlURL in [
+            "http://chatgpt.com/backend-api",
+            "http://example.com/backend-api",
+            "https://example.com/backend-api",
+            "https://chat.openai.com/backend-api",
+            "https://chatgpt.com.evil.com/backend-api",
+            "https://evilchatgpt.com/backend-api",
+            "https://foo.localhost/backend-api",
+        ] {
+            XCTAssertThrowsError(try RemoteControlURLNormalizer.normalize(remoteControlURL)) { error in
+                XCTAssertEqual(
+                    String(describing: error),
+                    "invalid remote control URL `\(remoteControlURL)`; expected HTTPS URL for chatgpt.com or chatgpt-staging.com, or HTTP/HTTPS URL for localhost"
+                )
+            }
+        }
+    }
+
     func testRemoteExecutorConfigurationNormalizesRustValues() throws {
         let config = try ExecServerRemoteExecutorConfiguration.fromEnvironment(
             baseURL: " https://registry.example.test/// ",

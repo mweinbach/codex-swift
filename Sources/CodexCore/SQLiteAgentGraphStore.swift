@@ -181,6 +181,21 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
                 """,
                 database: openedDatabase
             )
+            try Self.execute(
+                """
+                CREATE TABLE IF NOT EXISTS remote_control_enrollments (
+                    websocket_url TEXT NOT NULL,
+                    account_id TEXT NOT NULL,
+                    app_server_client_name TEXT NOT NULL,
+                    server_id TEXT NOT NULL,
+                    environment_id TEXT NOT NULL,
+                    server_name TEXT NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    PRIMARY KEY (websocket_url, account_id, app_server_client_name)
+                )
+                """,
+                database: openedDatabase
+            )
         } catch {
             sqlite3_close(openedDatabase)
             throw error
@@ -330,6 +345,98 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
                 ))
             }
         }
+    }
+
+    public func getRemoteControlEnrollment(
+        websocketURL: String,
+        accountID: String,
+        appServerClientName: String?
+    ) async throws -> RemoteControlEnrollmentRecord? {
+        let database = handle.database
+        return try Self.withStatement(
+            query:
+            """
+            SELECT websocket_url, account_id, app_server_client_name, server_id, environment_id, server_name
+            FROM remote_control_enrollments
+            WHERE websocket_url = ? AND account_id = ? AND app_server_client_name = ?
+            """,
+            bindings: [
+                .text(websocketURL),
+                .text(accountID),
+                .text(Self.remoteControlAppServerClientNameKey(appServerClientName)),
+            ],
+            database: database
+        ) { statement in
+            let result = sqlite3_step(statement)
+            if result == SQLITE_DONE {
+                return nil
+            }
+            guard result == SQLITE_ROW else {
+                throw Self.sqliteError(database: database)
+            }
+            return RemoteControlEnrollmentRecord(
+                websocketURL: try Self.requiredTextColumn(statement, index: 0, columnName: "websocket_url"),
+                accountID: try Self.requiredTextColumn(statement, index: 1, columnName: "account_id"),
+                appServerClientName: Self.remoteControlAppServerClientNameFromKey(
+                    try Self.requiredTextColumn(statement, index: 2, columnName: "app_server_client_name")
+                ),
+                serverID: try Self.requiredTextColumn(statement, index: 3, columnName: "server_id"),
+                environmentID: try Self.requiredTextColumn(statement, index: 4, columnName: "environment_id"),
+                serverName: try Self.requiredTextColumn(statement, index: 5, columnName: "server_name")
+            )
+        }
+    }
+
+    public func upsertRemoteControlEnrollment(_ enrollment: RemoteControlEnrollmentRecord) async throws {
+        try Self.execute(
+            """
+            INSERT INTO remote_control_enrollments (
+                websocket_url,
+                account_id,
+                app_server_client_name,
+                server_id,
+                environment_id,
+                server_name,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(websocket_url, account_id, app_server_client_name) DO UPDATE SET
+                server_id = excluded.server_id,
+                environment_id = excluded.environment_id,
+                server_name = excluded.server_name,
+                updated_at = excluded.updated_at
+            """,
+            bindings: [
+                .text(enrollment.websocketURL),
+                .text(enrollment.accountID),
+                .text(Self.remoteControlAppServerClientNameKey(enrollment.appServerClientName)),
+                .text(enrollment.serverID),
+                .text(enrollment.environmentID),
+                .text(enrollment.serverName),
+                .int(Self.currentTimeSeconds()),
+            ],
+            database: handle.database
+        )
+    }
+
+    public func deleteRemoteControlEnrollment(
+        websocketURL: String,
+        accountID: String,
+        appServerClientName: String?
+    ) async throws -> Int {
+        let database = handle.database
+        try Self.execute(
+            """
+            DELETE FROM remote_control_enrollments
+            WHERE websocket_url = ? AND account_id = ? AND app_server_client_name = ?
+            """,
+            bindings: [
+                .text(websocketURL),
+                .text(accountID),
+                .text(Self.remoteControlAppServerClientNameKey(appServerClientName)),
+            ],
+            database: database
+        )
+        return Int(sqlite3_changes(database))
     }
 
     public func getThreadMemoryMode(threadID: ThreadId) async throws -> String? {
@@ -1341,8 +1448,20 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         epochMilliseconds(Date())
     }
 
+    private static func currentTimeSeconds() -> Int64 {
+        epochSeconds(Date())
+    }
+
     private static func epochSeconds(_ date: Date) -> Int64 {
         Int64(date.timeIntervalSince1970.rounded(.down))
+    }
+
+    private static func remoteControlAppServerClientNameKey(_ appServerClientName: String?) -> String {
+        appServerClientName ?? ""
+    }
+
+    private static func remoteControlAppServerClientNameFromKey(_ appServerClientName: String) -> String? {
+        appServerClientName.isEmpty ? nil : appServerClientName
     }
 
     private static func epochSeconds(fromMilliseconds milliseconds: Int64) -> Int64 {

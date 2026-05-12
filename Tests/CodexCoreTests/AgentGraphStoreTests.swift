@@ -566,6 +566,108 @@ final class AgentGraphStoreTests: XCTestCase {
         XCTAssertEqual(storedTools, firstTools)
     }
 
+    func testSQLiteStoreRoundTripsRemoteControlEnrollmentByTargetAccountAndClient() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        let target = "wss://example.com/backend-api/wham/remote/control/server"
+
+        try await store.upsertRemoteControlEnrollment(RemoteControlEnrollmentRecord(
+            websocketURL: target,
+            accountID: "account-a",
+            appServerClientName: "desktop-client",
+            serverID: "srv_e_first",
+            environmentID: "env_first",
+            serverName: "first-server"
+        ))
+        try await store.upsertRemoteControlEnrollment(RemoteControlEnrollmentRecord(
+            websocketURL: target,
+            accountID: "account-b",
+            appServerClientName: "desktop-client",
+            serverID: "srv_e_second",
+            environmentID: "env_second",
+            serverName: "second-server"
+        ))
+
+        let first = try await store.getRemoteControlEnrollment(
+            websocketURL: target,
+            accountID: "account-a",
+            appServerClientName: "desktop-client"
+        )
+        let missingAccount = try await store.getRemoteControlEnrollment(
+            websocketURL: target,
+            accountID: "account-missing",
+            appServerClientName: "desktop-client"
+        )
+        let wrongClient = try await store.getRemoteControlEnrollment(
+            websocketURL: target,
+            accountID: "account-a",
+            appServerClientName: "other-client"
+        )
+
+        XCTAssertEqual(first, RemoteControlEnrollmentRecord(
+            websocketURL: target,
+            accountID: "account-a",
+            appServerClientName: "desktop-client",
+            serverID: "srv_e_first",
+            environmentID: "env_first",
+            serverName: "first-server"
+        ))
+        XCTAssertNil(missingAccount)
+        XCTAssertNil(wrongClient)
+    }
+
+    func testSQLiteStoreDeletesOnlyMatchingRemoteControlEnrollmentAndMapsNilClient() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        let target = "wss://example.com/backend-api/wham/remote/control/server"
+
+        try await store.upsertRemoteControlEnrollment(RemoteControlEnrollmentRecord(
+            websocketURL: target,
+            accountID: "account-a",
+            appServerClientName: nil,
+            serverID: "srv_e_first",
+            environmentID: "env_first",
+            serverName: "first-server"
+        ))
+        try await store.upsertRemoteControlEnrollment(RemoteControlEnrollmentRecord(
+            websocketURL: target,
+            accountID: "account-b",
+            appServerClientName: nil,
+            serverID: "srv_e_second",
+            environmentID: "env_second",
+            serverName: "second-server"
+        ))
+
+        let deleted = try await store.deleteRemoteControlEnrollment(
+            websocketURL: target,
+            accountID: "account-a",
+            appServerClientName: nil
+        )
+        let deletedEnrollment = try await store.getRemoteControlEnrollment(
+            websocketURL: target,
+            accountID: "account-a",
+            appServerClientName: nil
+        )
+        let retainedEnrollment = try await store.getRemoteControlEnrollment(
+            websocketURL: target,
+            accountID: "account-b",
+            appServerClientName: nil
+        )
+
+        XCTAssertEqual(deleted, 1)
+        XCTAssertNil(deletedEnrollment)
+        XCTAssertEqual(retainedEnrollment, RemoteControlEnrollmentRecord(
+            websocketURL: target,
+            accountID: "account-b",
+            appServerClientName: nil,
+            serverID: "srv_e_second",
+            environmentID: "env_second",
+            serverName: "second-server"
+        ))
+    }
+
     func testSQLiteStoreGetsAndSetsThreadMemoryMode() async throws {
         let temp = try AgentGraphStoreTemporaryDirectory()
         let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
