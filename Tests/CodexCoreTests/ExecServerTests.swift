@@ -2586,6 +2586,110 @@ final class ExecServerTests: XCTestCase {
         ))
     }
 
+    func testRemoteControlHandleCoreMirrorsRustEnablementGateAndInitialStatus() throws {
+        let disabledInvalidURL = try RemoteControlHandleCore(
+            remoteControlURL: "https://example.com/backend-api",
+            installationID: "install-123",
+            requestedEnabled: false,
+            stateDatabaseAvailable: true
+        )
+        XCTAssertFalse(disabledInvalidURL.effectiveEnabled)
+        XCTAssertNil(disabledInvalidURL.target)
+        XCTAssertEqual(disabledInvalidURL.statusSnapshot, RemoteControlStatusSnapshot(
+            status: .disabled,
+            installationID: "install-123",
+            environmentID: nil
+        ))
+
+        let missingStateDB = try RemoteControlHandleCore(
+            remoteControlURL: "https://chatgpt.com/backend-api",
+            installationID: "install-123",
+            requestedEnabled: true,
+            stateDatabaseAvailable: false
+        )
+        XCTAssertTrue(missingStateDB.requestedEnabled)
+        XCTAssertFalse(missingStateDB.effectiveEnabled)
+        XCTAssertNil(missingStateDB.target)
+        XCTAssertEqual(missingStateDB.statusSnapshot.status, .disabled)
+
+        let enabled = try RemoteControlHandleCore(
+            remoteControlURL: "https://chatgpt.com/backend-api",
+            installationID: "install-123",
+            requestedEnabled: true,
+            stateDatabaseAvailable: true
+        )
+        XCTAssertTrue(enabled.effectiveEnabled)
+        XCTAssertEqual(enabled.target, RemoteControlTarget(
+            websocketURL: "wss://chatgpt.com/backend-api/wham/remote/control/server",
+            enrollURL: "https://chatgpt.com/backend-api/wham/remote/control/server/enroll"
+        ))
+        XCTAssertEqual(enabled.statusSnapshot.status, .connecting)
+
+        XCTAssertThrowsError(try RemoteControlHandleCore(
+            remoteControlURL: "https://example.com/backend-api",
+            installationID: "install-123",
+            requestedEnabled: true,
+            stateDatabaseAvailable: true
+        )) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "invalid remote control URL `https://example.com/backend-api`; expected HTTPS URL for chatgpt.com or chatgpt-staging.com, or HTTP/HTTPS URL for localhost"
+            )
+        }
+    }
+
+    func testRemoteControlHandleCoreSetEnabledDefersURLValidationToConnectLoopLikeRust() throws {
+        var handle = try RemoteControlHandleCore(
+            remoteControlURL: "https://example.com/backend-api",
+            installationID: "install-123",
+            requestedEnabled: false,
+            stateDatabaseAvailable: true
+        )
+
+        XCTAssertEqual(handle.setEnabled(true), RemoteControlHandleEnablementChange(
+            requestedEnabled: true,
+            effectiveEnabled: true,
+            changed: true,
+            stateDatabaseUnavailable: false
+        ))
+        XCTAssertTrue(handle.effectiveEnabled)
+        XCTAssertNil(handle.target)
+        XCTAssertEqual(handle.statusSnapshot.status, .disabled)
+
+        var connectLoop = handle.beginConnectLoop()
+        let connectStep = connectLoop.beginConnect()
+        XCTAssertEqual(
+            connectStep.action,
+            .waitForDisableAfterInvalidURL("invalid remote control URL `https://example.com/backend-api`; expected HTTPS URL for chatgpt.com or chatgpt-staging.com, or HTTP/HTTPS URL for localhost")
+        )
+        XCTAssertEqual(connectStep.statusUpdates.map(\.status), [.connecting, .errored])
+        handle.applyConnectLoopStatus(connectLoop)
+        XCTAssertEqual(handle.statusSnapshot.status, .errored)
+
+        XCTAssertEqual(handle.setEnabled(false), RemoteControlHandleEnablementChange(
+            requestedEnabled: false,
+            effectiveEnabled: false,
+            changed: true,
+            stateDatabaseUnavailable: false
+        ))
+        XCTAssertFalse(handle.effectiveEnabled)
+        XCTAssertEqual(handle.statusSnapshot.status, .errored)
+
+        var missingStateDB = try RemoteControlHandleCore(
+            remoteControlURL: "https://chatgpt.com/backend-api",
+            installationID: "install-123",
+            requestedEnabled: false,
+            stateDatabaseAvailable: false
+        )
+        XCTAssertEqual(missingStateDB.setEnabled(true), RemoteControlHandleEnablementChange(
+            requestedEnabled: true,
+            effectiveEnabled: false,
+            changed: false,
+            stateDatabaseUnavailable: true
+        ))
+        XCTAssertEqual(missingStateDB.statusSnapshot.status, .disabled)
+    }
+
     func testRemoteControlStatusPublisherCoreSendsOnlyRustStatusChanges() {
         var publisher = RemoteControlStatusPublisherCore(snapshot: RemoteControlStatusSnapshot(
             status: .connecting,

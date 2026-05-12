@@ -166,6 +166,84 @@ public struct RemoteControlStartState: Equatable, Sendable {
     }
 }
 
+public struct RemoteControlHandleEnablementChange: Equatable, Sendable {
+    public var requestedEnabled: Bool
+    public var effectiveEnabled: Bool
+    public var changed: Bool
+    public var stateDatabaseUnavailable: Bool
+
+    public init(
+        requestedEnabled: Bool,
+        effectiveEnabled: Bool,
+        changed: Bool,
+        stateDatabaseUnavailable: Bool
+    ) {
+        self.requestedEnabled = requestedEnabled
+        self.effectiveEnabled = effectiveEnabled
+        self.changed = changed
+        self.stateDatabaseUnavailable = stateDatabaseUnavailable
+    }
+}
+
+public struct RemoteControlHandleCore: Equatable, Sendable {
+    public var remoteControlURL: String
+    public var requestedEnabled: Bool
+    public var stateDatabaseAvailable: Bool
+    public private(set) var effectiveEnabled: Bool
+    public private(set) var target: RemoteControlTarget?
+    public var statusPublisher: RemoteControlStatusPublisherCore
+
+    public var statusSnapshot: RemoteControlStatusSnapshot {
+        statusPublisher.snapshot
+    }
+
+    public init(
+        remoteControlURL: String,
+        installationID: String,
+        requestedEnabled: Bool,
+        stateDatabaseAvailable: Bool
+    ) throws {
+        let effectiveEnabled = requestedEnabled && stateDatabaseAvailable
+        self.remoteControlURL = remoteControlURL
+        self.requestedEnabled = requestedEnabled
+        self.stateDatabaseAvailable = stateDatabaseAvailable
+        self.effectiveEnabled = effectiveEnabled
+        self.target = effectiveEnabled ? try RemoteControlURLNormalizer.normalize(remoteControlURL) : nil
+        self.statusPublisher = RemoteControlStatusPublisherCore(snapshot: RemoteControlStatusSnapshot(
+            status: effectiveEnabled ? .connecting : .disabled,
+            installationID: installationID,
+            environmentID: nil
+        ))
+    }
+
+    @discardableResult
+    public mutating func setEnabled(_ requestedEnabled: Bool) -> RemoteControlHandleEnablementChange {
+        let effectiveEnabled = requestedEnabled && stateDatabaseAvailable
+        let changed = self.effectiveEnabled != effectiveEnabled
+        self.requestedEnabled = requestedEnabled
+        self.effectiveEnabled = effectiveEnabled
+        return RemoteControlHandleEnablementChange(
+            requestedEnabled: requestedEnabled,
+            effectiveEnabled: effectiveEnabled,
+            changed: changed,
+            stateDatabaseUnavailable: requestedEnabled && !stateDatabaseAvailable
+        )
+    }
+
+    public mutating func beginConnectLoop() -> RemoteControlConnectLoopCore {
+        RemoteControlConnectLoopCore(
+            remoteControlURL: remoteControlURL,
+            target: target,
+            statusPublisher: statusPublisher
+        )
+    }
+
+    public mutating func applyConnectLoopStatus(_ connectLoop: RemoteControlConnectLoopCore) {
+        target = connectLoop.target
+        statusPublisher = connectLoop.statusPublisher
+    }
+}
+
 public struct RemoteControlReconnectDelay: Equatable, Sendable {
     public var attempt: UInt64
     public var baseMilliseconds: UInt64
