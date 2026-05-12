@@ -3389,6 +3389,145 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(reasoningItem["content"] as? [String], ["raw"])
     }
 
+    func testRuntimeDynamicToolCallRequestsMirrorRustClientBridge() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let coreOpCapture = AppServerCoreOpCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) },
+            coreOpSubmitter: coreOpCapture.submit
+        )
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-fallback",
+            event: .dynamicToolCallRequest(DynamicToolCallRequest(
+                callID: "dyn-1",
+                turnID: "turn-runtime",
+                startedAtMilliseconds: 123,
+                namespace: "codex_app",
+                tool: "lookup",
+                arguments: .object(["topic": .string("protocol")])
+            ))
+        )
+
+        let startedMessages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(startedMessages[0]["method"] as? String, "item/started")
+        let startedParams = try XCTUnwrap(startedMessages[0]["params"] as? [String: Any])
+        XCTAssertEqual(startedParams["threadId"] as? String, "thread-1")
+        XCTAssertEqual(startedParams["turnId"] as? String, "turn-runtime")
+        XCTAssertEqual(startedParams["startedAtMs"] as? Int, 123)
+        let startedItem = try XCTUnwrap(startedParams["item"] as? [String: Any])
+        XCTAssertEqual(startedItem["type"] as? String, "dynamicToolCall")
+        XCTAssertEqual(startedItem["id"] as? String, "dyn-1")
+        XCTAssertEqual(startedItem["namespace"] as? String, "codex_app")
+        XCTAssertEqual(startedItem["tool"] as? String, "lookup")
+        XCTAssertEqual(startedItem["status"] as? String, "inProgress")
+        XCTAssertTrue(startedItem["contentItems"] is NSNull)
+        XCTAssertTrue(startedItem["success"] is NSNull)
+        XCTAssertTrue(startedItem["durationMs"] is NSNull)
+
+        let requestData = try await nextNotificationPayload(notificationCapture)
+        let request = try XCTUnwrap(JSONSerialization.jsonObject(with: requestData) as? [String: Any])
+        XCTAssertEqual(request["method"] as? String, "item/tool/call")
+        let requestID = try XCTUnwrap(request["id"])
+        let requestParams = try XCTUnwrap(request["params"] as? [String: Any])
+        XCTAssertEqual(requestParams["threadId"] as? String, "thread-1")
+        XCTAssertEqual(requestParams["turnId"] as? String, "turn-runtime")
+        XCTAssertEqual(requestParams["callId"] as? String, "dyn-1")
+        XCTAssertEqual(requestParams["namespace"] as? String, "codex_app")
+        XCTAssertEqual(requestParams["tool"] as? String, "lookup")
+        XCTAssertEqual((requestParams["arguments"] as? [String: Any])?["topic"] as? String, "protocol")
+
+        let response = try JSONSerialization.data(withJSONObject: [
+            "method": "item/tool/call",
+            "id": requestID,
+            "response": [
+                "contentItems": [
+                    [
+                        "type": "inputText",
+                        "text": "done"
+                    ]
+                ],
+                "success": true
+            ]
+        ])
+        XCTAssertNil(processor.processLine(response))
+
+        let submissions = try await waitForSubmissions(coreOpCapture, count: 1)
+        XCTAssertEqual(submissions[0].threadID, "thread-1")
+        guard case let .dynamicToolResponse(id, toolResponse) = submissions[0].op else {
+            return XCTFail("expected dynamic tool response")
+        }
+        XCTAssertEqual(id, "dyn-1")
+        XCTAssertEqual(toolResponse, DynamicToolResponse(contentItems: [.text("done")], success: true))
+    }
+
+    func testRuntimeDynamicToolCallResponseFallbacksMatchRust() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let coreOpCapture = AppServerCoreOpCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) },
+            coreOpSubmitter: coreOpCapture.submit
+        )
+
+        let invalidRequestID = try await startDynamicToolCall(
+            processor: processor,
+            notificationCapture: notificationCapture,
+            callID: "dyn-invalid"
+        )
+        let invalidResponse = try JSONSerialization.data(withJSONObject: [
+            "method": "item/tool/call",
+            "id": invalidRequestID,
+            "response": [
+                "contentItems": "not-items",
+                "success": true
+            ]
+        ])
+        XCTAssertNil(processor.processLine(invalidResponse))
+
+        let requestErrorID = try await startDynamicToolCall(
+            processor: processor,
+            notificationCapture: notificationCapture,
+            callID: "dyn-error"
+        )
+        let requestError = try JSONSerialization.data(withJSONObject: [
+            "id": requestErrorID,
+            "error": [
+                "code": -1,
+                "message": "client failed"
+            ]
+        ])
+        XCTAssertNil(processor.processLine(requestError))
+
+        let transitionErrorID = try await startDynamicToolCall(
+            processor: processor,
+            notificationCapture: notificationCapture,
+            callID: "dyn-transition"
+        )
+        let transitionError = try JSONSerialization.data(withJSONObject: [
+            "id": transitionErrorID,
+            "error": [
+                "code": -1,
+                "message": "client request resolved because the turn state was changed",
+                "data": [
+                    "reason": "turnTransition"
+                ]
+            ]
+        ])
+        XCTAssertNil(processor.processLine(transitionError))
+
+        let submissions = try await waitForSubmissions(coreOpCapture, count: 2)
+        XCTAssertEqual(submissions.map(\.threadID), ["thread-1", "thread-1"])
+        XCTAssertEqual(dynamicToolResponseText(submissions[0].op), "dynamic tool response was invalid")
+        XCTAssertEqual(dynamicToolResponseText(submissions[1].op), "dynamic tool request failed")
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(coreOpCapture.submissions.count, 2)
+    }
+
     func testRuntimeItemLifecycleSerializesUserFileAndMcpItems() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()
@@ -24716,6 +24855,54 @@ final class CodexAppServerTests: XCTestCase {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
         throw AppServerTestTimeout()
+    }
+
+    private func waitForSubmissions(
+        _ capture: AppServerCoreOpCapture,
+        count: Int,
+        timeoutNanoseconds: UInt64 = 5_000_000_000
+    ) async throws -> [SubmittedCoreOp] {
+        let start = DispatchTime.now().uptimeNanoseconds
+        while DispatchTime.now().uptimeNanoseconds - start < timeoutNanoseconds {
+            let submissions = capture.submissions
+            if submissions.count >= count {
+                return submissions
+            }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        throw AppServerTestTimeout()
+    }
+
+    private func startDynamicToolCall(
+        processor: CodexAppServerMessageProcessor,
+        notificationCapture: AppServerNotificationCapture,
+        callID: String
+    ) async throws -> Any {
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-fallback",
+            event: .dynamicToolCallRequest(DynamicToolCallRequest(
+                callID: callID,
+                turnID: "turn-runtime",
+                startedAtMilliseconds: 123,
+                tool: "lookup",
+                arguments: .object(["topic": .string("protocol")])
+            ))
+        )
+        _ = try await nextNotificationPayload(notificationCapture)
+        let requestData = try await nextNotificationPayload(notificationCapture)
+        let request = try XCTUnwrap(JSONSerialization.jsonObject(with: requestData) as? [String: Any])
+        XCTAssertEqual(request["method"] as? String, "item/tool/call")
+        return try XCTUnwrap(request["id"])
+    }
+
+    private func dynamicToolResponseText(_ op: Op) -> String? {
+        guard case let .dynamicToolResponse(_, response) = op,
+              case let .text(text)? = response.contentItems.first
+        else {
+            return nil
+        }
+        return text
     }
 
     private func commandExecOutputDelta(

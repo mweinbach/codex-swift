@@ -20,6 +20,13 @@ enum AppServerElicitationCounterResult: Equatable, Sendable {
     case overflow
 }
 
+enum AppServerDynamicToolCallRequestResult: Equatable, Sendable {
+    case success(requestID: RequestID, response: AppServerProtocol.DynamicToolCallResponse)
+    case malformedResponse(requestID: RequestID)
+    case requestFailed(requestID: RequestID, code: Int64?, message: String?, data: JSONValue?)
+    case requestCanceled
+}
+
 actor AppServerThreadStateManager {
     private var liveConnections: [AppServerConnectionID: AppServerConnectionCapabilities] = [:]
     private var threadConnectionIDs: [String: Set<AppServerConnectionID>] = [:]
@@ -180,6 +187,7 @@ actor AppServerOutgoingRequestBroker {
     private var nextRequestID: Int64 = 1
     private var pendingAttestationRequests: [String: CheckedContinuation<AppServerAttestationRequestResult, Never>] = [:]
     private var pendingExternalAuthRefreshRequests: [String: CheckedContinuation<AppServerExternalAuthRefreshRequestResult, Never>] = [:]
+    private var pendingDynamicToolCallRequests: [String: CheckedContinuation<AppServerDynamicToolCallRequestResult, Never>] = [:]
 
     init(notificationSink: AppServerNotificationSink?) {
         self.notificationSink = notificationSink
@@ -250,8 +258,42 @@ actor AppServerOutgoingRequestBroker {
         }
     }
 
+    func requestDynamicToolCall(
+        params: AppServerProtocol.DynamicToolCallParams
+    ) async -> AppServerDynamicToolCallRequestResult {
+        guard let notificationSink else {
+            return .requestCanceled
+        }
+
+        let requestID = RequestID.integer(nextRequestID)
+        nextRequestID += 1
+        let request = AppServerProtocol.ServerRequest.dynamicToolCall(requestID: requestID, params: params)
+        guard let data = try? JSONEncoder().encode(request) else {
+            return .malformedResponse(requestID: requestID)
+        }
+
+        let key = AppServerRequestIDCodec.key(for: requestID)
+        return await withCheckedContinuation { continuation in
+            pendingDynamicToolCallRequests[key] = continuation
+            Task {
+                await notificationSink(data)
+            }
+        }
+    }
+
     func receiveResponse(id: RequestID, resultData: Data) {
         let key = AppServerRequestIDCodec.key(for: id)
+        if pendingDynamicToolCallRequests[key] != nil {
+            let decoded = try? JSONDecoder().decode(AppServerProtocol.DynamicToolCallResponse.self, from: resultData)
+            resolveDynamicToolCallRequest(
+                key: key,
+                result: decoded
+                    .map { .success(requestID: id, response: $0) }
+                    ?? .malformedResponse(requestID: id)
+            )
+            return
+        }
+
         if pendingExternalAuthRefreshRequests[key] != nil {
             let decoded = try? JSONDecoder().decode(AppServerProtocol.ChatGPTAuthTokensRefreshResponse.self, from: resultData)
             resolveExternalAuthRefreshRequest(
@@ -270,16 +312,23 @@ actor AppServerOutgoingRequestBroker {
 
     func receiveMalformedResponse(id: RequestID) {
         let key = AppServerRequestIDCodec.key(for: id)
-        if pendingExternalAuthRefreshRequests[key] != nil {
+        if pendingDynamicToolCallRequests[key] != nil {
+            resolveDynamicToolCallRequest(key: key, result: .malformedResponse(requestID: id))
+        } else if pendingExternalAuthRefreshRequests[key] != nil {
             resolveExternalAuthRefreshRequest(key: key, result: .malformedResponse)
         } else {
             resolveAttestationRequest(key: key, result: .malformedResponse)
         }
     }
 
-    func receiveError(id: RequestID, code: Int64?, message: String?) {
+    func receiveError(id: RequestID, code: Int64?, message: String?, data: JSONValue? = nil) {
         let key = AppServerRequestIDCodec.key(for: id)
-        if pendingExternalAuthRefreshRequests[key] != nil {
+        if pendingDynamicToolCallRequests[key] != nil {
+            resolveDynamicToolCallRequest(
+                key: key,
+                result: .requestFailed(requestID: id, code: code, message: message, data: data)
+            )
+        } else if pendingExternalAuthRefreshRequests[key] != nil {
             resolveExternalAuthRefreshRequest(key: key, result: .requestFailed(code: code, message: message))
         } else {
             resolveAttestationRequest(key: key, result: .requestFailed)
@@ -288,7 +337,9 @@ actor AppServerOutgoingRequestBroker {
 
     func cancelRequest(id: RequestID) {
         let key = AppServerRequestIDCodec.key(for: id)
-        if pendingExternalAuthRefreshRequests[key] != nil {
+        if pendingDynamicToolCallRequests[key] != nil {
+            resolveDynamicToolCallRequest(key: key, result: .requestCanceled)
+        } else if pendingExternalAuthRefreshRequests[key] != nil {
             resolveExternalAuthRefreshRequest(key: key, result: .requestCanceled)
         } else {
             resolveAttestationRequest(key: key, result: .requestCanceled)
@@ -304,6 +355,13 @@ actor AppServerOutgoingRequestBroker {
 
     private func resolveExternalAuthRefreshRequest(key: String, result: AppServerExternalAuthRefreshRequestResult) {
         guard let continuation = pendingExternalAuthRefreshRequests.removeValue(forKey: key) else {
+            return
+        }
+        continuation.resume(returning: result)
+    }
+
+    private func resolveDynamicToolCallRequest(key: String, result: AppServerDynamicToolCallRequestResult) {
+        guard let continuation = pendingDynamicToolCallRequests.removeValue(forKey: key) else {
             return
         }
         continuation.resume(returning: result)

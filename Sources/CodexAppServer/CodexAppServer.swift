@@ -2443,7 +2443,7 @@ public enum CodexAppServer {
         }
     }
 
-    private static func jsonValue(fromJSONObject value: Any) throws -> JSONValue {
+    fileprivate static func jsonValue(fromJSONObject value: Any) throws -> JSONValue {
         if value is NSNull {
             return .null
         }
@@ -14146,6 +14146,21 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func dynamicToolCallStartedNotification(
+        threadID: String,
+        event: DynamicToolCallRequest
+    ) -> [String: Any] {
+        [
+            "method": "item/started",
+            "params": [
+                "threadId": threadID,
+                "turnId": event.turnID,
+                "item": dynamicToolCallItemObject(event),
+                "startedAtMs": event.startedAtMilliseconds
+            ]
+        ]
+    }
+
     fileprivate static func itemCompletedNotification(
         threadID: String,
         turnID: String,
@@ -14285,6 +14300,20 @@ public enum CodexAppServer {
                 "id": item.id
             ]
         }
+    }
+
+    private static func dynamicToolCallItemObject(_ item: DynamicToolCallRequest) -> [String: Any] {
+        [
+            "type": "dynamicToolCall",
+            "id": item.callID,
+            "namespace": item.namespace as Any? ?? NSNull(),
+            "tool": item.tool,
+            "arguments": jsonObject(from: item.arguments),
+            "status": "inProgress",
+            "contentItems": NSNull(),
+            "success": NSNull(),
+            "durationMs": NSNull()
+        ]
     }
 
     private static func userInputObject(_ input: UserInput) -> [String: Any] {
@@ -23283,6 +23312,7 @@ final class CodexAppServerMessageProcessor {
 
     func handleRuntimeEvent(threadID: String, turnID: String, event: EventMessage) async {
         let notifications: [[String: Any]]
+        var afterNotifications: (() -> Void)?
         switch event {
         case let .taskStarted(event):
             let runtimeTurnID = event.turnID
@@ -23418,6 +23448,32 @@ final class CodexAppServerMessageProcessor {
         case .threadRolledBack:
             pendingRollbackRequests[threadID] = nil
             notifications = []
+        case let .dynamicToolCallRequest(event):
+            notifications = [
+                CodexAppServer.dynamicToolCallStartedNotification(threadID: threadID, event: event)
+            ]
+            let broker = outgoingRequestBroker
+            let submitter = coreOpSubmitter
+            afterNotifications = {
+                Task { [broker, submitter, threadID, event] in
+                    let result = await broker.requestDynamicToolCall(
+                        params: AppServerProtocol.DynamicToolCallParams(
+                            threadID: threadID,
+                            turnID: event.turnID,
+                            callID: event.callID,
+                            namespace: event.namespace,
+                            tool: event.tool,
+                            arguments: event.arguments
+                        )
+                    )
+                    guard let submitter,
+                          let submission = Self.dynamicToolCallSubmission(callID: event.callID, result: result)
+                    else {
+                        return
+                    }
+                    try? submitter(submission.requestID, threadID, submission.op)
+                }
+            }
         default:
             notifications = CodexAppServer.runtimeEventNotifications(
                 threadID: threadID,
@@ -23438,6 +23494,47 @@ final class CodexAppServerMessageProcessor {
         for notification in notifications {
             await sendNotification(notification)
         }
+        afterNotifications?()
+    }
+
+    private static func dynamicToolCallSubmission(
+        callID: String,
+        result: AppServerDynamicToolCallRequestResult
+    ) -> (requestID: RequestID, op: Op)? {
+        let requestID: RequestID
+        let response: DynamicToolResponse
+        switch result {
+        case let .success(id, toolResponse):
+            requestID = id
+            response = DynamicToolResponse(
+                contentItems: toolResponse.contentItems,
+                success: toolResponse.success
+            )
+        case let .malformedResponse(id):
+            requestID = id
+            response = Self.dynamicToolFallbackResponse("dynamic tool response was invalid")
+        case let .requestFailed(id, _, _, data):
+            guard !isTurnTransitionServerRequestError(data) else {
+                return nil
+            }
+            requestID = id
+            response = dynamicToolFallbackResponse("dynamic tool request failed")
+        case .requestCanceled:
+            return nil
+        }
+
+        return (requestID, .dynamicToolResponse(id: callID, response: response))
+    }
+
+    private static func dynamicToolFallbackResponse(_ message: String) -> DynamicToolResponse {
+        DynamicToolResponse(contentItems: [.text(message)], success: false)
+    }
+
+    private static func isTurnTransitionServerRequestError(_ data: JSONValue?) -> Bool {
+        guard case let .object(object)? = data else {
+            return false
+        }
+        return object["reason"] == .string("turnTransition")
     }
 
     private func markRuntimeApprovalRequested(threadID: String) -> [String: Any]? {
@@ -23689,8 +23786,28 @@ final class CodexAppServerMessageProcessor {
         if let error = object["error"] as? [String: Any] {
             let code = (error["code"] as? NSNumber)?.int64Value
             let message = error["message"] as? String
+            let data: JSONValue?
+            if let rawData = error["data"] {
+                data = try? CodexAppServer.jsonValue(fromJSONObject: rawData)
+            } else {
+                data = nil
+            }
             _ = try? CodexAppServer.runAsyncBlocking {
-                await broker.receiveError(id: requestID, code: code, message: message)
+                await broker.receiveError(id: requestID, code: code, message: message, data: data)
+            }
+            return true
+        }
+        if object["method"] as? String == AppServerProtocol.DynamicToolCallParams.method,
+           let response = object["response"] {
+            if JSONSerialization.isValidJSONObject(["response": response]),
+               let responseData = try? JSONSerialization.data(withJSONObject: response) {
+                _ = try? CodexAppServer.runAsyncBlocking {
+                    await broker.receiveResponse(id: requestID, resultData: responseData)
+                }
+            } else {
+                _ = try? CodexAppServer.runAsyncBlocking {
+                    await broker.receiveMalformedResponse(id: requestID)
+                }
             }
             return true
         }
