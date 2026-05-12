@@ -1761,6 +1761,28 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
+        let rollback = try threadRollbackParams(params)
+
+        let rolloutPath = try rolloutPathForConversation(rollback.conversationID, configuration: configuration)
+        let recorder = try RolloutRecorder.resume(path: URL(fileURLWithPath: rolloutPath))
+        try recorder.recordItems([
+            .eventMsg(.threadRolledBack(ThreadRolledBackEvent(numTurns: rollback.numTurns)))
+        ])
+        try recorder.shutdown()
+
+        let item = ConversationItem(path: rolloutPath, head: [], createdAt: nil, updatedAt: nil)
+        return [
+            "thread": try threadObject(
+                for: item,
+                defaultProvider: configuration.defaultModelProvider,
+                turns: buildTurnsFromRolloutEvents(at: rolloutPath)
+            )
+        ]
+    }
+
+    fileprivate static func threadRollbackParams(
+        _ params: [String: Any]?
+    ) throws -> (threadID: String, conversationID: ConversationId, numTurns: UInt32) {
         let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
         guard let numTurnsNumber = params?["numTurns"] as? NSNumber else {
             throw AppServerError.invalidRequest("missing numTurns")
@@ -1776,30 +1798,13 @@ public enum CodexAppServer {
         guard rawNumTurns > 0 && rawNumTurns <= Int64(UInt32.max) else {
             throw AppServerError.invalidRequest("numTurns must be >= 1")
         }
-        let numTurns = UInt32(rawNumTurns)
-
         let conversationID: ConversationId
         do {
             conversationID = try ConversationId(string: threadID)
         } catch {
             throw AppServerError.invalidRequest("invalid thread id: \(error)")
         }
-
-        let rolloutPath = try rolloutPathForConversation(conversationID, configuration: configuration)
-        let recorder = try RolloutRecorder.resume(path: URL(fileURLWithPath: rolloutPath))
-        try recorder.recordItems([
-            .eventMsg(.threadRolledBack(ThreadRolledBackEvent(numTurns: numTurns)))
-        ])
-        try recorder.shutdown()
-
-        let item = ConversationItem(path: rolloutPath, head: [], createdAt: nil, updatedAt: nil)
-        return [
-            "thread": try threadObject(
-                for: item,
-                defaultProvider: configuration.defaultModelProvider,
-                turns: buildTurnsFromRolloutEvents(at: rolloutPath)
-            )
-        ]
+        return (threadID, conversationID, UInt32(rawNumTurns))
     }
 
     fileprivate static func threadUnsubscribeResult(
@@ -23370,10 +23375,21 @@ final class CodexAppServerMessageProcessor {
                         result: [:]
                     )
                 case "thread/rollback":
-                    response = CodexAppServer.responseObject(
-                        id: id,
-                        result: try CodexAppServer.threadRollbackResult(params: params, configuration: configuration)
-                    )
+                    if coreOpSubmitter != nil {
+                        let rollback = try CodexAppServer.threadRollbackParams(params)
+                        try submitCoreOp(
+                            requestID: id,
+                            threadID: rollback.threadID,
+                            op: .threadRollback(numTurns: rollback.numTurns),
+                            failureMessage: "failed to start rollback"
+                        )
+                        response = nil
+                    } else {
+                        response = CodexAppServer.responseObject(
+                            id: id,
+                            result: try CodexAppServer.threadRollbackResult(params: params, configuration: configuration)
+                        )
+                    }
                 case "thread/backgroundTerminals/clean":
                     let coreOp = try CodexAppServer.threadBackgroundTerminalsCleanCoreOp(
                         params: params,

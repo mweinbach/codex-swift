@@ -4840,12 +4840,18 @@ final class CodexAppServerTests: XCTestCase {
         )))
         XCTAssertNotNil(clean["result"])
 
+        let rollback = processor.processLine(Data(
+            #"{"id":5,"method":"thread/rollback","params":{"threadId":"\#(threadID)","numTurns":2}}"#.utf8
+        ))
+        XCTAssertNil(rollback)
+
         let submissions = capture.submissions
-        XCTAssertEqual(submissions.map(\.requestID), [.integer(1), .integer(2), .integer(3), .integer(4)])
-        XCTAssertEqual(submissions.map(\.threadID), Array(repeating: threadID, count: 4))
+        XCTAssertEqual(submissions.map(\.requestID), [.integer(1), .integer(2), .integer(3), .integer(4), .integer(5)])
+        XCTAssertEqual(submissions.map(\.threadID), Array(repeating: threadID, count: 5))
         XCTAssertEqual(submissions[0].op, .compact)
         XCTAssertEqual(submissions[1].op, .runUserShellCommand(command: "git status --short"))
         XCTAssertEqual(submissions[3].op, .cleanBackgroundTerminals)
+        XCTAssertEqual(submissions[4].op, .threadRollback(numTurns: 2))
         guard case let .approveGuardianDeniedAction(event) = submissions[2].op else {
             XCTFail("expected Guardian approval op")
             return
@@ -4874,6 +4880,13 @@ final class CodexAppServerTests: XCTestCase {
         let error = try XCTUnwrap(response["error"] as? [String: Any])
         XCTAssertEqual(error["code"] as? Int, -32603)
         XCTAssertEqual(error["message"] as? String, "failed to start shell command: channel closed")
+
+        let rollback = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"thread/rollback","params":{"threadId":"\#(threadID)","numTurns":1}}"#.utf8
+        )))
+        let rollbackError = try XCTUnwrap(rollback["error"] as? [String: Any])
+        XCTAssertEqual(rollbackError["code"] as? Int, -32603)
+        XCTAssertEqual(rollbackError["message"] as? String, "failed to start rollback: channel closed")
     }
 
     func testThreadCompactStartAndShellCommandValidateInputs() throws {
