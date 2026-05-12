@@ -275,6 +275,12 @@ final class ParsedCommandTests: XCTestCase {
         ])
     }
 
+    func testSupportsRgFilesThenHeadLikeRust() {
+        XCTAssertEqual(parseCommand(["bash", "-lc", "rg --files | head -n 50"]), [
+            .listFiles(cmd: "rg --files", path: nil)
+        ])
+    }
+
     func testSupportsReadHelpers() {
         XCTAssertEqual(parseCommand(["bash", "-lc", "head -n50 Cargo.toml"]), [
             .read(cmd: "head -n50 Cargo.toml", name: "Cargo.toml", path: "Cargo.toml")

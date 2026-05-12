@@ -917,6 +917,32 @@ final class ResponseModelsTests: XCTestCase {
         ])
     }
 
+    func testDecodesImageGenerationCallWithoutRevisedPromptLikeRust() throws {
+        let json = #"""
+        {
+            "id": "ig_123",
+            "type": "image_generation_call",
+            "status": "completed",
+            "result": "Zm9v"
+        }
+        """#
+
+        let item = try JSONDecoder().decode(ResponseItem.self, from: Data(json.utf8))
+        XCTAssertEqual(item, .imageGenerationCall(
+            id: "ig_123",
+            status: "completed",
+            revisedPrompt: nil,
+            result: "Zm9v"
+        ))
+
+        try XCTAssertJSONObjectEqual(item, [
+            "id": "ig_123",
+            "type": "image_generation_call",
+            "status": "completed",
+            "result": "Zm9v"
+        ])
+    }
+
     func testDeserializesLegacyGhostSnapshotAsOtherLikeRust() throws {
         let json = #"""
         {

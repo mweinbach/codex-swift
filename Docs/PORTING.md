@@ -1217,6 +1217,8 @@ Source baseline inspected for this scaffold:
   - added Swift `PersonalityMigration` parity for Rust's `.personality_migration` marker, selected-profile validation before writes, explicit top-level/profile personality skip behavior, active and archived session detection that ignores meta-only rollouts, `personality = "pragmatic"` config persistence for existing-session homes, marker idempotency, and no-marker invalid-profile failures.
 - `codex-rs/app-server/src/request_processors/thread_goal_processor.rs` goal parameter decoding
   - tightened Swift `thread/goal/set` optional field decoding to match Rust serde semantics for `objective`, `status`, and `tokenBudget`: explicit `status: null` now behaves like omission, malformed optional strings/enums/integers return Rust-shaped invalid-request errors, and explicit `tokenBudget: null` remains a budget clear rather than a preserve operation.
+- `codex-rs/shell-command/src/parse_command.rs` / `codex-rs/protocol/src/models.rs` parity pins
+  - added Swift regression coverage for Rust's `rg --files | head -n 50` parser simplification and image-generation response items that omit `revised_prompt`, preserving the existing Swift behavior while closing the upstream test-matrix gap.
 
 ## Known Gaps
 
