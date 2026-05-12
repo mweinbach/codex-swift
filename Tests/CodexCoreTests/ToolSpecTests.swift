@@ -733,6 +733,82 @@ final class ToolSpecTests: XCTestCase {
         )
     }
 
+    func testModelVisibleSpecsFilterDeferredDynamicToolsLikeRustRouter() throws {
+        let dynamicTools = [
+            DynamicToolSpec(
+                namespace: "codex_app",
+                name: "hidden_dynamic_tool",
+                description: "Hidden until discovered.",
+                inputSchema: .object(["type": .string("object"), "properties": .object([:])]),
+                deferLoading: true
+            ),
+            DynamicToolSpec(
+                namespace: "codex_app",
+                name: "visible_dynamic_tool",
+                description: "Visible immediately.",
+                inputSchema: .object(["type": .string("object"), "properties": .object([:])])
+            )
+        ]
+        let specs = ToolSpecFactory.buildSpecs(
+            config: ToolsConfig(
+                shellType: .disabled,
+                applyPatchToolType: nil,
+                includeViewImageTool: false
+            ),
+            dynamicTools: dynamicTools
+        )
+
+        let registeredNamespace = try XCTUnwrap(specs.first { $0.spec.name == "codex_app" }?.spec)
+        guard case let .namespace(registered) = registeredNamespace else {
+            return XCTFail("expected registered namespace")
+        }
+        XCTAssertEqual(registered.tools.map(namespaceToolName), [
+            "hidden_dynamic_tool",
+            "visible_dynamic_tool"
+        ])
+
+        let visibleSpecs = ToolSpecFactory.modelVisibleSpecs(from: specs, dynamicTools: dynamicTools)
+        let visibleNamespace = try XCTUnwrap(visibleSpecs.first { $0.name == "codex_app" })
+        guard case let .namespace(namespace) = visibleNamespace else {
+            return XCTFail("expected visible namespace")
+        }
+        XCTAssertEqual(namespace.tools.map(namespaceToolName), ["visible_dynamic_tool"])
+    }
+
+    func testModelVisibleSpecsDropEmptyNamespaceAndPlainDeferredDynamicToolLikeRustRouter() {
+        let dynamicTools = [
+            DynamicToolSpec(
+                namespace: "codex_app",
+                name: "hidden_dynamic_tool",
+                description: "Hidden until discovered.",
+                inputSchema: .object(["type": .string("object"), "properties": .object([:])]),
+                deferLoading: true
+            ),
+            DynamicToolSpec(
+                name: "plain_dynamic_tool",
+                description: "Plain hidden tool.",
+                inputSchema: .object(["type": .string("object"), "properties": .object([:])]),
+                deferLoading: true
+            )
+        ]
+        let specs = ToolSpecFactory.buildSpecs(
+            config: ToolsConfig(
+                shellType: .disabled,
+                applyPatchToolType: nil,
+                includeViewImageTool: false
+            ),
+            dynamicTools: dynamicTools
+        )
+
+        XCTAssertTrue(specs.contains { $0.spec.name == "codex_app" })
+        XCTAssertTrue(specs.contains { $0.spec.name == "plain_dynamic_tool" })
+
+        let visibleSpecs = ToolSpecFactory.modelVisibleSpecs(from: specs, dynamicTools: dynamicTools)
+        XCTAssertFalse(visibleSpecs.contains { $0.name == "codex_app" })
+        XCTAssertFalse(visibleSpecs.contains { $0.name == "plain_dynamic_tool" })
+        XCTAssertTrue(visibleSpecs.contains { $0.name == "tool_search" })
+    }
+
     func testBuildSpecsHidesNamespacedDynamicToolsWhenNamespaceToolsDisabledLikeRust() {
         let specs = ToolSpecFactory.buildSpecs(
             config: ToolsConfig(

@@ -737,6 +737,29 @@ public struct ConfiguredToolSpec: Equatable, Sendable {
     }
 }
 
+private struct DeferredDynamicToolName: Hashable {
+    let namespace: String?
+    let name: String
+
+    init(namespace: String?, name: String) {
+        self.namespace = namespace
+        self.name = name
+    }
+
+    init(tool: DynamicToolSpec) {
+        self.namespace = tool.namespace
+        self.name = tool.name
+    }
+
+    static func plain(_ name: String) -> DeferredDynamicToolName {
+        DeferredDynamicToolName(namespace: nil, name: name)
+    }
+
+    static func namespaced(_ namespace: String, _ name: String) -> DeferredDynamicToolName {
+        DeferredDynamicToolName(namespace: namespace, name: name)
+    }
+}
+
 public struct ToolsConfig: Equatable, Sendable {
     public let shellType: ConfigShellToolType
     public let applyPatchToolType: ApplyPatchToolType?
@@ -926,6 +949,21 @@ public enum ToolSpecFactory {
         return specs
     }
 
+    public static func modelVisibleSpecs(
+        from specs: [ConfiguredToolSpec],
+        dynamicTools: [DynamicToolSpec]
+    ) -> [ToolSpec] {
+        let deferredDynamicTools = Set(
+            dynamicTools.lazy.filter(\.deferLoading).map(DeferredDynamicToolName.init)
+        )
+        return specs.compactMap { configuredTool in
+            filterDeferredDynamicToolSpec(
+                configuredTool.spec,
+                deferredDynamicTools: deferredDynamicTools
+            )
+        }
+    }
+
     public static func createToolsJSONForResponsesAPI(_ tools: [ToolSpec]) throws -> [Any] {
         try tools.map { tool in
             let data = try JSONEncoder().encode(tool)
@@ -1043,6 +1081,37 @@ public enum ToolSpecFactory {
             return true
         }
         return false
+    }
+
+    private static func filterDeferredDynamicToolSpec(
+        _ spec: ToolSpec,
+        deferredDynamicTools: Set<DeferredDynamicToolName>
+    ) -> ToolSpec? {
+        guard !deferredDynamicTools.isEmpty else {
+            return spec
+        }
+
+        switch spec {
+        case let .function(tool):
+            return deferredDynamicTools.contains(.plain(tool.name)) ? nil : spec
+        case let .namespace(namespace):
+            let tools = namespace.tools.filter { namespaceTool in
+                guard case let .function(function) = namespaceTool else {
+                    return true
+                }
+                return !deferredDynamicTools.contains(.namespaced(namespace.name, function.name))
+            }
+            guard !tools.isEmpty else {
+                return nil
+            }
+            return .namespace(ResponsesAPINamespace(
+                name: namespace.name,
+                description: namespace.description,
+                tools: tools
+            ))
+        default:
+            return spec
+        }
     }
 
     static func createDynamicResponsesAPITool(name: String, tool: DynamicToolSpec) -> ResponsesAPITool {
