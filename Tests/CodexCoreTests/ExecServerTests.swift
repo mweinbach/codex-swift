@@ -2901,6 +2901,132 @@ final class ExecServerTests: XCTestCase {
         ))
     }
 
+    func testRemoteControlRuntimeCoreStitchesRustStartEnableAndConnectDecisions() throws {
+        var runtime = try RemoteControlRuntimeCore(
+            remoteControlURL: "https://chatgpt.com/backend-api",
+            installationID: "install-123",
+            requestedEnabled: false,
+            stateDatabaseAvailable: true
+        )
+
+        XCTAssertEqual(runtime.start(appServerClientNameRequired: false), RemoteControlRuntimeStep(
+            action: .waitUntilEnabled(appServerClientName: nil)
+        ))
+        let enableStep = runtime.setEnabled(true)
+        XCTAssertEqual(enableStep.enablementChange, RemoteControlHandleEnablementChange(
+            requestedEnabled: true,
+            effectiveEnabled: true,
+            changed: true,
+            stateDatabaseUnavailable: false
+        ))
+        XCTAssertEqual(enableStep.action, .connect(RemoteControlTarget(
+            websocketURL: "wss://chatgpt.com/backend-api/wham/remote/control/server",
+            enrollURL: "https://chatgpt.com/backend-api/wham/remote/control/server/enroll"
+        ), appServerClientName: nil))
+        XCTAssertEqual(enableStep.statusUpdates, [RemoteControlStatusSnapshot(
+            status: .connecting,
+            installationID: "install-123",
+            environmentID: nil
+        )])
+
+        XCTAssertEqual(runtime.connectionEstablished(environmentID: "env-test"), RemoteControlRuntimeStep(
+            action: .connected,
+            statusUpdates: [
+                RemoteControlStatusSnapshot(
+                    status: .connecting,
+                    installationID: "install-123",
+                    environmentID: "env-test"
+                ),
+                RemoteControlStatusSnapshot(
+                    status: .connected,
+                    installationID: "install-123",
+                    environmentID: "env-test"
+                ),
+            ]
+        ))
+        XCTAssertEqual(runtime.statusSnapshot.status, .connected)
+        XCTAssertEqual(runtime.connectionEnded(.workerEnded), RemoteControlRuntimeStep(
+            action: .reconnect(appServerClientName: nil)
+        ))
+    }
+
+    func testRemoteControlRuntimeCoreHandlesStdioNameAndDisableLikeRust() throws {
+        var runtime = try RemoteControlRuntimeCore(
+            remoteControlURL: "https://chatgpt.com/backend-api",
+            installationID: "install-123",
+            requestedEnabled: true,
+            stateDatabaseAvailable: true
+        )
+
+        XCTAssertEqual(runtime.start(appServerClientNameRequired: true), RemoteControlRuntimeStep(
+            action: .waitForAppServerClientName
+        ))
+        XCTAssertEqual(runtime.receiveAppServerClientName(.received("stdio-client")), RemoteControlRuntimeStep(
+            action: .connect(RemoteControlTarget(
+                websocketURL: "wss://chatgpt.com/backend-api/wham/remote/control/server",
+                enrollURL: "https://chatgpt.com/backend-api/wham/remote/control/server/enroll"
+            ), appServerClientName: "stdio-client"),
+            statusUpdates: []
+        ))
+        XCTAssertEqual(runtime.setEnabled(false), RemoteControlRuntimeStep(
+            action: .waitUntilEnabled(appServerClientName: "stdio-client"),
+            statusUpdates: [RemoteControlStatusSnapshot(
+                status: .disabled,
+                installationID: "install-123",
+                environmentID: nil
+            )],
+            enablementChange: RemoteControlHandleEnablementChange(
+                requestedEnabled: false,
+                effectiveEnabled: false,
+                changed: true,
+                stateDatabaseUnavailable: false
+            )
+        ))
+
+        var missingStateDB = try RemoteControlRuntimeCore(
+            remoteControlURL: "https://chatgpt.com/backend-api",
+            installationID: "install-123",
+            requestedEnabled: false,
+            stateDatabaseAvailable: false
+        )
+        let missingDBEnable = missingStateDB.setEnabled(true)
+        XCTAssertEqual(missingDBEnable.action, .waitUntilEnabled(appServerClientName: nil))
+        XCTAssertEqual(missingDBEnable.enablementChange, RemoteControlHandleEnablementChange(
+            requestedEnabled: true,
+            effectiveEnabled: false,
+            changed: false,
+            stateDatabaseUnavailable: true
+        ))
+        XCTAssertEqual(missingStateDB.statusSnapshot.status, .disabled)
+    }
+
+    func testRemoteControlRuntimeCoreKeepsInvalidURLErroredUntilDisabledLikeRust() throws {
+        var runtime = try RemoteControlRuntimeCore(
+            remoteControlURL: "https://example.com/backend-api",
+            installationID: "install-123",
+            requestedEnabled: false,
+            stateDatabaseAvailable: true
+        )
+
+        _ = runtime.start(appServerClientNameRequired: false)
+        let enableStep = runtime.setEnabled(true)
+        XCTAssertEqual(
+            enableStep.action,
+            .waitForDisableAfterInvalidURL("invalid remote control URL `https://example.com/backend-api`; expected HTTPS URL for chatgpt.com or chatgpt-staging.com, or HTTP/HTTPS URL for localhost")
+        )
+        XCTAssertEqual(enableStep.statusUpdates.map(\.status), [.connecting, .errored])
+        XCTAssertEqual(runtime.statusSnapshot.status, .errored)
+
+        let disableStep = runtime.setEnabled(false)
+        XCTAssertEqual(disableStep.action, .waitUntilEnabled(appServerClientName: nil))
+        XCTAssertEqual(disableStep.statusUpdates, [RemoteControlStatusSnapshot(
+            status: .disabled,
+            installationID: "install-123",
+            environmentID: nil
+        )])
+        XCTAssertEqual(runtime.statusSnapshot.status, .disabled)
+    }
+
     func testRemoteControlEnrollmentClientBuildsRustRequestShape() async throws {
         let target = try RemoteControlURLNormalizer.normalize("https://chatgpt.com/backend-api")
         let client = RemoteControlEnrollmentClient(

@@ -467,6 +467,233 @@ public struct RemoteControlSessionLoopCore: Equatable, Sendable {
     }
 }
 
+public enum RemoteControlRuntimeAction: Equatable, Sendable {
+    case waitForAppServerClientName
+    case waitUntilEnabled(appServerClientName: String?)
+    case connect(RemoteControlTarget, appServerClientName: String?)
+    case waitForDisableAfterInvalidURL(String)
+    case connected
+    case retryAfterAccountID
+    case retryAfterBackoff(RemoteControlReconnectDelay)
+    case reconnect(appServerClientName: String?)
+    case shutdownTracker
+}
+
+public struct RemoteControlRuntimeStep: Equatable, Sendable {
+    public var action: RemoteControlRuntimeAction
+    public var statusUpdates: [RemoteControlStatusSnapshot]
+    public var enablementChange: RemoteControlHandleEnablementChange?
+
+    public init(
+        action: RemoteControlRuntimeAction,
+        statusUpdates: [RemoteControlStatusSnapshot] = [],
+        enablementChange: RemoteControlHandleEnablementChange? = nil
+    ) {
+        self.action = action
+        self.statusUpdates = statusUpdates
+        self.enablementChange = enablementChange
+    }
+}
+
+public struct RemoteControlRuntimeCore: Equatable, Sendable {
+    public private(set) var handle: RemoteControlHandleCore
+    public private(set) var sessionLoop: RemoteControlSessionLoopCore
+    public private(set) var connectLoop: RemoteControlConnectLoopCore?
+
+    public var statusSnapshot: RemoteControlStatusSnapshot {
+        handle.statusSnapshot
+    }
+
+    public init(handle: RemoteControlHandleCore) {
+        self.handle = handle
+        sessionLoop = RemoteControlSessionLoopCore(statusPublisher: handle.statusPublisher)
+    }
+
+    public init(
+        remoteControlURL: String,
+        installationID: String,
+        requestedEnabled: Bool,
+        stateDatabaseAvailable: Bool
+    ) throws {
+        self.init(handle: try RemoteControlHandleCore(
+            remoteControlURL: remoteControlURL,
+            installationID: installationID,
+            requestedEnabled: requestedEnabled,
+            stateDatabaseAvailable: stateDatabaseAvailable
+        ))
+    }
+
+    public mutating func start(appServerClientNameRequired: Bool) -> RemoteControlRuntimeStep {
+        let step = sessionLoop.start(appServerClientNameRequired: appServerClientNameRequired)
+        switch step.action {
+        case .waitForAppServerClientName:
+            return RemoteControlRuntimeStep(action: .waitForAppServerClientName)
+        case let .waitUntilEnabled(appServerClientName):
+            return waitUntilEnabledOrConnect(appServerClientName: appServerClientName)
+        case .connect, .reconnect, .shutdownTracker:
+            return RemoteControlRuntimeStep(action: .shutdownTracker)
+        }
+    }
+
+    public mutating func receiveAppServerClientName(
+        _ event: RemoteControlAppServerClientNameEvent
+    ) -> RemoteControlRuntimeStep {
+        let step = sessionLoop.receiveAppServerClientName(event)
+        switch step.action {
+        case let .waitUntilEnabled(appServerClientName):
+            return waitUntilEnabledOrConnect(appServerClientName: appServerClientName)
+        case .shutdownTracker:
+            return RemoteControlRuntimeStep(action: .shutdownTracker)
+        case .waitForAppServerClientName:
+            return RemoteControlRuntimeStep(action: .waitForAppServerClientName)
+        case let .connect(appServerClientName), let .reconnect(appServerClientName):
+            return beginConnect(appServerClientName: appServerClientName)
+        }
+    }
+
+    public mutating func setEnabled(_ requestedEnabled: Bool) -> RemoteControlRuntimeStep {
+        let change = handle.setEnabled(requestedEnabled)
+        if change.effectiveEnabled {
+            return beginConnect(
+                appServerClientName: sessionLoop.appServerClientName,
+                enablementChange: change
+            )
+        }
+
+        connectLoop = nil
+        syncSessionStatusFromHandle()
+        let step = sessionLoop.connectionEnded(.disabled)
+        handle.statusPublisher = sessionLoop.statusPublisher
+        return RemoteControlRuntimeStep(
+            action: .waitUntilEnabled(appServerClientName: sessionLoop.appServerClientName),
+            statusUpdates: step.statusUpdates,
+            enablementChange: change
+        )
+    }
+
+    public mutating func connectionEstablished(
+        environmentID: String?
+    ) -> RemoteControlRuntimeStep {
+        ensureConnectLoop()
+        guard var loop = connectLoop else {
+            return RemoteControlRuntimeStep(action: .shutdownTracker)
+        }
+        let step = loop.connectionEstablished(environmentID: environmentID)
+        applyConnectLoop(loop)
+        return RemoteControlRuntimeStep(
+            action: .connected,
+            statusUpdates: step.statusUpdates
+        )
+    }
+
+    public mutating func connectionFailed(
+        _ failure: RemoteControlConnectLoopFailure
+    ) -> RemoteControlRuntimeStep {
+        ensureConnectLoop()
+        guard var loop = connectLoop else {
+            return RemoteControlRuntimeStep(action: .shutdownTracker)
+        }
+        let step = loop.connectionFailed(failure)
+        applyConnectLoop(loop)
+        return RemoteControlRuntimeStep(
+            action: runtimeAction(for: step.action, appServerClientName: sessionLoop.appServerClientName),
+            statusUpdates: step.statusUpdates
+        )
+    }
+
+    public mutating func connectionEnded(
+        _ end: RemoteControlSessionConnectionEnd
+    ) -> RemoteControlRuntimeStep {
+        connectLoop = nil
+        syncSessionStatusFromHandle()
+        let step = sessionLoop.connectionEnded(end)
+        handle.statusPublisher = sessionLoop.statusPublisher
+        return RemoteControlRuntimeStep(
+            action: runtimeAction(for: step.action),
+            statusUpdates: step.statusUpdates
+        )
+    }
+
+    private mutating func waitUntilEnabledOrConnect(
+        appServerClientName: String?
+    ) -> RemoteControlRuntimeStep {
+        guard handle.effectiveEnabled else {
+            return RemoteControlRuntimeStep(action: .waitUntilEnabled(appServerClientName: appServerClientName))
+        }
+        return beginConnect(appServerClientName: appServerClientName)
+    }
+
+    private mutating func beginConnect(
+        appServerClientName: String?,
+        enablementChange: RemoteControlHandleEnablementChange? = nil
+    ) -> RemoteControlRuntimeStep {
+        var loop = handle.beginConnectLoop()
+        let step = loop.beginConnect()
+        applyConnectLoop(loop)
+        return RemoteControlRuntimeStep(
+            action: runtimeAction(for: step.action, appServerClientName: appServerClientName),
+            statusUpdates: step.statusUpdates,
+            enablementChange: enablementChange
+        )
+    }
+
+    private mutating func ensureConnectLoop() {
+        if connectLoop == nil {
+            connectLoop = handle.beginConnectLoop()
+        }
+    }
+
+    private mutating func applyConnectLoop(_ loop: RemoteControlConnectLoopCore) {
+        connectLoop = loop
+        handle.applyConnectLoopStatus(loop)
+        syncSessionStatusFromHandle()
+    }
+
+    private mutating func syncSessionStatusFromHandle() {
+        sessionLoop.statusPublisher = handle.statusPublisher
+    }
+
+    private func runtimeAction(
+        for action: RemoteControlConnectLoopAction,
+        appServerClientName: String?
+    ) -> RemoteControlRuntimeAction {
+        switch action {
+        case let .connect(target):
+            return .connect(target, appServerClientName: appServerClientName)
+        case let .waitForDisableAfterInvalidURL(message):
+            return .waitForDisableAfterInvalidURL(message)
+        case .connected:
+            return .connected
+        case .disabled:
+            return .waitUntilEnabled(appServerClientName: appServerClientName)
+        case .retryAfterAccountID:
+            return .retryAfterAccountID
+        case let .retryAfterBackoff(delay):
+            return .retryAfterBackoff(delay)
+        }
+    }
+
+    private func runtimeAction(
+        for action: RemoteControlSessionLoopAction
+    ) -> RemoteControlRuntimeAction {
+        switch action {
+        case .waitForAppServerClientName:
+            return .waitForAppServerClientName
+        case let .waitUntilEnabled(appServerClientName):
+            return .waitUntilEnabled(appServerClientName: appServerClientName)
+        case let .connect(appServerClientName):
+            guard let target = handle.target else {
+                return .waitUntilEnabled(appServerClientName: appServerClientName)
+            }
+            return .connect(target, appServerClientName: appServerClientName)
+        case let .reconnect(appServerClientName):
+            return .reconnect(appServerClientName: appServerClientName)
+        case .shutdownTracker:
+            return .shutdownTracker
+        }
+    }
+}
+
 public struct RemoteControlClientID: Codable, Equatable, Hashable, Sendable {
     public var rawValue: String
 
