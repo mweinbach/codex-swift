@@ -1161,6 +1161,8 @@ Source baseline inspected for this scaffold:
   - added Swift parity for Rust's `is_codex_generated_item` helper, classifying function/tool-search/custom-tool outputs and developer messages as Codex-generated while leaving model-generated assistant/tool-call items under the separate model-generated classifier.
 - `codex-rs/core/src/context_manager/updates.rs` persisted context update helpers
   - added Swift `ContextUpdateBuilder` parity for environment diffs from persisted `TurnContextItem` baselines, full environment reinjection when the baseline is missing, `include_environment_context` suppression, model-switch developer updates, permission-profile/approval-policy developer updates, collaboration-mode developer updates, realtime start/end developer updates, custom realtime start instructions, personality-spec developer updates, and Rust's previous-turn realtime fallback for older records without `realtime_active`.
+- `codex-rs/core/src/personality_migration.rs` startup personality migration
+  - added Swift `PersonalityMigration` parity for Rust's `.personality_migration` marker, selected-profile validation before writes, explicit top-level/profile personality skip behavior, active and archived session detection that ignores meta-only rollouts, `personality = "pragmatic"` config persistence for existing-session homes, marker idempotency, and no-marker invalid-profile failures.
 
 ## Known Gaps
 
