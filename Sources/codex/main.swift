@@ -435,6 +435,12 @@ private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) as
             remoteControlFeatureEnabled: settings.features.isEnabled(.remoteControl),
             stateStoreAvailable: stateStore != nil
         )
+        let remoteControlEnabled = settings.features.isEnabled(.remoteControl) && stateStore != nil
+        let remoteControlStatusSnapshot = CodexAppServerConfiguration.RemoteControlStatusSnapshot(
+            status: remoteControlEnabled ? .connecting : .disabled,
+            installationID: try InstallationIDResolver.resolve(codexHome: codexHome),
+            environmentID: nil
+        )
         let configuration = CodexAppServerConfiguration(
             codexHome: codexHome,
             defaultModelProvider: settings.selectedModelProviderID,
@@ -442,7 +448,8 @@ private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) as
             requiresOpenAIAuth: settings.selectedModelProvider?.requiresOpenAIAuth ?? true,
             authCredentialsStoreMode: settings.cliAuthCredentialsStoreMode,
             activeProfile: settings.activeProfile,
-            stateStore: stateStore
+            stateStore: stateStore,
+            remoteControlStatusSnapshot: remoteControlStatusSnapshot
         )
         switch request.listenTransport {
         case .stdio:
