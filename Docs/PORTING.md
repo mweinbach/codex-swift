@@ -902,7 +902,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/execpolicy/src/parser.rs` Starlark conditional expressions
   - Added Swift execpolicy parser support for `value if condition else fallback` expressions across supported policy literals, including constants, helper returns, list-comprehension outputs, builtin arguments, examples, network hosts, and host executable paths.
 - `codex-rs/execpolicy/src/parser.rs` Starlark boolean expressions as literals
-  - Added Swift execpolicy parser support for explicit boolean/comparison expressions assigned to constants and passed through supported function or builtin arguments, covering `and`, `or`, prefix `not`, ordered/equality comparisons, and membership operators.
+  - Added Swift execpolicy parser support for explicit boolean/comparison expressions assigned to constants and passed through supported function or builtin arguments, covering value-preserving `and`/`or`, prefix `not`, ordered/equality comparisons, and membership operators.
 - `codex-rs/execpolicy/src/parser.rs` Starlark boolean sequence builtins
   - Added Swift execpolicy parser support for `all(...)` and `any(...)` over supported list and string iterables, including empty-iterable truth values and use with list-comprehension predicates in generated policy rules.
 - `codex-rs/execpolicy/src/parser.rs` Starlark conversion builtins

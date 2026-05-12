@@ -3100,6 +3100,10 @@ final class ExecPolicyTests: XCTestCase {
         HAS_GITHUB = "github" in HOSTS
         SHOULD_PROMPT = HAS_STATUS and HAS_GITHUB and len(COMMANDS) >= 3
         SHOULD_BLOCK = not ("commit" in COMMANDS) and TOOL != "jj"
+        FALLBACK_COMMANDS = [] or COMMANDS
+        EMPTY_SELECTION = [] and COMMANDS
+        SELECTED_HOST = "" or HOSTS["github"]
+        SELECTED_TOOL = TOOL and FALLBACK_COMMANDS[0]
         MATCH = f"{TOOL} {COMMANDS[0]}" if SHOULD_PROMPT else "jj status"
 
         def host(public):
@@ -3107,16 +3111,16 @@ final class ExecPolicyTests: XCTestCase {
 
         if SHOULD_PROMPT:
             prefix_rule(
-                [TOOL, COMMANDS[0]],
+                [TOOL, SELECTED_TOOL],
                 "prompt",
                 match = [MATCH],
-                justification = "bool literal prompt",
+                justification = "bool literal " + SELECTED_HOST,
             )
 
-        if SHOULD_BLOCK:
-            prefix_rule([TOOL, "commit"], "forbidden")
+        if SHOULD_BLOCK and not EMPTY_SELECTION:
+            prefix_rule([TOOL, FALLBACK_COMMANDS[-1]], "forbidden")
 
-        network_rule(host(SHOULD_PROMPT or False), "https", "allow")
+        network_rule(SELECTED_HOST if (SHOULD_PROMPT or False) else host(False), "https", "allow")
         host_executable(TOOL, ["/usr/bin/" + TOOL] if SHOULD_BLOCK else [])
         """)
 
@@ -3124,10 +3128,10 @@ final class ExecPolicyTests: XCTestCase {
             PrefixRule(
                 pattern: PrefixPattern(first: "git", rest: [.single("status")]),
                 decision: .prompt,
-                justification: "bool literal prompt"
+                justification: "bool literal api.github.com"
             ),
             PrefixRule(
-                pattern: PrefixPattern(first: "git", rest: [.single("commit")]),
+                pattern: PrefixPattern(first: "git", rest: [.single("log")]),
                 decision: .forbidden
             )
         ])

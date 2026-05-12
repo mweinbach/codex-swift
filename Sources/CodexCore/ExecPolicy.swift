@@ -6869,26 +6869,53 @@ public final class PolicyParser {
         constants: [String: ConfigValue],
         functions: [String: StarlarkFunction]
     ) throws -> ConfigValue? {
-        guard containsExplicitStarlarkBooleanOperator(text) else {
-            return nil
+        let orPieces = splitTopLevelKeywordExpression(text, keyword: "or")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        if orPieces.count > 1 {
+            var lastValue: ConfigValue = .none
+            for piece in orPieces {
+                guard !piece.isEmpty else {
+                    throw ConfigOverrideError.invalidLiteral(text)
+                }
+                let value = try parsePolicyLiteral(piece, constants: constants, functions: functions)
+                lastValue = value
+                if truthy(value) {
+                    return value
+                }
+            }
+            return lastValue
         }
-        return try .bool(evaluateStarlarkCondition(text, constants: constants, functions: functions))
-    }
 
-    private static func containsExplicitStarlarkBooleanOperator(_ text: String) -> Bool {
-        if topLevelKeywordRange("or", in: text) != nil ||
-            topLevelKeywordRange("and", in: text) != nil ||
-            topLevelKeywordRange("not in", in: text) != nil ||
-            topLevelKeywordRange("in", in: text) != nil {
-            return true
+        let andPieces = splitTopLevelKeywordExpression(text, keyword: "and")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        if andPieces.count > 1 {
+            var lastValue: ConfigValue = .none
+            for piece in andPieces {
+                guard !piece.isEmpty else {
+                    throw ConfigOverrideError.invalidLiteral(text)
+                }
+                let value = try parsePolicyLiteral(piece, constants: constants, functions: functions)
+                lastValue = value
+                if !truthy(value) {
+                    return value
+                }
+            }
+            return lastValue
         }
+
         if let notRange = topLevelKeywordRange("not", in: text),
            notRange.lowerBound == text.startIndex {
-            return true
+            let operand = String(text[notRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !operand.isEmpty else {
+                throw ConfigOverrideError.invalidLiteral(text)
+            }
+            return try .bool(!truthy(parsePolicyLiteral(operand, constants: constants, functions: functions)))
         }
-        return ["==", "!=", "<=", ">=", "<", ">"].contains { operatorText in
-            topLevelOperatorRange(operatorText, in: text) != nil
+
+        if splitTopLevelComparisonExpression(text).count > 1 {
+            return try .bool(evaluateStarlarkCondition(text, constants: constants, functions: functions))
         }
+        return nil
     }
 
     private static func parseStarlarkConditionalExpression(
