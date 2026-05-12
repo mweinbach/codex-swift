@@ -340,6 +340,52 @@ final class SandboxCLITests: XCTestCase {
         )
     }
 
+    func testResolveDebugSandboxConfigurationIgnoresManagedRequirementsUnlessIncludedLikeRust() throws {
+        let codexHome = try SandboxTemporaryDirectory()
+        let processCwd = try SandboxTemporaryDirectory()
+        let requirementsPath = codexHome.url.appendingPathComponent("requirements.toml", isDirectory: false)
+        try """
+        allowed_sandbox_modes = ["read-only"]
+        """.write(to: requirementsPath, atomically: true, encoding: .utf8)
+
+        let managedOverrides = ConfigLayerLoaderOverrides(
+            managedConfigPath: codexHome.url.appendingPathComponent("missing-managed.toml", isDirectory: false),
+            requirementsPath: requirementsPath
+        )
+
+        let ignoredConfiguration = try CodexCLI.resolveDebugSandboxConfiguration(
+            profile: CodexCLI.SandboxProfileOptions(permissionsProfile: ":workspace"),
+            configOverrides: CliConfigOverrides(),
+            codexHome: codexHome.url,
+            processCwd: processCwd.url,
+            managedConfigOverrides: managedOverrides,
+            environment: [:]
+        )
+        guard case .workspaceWrite = ignoredConfiguration.sandboxPolicy else {
+            return XCTFail("expected debug sandbox to ignore managed requirements by default for profile invocations")
+        }
+
+        XCTAssertThrowsError(try CodexCLI.resolveDebugSandboxConfiguration(
+            profile: CodexCLI.SandboxProfileOptions(
+                permissionsProfile: ":workspace",
+                includeManagedConfig: true
+            ),
+            configOverrides: CliConfigOverrides(),
+            codexHome: codexHome.url,
+            processCwd: processCwd.url,
+            managedConfigOverrides: managedOverrides,
+            environment: [:]
+        )) { error in
+            XCTAssertEqual(
+                error as? ConstraintError,
+                .invalidValue(
+                    candidate: "WorkspaceWrite { writable_roots: [], network_access: false, exclude_tmpdir_env_var: false, exclude_slash_tmp: false }",
+                    allowed: "[ReadOnly]"
+                )
+            )
+        }
+    }
+
     func testResolveDebugSandboxConfigurationPreservesNonLegacyPermissionProfileForDirectSeatbeltRuntime() throws {
         let codexHome = try SandboxTemporaryDirectory()
         let processCwd = try SandboxTemporaryDirectory()

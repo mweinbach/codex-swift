@@ -1102,19 +1102,21 @@ public enum CodexConfigLoader {
         try parsed.merge(managedConfigLayers)
 
         var requirementsToml = ConfigRequirementsToml()
-        if let requirementsPath = managedConfigOverrides.requirementsPath
-            ?? CodexConfigLayerLoader.defaultRequirementsTomlFile()
-        {
-            try CodexConfigLayerLoader.loadRequirementsToml(
+        if !managedConfigOverrides.ignoreManagedRequirements {
+            if let requirementsPath = managedConfigOverrides.requirementsPath
+                ?? CodexConfigLayerLoader.defaultRequirementsTomlFile()
+            {
+                try CodexConfigLayerLoader.loadRequirementsToml(
+                    into: &requirementsToml,
+                    from: requirementsPath,
+                    fileManager: fileManager
+                )
+            }
+            try CodexConfigLayerLoader.loadRequirementsFromLegacyScheme(
                 into: &requirementsToml,
-                from: requirementsPath,
-                fileManager: fileManager
+                loadedConfigLayers: managedConfigLayers
             )
         }
-        try CodexConfigLayerLoader.loadRequirementsFromLegacyScheme(
-            into: &requirementsToml,
-            loadedConfigLayers: managedConfigLayers
-        )
 
         let requirements = try requirementsToml.requirements()
         var config = try parsed.resolvedConfig(environment: environment)

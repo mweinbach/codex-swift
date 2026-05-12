@@ -2599,6 +2599,48 @@ final class ConfigLoaderTests: XCTestCase {
         }
     }
 
+    func testIgnoreManagedRequirementsSkipsRequirementsTomlLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let requirementsPath = dir.url.appendingPathComponent("requirements.toml")
+        try """
+        allowed_sandbox_modes = ["read-only"]
+        """.write(to: requirementsPath, atomically: true, encoding: .utf8)
+        try """
+        sandbox_mode = "workspace-write"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(
+            codexHome: dir.url,
+            systemConfigFile: nil,
+            managedConfigOverrides: ConfigLayerLoaderOverrides(
+                managedConfigPath: dir.url.appendingPathComponent("missing-managed.toml"),
+                requirementsPath: requirementsPath
+            )
+        )) { error in
+            XCTAssertEqual(
+                error as? ConstraintError,
+                .invalidValue(
+                    candidate: "WorkspaceWrite { writable_roots: [], network_access: false, exclude_tmpdir_env_var: false, exclude_slash_tmp: false }",
+                    allowed: "[ReadOnly]"
+                )
+            )
+        }
+
+        let config = try CodexConfigLoader.load(
+            codexHome: dir.url,
+            systemConfigFile: nil,
+            managedConfigOverrides: ConfigLayerLoaderOverrides(
+                managedConfigPath: dir.url.appendingPathComponent("missing-managed.toml"),
+                requirementsPath: requirementsPath,
+                ignoreManagedRequirements: true
+            )
+        )
+
+        guard case .workspaceWrite = config.sandboxPolicy else {
+            return XCTFail("expected managed requirements to be ignored")
+        }
+    }
+
     func testRequirementsTomlFallsBackToAllowedApprovalsReviewerLikeRust() throws {
         let dir = try CoreTemporaryDirectory()
         let requirementsPath = dir.url.appendingPathComponent("requirements.toml")

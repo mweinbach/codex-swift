@@ -6,19 +6,22 @@ public struct ConfigLayerLoaderOverrides: Equatable, Sendable {
     public var requirementsPath: URL?
     public var ignoreUserConfig: Bool
     public var ignoreUserAndProjectExecPolicyRules: Bool
+    public var ignoreManagedRequirements: Bool
 
     public init(
         managedConfigPath: URL? = nil,
         managedPreferencesBase64: String? = nil,
         requirementsPath: URL? = nil,
         ignoreUserConfig: Bool = false,
-        ignoreUserAndProjectExecPolicyRules: Bool = false
+        ignoreUserAndProjectExecPolicyRules: Bool = false,
+        ignoreManagedRequirements: Bool = false
     ) {
         self.managedConfigPath = managedConfigPath
         self.managedPreferencesBase64 = managedPreferencesBase64
         self.requirementsPath = requirementsPath
         self.ignoreUserConfig = ignoreUserConfig
         self.ignoreUserAndProjectExecPolicyRules = ignoreUserAndProjectExecPolicyRules
+        self.ignoreManagedRequirements = ignoreManagedRequirements
     }
 }
 
@@ -138,18 +141,19 @@ public enum CodexConfigLayerLoader {
         fileManager: FileManager = .default,
         systemConfigFile: URL? = CodexConfigLoader.defaultSystemConfigFile()
     ) throws -> ConfigLayerStack {
-        var requirementsToml = ConfigRequirementsToml()
-        if let requirementsPath = overrides.requirementsPath ?? defaultRequirementsTomlFile() {
-            try loadRequirementsToml(into: &requirementsToml, from: requirementsPath, fileManager: fileManager)
-        }
-
         let loadedConfigLayers = try loadConfigLayers(
             codexHome: codexHome,
             overrides: overrides,
             environment: environment,
             fileManager: fileManager
         )
-        try loadRequirementsFromLegacyScheme(into: &requirementsToml, loadedConfigLayers: loadedConfigLayers)
+        var requirementsToml = ConfigRequirementsToml()
+        if !overrides.ignoreManagedRequirements {
+            if let requirementsPath = overrides.requirementsPath ?? defaultRequirementsTomlFile() {
+                try loadRequirementsToml(into: &requirementsToml, from: requirementsPath, fileManager: fileManager)
+            }
+            try loadRequirementsFromLegacyScheme(into: &requirementsToml, loadedConfigLayers: loadedConfigLayers)
+        }
 
         var layers: [ConfigLayerEntry] = []
         var startupWarnings: [String] = []

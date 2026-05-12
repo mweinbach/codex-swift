@@ -52,14 +52,20 @@ extension CodexCLI {
         configOverrides: CliConfigOverrides,
         codexHome: URL,
         processCwd: URL,
+        managedConfigOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides(),
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) throws -> DebugSandboxConfiguration {
         let cwd = profile.resolvedCwd(relativeTo: processCwd)
+        let loaderOverrides = debugSandboxManagedConfigOverrides(
+            profile: profile,
+            base: managedConfigOverrides
+        )
         let defaultConfig = try debugSandboxDefaultConfiguration(
             profile: profile,
             configOverrides: configOverrides,
             codexHome: codexHome,
             cwd: cwd,
+            managedConfigOverrides: loaderOverrides,
             environment: environment
         )
         switch profile.resolveBuiltInPolicy(defaultPolicy: defaultConfig.sandboxPolicy) {
@@ -81,6 +87,7 @@ extension CodexCLI {
                 configOverrides: configOverrides,
                 codexHome: codexHome,
                 cwd: cwd,
+                managedConfigOverrides: loaderOverrides,
                 environment: environment
             )
             return try configuration(from: config, cwd: cwd)
@@ -94,6 +101,7 @@ extension CodexCLI {
         configOverrides: CliConfigOverrides,
         codexHome: URL,
         cwd: URL,
+        managedConfigOverrides: ConfigLayerLoaderOverrides,
         environment: [String: String]
     ) throws -> DebugSandboxConfiguration {
         if profile.permissionsProfile == ":workspace" {
@@ -102,6 +110,7 @@ extension CodexCLI {
                 codexHome: codexHome,
                 cwd: cwd,
                 overrides: CliConfigOverrides(rawOverrides: workspaceOverrides),
+                managedConfigOverrides: managedConfigOverrides,
                 environment: environment
             )
             if let activeProfile = config.activeProfile {
@@ -111,6 +120,7 @@ extension CodexCLI {
                     overrides: CliConfigOverrides(rawOverrides: workspaceOverrides + [
                         #"profiles.\#(tomlQuotedKeySegment(activeProfile)).sandbox_mode="workspace-write""#
                     ]),
+                    managedConfigOverrides: managedConfigOverrides,
                     environment: environment
                 )
             }
@@ -123,6 +133,7 @@ extension CodexCLI {
                 configOverrides: configOverrides,
                 codexHome: codexHome,
                 cwd: cwd,
+                managedConfigOverrides: managedConfigOverrides,
                 environment: environment
             )
             return try configuration(from: config, cwd: cwd)
@@ -132,6 +143,7 @@ extension CodexCLI {
             codexHome: codexHome,
             cwd: cwd,
             overrides: configOverrides,
+            managedConfigOverrides: managedConfigOverrides,
             environment: environment
         )
         if ambientConfig.defaultPermissions != nil {
@@ -143,6 +155,7 @@ extension CodexCLI {
                 codexHome: codexHome,
                 cwd: cwd,
                 overrides: configOverrides,
+                managedConfigOverrides: managedConfigOverrides,
                 environment: environment
             )
             return try configuration(from: config, cwd: cwd)
@@ -156,6 +169,7 @@ extension CodexCLI {
         configOverrides: CliConfigOverrides,
         codexHome: URL,
         cwd: URL,
+        managedConfigOverrides: ConfigLayerLoaderOverrides,
         environment: [String: String]
     ) throws -> CodexRuntimeConfig {
         try CodexConfigLoader.load(
@@ -166,8 +180,20 @@ extension CodexCLI {
                     #"default_permissions="\#(escapedTomlStringBody(permissionsProfile))""#
                 ]
             ),
+            managedConfigOverrides: managedConfigOverrides,
             environment: environment
         )
+    }
+
+    private static func debugSandboxManagedConfigOverrides(
+        profile: SandboxProfileOptions,
+        base: ConfigLayerLoaderOverrides
+    ) -> ConfigLayerLoaderOverrides {
+        var overrides = base
+        if profile.permissionsProfile != nil, !profile.includeManagedConfig {
+            overrides.ignoreManagedRequirements = true
+        }
+        return overrides
     }
 
     private static func configuration(
