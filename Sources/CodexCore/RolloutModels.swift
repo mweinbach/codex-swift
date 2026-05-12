@@ -384,6 +384,63 @@ public struct TurnContextItem: Equatable, Codable, Sendable {
     }
 }
 
+extension TurnContextItem {
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.turnID = try container.decodeIfPresent(String.self, forKey: .turnID)
+        self.traceID = try container.decodeIfPresent(String.self, forKey: .traceID)
+        self.cwd = try container.decode(String.self, forKey: .cwd)
+        self.currentDate = try container.decodeIfPresent(String.self, forKey: .currentDate)
+        self.timezone = try container.decodeIfPresent(String.self, forKey: .timezone)
+        self.approvalPolicy = try container.decode(AskForApproval.self, forKey: .approvalPolicy)
+        self.sandboxPolicy = try container.decode(SandboxPolicy.self, forKey: .sandboxPolicy)
+        self.permissionProfile = try container.decodeIfPresent(PermissionProfile.self, forKey: .permissionProfile)
+        self.activePermissionProfile = try container.decodeIfPresent(
+            ActivePermissionProfile.self,
+            forKey: .activePermissionProfile
+        )
+        self.network = try container.decodeIfPresent(TurnContextNetworkItem.self, forKey: .network)
+        self.fileSystemSandboxPolicy = try container.decodeIfPresent(
+            FileSystemSandboxPolicy.self,
+            forKey: .fileSystemSandboxPolicy
+        )
+        self.model = try container.decode(String.self, forKey: .model)
+        self.personality = try container.decodeIfPresent(Personality.self, forKey: .personality)
+        self.collaborationMode = try container.decodeIfPresent(CollaborationMode.self, forKey: .collaborationMode)
+        self.realtimeActive = try container.decodeIfPresent(Bool.self, forKey: .realtimeActive)
+        self.effort = try container.decodeIfPresent(ReasoningEffort.self, forKey: .effort)
+        self.summary = try container.decode(ReasoningSummary.self, forKey: .summary)
+        self.userInstructions = try container.decodeIfPresent(String.self, forKey: .userInstructions)
+        self.developerInstructions = try container.decodeIfPresent(String.self, forKey: .developerInstructions)
+        self.finalOutputJSONSchema = try container.decodeIfPresent(JSONValue.self, forKey: .finalOutputJSONSchema)
+        self.truncationPolicy = try container.decodeIfPresent(TruncationPolicy.self, forKey: .truncationPolicy)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(turnID, forKey: .turnID)
+        try container.encodeIfPresent(traceID, forKey: .traceID)
+        try container.encode(cwd, forKey: .cwd)
+        try container.encodeIfPresent(currentDate, forKey: .currentDate)
+        try container.encodeIfPresent(timezone, forKey: .timezone)
+        try container.encode(approvalPolicy, forKey: .approvalPolicy)
+        try container.encode(sandboxPolicy, forKey: .sandboxPolicy)
+        try container.encodeIfPresent(permissionProfile, forKey: .permissionProfile)
+        try container.encodeIfPresent(network, forKey: .network)
+        try container.encodeIfPresent(fileSystemSandboxPolicy, forKey: .fileSystemSandboxPolicy)
+        try container.encode(model, forKey: .model)
+        try container.encodeIfPresent(personality, forKey: .personality)
+        try container.encodeIfPresent(collaborationMode, forKey: .collaborationMode)
+        try container.encodeIfPresent(realtimeActive, forKey: .realtimeActive)
+        try container.encodeIfPresent(effort, forKey: .effort)
+        try container.encode(summary, forKey: .summary)
+        try container.encodeIfPresent(userInstructions, forKey: .userInstructions)
+        try container.encodeIfPresent(developerInstructions, forKey: .developerInstructions)
+        try container.encodeIfPresent(finalOutputJSONSchema, forKey: .finalOutputJSONSchema)
+        try container.encodeIfPresent(truncationPolicy, forKey: .truncationPolicy)
+    }
+}
+
 public enum RolloutRecordItem: Equatable, Sendable {
     case sessionMeta(SessionMetaLine)
     case responseItem(ResponseItem)

@@ -221,7 +221,7 @@ final class CodexAppServerTests: XCTestCase {
         assertPermissionSelection(forkResult, activeID: "limited", extraPath: extra.url.path)
     }
 
-    func testTurnStartPermissionsSelectionPersistsTurnContextLikeRust() throws {
+    func testTurnStartPermissionsSelectionPersistsEffectiveTurnContextLikeRust() throws {
         let temp = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
         let extra = try TemporaryDirectory()
@@ -271,10 +271,7 @@ final class CodexAppServerTests: XCTestCase {
             }
             return nil
         }.last)
-        XCTAssertEqual(turnContext.activePermissionProfile, ActivePermissionProfile(
-            id: "limited",
-            modifications: [.additionalWritableRoot(path: extra.url.path)]
-        ))
+        XCTAssertNil(turnContext.activePermissionProfile)
         XCTAssertNotNil(turnContext.permissionProfile)
     }
 

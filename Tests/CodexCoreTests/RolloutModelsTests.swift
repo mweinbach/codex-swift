@@ -234,6 +234,67 @@ final class RolloutModelsTests: XCTestCase {
         ])
     }
 
+    func testTurnContextItemOmitsActivePermissionProfileLikeRustRollout() throws {
+        let context = TurnContextItem(
+            cwd: "/repo",
+            approvalPolicy: .onRequest,
+            sandboxPolicy: .readOnly,
+            permissionProfile: .readOnly(),
+            activePermissionProfile: ActivePermissionProfile(id: ":read-only"),
+            model: "gpt-5.4",
+            summary: .auto
+        )
+
+        try XCTAssertJSONObjectEqual(context, [
+            "cwd": "/repo",
+            "approval_policy": "on-request",
+            "sandbox_policy": [
+                "type": "read-only"
+            ],
+            "permission_profile": [
+                "type": "managed",
+                "file_system": [
+                    "type": "restricted",
+                    "entries": [
+                        [
+                            "path": [
+                                "type": "special",
+                                "value": [
+                                    "kind": "root"
+                                ]
+                            ],
+                            "access": "read"
+                        ]
+                    ]
+                ],
+                "network": "restricted"
+            ],
+            "model": "gpt-5.4",
+            "summary": "auto"
+        ])
+    }
+
+    func testTurnContextItemDecodesLegacyActivePermissionProfile() throws {
+        let json = #"""
+        {
+            "cwd": "/repo",
+            "approval_policy": "on-request",
+            "sandbox_policy": {
+                "type": "read-only"
+            },
+            "active_permission_profile": {
+                "id": ":read-only",
+                "modifications": []
+            },
+            "model": "gpt-5.4",
+            "summary": "auto"
+        }
+        """#
+
+        let context = try JSONDecoder().decode(TurnContextItem.self, from: Data(json.utf8))
+        XCTAssertEqual(context.activePermissionProfile, ActivePermissionProfile(id: ":read-only"))
+    }
+
     func testTurnContextItemWireShapeIncludesOptionalFields() throws {
         let context = TurnContextItem(
             turnID: "turn-1",
