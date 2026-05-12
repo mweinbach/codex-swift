@@ -142,7 +142,9 @@ public actor ExecServerHandler {
 
     public func readProcess(_ params: ExecServerReadParams) async throws -> ExecServerReadResponse {
         let session = try await requireInitialized(for: "exec")
-        return try await session.processStore.read(params)
+        let response = try await session.processStore.read(params)
+        _ = try await requireSessionAttached()
+        return response
     }
 
     public func writeProcess(_ params: ExecServerWriteParams) async throws -> ExecServerWriteResponse {

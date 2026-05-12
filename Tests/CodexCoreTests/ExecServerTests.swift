@@ -1700,6 +1700,48 @@ final class ExecServerTests: XCTestCase {
         )
     }
 
+    func testHandlerLongPollReadFailsAfterSessionResumeLikeRust() async throws {
+        let registry = ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1", "connection-2"]))
+        let first = ExecServerHandler(sessionRegistry: registry)
+        let second = ExecServerHandler(sessionRegistry: registry)
+        let response = try await first.initialize(ExecServerInitializeParams(clientName: "first"))
+        try await first.markInitialized()
+
+        _ = try await first.startProcess(ExecServerExecParams(
+            processId: "proc-long-poll",
+            argv: ["/bin/sh", "-c", "sleep 5"],
+            cwd: FileManager.default.currentDirectoryPath,
+            env: [:],
+            tty: false
+        ))
+
+        let readTask = Task {
+            try await first.readProcess(ExecServerReadParams(
+                processId: "proc-long-poll",
+                waitMs: 500
+            ))
+        }
+
+        try await Task.sleep(nanoseconds: 50_000_000)
+        await first.shutdown()
+        _ = try await second.initialize(ExecServerInitializeParams(
+            clientName: "second",
+            resumeSessionId: response.sessionId
+        ))
+        try await second.markInitialized()
+
+        do {
+            _ = try await readTask.value
+            XCTFail("Expected evicted long-poll read to fail")
+        } catch let error as ExecServerJSONRPCErrorDetail {
+            XCTAssertEqual(error.code, -32600)
+            XCTAssertEqual(error.message, "session has been resumed by another connection")
+        }
+
+        _ = try await second.terminateProcess(ExecServerTerminateParams(processId: "proc-long-poll"))
+        await second.shutdown()
+    }
+
     func testHandlerShutdownDetachesSessionForResume() async throws {
         let registry = ExecServerSessionRegistry(makeID: sequenceIDs(["connection-1", "session-1", "connection-2"]))
         let first = ExecServerHandler(sessionRegistry: registry)
