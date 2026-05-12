@@ -1014,6 +1014,8 @@ Source baseline inspected for this scaffold:
   - matched Rust tree-sitter word-concatenation handling for empty quoted prefixes followed by literal `#`, so shell-wrapped commands like `rg ""#TODO Sources` summarize as searches instead of collapsing to whole-script unknowns.
 - `codex-rs/shell-command/src/bash.rs` concatenated literal flags
   - added public `parseCommand` parity coverage for Rust tree-sitter cases such as `-g"*.swift"` and `-g'*.txt'`, while preserving Rust's rejection of concatenated shell words that contain variable expansion.
+- `codex-rs/core/src/windows_sandbox.rs` off-Windows setup behavior
+  - factored Windows sandbox setup/readiness into `CodexCore`, matching Rust's off-Windows setup-completion default and exact elevated/legacy setup error strings; the app-server `windowsSandbox/readiness` and `windowsSandbox/setupStart` routes now delegate to the shared helper instead of carrying route-local placeholder behavior.
 - `codex-rs/shell-command/src/powershell.rs` UTF-8 output prefixing
   - added Swift PowerShell command prefixing with Rust's `[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;` prelude, including idempotence, accepted flag validation, and non-interactive shell/unified exec wiring.
 - `codex-rs/shell-command/src/powershell.rs` wrapper command extraction

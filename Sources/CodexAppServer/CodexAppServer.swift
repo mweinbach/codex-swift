@@ -12333,29 +12333,34 @@ public enum CodexAppServer {
         return [
             "status": windowsSandboxReadinessStatus(
                 windowsSandboxLevel: runtimeConfig.windowsSandboxLevel,
-                sandboxSetupIsComplete: false,
+                sandboxSetupIsComplete: windowsSandboxSetupIsComplete(codexHome: configuration.codexHome),
                 isWindows: isWindows
             )
         ]
     }
 
-    fileprivate static func windowsSandboxSetupStartResult(params: [String: Any]?) throws -> (result: [String: Any], notification: [String: Any]) {
+    fileprivate static func windowsSandboxSetupStartResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> (result: [String: Any], notification: [String: Any]) {
         let mode = try windowsSandboxSetupModeParam(params?["mode"])
-        _ = try rustOptionalAbsolutePathParam(params?["cwd"])
-
-        let error: String?
-        #if os(Windows)
-        error = "Windows sandbox setup is not implemented"
-        #else
-        switch mode {
-        case "elevated":
-            error = "elevated Windows sandbox setup is only supported on Windows"
-        case "unelevated":
-            error = "legacy Windows sandbox setup is only supported on Windows"
-        default:
-            error = nil
-        }
-        #endif
+        let cwd = try rustOptionalAbsolutePathParam(params?["cwd"])
+        let setupMode: WindowsSandboxSetupMode = mode == "elevated" ? .elevated : .unelevated
+        let request = WindowsSandboxSetupRequest(
+            mode: setupMode,
+            codexHome: configuration.codexHome,
+            commandCwd: cwd.map { URL(fileURLWithPath: $0, isDirectory: true) } ?? configuration.cwd
+        )
+        let error: String? = {
+            do {
+                try runWindowsSandboxSetup(request)
+                return nil
+            } catch let setupError as WindowsSandboxSetupError {
+                return setupError.description
+            } catch {
+                return String(describing: error)
+            }
+        }()
 
         return (
             result: ["started": true],
@@ -26179,7 +26184,10 @@ final class CodexAppServerMessageProcessor {
                         result: try CodexAppServer.windowsSandboxReadinessResult(configuration: configuration)
                     )
                 case "windowsSandbox/setupStart":
-                    let result = try CodexAppServer.windowsSandboxSetupStartResult(params: params)
+                    let result = try CodexAppServer.windowsSandboxSetupStartResult(
+                        params: params,
+                        configuration: configuration
+                    )
                     response = CodexAppServer.responseObject(id: id, result: result.result)
                     notifications.append(result.notification)
                 case "mcpServerStatus/list":
