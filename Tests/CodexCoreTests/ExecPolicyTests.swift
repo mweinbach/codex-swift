@@ -1131,6 +1131,29 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkStringIndexes() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        COMMAND = "status"
+
+        if TOOL[0] == "g" and COMMAND[-1] == "s":
+            prefix_rule([TOOL, COMMAND[0] + "hort"], "allow")
+            network_rule("api-" + TOOL[1] + ".github.com", "https", "allow")
+            host_executable(TOOL, ["/opt/" + TOOL[-1] + "/" + TOOL])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("short")]),
+                decision: .allow
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api-i.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/t/git"]])
+    }
+
     func testParserEvaluatesRustStarlarkSequenceRepetitionAndFloorModulo() throws {
         let policy = try parsePolicy("""
         TOOL = "g" + ("i" * 1) + ("t" * (2 - 1))

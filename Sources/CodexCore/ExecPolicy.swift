@@ -6520,6 +6520,19 @@ public final class PolicyParser {
                 throw ConfigOverrideError.invalidLiteral(text)
             }
             return items[resolvedIndex]
+        case let .string(value):
+            let characters = Array(value)
+            let itemIndex = try parseStarlarkInteger(
+                indexText,
+                constants: constants,
+                functions: functions,
+                expression: text
+            )
+            let resolvedIndex = itemIndex >= 0 ? itemIndex : characters.count + itemIndex
+            guard characters.indices.contains(resolvedIndex) else {
+                throw ConfigOverrideError.invalidLiteral(text)
+            }
+            return .string(String(characters[resolvedIndex]))
         case let .table(items):
             let key = try parsePolicyLiteral(indexText, constants: constants, functions: functions)
             guard case let .string(key) = key,
