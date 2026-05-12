@@ -25308,7 +25308,9 @@ final class CodexAppServerMessageProcessor {
                             op: coreOp.op,
                             failureMessage: "failed to start turn"
                         ) ?? UUID().uuidString.lowercased()
-                        activeTurnIDs[coreOp.threadID] = turnID
+                        if activeTurnIDs[coreOp.threadID] == nil {
+                            activeTurnIDs[coreOp.threadID] = turnID
+                        }
                         let turn = CodexAppServer.inProgressTurnObject(id: turnID)
                         response = CodexAppServer.responseObject(id: id, result: ["turn": turn])
                         break

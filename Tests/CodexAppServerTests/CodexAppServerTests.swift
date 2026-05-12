@@ -2826,6 +2826,58 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(turns.count, 0)
     }
 
+    func testTurnStartRuntimeSubmitterKeepsExistingActiveTurnForSameTurnInputLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let capture = AppServerCoreOpCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            coreOpSubmitter: capture.submit,
+            experimentalAPIEnabled: true
+        )
+        let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let firstMessages = try decodeMessages(processor.processLine(Data(#"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"First"}]}}"#.utf8)))
+        let firstResult = try XCTUnwrap(firstMessages[0]["result"] as? [String: Any])
+        let firstTurn = try XCTUnwrap(firstResult["turn"] as? [String: Any])
+        XCTAssertEqual(firstTurn["id"] as? String, "turn-2")
+
+        let secondMessages = try decodeMessages(processor.processLine(Data(#"{"id":3,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Second"}]}}"#.utf8)))
+        let secondResult = try XCTUnwrap(secondMessages[0]["result"] as? [String: Any])
+        let secondTurn = try XCTUnwrap(secondResult["turn"] as? [String: Any])
+        XCTAssertEqual(secondTurn["id"] as? String, "turn-3")
+
+        let mismatch = try decode(processor.processLine(Data(#"{"id":4,"method":"turn/steer","params":{"threadId":"\#(threadID)","expectedTurnId":"turn-3","input":[{"type":"text","text":"Wrong active"}]}}"#.utf8)))
+        let mismatchError = try XCTUnwrap(mismatch["error"] as? [String: Any])
+        XCTAssertEqual(mismatchError["code"] as? Int, -32600)
+        XCTAssertEqual(mismatchError["message"] as? String, "expected active turn id `turn-3` but found `turn-2`")
+
+        let steer = try decode(processor.processLine(Data(#"{"id":5,"method":"turn/steer","params":{"threadId":"\#(threadID)","expectedTurnId":"turn-2","input":[{"type":"text","text":"Steer active"}]}}"#.utf8)))
+        let steerResult = try XCTUnwrap(steer["result"] as? [String: Any])
+        XCTAssertEqual(steerResult["turnId"] as? String, "turn-2")
+
+        let submissions = capture.submissions
+        XCTAssertEqual(submissions.map(\.requestID), [.integer(2), .integer(3), .integer(5)])
+        XCTAssertEqual(submissions.map(\.threadID), [threadID, threadID, threadID])
+        guard case let .userInput(firstItems, _, _, _) = submissions[0].op else {
+            XCTFail("expected first turn/start to submit user input")
+            return
+        }
+        guard case let .userInput(secondItems, _, _, _) = submissions[1].op else {
+            XCTFail("expected second turn/start to submit user input")
+            return
+        }
+        guard case let .userInput(steerItems, _, _, _) = submissions[2].op else {
+            XCTFail("expected turn/steer to submit user input")
+            return
+        }
+        XCTAssertEqual(firstItems, [.text("First")])
+        XCTAssertEqual(secondItems, [.text("Second")])
+        XCTAssertEqual(steerItems, [.text("Steer active")])
+    }
+
     func testTurnStartSubmitsCoreUserInputWhenRuntimeSubmitterIsAvailable() throws {
         let temp = try TemporaryDirectory()
         let capture = AppServerCoreOpCapture()
