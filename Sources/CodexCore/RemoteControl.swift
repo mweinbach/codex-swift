@@ -387,6 +387,284 @@ public struct RemoteControlOutboundBuffer: Equatable, Sendable {
     }
 }
 
+public enum RemoteControlClientSegmentObservation: Equatable, Sendable {
+    case forward(RemoteControlClientEnvelope)
+    case pending
+    case dropped
+}
+
+public struct RemoteControlClientMessageObserver: Equatable, Sendable {
+    public static var segmentTargetBytes: Int { 100 * 1024 }
+    public static var segmentMaxBytes: Int { 150 * 1024 }
+    public static var reassembledMaxBytes: Int { 100 * 1024 * 1024 }
+    public static var segmentCountMax: Int { 1_024 }
+    private static var segmentAssemblyMaxCount: Int { 128 }
+
+    private struct ClientStreamKey: Hashable, Sendable {
+        var clientID: RemoteControlClientID
+        var streamID: RemoteControlStreamID?
+    }
+
+    private struct SegmentAssembly: Equatable, Sendable {
+        var streamID: RemoteControlStreamID
+        var metadata: SegmentMetadata
+        var raw: Data
+        var nextSegmentID: Int
+        var lastChunkSeenOrder: UInt64
+    }
+
+    private struct SegmentMetadata: Equatable, Sendable {
+        var seqID: UInt64
+        var segmentCount: Int
+        var messageSizeBytes: Int
+    }
+
+    private enum AssemblyUpdate: Equatable, Sendable {
+        case pending
+        case ignore
+        case drop
+        case complete(ExecServerJSONRPCMessage)
+    }
+
+    private var assembliesByClientID: [RemoteControlClientID: SegmentAssembly] = [:]
+    private var lastCompletedSeqIDByStream: [ClientStreamKey: UInt64] = [:]
+    private var chunkOrder: UInt64 = 0
+
+    public init() {}
+
+    public mutating func observe(
+        _ envelope: RemoteControlClientEnvelope,
+        wireSizeBytes: Int
+    ) -> RemoteControlClientSegmentObservation {
+        let messageKey = clientMessageKey(for: envelope)
+        if let (key, seqID) = messageKey,
+           let lastSeqID = lastCompletedSeqIDByStream[key],
+           lastSeqID >= seqID
+        {
+            return .dropped
+        }
+
+        if let (_, seqID) = messageKey,
+           let streamID = envelope.streamID,
+           case let .clientMessageChunk(segmentID, _, _, _) = envelope.event,
+           shouldIgnoreChunk(
+               clientID: envelope.clientID,
+               streamID: streamID,
+               seqID: seqID,
+               segmentID: segmentID
+           )
+        {
+            return .dropped
+        }
+
+        if messageKey != nil, wireSizeBytes > Self.segmentMaxBytes {
+            if let streamID = envelope.streamID {
+                invalidateStream(clientID: envelope.clientID, streamID: streamID)
+            }
+            return .dropped
+        }
+
+        let observation = observeSegment(envelope)
+        if case .forward = observation, let (key, seqID) = messageKey {
+            lastCompletedSeqIDByStream[key] = seqID
+        }
+        return observation
+    }
+
+    public mutating func invalidateStream(
+        clientID: RemoteControlClientID,
+        streamID: RemoteControlStreamID
+    ) {
+        lastCompletedSeqIDByStream.removeValue(forKey: ClientStreamKey(clientID: clientID, streamID: streamID))
+        removeAssembly(clientID: clientID, streamID: streamID)
+    }
+
+    public mutating func invalidateClient(clientID: RemoteControlClientID) {
+        lastCompletedSeqIDByStream = lastCompletedSeqIDByStream.filter { key, _ in
+            key.clientID != clientID
+        }
+        assembliesByClientID.removeValue(forKey: clientID)
+    }
+
+    private func clientMessageKey(
+        for envelope: RemoteControlClientEnvelope
+    ) -> (ClientStreamKey, UInt64)? {
+        guard case .clientMessageChunk = envelope.event,
+              let seqID = envelope.seqID
+        else {
+            return nil
+        }
+        return (ClientStreamKey(clientID: envelope.clientID, streamID: envelope.streamID), seqID)
+    }
+
+    private mutating func observeSegment(_ envelope: RemoteControlClientEnvelope) -> RemoteControlClientSegmentObservation {
+        guard case let .clientMessageChunk(segmentID, segmentCount, messageSizeBytes, messageChunkBase64) = envelope.event else {
+            return .forward(envelope)
+        }
+        guard let metadata = segmentMetadata(for: envelope) else {
+            return .dropped
+        }
+        guard let streamID = envelope.streamID else {
+            return .dropped
+        }
+        if shouldIgnoreChunk(
+            clientID: envelope.clientID,
+            streamID: streamID,
+            seqID: metadata.seqID,
+            segmentID: segmentID
+        ) {
+            return .dropped
+        }
+        if segmentCount == 0
+            || segmentCount > Self.segmentCountMax
+            || segmentID >= segmentCount
+            || messageSizeBytes == 0
+            || messageSizeBytes > Self.reassembledMaxBytes
+            || messageChunkBase64.isEmpty
+        {
+            removeAssembly(clientID: envelope.clientID, streamID: streamID)
+            return .dropped
+        }
+
+        chunkOrder &+= 1
+        if let assembly = assembliesByClientID[envelope.clientID] {
+            if assembly.streamID != streamID {
+                assembliesByClientID[envelope.clientID] = SegmentAssembly(
+                    streamID: streamID,
+                    metadata: metadata,
+                    raw: Data(),
+                    nextSegmentID: 0,
+                    lastChunkSeenOrder: chunkOrder
+                )
+            }
+        } else {
+            evictAssembliesIfFull()
+            assembliesByClientID[envelope.clientID] = SegmentAssembly(
+                streamID: streamID,
+                metadata: metadata,
+                raw: Data(),
+                nextSegmentID: 0,
+                lastChunkSeenOrder: chunkOrder
+            )
+        }
+
+        let update = applyChunk(
+            envelope: envelope,
+            metadata: metadata,
+            segmentID: segmentID,
+            messageChunkBase64: messageChunkBase64
+        )
+        switch update {
+        case .pending:
+            return .pending
+        case .ignore:
+            return .dropped
+        case .drop:
+            removeAssembly(clientID: envelope.clientID, streamID: streamID)
+            return .dropped
+        case let .complete(message):
+            removeAssembly(clientID: envelope.clientID, streamID: streamID)
+            return .forward(RemoteControlClientEnvelope(
+                event: .clientMessage(message: message),
+                clientID: envelope.clientID,
+                streamID: envelope.streamID,
+                seqID: envelope.seqID,
+                cursor: envelope.cursor
+            ))
+        }
+    }
+
+    private mutating func applyChunk(
+        envelope: RemoteControlClientEnvelope,
+        metadata: SegmentMetadata,
+        segmentID: Int,
+        messageChunkBase64: String
+    ) -> AssemblyUpdate {
+        guard var assembly = assembliesByClientID[envelope.clientID] else {
+            return .drop
+        }
+        if metadata.seqID < assembly.metadata.seqID {
+            return .ignore
+        }
+        if assembly.metadata != metadata {
+            return .drop
+        }
+        if segmentID < assembly.nextSegmentID {
+            return .pending
+        }
+        if segmentID != assembly.nextSegmentID {
+            return .drop
+        }
+        guard let chunk = Data(base64Encoded: messageChunkBase64) else {
+            return .drop
+        }
+        let nextRawCount = assembly.raw.count + chunk.count
+        guard nextRawCount <= metadata.messageSizeBytes else {
+            return .drop
+        }
+
+        assembly.raw.append(chunk)
+        assembly.nextSegmentID += 1
+        assembly.lastChunkSeenOrder = chunkOrder
+        assembliesByClientID[envelope.clientID] = assembly
+
+        if assembly.nextSegmentID < metadata.segmentCount {
+            return .pending
+        }
+        guard assembly.raw.count == metadata.messageSizeBytes else {
+            return .drop
+        }
+        do {
+            let message = try JSONDecoder().decode(ExecServerJSONRPCMessage.self, from: assembly.raw)
+            return .complete(message)
+        } catch {
+            return .drop
+        }
+    }
+
+    private func segmentMetadata(for envelope: RemoteControlClientEnvelope) -> SegmentMetadata? {
+        guard case let .clientMessageChunk(_, segmentCount, messageSizeBytes, _) = envelope.event,
+              let seqID = envelope.seqID
+        else {
+            return nil
+        }
+        return SegmentMetadata(seqID: seqID, segmentCount: segmentCount, messageSizeBytes: messageSizeBytes)
+    }
+
+    private func shouldIgnoreChunk(
+        clientID: RemoteControlClientID,
+        streamID: RemoteControlStreamID,
+        seqID: UInt64,
+        segmentID: Int
+    ) -> Bool {
+        guard let assembly = assembliesByClientID[clientID], assembly.streamID == streamID else {
+            return false
+        }
+        return seqID < assembly.metadata.seqID
+            || (seqID == assembly.metadata.seqID && segmentID < assembly.nextSegmentID)
+    }
+
+    private mutating func removeAssembly(
+        clientID: RemoteControlClientID,
+        streamID: RemoteControlStreamID
+    ) {
+        if assembliesByClientID[clientID]?.streamID == streamID {
+            assembliesByClientID.removeValue(forKey: clientID)
+        }
+    }
+
+    private mutating func evictAssembliesIfFull() {
+        while assembliesByClientID.count >= Self.segmentAssemblyMaxCount {
+            guard let oldestClientID = assembliesByClientID.min(by: {
+                $0.value.lastChunkSeenOrder < $1.value.lastChunkSeenOrder
+            })?.key else {
+                return
+            }
+            assembliesByClientID.removeValue(forKey: oldestClientID)
+        }
+    }
+}
+
 public enum RemoteControlAuthLoadError: Error, CustomStringConvertible, Equatable, Sendable {
     case requiresChatGPTAuthentication
     case apiKeyUnsupported

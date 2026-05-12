@@ -2811,6 +2811,163 @@ final class ExecServerTests: XCTestCase {
         XCTAssertEqual(buffer.serverEnvelopes(), [otherStreamMessage])
     }
 
+    func testRemoteControlClientMessageObserverReassemblesChunksLikeRust() throws {
+        var observer = RemoteControlClientMessageObserver()
+        let message = ExecServerJSONRPCMessage.notification(ExecServerJSONRPCNotification(method: "initialized"))
+        let raw = try JSONEncoder().encode(message)
+        let split = raw.count / 2
+        let firstChunk = remoteControlClientChunkEnvelope(
+            seqID: 4,
+            segmentID: 0,
+            segmentCount: 2,
+            messageSizeBytes: raw.count,
+            chunk: raw.prefix(split)
+        )
+        let secondChunk = remoteControlClientChunkEnvelope(
+            seqID: 4,
+            segmentID: 1,
+            segmentCount: 2,
+            messageSizeBytes: raw.count,
+            chunk: raw.suffix(raw.count - split)
+        )
+
+        XCTAssertEqual(try observeRemoteControlClientMessage(&observer, firstChunk), .pending)
+        XCTAssertEqual(
+            try observeRemoteControlClientMessage(&observer, secondChunk),
+            .forward(RemoteControlClientEnvelope(
+                event: .clientMessage(message: message),
+                clientID: RemoteControlClientID("client-1"),
+                streamID: RemoteControlStreamID("stream-1"),
+                seqID: 4,
+                cursor: nil
+            ))
+        )
+        XCTAssertEqual(try observeRemoteControlClientMessage(&observer, firstChunk), .dropped)
+    }
+
+    func testRemoteControlClientMessageObserverDropsDuplicateChunksWhilePendingLikeRust() throws {
+        var observer = RemoteControlClientMessageObserver()
+        let firstChunk = remoteControlClientChunkEnvelope(
+            seqID: 4,
+            segmentID: 0,
+            segmentCount: 2,
+            messageSizeBytes: 2,
+            chunk: Data("x".utf8)
+        )
+        let secondChunk = remoteControlClientChunkEnvelope(
+            seqID: 4,
+            segmentID: 1,
+            segmentCount: 2,
+            messageSizeBytes: 2,
+            chunk: Data("y".utf8)
+        )
+
+        XCTAssertEqual(try observeRemoteControlClientMessage(&observer, firstChunk), .pending)
+        XCTAssertEqual(try observeRemoteControlClientMessage(&observer, firstChunk), .dropped)
+        XCTAssertEqual(try observeRemoteControlClientMessage(&observer, secondChunk), .dropped)
+        XCTAssertEqual(try observeRemoteControlClientMessage(&observer, firstChunk), .pending)
+    }
+
+    func testRemoteControlClientMessageObserverAllowsReplayAfterOutOfOrderOrInvalidLaterChunkLikeRust() throws {
+        var outOfOrderObserver = RemoteControlClientMessageObserver()
+        let firstChunk = remoteControlClientChunkEnvelope(
+            seqID: 4,
+            segmentID: 0,
+            segmentCount: 2,
+            messageSizeBytes: 2,
+            chunk: Data("x".utf8)
+        )
+        let secondChunk = remoteControlClientChunkEnvelope(
+            seqID: 4,
+            segmentID: 1,
+            segmentCount: 2,
+            messageSizeBytes: 2,
+            chunk: Data("y".utf8)
+        )
+
+        XCTAssertEqual(try observeRemoteControlClientMessage(&outOfOrderObserver, secondChunk), .dropped)
+        XCTAssertEqual(try observeRemoteControlClientMessage(&outOfOrderObserver, firstChunk), .pending)
+
+        var invalidLaterObserver = RemoteControlClientMessageObserver()
+        let invalidSecondChunk = remoteControlClientChunkEnvelope(
+            seqID: 4,
+            segmentID: 1,
+            segmentCount: 2,
+            messageSizeBytes: 2,
+            chunk: Data()
+        )
+
+        XCTAssertEqual(try observeRemoteControlClientMessage(&invalidLaterObserver, firstChunk), .pending)
+        XCTAssertEqual(try observeRemoteControlClientMessage(&invalidLaterObserver, invalidSecondChunk), .dropped)
+        XCTAssertEqual(try observeRemoteControlClientMessage(&invalidLaterObserver, firstChunk), .pending)
+    }
+
+    func testRemoteControlClientMessageObserverOversizedDuplicateDoesNotDropCurrentAssemblyLikeRust() throws {
+        var observer = RemoteControlClientMessageObserver()
+        let message = ExecServerJSONRPCMessage.notification(ExecServerJSONRPCNotification(method: "initialized"))
+        let raw = try JSONEncoder().encode(message)
+        let split = raw.count / 2
+        let firstChunk = remoteControlClientChunkEnvelope(
+            seqID: 8,
+            segmentID: 0,
+            segmentCount: 2,
+            messageSizeBytes: raw.count,
+            chunk: raw.prefix(split)
+        )
+        let secondChunk = remoteControlClientChunkEnvelope(
+            seqID: 8,
+            segmentID: 1,
+            segmentCount: 2,
+            messageSizeBytes: raw.count,
+            chunk: raw.suffix(raw.count - split)
+        )
+
+        XCTAssertEqual(try observeRemoteControlClientMessage(&observer, firstChunk), .pending)
+        XCTAssertEqual(
+            observer.observe(firstChunk, wireSizeBytes: RemoteControlClientMessageObserver.segmentMaxBytes + 1),
+            .dropped
+        )
+        XCTAssertEqual(
+            try observeRemoteControlClientMessage(&observer, secondChunk),
+            .forward(RemoteControlClientEnvelope(
+                event: .clientMessage(message: message),
+                clientID: RemoteControlClientID("client-1"),
+                streamID: RemoteControlStreamID("stream-1"),
+                seqID: 8,
+                cursor: nil
+            ))
+        )
+    }
+
+    func testRemoteControlClientMessageObserverInvalidationClearsCompletedChunkCursorLikeRust() throws {
+        var observer = RemoteControlClientMessageObserver()
+        let clientID = RemoteControlClientID("client-1")
+        let streamID = RemoteControlStreamID("stream-1")
+
+        XCTAssertEqual(
+            try observeRemoteControlClientMessage(&observer, remoteControlClientChunkEnvelope(
+                seqID: 4,
+                segmentID: 0,
+                segmentCount: 2,
+                messageSizeBytes: 2,
+                chunk: Data("x".utf8)
+            )),
+            .pending
+        )
+        observer.invalidateStream(clientID: clientID, streamID: streamID)
+
+        XCTAssertEqual(
+            try observeRemoteControlClientMessage(&observer, remoteControlClientChunkEnvelope(
+                seqID: 1,
+                segmentID: 0,
+                segmentCount: 2,
+                messageSizeBytes: 2,
+                chunk: Data("x".utf8)
+            )),
+            .pending
+        )
+    }
+
     func testRemoteControlAuthLoaderReloadsMissingAuthOnceLikeRust() async throws {
         let authStore = RemoteControlAuthSequence([
             nil,
@@ -3434,6 +3591,36 @@ final class ExecServerTests: XCTestCase {
     private func decodeLine(_ data: Data) throws -> ExecServerJSONRPCMessage {
         XCTAssertEqual(data.last, 0x0A)
         return try JSONDecoder().decode(ExecServerJSONRPCMessage.self, from: Data(data.dropLast()))
+    }
+
+    private func remoteControlClientChunkEnvelope(
+        clientID: String = "client-1",
+        streamID: String = "stream-1",
+        seqID: UInt64?,
+        segmentID: Int,
+        segmentCount: Int,
+        messageSizeBytes: Int,
+        chunk: Data
+    ) -> RemoteControlClientEnvelope {
+        RemoteControlClientEnvelope(
+            event: .clientMessageChunk(
+                segmentID: segmentID,
+                segmentCount: segmentCount,
+                messageSizeBytes: messageSizeBytes,
+                messageChunkBase64: chunk.base64EncodedString()
+            ),
+            clientID: RemoteControlClientID(clientID),
+            streamID: RemoteControlStreamID(streamID),
+            seqID: seqID,
+            cursor: nil
+        )
+    }
+
+    private func observeRemoteControlClientMessage(
+        _ observer: inout RemoteControlClientMessageObserver,
+        _ envelope: RemoteControlClientEnvelope
+    ) throws -> RemoteControlClientSegmentObservation {
+        observer.observe(envelope, wireSizeBytes: try JSONEncoder().encode(envelope).count)
     }
 
     private actor StdioTransportOutput {
