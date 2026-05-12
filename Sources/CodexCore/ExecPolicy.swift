@@ -1054,6 +1054,10 @@ public final class PolicyParser {
             return
         }
 
+        if try Self.parseStarlarkFailStatement(statement, constants: constants, functions: functions) {
+            return
+        }
+
         if let callee = try Self.parseTopLevelFunctionCallName(statement),
            !["prefix_rule", "network_rule", "host_executable"].contains(callee) {
             throw ExecPolicyError.invalidSyntax("unsupported Starlark top-level call: \(callee)")
@@ -5379,6 +5383,9 @@ public final class PolicyParser {
             constants[assignment.key] = assignment.value
             return true
         }
+        if try parseStarlarkFailStatement(statement, constants: constants, functions: functions) {
+            return true
+        }
         return false
     }
 
@@ -5394,7 +5401,7 @@ public final class PolicyParser {
         }
 
         let name = String(text[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard ["all", "any", "dir", "enumerate", "getattr", "hasattr", "zip", "list", "tuple", "dict", "sorted", "reversed", "min", "max", "sum", "abs", "hash", "chr", "ord", "repr", "type", "str", "int", "float", "bool"].contains(name) else {
+        guard ["all", "any", "dir", "enumerate", "fail", "getattr", "hasattr", "zip", "list", "tuple", "dict", "sorted", "reversed", "min", "max", "sum", "abs", "hash", "chr", "ord", "repr", "type", "str", "int", "float", "bool"].contains(name) else {
             return nil
         }
 
@@ -5427,6 +5434,13 @@ public final class PolicyParser {
             )
         case "enumerate":
             return try parseStarlarkEnumerateCall(
+                rawArguments,
+                expression: text,
+                constants: constants,
+                functions: functions
+            )
+        case "fail":
+            return try parseStarlarkFailCall(
                 rawArguments,
                 expression: text,
                 constants: constants,
@@ -5577,6 +5591,52 @@ public final class PolicyParser {
         default:
             return nil
         }
+    }
+
+    private static func parseStarlarkFailStatement(
+        _ statement: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> Bool {
+        let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasSuffix(")"),
+              let openIndex = matchingTopLevelCallOpen(in: trimmed),
+              trimmed[..<openIndex].trimmingCharacters(in: .whitespacesAndNewlines) == "fail"
+        else {
+            return false
+        }
+
+        let bodyStart = trimmed.index(after: openIndex)
+        let body = String(trimmed[bodyStart..<trimmed.index(before: trimmed.endIndex)])
+        let rawArguments = splitTopLevel(body, separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        _ = try parseStarlarkFailCall(
+            rawArguments,
+            expression: trimmed,
+            constants: constants,
+            functions: functions
+        )
+        return true
+    }
+
+    private static func parseStarlarkFailCall(
+        _ rawArguments: [String],
+        expression: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue {
+        let parts = try rawArguments.map { rawArgument -> String in
+            guard topLevelEqualsIndex(in: rawArgument) == nil else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            let value = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
+            if case let .string(string) = value {
+                return string
+            }
+            return starlarkRepresentation(value)
+        }
+        throw ExecPolicyError.invalidSyntax("fail:\(parts.isEmpty ? "" : " " + parts.joined(separator: " "))")
     }
 
     private static func parseStarlarkAllCall(

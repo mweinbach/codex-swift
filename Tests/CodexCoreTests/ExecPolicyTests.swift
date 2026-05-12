@@ -549,7 +549,6 @@ final class ExecPolicyTests: XCTestCase {
     func testParserRejectsUnsupportedTopLevelStarlarkCallsLikeRust() throws {
         for (source, callee) in [
             (#"load("//foo:bar.star", "x")"#, "load"),
-            (#"fail("nope")"#, "fail"),
             (#"print("hi")"#, "print")
         ] {
             XCTAssertThrowsError(try parsePolicy("""
@@ -3473,6 +3472,34 @@ final class ExecPolicyTests: XCTestCase {
             NetworkRule(host: "api.github.com", protocol: .https, decision: .allow)
         ])
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
+    }
+
+    func testParserEvaluatesRustStarlarkFailBuiltin() throws {
+        let policy = try parsePolicy("""
+        if False:
+            fail("dead branch")
+
+        def require_tool(tool):
+            if tool == "git":
+                return tool
+            fail("unexpected tool", tool, 7, False)
+
+        prefix_rule([require_tool("git"), "status"], "allow")
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .allow
+            )
+        ])
+
+        XCTAssertThrowsError(try parsePolicy("""
+        if True:
+            fail("unexpected tool", "hg", 7, False)
+        """)) { error in
+            XCTAssertEqual(error as? ExecPolicyError, .invalidSyntax("fail: unexpected tool hg 7 False"))
+        }
     }
 
     func testParserEvaluatesRustStarlarkConversionBuiltins() throws {

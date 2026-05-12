@@ -916,6 +916,8 @@ Source baseline inspected for this scaffold:
   - Added Swift execpolicy parser support for explicit boolean/comparison expressions assigned to constants and passed through supported function or builtin arguments, covering value-preserving `and`/`or`, prefix `not`, ordered/equality comparisons, membership operators, and singleton identity comparisons such as `value is None` / `value is not False`.
 - `codex-rs/execpolicy/src/parser.rs` Starlark boolean sequence builtins
   - Added Swift execpolicy parser support for `all(...)` and `any(...)` over supported list and string iterables, including empty-iterable truth values and use with list-comprehension predicates in generated policy rules.
+- `codex-rs/execpolicy/src/parser.rs` Starlark fail builtin
+  - Added Swift execpolicy parser support for Rust Starlark's standard `fail(...)` builtin in top-level branches, helper-function bodies, and expressions, preserving dead-branch no-op behavior and aborting taken paths with the same joined argument payload shape.
 - `codex-rs/execpolicy/src/parser.rs` Starlark conversion builtins
   - Added Swift execpolicy parser support for `str(...)`, `int(...)`, and `bool(...)` conversions, including zero-argument defaults and generated rule values from converted strings, numbers, and booleans. `int(...)` now also preserves Rust Starlark base conversion for positional or `base =` arguments, base-0 `0x`/`0o`/`0b` prefix detection, and underscore-separated digit strings.
 - `codex-rs/execpolicy/src/parser.rs` Starlark dictionary builtin
