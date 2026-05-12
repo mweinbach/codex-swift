@@ -60,6 +60,333 @@ public struct RemoteControlConnectionAuth<Auth: APIAuthProvider>: Sendable {
     }
 }
 
+public struct RemoteControlClientID: Codable, Equatable, Hashable, Sendable {
+    public var rawValue: String
+
+    public init(_ rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    public init(from decoder: Decoder) throws {
+        rawValue = try String(from: decoder)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        try rawValue.encode(to: encoder)
+    }
+}
+
+public struct RemoteControlStreamID: Codable, Equatable, Hashable, Sendable {
+    public var rawValue: String
+
+    public init(_ rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    public static func newRandom() -> Self {
+        Self(UUID().uuidString.lowercased())
+    }
+
+    public init(from decoder: Decoder) throws {
+        rawValue = try String(from: decoder)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        try rawValue.encode(to: encoder)
+    }
+}
+
+public enum RemoteControlPongStatus: String, Codable, Equatable, Sendable {
+    case active
+    case unknown
+}
+
+public enum RemoteControlClientEvent: Codable, Equatable, Sendable {
+    case clientMessage(message: ExecServerJSONRPCMessage)
+    case clientMessageChunk(
+        segmentID: Int,
+        segmentCount: Int,
+        messageSizeBytes: Int,
+        messageChunkBase64: String
+    )
+    case ack(segmentID: Int?)
+    case ping
+    case clientClosed
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case message
+        case segmentID = "segment_id"
+        case segmentCount = "segment_count"
+        case messageSizeBytes = "message_size_bytes"
+        case messageChunkBase64 = "message_chunk_base64"
+    }
+
+    private enum EventType: String, Codable {
+        case clientMessage = "client_message"
+        case clientMessageChunk = "client_message_chunk"
+        case ack
+        case ping
+        case clientClosed = "client_closed"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(EventType.self, forKey: .type) {
+        case .clientMessage:
+            self = .clientMessage(message: try container.decode(ExecServerJSONRPCMessage.self, forKey: .message))
+        case .clientMessageChunk:
+            self = .clientMessageChunk(
+                segmentID: try container.decode(Int.self, forKey: .segmentID),
+                segmentCount: try container.decode(Int.self, forKey: .segmentCount),
+                messageSizeBytes: try container.decode(Int.self, forKey: .messageSizeBytes),
+                messageChunkBase64: try container.decode(String.self, forKey: .messageChunkBase64)
+            )
+        case .ack:
+            self = .ack(segmentID: try container.decodeIfPresent(Int.self, forKey: .segmentID))
+        case .ping:
+            self = .ping
+        case .clientClosed:
+            self = .clientClosed
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .clientMessage(message):
+            try container.encode(EventType.clientMessage, forKey: .type)
+            try container.encode(message, forKey: .message)
+        case let .clientMessageChunk(segmentID, segmentCount, messageSizeBytes, messageChunkBase64):
+            try container.encode(EventType.clientMessageChunk, forKey: .type)
+            try container.encode(segmentID, forKey: .segmentID)
+            try container.encode(segmentCount, forKey: .segmentCount)
+            try container.encode(messageSizeBytes, forKey: .messageSizeBytes)
+            try container.encode(messageChunkBase64, forKey: .messageChunkBase64)
+        case let .ack(segmentID):
+            try container.encode(EventType.ack, forKey: .type)
+            try container.encodeIfPresent(segmentID, forKey: .segmentID)
+        case .ping:
+            try container.encode(EventType.ping, forKey: .type)
+        case .clientClosed:
+            try container.encode(EventType.clientClosed, forKey: .type)
+        }
+    }
+}
+
+public struct RemoteControlClientEnvelope: Codable, Equatable, Sendable {
+    public var event: RemoteControlClientEvent
+    public var clientID: RemoteControlClientID
+    public var streamID: RemoteControlStreamID?
+    public var seqID: UInt64?
+    public var cursor: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case clientID = "client_id"
+        case streamID = "stream_id"
+        case seqID = "seq_id"
+        case cursor
+    }
+
+    public init(
+        event: RemoteControlClientEvent,
+        clientID: RemoteControlClientID,
+        streamID: RemoteControlStreamID?,
+        seqID: UInt64?,
+        cursor: String?
+    ) {
+        self.event = event
+        self.clientID = clientID
+        self.streamID = streamID
+        self.seqID = seqID
+        self.cursor = cursor
+    }
+
+    public init(from decoder: Decoder) throws {
+        event = try RemoteControlClientEvent(from: decoder)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        clientID = try container.decode(RemoteControlClientID.self, forKey: .clientID)
+        streamID = try container.decodeIfPresent(RemoteControlStreamID.self, forKey: .streamID)
+        seqID = try container.decodeIfPresent(UInt64.self, forKey: .seqID)
+        cursor = try container.decodeIfPresent(String.self, forKey: .cursor)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        try event.encode(to: encoder)
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(clientID, forKey: .clientID)
+        try container.encodeIfPresent(streamID, forKey: .streamID)
+        try container.encodeIfPresent(seqID, forKey: .seqID)
+        try container.encodeIfPresent(cursor, forKey: .cursor)
+    }
+}
+
+public enum RemoteControlServerEvent: Codable, Equatable, Sendable {
+    case serverMessage(message: ExecServerJSONRPCMessage)
+    case serverMessageChunk(
+        segmentID: Int,
+        segmentCount: Int,
+        messageSizeBytes: Int,
+        messageChunkBase64: String
+    )
+    case ack
+    case pong(status: RemoteControlPongStatus)
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case message
+        case segmentID = "segment_id"
+        case segmentCount = "segment_count"
+        case messageSizeBytes = "message_size_bytes"
+        case messageChunkBase64 = "message_chunk_base64"
+        case status
+    }
+
+    private enum EventType: String, Codable {
+        case serverMessage = "server_message"
+        case serverMessageChunk = "server_message_chunk"
+        case ack
+        case pong
+    }
+
+    public var segmentID: Int? {
+        switch self {
+        case let .serverMessageChunk(segmentID, _, _, _):
+            return segmentID
+        case .serverMessage, .ack, .pong:
+            return nil
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(EventType.self, forKey: .type) {
+        case .serverMessage:
+            self = .serverMessage(message: try container.decode(ExecServerJSONRPCMessage.self, forKey: .message))
+        case .serverMessageChunk:
+            self = .serverMessageChunk(
+                segmentID: try container.decode(Int.self, forKey: .segmentID),
+                segmentCount: try container.decode(Int.self, forKey: .segmentCount),
+                messageSizeBytes: try container.decode(Int.self, forKey: .messageSizeBytes),
+                messageChunkBase64: try container.decode(String.self, forKey: .messageChunkBase64)
+            )
+        case .ack:
+            self = .ack
+        case .pong:
+            self = .pong(status: try container.decode(RemoteControlPongStatus.self, forKey: .status))
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .serverMessage(message):
+            try container.encode(EventType.serverMessage, forKey: .type)
+            try container.encode(message, forKey: .message)
+        case let .serverMessageChunk(segmentID, segmentCount, messageSizeBytes, messageChunkBase64):
+            try container.encode(EventType.serverMessageChunk, forKey: .type)
+            try container.encode(segmentID, forKey: .segmentID)
+            try container.encode(segmentCount, forKey: .segmentCount)
+            try container.encode(messageSizeBytes, forKey: .messageSizeBytes)
+            try container.encode(messageChunkBase64, forKey: .messageChunkBase64)
+        case .ack:
+            try container.encode(EventType.ack, forKey: .type)
+        case let .pong(status):
+            try container.encode(EventType.pong, forKey: .type)
+            try container.encode(status, forKey: .status)
+        }
+    }
+}
+
+public struct RemoteControlServerEnvelope: Codable, Equatable, Sendable {
+    public var event: RemoteControlServerEvent
+    public var clientID: RemoteControlClientID
+    public var streamID: RemoteControlStreamID
+    public var seqID: UInt64
+
+    private enum CodingKeys: String, CodingKey {
+        case clientID = "client_id"
+        case streamID = "stream_id"
+        case seqID = "seq_id"
+    }
+
+    public init(
+        event: RemoteControlServerEvent,
+        clientID: RemoteControlClientID,
+        streamID: RemoteControlStreamID,
+        seqID: UInt64
+    ) {
+        self.event = event
+        self.clientID = clientID
+        self.streamID = streamID
+        self.seqID = seqID
+    }
+
+    public init(from decoder: Decoder) throws {
+        event = try RemoteControlServerEvent(from: decoder)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        clientID = try container.decode(RemoteControlClientID.self, forKey: .clientID)
+        streamID = try container.decode(RemoteControlStreamID.self, forKey: .streamID)
+        seqID = try container.decode(UInt64.self, forKey: .seqID)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        try event.encode(to: encoder)
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(clientID, forKey: .clientID)
+        try container.encode(streamID, forKey: .streamID)
+        try container.encode(seqID, forKey: .seqID)
+    }
+}
+
+public struct RemoteControlOutboundBuffer: Equatable, Sendable {
+    private struct StreamKey: Hashable, Sendable {
+        var clientID: RemoteControlClientID
+        var streamID: RemoteControlStreamID
+    }
+
+    private var envelopesByStream: [StreamKey: [RemoteControlServerEnvelope]] = [:]
+    public private(set) var usedCount: Int = 0
+
+    public init() {}
+
+    public mutating func insert(_ envelope: RemoteControlServerEnvelope) {
+        let key = StreamKey(clientID: envelope.clientID, streamID: envelope.streamID)
+        envelopesByStream[key, default: []].append(envelope)
+        usedCount += 1
+    }
+
+    public mutating func ack(
+        clientID: RemoteControlClientID,
+        streamID: RemoteControlStreamID,
+        ackedSeqID: UInt64,
+        ackedSegmentID: Int?
+    ) {
+        let key = StreamKey(clientID: clientID, streamID: streamID)
+        guard var envelopes = envelopesByStream[key] else {
+            return
+        }
+        let ackedCursor = (ackedSeqID, ackedSegmentID ?? Int.max)
+        envelopes.removeAll { envelope in
+            let envelopeCursor = (envelope.seqID, envelope.event.segmentID ?? 0)
+            if envelopeCursor <= ackedCursor {
+                usedCount -= 1
+                return true
+            }
+            return false
+        }
+        if envelopes.isEmpty {
+            envelopesByStream.removeValue(forKey: key)
+        } else {
+            envelopesByStream[key] = envelopes
+        }
+    }
+
+    public func serverEnvelopes() -> [RemoteControlServerEnvelope] {
+        envelopesByStream.values.flatMap { $0 }
+    }
+}
+
 public enum RemoteControlAuthLoadError: Error, CustomStringConvertible, Equatable, Sendable {
     case requiresChatGPTAuthentication
     case apiKeyUnsupported

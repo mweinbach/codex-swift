@@ -2675,6 +2675,142 @@ final class ExecServerTests: XCTestCase {
         )
     }
 
+    func testRemoteControlClientEnvelopeWireShapesMatchRust() throws {
+        let envelope = RemoteControlClientEnvelope(
+            event: .clientMessage(message: .request(ExecServerJSONRPCRequest(
+                id: .integer(1),
+                method: "initialize",
+                params: .object(["clientInfo": .object(["name": .string("remote-test-client")])])
+            ))),
+            clientID: RemoteControlClientID("client-1"),
+            streamID: RemoteControlStreamID("stream-1"),
+            seqID: 7,
+            cursor: "cursor-1"
+        )
+
+        let object = try jsonObject(from: envelope)
+        XCTAssertEqual(object["type"] as? String, "client_message")
+        XCTAssertEqual(object["client_id"] as? String, "client-1")
+        XCTAssertEqual(object["stream_id"] as? String, "stream-1")
+        XCTAssertEqual(object["seq_id"] as? Int, 7)
+        XCTAssertEqual(object["cursor"] as? String, "cursor-1")
+        let message = try XCTUnwrap(object["message"] as? [String: Any])
+        XCTAssertEqual(message["id"] as? Int, 1)
+        XCTAssertEqual(message["method"] as? String, "initialize")
+        XCTAssertNil(message["jsonrpc"])
+
+        XCTAssertEqual(try JSONDecoder().decode(RemoteControlClientEnvelope.self, from: JSONEncoder().encode(envelope)), envelope)
+
+        let ack = RemoteControlClientEnvelope(
+            event: .ack(segmentID: nil),
+            clientID: RemoteControlClientID("client-1"),
+            streamID: RemoteControlStreamID("stream-1"),
+            seqID: 8,
+            cursor: nil
+        )
+        let ackObject = try jsonObject(from: ack)
+        XCTAssertEqual(ackObject["type"] as? String, "ack")
+        XCTAssertNil(ackObject["segment_id"])
+        XCTAssertNil(ackObject["cursor"])
+    }
+
+    func testRemoteControlServerEnvelopeWireShapesMatchRust() throws {
+        let envelope = RemoteControlServerEnvelope(
+            event: .serverMessage(message: .notification(ExecServerJSONRPCNotification(
+                method: "initialized",
+                params: .object(["ok": .bool(true)])
+            ))),
+            clientID: RemoteControlClientID("client-1"),
+            streamID: RemoteControlStreamID("stream-1"),
+            seqID: 4
+        )
+
+        let object = try jsonObject(from: envelope)
+        XCTAssertEqual(object["type"] as? String, "server_message")
+        XCTAssertEqual(object["client_id"] as? String, "client-1")
+        XCTAssertEqual(object["stream_id"] as? String, "stream-1")
+        XCTAssertEqual(object["seq_id"] as? Int, 4)
+        let message = try XCTUnwrap(object["message"] as? [String: Any])
+        XCTAssertEqual(message["method"] as? String, "initialized")
+        XCTAssertNil(message["jsonrpc"])
+
+        let pong = RemoteControlServerEnvelope(
+            event: .pong(status: .unknown),
+            clientID: RemoteControlClientID("client-1"),
+            streamID: RemoteControlStreamID("stream-1"),
+            seqID: 5
+        )
+        let pongObject = try jsonObject(from: pong)
+        XCTAssertEqual(pongObject["type"] as? String, "pong")
+        XCTAssertEqual(pongObject["status"] as? String, "unknown")
+        XCTAssertEqual(try JSONDecoder().decode(RemoteControlServerEnvelope.self, from: JSONEncoder().encode(pong)), pong)
+    }
+
+    func testRemoteControlOutboundBufferAcksByRustCursorRules() {
+        let clientID = RemoteControlClientID("client-1")
+        let streamID = RemoteControlStreamID("stream-1")
+        let otherStreamID = RemoteControlStreamID("stream-2")
+        var buffer = RemoteControlOutboundBuffer()
+
+        let chunk0 = RemoteControlServerEnvelope(
+            event: .serverMessageChunk(
+                segmentID: 0,
+                segmentCount: 2,
+                messageSizeBytes: 18,
+                messageChunkBase64: "Zmlyc3Q="
+            ),
+            clientID: clientID,
+            streamID: streamID,
+            seqID: 1
+        )
+        let chunk1 = RemoteControlServerEnvelope(
+            event: .serverMessageChunk(
+                segmentID: 1,
+                segmentCount: 2,
+                messageSizeBytes: 18,
+                messageChunkBase64: "c2Vjb25k"
+            ),
+            clientID: clientID,
+            streamID: streamID,
+            seqID: 1
+        )
+        let nextMessage = RemoteControlServerEnvelope(
+            event: .serverMessage(message: .notification(ExecServerJSONRPCNotification(method: "initialized"))),
+            clientID: clientID,
+            streamID: streamID,
+            seqID: 2
+        )
+        let otherStreamMessage = RemoteControlServerEnvelope(
+            event: .pong(status: .active),
+            clientID: clientID,
+            streamID: otherStreamID,
+            seqID: 1
+        )
+
+        buffer.insert(chunk0)
+        buffer.insert(chunk1)
+        buffer.insert(nextMessage)
+        buffer.insert(otherStreamMessage)
+        XCTAssertEqual(buffer.usedCount, 4)
+
+        buffer.ack(clientID: clientID, streamID: streamID, ackedSeqID: 1, ackedSegmentID: 0)
+        XCTAssertEqual(buffer.usedCount, 3)
+        XCTAssertFalse(buffer.serverEnvelopes().contains(chunk0))
+        XCTAssertTrue(buffer.serverEnvelopes().contains(chunk1))
+        XCTAssertTrue(buffer.serverEnvelopes().contains(nextMessage))
+        XCTAssertTrue(buffer.serverEnvelopes().contains(otherStreamMessage))
+
+        buffer.ack(clientID: clientID, streamID: streamID, ackedSeqID: 1, ackedSegmentID: nil)
+        XCTAssertEqual(buffer.usedCount, 2)
+        XCTAssertFalse(buffer.serverEnvelopes().contains(chunk1))
+        XCTAssertTrue(buffer.serverEnvelopes().contains(nextMessage))
+        XCTAssertTrue(buffer.serverEnvelopes().contains(otherStreamMessage))
+
+        buffer.ack(clientID: clientID, streamID: streamID, ackedSeqID: 2, ackedSegmentID: nil)
+        XCTAssertEqual(buffer.usedCount, 1)
+        XCTAssertEqual(buffer.serverEnvelopes(), [otherStreamMessage])
+    }
+
     func testRemoteControlAuthLoaderReloadsMissingAuthOnceLikeRust() async throws {
         let authStore = RemoteControlAuthSequence([
             nil,
@@ -3493,6 +3629,11 @@ final class ExecServerTests: XCTestCase {
     private func decodeJSONValue<T: Decodable>(_ value: JSONValue, as type: T.Type) throws -> T {
         let data = try JSONEncoder().encode(value)
         return try JSONDecoder().decode(type, from: data)
+    }
+
+    private func jsonObject<T: Encodable>(from value: T) throws -> [String: Any] {
+        let data = try JSONEncoder().encode(value)
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
 
     private actor RemoteControlAuthSequence {
