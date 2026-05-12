@@ -75,7 +75,7 @@ public struct SkillInstructions: Equatable, Codable, Sendable {
     }
 }
 
-private func contextualFragmentMatches(_ text: String, startMarker: String, endMarker: String) -> Bool {
+func contextualFragmentMatches(_ text: String, startMarker: String, endMarker: String) -> Bool {
     guard !startMarker.isEmpty, !endMarker.isEmpty else {
         return false
     }

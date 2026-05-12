@@ -141,7 +141,7 @@ public enum Compact {
         for item in content {
             switch item {
             case let .inputText(text), let .outputText(text):
-                if isSessionPrefix(text) || UserShellCommand.isUserShellCommandText(text) {
+                if ContextualUserFragments.isStandardText(text) {
                     return false
                 }
             case .inputImage:
@@ -150,12 +150,6 @@ public enum Compact {
         }
 
         return true
-    }
-
-    private static func isSessionPrefix(_ text: String) -> Bool {
-        text.trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-            .hasPrefix("<environment_context>")
     }
 
     private static func loadResource(_ name: String, subdirectory: String) -> String {

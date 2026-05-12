@@ -45,6 +45,12 @@ final class CompactTests: XCTestCase {
             .message(role: "user", content: [
                 .inputText(text: "<user_shell_command>echo 42</user_shell_command>")
             ]),
+            .message(role: "user", content: [
+                .inputText(text: "<turn_aborted>interrupted</turn_aborted>")
+            ]),
+            .message(role: "user", content: [
+                .inputText(text: "<SUBAGENT_NOTIFICATION>{}</subagent_notification>")
+            ]),
             .message(role: "user", content: [.inputText(text: "real user message")])
         ]
 

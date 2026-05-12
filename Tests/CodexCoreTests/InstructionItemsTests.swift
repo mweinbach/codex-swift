@@ -78,6 +78,22 @@ final class InstructionItemsTests: XCTestCase {
         ]))
     }
 
+    func testStandardContextualUserFragmentsMatchRustMarkers() {
+        XCTAssertTrue(ContextualUserFragments.isStandardText(
+            "  <ENVIRONMENT_CONTEXT>ctx</environment_context>\n"
+        ))
+        XCTAssertTrue(ContextualUserFragments.isStandardText(
+            "  <TURN_ABORTED>interrupted</turn_aborted>\n"
+        ))
+        XCTAssertTrue(ContextualUserFragments.isStandardText(
+            "  <SUBAGENT_NOTIFICATION>{}</subagent_notification>\n"
+        ))
+
+        XCTAssertFalse(ContextualUserFragments.isStandardText("<environment_context>ctx"))
+        XCTAssertFalse(ContextualUserFragments.isStandardText("<turn_aborted>interrupted"))
+        XCTAssertFalse(ContextualUserFragments.isStandardText("<subagent_notification>{}"))
+    }
+
     func testDeveloperInstructions() {
         let instructions = DeveloperInstructions("developer text")
 

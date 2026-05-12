@@ -131,6 +131,10 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
         )
     }
 
+    public static func matchesText(_ text: String) -> Bool {
+        contextualFragmentMatches(text, startMarker: openTag, endMarker: closeTag)
+    }
+
     public func equalsExceptShell(_ other: EnvironmentContext) -> Bool {
         environmentsEqualExceptShell(environments, other.environments)
             && currentDate == other.currentDate

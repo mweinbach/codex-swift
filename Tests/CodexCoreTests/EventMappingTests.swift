@@ -105,6 +105,27 @@ final class EventMappingTests: XCTestCase {
         }
     }
 
+    func testSkipsMixedContextualUserFragmentsLikeRust() {
+        let items: [ResponseItem] = [
+            .message(role: "user", content: [
+                .inputText(text: "<environment_context>ctx</environment_context>"),
+                .inputText(text: "# AGENTS.md instructions for dir\n\n<INSTRUCTIONS>\nbody\n</INSTRUCTIONS>")
+            ]),
+            .message(role: "user", content: [
+                .inputText(text: "<turn_aborted>interrupted</turn_aborted>"),
+                .inputText(text: "plain text")
+            ]),
+            .message(role: "user", content: [
+                .inputText(text: "<SUBAGENT_NOTIFICATION>{}</subagent_notification>"),
+                .inputText(text: "plain text")
+            ])
+        ]
+
+        for item in items {
+            XCTAssertNil(EventMapping.parseTurnItem(item), "\(item)")
+        }
+    }
+
     func testParsesAgentMessageAndPreservesID() {
         let item = ResponseItem.message(
             id: "msg-1",

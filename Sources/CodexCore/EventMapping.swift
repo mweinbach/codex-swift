@@ -66,9 +66,7 @@ public enum EventMapping {
     }
 
     private static func parseUserMessage(_ message: [ContentItem]) -> UserMessageItem? {
-        if UserInstructions.isUserInstructions(message: message)
-            || SkillInstructions.isSkillInstructions(message: message)
-        {
+        if message.contains(where: isContextualUserFragment) {
             return nil
         }
 
@@ -76,22 +74,25 @@ public enum EventMapping {
         for contentItem in message {
             switch contentItem {
             case let .inputText(text):
-                if isSessionPrefix(text) || UserShellCommand.isUserShellCommandText(text) {
-                    return nil
-                }
                 content.append(.text(text))
 
             case let .inputImage(imageURL, _):
                 content.append(.image(imageURL: imageURL))
 
-            case let .outputText(text):
-                if isSessionPrefix(text) {
-                    return nil
-                }
+            case .outputText:
+                continue
             }
         }
 
         return UserMessageItem(content: content)
+    }
+
+    private static func isContextualUserFragment(_ item: ContentItem) -> Bool {
+        guard case let .inputText(text) = item else {
+            return false
+        }
+        return HookPromptFragment.parseXML(text) != nil
+            || ContextualUserFragments.isStandardText(text)
     }
 
     private static func parseAgentMessage(
@@ -106,12 +107,6 @@ public enum EventMapping {
             return .text(text)
         }
         return AgentMessageItem(id: id ?? UUID().uuidString.lowercased(), content: content, phase: phase)
-    }
-
-    private static func isSessionPrefix(_ text: String) -> Bool {
-        text.trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-            .hasPrefix("<environment_context>")
     }
 
 }

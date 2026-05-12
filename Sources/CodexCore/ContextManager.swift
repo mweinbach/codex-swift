@@ -437,13 +437,7 @@ public struct ContextManager: Equatable, Sendable {
         if HookPromptFragment.parseXML(text) != nil {
             return true
         }
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return UserInstructions.matchesText(text)
-            || SkillInstructions.matchesText(text)
-            || UserShellCommand.isUserShellCommandText(text)
-            || trimmed.lowercased().hasPrefix("<environment_context>")
-            || trimmed.lowercased().hasPrefix("<turn_aborted>")
-            || trimmed.lowercased().hasPrefix("<subagent_notification>")
+        return ContextualUserFragments.isStandardText(text)
     }
 
     private static func isContextualDeveloperMessageContent(_ content: [ContentItem]) -> Bool {

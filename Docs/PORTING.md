@@ -280,6 +280,7 @@ Source baseline inspected for this scaffold:
   - environment context sandbox/network derivation, shell-insensitive comparison, turn-context diffing, XML serialization, and user response-item projection
 - `codex-rs/core/src/event_mapping.rs`
   - response-item to turn-item projection for user/assistant/reasoning/web-search/image-generation items, user instruction/session/shell-command filtering, assistant id preservation, reasoning raw-content mapping, and non-turn item suppression
+  - contextual user filtering now uses Rust's shared fragment registry semantics for AGENTS, environment context, skill instructions, user shell commands, turn-aborted markers, and subagent notifications, including mixed-fragment messages
 - `codex-rs/protocol/src/memory_citation.rs` and `AgentMessageItem` fields from `codex-rs/protocol/src/items.rs`
   - memory-citation wire models, assistant-message optional phase/memory-citation serialization, and response-item phase preservation during turn-item projection
 - `codex-rs/memories/mcp/src/local.rs`
@@ -311,6 +312,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/core/src/user_instructions.rs`
   - AGENTS.md/user instruction formatting and detection, skill instruction envelopes, and developer-role instruction response items
   - tightened injected AGENTS and skill fragment detection to require Rust's trimmed, case-insensitive start/end markers before filtering contextual user messages
+  - extracted the same marker matching for environment, turn-aborted, and subagent-notification contextual user fragments so context-manager rollback, hook-prompt parsing, event mapping, and compaction filtering no longer use prefix-only checks
 - `codex-rs/core/src/project_doc.rs`
   - AGENTS.md/AGENTS.override.md discovery from configured project root markers to cwd, empty-marker current-directory behavior, regular-file-only candidate filtering, project-doc byte limits, fallback filenames, configured instruction merging, and Rust's separation between project-doc user instructions and available-skill developer instructions
 - `codex-rs/core-skills/src/{loader,manager,config_rules}.rs` and `codex-rs/core/src/session/mod.rs`
