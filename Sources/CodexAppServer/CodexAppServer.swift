@@ -160,6 +160,12 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
             self.installationID = installationID
             self.environmentID = environmentID
         }
+
+        public init(_ snapshot: CodexCore.RemoteControlStatusSnapshot) {
+            self.status = Status(rawValue: snapshot.status.rawValue) ?? .errored
+            self.installationID = snapshot.installationID
+            self.environmentID = snapshot.environmentID
+        }
     }
 
     public let codexHome: URL

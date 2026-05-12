@@ -60,6 +60,100 @@ public struct RemoteControlConnectionAuth<Auth: APIAuthProvider>: Sendable {
     }
 }
 
+public enum RemoteControlConnectionStatus: String, Equatable, Sendable {
+    case disabled
+    case connecting
+    case connected
+    case errored
+}
+
+public struct RemoteControlStatusSnapshot: Equatable, Sendable {
+    public var status: RemoteControlConnectionStatus
+    public var installationID: String
+    public var environmentID: String?
+
+    public init(
+        status: RemoteControlConnectionStatus,
+        installationID: String,
+        environmentID: String?
+    ) {
+        self.status = status
+        self.installationID = installationID
+        self.environmentID = environmentID
+    }
+}
+
+public struct RemoteControlStatusPublisherCore: Equatable, Sendable {
+    public private(set) var snapshot: RemoteControlStatusSnapshot
+
+    public init(snapshot: RemoteControlStatusSnapshot) {
+        self.snapshot = snapshot
+    }
+
+    @discardableResult
+    public mutating func publishStatus(_ status: RemoteControlConnectionStatus) -> RemoteControlStatusSnapshot? {
+        let nextSnapshot = RemoteControlStatusSnapshot(
+            status: status,
+            installationID: snapshot.installationID,
+            environmentID: status == .disabled ? nil : snapshot.environmentID
+        )
+        guard nextSnapshot != snapshot else {
+            return nil
+        }
+        snapshot = nextSnapshot
+        return nextSnapshot
+    }
+
+    @discardableResult
+    public mutating func publishEnvironmentID(_ environmentID: String?) -> RemoteControlStatusSnapshot? {
+        guard snapshot.status != .disabled else {
+            return nil
+        }
+        let nextSnapshot = RemoteControlStatusSnapshot(
+            status: snapshot.status,
+            installationID: snapshot.installationID,
+            environmentID: environmentID
+        )
+        guard nextSnapshot != snapshot else {
+            return nil
+        }
+        snapshot = nextSnapshot
+        return nextSnapshot
+    }
+}
+
+public struct RemoteControlStartState: Equatable, Sendable {
+    public var requestedEnabled: Bool
+    public var stateDatabaseAvailable: Bool
+    public var target: RemoteControlTarget?
+    public var statusPublisher: RemoteControlStatusPublisherCore
+
+    public var enabled: Bool {
+        requestedEnabled && stateDatabaseAvailable
+    }
+
+    public var statusSnapshot: RemoteControlStatusSnapshot {
+        statusPublisher.snapshot
+    }
+
+    public init(
+        remoteControlURL: String,
+        installationID: String,
+        requestedEnabled: Bool,
+        stateDatabaseAvailable: Bool
+    ) throws {
+        let enabled = requestedEnabled && stateDatabaseAvailable
+        self.requestedEnabled = requestedEnabled
+        self.stateDatabaseAvailable = stateDatabaseAvailable
+        target = enabled ? try RemoteControlURLNormalizer.normalize(remoteControlURL) : nil
+        statusPublisher = RemoteControlStatusPublisherCore(snapshot: RemoteControlStatusSnapshot(
+            status: enabled ? .connecting : .disabled,
+            installationID: installationID,
+            environmentID: nil
+        ))
+    }
+}
+
 public struct RemoteControlClientID: Codable, Equatable, Hashable, Sendable {
     public var rawValue: String
 

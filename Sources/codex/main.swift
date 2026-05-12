@@ -436,11 +436,11 @@ private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) as
             stateStoreAvailable: stateStore != nil,
             remoteControlBaseURL: settings.chatgptBaseURL
         )
-        let remoteControlEnabled = settings.features.isEnabled(.remoteControl) && stateStore != nil
-        let remoteControlStatusSnapshot = CodexAppServerConfiguration.RemoteControlStatusSnapshot(
-            status: remoteControlEnabled ? .connecting : .disabled,
+        let remoteControlStartState = try RemoteControlStartState(
+            remoteControlURL: settings.chatgptBaseURL,
             installationID: try InstallationIDResolver.resolve(codexHome: codexHome),
-            environmentID: nil
+            requestedEnabled: settings.features.isEnabled(.remoteControl),
+            stateDatabaseAvailable: stateStore != nil
         )
         let configuration = CodexAppServerConfiguration(
             codexHome: codexHome,
@@ -450,7 +450,9 @@ private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) as
             authCredentialsStoreMode: settings.cliAuthCredentialsStoreMode,
             activeProfile: settings.activeProfile,
             stateStore: stateStore,
-            remoteControlStatusSnapshot: remoteControlStatusSnapshot
+            remoteControlStatusSnapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot(
+                remoteControlStartState.statusSnapshot
+            )
         )
         switch request.listenTransport {
         case .stdio:
