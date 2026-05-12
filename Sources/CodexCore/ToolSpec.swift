@@ -829,7 +829,8 @@ public enum ToolSpecFactory {
            (deferredMcpToolsForSearch?.isEmpty == false || !deferredDynamicTools.isEmpty) {
             let index = ToolSearchIndex.deferredToolIndex(
                 mcpTools: deferredMcpToolsForSearch ?? [:],
-                dynamicTools: deferredDynamicTools
+                dynamicTools: deferredDynamicTools,
+                namespaceTools: config.namespaceTools
             )
             specs.append(ConfiguredToolSpec(spec: index.toolSpec(), supportsParallelToolCalls: true))
         }

@@ -61,17 +61,20 @@ public struct ToolSearchIndex: Equatable, Sendable {
 
     public static func deferredToolIndex(
         mcpTools: [String: McpTool],
-        dynamicTools: [DynamicToolSpec]
+        dynamicTools: [DynamicToolSpec],
+        namespaceTools: Bool = true
     ) -> ToolSearchIndex {
-        var sourceInfos = mcpSourceInfos(from: mcpTools)
-        if !dynamicTools.isEmpty {
+        let filteredMcpTools = namespaceTools ? mcpTools : [:]
+        var sourceInfos = mcpSourceInfos(from: filteredMcpTools)
+        let filteredDynamicTools = dynamicTools.filter { namespaceTools || $0.namespace == nil }
+        if !filteredDynamicTools.isEmpty {
             sourceInfos.append(ToolSearchSourceInfo(
                 name: "Dynamic tools",
                 description: "Tools provided by the current Codex thread."
             ))
         }
         return ToolSearchIndex(
-            entries: mcpEntries(from: mcpTools) + dynamicEntries(from: dynamicTools),
+            entries: mcpEntries(from: filteredMcpTools) + dynamicEntries(from: filteredDynamicTools),
             sourceInfos: sourceInfos
         )
     }
@@ -109,7 +112,18 @@ public struct ToolSearchIndex: Equatable, Sendable {
     }
 
     public static func dynamicEntries(from tools: [DynamicToolSpec]) -> [ToolSearchEntry] {
-        tools.map { tool in
+        tools.sorted {
+            switch ($0.namespace, $1.namespace) {
+            case let (lhs?, rhs?) where lhs != rhs:
+                return lhs < rhs
+            case (nil, _?):
+                return true
+            case (_?, nil):
+                return false
+            default:
+                return $0.name < $1.name
+            }
+        }.map { tool in
             let output: ToolSpec
             let function = ToolSpecFactory.createDynamicResponsesAPITool(name: tool.name, tool: tool)
             if let namespace = tool.namespace {
@@ -124,7 +138,7 @@ public struct ToolSearchIndex: Equatable, Sendable {
             return ToolSearchEntry(
                 searchText: buildDynamicSearchText(tool: tool),
                 output: output,
-                limitBucket: tool.namespace ?? "Dynamic tools"
+                limitBucket: nil
             )
         }
     }
@@ -137,14 +151,23 @@ public struct ToolSearchIndex: Equatable, Sendable {
     }
 
     private static func buildDynamicSearchText(tool: DynamicToolSpec) -> String {
-        [
-            tool.namespace,
+        var parts = [
             tool.name,
+            tool.name.replacingOccurrences(of: "_", with: " "),
             tool.description
         ]
-        .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
-        .filter { !$0.isEmpty }
-        .joined(separator: " ")
+        if let namespace = tool.namespace {
+            parts.append(namespace)
+        }
+        if case let .object(schema) = tool.inputSchema,
+           case let .object(properties)? = schema["properties"] {
+            parts.append(contentsOf: properties.keys.sorted())
+        }
+
+        return parts
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
     }
 
     public func toolSpec(defaultLimit: Int = ToolSearchIndex.defaultLimit) -> ToolSpec {

@@ -824,6 +824,78 @@ final class ToolSpecTests: XCTestCase {
         XCTAssertEqual(children.compactMap(deferLoading), [true, true])
     }
 
+    func testToolSearchIndexFiltersNamespaceOutputsWhenNamespaceToolsDisabledLikeRust() throws {
+        let index = ToolSearchIndex.deferredToolIndex(
+            mcpTools: [
+                "mcp__calendar__list_events": makeMcpTool(name: "list_events", description: "List calendar events")
+            ],
+            dynamicTools: [
+                DynamicToolSpec(
+                    namespace: "codex_app",
+                    name: "automation_update",
+                    description: "Create or update automations.",
+                    inputSchema: .object(["type": .string("object"), "properties": .object([:])]),
+                    deferLoading: true
+                ),
+                DynamicToolSpec(
+                    namespace: nil,
+                    name: "plain_dynamic",
+                    description: "Plain dynamic tool.",
+                    inputSchema: .object(["type": .string("object"), "properties": .object([:])]),
+                    deferLoading: true
+                )
+            ],
+            namespaceTools: false
+        )
+
+        guard case let .toolSearch(_, description, _) = index.toolSpec() else {
+            return XCTFail("expected tool_search")
+        }
+        XCTAssertFalse(description.contains("- calendar"))
+        XCTAssertTrue(description.contains("- Dynamic tools: Tools provided by the current Codex thread."))
+
+        let tools = try index.search(arguments: .object([
+            "query": .string("dynamic automation calendar"),
+            "limit": .integer(8)
+        ]))
+
+        XCTAssertEqual(tools.count, 1)
+        guard case let .object(tool) = tools[0] else {
+            return XCTFail("expected function result")
+        }
+        XCTAssertEqual(tool["name"], .string("plain_dynamic"))
+    }
+
+    func testDynamicToolSearchTextMatchesRustNameDescriptionNamespaceAndProperties() throws {
+        let entries = ToolSearchIndex.dynamicEntries(from: [
+            DynamicToolSpec(
+                namespace: "codex_app",
+                name: "later_tool",
+                description: "Later tool.",
+                inputSchema: .object(["type": .string("object"), "properties": .object([:])]),
+                deferLoading: true
+            ),
+            DynamicToolSpec(
+                namespace: "codex_app",
+                name: "automation_update",
+                description: "Create recurring automations.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "target_id": .object(["type": .string("string")])
+                    ])
+                ]),
+                deferLoading: true
+            )
+        ])
+
+        XCTAssertEqual(entries.map(\.output.name), ["codex_app", "codex_app"])
+        XCTAssertTrue(entries[0].searchText.contains("automation update"))
+        XCTAssertTrue(entries[0].searchText.contains("codex_app"))
+        XCTAssertTrue(entries[0].searchText.contains("target_id"))
+        XCTAssertNil(entries[0].limitBucket)
+    }
+
     func testToolSearchIndexReturnsCoalescedDeferredMCPNamespace() throws {
         let index = ToolSearchIndex.mcpIndex(from: [
             "mcp__calendar__create_event": makeMcpTool(name: "create_event", description: "Create events"),
