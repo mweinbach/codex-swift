@@ -526,11 +526,12 @@ final class DebugCommandRuntimeTests: XCTestCase {
             encoding: .utf8
         )
 
+        let dependencies = testDependencies(codexHome: temp.url)
         // Keep this async test from completing entirely synchronously under Swift 6.2 XCTest.
         await Task.yield()
         let result = try await DebugCommandRuntime.run(
             CodexCLI.DebugCommandRequest(action: .clearMemories),
-            dependencies: testDependencies(codexHome: temp.url)
+            dependencies: dependencies
         )
 
         XCTAssertEqual(result.exitCode, 0)
@@ -568,11 +569,12 @@ final class DebugCommandRuntimeTests: XCTestCase {
             encoding: .utf8
         )
 
+        let dependencies = testDependencies(codexHome: temp.url)
         // Keep this async test from completing entirely synchronously under Swift 6.2 XCTest.
         await Task.yield()
         let result = try await DebugCommandRuntime.run(
             CodexCLI.DebugCommandRequest(action: .clearMemories),
-            dependencies: testDependencies(codexHome: temp.url)
+            dependencies: dependencies
         )
 
         XCTAssertEqual(result.exitCode, 0)
@@ -602,11 +604,12 @@ final class DebugCommandRuntimeTests: XCTestCase {
         )
         config.sqliteHome = sqliteHome.path
 
+        let dependencies = testDependencies(codexHome: temp.url, config: config)
         // Keep this async test from completing entirely synchronously under Swift 6.2 XCTest.
         await Task.yield()
         let result = try await DebugCommandRuntime.run(
             CodexCLI.DebugCommandRequest(action: .clearMemories),
-            dependencies: testDependencies(codexHome: temp.url, config: config)
+            dependencies: dependencies
         )
 
         XCTAssertEqual(result.exitCode, 0)
