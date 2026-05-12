@@ -2675,6 +2675,201 @@ final class ExecServerTests: XCTestCase {
         )
     }
 
+    func testRemoteControlAuthLoaderReloadsMissingAuthOnceLikeRust() async throws {
+        let authStore = RemoteControlAuthSequence([
+            nil,
+            AuthDotJSON(
+                authMode: .chatGPT,
+                openAIAPIKey: nil,
+                tokens: AuthTokenData(
+                    idToken: "header.payload.signature",
+                    accessToken: "fresh-token",
+                    refreshToken: "refresh-token",
+                    accountID: "account_id"
+                ),
+                lastRefresh: nil
+            ),
+        ])
+        let loader = RemoteControlAuthLoader(
+            loadAuth: { await authStore.load() },
+            reloadAuth: { await authStore.reload() }
+        )
+
+        let auth = try await loader.load()
+
+        XCTAssertEqual(auth.authProvider.bearerToken, "fresh-token")
+        XCTAssertEqual(auth.authProvider.accountID, "account_id")
+        XCTAssertEqual(auth.accountID, "account_id")
+        let reloadCount = await authStore.reloadCount()
+        XCTAssertEqual(reloadCount, 1)
+    }
+
+    func testRemoteControlAuthLoaderRejectsAPIKeyAuthLikeRust() async {
+        let authStore = RemoteControlAuthSequence([
+            AuthDotJSON(authMode: .apiKey, openAIAPIKey: "sk-api", tokens: nil, lastRefresh: nil),
+        ])
+        let loader = RemoteControlAuthLoader(
+            loadAuth: { await authStore.load() },
+            reloadAuth: { await authStore.reload() }
+        )
+
+        do {
+            _ = try await loader.load()
+            XCTFail("Expected remote-control auth loading to reject API key auth")
+        } catch {
+            XCTAssertEqual(
+                String(describing: error),
+                "remote control requires ChatGPT authentication; API key auth is not supported"
+            )
+        }
+    }
+
+    func testRemoteControlAuthLoaderWaitsForAccountIDAfterReloadLikeRust() async {
+        let authWithoutAccount = AuthDotJSON(
+            authMode: .chatGPT,
+            openAIAPIKey: nil,
+            tokens: AuthTokenData(
+                idToken: "header.payload.signature",
+                accessToken: "token",
+                refreshToken: "refresh-token",
+                accountID: nil
+            ),
+            lastRefresh: nil
+        )
+        let authStore = RemoteControlAuthSequence([authWithoutAccount, authWithoutAccount])
+        let loader = RemoteControlAuthLoader(
+            loadAuth: { await authStore.load() },
+            reloadAuth: { await authStore.reload() }
+        )
+
+        do {
+            _ = try await loader.load()
+            XCTFail("Expected remote-control auth loading to wait for a ChatGPT account id")
+        } catch {
+            XCTAssertEqual(
+                String(describing: error),
+                "remote control enrollment is waiting for a ChatGPT account id"
+            )
+        }
+        let reloadCount = await authStore.reloadCount()
+        XCTAssertEqual(reloadCount, 1)
+    }
+
+    func testRemoteControlEnrollmentPersistenceLoadsAndUpdatesRustCacheShape() async throws {
+        let target = try RemoteControlURLNormalizer.normalize("https://chatgpt.com/backend-api")
+        let store = RemoteControlEnrollmentMemoryStore()
+        let enrollment = RemoteControlEnrollment(
+            accountID: "account_id",
+            environmentID: "env_123",
+            serverID: "srv_123",
+            serverName: "test-server"
+        )
+
+        try await RemoteControlEnrollmentPersistence.update(
+            store: store,
+            target: target,
+            accountID: "account_id",
+            appServerClientName: "desktop",
+            enrollment: enrollment
+        )
+        let loaded = try await RemoteControlEnrollmentPersistence.load(
+            store: store,
+            target: target,
+            accountID: "account_id",
+            appServerClientName: "desktop"
+        )
+
+        XCTAssertEqual(loaded, enrollment)
+        let records = await store.records()
+        XCTAssertEqual(records, [
+            RemoteControlEnrollmentRecord(
+                websocketURL: target.websocketURL,
+                accountID: "account_id",
+                appServerClientName: "desktop",
+                serverID: "srv_123",
+                environmentID: "env_123",
+                serverName: "test-server"
+            ),
+        ])
+
+        try await RemoteControlEnrollmentPersistence.update(
+            store: store,
+            target: target,
+            accountID: "account_id",
+            appServerClientName: "desktop",
+            enrollment: nil
+        )
+        let cleared = try await RemoteControlEnrollmentPersistence.load(
+            store: store,
+            target: target,
+            accountID: "account_id",
+            appServerClientName: "desktop"
+        )
+
+        XCTAssertNil(cleared)
+    }
+
+    func testRemoteControlEnrollmentPersistenceErrorsMatchRust() async throws {
+        let target = try RemoteControlURLNormalizer.normalize("https://chatgpt.com/backend-api")
+
+        do {
+            _ = try await RemoteControlEnrollmentPersistence.load(
+                store: nil,
+                target: target,
+                accountID: "account_id",
+                appServerClientName: nil
+            )
+            XCTFail("Expected disabled state DB to reject enrollment cache loads")
+        } catch {
+            XCTAssertEqual(
+                String(describing: error),
+                "remote control enrollment cache unavailable because sqlite state db is disabled: websocket_url=wss://chatgpt.com/backend-api/wham/remote/control/server, account_id=account_id, app_server_client_name=None"
+            )
+        }
+
+        do {
+            try await RemoteControlEnrollmentPersistence.update(
+                store: nil,
+                target: target,
+                accountID: "account_id",
+                appServerClientName: "desktop",
+                enrollment: RemoteControlEnrollment(
+                    accountID: "account_id",
+                    environmentID: "env_123",
+                    serverID: "srv_123",
+                    serverName: "test-server"
+                )
+            )
+            XCTFail("Expected disabled state DB to reject enrollment persistence")
+        } catch {
+            XCTAssertEqual(
+                String(describing: error),
+                "remote control enrollment persistence unavailable because sqlite state db is disabled: websocket_url=wss://chatgpt.com/backend-api/wham/remote/control/server, account_id=account_id, app_server_client_name=Some(\"desktop\"), has_enrollment=true"
+            )
+        }
+
+        do {
+            try await RemoteControlEnrollmentPersistence.update(
+                store: RemoteControlEnrollmentMemoryStore(),
+                target: target,
+                accountID: "account_id",
+                appServerClientName: nil,
+                enrollment: RemoteControlEnrollment(
+                    accountID: "other_account",
+                    environmentID: "env_123",
+                    serverID: "srv_123",
+                    serverName: "test-server"
+                )
+            )
+            XCTFail("Expected enrollment account mismatch to be rejected")
+        } catch {
+            XCTAssertEqual(
+                String(describing: error),
+                "enrollment account_id does not match expected account_id `account_id`"
+            )
+        }
+    }
+
     func testRemoteExecutorConfigurationNormalizesRustValues() throws {
         let config = try ExecServerRemoteExecutorConfiguration.fromEnvironment(
             baseURL: " https://registry.example.test/// ",
@@ -3298,5 +3493,74 @@ final class ExecServerTests: XCTestCase {
     private func decodeJSONValue<T: Decodable>(_ value: JSONValue, as type: T.Type) throws -> T {
         let data = try JSONEncoder().encode(value)
         return try JSONDecoder().decode(type, from: data)
+    }
+
+    private actor RemoteControlAuthSequence {
+        private var values: [AuthDotJSON?]
+        private var loads = 0
+        private var reloads = 0
+
+        init(_ values: [AuthDotJSON?]) {
+            self.values = values
+        }
+
+        func load() -> AuthDotJSON? {
+            defer { loads += 1 }
+            guard loads < values.count else {
+                return values.last ?? nil
+            }
+            return values[loads]
+        }
+
+        func reload() {
+            reloads += 1
+        }
+
+        func reloadCount() -> Int {
+            reloads
+        }
+    }
+
+    private actor RemoteControlEnrollmentMemoryStore: RemoteControlEnrollmentStore {
+        private var storage: [RemoteControlEnrollmentRecord] = []
+
+        func getRemoteControlEnrollment(
+            websocketURL: String,
+            accountID: String,
+            appServerClientName: String?
+        ) async throws -> RemoteControlEnrollmentRecord? {
+            storage.first {
+                $0.websocketURL == websocketURL
+                    && $0.accountID == accountID
+                    && $0.appServerClientName == appServerClientName
+            }
+        }
+
+        func upsertRemoteControlEnrollment(_ enrollment: RemoteControlEnrollmentRecord) async throws {
+            storage.removeAll {
+                $0.websocketURL == enrollment.websocketURL
+                    && $0.accountID == enrollment.accountID
+                    && $0.appServerClientName == enrollment.appServerClientName
+            }
+            storage.append(enrollment)
+        }
+
+        func deleteRemoteControlEnrollment(
+            websocketURL: String,
+            accountID: String,
+            appServerClientName: String?
+        ) async throws -> Int {
+            let oldCount = storage.count
+            storage.removeAll {
+                $0.websocketURL == websocketURL
+                    && $0.accountID == accountID
+                    && $0.appServerClientName == appServerClientName
+            }
+            return oldCount - storage.count
+        }
+
+        func records() -> [RemoteControlEnrollmentRecord] {
+            storage
+        }
     }
 }

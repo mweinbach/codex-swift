@@ -60,6 +60,262 @@ public struct RemoteControlConnectionAuth<Auth: APIAuthProvider>: Sendable {
     }
 }
 
+public enum RemoteControlAuthLoadError: Error, CustomStringConvertible, Equatable, Sendable {
+    case requiresChatGPTAuthentication
+    case apiKeyUnsupported
+    case waitingForChatGPTAccountID
+    case loadFailed(String)
+
+    public var description: String {
+        switch self {
+        case .requiresChatGPTAuthentication:
+            return "remote control requires ChatGPT authentication"
+        case .apiKeyUnsupported:
+            return "remote control requires ChatGPT authentication; API key auth is not supported"
+        case .waitingForChatGPTAccountID:
+            return "remote control enrollment is waiting for a ChatGPT account id"
+        case let .loadFailed(message):
+            return message
+        }
+    }
+}
+
+public struct RemoteControlAuthLoader: Sendable {
+    public typealias LoadAuth = @Sendable () async throws -> AuthDotJSON?
+    public typealias ReloadAuth = @Sendable () async throws -> Void
+
+    private let loadAuth: LoadAuth
+    private let reloadAuth: ReloadAuth
+
+    public init(
+        loadAuth: @escaping LoadAuth,
+        reloadAuth: @escaping ReloadAuth
+    ) {
+        self.loadAuth = loadAuth
+        self.reloadAuth = reloadAuth
+    }
+
+    public func load() async throws -> RemoteControlConnectionAuth<StaticAPIAuthProvider> {
+        var reloaded = false
+        let auth: AuthDotJSON
+        while true {
+            let loadedAuth: AuthDotJSON?
+            do {
+                loadedAuth = try await loadAuth()
+            } catch {
+                throw RemoteControlAuthLoadError.loadFailed(Self.errorDescription(error))
+            }
+            guard let loadedAuth else {
+                if reloaded {
+                    throw RemoteControlAuthLoadError.requiresChatGPTAuthentication
+                }
+                try await reload()
+                reloaded = true
+                continue
+            }
+
+            if !Self.isChatGPTAuth(loadedAuth) {
+                if Self.hasUsableAuthMaterial(loadedAuth) {
+                    throw RemoteControlAuthLoadError.apiKeyUnsupported
+                }
+                if reloaded {
+                    throw RemoteControlAuthLoadError.requiresChatGPTAuthentication
+                }
+                try await reload()
+                reloaded = true
+                continue
+            }
+
+            if loadedAuth.tokens?.accountID == nil, !reloaded {
+                try await reload()
+                reloaded = true
+                continue
+            }
+
+            auth = loadedAuth
+            break
+        }
+
+        guard Self.isChatGPTAuth(auth), let tokens = auth.tokens else {
+            throw RemoteControlAuthLoadError.apiKeyUnsupported
+        }
+        guard let accountID = tokens.accountID else {
+            throw RemoteControlAuthLoadError.waitingForChatGPTAccountID
+        }
+        return RemoteControlConnectionAuth(
+            authProvider: StaticAPIAuthProvider(
+                bearerToken: tokens.accessToken,
+                accountID: tokens.accountID
+            ),
+            accountID: accountID
+        )
+    }
+
+    private func reload() async throws {
+        do {
+            try await reloadAuth()
+        } catch {
+            throw RemoteControlAuthLoadError.loadFailed(Self.errorDescription(error))
+        }
+    }
+
+    private static func isChatGPTAuth(_ auth: AuthDotJSON) -> Bool {
+        auth.openAIAPIKey == nil
+            && auth.tokens != nil
+            && auth.authMode != .apiKey
+    }
+
+    private static func hasUsableAuthMaterial(_ auth: AuthDotJSON) -> Bool {
+        auth.openAIAPIKey != nil || auth.tokens != nil
+    }
+
+    private static func errorDescription(_ error: Error) -> String {
+        if let localized = error as? LocalizedError, let description = localized.errorDescription {
+            return description
+        }
+        return String(describing: error)
+    }
+}
+
+/// Stores remote-control enrollments using Rust's `(websocket_url, account_id, app_server_client_name)` key.
+///
+/// Implementers provide the durable state database used by the remote-control
+/// connect loop. Callers may rely on nil client names being represented through
+/// the same key normalization as the Swift SQLite store, and on failures being
+/// surfaced without retry side effects.
+public protocol RemoteControlEnrollmentStore: Sendable {
+    func getRemoteControlEnrollment(
+        websocketURL: String,
+        accountID: String,
+        appServerClientName: String?
+    ) async throws -> RemoteControlEnrollmentRecord?
+
+    func upsertRemoteControlEnrollment(_ enrollment: RemoteControlEnrollmentRecord) async throws
+
+    @discardableResult
+    func deleteRemoteControlEnrollment(
+        websocketURL: String,
+        accountID: String,
+        appServerClientName: String?
+    ) async throws -> Int
+}
+
+extension SQLiteAgentGraphStore: RemoteControlEnrollmentStore {}
+
+public enum RemoteControlEnrollmentPersistenceError: Error, CustomStringConvertible, Equatable, Sendable {
+    case cacheUnavailable(websocketURL: String, accountID: String, appServerClientName: String?)
+    case persistenceUnavailable(websocketURL: String, accountID: String, appServerClientName: String?, hasEnrollment: Bool)
+    case accountIDMismatch(expectedAccountID: String)
+    case storeFailed(String)
+
+    public var description: String {
+        switch self {
+        case let .cacheUnavailable(websocketURL, accountID, appServerClientName):
+            return "remote control enrollment cache unavailable because sqlite state db is disabled: websocket_url=\(websocketURL), account_id=\(accountID), app_server_client_name=\(Self.rustOptionalString(appServerClientName))"
+        case let .persistenceUnavailable(websocketURL, accountID, appServerClientName, hasEnrollment):
+            return "remote control enrollment persistence unavailable because sqlite state db is disabled: websocket_url=\(websocketURL), account_id=\(accountID), app_server_client_name=\(Self.rustOptionalString(appServerClientName)), has_enrollment=\(hasEnrollment)"
+        case let .accountIDMismatch(expectedAccountID):
+            return "enrollment account_id does not match expected account_id `\(expectedAccountID)`"
+        case let .storeFailed(message):
+            return message
+        }
+    }
+
+    private static func rustOptionalString(_ value: String?) -> String {
+        switch value {
+        case let .some(value):
+            return "Some(\"\(value)\")"
+        case .none:
+            return "None"
+        }
+    }
+}
+
+public enum RemoteControlEnrollmentPersistence {
+    public static func load(
+        store: RemoteControlEnrollmentStore?,
+        target: RemoteControlTarget,
+        accountID: String,
+        appServerClientName: String?
+    ) async throws -> RemoteControlEnrollment? {
+        guard let store else {
+            throw RemoteControlEnrollmentPersistenceError.cacheUnavailable(
+                websocketURL: target.websocketURL,
+                accountID: accountID,
+                appServerClientName: appServerClientName
+            )
+        }
+        do {
+            guard let record = try await store.getRemoteControlEnrollment(
+                websocketURL: target.websocketURL,
+                accountID: accountID,
+                appServerClientName: appServerClientName
+            ) else {
+                return nil
+            }
+            return RemoteControlEnrollment(
+                accountID: record.accountID,
+                environmentID: record.environmentID,
+                serverID: record.serverID,
+                serverName: record.serverName
+            )
+        } catch let error as RemoteControlEnrollmentPersistenceError {
+            throw error
+        } catch {
+            throw RemoteControlEnrollmentPersistenceError.storeFailed(Self.errorDescription(error))
+        }
+    }
+
+    public static func update(
+        store: RemoteControlEnrollmentStore?,
+        target: RemoteControlTarget,
+        accountID: String,
+        appServerClientName: String?,
+        enrollment: RemoteControlEnrollment?
+    ) async throws {
+        guard let store else {
+            throw RemoteControlEnrollmentPersistenceError.persistenceUnavailable(
+                websocketURL: target.websocketURL,
+                accountID: accountID,
+                appServerClientName: appServerClientName,
+                hasEnrollment: enrollment != nil
+            )
+        }
+        if let enrollment, enrollment.accountID != accountID {
+            throw RemoteControlEnrollmentPersistenceError.accountIDMismatch(expectedAccountID: accountID)
+        }
+        do {
+            if let enrollment {
+                try await store.upsertRemoteControlEnrollment(RemoteControlEnrollmentRecord(
+                    websocketURL: target.websocketURL,
+                    accountID: accountID,
+                    appServerClientName: appServerClientName,
+                    serverID: enrollment.serverID,
+                    environmentID: enrollment.environmentID,
+                    serverName: enrollment.serverName
+                ))
+            } else {
+                _ = try await store.deleteRemoteControlEnrollment(
+                    websocketURL: target.websocketURL,
+                    accountID: accountID,
+                    appServerClientName: appServerClientName
+                )
+            }
+        } catch let error as RemoteControlEnrollmentPersistenceError {
+            throw error
+        } catch {
+            throw RemoteControlEnrollmentPersistenceError.storeFailed(Self.errorDescription(error))
+        }
+    }
+
+    private static func errorDescription(_ error: Error) -> String {
+        if let localized = error as? LocalizedError, let description = localized.errorDescription {
+            return description
+        }
+        return String(describing: error)
+    }
+}
+
 public enum RemoteControlURLNormalizationError: Error, CustomStringConvertible, Equatable, Sendable {
     case invalidURL(remoteControlURL: String, message: String)
     case unsupportedURL(remoteControlURL: String)
