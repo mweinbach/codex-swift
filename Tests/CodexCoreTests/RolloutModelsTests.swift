@@ -119,6 +119,62 @@ final class RolloutModelsTests: XCTestCase {
         XCTAssertNil(InitialHistory.cleared.dynamicTools)
     }
 
+    func testInitialHistoryProjectsFirstSessionMetaHelpersLikeRust() throws {
+        let id = try ConversationId(string: "67e55044-10b1-426f-9247-bb680e5fe0c8")
+        let forkedID = try ConversationId(string: "77e55044-10b1-426f-9247-bb680e5fe0c8")
+        let firstMeta = RolloutRecordItem.sessionMeta(SessionMetaLine(meta: SessionMeta(
+            id: id,
+            forkedFromID: forkedID,
+            timestamp: "2026-05-08T00:00:00Z",
+            cwd: "/first",
+            originator: "codex_swift",
+            cliVersion: "0.1.0",
+            threadSource: .user,
+            baseInstructions: BaseInstructions(text: "base")
+        )))
+        let laterMeta = RolloutRecordItem.sessionMeta(SessionMetaLine(meta: SessionMeta(
+            id: try ConversationId(string: "87e55044-10b1-426f-9247-bb680e5fe0c8"),
+            timestamp: "2026-05-08T00:00:01Z",
+            cwd: "/later",
+            originator: "codex_swift",
+            cliVersion: "0.1.0",
+            threadSource: .subagent,
+            baseInstructions: BaseInstructions(text: "later base")
+        )))
+        let turnContext = RolloutRecordItem.turnContext(TurnContextItem(
+            cwd: "/turn-context",
+            approvalPolicy: .onRequest,
+            sandboxPolicy: .readOnly,
+            model: "gpt-5.4",
+            summary: .auto
+        ))
+
+        let resumed = InitialHistory.resumed(ResumedHistory(
+            conversationID: id,
+            history: [turnContext, firstMeta, laterMeta],
+            rolloutPath: nil
+        ))
+        XCTAssertEqual(resumed.forkedFromID, forkedID)
+        XCTAssertEqual(resumed.sessionCwd, "/first")
+        XCTAssertEqual(resumed.baseInstructions, BaseInstructions(text: "base"))
+        XCTAssertEqual(resumed.resumedThreadSource, .user)
+
+        let forked = InitialHistory.forked([turnContext, firstMeta, laterMeta])
+        XCTAssertEqual(forked.forkedFromID, id)
+        XCTAssertEqual(forked.sessionCwd, "/first")
+        XCTAssertEqual(forked.baseInstructions, BaseInstructions(text: "base"))
+        XCTAssertNil(forked.resumedThreadSource)
+
+        XCTAssertNil(InitialHistory.new.forkedFromID)
+        XCTAssertNil(InitialHistory.new.sessionCwd)
+        XCTAssertNil(InitialHistory.new.baseInstructions)
+        XCTAssertNil(InitialHistory.new.resumedThreadSource)
+        XCTAssertNil(InitialHistory.cleared.forkedFromID)
+        XCTAssertNil(InitialHistory.cleared.sessionCwd)
+        XCTAssertNil(InitialHistory.cleared.baseInstructions)
+        XCTAssertNil(InitialHistory.cleared.resumedThreadSource)
+    }
+
     func testSessionMetaDecodesAgentTypeAliasForAgentRole() throws {
         let line = try JSONDecoder().decode(SessionMetaLine.self, from: Data("""
         {

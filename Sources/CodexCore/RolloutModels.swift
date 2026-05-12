@@ -610,12 +610,52 @@ public enum InitialHistory: Equatable, Sendable {
         }
     }
 
+    public var forkedFromID: ConversationId? {
+        switch self {
+        case .new, .cleared:
+            return nil
+        case let .resumed(resumed):
+            return resumed.history.compactMap { item -> ConversationId? in
+                guard case let .sessionMeta(metaLine) = item else {
+                    return nil
+                }
+                return metaLine.meta.forkedFromID
+            }.first
+        case let .forked(items):
+            return items.compactMap { item -> ConversationId? in
+                guard case let .sessionMeta(metaLine) = item else {
+                    return nil
+                }
+                return metaLine.meta.id
+            }.first
+        }
+    }
+
+    public var sessionCwd: String? {
+        Self.firstSessionMeta(in: rolloutItems)?.cwd
+    }
+
+    public var baseInstructions: BaseInstructions? {
+        Self.firstSessionMeta(in: rolloutItems)?.baseInstructions
+    }
+
+    public var resumedThreadSource: ThreadSource? {
+        guard case let .resumed(resumed) = self else {
+            return nil
+        }
+        return Self.firstSessionMeta(in: resumed.history)?.threadSource
+    }
+
     private static func firstDynamicTools(in items: [RolloutRecordItem]) -> [DynamicToolSpec]? {
-        items.compactMap { item -> [DynamicToolSpec]? in
+        firstSessionMeta(in: items)?.dynamicTools
+    }
+
+    private static func firstSessionMeta(in items: [RolloutRecordItem]) -> SessionMeta? {
+        items.compactMap { item -> SessionMeta? in
             guard case let .sessionMeta(metaLine) = item else {
                 return nil
             }
-            return metaLine.meta.dynamicTools
+            return metaLine.meta
         }.first
     }
 }

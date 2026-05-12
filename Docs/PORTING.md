@@ -428,7 +428,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/protocol/src/protocol.rs` rollout JSONL models
   - session metadata flattening, optional git metadata, compacted records, turn-context records, truncation policies, rollout item `type`/`payload` wrappers, and timestamp-flattened rollout lines. Swift now matches Rust's split where `base_instructions` is persisted on `session_meta`, while `turn_context` carries user/developer instructions and omits base instructions.
 - `codex-rs/protocol/src/protocol.rs` resume/bootstrap history models
-  - conversation path response payloads, new/cleared/resumed/forked initial history wire tags, rollout item extraction, and initial event-message projection
+  - conversation path response payloads, new/cleared/resumed/forked initial history wire tags, rollout item extraction, initial event-message projection, and Rust-matching first-session-meta helpers for fork parent id, session cwd, base instructions, dynamic tools, and resumed thread source
 - `codex-rs/exec/src/lib.rs` resume target resolution
   - `codex resume` parser-to-runtime bridge for explicit session IDs, `--last`, provider-filtered newest-session lookup, `--all` provider bypass, and non-interactive picker listing over saved rollout files
   - `codex fork` parser-to-runtime bridge for explicit session IDs, `--last`, `--all`, root and fork-scoped `--remote` / `--remote-auth-token-env` option precedence, provider-filtered newest-session lookup, and picker listing over saved rollout files; the actual interactive fork TUI remains pending with the broader interactive runtime
