@@ -281,7 +281,7 @@ public enum ModelsManager {
             )
         }
 
-        guard shouldRefreshRawModels(providerInfo: providerInfo, provider: apiProvider, auth: authProvider) else {
+        guard shouldRefreshRawModels(providerInfo: providerInfo, provider: apiProvider) else {
             return ModelsResponse(models: fallbackModels)
         }
 
@@ -317,12 +317,11 @@ public enum ModelsManager {
         }
     }
 
-    private static func shouldRefreshRawModels<Auth: APIAuthProvider>(
+    private static func shouldRefreshRawModels(
         providerInfo: ModelProviderInfo,
-        provider: APIProvider,
-        auth: Auth
+        provider: APIProvider
     ) -> Bool {
-        provider.baseURL.contains("/backend-api/codex") || providerInfo.hasCommandAuth() || auth.bearerToken != nil
+        provider.baseURL.contains("/backend-api/codex") || providerInfo.hasCommandAuth()
     }
 
     private static func selectedProviderInfo(for config: CodexRuntimeConfig) -> ModelProviderInfo {

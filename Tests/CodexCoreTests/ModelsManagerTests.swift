@@ -141,7 +141,7 @@ final class ModelsManagerTests: XCTestCase {
         XCTAssertTrue(response.models.contains { $0.slug == "cached-remote" })
     }
 
-    func testRawModelCatalogOnlineIfUncachedFetchesAndPersistsWhenAuthorized() async throws {
+    func testRawModelCatalogOnlineIfUncachedFetchesAndPersistsWithChatGPTTokensLikeRust() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let remoteModel = minimalModelInfo(slug: "remote-model", priority: 0)
@@ -159,7 +159,12 @@ final class ModelsManagerTests: XCTestCase {
         let response = try await ModelsManager.rawModelCatalogOnlineIfUncached(
             codexHome: root,
             config: CodexRuntimeConfig(modelProvider: "openai"),
-            auth: AuthDotJSON(authMode: .apiKey, openAIAPIKey: "sk-test", tokens: nil, lastRefresh: nil),
+            auth: AuthDotJSON(
+                authMode: .chatGPTAuthTokens,
+                openAIAPIKey: nil,
+                tokens: chatGPTTokenData(accessToken: "chatgpt-token", accountID: "acct-123"),
+                lastRefresh: nil
+            ),
             transport: transport,
             clientVersion: "1.2.3",
             now: try parseDate("2026-05-08T12:00:00Z")
@@ -169,13 +174,35 @@ final class ModelsManagerTests: XCTestCase {
         XCTAssertTrue(response.models.contains { $0.slug == "remote-model" })
         let capturedRequest = await capture.firstRequest()
         let request = try XCTUnwrap(capturedRequest)
-        XCTAssertEqual(request.url, "https://api.openai.com/v1/models?client_version=1.2.3")
-        XCTAssertEqual(request.headers["authorization"], "Bearer sk-test")
+        XCTAssertEqual(request.url, "https://chatgpt.com/backend-api/codex/models?client_version=1.2.3")
+        XCTAssertEqual(request.headers["authorization"], "Bearer chatgpt-token")
+        XCTAssertEqual(request.headers["ChatGPT-Account-ID"], "acct-123")
 
         let cache = try XCTUnwrap(ModelsCache.load(from: ModelsManager.cachePath(codexHome: root)))
         XCTAssertEqual(cache.etag, "header-etag")
         XCTAssertEqual(cache.clientVersion, "1.2.3")
         XCTAssertEqual(cache.models.map(\.slug), ["remote-model"])
+    }
+
+    func testRawModelCatalogOnlineIfUncachedSkipsNetworkForAPIKeyAuthLikeRust() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let transport = RecordingAPITransport { _ in
+            XCTFail("plain API-key auth should not refresh remote model metadata")
+            return URLSessionTransportResponse(statusCode: 200)
+        }
+
+        let response = try await ModelsManager.rawModelCatalogOnlineIfUncached(
+            codexHome: root,
+            config: CodexRuntimeConfig(modelProvider: "openai"),
+            auth: AuthDotJSON(authMode: .apiKey, openAIAPIKey: "sk-test", tokens: nil, lastRefresh: nil),
+            transport: transport,
+            clientVersion: "1.2.3",
+            now: try parseDate("2026-05-08T12:00:00Z")
+        )
+
+        XCTAssertEqual(response.models, try ModelsManager.bundledModelsResponse().models)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: ModelsManager.cachePath(codexHome: root).path))
     }
 
     func testRawModelCatalogOnlineIfUncachedUsesProviderCommandAuthLikeRust() async throws {
@@ -597,6 +624,15 @@ final class ModelsManagerTests: XCTestCase {
             upgrade: nil,
             showInPicker: showInPicker,
             supportedInAPI: supportedInAPI
+        )
+    }
+
+    private func chatGPTTokenData(accessToken: String, accountID: String?) -> AuthTokenData {
+        AuthTokenData(
+            idToken: "id-token",
+            accessToken: accessToken,
+            refreshToken: "refresh-token",
+            accountID: accountID
         )
     }
 }
