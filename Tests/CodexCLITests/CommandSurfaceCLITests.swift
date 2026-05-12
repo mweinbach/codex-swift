@@ -783,10 +783,18 @@ final class CommandSurfaceCLITests: XCTestCase {
 
     func testRunAsyncAppServerParsesRunAndGenerators() async {
         var actions: [CodexCLI.AppServerCommandAction] = []
+        let relativeProxySocketPath = URL(
+            fileURLWithPath: FileManager.default.currentDirectoryPath,
+            isDirectory: true
+        )
+        .appendingPathComponent("codex.sock")
+        .standardizedFileURL
+        .path
 
         for arguments in [
             ["app-server"],
             ["app-server", "proxy", "--sock", "/tmp/codex.sock"],
+            ["app-server", "proxy", "--sock", "codex.sock"],
             ["app-server", "generate-ts", "-o", "/tmp/ts", "--prettier", "prettier"],
             ["app-server", "generate-json-schema", "--out=/tmp/schema", "--experimental"],
             ["app-server", "generate-internal-json-schema", "-o/tmp/internal-schema"]
@@ -805,6 +813,7 @@ final class CommandSurfaceCLITests: XCTestCase {
         XCTAssertEqual(actions, [
             .run,
             .proxy(socketPath: "/tmp/codex.sock"),
+            .proxy(socketPath: relativeProxySocketPath),
             .generateTS(outDir: "/tmp/ts", prettier: "prettier", experimental: false),
             .generateJSONSchema(outDir: "/tmp/schema", experimental: true),
             .generateInternalJSONSchema(outDir: "/tmp/internal-schema")

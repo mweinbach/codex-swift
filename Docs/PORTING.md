@@ -33,7 +33,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/cli/src/main.rs`
   - top-level command registry, visible aliases, hidden command marking, version, and shell completion generation for bash, elvish, fish, PowerShell, and zsh
   - root `--remote` / `--remote-auth-token-env` mode now follows Rust's command dispatch guard: non-interactive subcommands reject those flags with subcommand-specific error text before runner startup, while `resume` and `fork` retain their interactive remote forwarding path.
-  - `app-server proxy`, `app-server generate-ts`, `app-server generate-json-schema`, and hidden `app-server generate-internal-json-schema` CLI dispatch now preserve Rust's option shapes, root remote-mode rejection, and executable handoff paths; schema generation still delegates to the Rust generator binary until Swift-native schema export exists.
+  - `app-server proxy`, `app-server generate-ts`, `app-server generate-json-schema`, and hidden `app-server generate-internal-json-schema` CLI dispatch now preserve Rust's option shapes, proxy socket path normalization relative to the current directory, root remote-mode rejection, and executable handoff paths; schema generation still delegates to the Rust generator binary until Swift-native schema export exists.
   - `remote-control` dispatch now rejects Rust's root `--remote` / `--remote-auth-token-env` flags for this non-interactive subcommand, rejects unexpected command arguments before runtime startup, and starts the Swift app-server path with `features.remote_control=true` appended after any root config or feature-toggle overrides
 - `codex-rs/common/src/approval_mode_cli_arg.rs`
   - approval CLI argument names and protocol mapping

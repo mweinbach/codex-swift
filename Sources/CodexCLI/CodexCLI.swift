@@ -2707,12 +2707,12 @@ public struct CodexCLI: Sendable {
                 guard index + 1 < arguments.count else {
                     return .failure("codex-swift: missing value for \(argument)", 64)
                 }
-                socketPath = arguments[index + 1]
+                socketPath = normalizeAppServerProxySocketPath(arguments[index + 1])
                 index += 2
                 continue
             }
             if argument.hasPrefix("--sock=") {
-                socketPath = String(argument.dropFirst("--sock=".count))
+                socketPath = normalizeAppServerProxySocketPath(String(argument.dropFirst("--sock=".count)))
                 index += 1
                 continue
             }
@@ -2723,6 +2723,17 @@ public struct CodexCLI: Sendable {
         }
 
         return .success(socketPath)
+    }
+
+    private func normalizeAppServerProxySocketPath(_ rawPath: String) -> String {
+        if rawPath.hasPrefix("/") {
+            return rawPath
+        }
+
+        return URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+            .appendingPathComponent(rawPath)
+            .standardizedFileURL
+            .path
     }
 
     private func parseAppServerGenerateTS(
