@@ -665,6 +665,145 @@ public struct RemoteControlClientMessageObserver: Equatable, Sendable {
     }
 }
 
+public enum RemoteControlServerEnvelopeSplitter {
+    public static func splitForTransport(_ envelope: RemoteControlServerEnvelope) throws -> [RemoteControlServerEnvelope] {
+        guard case let .serverMessage(message) = envelope.event else {
+            return [envelope]
+        }
+
+        let envelopeSizeBytes = try serializedLength(envelope)
+        if envelopeSizeBytes <= RemoteControlClientMessageObserver.segmentMaxBytes {
+            return [envelope]
+        }
+
+        let raw = try JSONEncoder().encode(message)
+        let messageSizeBytes = raw.count
+        if messageSizeBytes > RemoteControlClientMessageObserver.reassembledMaxBytes {
+            return []
+        }
+
+        let minimalSegmentCount = min(max(messageSizeBytes, 1), RemoteControlClientMessageObserver.segmentCountMax)
+        let minimalChunk = raw.prefix(min(raw.count, 1))
+        if try serializedChunkLength(
+            envelope: envelope,
+            segmentID: 0,
+            segmentCount: minimalSegmentCount,
+            messageSizeBytes: messageSizeBytes,
+            chunk: minimalChunk
+        ) > RemoteControlClientMessageObserver.segmentMaxBytes {
+            return []
+        }
+
+        var segmentCount = max(
+            2,
+            ceilDiv(messageSizeBytes, RemoteControlClientMessageObserver.segmentTargetBytes)
+        )
+        while true {
+            let chunkSize = max(1, ceilDiv(messageSizeBytes, segmentCount))
+            segmentCount = ceilDiv(messageSizeBytes, chunkSize)
+            var segmentsFit = true
+            for (segmentID, chunk) in chunks(raw, chunkSize: chunkSize).enumerated() {
+                let chunkLength = try serializedChunkLength(
+                    envelope: envelope,
+                    segmentID: segmentID,
+                    segmentCount: segmentCount,
+                    messageSizeBytes: messageSizeBytes,
+                    chunk: chunk
+                )
+                if chunkLength > RemoteControlClientMessageObserver.segmentMaxBytes {
+                    segmentsFit = false
+                    break
+                }
+            }
+            if segmentsFit {
+                return try chunks(raw, chunkSize: chunkSize).enumerated().map { segmentID, chunk in
+                    try buildChunkEnvelope(
+                        envelope: envelope,
+                        segmentID: segmentID,
+                        segmentCount: segmentCount,
+                        messageSizeBytes: messageSizeBytes,
+                        chunk: chunk
+                    )
+                }
+            }
+            if chunkSize == 1 {
+                return []
+            }
+            let nextSegmentCount = segmentCount + 1
+            let nextChunkSize = max(1, ceilDiv(messageSizeBytes, nextSegmentCount))
+            segmentCount = nextChunkSize == chunkSize ? messageSizeBytes : nextSegmentCount
+        }
+    }
+
+    private static func serializedChunkLength(
+        envelope: RemoteControlServerEnvelope,
+        segmentID: Int,
+        segmentCount: Int,
+        messageSizeBytes: Int,
+        chunk: Data.SubSequence
+    ) throws -> Int {
+        try serializedLength(buildChunkEnvelope(
+            envelope: envelope,
+            segmentID: segmentID,
+            segmentCount: segmentCount,
+            messageSizeBytes: messageSizeBytes,
+            chunk: chunk
+        ))
+    }
+
+    private static func serializedLength<T: Encodable>(_ value: T) throws -> Int {
+        try JSONEncoder().encode(value).count
+    }
+
+    private static func buildChunkEnvelope(
+        envelope: RemoteControlServerEnvelope,
+        segmentID: Int,
+        segmentCount: Int,
+        messageSizeBytes: Int,
+        chunk: Data.SubSequence
+    ) throws -> RemoteControlServerEnvelope {
+        if segmentCount > RemoteControlClientMessageObserver.segmentCountMax {
+            throw RemoteControlServerEnvelopeSplitterError.segmentCountExceedsMaximum
+        }
+        return RemoteControlServerEnvelope(
+            event: .serverMessageChunk(
+                segmentID: segmentID,
+                segmentCount: segmentCount,
+                messageSizeBytes: messageSizeBytes,
+                messageChunkBase64: Data(chunk).base64EncodedString()
+            ),
+            clientID: envelope.clientID,
+            streamID: envelope.streamID,
+            seqID: envelope.seqID
+        )
+    }
+
+    private static func chunks(_ data: Data, chunkSize: Int) -> [Data.SubSequence] {
+        stride(from: 0, to: data.count, by: chunkSize).map { start in
+            let end = min(start + chunkSize, data.count)
+            return data[start..<end]
+        }
+    }
+
+    private static func ceilDiv(_ lhs: Int, _ rhs: Int) -> Int {
+        guard rhs > 0 else {
+            return 0
+        }
+        return (lhs + rhs - 1) / rhs
+    }
+}
+
+public enum RemoteControlServerEnvelopeSplitterError: Error, CustomStringConvertible, Equatable, Sendable {
+    case segmentCountExceedsMaximum
+
+    public var description: String {
+        switch self {
+        case .segmentCountExceedsMaximum:
+            return "remote-control segment count exceeds maximum"
+        }
+    }
+}
+
 public enum RemoteControlAuthLoadError: Error, CustomStringConvertible, Equatable, Sendable {
     case requiresChatGPTAuthentication
     case apiKeyUnsupported

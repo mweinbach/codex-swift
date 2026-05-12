@@ -2811,6 +2811,60 @@ final class ExecServerTests: XCTestCase {
         XCTAssertEqual(buffer.serverEnvelopes(), [otherStreamMessage])
     }
 
+    func testRemoteControlServerEnvelopeSplitterPassesThroughSmallAndNonMessageEnvelopesLikeRust() throws {
+        let pong = RemoteControlServerEnvelope(
+            event: .pong(status: .active),
+            clientID: RemoteControlClientID("client-1"),
+            streamID: RemoteControlStreamID("stream-1"),
+            seqID: 1
+        )
+        XCTAssertEqual(try RemoteControlServerEnvelopeSplitter.splitForTransport(pong), [pong])
+
+        let smallMessage = RemoteControlServerEnvelope(
+            event: .serverMessage(message: .notification(ExecServerJSONRPCNotification(method: "initialized"))),
+            clientID: RemoteControlClientID("client-1"),
+            streamID: RemoteControlStreamID("stream-1"),
+            seqID: 2
+        )
+        XCTAssertEqual(try RemoteControlServerEnvelopeSplitter.splitForTransport(smallMessage), [smallMessage])
+    }
+
+    func testRemoteControlServerEnvelopeSplitterBuildsRustChunkEnvelopeSequence() throws {
+        let payload = String(repeating: "x", count: RemoteControlClientMessageObserver.segmentMaxBytes)
+        let message = ExecServerJSONRPCMessage.notification(ExecServerJSONRPCNotification(
+            method: "initialized",
+            params: .object(["payload": .string(payload)])
+        ))
+        let envelope = RemoteControlServerEnvelope(
+            event: .serverMessage(message: message),
+            clientID: RemoteControlClientID("client-1"),
+            streamID: RemoteControlStreamID("stream-1"),
+            seqID: 8
+        )
+
+        let chunks = try RemoteControlServerEnvelopeSplitter.splitForTransport(envelope)
+
+        XCTAssertGreaterThan(chunks.count, 1)
+        let messageSizeBytes = try JSONEncoder().encode(message).count
+        var reassembled = Data()
+        for (index, chunkEnvelope) in chunks.enumerated() {
+            XCTAssertEqual(chunkEnvelope.clientID, envelope.clientID)
+            XCTAssertEqual(chunkEnvelope.streamID, envelope.streamID)
+            XCTAssertEqual(chunkEnvelope.seqID, envelope.seqID)
+            XCTAssertLessThanOrEqual(try JSONEncoder().encode(chunkEnvelope).count, RemoteControlClientMessageObserver.segmentMaxBytes)
+
+            guard case let .serverMessageChunk(segmentID, segmentCount, chunkMessageSizeBytes, messageChunkBase64) = chunkEnvelope.event else {
+                return XCTFail("Expected server_message_chunk")
+            }
+            XCTAssertEqual(segmentID, index)
+            XCTAssertEqual(segmentCount, chunks.count)
+            XCTAssertEqual(chunkMessageSizeBytes, messageSizeBytes)
+            reassembled.append(try XCTUnwrap(Data(base64Encoded: messageChunkBase64)))
+        }
+
+        XCTAssertEqual(try JSONDecoder().decode(ExecServerJSONRPCMessage.self, from: reassembled), message)
+    }
+
     func testRemoteControlClientMessageObserverReassemblesChunksLikeRust() throws {
         var observer = RemoteControlClientMessageObserver()
         let message = ExecServerJSONRPCMessage.notification(ExecServerJSONRPCNotification(method: "initialized"))
