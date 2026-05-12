@@ -836,6 +836,74 @@ final class CommandSurfaceCLITests: XCTestCase {
         XCTAssertEqual(action, .generateTS(outDir: "/tmp/ts", prettier: nil, experimental: true))
     }
 
+    func testRunAsyncAppServerParsesRustTopLevelOptions() async {
+        var request: CodexCLI.AppServerCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: [
+                "app-server",
+                "--listen",
+                "ws://127.0.0.1:4500",
+                "--analytics-default-enabled",
+                "--ws-auth",
+                "signed-bearer-token",
+                "--ws-shared-secret-file=/tmp/secret",
+                "--ws-issuer",
+                "issuer",
+                "--ws-audience=audience",
+                "--ws-max-clock-skew-seconds",
+                "30"
+            ],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            appServerRunner: {
+                request = $0
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(request?.action, .run)
+        XCTAssertEqual(request?.listenTransport, .webSocket(host: "127.0.0.1", port: 4500))
+        XCTAssertEqual(request?.analyticsDefaultEnabled, true)
+        XCTAssertEqual(request?.websocketAuth, CodexCLI.AppServerWebsocketAuthArguments(
+            mode: .signedBearerToken,
+            sharedSecretFile: "/tmp/secret",
+            issuer: "issuer",
+            audience: "audience",
+            maxClockSkewSeconds: 30
+        ))
+    }
+
+    func testRunAsyncAppServerParsesCapabilityTokenFlagsBeforeSubcommand() async {
+        var request: CodexCLI.AppServerCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: [
+                "app-server",
+                "--listen=off",
+                "--ws-auth=capability-token",
+                "--ws-token-file",
+                "/tmp/token",
+                "--ws-token-sha256=abc123",
+                "proxy"
+            ],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            appServerRunner: {
+                request = $0
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(request?.action, .proxy(socketPath: nil))
+        XCTAssertEqual(request?.listenTransport, .off)
+        XCTAssertEqual(request?.websocketAuth, CodexCLI.AppServerWebsocketAuthArguments(
+            mode: .capabilityToken,
+            tokenFile: "/tmp/token",
+            tokenSHA256: "abc123"
+        ))
+    }
+
     func testRunAsyncRemoteControlAppendsFeatureOverrideAfterRootOverrides() async {
         var request: CodexCLI.AppServerCommandRequest?
 
@@ -1021,6 +1089,22 @@ final class CommandSurfaceCLITests: XCTestCase {
             (
                 ["app-server", "proxy", "extra"],
                 "codex-swift: unexpected argument for command 'app-server proxy': extra"
+            ),
+            (
+                ["app-server", "--listen"],
+                "codex-swift: missing value for --listen"
+            ),
+            (
+                ["app-server", "--listen", "http://foo"],
+                "unsupported --listen URL `http://foo`; expected `stdio://`, `unix://`, `unix://PATH`, `ws://IP:PORT`, or `off`"
+            ),
+            (
+                ["app-server", "--ws-auth", "bogus"],
+                "codex-swift: invalid value for --ws-auth: bogus"
+            ),
+            (
+                ["app-server", "--ws-max-clock-skew-seconds", "-1"],
+                "codex-swift: invalid value for command 'app-server' --ws-max-clock-skew-seconds: -1"
             ),
             (
                 ["app-server", "generate-internal-json-schema"],

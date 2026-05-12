@@ -2295,6 +2295,57 @@ final class ExecServerTests: XCTestCase {
         }
     }
 
+    func testAppServerListenURLParserAcceptsRustSupportedForms() throws {
+        let codexHome = URL(fileURLWithPath: "/tmp/codex-home", isDirectory: true)
+
+        XCTAssertEqual(try AppServerListenURLParser.parse("stdio://", codexHome: codexHome), .stdio)
+        XCTAssertEqual(
+            try AppServerListenURLParser.parse("unix://", codexHome: codexHome),
+            .unixSocket(socketPath: "/tmp/codex-home/app-server-control/app-server-control.sock")
+        )
+        XCTAssertEqual(
+            try AppServerListenURLParser.parse(
+                "unix://codex.sock",
+                codexHome: codexHome,
+                currentDirectory: "/tmp/workspace"
+            ),
+            .unixSocket(socketPath: "/tmp/workspace/codex.sock")
+        )
+        XCTAssertEqual(
+            try AppServerListenURLParser.parse("unix:///tmp/codex.sock", codexHome: codexHome),
+            .unixSocket(socketPath: "/tmp/codex.sock")
+        )
+        XCTAssertEqual(
+            try AppServerListenURLParser.parse("ws://127.0.0.1:4500", codexHome: codexHome),
+            .webSocket(host: "127.0.0.1", port: 4500)
+        )
+        XCTAssertEqual(
+            try AppServerListenURLParser.parse("ws://[::1]:4500", codexHome: codexHome),
+            .webSocket(host: "::1", port: 4500)
+        )
+        XCTAssertEqual(try AppServerListenURLParser.parse("off", codexHome: codexHome), .off)
+    }
+
+    func testAppServerListenURLParserRejectsRustInvalidForms() {
+        XCTAssertThrowsError(try AppServerListenURLParser.parse("http://foo", codexHome: URL(fileURLWithPath: "/tmp/home"))) { error in
+            XCTAssertEqual(error as? AppServerTransportParseError, .unsupportedListenURL("http://foo"))
+            XCTAssertEqual(
+                String(describing: error),
+                "unsupported --listen URL `http://foo`; expected `stdio://`, `unix://`, `unix://PATH`, `ws://IP:PORT`, or `off`"
+            )
+        }
+
+        for listenURL in ["ws://127.0.0.1", "ws://localhost:4500", "ws://127.0.0.1:4500/path"] {
+            XCTAssertThrowsError(try AppServerListenURLParser.parse(listenURL, codexHome: URL(fileURLWithPath: "/tmp/home"))) { error in
+                XCTAssertEqual(error as? AppServerTransportParseError, .invalidWebSocketListenURL(listenURL))
+                XCTAssertEqual(
+                    String(describing: error),
+                    "invalid websocket --listen URL `\(listenURL)`; expected `ws://IP:PORT`"
+                )
+            }
+        }
+    }
+
     func testRemoteExecutorConfigurationNormalizesRustValues() throws {
         let config = try ExecServerRemoteExecutorConfiguration.fromEnvironment(
             baseURL: " https://registry.example.test/// ",

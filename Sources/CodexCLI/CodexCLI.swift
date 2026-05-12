@@ -366,15 +366,57 @@ public struct CodexCLI: Sendable {
         case generateInternalJSONSchema(outDir: String)
     }
 
+    public enum AppServerWebsocketAuthMode: Equatable, Sendable {
+        case capabilityToken
+        case signedBearerToken
+    }
+
+    public struct AppServerWebsocketAuthArguments: Equatable, Sendable {
+        public let mode: AppServerWebsocketAuthMode?
+        public let tokenFile: String?
+        public let tokenSHA256: String?
+        public let sharedSecretFile: String?
+        public let issuer: String?
+        public let audience: String?
+        public let maxClockSkewSeconds: UInt64?
+
+        public init(
+            mode: AppServerWebsocketAuthMode? = nil,
+            tokenFile: String? = nil,
+            tokenSHA256: String? = nil,
+            sharedSecretFile: String? = nil,
+            issuer: String? = nil,
+            audience: String? = nil,
+            maxClockSkewSeconds: UInt64? = nil
+        ) {
+            self.mode = mode
+            self.tokenFile = tokenFile
+            self.tokenSHA256 = tokenSHA256
+            self.sharedSecretFile = sharedSecretFile
+            self.issuer = issuer
+            self.audience = audience
+            self.maxClockSkewSeconds = maxClockSkewSeconds
+        }
+    }
+
     public struct AppServerCommandRequest: Equatable, Sendable {
         public let action: AppServerCommandAction
+        public let listenTransport: AppServerListenTransport
+        public let analyticsDefaultEnabled: Bool
+        public let websocketAuth: AppServerWebsocketAuthArguments
         public let configOverrides: CliConfigOverrides
 
         public init(
             action: AppServerCommandAction,
+            listenTransport: AppServerListenTransport = .stdio,
+            analyticsDefaultEnabled: Bool = false,
+            websocketAuth: AppServerWebsocketAuthArguments = AppServerWebsocketAuthArguments(),
             configOverrides: CliConfigOverrides = CliConfigOverrides()
         ) {
             self.action = action
+            self.listenTransport = listenTransport
+            self.analyticsDefaultEnabled = analyticsDefaultEnabled
+            self.websocketAuth = websocketAuth
             self.configOverrides = configOverrides
         }
     }
@@ -2423,22 +2465,32 @@ public struct CodexCLI: Sendable {
         _ arguments: [String],
         rootArguments: [String]
     ) -> ParseResult<AppServerCommandRequest> {
+        let parsedOptions: ParsedAppServerOptions
+        let commandArguments: [String]
+        switch parseAppServerOptions(arguments) {
+        case let .success(parsed):
+            parsedOptions = parsed.options
+            commandArguments = parsed.remainingArguments
+        case let .failure(message, exitCode):
+            return .failure(message, exitCode)
+        }
+
         let action: AppServerCommandAction
-        guard let subcommand = arguments.first else {
+        guard let subcommand = commandArguments.first else {
             action = .run
-            return appServerRequest(action: action, rootArguments: rootArguments)
+            return appServerRequest(action: action, options: parsedOptions, rootArguments: rootArguments)
         }
 
         switch subcommand {
         case "proxy":
-            switch parseAppServerProxy(Array(arguments.dropFirst())) {
+            switch parseAppServerProxy(Array(commandArguments.dropFirst())) {
             case let .success(socketPath):
                 action = .proxy(socketPath: socketPath)
             case let .failure(message, exitCode):
                 return .failure(message, exitCode)
             }
         case "generate-ts":
-            switch parseAppServerGenerateTS(Array(arguments.dropFirst())) {
+            switch parseAppServerGenerateTS(Array(commandArguments.dropFirst())) {
             case let .success(parsed):
                 action = .generateTS(
                     outDir: parsed.outDir,
@@ -2449,14 +2501,14 @@ public struct CodexCLI: Sendable {
                 return .failure(message, exitCode)
             }
         case "generate-json-schema":
-            switch parseAppServerGenerateJSONSchema(Array(arguments.dropFirst())) {
+            switch parseAppServerGenerateJSONSchema(Array(commandArguments.dropFirst())) {
             case let .success(parsed):
                 action = .generateJSONSchema(outDir: parsed.outDir, experimental: parsed.experimental)
             case let .failure(message, exitCode):
                 return .failure(message, exitCode)
             }
         case "generate-internal-json-schema":
-            switch parseAppServerGenerateInternalJSONSchema(Array(arguments.dropFirst())) {
+            switch parseAppServerGenerateInternalJSONSchema(Array(commandArguments.dropFirst())) {
             case let .success(outDir):
                 action = .generateInternalJSONSchema(outDir: outDir)
             case let .failure(message, exitCode):
@@ -2469,7 +2521,7 @@ public struct CodexCLI: Sendable {
             return .failure("codex-swift: unsupported app-server subcommand: \(subcommand)", 64)
         }
 
-        return appServerRequest(action: action, rootArguments: rootArguments)
+        return appServerRequest(action: action, options: parsedOptions, rootArguments: rootArguments)
     }
 
     private func parseRemoteControlCommand(
@@ -2687,14 +2739,214 @@ public struct CodexCLI: Sendable {
 
     private func appServerRequest(
         action: AppServerCommandAction,
+        options: ParsedAppServerOptions = ParsedAppServerOptions(),
         rootArguments: [String]
     ) -> ParseResult<AppServerCommandRequest> {
         switch parseConfigOverrides(from: rootArguments) {
         case let .success(configOverrides):
-            return .success(AppServerCommandRequest(action: action, configOverrides: configOverrides))
+            return .success(AppServerCommandRequest(
+                action: action,
+                listenTransport: options.listenTransport,
+                analyticsDefaultEnabled: options.analyticsDefaultEnabled,
+                websocketAuth: options.websocketAuth,
+                configOverrides: configOverrides
+            ))
         case let .failure(message, exitCode):
             return .failure(message, exitCode)
         }
+    }
+
+    private struct ParsedAppServerOptions {
+        var listenTransport: AppServerListenTransport = .stdio
+        var analyticsDefaultEnabled = false
+        var websocketAuth = AppServerWebsocketAuthArguments()
+    }
+
+    private func parseAppServerOptions(
+        _ arguments: [String]
+    ) -> ParseResult<(options: ParsedAppServerOptions, remainingArguments: [String])> {
+        var options = ParsedAppServerOptions()
+        var websocketAuthMode: AppServerWebsocketAuthMode?
+        var tokenFile: String?
+        var tokenSHA256: String?
+        var sharedSecretFile: String?
+        var issuer: String?
+        var audience: String?
+        var maxClockSkewSeconds: UInt64?
+        var index = 0
+
+        func value(after option: String) -> ParseResult<String> {
+            guard index + 1 < arguments.count else {
+                return .failure("codex-swift: missing value for \(option)", 64)
+            }
+            return .success(arguments[index + 1])
+        }
+
+        while index < arguments.count {
+            let argument = arguments[index]
+            if argument == "--analytics-default-enabled" {
+                options.analyticsDefaultEnabled = true
+                index += 1
+                continue
+            }
+            if argument == "--listen" {
+                switch value(after: argument) {
+                case let .success(listenURL):
+                    switch parseAppServerListenTransport(listenURL) {
+                    case let .success(transport):
+                        options.listenTransport = transport
+                    case let .failure(message, exitCode):
+                        return .failure(message, exitCode)
+                    }
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
+                index += 2
+                continue
+            }
+            if argument.hasPrefix("--listen=") {
+                let listenURL = String(argument.dropFirst("--listen=".count))
+                switch parseAppServerListenTransport(listenURL) {
+                case let .success(transport):
+                    options.listenTransport = transport
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
+                index += 1
+                continue
+            }
+            if argument == "--ws-auth" {
+                switch value(after: argument) {
+                case let .success(mode):
+                    switch parseAppServerWebsocketAuthMode(mode) {
+                    case let .success(parsed):
+                        websocketAuthMode = parsed
+                    case let .failure(message, exitCode):
+                        return .failure(message, exitCode)
+                    }
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
+                index += 2
+                continue
+            }
+            if argument.hasPrefix("--ws-auth=") {
+                switch parseAppServerWebsocketAuthMode(String(argument.dropFirst("--ws-auth=".count))) {
+                case let .success(parsed):
+                    websocketAuthMode = parsed
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
+                index += 1
+                continue
+            }
+
+            let stringOptions = [
+                "--ws-token-file": { (value: String) in tokenFile = value },
+                "--ws-token-sha256": { (value: String) in tokenSHA256 = value },
+                "--ws-shared-secret-file": { (value: String) in sharedSecretFile = value },
+                "--ws-issuer": { (value: String) in issuer = value },
+                "--ws-audience": { (value: String) in audience = value }
+            ]
+            if let assign = stringOptions[argument] {
+                switch value(after: argument) {
+                case let .success(rawValue):
+                    assign(rawValue)
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
+                index += 2
+                continue
+            }
+            if let equalIndex = argument.firstIndex(of: "=") {
+                let option = String(argument[..<equalIndex])
+                if let assign = stringOptions[option] {
+                    assign(String(argument[argument.index(after: equalIndex)...]))
+                    index += 1
+                    continue
+                }
+            }
+            if argument == "--ws-max-clock-skew-seconds" {
+                switch value(after: argument) {
+                case let .success(rawValue):
+                    switch parseUInt64Option(rawValue, option: argument, command: "app-server") {
+                    case let .success(parsed):
+                        maxClockSkewSeconds = parsed
+                    case let .failure(message, exitCode):
+                        return .failure(message, exitCode)
+                    }
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
+                index += 2
+                continue
+            }
+            if argument.hasPrefix("--ws-max-clock-skew-seconds=") {
+                let rawValue = String(argument.dropFirst("--ws-max-clock-skew-seconds=".count))
+                switch parseUInt64Option(rawValue, option: "--ws-max-clock-skew-seconds", command: "app-server") {
+                case let .success(parsed):
+                    maxClockSkewSeconds = parsed
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
+                index += 1
+                continue
+            }
+
+            return .success((
+                options: ParsedAppServerOptions(
+                    listenTransport: options.listenTransport,
+                    analyticsDefaultEnabled: options.analyticsDefaultEnabled,
+                    websocketAuth: AppServerWebsocketAuthArguments(
+                        mode: websocketAuthMode,
+                        tokenFile: tokenFile,
+                        tokenSHA256: tokenSHA256,
+                        sharedSecretFile: sharedSecretFile,
+                        issuer: issuer,
+                        audience: audience,
+                        maxClockSkewSeconds: maxClockSkewSeconds
+                    )
+                ),
+                remainingArguments: Array(arguments[index...])
+            ))
+        }
+
+        options.websocketAuth = AppServerWebsocketAuthArguments(
+            mode: websocketAuthMode,
+            tokenFile: tokenFile,
+            tokenSHA256: tokenSHA256,
+            sharedSecretFile: sharedSecretFile,
+            issuer: issuer,
+            audience: audience,
+            maxClockSkewSeconds: maxClockSkewSeconds
+        )
+        return .success((options: options, remainingArguments: []))
+    }
+
+    private func parseAppServerListenTransport(_ listenURL: String) -> ParseResult<AppServerListenTransport> {
+        do {
+            return .success(try AppServerListenURLParser.parse(listenURL))
+        } catch {
+            return .failure(String(describing: error), 64)
+        }
+    }
+
+    private func parseAppServerWebsocketAuthMode(_ rawValue: String) -> ParseResult<AppServerWebsocketAuthMode> {
+        switch rawValue {
+        case "capability-token":
+            return .success(.capabilityToken)
+        case "signed-bearer-token":
+            return .success(.signedBearerToken)
+        default:
+            return .failure("codex-swift: invalid value for --ws-auth: \(rawValue)", 64)
+        }
+    }
+
+    private func parseUInt64Option(_ rawValue: String, option: String, command: String) -> ParseResult<UInt64> {
+        guard let parsed = UInt64(rawValue) else {
+            return .failure("codex-swift: invalid value for command '\(command)' \(option): \(rawValue)", 64)
+        }
+        return .success(parsed)
     }
 
     private func parseAppServerProxy(_ arguments: [String]) -> ParseResult<String?> {
