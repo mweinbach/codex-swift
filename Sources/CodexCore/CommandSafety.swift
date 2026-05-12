@@ -1309,14 +1309,15 @@ public enum CommandSafety {
         let parts = core.split(separator: ",", omittingEmptySubsequences: false)
         switch parts.count {
         case 1:
-            return !parts[0].isEmpty && parts[0].allSatisfy(\.isNumber)
+            return isASCIINumeric(parts[0])
         case 2:
-            return !parts[0].isEmpty
-                && !parts[1].isEmpty
-                && parts[0].allSatisfy(\.isNumber)
-                && parts[1].allSatisfy(\.isNumber)
+            return isASCIINumeric(parts[0]) && isASCIINumeric(parts[1])
         default:
             return false
         }
+    }
+
+    private static func isASCIINumeric<S: StringProtocol>(_ value: S) -> Bool {
+        !value.isEmpty && value.allSatisfy { $0 >= "0" && $0 <= "9" }
     }
 }

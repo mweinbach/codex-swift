@@ -119,6 +119,14 @@ final class CommandSafetyTests: XCTestCase {
         XCTAssertTrue(CommandSafety.isKnownSafeCommand(["bash", "-lc", "find . -name file.txt"]))
     }
 
+    func testSedSafetyRequiresASCIIDigitsLikeRust() {
+        XCTAssertTrue(CommandSafety.isSafeToCallWithExec(["sed", "-n", "1,5p", "file.txt"]))
+        XCTAssertTrue(CommandSafety.isKnownSafeCommand(["bash", "-lc", "sed -n '1,5p' file.txt"]))
+
+        XCTAssertFalse(CommandSafety.isSafeToCallWithExec(["sed", "-n", "١,٢p", "file.txt"]))
+        XCTAssertFalse(CommandSafety.isKnownSafeCommand(["bash", "-lc", "sed -n '١,٢p' file.txt"]))
+    }
+
     func testBashLcSafeExamplesWithOperators() {
         XCTAssertTrue(CommandSafety.isKnownSafeCommand(["bash", "-lc", #"grep -R "Cargo.toml" -n || true"#]))
         XCTAssertTrue(CommandSafety.isKnownSafeCommand(["bash", "-lc", "ls && pwd"]))
