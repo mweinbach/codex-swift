@@ -1088,6 +1088,9 @@ Source baseline inspected for this scaffold:
 - `codex-rs/shell-command/src/bash.rs` heredoc command-prefix parsing
   - tightened Swift's `parseShellLcSingleCommandPrefix` to match Rust's literal word/number-only heredoc prefix contract, so quoted, escaped, arithmetic-expanded, or otherwise non-literal prefix words are no longer accepted for exec-policy prefix matching.
   - matched Rust tree-sitter handling for tab-stripping `<<-` heredocs in Swift's single-command prefix parser, including tab-prefixed delimiter lines.
+  - pinned the remaining upstream zsh heredoc prefix and non-heredoc arithmetic-shift rejection cases in Swift tests.
+- `codex-rs/shell-command/src/command_safety/windows_safe_commands.rs` PowerShell safe-command parsing
+  - pinned Rust's remaining PowerShell git global-option rejection cases for split and inline `--git-dir`, `--work-tree`, `--exec-path`, `--namespace`, and `--super-prefix` values.
 - `codex-rs/core/src/command_canonicalization.rs` approval-cache command keys
   - added Swift command canonicalization for approval-cache matching, including Rust's plain `bash`/`zsh` inner-command normalization, stable shell-script keys for heredoc/complex scripts, stable PowerShell script keys, and unchanged non-shell argv behavior.
 - `codex-rs/cloud-tasks-client/src/http.rs` cloud task git apply

@@ -167,7 +167,7 @@ final class BashPlainCommandParserTests: XCTestCase {
     func testSingleCommandPrefixSupportsSimpleHeredoc() {
         XCTAssertEqual(
             BashPlainCommandParser.parseShellLcSingleCommandPrefix([
-                "bash",
+                "zsh",
                 "-lc",
                 "python3 <<'PY'\nprint('hello')\nPY",
             ]),
@@ -175,7 +175,7 @@ final class BashPlainCommandParserTests: XCTestCase {
         )
         XCTAssertEqual(
             BashPlainCommandParser.parseShellLcSingleCommandPrefix([
-                "bash",
+                "zsh",
                 "-lc",
                 "python3 << PY\nprint('hello')\nPY",
             ]),
@@ -221,6 +221,11 @@ final class BashPlainCommandParserTests: XCTestCase {
             "bash",
             "-lc",
             #"python3 escaped\ arg <<'PY'\nprint('hello')\nPY"#,
+        ]))
+        XCTAssertNil(BashPlainCommandParser.parseShellLcSingleCommandPrefix([
+            "bash",
+            "-lc",
+            "echo $((1<<2))",
         ]))
         XCTAssertNil(BashPlainCommandParser.parseShellLcSingleCommandPrefix([
             "bash",
