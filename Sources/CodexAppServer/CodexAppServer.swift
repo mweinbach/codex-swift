@@ -1390,6 +1390,12 @@ public enum CodexAppServer {
                 runtimeConfig.sandboxPolicy = sandbox
             }
         }
+        try rejectDisallowedTurnPermissionSelection(
+            runtimeConfig: runtimeConfig,
+            permissionSelection: permissionSelection,
+            configuration: configuration,
+            cwd: cwd
+        )
         if let message = McpRequiredStartupValidator.requiredStartupFailureMessage(
             mcpServers: runtimeConfig.mcpServers,
             environment: configuration.environment
@@ -1397,6 +1403,49 @@ public enum CodexAppServer {
             throw AppServerError.internalError(message)
         }
         return runtimeConfig
+    }
+
+    private static func rejectDisallowedTurnPermissionSelection(
+        runtimeConfig: CodexRuntimeConfig,
+        permissionSelection: PermissionProfileSelection?,
+        configuration: CodexAppServerConfiguration,
+        cwd: URL?
+    ) throws {
+        guard permissionSelection != nil,
+              let permissionProfile = runtimeConfig.permissionProfile
+        else {
+            return
+        }
+        let cwdURL = cwd ?? configuration.codexHome
+        let cwdPath = cwdURL.standardizedFileURL.path
+        let sandboxPolicy: SandboxPolicy
+        do {
+            sandboxPolicy = try permissionProfile.fileSystemSandboxPolicy.toLegacySandboxPolicy(
+                networkPolicy: permissionProfile.networkSandboxPolicy,
+                cwd: cwdPath
+            )
+        } catch {
+            return
+        }
+        let stack: ConfigLayerStack
+        do {
+            stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+                codexHome: configuration.codexHome,
+                cwd: cwd,
+                cliOverrides: configuration.cliConfigOverrides,
+                threadConfigSources: configuration.threadConfigSources,
+                overrides: configuration.configLayerOverrides,
+                environment: configuration.environment
+            )
+        } catch {
+            throw configLoadError(error)
+        }
+        switch stack.requirements.sandboxPolicy.canSet(sandboxPolicy) {
+        case .success:
+            return
+        case let .failure(error):
+            throw AppServerError.invalidRequest("invalid turn context override: \(error.description)")
+        }
     }
 
     static func configLoadErrorResponseObject(id: Any, error: Error) -> [String: Any] {
