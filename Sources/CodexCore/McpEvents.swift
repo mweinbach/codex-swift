@@ -571,6 +571,8 @@ public struct McpToolCallEndEvent: Equatable, Codable, Sendable {
 }
 
 public enum McpToolCallResult: Equatable, Codable, Sendable {
+    public static let eventResultMaxBytes = 1024 * 1024
+
     case ok(McpCallToolResult)
     case err(String)
 
@@ -605,6 +607,15 @@ public enum McpToolCallResult: Equatable, Codable, Sendable {
             try container.encode(value, forKey: .err)
         }
     }
+
+    public func truncatedForEvent(maxBytes: Int = eventResultMaxBytes) -> McpToolCallResult {
+        switch self {
+        case let .ok(value):
+            return .ok(value.truncatedForEvent(maxBytes: maxBytes))
+        case let .err(message):
+            return .err(Truncation.truncateText(message, policy: .bytes(maxBytes)))
+        }
+    }
 }
 
 public struct McpCallToolResult: Equatable, Codable, Sendable {
@@ -630,6 +641,20 @@ public struct McpCallToolResult: Equatable, Codable, Sendable {
         self.isError = isError
         self.structuredContent = structuredContent
         self.meta = meta
+    }
+
+    public func truncatedForEvent(maxBytes: Int = McpToolCallResult.eventResultMaxBytes) -> McpCallToolResult {
+        let encoder = JSONEncoder()
+        guard let encoded = try? encoder.encode(self),
+              encoded.count > maxBytes,
+              let serialized = String(data: encoded, encoding: .utf8) else {
+            return self
+        }
+
+        return McpCallToolResult(
+            content: [.text(McpTextContent(text: Truncation.truncateText(serialized, policy: .bytes(maxBytes))))],
+            isError: isError
+        )
     }
 }
 

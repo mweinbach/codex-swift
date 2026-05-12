@@ -14200,8 +14200,14 @@ public enum CodexAppServer {
                 "tool": item.tool,
                 "status": item.status.rawValue,
                 "arguments": jsonObject(from: item.arguments),
-                "result": item.result.map(encodableJSONObject) ?? NSNull(),
-                "error": item.error.map(mcpToolCallErrorObject) ?? NSNull(),
+                "result": item.result.map { encodableJSONObject($0.truncatedForEvent()) } ?? NSNull(),
+                "error": item.error
+                    .map { mcpToolCallErrorObject(McpToolCallError(
+                        message: Truncation.truncateText(
+                            $0.message,
+                            policy: .bytes(McpToolCallResult.eventResultMaxBytes)
+                        )
+                    )) } ?? NSNull(),
                 "durationMs": item.duration.map(durationMilliseconds) ?? NSNull()
             ]
             if let mcpAppResourceURI = item.mcpAppResourceURI {

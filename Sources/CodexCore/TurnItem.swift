@@ -594,7 +594,7 @@ public struct McpToolCallItem: Equatable, Codable, Sendable {
             invocation: invocation,
             mcpAppResourceURI: mcpAppResourceURI,
             duration: duration,
-            result: toolResult
+            result: toolResult.truncatedForEvent()
         ))
     }
 

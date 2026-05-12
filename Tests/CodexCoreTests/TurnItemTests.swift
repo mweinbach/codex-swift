@@ -479,6 +479,43 @@ final class TurnItemTests: XCTestCase {
         ])
     }
 
+    func testMcpToolCallLegacyEndTruncatesLargeResultLikeRust() throws {
+        let item = TurnItem.mcpToolCall(McpToolCallItem(
+            id: "mcp-large",
+            server: "filesystem",
+            tool: "read_file",
+            arguments: .object(["path": .string("/tmp/huge.txt")]),
+            status: .completed,
+            result: McpCallToolResult(
+                content: [
+                    .text(McpTextContent(text: String(repeating: "large-mcp-content-", count: 100_000)))
+                ],
+                isError: false,
+                structuredContent: .object([
+                    "large": .string(String(repeating: "structured-value-", count: 100_000))
+                ]),
+                meta: .object([
+                    "meta": .string(String(repeating: "meta-value-", count: 100_000))
+                ])
+            ),
+            duration: ProtocolDuration(secs: 1)
+        ))
+
+        guard case let .mcpToolCall(mcpItem) = item,
+              case let .mcpToolCallEnd(endEvent) = mcpItem.asLegacyEndEvent() else {
+            return XCTFail("expected MCP tool call end event")
+        }
+        guard case let .ok(result) = endEvent.result,
+              case let .text(text) = try XCTUnwrap(result.content.first) else {
+            return XCTFail("expected truncated text result")
+        }
+
+        XCTAssertEqual(result.structuredContent, nil)
+        XCTAssertEqual(result.meta, nil)
+        XCTAssertEqual(result.isError, false)
+        XCTAssertTrue(text.text.contains("truncated"))
+    }
+
     func testMcpToolCallPendingItemOmitsLegacyEnd() throws {
         let item = TurnItem.mcpToolCall(McpToolCallItem(
             id: "mcp-1",

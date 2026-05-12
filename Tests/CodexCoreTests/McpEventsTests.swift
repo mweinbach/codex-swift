@@ -510,6 +510,44 @@ final class McpEventsTests: XCTestCase {
         XCTAssertFalse(event.isSuccess)
     }
 
+    func testToolCallResultTruncatesLargeSuccessForEventLikeRust() throws {
+        let original = McpCallToolResult(
+            content: [
+                .text(McpTextContent(text: String(repeating: "long-message-with-newlines-\n", count: 1_000)))
+            ],
+            isError: false,
+            structuredContent: .object([
+                "structured": .string(String(repeating: "structured-value-", count: 1_000))
+            ]),
+            meta: .object([
+                "meta": .string(String(repeating: "meta-value-", count: 1_000))
+            ])
+        )
+
+        let truncated = original.truncatedForEvent(maxBytes: 512)
+        let encoded = try JSONEncoder().encode(truncated)
+
+        XCTAssertLessThan(encoded.count, 512 * 2 + 1_024)
+        XCTAssertEqual(truncated.structuredContent, nil)
+        XCTAssertEqual(truncated.meta, nil)
+        XCTAssertEqual(truncated.isError, false)
+        guard case let .text(text) = try XCTUnwrap(truncated.content.first) else {
+            return XCTFail("expected text preview")
+        }
+        XCTAssertTrue(text.text.contains("truncated"), "large event result should contain a truncation marker")
+    }
+
+    func testToolCallResultTruncatesLargeErrorForEventLikeRust() throws {
+        let result = McpToolCallResult.err(String(repeating: "error-message-", count: 1_000))
+            .truncatedForEvent(maxBytes: 512)
+
+        guard case let .err(message) = result else {
+            return XCTFail("expected error result")
+        }
+        XCTAssertLessThan(message.utf8.count, 512 + 1_024)
+        XCTAssertTrue(message.contains("truncated"))
+    }
+
     func testMcpContentBlocksCoverRustUntaggedVariantEncoding() throws {
         let result = McpCallToolResult(content: [
             .image(McpImageContent(data: "iVBORw0=", mimeType: "image/png")),
