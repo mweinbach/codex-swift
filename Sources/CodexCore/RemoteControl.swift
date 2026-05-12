@@ -1303,6 +1303,115 @@ public struct RemoteControlWebsocketConnectionCore: Equatable, Sendable {
     }
 }
 
+/// Transport boundary for a live remote-control websocket connection.
+///
+/// Implemented by URLSession-backed sockets and tests. Callers may rely on implementations to
+/// serialize websocket access, surface received text/binary frames as remote-control messages, and
+/// send complete writer frames without reordering. Implementations should make cancellation explicit
+/// through `closeRemoteControlWebSocket()` rather than hiding lifetime issues behind detached tasks.
+public protocol RemoteControlWebSocketTransport: Sendable {
+    func receiveRemoteControlMessage() async throws -> RemoteControlWebsocketIncomingMessage
+    func sendRemoteControlFrame(_ frame: RemoteControlWebsocketWriterFrame) async throws
+    func closeRemoteControlWebSocket() async
+}
+
+public struct RemoteControlWebSocketSessionRunner<Transport: RemoteControlWebSocketTransport>: Sendable {
+    private let transport: Transport
+    private var core: RemoteControlWebsocketConnectionCore
+
+    public init(
+        transport: Transport,
+        statusPublisher: RemoteControlStatusPublisherCore
+    ) {
+        self.transport = transport
+        core = RemoteControlWebsocketConnectionCore(statusPublisher: statusPublisher)
+    }
+
+    public mutating func receive(
+        state: inout RemoteControlWebsocketState,
+        clientTracker: inout RemoteControlClientTracker,
+        now: TimeInterval = Date().timeIntervalSinceReferenceDate
+    ) async throws -> RemoteControlWebsocketConnectionStep {
+        let message: RemoteControlWebsocketIncomingMessage
+        do {
+            message = try await transport.receiveRemoteControlMessage()
+        } catch {
+            message = .readError(String(describing: error))
+        }
+        return try await process(
+            .incoming(message, now: now),
+            state: &state,
+            clientTracker: &clientTracker
+        )
+    }
+
+    public mutating func process(
+        _ input: RemoteControlWebsocketConnectionInput,
+        state: inout RemoteControlWebsocketState,
+        clientTracker: inout RemoteControlClientTracker
+    ) async throws -> RemoteControlWebsocketConnectionStep {
+        var step = try core.process(input, state: &state, clientTracker: &clientTracker)
+        for frame in step.frames {
+            do {
+                try await transport.sendRemoteControlFrame(frame)
+            } catch {
+                step.end = .reconnect(String(describing: error))
+                break
+            }
+        }
+        if step.end != nil {
+            await transport.closeRemoteControlWebSocket()
+        }
+        return step
+    }
+}
+
+public actor RemoteControlURLSessionWebSocket: RemoteControlWebSocketTransport {
+    private let task: URLSessionWebSocketTask
+
+    public init(request: URLRequest, session: URLSession = .shared) {
+        task = session.webSocketTask(with: request)
+        task.resume()
+    }
+
+    public init(url: URL, session: URLSession = .shared) {
+        task = session.webSocketTask(with: url)
+        task.resume()
+    }
+
+    public func receiveRemoteControlMessage() async throws -> RemoteControlWebsocketIncomingMessage {
+        switch try await task.receive() {
+        case let .string(text):
+            return .text(text)
+        case let .data(data):
+            return .binary(data)
+        @unknown default:
+            return .binary(Data())
+        }
+    }
+
+    public func sendRemoteControlFrame(_ frame: RemoteControlWebsocketWriterFrame) async throws {
+        switch frame {
+        case let .text(text):
+            try await task.send(.string(text))
+        case .ping:
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                task.sendPing { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume()
+                    }
+                }
+            }
+        }
+    }
+
+    public func closeRemoteControlWebSocket() async {
+        task.cancel(with: .normalClosure, reason: nil)
+    }
+}
+
 public enum RemoteControlClientSegmentObservation: Equatable, Sendable {
     case forward(RemoteControlClientEnvelope)
     case pending

@@ -3848,6 +3848,111 @@ final class ExecServerTests: XCTestCase {
         )
     }
 
+    func testRemoteControlWebSocketSessionRunnerSendsFramesAndClosesOnTerminalEventsLikeRust() async throws {
+        let clientID = RemoteControlClientID("client-1")
+        let streamID = RemoteControlStreamID("stream-1")
+        let transport = RemoteControlRecordingWebSocketTransport()
+        var runner = RemoteControlWebSocketSessionRunner(
+            transport: transport,
+            statusPublisher: RemoteControlStatusPublisherCore(snapshot: RemoteControlStatusSnapshot(
+                status: .connected,
+                installationID: "install-1",
+                environmentID: "env-1"
+            ))
+        )
+        var state = RemoteControlWebsocketState()
+        var tracker = RemoteControlClientTracker()
+        let queued = RemoteControlQueuedServerEnvelope(
+            event: .pong(status: .active),
+            clientID: clientID,
+            streamID: streamID
+        )
+
+        let queuedStep = try await runner.process(.queuedServerEvent(queued), state: &state, clientTracker: &tracker)
+        XCTAssertNil(queuedStep.end)
+        let sentFrameCount = await transport.sentFrameCount()
+        let sentFrames = await transport.sentFrames()
+        XCTAssertEqual(sentFrameCount, 1)
+        XCTAssertEqual(try remoteControlServerEnvelope(from: sentFrames[0]), RemoteControlServerEnvelope(
+            event: .pong(status: .active),
+            clientID: clientID,
+            streamID: streamID,
+            seqID: 1
+        ))
+
+        let pingStep = try await runner.process(.pingTick, state: &state, clientTracker: &tracker)
+        XCTAssertEqual(pingStep.frames, [.ping])
+        let sentFramesAfterPing = await transport.sentFrames()
+        XCTAssertEqual(sentFramesAfterPing.suffix(1), [.ping])
+
+        let disabledStep = try await runner.process(.disabled, state: &state, clientTracker: &tracker)
+        XCTAssertEqual(disabledStep.end, .disabled)
+        XCTAssertEqual(disabledStep.statusUpdates, [
+            RemoteControlStatusSnapshot(status: .disabled, installationID: "install-1", environmentID: nil)
+        ])
+        let closeCount = await transport.closeCount()
+        XCTAssertEqual(closeCount, 1)
+    }
+
+    func testRemoteControlWebSocketSessionRunnerReceivesAndMapsTransportFailuresLikeRust() async throws {
+        let clientID = RemoteControlClientID("client-1")
+        let streamID = RemoteControlStreamID("stream-1")
+        let initialize = remoteControlInitializeEnvelope(clientID: clientID, streamID: streamID, seqID: 0)
+        let transport = RemoteControlRecordingWebSocketTransport(incoming: [
+            .text(try remoteControlEnvelopeText(initialize))
+        ])
+        var runner = RemoteControlWebSocketSessionRunner(
+            transport: transport,
+            statusPublisher: RemoteControlStatusPublisherCore(snapshot: RemoteControlStatusSnapshot(
+                status: .connected,
+                installationID: "install-1",
+                environmentID: nil
+            ))
+        )
+        var state = RemoteControlWebsocketState()
+        var tracker = RemoteControlClientTracker()
+
+        let receiveStep = try await runner.receive(state: &state, clientTracker: &tracker, now: 10)
+        XCTAssertEqual(
+            receiveStep.trackerEffects,
+            [
+                .connectionOpened(
+                    connectionID: RemoteControlVirtualConnectionID(1),
+                    clientID: clientID,
+                    streamID: streamID
+                ),
+                .incomingMessage(
+                    connectionID: RemoteControlVirtualConnectionID(1),
+                    message: tryInitializeMessage()
+                )
+            ]
+        )
+
+        await transport.setReceiveError("bad frame")
+        let receiveFailure = try await runner.receive(state: &state, clientTracker: &tracker, now: 11)
+        XCTAssertEqual(receiveFailure.end, .reconnect("failed to read from websocket: bad frame"))
+        let closeCount = await transport.closeCount()
+        XCTAssertEqual(closeCount, 1)
+
+        let failingSendTransport = RemoteControlRecordingWebSocketTransport(sendError: "send failed")
+        var failingRunner = RemoteControlWebSocketSessionRunner(
+            transport: failingSendTransport,
+            statusPublisher: RemoteControlStatusPublisherCore(snapshot: RemoteControlStatusSnapshot(
+                status: .connected,
+                installationID: "install-1",
+                environmentID: nil
+            ))
+        )
+        let sendFailure = try await failingRunner.process(
+            .queuedServerEvent(RemoteControlQueuedServerEnvelope(event: .pong(status: .active), clientID: clientID, streamID: streamID)),
+            state: &state,
+            clientTracker: &tracker
+        )
+        XCTAssertEqual(sendFailure.end, .reconnect("send failed"))
+        let failingSendCloseCount = await failingSendTransport.closeCount()
+        XCTAssertEqual(failingSendCloseCount, 1)
+    }
+
     func testRemoteControlWebsocketStateSequencesSplitsAndBuffersLikeRust() throws {
         let clientID = RemoteControlClientID("client-1")
         let streamID = RemoteControlStreamID("stream-1")
@@ -5028,6 +5133,61 @@ final class ExecServerTests: XCTestCase {
 
         func reloadCount() -> Int {
             reloads
+        }
+    }
+
+    private actor RemoteControlRecordingWebSocketTransport: RemoteControlWebSocketTransport {
+        private var incoming: [RemoteControlWebsocketIncomingMessage]
+        private var receiveError: String?
+        private let sendError: String?
+        private var frames: [RemoteControlWebsocketWriterFrame] = []
+        private var closes = 0
+
+        init(
+            incoming: [RemoteControlWebsocketIncomingMessage] = [],
+            receiveError: String? = nil,
+            sendError: String? = nil
+        ) {
+            self.incoming = incoming
+            self.receiveError = receiveError
+            self.sendError = sendError
+        }
+
+        func receiveRemoteControlMessage() throws -> RemoteControlWebsocketIncomingMessage {
+            if let receiveError {
+                throw TestError(receiveError)
+            }
+            guard !incoming.isEmpty else {
+                return .streamEnded
+            }
+            return incoming.removeFirst()
+        }
+
+        func sendRemoteControlFrame(_ frame: RemoteControlWebsocketWriterFrame) throws {
+            if let sendError {
+                throw TestError(sendError)
+            }
+            frames.append(frame)
+        }
+
+        func closeRemoteControlWebSocket() {
+            closes += 1
+        }
+
+        func setReceiveError(_ message: String?) {
+            receiveError = message
+        }
+
+        func sentFrames() -> [RemoteControlWebsocketWriterFrame] {
+            frames
+        }
+
+        func sentFrameCount() -> Int {
+            frames.count
+        }
+
+        func closeCount() -> Int {
+            closes
         }
     }
 
