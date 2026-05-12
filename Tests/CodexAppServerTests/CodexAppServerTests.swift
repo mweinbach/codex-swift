@@ -3352,6 +3352,69 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(turns[0]["status"] as? String, "interrupted")
     }
 
+    func testTurnInterruptRuntimeSubmitterSubmitsInterruptForActiveTurnLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let capture = AppServerCoreOpCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            coreOpSubmitter: capture.submit
+        )
+        let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+        let turnMessages = try decodeMessages(processor.processLine(Data(#"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Interrupt me"}]}}"#.utf8)))
+        let turnResult = try XCTUnwrap(turnMessages[0]["result"] as? [String: Any])
+        let turn = try XCTUnwrap(turnResult["turn"] as? [String: Any])
+        let turnID = try XCTUnwrap(turn["id"] as? String)
+
+        let messages = try decodeMessages(processor.processLine(Data(#"{"id":3,"method":"turn/interrupt","params":{"threadId":"\#(threadID)","turnId":"\#(turnID)"}}"#.utf8)))
+
+        let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
+        XCTAssertTrue(result.isEmpty)
+        let submissions = capture.submissions
+        XCTAssertEqual(submissions.map(\.requestID), [.integer(2), .integer(3)])
+        XCTAssertEqual(submissions.map(\.threadID), [threadID, threadID])
+        guard case .interrupt = submissions[1].op else {
+            XCTFail("expected runtime interrupt to submit Op.interrupt")
+            return
+        }
+        XCTAssertEqual(messages[1]["method"] as? String, "turn/completed")
+        let completedParams = try XCTUnwrap(messages[1]["params"] as? [String: Any])
+        let completedTurn = try XCTUnwrap(completedParams["turn"] as? [String: Any])
+        XCTAssertEqual(completedTurn["id"] as? String, turnID)
+        XCTAssertEqual(completedTurn["status"] as? String, "interrupted")
+    }
+
+    func testTurnInterruptRuntimeSubmitterRejectsMismatchedOrMissingActiveTurnLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let capture = AppServerCoreOpCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            coreOpSubmitter: capture.submit
+        )
+        let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let noActive = try decode(processor.processLine(Data(#"{"id":2,"method":"turn/interrupt","params":{"threadId":"\#(threadID)","turnId":"turn-does-not-exist"}}"#.utf8)))
+        let noActiveError = try XCTUnwrap(noActive["error"] as? [String: Any])
+        XCTAssertEqual(noActiveError["code"] as? Int, -32600)
+        XCTAssertEqual(noActiveError["message"] as? String, "no active turn to interrupt")
+
+        let turnMessages = try decodeMessages(processor.processLine(Data(#"{"id":3,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Interrupt me"}]}}"#.utf8)))
+        let turnResult = try XCTUnwrap(turnMessages[0]["result"] as? [String: Any])
+        let turn = try XCTUnwrap(turnResult["turn"] as? [String: Any])
+        let turnID = try XCTUnwrap(turn["id"] as? String)
+
+        let mismatch = try decode(processor.processLine(Data(#"{"id":4,"method":"turn/interrupt","params":{"threadId":"\#(threadID)","turnId":"wrong-turn"}}"#.utf8)))
+        let mismatchError = try XCTUnwrap(mismatch["error"] as? [String: Any])
+        XCTAssertEqual(mismatchError["code"] as? Int, -32600)
+        XCTAssertEqual(mismatchError["message"] as? String, "expected active turn id wrong-turn but found \(turnID)")
+        XCTAssertEqual(capture.submissions.map(\.requestID), [.integer(3)])
+    }
+
     func testThreadStatusChangedCanBeOptedOut() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(

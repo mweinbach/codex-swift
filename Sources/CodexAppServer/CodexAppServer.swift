@@ -3042,10 +3042,29 @@ public enum CodexAppServer {
 
     fileprivate static func turnInterruptResult(
         params: [String: Any]?,
-        configuration: CodexAppServerConfiguration
+        configuration: CodexAppServerConfiguration,
+        activeTurnID: String? = nil
     ) throws -> [String: Any] {
+        let interrupt = try validatedTurnInterrupt(
+            params: params,
+            configuration: configuration,
+            activeTurnID: activeTurnID
+        )
+        let recorder = try RolloutRecorder.resume(path: URL(fileURLWithPath: interrupt.rolloutPath))
+        try recorder.recordItems([
+            .eventMsg(.turnAborted(TurnAbortedEvent(reason: .interrupted)))
+        ])
+        try recorder.shutdown()
+        return [:]
+    }
+
+    fileprivate static func validatedTurnInterrupt(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration,
+        activeTurnID: String? = nil
+    ) throws -> (threadID: String, rolloutPath: String, turnID: String, isStartupInterrupt: Bool) {
         let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
-        _ = try rustRequiredStringParam(params?["turnId"], field: "turnId")
+        let turnID = try rustRequiredStringParam(params?["turnId"], field: "turnId")
         let conversationID: ConversationId
         do {
             conversationID = try ConversationId(string: threadID)
@@ -3053,12 +3072,16 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("invalid thread id: \(error)")
         }
         let rolloutPath = try rolloutPathForConversation(conversationID, configuration: configuration)
-        let recorder = try RolloutRecorder.resume(path: URL(fileURLWithPath: rolloutPath))
-        try recorder.recordItems([
-            .eventMsg(.turnAborted(TurnAbortedEvent(reason: .interrupted)))
-        ])
-        try recorder.shutdown()
-        return [:]
+        guard !turnID.isEmpty else {
+            return (threadID, rolloutPath, turnID, true)
+        }
+        guard let activeTurnID else {
+            throw AppServerError.invalidRequest("no active turn to interrupt")
+        }
+        guard activeTurnID == turnID else {
+            throw AppServerError.invalidRequest("expected active turn id \(turnID) but found \(activeTurnID)")
+        }
+        return (threadID, rolloutPath, turnID, false)
     }
 
     fileprivate static func reviewStartResult(
@@ -25818,12 +25841,34 @@ final class CodexAppServerMessageProcessor {
                         )
                     }
                 case "turn/interrupt":
+                    let threadID = CodexAppServer.stringParam(params?["threadId"])
+                    let turnID = CodexAppServer.stringParam(params?["turnId"])
+                    let interrupt = try CodexAppServer.validatedTurnInterrupt(
+                        params: params,
+                        configuration: configuration,
+                        activeTurnID: threadID.flatMap { activeTurnIDs[$0] }
+                    )
+                    if coreOpSubmitter != nil {
+                        _ = try submitCoreOp(
+                            requestID: id,
+                            threadID: interrupt.threadID,
+                            op: .interrupt,
+                            failureMessage: interrupt.isStartupInterrupt
+                                ? "failed to interrupt startup"
+                                : "failed to interrupt turn"
+                        )
+                    } else {
+                        _ = try CodexAppServer.turnInterruptResult(
+                            params: params,
+                            configuration: configuration,
+                            activeTurnID: threadID.flatMap { activeTurnIDs[$0] }
+                        )
+                    }
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.turnInterruptResult(params: params, configuration: configuration)
+                        result: [:]
                     )
-                    if let threadID = params?["threadId"] as? String,
-                       let turnID = params?["turnId"] as? String {
+                    if let threadID, let turnID, !interrupt.isStartupInterrupt {
                         activeTurnIDs.removeValue(forKey: threadID)
                         notifications.append(CodexAppServer.turnCompletedNotification(
                             threadID: threadID,
