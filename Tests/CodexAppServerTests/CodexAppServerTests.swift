@@ -3528,6 +3528,86 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(coreOpCapture.submissions.count, 2)
     }
 
+    func testRuntimeDynamicToolCallResponseEmitsCompletedItemLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "fallback-turn",
+            event: .dynamicToolCallResponse(DynamicToolCallResponseEvent(
+                callID: "dyn-1",
+                turnID: "runtime-turn",
+                completedAtMilliseconds: 456,
+                namespace: "codex_app",
+                tool: "lookup",
+                arguments: .object(["topic": .string("protocol")]),
+                contentItems: [
+                    .text("done"),
+                    .imageURL("file:///tmp/dynamic.png")
+                ],
+                success: true,
+                duration: ProtocolDuration(secs: 1, nanos: 234_000_000)
+            ))
+        )
+
+        let messages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(messages[0]["method"] as? String, "item/completed")
+        let params = try XCTUnwrap(messages[0]["params"] as? [String: Any])
+        XCTAssertEqual(params["threadId"] as? String, "thread-1")
+        XCTAssertEqual(params["turnId"] as? String, "runtime-turn")
+        XCTAssertEqual(params["completedAtMs"] as? Int, 456)
+        let item = try XCTUnwrap(params["item"] as? [String: Any])
+        XCTAssertEqual(item["type"] as? String, "dynamicToolCall")
+        XCTAssertEqual(item["id"] as? String, "dyn-1")
+        XCTAssertEqual(item["namespace"] as? String, "codex_app")
+        XCTAssertEqual(item["tool"] as? String, "lookup")
+        XCTAssertEqual((item["arguments"] as? [String: Any])?["topic"] as? String, "protocol")
+        XCTAssertEqual(item["status"] as? String, "completed")
+        XCTAssertEqual(item["success"] as? Bool, true)
+        XCTAssertEqual(item["durationMs"] as? Int, 1_234)
+        let contentItems = try XCTUnwrap(item["contentItems"] as? [[String: Any]])
+        XCTAssertEqual(contentItems[0]["type"] as? String, "inputText")
+        XCTAssertEqual(contentItems[0]["text"] as? String, "done")
+        XCTAssertEqual(contentItems[1]["type"] as? String, "inputImage")
+        XCTAssertEqual(contentItems[1]["imageUrl"] as? String, "file:///tmp/dynamic.png")
+    }
+
+    func testRuntimeFailedDynamicToolCallResponseEmitsFailedStatusLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "fallback-turn",
+            event: .dynamicToolCallResponse(DynamicToolCallResponseEvent(
+                callID: "dyn-1",
+                turnID: "runtime-turn",
+                completedAtMilliseconds: 456,
+                tool: "lookup",
+                arguments: .object([:]),
+                contentItems: [.text("failed")],
+                success: false,
+                duration: ProtocolDuration(secs: 0, nanos: 1_000_000)
+            ))
+        )
+
+        let messages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        let params = try XCTUnwrap(messages[0]["params"] as? [String: Any])
+        let item = try XCTUnwrap(params["item"] as? [String: Any])
+        XCTAssertEqual(item["status"] as? String, "failed")
+        XCTAssertEqual(item["success"] as? Bool, false)
+        XCTAssertEqual(item["durationMs"] as? Int, 1)
+    }
+
     func testRuntimeItemLifecycleSerializesUserFileAndMcpItems() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()

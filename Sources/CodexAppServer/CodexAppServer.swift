@@ -14177,6 +14177,21 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func dynamicToolCallCompletedNotification(
+        threadID: String,
+        event: DynamicToolCallResponseEvent
+    ) -> [String: Any] {
+        [
+            "method": "item/completed",
+            "params": [
+                "threadId": threadID,
+                "turnId": event.turnID,
+                "item": dynamicToolCallItemObject(event),
+                "completedAtMs": event.completedAtMilliseconds
+            ]
+        ]
+    }
+
     fileprivate static func rawResponseItemNotifications(
         threadID: String,
         turnID: String,
@@ -14314,6 +14329,35 @@ public enum CodexAppServer {
             "success": NSNull(),
             "durationMs": NSNull()
         ]
+    }
+
+    private static func dynamicToolCallItemObject(_ item: DynamicToolCallResponseEvent) -> [String: Any] {
+        [
+            "type": "dynamicToolCall",
+            "id": item.callID,
+            "namespace": item.namespace as Any? ?? NSNull(),
+            "tool": item.tool,
+            "arguments": jsonObject(from: item.arguments),
+            "status": item.success ? "completed" : "failed",
+            "contentItems": item.contentItems.map(dynamicToolCallContentItemObject),
+            "success": item.success,
+            "durationMs": durationMilliseconds(item.duration)
+        ]
+    }
+
+    private static func dynamicToolCallContentItemObject(_ item: DynamicToolCallOutputContentItem) -> [String: Any] {
+        switch item {
+        case let .text(text):
+            return [
+                "type": "inputText",
+                "text": text
+            ]
+        case let .imageURL(imageURL):
+            return [
+                "type": "inputImage",
+                "imageUrl": imageURL
+            ]
+        }
     }
 
     private static func userInputObject(_ input: UserInput) -> [String: Any] {
@@ -15049,6 +15093,8 @@ public enum CodexAppServer {
             return itemStartedNotification(threadID: threadID, turnID: turnID, event: event)
         case let .itemCompleted(event):
             return itemCompletedNotification(threadID: threadID, turnID: turnID, event: event)
+        case let .dynamicToolCallResponse(event):
+            return dynamicToolCallCompletedNotification(threadID: threadID, event: event)
         default:
             return nil
         }
