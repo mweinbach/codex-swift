@@ -1932,7 +1932,13 @@ public final class PolicyParser {
                 throw ConfigOverrideError.invalidLiteral(expression)
             }
             let argument = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
-            guard case let .array(extensionItems) = argument else {
+            let extensionItems: [ConfigValue]
+            switch argument {
+            case let .array(items):
+                extensionItems = items
+            case let .table(items):
+                extensionItems = items.keys.map(ConfigValue.string)
+            default:
                 throw ConfigOverrideError.invalidLiteral(expression)
             }
             items.append(contentsOf: extensionItems)

@@ -853,7 +853,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/execpolicy/src/parser.rs` Starlark tuple literals
   - Added Swift execpolicy parser support for parenthesized Starlark tuple literals as array-equivalent policy values, covering tuple-shaped constants, loop iterables, destructured loop items, positional builtin arguments, examples, host executable paths, and nested pattern alternatives.
 - `codex-rs/execpolicy/src/parser.rs` Starlark list mutation statements
-  - Added Swift execpolicy parser support for named list constant `.append(...)` and `.extend(...)` statements, covering policy data built incrementally before loops, generated prefix rules, examples, and host executable path lists.
+  - Added Swift execpolicy parser support for named list constant `.append(...)` and `.extend(...)` statements, covering policy data built incrementally before loops, generated prefix rules, examples, and host executable path lists. List `.extend(...)` now also accepts dictionary values and appends Rust Starlark dictionary keys.
 - `codex-rs/execpolicy/src/parser.rs` Starlark collection mutation methods
   - Added Swift execpolicy parser support for named list constant `.insert(index, value)` statements with Starlark/Python-style clamped insertion indexes, plus named dictionary constant `.update({...})` statements for supported table values used by generated rules, network hosts, and host executable paths. Assigning the result of list `.append(...)`, `.extend(...)`, and `.insert(...)` now mutates the source collection and produces Rust Starlark's `None` return value in top-level and helper-function local scopes.
 - `codex-rs/execpolicy/src/parser.rs` Starlark dict update argument forms

@@ -1774,6 +1774,8 @@ final class ExecPolicyTests: XCTestCase {
         COMMANDS = []
         COMMANDS.append(("git", "status", "prompt"))
         COMMANDS.extend([("jj", "log", "allow")])
+        MAPPING_KEYS = []
+        MAPPING_KEYS.extend({"hg": True})
 
         GIT_PATHS = []
         GIT_PATHS.append("/usr/bin/git")
@@ -1791,6 +1793,7 @@ final class ExecPolicyTests: XCTestCase {
                 justification = "list mutation " + tool,
             )
 
+        prefix_rule([MAPPING_KEYS[0], "status"], "forbidden", justification = "list mutation " + MAPPING_KEYS[0])
         host_executable("git", GIT_PATHS)
         """)
 
@@ -1806,6 +1809,13 @@ final class ExecPolicyTests: XCTestCase {
                 pattern: PrefixPattern(first: "jj", rest: [.single("log")]),
                 decision: .allow,
                 justification: "list mutation jj"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "hg"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "hg", rest: [.single("status")]),
+                decision: .forbidden,
+                justification: "list mutation hg"
             )
         ])
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git", "/opt/homebrew/bin/git"]])
@@ -1874,6 +1884,7 @@ final class ExecPolicyTests: XCTestCase {
         COMMANDS = ["status"]
         APPENDED = COMMANDS.append("diff")
         EXTENDED = COMMANDS.extend(("log",))
+        EXTENDED_KEYS = COMMANDS.extend({"branch": True})
         INSERTED = COMMANDS.insert(0, "show")
         REMOVED = COMMANDS.remove("diff")
         CLEARED = ["temporary"].clear()
@@ -1885,8 +1896,8 @@ final class ExecPolicyTests: XCTestCase {
         DICT_CLEARED = SCRATCH.clear()
         TEMP_UPDATED = {"scratch": "value"}.update({"extra": "value"})
 
-        if APPENDED == None and EXTENDED == None and INSERTED == None and REMOVED == None and TEMP_APPEND == None:
-            prefix_rule([SETTINGS["tool"], SETTINGS["command"]], "allow", justification = repr(UPDATED) + "/" + repr(CLEARED))
+        if APPENDED == None and EXTENDED == None and EXTENDED_KEYS == None and INSERTED == None and REMOVED == None and TEMP_APPEND == None:
+            prefix_rule([SETTINGS["tool"], SETTINGS["command"], COMMANDS[-1]], "allow", justification = repr(UPDATED) + "/" + repr(CLEARED))
 
         if UPDATED == None and DICT_CLEARED == None and TEMP_UPDATED == None and len(SCRATCH) == 0:
             network_rule("mutation-none.example.com", "https", "allow")
@@ -1908,7 +1919,7 @@ final class ExecPolicyTests: XCTestCase {
 
         XCTAssertEqual(policy.rules(for: "git"), [
             PrefixRule(
-                pattern: PrefixPattern(first: "git", rest: [.single("show")]),
+                pattern: PrefixPattern(first: "git", rest: [.single("show"), .single("branch")]),
                 decision: .allow,
                 justification: "None/None"
             ),
