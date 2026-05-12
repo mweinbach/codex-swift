@@ -2550,6 +2550,42 @@ final class ExecServerTests: XCTestCase {
         }
     }
 
+    func testRemoteControlStartStateSetEnabledUsesRustEffectiveStateGate() throws {
+        var missingStateDB = try RemoteControlStartState(
+            remoteControlURL: "https://chatgpt.com/backend-api",
+            installationID: "install-123",
+            requestedEnabled: false,
+            stateDatabaseAvailable: false
+        )
+        XCTAssertNil(try missingStateDB.setRequestedEnabled(true))
+        XCTAssertTrue(missingStateDB.requestedEnabled)
+        XCTAssertFalse(missingStateDB.enabled)
+        XCTAssertNil(missingStateDB.target)
+        XCTAssertEqual(missingStateDB.statusSnapshot.status, .disabled)
+
+        var withStateDB = try RemoteControlStartState(
+            remoteControlURL: "https://chatgpt.com/backend-api",
+            installationID: "install-123",
+            requestedEnabled: false,
+            stateDatabaseAvailable: true
+        )
+        XCTAssertEqual(try withStateDB.setRequestedEnabled(true), RemoteControlStatusSnapshot(
+            status: .connecting,
+            installationID: "install-123",
+            environmentID: nil
+        ))
+        XCTAssertEqual(withStateDB.target, RemoteControlTarget(
+            websocketURL: "wss://chatgpt.com/backend-api/wham/remote/control/server",
+            enrollURL: "https://chatgpt.com/backend-api/wham/remote/control/server/enroll"
+        ))
+        XCTAssertNil(try withStateDB.setRequestedEnabled(true))
+        XCTAssertEqual(try withStateDB.setRequestedEnabled(false), RemoteControlStatusSnapshot(
+            status: .disabled,
+            installationID: "install-123",
+            environmentID: nil
+        ))
+    }
+
     func testRemoteControlStatusPublisherCoreSendsOnlyRustStatusChanges() {
         var publisher = RemoteControlStatusPublisherCore(snapshot: RemoteControlStatusSnapshot(
             status: .connecting,

@@ -123,6 +123,7 @@ public struct RemoteControlStatusPublisherCore: Equatable, Sendable {
 }
 
 public struct RemoteControlStartState: Equatable, Sendable {
+    public var remoteControlURL: String
     public var requestedEnabled: Bool
     public var stateDatabaseAvailable: Bool
     public var target: RemoteControlTarget?
@@ -143,6 +144,7 @@ public struct RemoteControlStartState: Equatable, Sendable {
         stateDatabaseAvailable: Bool
     ) throws {
         let enabled = requestedEnabled && stateDatabaseAvailable
+        self.remoteControlURL = remoteControlURL
         self.requestedEnabled = requestedEnabled
         self.stateDatabaseAvailable = stateDatabaseAvailable
         target = enabled ? try RemoteControlURLNormalizer.normalize(remoteControlURL) : nil
@@ -151,6 +153,16 @@ public struct RemoteControlStartState: Equatable, Sendable {
             installationID: installationID,
             environmentID: nil
         ))
+    }
+
+    @discardableResult
+    public mutating func setRequestedEnabled(_ requestedEnabled: Bool) throws -> RemoteControlStatusSnapshot? {
+        let enabled = requestedEnabled && stateDatabaseAvailable
+        self.requestedEnabled = requestedEnabled
+        if enabled, target == nil {
+            target = try RemoteControlURLNormalizer.normalize(remoteControlURL)
+        }
+        return statusPublisher.publishStatus(enabled ? .connecting : .disabled)
     }
 }
 

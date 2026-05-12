@@ -22990,8 +22990,9 @@ final class CodexAppServerMessageProcessor {
         if let environmentID = snapshot.environmentID {
             lastRemoteControlEnvironmentID = environmentID
         }
+        let effectivelyEnabled = enabled && configuration.stateStore != nil
         let nextSnapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot
-        if enabled {
+        if effectivelyEnabled {
             nextSnapshot = CodexAppServerConfiguration.RemoteControlStatusSnapshot(
                 status: .connecting,
                 installationID: snapshot.installationID,

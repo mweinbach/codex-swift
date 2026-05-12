@@ -16023,8 +16023,10 @@ final class CodexAppServerTests: XCTestCase {
 
     func testExperimentalFeatureEnablementSetBroadcastsRemoteControlStatusLikeRust() throws {
         let temp = try TemporaryDirectory()
+        let stateStore = try createAppServerStateStore(codexHome: temp.url)
         let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(
             codexHome: temp.url,
+            stateStore: stateStore,
             remoteControlStatusSnapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot(
                 status: .connected,
                 installationID: "install-123",
@@ -16058,6 +16060,29 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(enabledParams["status"] as? String, "connecting")
         XCTAssertEqual(enabledParams["installationId"] as? String, "install-123")
         XCTAssertEqual(enabledParams["environmentId"] as? String, "env-456")
+    }
+
+    func testExperimentalFeatureEnablementSetRemoteControlStaysDisabledWithoutStateDBLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            remoteControlStatusSnapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot(
+                status: .disabled,
+                installationID: "install-123",
+                environmentID: nil
+            )
+        ))
+        _ = try decodeMessages(processor.processLine(Data(
+            #"{"id":0,"method":"initialize","params":{"clientInfo":{"name":"test","version":"0"}}}"#.utf8
+        )))
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"experimentalFeature/enablement/set","params":{"enablement":{"remote_control":true}}}"#.utf8
+        )))
+
+        XCTAssertEqual(messages.count, 1)
+        XCTAssertEqual(messages[0]["id"] as? Int, 1)
+        XCTAssertNotNil(messages[0]["result"] as? [String: Any])
     }
 
     func testExperimentalFeatureEnablementSetRemoteControlStatusRespectsOptOutLikeRust() throws {
