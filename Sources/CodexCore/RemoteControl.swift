@@ -1078,11 +1078,16 @@ public struct RemoteControlClientTracker: Equatable, Sendable {
 }
 
 public struct RemoteControlVirtualTransportCore: Equatable, Sendable {
+    private struct OpenConnection: Equatable, Sendable {
+        var clientID: RemoteControlClientID
+        var streamID: RemoteControlStreamID
+    }
+
     private var clientTracker: RemoteControlClientTracker
-    private var openConnectionIDs: Set<RemoteControlVirtualConnectionID> = []
+    private var openConnections: [RemoteControlVirtualConnectionID: OpenConnection] = [:]
 
     public var activeConnectionCount: Int {
-        openConnectionIDs.count
+        openConnections.count
     }
 
     public init(clientTracker: RemoteControlClientTracker = RemoteControlClientTracker()) {
@@ -1100,16 +1105,20 @@ public struct RemoteControlVirtualTransportCore: Equatable, Sendable {
         connectionID: RemoteControlVirtualConnectionID,
         message: ExecServerJSONRPCMessage
     ) -> RemoteControlQueuedServerEnvelope? {
-        guard openConnectionIDs.contains(connectionID) else {
+        guard let connection = openConnections[connectionID] else {
             return nil
         }
-        return clientTracker.enqueueOutgoingMessage(connectionID: connectionID, message: message)
+        return RemoteControlQueuedServerEnvelope(
+            event: .serverMessage(message: message),
+            clientID: connection.clientID,
+            streamID: connection.streamID
+        )
     }
 
     public mutating func disconnect(
         connectionID: RemoteControlVirtualConnectionID
     ) -> RemoteControlVirtualTransportStep {
-        guard openConnectionIDs.contains(connectionID) else {
+        guard openConnections[connectionID] != nil else {
             return RemoteControlVirtualTransportStep()
         }
         return apply(clientTracker.closeConnection(connectionID: connectionID))
@@ -1121,6 +1130,12 @@ public struct RemoteControlVirtualTransportCore: Equatable, Sendable {
         apply(clientTracker.closeExpiredClients(now: now))
     }
 
+    public mutating func applyClientTrackerEffects(
+        _ effects: [RemoteControlClientTrackerEffect]
+    ) -> RemoteControlVirtualTransportStep {
+        apply(effects)
+    }
+
     private mutating func apply(
         _ effects: [RemoteControlClientTrackerEffect]
     ) -> RemoteControlVirtualTransportStep {
@@ -1128,7 +1143,7 @@ public struct RemoteControlVirtualTransportCore: Equatable, Sendable {
         for effect in effects {
             switch effect {
             case let .connectionOpened(connectionID, clientID, streamID):
-                openConnectionIDs.insert(connectionID)
+                openConnections[connectionID] = OpenConnection(clientID: clientID, streamID: streamID)
                 step.transportEvents.append(.connectionOpened(
                     connectionID: connectionID,
                     clientID: clientID,
@@ -1136,7 +1151,7 @@ public struct RemoteControlVirtualTransportCore: Equatable, Sendable {
                 ))
 
             case let .incomingMessage(connectionID, message):
-                guard openConnectionIDs.contains(connectionID) else {
+                guard openConnections[connectionID] != nil else {
                     continue
                 }
                 step.transportEvents.append(.incomingMessage(
@@ -1145,7 +1160,7 @@ public struct RemoteControlVirtualTransportCore: Equatable, Sendable {
                 ))
 
             case let .connectionClosed(connectionID):
-                guard openConnectionIDs.remove(connectionID) != nil else {
+                guard openConnections.removeValue(forKey: connectionID) != nil else {
                     continue
                 }
                 step.transportEvents.append(.connectionClosed(connectionID: connectionID))

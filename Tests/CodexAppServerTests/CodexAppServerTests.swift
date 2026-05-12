@@ -261,6 +261,90 @@ final class CodexAppServerTests: XCTestCase {
         ])
     }
 
+    func testRemoteControlAppServerWebSocketSessionRoutesFramesThroughAppServerLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let clientID = RemoteControlClientID("client-1")
+        let streamID = RemoteControlStreamID("stream-1")
+        let initialize = ExecServerJSONRPCMessage.request(ExecServerJSONRPCRequest(
+            id: .integer(1),
+            method: "initialize",
+            params: .object([
+                "clientInfo": .object([
+                    "name": .string("test"),
+                    "version": .string("0")
+                ]),
+                "capabilities": .object([
+                    "experimentalApi": .bool(true)
+                ])
+            ])
+        ))
+        let transport = RemoteControlAppServerRecordingWebSocketTransport(incoming: [
+            .text(try remoteControlEnvelopeText(RemoteControlClientEnvelope(
+                event: .clientMessage(message: initialize),
+                clientID: clientID,
+                streamID: streamID,
+                seqID: 1,
+                cursor: nil
+            ))),
+            .text(try remoteControlEnvelopeText(RemoteControlClientEnvelope(
+                event: .ping,
+                clientID: clientID,
+                streamID: streamID,
+                seqID: nil,
+                cursor: nil
+            )))
+        ])
+        var session = RemoteControlAppServerWebSocketSession(
+            transport: transport,
+            statusPublisher: RemoteControlStatusPublisherCore(snapshot: RemoteControlStatusSnapshot(
+                status: .connected,
+                installationID: "install-1",
+                environmentID: "env-1"
+            )),
+            configuration: testConfiguration(codexHome: temp.url)
+        )
+
+        let initializeStep = try await session.receive(now: 10)
+        XCTAssertEqual(initializeStep.connectionStep.trackerEffects.count, 2)
+        XCTAssertEqual(initializeStep.appServerStep.transportStep.transportEvents.count, 2)
+        XCTAssertEqual(initializeStep.writerSteps.count, 1)
+        let initializeFrames = await transport.sentFrames()
+        XCTAssertEqual(initializeFrames.count, 1)
+        let initializeEnvelope = try remoteControlServerEnvelope(from: try XCTUnwrap(initializeFrames.first))
+        XCTAssertEqual(initializeEnvelope.clientID, clientID)
+        XCTAssertEqual(initializeEnvelope.streamID, streamID)
+        XCTAssertEqual(initializeEnvelope.seqID, 1)
+        guard case let .serverMessage(.response(initializeResponse)) = initializeEnvelope.event,
+              case let .object(result) = initializeResponse.result
+        else {
+            return XCTFail("initialize response was not forwarded as a remote-control server event")
+        }
+        XCTAssertEqual(initializeResponse.id, .integer(1))
+        XCTAssertEqual(result["codexHome"], .string(temp.url.standardizedFileURL.path))
+        XCTAssertEqual(result["platformFamily"], .string("unix"))
+
+        let pingStep = try await session.receive(now: 11)
+        XCTAssertEqual(pingStep.appServerStep.transportStep.transportEvents, [])
+        XCTAssertEqual(pingStep.appServerStep.serverEvents, [
+            RemoteControlQueuedServerEnvelope(
+                event: .pong(status: .active),
+                clientID: clientID,
+                streamID: streamID
+            )
+        ])
+        let pingFrames = await transport.sentFrames()
+        XCTAssertEqual(pingFrames.count, 2)
+        XCTAssertEqual(
+            try remoteControlServerEnvelope(from: try XCTUnwrap(pingFrames.last)),
+            RemoteControlServerEnvelope(
+                event: .pong(status: .active),
+                clientID: clientID,
+                streamID: streamID,
+                seqID: 2
+            )
+        )
+    }
+
     func testRemoteControlAppServerBridgeDropsUnknownAndClosesConnectionLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let clientID = RemoteControlClientID("client-1")
@@ -24908,6 +24992,19 @@ final class CodexAppServerTests: XCTestCase {
         throw AppServerTestTimeout()
     }
 
+    private func remoteControlEnvelopeText(_ envelope: RemoteControlClientEnvelope) throws -> String {
+        String(decoding: try JSONEncoder().encode(envelope), as: UTF8.self)
+    }
+
+    private func remoteControlServerEnvelope(
+        from frame: RemoteControlWebsocketWriterFrame
+    ) throws -> RemoteControlServerEnvelope {
+        guard case let .text(text) = frame else {
+            throw AppServerTestFailure("expected websocket text frame")
+        }
+        return try JSONDecoder().decode(RemoteControlServerEnvelope.self, from: Data(text.utf8))
+    }
+
     private func receiveWebSocketText(_ webSocket: URLSessionWebSocketTask) async throws -> String {
         switch try await webSocket.receive() {
         case let .string(text):
@@ -26156,6 +26253,61 @@ private actor AppServerMcpOAuthLoginCapture {
 }
 
 private struct AppServerTestTimeout: Error {}
+
+private struct AppServerTestFailure: Error, CustomStringConvertible, Equatable, Sendable {
+    var description: String
+
+    init(_ description: String) {
+        self.description = description
+    }
+}
+
+private actor RemoteControlAppServerRecordingWebSocketTransport: RemoteControlWebSocketTransport {
+    private var incoming: [RemoteControlWebsocketIncomingMessage]
+    private var receiveError: String?
+    private let sendError: String?
+    private var frames: [RemoteControlWebsocketWriterFrame] = []
+    private var closes = 0
+
+    init(
+        incoming: [RemoteControlWebsocketIncomingMessage] = [],
+        receiveError: String? = nil,
+        sendError: String? = nil
+    ) {
+        self.incoming = incoming
+        self.receiveError = receiveError
+        self.sendError = sendError
+    }
+
+    func receiveRemoteControlMessage() throws -> RemoteControlWebsocketIncomingMessage {
+        if let receiveError {
+            throw AppServerTestFailure(receiveError)
+        }
+        guard !incoming.isEmpty else {
+            return .streamEnded
+        }
+        return incoming.removeFirst()
+    }
+
+    func sendRemoteControlFrame(_ frame: RemoteControlWebsocketWriterFrame) throws {
+        if let sendError {
+            throw AppServerTestFailure(sendError)
+        }
+        frames.append(frame)
+    }
+
+    func closeRemoteControlWebSocket() {
+        closes += 1
+    }
+
+    func sentFrames() -> [RemoteControlWebsocketWriterFrame] {
+        frames
+    }
+
+    func closeCount() -> Int {
+        closes
+    }
+}
 
 private actor AppServerDeviceCodeProbe {
     enum Scenario {

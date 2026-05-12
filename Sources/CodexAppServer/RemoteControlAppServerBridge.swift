@@ -83,6 +83,12 @@ struct RemoteControlAppServerVirtualLoop {
         await apply(transport.closeExpiredClients(now: now))
     }
 
+    mutating func handleClientTrackerEffects(
+        _ effects: [RemoteControlClientTrackerEffect]
+    ) async -> RemoteControlAppServerVirtualLoopStep {
+        await apply(transport.applyClientTrackerEffects(effects))
+    }
+
     mutating func drainPendingNotifications() async -> RemoteControlAppServerVirtualLoopStep {
         let bridgeStep = await bridge.drainPendingNotifications()
         return RemoteControlAppServerVirtualLoopStep(
@@ -112,6 +118,123 @@ struct RemoteControlAppServerVirtualLoop {
             )
         }
     }
+}
+
+struct RemoteControlAppServerWebSocketSessionStep: Equatable, Sendable {
+    var connectionStep: RemoteControlWebsocketConnectionStep
+    var appServerStep: RemoteControlAppServerVirtualLoopStep
+    var writerSteps: [RemoteControlWebsocketConnectionStep]
+
+    init(
+        connectionStep: RemoteControlWebsocketConnectionStep = RemoteControlWebsocketConnectionStep(),
+        appServerStep: RemoteControlAppServerVirtualLoopStep = RemoteControlAppServerVirtualLoopStep(),
+        writerSteps: [RemoteControlWebsocketConnectionStep] = []
+    ) {
+        self.connectionStep = connectionStep
+        self.appServerStep = appServerStep
+        self.writerSteps = writerSteps
+    }
+}
+
+struct RemoteControlAppServerWebSocketSession<Transport: RemoteControlWebSocketTransport> {
+    private var runner: RemoteControlWebSocketSessionRunner<Transport>
+    private var state = RemoteControlWebsocketState()
+    private var clientTracker = RemoteControlClientTracker()
+    private var appServerLoop: RemoteControlAppServerVirtualLoop
+
+    init(
+        transport: Transport,
+        statusPublisher: RemoteControlStatusPublisherCore,
+        appServerLoop: RemoteControlAppServerVirtualLoop
+    ) {
+        runner = RemoteControlWebSocketSessionRunner(
+            transport: transport,
+            statusPublisher: statusPublisher
+        )
+        self.appServerLoop = appServerLoop
+    }
+
+    init(
+        transport: Transport,
+        statusPublisher: RemoteControlStatusPublisherCore,
+        configuration: CodexAppServerConfiguration,
+        threadStateManager: AppServerThreadStateManager = AppServerThreadStateManager()
+    ) {
+        self.init(
+            transport: transport,
+            statusPublisher: statusPublisher,
+            appServerLoop: RemoteControlAppServerVirtualLoop(
+                configuration: configuration,
+                threadStateManager: threadStateManager
+            )
+        )
+    }
+
+    mutating func receive(
+        now: TimeInterval = Date().timeIntervalSinceReferenceDate
+    ) async throws -> RemoteControlAppServerWebSocketSessionStep {
+        try await process(.receive(now: now))
+    }
+
+    mutating func process(
+        _ input: RemoteControlAppServerWebSocketSessionInput
+    ) async throws -> RemoteControlAppServerWebSocketSessionStep {
+        let connectionStep: RemoteControlWebsocketConnectionStep
+        switch input {
+        case let .receive(now):
+            connectionStep = try await runner.receive(
+                state: &state,
+                clientTracker: &clientTracker,
+                now: now
+            )
+        case let .connection(input):
+            connectionStep = try await runner.process(
+                input,
+                state: &state,
+                clientTracker: &clientTracker
+            )
+        }
+
+        let appServerStep = await appServerLoop.handleClientTrackerEffects(connectionStep.trackerEffects)
+        let writerSteps = try await writeServerEvents(appServerStep.serverEvents)
+        return RemoteControlAppServerWebSocketSessionStep(
+            connectionStep: connectionStep,
+            appServerStep: appServerStep,
+            writerSteps: writerSteps
+        )
+    }
+
+    mutating func drainPendingNotifications() async throws -> RemoteControlAppServerWebSocketSessionStep {
+        let appServerStep = await appServerLoop.drainPendingNotifications()
+        let writerSteps = try await writeServerEvents(appServerStep.serverEvents)
+        return RemoteControlAppServerWebSocketSessionStep(
+            appServerStep: appServerStep,
+            writerSteps: writerSteps
+        )
+    }
+
+    private mutating func writeServerEvents(
+        _ serverEvents: [RemoteControlQueuedServerEnvelope]
+    ) async throws -> [RemoteControlWebsocketConnectionStep] {
+        var writerSteps: [RemoteControlWebsocketConnectionStep] = []
+        for serverEvent in serverEvents {
+            let writerStep = try await runner.process(
+                .queuedServerEvent(serverEvent),
+                state: &state,
+                clientTracker: &clientTracker
+            )
+            writerSteps.append(writerStep)
+            if writerStep.end != nil {
+                break
+            }
+        }
+        return writerSteps
+    }
+}
+
+enum RemoteControlAppServerWebSocketSessionInput: Equatable, Sendable {
+    case receive(now: TimeInterval)
+    case connection(RemoteControlWebsocketConnectionInput)
 }
 
 struct RemoteControlAppServerBridge {
