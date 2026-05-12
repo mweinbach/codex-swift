@@ -438,6 +438,19 @@ private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) as
             stateStore: stateStore
         ))
         return CodexCLI.CommandExecutionResult(exitCode: 0)
+    case let .proxy(socketPath):
+        let resolvedSocketPath: String
+        if let socketPath {
+            resolvedSocketPath = socketPath
+        } else {
+            let codexHome = try CodexHome.find()
+            resolvedSocketPath = codexHome
+                .appendingPathComponent("app-server-control", isDirectory: true)
+                .appendingPathComponent("app-server-control.sock")
+                .path
+        }
+        try StdioToUDS.run(socketPath: resolvedSocketPath)
+        return CodexCLI.CommandExecutionResult(exitCode: 0)
     case let .generateTS(outDir, prettier, experimental):
         return try runAppServerGenerator(
             subcommand: "generate-ts",
@@ -451,6 +464,11 @@ private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) as
         return try runAppServerGenerator(
             subcommand: "generate-json-schema",
             arguments: buildGeneratorArguments(outDir: outDir, experimental: experimental)
+        )
+    case let .generateInternalJSONSchema(outDir):
+        return try runAppServerGenerator(
+            subcommand: "generate-internal-json-schema",
+            arguments: ["--out", outDir]
         )
     }
 }

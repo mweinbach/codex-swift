@@ -786,8 +786,10 @@ final class CommandSurfaceCLITests: XCTestCase {
 
         for arguments in [
             ["app-server"],
+            ["app-server", "proxy", "--sock", "/tmp/codex.sock"],
             ["app-server", "generate-ts", "-o", "/tmp/ts", "--prettier", "prettier"],
-            ["app-server", "generate-json-schema", "--out=/tmp/schema", "--experimental"]
+            ["app-server", "generate-json-schema", "--out=/tmp/schema", "--experimental"],
+            ["app-server", "generate-internal-json-schema", "-o/tmp/internal-schema"]
         ] {
             let exitCode = await CodexCLI().runAsync(
                 arguments: arguments,
@@ -802,8 +804,10 @@ final class CommandSurfaceCLITests: XCTestCase {
 
         XCTAssertEqual(actions, [
             .run,
+            .proxy(socketPath: "/tmp/codex.sock"),
             .generateTS(outDir: "/tmp/ts", prettier: "prettier", experimental: false),
-            .generateJSONSchema(outDir: "/tmp/schema", experimental: true)
+            .generateJSONSchema(outDir: "/tmp/schema", experimental: true),
+            .generateInternalJSONSchema(outDir: "/tmp/internal-schema")
         ])
     }
 
@@ -910,6 +914,10 @@ final class CommandSurfaceCLITests: XCTestCase {
                 "`--remote-auth-token-env` is only supported for interactive TUI commands, not `codex app-server generate-ts`"
             ),
             (
+                ["--remote-auth-token-env", "CODEX_REMOTE_TOKEN", "app-server", "generate-internal-json-schema", "--out", "/tmp/out"],
+                "`--remote-auth-token-env` is only supported for interactive TUI commands, not `codex app-server generate-internal-json-schema`"
+            ),
+            (
                 ["--remote", "ws://root.example.test", "sandbox", "macos", "echo", "hi"],
                 "`--remote ws://root.example.test` is only supported for interactive TUI commands, not `codex sandbox macos`"
             ),
@@ -1000,6 +1008,14 @@ final class CommandSurfaceCLITests: XCTestCase {
             (
                 ["app-server", "generate-json-schema", "--prettier", "prettier", "--out", "/tmp/schema"],
                 "codex-swift: unsupported option for command 'app-server generate-json-schema': --prettier"
+            ),
+            (
+                ["app-server", "proxy", "extra"],
+                "codex-swift: unexpected argument for command 'app-server proxy': extra"
+            ),
+            (
+                ["app-server", "generate-internal-json-schema"],
+                "codex-swift: missing required option for command 'app-server generate-internal-json-schema': --out <DIR>"
             ),
             (
                 ["app-server", "bogus"],

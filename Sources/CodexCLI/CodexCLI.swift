@@ -360,8 +360,10 @@ public struct CodexCLI: Sendable {
     public enum AppServerCommandAction: Equatable, Sendable {
         case run
         case remoteControl
+        case proxy(socketPath: String?)
         case generateTS(outDir: String, prettier: String?, experimental: Bool)
         case generateJSONSchema(outDir: String, experimental: Bool)
+        case generateInternalJSONSchema(outDir: String)
     }
 
     public struct AppServerCommandRequest: Equatable, Sendable {
@@ -2428,6 +2430,13 @@ public struct CodexCLI: Sendable {
         }
 
         switch subcommand {
+        case "proxy":
+            switch parseAppServerProxy(Array(arguments.dropFirst())) {
+            case let .success(socketPath):
+                action = .proxy(socketPath: socketPath)
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
         case "generate-ts":
             switch parseAppServerGenerateTS(Array(arguments.dropFirst())) {
             case let .success(parsed):
@@ -2443,6 +2452,13 @@ public struct CodexCLI: Sendable {
             switch parseAppServerGenerateJSONSchema(Array(arguments.dropFirst())) {
             case let .success(parsed):
                 action = .generateJSONSchema(outDir: parsed.outDir, experimental: parsed.experimental)
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
+        case "generate-internal-json-schema":
+            switch parseAppServerGenerateInternalJSONSchema(Array(arguments.dropFirst())) {
+            case let .success(outDir):
+                action = .generateInternalJSONSchema(outDir: outDir)
             case let .failure(message, exitCode):
                 return .failure(message, exitCode)
             }
@@ -2681,6 +2697,34 @@ public struct CodexCLI: Sendable {
         }
     }
 
+    private func parseAppServerProxy(_ arguments: [String]) -> ParseResult<String?> {
+        var socketPath: String?
+        var index = 0
+
+        while index < arguments.count {
+            let argument = arguments[index]
+            if argument == "--sock" {
+                guard index + 1 < arguments.count else {
+                    return .failure("codex-swift: missing value for \(argument)", 64)
+                }
+                socketPath = arguments[index + 1]
+                index += 2
+                continue
+            }
+            if argument.hasPrefix("--sock=") {
+                socketPath = String(argument.dropFirst("--sock=".count))
+                index += 1
+                continue
+            }
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'app-server proxy': \(argument)", 64)
+            }
+            return .failure("codex-swift: unexpected argument for command 'app-server proxy': \(argument)", 64)
+        }
+
+        return .success(socketPath)
+    }
+
     private func parseAppServerGenerateTS(
         _ arguments: [String]
     ) -> ParseResult<(outDir: String, prettier: String?, experimental: Bool)> {
@@ -2784,6 +2828,42 @@ public struct CodexCLI: Sendable {
             return .failure("codex-swift: missing required option for command 'app-server generate-json-schema': --out <DIR>", 64)
         }
         return .success((outDir: outDir, experimental: experimental))
+    }
+
+    private func parseAppServerGenerateInternalJSONSchema(_ arguments: [String]) -> ParseResult<String> {
+        var outDir: String?
+        var index = 0
+
+        while index < arguments.count {
+            let argument = arguments[index]
+            if argument == "--out" || argument == "-o" {
+                guard index + 1 < arguments.count else {
+                    return .failure("codex-swift: missing value for \(argument)", 64)
+                }
+                outDir = arguments[index + 1]
+                index += 2
+                continue
+            }
+            if argument.hasPrefix("--out=") {
+                outDir = String(argument.dropFirst("--out=".count))
+                index += 1
+                continue
+            }
+            if argument.hasPrefix("-o"), argument.count > 2, !argument.hasPrefix("--") {
+                outDir = String(argument.dropFirst(2))
+                index += 1
+                continue
+            }
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'app-server generate-internal-json-schema': \(argument)", 64)
+            }
+            return .failure("codex-swift: unexpected argument for command 'app-server generate-internal-json-schema': \(argument)", 64)
+        }
+
+        guard let outDir else {
+            return .failure("codex-swift: missing required option for command 'app-server generate-internal-json-schema': --out <DIR>", 64)
+        }
+        return .success(outDir)
     }
 
     private func parseAppCommand(_ arguments: [String]) -> ParseResult<AppCommandRequest> {
