@@ -479,6 +479,7 @@ public enum DebugCommandRuntime {
         let codexHome = try dependencies.findCodexHome()
         let config = try dependencies.loadConfig(codexHome, configOverrides)
         let statePath = stateDatabasePath(codexHome: codexHome, config: config)
+        await Task.yield()
 
         let clearedStateDB: Bool
         if FileManager.default.fileExists(atPath: statePath.path) {
