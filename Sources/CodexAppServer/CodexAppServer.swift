@@ -22677,6 +22677,7 @@ final class CodexAppServerMessageProcessor {
     private var runtimePendingApprovalCounts: [String: Int] = [:]
     private var runtimePendingUserInputCounts: [String: Int] = [:]
     private var runtimeCommandExecutionStarted: [String: Set<String>] = [:]
+    private var pendingRollbackRequests: [String: RequestID] = [:]
     private var pendingSessionStartSources: [String: HookSessionStartSource] = [:]
     private var ephemeralThreadIDs: Set<String> = []
     private var ephemeralThreadSnapshots: [String: [String: Any]] = [:]
@@ -23054,6 +23055,9 @@ final class CodexAppServerMessageProcessor {
                 turnID: turnID,
                 event: .error(event)
             )
+            if event.codexErrorInfo == .threadRollbackFailed {
+                pendingRollbackRequests[threadID] = nil
+            }
             if let notification = threadStatusChangedNotification(
                 threadID: threadID,
                 status: CodexAppServer.systemErrorThreadStatus()
@@ -23112,6 +23116,9 @@ final class CodexAppServerMessageProcessor {
                     event: event
                 )
             ]
+        case .threadRolledBack:
+            pendingRollbackRequests[threadID] = nil
+            notifications = []
         default:
             notifications = CodexAppServer.runtimeEventNotifications(
                 threadID: threadID,
@@ -24268,12 +24275,24 @@ final class CodexAppServerMessageProcessor {
                 case "thread/rollback":
                     if coreOpSubmitter != nil {
                         let rollback = try CodexAppServer.threadRollbackParams(params)
-                        try submitCoreOp(
-                            requestID: id,
-                            threadID: rollback.threadID,
-                            op: .threadRollback(numTurns: rollback.numTurns),
-                            failureMessage: "failed to start rollback"
-                        )
+                        if pendingRollbackRequests[rollback.threadID] != nil {
+                            throw AppServerError.invalidRequest("rollback already in progress for this thread")
+                        }
+                        guard let requestID = AppServerRequestIDCodec.requestID(from: id) else {
+                            throw AppServerError.invalidRequest("invalid request id")
+                        }
+                        pendingRollbackRequests[rollback.threadID] = requestID
+                        do {
+                            try submitCoreOp(
+                                requestID: id,
+                                threadID: rollback.threadID,
+                                op: .threadRollback(numTurns: rollback.numTurns),
+                                failureMessage: "failed to start rollback"
+                            )
+                        } catch {
+                            pendingRollbackRequests[rollback.threadID] = nil
+                            throw error
+                        }
                         response = nil
                     } else {
                         response = CodexAppServer.responseObject(

@@ -4871,6 +4871,13 @@ final class CodexAppServerTests: XCTestCase {
         ))
         XCTAssertNil(rollback)
 
+        let duplicateRollback = try decode(processor.processLine(Data(
+            #"{"id":6,"method":"thread/rollback","params":{"threadId":"\#(threadID)","numTurns":1}}"#.utf8
+        )))
+        let duplicateRollbackError = try XCTUnwrap(duplicateRollback["error"] as? [String: Any])
+        XCTAssertEqual(duplicateRollbackError["code"] as? Int, -32600)
+        XCTAssertEqual(duplicateRollbackError["message"] as? String, "rollback already in progress for this thread")
+
         let submissions = capture.submissions
         XCTAssertEqual(submissions.map(\.requestID), [.integer(1), .integer(2), .integer(3), .integer(4), .integer(5)])
         XCTAssertEqual(submissions.map(\.threadID), Array(repeating: threadID, count: 5))
@@ -4913,6 +4920,44 @@ final class CodexAppServerTests: XCTestCase {
         let rollbackError = try XCTUnwrap(rollback["error"] as? [String: Any])
         XCTAssertEqual(rollbackError["code"] as? Int, -32603)
         XCTAssertEqual(rollbackError["message"] as? String, "failed to start rollback: channel closed")
+
+        let retryRollback = try decode(processor.processLine(Data(
+            #"{"id":3,"method":"thread/rollback","params":{"threadId":"\#(threadID)","numTurns":1}}"#.utf8
+        )))
+        let retryRollbackError = try XCTUnwrap(retryRollback["error"] as? [String: Any])
+        XCTAssertEqual(retryRollbackError["code"] as? Int, -32603)
+        XCTAssertEqual(retryRollbackError["message"] as? String, "failed to start rollback: channel closed")
+    }
+
+    func testThreadRollbackPendingStateClearsAfterRuntimeRollbackEvent() async throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T08-03-00",
+            timestamp: "2025-01-06T08:03:00Z",
+            preview: "thread rollback",
+            provider: "mock_provider"
+        )
+        let capture = AppServerCoreOpCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            coreOpSubmitter: capture.submit
+        )
+
+        XCTAssertNil(processor.processLine(Data(
+            #"{"id":1,"method":"thread/rollback","params":{"threadId":"\#(threadID)","numTurns":1}}"#.utf8
+        )))
+
+        await processor.handleRuntimeEvent(
+            threadID: threadID,
+            turnID: "turn-1",
+            event: .threadRolledBack(ThreadRolledBackEvent(numTurns: 1))
+        )
+
+        XCTAssertNil(processor.processLine(Data(
+            #"{"id":2,"method":"thread/rollback","params":{"threadId":"\#(threadID)","numTurns":1}}"#.utf8
+        )))
+        XCTAssertEqual(capture.submissions.map(\.requestID), [.integer(1), .integer(2)])
     }
 
     func testThreadCompactStartAndShellCommandValidateInputs() throws {
