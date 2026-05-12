@@ -79,6 +79,45 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(result["platformFamily"] as? String, "unix")
     }
 
+    func testAppServerWebSocketTransportServesHealthAndRejectsOriginLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let transport = AppServerWebSocketTransport(configuration: testConfiguration(codexHome: temp.url))
+        let (stream, continuation) = AsyncStream.makeStream(of: String.self)
+        let serverTask = Task.detached {
+            try await transport.run(host: "127.0.0.1", port: 0) { url in
+                continuation.yield(url.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+        }
+        defer {
+            serverTask.cancel()
+        }
+
+        var iterator = stream.makeAsyncIterator()
+        let announcedURL = await iterator.next()
+        let urlString = try XCTUnwrap(announcedURL)
+        let httpBaseURL = try httpURL(fromWebSocketURL: urlString)
+
+        let readyz = try await httpStatus(url: httpBaseURL.appendingPathComponent("readyz"))
+        XCTAssertEqual(readyz, 200)
+
+        let healthz = try await httpStatus(url: httpBaseURL.appendingPathComponent("healthz"))
+        XCTAssertEqual(healthz, 200)
+
+        var originRequest = URLRequest(url: httpBaseURL.appendingPathComponent("healthz"))
+        originRequest.setValue("https://example.test", forHTTPHeaderField: "Origin")
+        let originStatus = try await httpStatus(request: originRequest)
+        XCTAssertEqual(originStatus, 403)
+
+        let webSocket = URLSession.shared.webSocketTask(with: try XCTUnwrap(URL(string: urlString)))
+        webSocket.resume()
+        defer {
+            webSocket.cancel(with: .goingAway, reason: nil)
+        }
+        try await webSocket.send(.string(#"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"test","version":"0"}}}"#))
+        let response = try decode(Data((try await receiveWebSocketText(webSocket)).utf8))
+        XCTAssertEqual(response["id"] as? Int, 1)
+    }
+
     func testThreadListReturnsRolloutsWithRustAppServerShape() throws {
         let temp = try TemporaryDirectory()
         let newestID = try writeRollout(
@@ -24373,6 +24412,22 @@ final class CodexAppServerTests: XCTestCase {
             XCTFail("unexpected websocket message")
             return ""
         }
+    }
+
+    private func httpURL(fromWebSocketURL urlString: String) throws -> URL {
+        var components = try XCTUnwrap(URLComponents(string: urlString))
+        components.scheme = "http"
+        return try XCTUnwrap(components.url)
+    }
+
+    private func httpStatus(url: URL) async throws -> Int {
+        try await httpStatus(request: URLRequest(url: url))
+    }
+
+    private func httpStatus(request: URLRequest) async throws -> Int {
+        let (_, response) = try await URLSession.shared.data(for: request)
+        let httpResponse = try XCTUnwrap(response as? HTTPURLResponse)
+        return httpResponse.statusCode
     }
 
     private func turnUserText(_ turn: [String: Any]) -> String {

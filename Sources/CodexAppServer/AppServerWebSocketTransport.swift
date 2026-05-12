@@ -7,6 +7,7 @@ public enum AppServerWebSocketTransportError: Error, CustomStringConvertible, Eq
     case invalidHandshake
     case unsupportedFrame(String)
     case closed
+    case handledHTTPResponse
 
     public var description: String {
         switch self {
@@ -18,6 +19,8 @@ public enum AppServerWebSocketTransportError: Error, CustomStringConvertible, Eq
             return message
         case .closed:
             return "app-server websocket connection closed"
+        case .handledHTTPResponse:
+            return "app-server websocket handled http response"
         }
     }
 }
@@ -80,7 +83,11 @@ public struct AppServerWebSocketTransport: Sendable {
             Darwin.close(fileDescriptor)
         }
 
-        try performHandshake(fileDescriptor: fileDescriptor)
+        do {
+            try performHandshake(fileDescriptor: fileDescriptor)
+        } catch AppServerWebSocketTransportError.handledHTTPResponse {
+            return
+        }
         let writer = AppServerWebSocketFrameWriter(fileDescriptor: fileDescriptor)
         let processor = CodexAppServerMessageProcessor(
             configuration: configuration,
@@ -127,25 +134,24 @@ public struct AppServerWebSocketTransport: Sendable {
 
     private static func performHandshake(fileDescriptor: Int32) throws {
         let request = try readHTTPRequest(fileDescriptor: fileDescriptor)
-        let lines = request.components(separatedBy: "\r\n")
-        guard lines.first?.hasPrefix("GET ") == true else {
+        guard request.method == "GET" else {
             throw AppServerWebSocketTransportError.invalidHandshake
         }
 
-        var headers: [String: String] = [:]
-        for line in lines.dropFirst() {
-            guard let separator = line.firstIndex(of: ":") else {
-                continue
-            }
-            let key = line[..<separator].trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            let value = line[line.index(after: separator)...].trimmingCharacters(in: .whitespacesAndNewlines)
-            headers[key] = value
+        if request.headers["origin"] != nil {
+            try writeHTTPResponse(fileDescriptor: fileDescriptor, statusCode: 403, reason: "Forbidden")
+            throw AppServerWebSocketTransportError.handledHTTPResponse
         }
 
-        guard headers["upgrade"]?.lowercased() == "websocket",
-              headers["connection"]?.lowercased().contains("upgrade") == true,
-              let key = headers["sec-websocket-key"],
-              headers["sec-websocket-version"] == "13"
+        if request.path == "/readyz" || request.path == "/healthz" {
+            try writeHTTPResponse(fileDescriptor: fileDescriptor, statusCode: 200, reason: "OK")
+            throw AppServerWebSocketTransportError.handledHTTPResponse
+        }
+
+        guard request.headers["upgrade"]?.lowercased() == "websocket",
+              request.headers["connection"]?.lowercased().contains("upgrade") == true,
+              let key = request.headers["sec-websocket-key"],
+              request.headers["sec-websocket-version"] == "13"
         else {
             throw AppServerWebSocketTransportError.invalidHandshake
         }
@@ -161,7 +167,13 @@ public struct AppServerWebSocketTransport: Sendable {
         try writeAll(fileDescriptor: fileDescriptor, bytes: Array(response.utf8))
     }
 
-    private static func readHTTPRequest(fileDescriptor: Int32) throws -> String {
+    private struct HTTPRequest {
+        let method: String
+        let path: String
+        let headers: [String: String]
+    }
+
+    private static func readHTTPRequest(fileDescriptor: Int32) throws -> HTTPRequest {
         var bytes: [UInt8] = []
         while !bytes.suffix(4).elementsEqual([13, 10, 13, 10]) {
             guard bytes.count < 16 * 1024 else {
@@ -169,13 +181,41 @@ public struct AppServerWebSocketTransport: Sendable {
             }
             bytes.append(contentsOf: try readExact(fileDescriptor: fileDescriptor, byteCount: 1))
         }
-        return String(decoding: bytes, as: UTF8.self)
+        let request = String(decoding: bytes, as: UTF8.self)
+        let lines = request.components(separatedBy: "\r\n")
+        guard let requestLine = lines.first else {
+            throw AppServerWebSocketTransportError.invalidHandshake
+        }
+        let parts = requestLine.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: false)
+        guard parts.count >= 2 else {
+            throw AppServerWebSocketTransportError.invalidHandshake
+        }
+
+        var headers: [String: String] = [:]
+        for line in lines.dropFirst() {
+            guard let separator = line.firstIndex(of: ":") else {
+                continue
+            }
+            let key = line[..<separator].trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let value = line[line.index(after: separator)...].trimmingCharacters(in: .whitespacesAndNewlines)
+            headers[key] = value
+        }
+        return HTTPRequest(method: String(parts[0]), path: String(parts[1]), headers: headers)
     }
 
     private static func websocketAcceptKey(for key: String) -> String {
         let magic = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
         let digest = Insecure.SHA1.hash(data: Data((key + magic).utf8))
         return Data(digest).base64EncodedString()
+    }
+
+    private static func writeHTTPResponse(fileDescriptor: Int32, statusCode: Int, reason: String) throws {
+        let response = (
+            "HTTP/1.1 \(statusCode) \(reason)\r\n" +
+            "Content-Length: 0\r\n" +
+            "\r\n"
+        )
+        try writeAll(fileDescriptor: fileDescriptor, bytes: Array(response.utf8))
     }
 
     fileprivate enum WebSocketOpcode: UInt8 {
