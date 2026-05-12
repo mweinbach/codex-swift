@@ -4758,7 +4758,15 @@ public enum CodexAppServer {
             )
             summary["keywords"] = manifest.keywords
         }
-        let skills = sourcePath.map { localPluginSkills(root: $0, pluginName: pluginName, config: config, manifest: manifest) } ?? []
+        let skills = sourcePath.map {
+            localPluginSkills(
+                root: $0,
+                pluginID: pluginID,
+                pluginName: pluginName,
+                config: config,
+                manifest: manifest
+            )
+        } ?? []
         let hooks = sourcePath.map {
             localPluginHooks(
                 root: $0,
@@ -5196,7 +5204,13 @@ public enum CodexAppServer {
         )
     }
 
-    private static func localPluginSkills(root: URL, pluginName: String, config: ConfigValue, manifest: LocalPluginManifest) -> [[String: Any]] {
+    private static func localPluginSkills(
+        root: URL,
+        pluginID: String,
+        pluginName: String,
+        config: ConfigValue,
+        manifest: LocalPluginManifest
+    ) -> [[String: Any]] {
         let defaultSkillsRoot = root.appendingPathComponent("skills", isDirectory: true)
         var skillRoots: [URL] = []
         if isDirectory(defaultSkillsRoot) {
@@ -5210,7 +5224,7 @@ public enum CodexAppServer {
 
         var outcome = SkillLoadOutcome()
         for skillsRoot in skillRoots {
-            discoverSkills(root: skillsRoot, scope: .user, outcome: &outcome)
+            discoverSkills(root: skillsRoot, scope: .user, pluginID: pluginID, outcome: &outcome)
         }
         outcome.filterSkillsForProduct(.codex)
         let rules = skillConfigRules(from: config)

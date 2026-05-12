@@ -7555,6 +7555,27 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(summary["enabled"] as? Bool, false)
     }
 
+    func testPluginReadAppliesNamespacedSkillConfigRulesLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let sourceRoot = try makeLocalMarketplaceRootWithPlugin(named: "debug", pluginName: "weather", in: temp.url)
+        let marketplacePath = sourceRoot.appendingPathComponent(".agents/plugins/marketplace.json", isDirectory: false).path
+        try """
+        [[skills.config]]
+        name = "weather:forecast"
+        enabled = false
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/read","params":{"marketplacePath":\#(jsonString(marketplacePath)),"pluginName":"weather"}}"#,
+            codexHome: temp.url
+        )
+
+        let plugin = try XCTUnwrap((response["result"] as? [String: Any])?["plugin"] as? [String: Any])
+        let skills = try XCTUnwrap(plugin["skills"] as? [[String: Any]])
+        XCTAssertEqual(skills.map { $0["name"] as? String }, ["weather:forecast"])
+        XCTAssertEqual(skills.map { $0["enabled"] as? Bool }, [false])
+    }
+
     func testPluginReadDescribesUninstalledGitSourceWithoutCloning() throws {
         let temp = try TemporaryDirectory()
         let sourceRoot = temp.url.appendingPathComponent("marketplace", isDirectory: true)
