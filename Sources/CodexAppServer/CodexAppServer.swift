@@ -20986,6 +20986,7 @@ public enum CodexAppServer {
             )
         }
         let writePaths = configSymlinkWritePaths(configFile)
+        let userConfigFileMissing = writePaths.readURL.map { !FileManager.default.fileExists(atPath: $0.path) } ?? true
 
         let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
             codexHome: configuration.codexHome,
@@ -20993,8 +20994,9 @@ public enum CodexAppServer {
             overrides: configuration.configLayerOverrides,
             environment: configuration.environment
         )
-        let userConfig = stack.getUserLayer()?.config ?? .table([:])
-        let currentVersion = stack.getUserLayer()?.version ?? ConfigFingerprint.version(for: userConfig)
+        let existingUserLayer = stack.getUserLayer()
+        let userConfig = existingUserLayer?.config ?? .table([:])
+        let currentVersion = existingUserLayer?.version ?? ConfigFingerprint.version(for: userConfig)
         if let expectedVersion, expectedVersion != currentVersion {
             throw AppServerError.invalidRequestWithData(
                 "Configuration was modified since last read. Fetch latest version and retry.",
@@ -21062,6 +21064,12 @@ public enum CodexAppServer {
                 withIntermediateDirectories: true
             )
             try renderedConfig.write(to: writePaths.writeURL, atomically: true, encoding: .utf8)
+        } else if userConfigFileMissing {
+            try FileManager.default.createDirectory(
+                at: writePaths.writeURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try "".write(to: writePaths.writeURL, atomically: true, encoding: .utf8)
         }
 
         return [
@@ -21278,20 +21286,25 @@ public enum CodexAppServer {
         var lines = contents.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         for edit in edits {
             guard edit.mergeStrategy == .replace,
-                  let value = edit.value,
-                  sourcePreservingTomlLiteral(value) != nil,
                   let path = try? configWriteKeyPath(edit.keyPath),
                   let key = path.last
             else {
                 return nil
             }
             let tablePath = Array(path.dropLast())
-            applySourcePreservingAssignment(
-                key: key,
-                value: value,
-                tablePath: tablePath,
-                lines: &lines
-            )
+            if let value = edit.value {
+                guard sourcePreservingTomlLiteral(value) != nil else {
+                    return nil
+                }
+                applySourcePreservingAssignment(
+                    key: key,
+                    value: value,
+                    tablePath: tablePath,
+                    lines: &lines
+                )
+            } else if !applySourcePreservingClear(key: key, tablePath: tablePath, lines: &lines) {
+                return nil
+            }
         }
         return trimTrailingBlankLines(lines.joined(separator: "\n")) + "\n"
     }
@@ -21322,6 +21335,21 @@ public enum CodexAppServer {
 
         let insertionIndex = sourcePreservingInsertionIndex(for: range, in: lines)
         lines.insert(assignment, at: insertionIndex)
+    }
+
+    private static func applySourcePreservingClear(
+        key: String,
+        tablePath: [String],
+        lines: inout [String]
+    ) -> Bool {
+        let header = tablePath.isEmpty ? nil : tablePath.map(tomlKey).joined(separator: ".")
+        let range = configSectionRange(header, in: lines)
+        let assignmentKey = tomlKey(key)
+        guard let index = range.first(where: { tomlAssignmentKey(lines[$0]) == assignmentKey }) else {
+            return false
+        }
+        lines.remove(at: index)
+        return true
     }
 
     private static func sourcePreservingInsertionIndex(for range: Range<Int>, in lines: [String]) -> Int {

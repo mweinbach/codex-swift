@@ -22719,6 +22719,63 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: configFile, encoding: .utf8), original)
     }
 
+    func testConfigValueWriteClearPreservesCommentsAndOrderLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        let original = """
+        # Codex user configuration
+        model = "gpt-5.2"
+        approval_policy = "on-request"
+
+        [notice]
+        hide_full_access_warning = true
+
+        [features]
+        unified_exec = true
+        personality = true
+
+        """
+        try original.write(to: configFile, atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/value/write","params":{"keyPath":"features.personality","value":null,"mergeStrategy":"replace"}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["status"] as? String, "ok")
+        XCTAssertTrue(result["overriddenMetadata"] is NSNull)
+
+        let expected = """
+        # Codex user configuration
+        model = "gpt-5.2"
+        approval_policy = "on-request"
+
+        [notice]
+        hide_full_access_warning = true
+
+        [features]
+        unified_exec = true
+
+        """
+        XCTAssertEqual(try String(contentsOf: configFile, encoding: .utf8), expected)
+    }
+
+    func testConfigValueWriteNoOpClearCreatesMissingUserConfigLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: configFile.path))
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/value/write","params":{"keyPath":"features.personality","value":null,"mergeStrategy":"replace"}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["status"] as? String, "ok")
+        XCTAssertEqual(result["filePath"] as? String, configFile.standardizedFileURL.path)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: configFile.path))
+        XCTAssertEqual(try String(contentsOf: configFile, encoding: .utf8), "")
+    }
+
     func testConfigValueWriteRejectsInvalidUserValueEvenWhenManagedOverridesLikeRust() throws {
         let temp = try TemporaryDirectory()
         let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
