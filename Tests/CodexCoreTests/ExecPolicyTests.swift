@@ -1796,6 +1796,52 @@ final class ExecPolicyTests: XCTestCase {
         ])
     }
 
+    func testParserEvaluatesRustStarlarkCollectionMutationNoneReturnValues() throws {
+        let policy = try parsePolicy("""
+        COMMANDS = ["status"]
+        APPENDED = COMMANDS.append("diff")
+        EXTENDED = COMMANDS.extend(("log",))
+        INSERTED = COMMANDS.insert(0, "show")
+        REMOVED = COMMANDS.remove("diff")
+        CLEARED = ["temporary"].clear()
+        TEMP_APPEND = ["temporary"].append("value")
+
+        SETTINGS = {"tool": "git"}
+        UPDATED = SETTINGS.update({"command": COMMANDS[0]})
+        SCRATCH = {"drop": "value"}
+        DICT_CLEARED = SCRATCH.clear()
+        TEMP_UPDATED = {"scratch": "value"}.update({"extra": "value"})
+
+        if APPENDED == None and EXTENDED == None and INSERTED == None and REMOVED == None and TEMP_APPEND == None:
+            prefix_rule([SETTINGS["tool"], SETTINGS["command"]], "allow", justification = repr(UPDATED) + "/" + repr(CLEARED))
+
+        if UPDATED == None and DICT_CLEARED == None and TEMP_UPDATED == None and len(SCRATCH) == 0:
+            network_rule("mutation-none.example.com", "https", "allow")
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("show")]),
+                decision: .allow,
+                justification: "None/None"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "mutation-none.example.com", protocol: .https, decision: .allow)
+        ])
+
+        XCTAssertThrowsError(try parsePolicy("""
+        COMMANDS = ["status"]
+        VALUE = COMMANDS.remove("missing")
+        prefix_rule(["git", "status"], "allow")
+        """))
+        XCTAssertThrowsError(try parsePolicy("""
+        SETTINGS = {}
+        VALUE = SETTINGS.clear("bad")
+        prefix_rule(["git", "status"], "allow")
+        """))
+    }
+
     func testParserEvaluatesRustStarlarkDictUpdateArgumentForms() throws {
         let policy = try parsePolicy("""
         SETTINGS = {"git": {"command": "status", "decision": "prompt"}}

@@ -992,6 +992,14 @@ public final class PolicyParser {
             return
         }
 
+        if try Self.parseStarlarkCollectionNoneMutationAssignment(
+            statement,
+            constants: &constants,
+            functions: functions
+        ) {
+            return
+        }
+
         if try Self.parseStarlarkDictMutationStatement(
             statement,
             constants: &constants,
@@ -1585,6 +1593,109 @@ public final class PolicyParser {
         return true
     }
 
+    private static func parseStarlarkCollectionNoneMutationAssignment(
+        _ statement: String,
+        constants: inout [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> Bool {
+        let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let equalsIndex = topLevelEqualsIndex(in: trimmed) else {
+            return false
+        }
+
+        let target = String(trimmed[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isStarlarkIdentifier(target) else {
+            return false
+        }
+
+        let valueStart = trimmed.index(after: equalsIndex)
+        let valueText = String(trimmed[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard valueText.hasSuffix(")"),
+              let openIndex = matchingTopLevelCallOpen(in: valueText)
+        else {
+            return false
+        }
+
+        let callee = String(valueText[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let methodDotIndex = topLevelMethodDotIndex(in: callee) else {
+            return false
+        }
+
+        let receiverText = String(callee[..<methodDotIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let methodStart = callee.index(after: methodDotIndex)
+        let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let bodyStart = valueText.index(after: openIndex)
+        let body = String(valueText[bodyStart..<valueText.index(before: valueText.endIndex)])
+        let rawArguments = splitTopLevel(body, separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        if starlarkListMutationMethods.contains(methodName), methodName != "pop" {
+            let mutatesNamedReceiver = isStarlarkIdentifier(receiverText)
+            let sourceItems: [ConfigValue]?
+            if mutatesNamedReceiver, case let .array(namedItems) = constants[receiverText] {
+                sourceItems = namedItems
+            } else if !mutatesNamedReceiver,
+                      case let .array(parsedItems) = try? parsePolicyLiteral(
+                        receiverText,
+                        constants: constants,
+                        functions: functions
+                      ) {
+                sourceItems = parsedItems
+            } else {
+                sourceItems = nil
+            }
+            if var items = sourceItems {
+                try applyStarlarkListMutation(
+                    methodName: methodName,
+                    to: &items,
+                    rawArguments: rawArguments,
+                    constants: constants,
+                    functions: functions,
+                    expression: trimmed
+                )
+                if mutatesNamedReceiver {
+                    constants[receiverText] = .array(items)
+                }
+                constants[target] = ConfigValue.none
+                return true
+            }
+        }
+
+        if starlarkDictNoneMutationMethods.contains(methodName) {
+            let mutatesNamedReceiver = isStarlarkIdentifier(receiverText)
+            var items: [String: ConfigValue]
+            if mutatesNamedReceiver, case let .table(sourceItems) = constants[receiverText] {
+                items = sourceItems
+            } else {
+                guard case let .table(sourceItems) = try? parsePolicyLiteral(
+                    receiverText,
+                    constants: constants,
+                    functions: functions
+                ) else {
+                    return false
+                }
+                items = sourceItems
+            }
+            try applyStarlarkDictNoneMutation(
+                methodName: methodName,
+                to: &items,
+                rawArguments: rawArguments,
+                constants: constants,
+                functions: functions,
+                expression: trimmed
+            )
+            if mutatesNamedReceiver {
+                constants[receiverText] = .table(items)
+            }
+            constants[target] = ConfigValue.none
+            return true
+        }
+
+        return false
+    }
+
     private static func popStarlarkDictValue(
         from items: inout [String: ConfigValue],
         rawArguments: [String],
@@ -1651,12 +1762,44 @@ public final class PolicyParser {
         return defaultValue
     }
 
+    private static let starlarkDictNoneMutationMethods = ["update", "clear"]
+
+    private static func applyStarlarkDictNoneMutation(
+        methodName: String,
+        to items: inout [String: ConfigValue],
+        rawArguments: [String],
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction],
+        expression: String
+    ) throws {
+        switch methodName {
+        case "update":
+            try applyStarlarkDictUpdateArguments(
+                rawArguments,
+                to: &items,
+                constants: constants,
+                functions: functions,
+                expression: expression
+            )
+        case "clear":
+            guard rawArguments.isEmpty else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            items.removeAll()
+        default:
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+    }
+
     private static func parseStarlarkListMutationStatement(
         _ statement: String,
         constants: inout [String: ConfigValue],
         functions: [String: StarlarkFunction]
     ) throws -> Bool {
         let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard topLevelEqualsIndex(in: trimmed) == nil else {
+            return false
+        }
         guard trimmed.hasSuffix(")"),
               let openIndex = matchingTopLevelCallOpen(in: trimmed)
         else {
@@ -1676,7 +1819,7 @@ public final class PolicyParser {
         else {
             return false
         }
-        guard ["append", "extend", "insert", "clear", "pop", "remove"].contains(methodName) else {
+        guard starlarkListMutationMethods.contains(methodName) else {
             throw ConfigOverrideError.invalidLiteral(trimmed)
         }
 
@@ -1685,12 +1828,34 @@ public final class PolicyParser {
         let rawArguments = splitTopLevel(body, separator: ",")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+        try applyStarlarkListMutation(
+            methodName: methodName,
+            to: &items,
+            rawArguments: rawArguments,
+            constants: constants,
+            functions: functions,
+            expression: trimmed
+        )
+        constants[receiverText] = .array(items)
+        return true
+    }
+
+    private static let starlarkListMutationMethods = ["append", "extend", "insert", "clear", "pop", "remove"]
+
+    private static func applyStarlarkListMutation(
+        methodName: String,
+        to items: inout [ConfigValue],
+        rawArguments: [String],
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction],
+        expression: String
+    ) throws {
         switch methodName {
         case "append":
             guard rawArguments.count == 1,
                   let rawArgument = rawArguments.first
             else {
-                throw ConfigOverrideError.invalidLiteral(trimmed)
+                throw ConfigOverrideError.invalidLiteral(expression)
             }
             let argument = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
             items.append(argument)
@@ -1698,22 +1863,22 @@ public final class PolicyParser {
             guard rawArguments.count == 1,
                   let rawArgument = rawArguments.first
             else {
-                throw ConfigOverrideError.invalidLiteral(trimmed)
+                throw ConfigOverrideError.invalidLiteral(expression)
             }
             let argument = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
             guard case let .array(extensionItems) = argument else {
-                throw ConfigOverrideError.invalidLiteral(trimmed)
+                throw ConfigOverrideError.invalidLiteral(expression)
             }
             items.append(contentsOf: extensionItems)
         case "insert":
             guard rawArguments.count == 2 else {
-                throw ConfigOverrideError.invalidLiteral(trimmed)
+                throw ConfigOverrideError.invalidLiteral(expression)
             }
             let insertionIndex = try parseStarlarkInteger(
                 rawArguments[0],
                 constants: constants,
                 functions: functions,
-                expression: trimmed
+                expression: expression
             )
             let argument = try parsePolicyLiteral(rawArguments[1], constants: constants, functions: functions)
             let clampedIndex: Int
@@ -1725,7 +1890,7 @@ public final class PolicyParser {
             items.insert(argument, at: clampedIndex)
         case "clear":
             guard rawArguments.isEmpty else {
-                throw ConfigOverrideError.invalidLiteral(trimmed)
+                throw ConfigOverrideError.invalidLiteral(expression)
             }
             items.removeAll()
         case "pop":
@@ -1734,24 +1899,22 @@ public final class PolicyParser {
                 rawArguments: rawArguments,
                 constants: constants,
                 functions: functions,
-                expression: trimmed
+                expression: expression
             )
         case "remove":
             guard rawArguments.count == 1,
                   let rawArgument = rawArguments.first
             else {
-                throw ConfigOverrideError.invalidLiteral(trimmed)
+                throw ConfigOverrideError.invalidLiteral(expression)
             }
             let argument = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
             guard let removalIndex = items.firstIndex(of: argument) else {
-                throw ConfigOverrideError.invalidLiteral(trimmed)
+                throw ConfigOverrideError.invalidLiteral(expression)
             }
             items.remove(at: removalIndex)
         default:
-            return false
+            throw ConfigOverrideError.invalidLiteral(expression)
         }
-        constants[receiverText] = .array(items)
-        return true
     }
 
     private static func parseStarlarkDeleteStatement(
@@ -3408,12 +3571,19 @@ public final class PolicyParser {
         let receiverText = String(callee[..<methodDotIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
         let methodStart = callee.index(after: methodDotIndex)
         let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !receiverText.isEmpty, methodName == "index" else {
+        let noneReturningMethods = starlarkListMutationMethods.filter { $0 != "pop" }
+        guard !receiverText.isEmpty,
+              methodName == "index" || noneReturningMethods.contains(methodName)
+        else {
+            return nil
+        }
+        if noneReturningMethods.contains(methodName),
+           isStarlarkIdentifier(strippingEnclosingParentheses(from: receiverText)) {
             return nil
         }
 
         let receiver = try parsePolicyLiteral(receiverText, constants: constants, functions: functions)
-        guard case let .array(items) = receiver else {
+        guard case var .array(items) = receiver else {
             return nil
         }
 
@@ -3422,6 +3592,18 @@ public final class PolicyParser {
         let rawArguments = splitTopLevel(body, separator: ",")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+        if noneReturningMethods.contains(methodName) {
+            try applyStarlarkListMutation(
+                methodName: methodName,
+                to: &items,
+                rawArguments: rawArguments,
+                constants: constants,
+                functions: functions,
+                expression: text
+            )
+            return ConfigValue.none
+        }
+
         guard (1...3).contains(rawArguments.count) else {
             throw ConfigOverrideError.invalidLiteral(text)
         }
@@ -3473,7 +3655,7 @@ public final class PolicyParser {
         let receiverText = String(callee[..<methodDotIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
         let methodStart = callee.index(after: methodDotIndex)
         let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
-        let mutatingExpressionMethods = ["pop", "popitem", "setdefault"]
+        let mutatingExpressionMethods = ["pop", "popitem", "setdefault"] + starlarkDictNoneMutationMethods
         guard !receiverText.isEmpty,
               ["get", "keys", "values", "items"].contains(methodName) ||
                 mutatingExpressionMethods.contains(methodName)
@@ -3544,6 +3726,17 @@ public final class PolicyParser {
                 functions: functions,
                 expression: text
             )
+        case "update", "clear":
+            var mutableItems = items
+            try applyStarlarkDictNoneMutation(
+                methodName: methodName,
+                to: &mutableItems,
+                rawArguments: rawArguments,
+                constants: constants,
+                functions: functions,
+                expression: text
+            )
+            return ConfigValue.none
         default:
             return nil
         }
