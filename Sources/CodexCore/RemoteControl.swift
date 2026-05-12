@@ -686,6 +686,94 @@ public struct RemoteControlWebsocketState: Equatable, Sendable {
     }
 }
 
+public enum RemoteControlWebsocketIncomingMessage: Equatable, Sendable {
+    case text(String)
+    case binary(Data)
+    case ping
+    case pong
+    case close
+    case streamEnded
+    case readError(String)
+}
+
+public enum RemoteControlWebsocketReaderError: Error, CustomStringConvertible, Equatable, Sendable {
+    case unexpectedEOF
+    case connectionAborted
+    case invalidData(String)
+
+    public var description: String {
+        switch self {
+        case .unexpectedEOF:
+            return "websocket stream ended"
+        case .connectionAborted:
+            return "websocket disconnected"
+        case let .invalidData(message):
+            return "failed to read from websocket: \(message)"
+        }
+    }
+}
+
+public struct RemoteControlWebsocketReaderCore: Equatable, Sendable {
+    public static var idleSweepIntervalSeconds: TimeInterval { 30 }
+    public static var pongTimeoutSeconds: TimeInterval { 60 }
+
+    public init() {}
+
+    public mutating func process(
+        _ incomingMessage: RemoteControlWebsocketIncomingMessage,
+        state: inout RemoteControlWebsocketState,
+        clientTracker: inout RemoteControlClientTracker,
+        now: TimeInterval = Date().timeIntervalSinceReferenceDate
+    ) throws -> [RemoteControlClientTrackerEffect] {
+        let clientEnvelope: RemoteControlClientEnvelope
+        let wireSizeBytes: Int
+        switch incomingMessage {
+        case let .text(text):
+            wireSizeBytes = text.utf8.count
+            guard let data = text.data(using: .utf8),
+                  let decoded = try? JSONDecoder().decode(RemoteControlClientEnvelope.self, from: data)
+            else {
+                return []
+            }
+            clientEnvelope = decoded
+        case .pong, .ping, .binary:
+            return []
+        case .close:
+            throw RemoteControlWebsocketReaderError.connectionAborted
+        case .streamEnded:
+            throw RemoteControlWebsocketReaderError.unexpectedEOF
+        case let .readError(message):
+            throw RemoteControlWebsocketReaderError.invalidData(message)
+        }
+
+        let observation = state.observeClientEnvelope(clientEnvelope, wireSizeBytes: wireSizeBytes)
+        guard case let .forward(forwardedEnvelope) = observation else {
+            return []
+        }
+
+        let closedClient = closedClientKey(for: forwardedEnvelope)
+        let effects = clientTracker.handleClientEnvelope(forwardedEnvelope, now: now)
+        if let closedClient {
+            switch closedClient.streamID {
+            case let .some(streamID):
+                state.invalidateClientMessageStream(clientID: closedClient.clientID, streamID: streamID)
+            case .none:
+                state.invalidateClientMessageClient(clientID: closedClient.clientID)
+            }
+        }
+        return effects
+    }
+
+    private func closedClientKey(
+        for envelope: RemoteControlClientEnvelope
+    ) -> (clientID: RemoteControlClientID, streamID: RemoteControlStreamID?)? {
+        guard case .clientClosed = envelope.event else {
+            return nil
+        }
+        return (envelope.clientID, envelope.streamID)
+    }
+}
+
 public enum RemoteControlClientSegmentObservation: Equatable, Sendable {
     case forward(RemoteControlClientEnvelope)
     case pending
