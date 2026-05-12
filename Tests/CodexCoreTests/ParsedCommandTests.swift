@@ -183,6 +183,20 @@ final class ParsedCommandTests: XCTestCase {
         ])
     }
 
+    func testShellWrappedConcatenatedFlagsMatchRustBashParser() {
+        XCTAssertEqual(parseCommand(["bash", "-lc", #"rg -n "foo" -g"*.swift" Sources"#]), [
+            .search(cmd: "rg -n foo '-g*.swift' Sources", query: "foo", path: "Sources")
+        ])
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", #"grep -n 'pattern' -g'*.txt' docs"#]), [
+            .search(cmd: "grep -n pattern '-g*.txt' docs", query: "pattern", path: "docs")
+        ])
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", #"rg -g"$VAR" pattern"#]), [
+            .unknown(cmd: #"rg -g"$VAR" pattern"#)
+        ])
+    }
+
     func testBashCdThenUnknownCollapsesToWholeUnknownLikeRust() {
         XCTAssertEqual(parseCommand(["bash", "-lc", "cd foo && bar"]), [
             .unknown(cmd: "cd foo && bar")
