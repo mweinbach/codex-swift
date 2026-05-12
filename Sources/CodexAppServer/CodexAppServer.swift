@@ -2920,6 +2920,7 @@ public enum CodexAppServer {
         }
 
         _ = try rolloutPathForConversation(threadID, configuration: configuration)
+        try updateStateStoreThreadNameIfConfigured(threadID: threadID, name: name, configuration: configuration)
         try appendThreadName(threadID: threadID, name: name, codexHome: configuration.codexHome)
         return ([:], threadID.description, name)
     }
@@ -17365,7 +17366,7 @@ public enum CodexAppServer {
             "agentNickname": agentNickname ?? NSNull(),
             "agentRole": agentRole ?? NSNull(),
             "gitInfo": gitInfo ?? NSNull(),
-            "name": summary.name ?? NSNull(),
+            "name": threadName(summary: summary, metadataOverlay: metadataOverlay) ?? NSNull(),
             "turns": turns
         ].nullStripped(keepNulls: true)
     }
@@ -17394,9 +17395,34 @@ public enum CodexAppServer {
             "agentNickname": ((metadata.agentNickname ?? source.nickname) as Any?) ?? NSNull(),
             "agentRole": ((metadata.agentRole ?? source.agentRole) as Any?) ?? NSNull(),
             "gitInfo": threadListGitInfo(from: metadata) ?? NSNull(),
-            "name": NSNull(),
+            "name": threadName(metadata: metadata) ?? NSNull(),
             "turns": turns
         ].nullStripped(keepNulls: true)
+    }
+
+    private static func threadName(
+        summary: RolloutSummary,
+        metadataOverlay: ThreadMetadata?
+    ) -> String? {
+        if let metadataName = metadataOverlay.flatMap(threadName(metadata:)) {
+            return metadataName
+        }
+        return summary.name
+    }
+
+    private static func threadName(metadata: ThreadMetadata) -> String? {
+        let title = metadata.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else {
+            return nil
+        }
+        if metadata.firstUserMessage?.trimmingCharacters(in: .whitespacesAndNewlines) == title {
+            return nil
+        }
+        let preview = (metadata.firstUserMessage ?? metadata.title).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard preview != title else {
+            return nil
+        }
+        return title
     }
 
     private static func threadObject(for started: AppServerStartedConversation) -> [String: Any] {
@@ -20499,6 +20525,32 @@ public enum CodexAppServer {
         try handle.seekToEnd()
         try handle.write(contentsOf: data)
         try handle.write(contentsOf: Data([0x0A]))
+    }
+
+    private static func updateStateStoreThreadNameIfConfigured(
+        threadID: ConversationId,
+        name: String,
+        configuration: CodexAppServerConfiguration
+    ) throws {
+        guard let stateStore = configuration.stateStore else {
+            return
+        }
+        let rolloutPath = try rolloutPathForConversation(threadID, configuration: configuration)
+        let item = ConversationItem(path: rolloutPath, head: [], createdAt: nil, updatedAt: nil)
+        let metadata = try threadMetadata(
+            for: item,
+            defaultProvider: configuration.defaultModelProvider,
+            archivedOnly: false
+        )
+        try runAsyncBlocking {
+            try await stateStore.upsertThread(metadata)
+            let updated = try await stateStore.updateThreadTitle(threadID: metadata.id, title: name)
+            if !updated {
+                throw AppServerError.internalError(
+                    "thread metadata unavailable before name update: \(threadID)"
+                )
+            }
+        }
     }
 
     private static func sessionIndexPath(codexHome: URL) -> URL {

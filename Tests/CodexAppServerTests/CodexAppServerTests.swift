@@ -4602,6 +4602,41 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(thread["name"] as? String, "Sharper thread name")
     }
 
+    func testThreadNameSetUpdatesStateDbTitleAndStateOnlyListingLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-30-00",
+            timestamp: "2025-01-05T12:30:00Z",
+            preview: "Saved user message",
+            provider: "openai",
+            cwd: temp.url.path
+        )
+        let stateStore = try createAppServerStateStore(codexHome: temp.url)
+        let configuration = testConfiguration(codexHome: temp.url, stateStore: stateStore)
+        let processor = try initializedProcessor(configuration: configuration)
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/name/set","params":{"threadId":"\#(threadID)","name":"  State backed name  "}}"#.utf8
+        )))
+        XCTAssertEqual(messages.count, 2)
+
+        let loadedMetadata = try await stateStore.getThread(threadID: ThreadId(string: threadID))
+        let metadata = try XCTUnwrap(loadedMetadata)
+        XCTAssertEqual(metadata.title, "State backed name")
+        XCTAssertEqual(metadata.firstUserMessage, "Saved user message")
+
+        let stateOnly = try appServerResponse(
+            #"{"id":2,"method":"thread/list","params":{"limit":10,"useStateDbOnly":true}}"#,
+            configuration: configuration
+        )
+        let result = try XCTUnwrap(stateOnly["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        XCTAssertEqual(data.map { $0["id"] as? String }, [threadID])
+        XCTAssertEqual(data.first?["preview"] as? String, "Saved user message")
+        XCTAssertEqual(data.first?["name"] as? String, "State backed name")
+    }
+
     func testThreadNameSetRejectsEmptyOrMissingThread() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(

@@ -584,7 +584,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` thread fork
   - `thread/fork` now creates a new rollout from a source thread/path, preserves copied history without mutating the source rollout, records fork metadata/thread source in session meta, returns the forked thread, subscribes the connection, and emits a `thread/started` notification without hydrated turns.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` thread name updates
-  - `thread/name/set` now validates Rust-shaped typed `threadId` and `name` params, trims names, rejects empty names and missing rollouts, appends Rust-compatible `session_index.jsonl` entries, emits `thread/name/updated`, and projects indexed names back onto thread objects.
+  - `thread/name/set` now validates Rust-shaped typed `threadId` and `name` params, trims names, rejects empty names and missing rollouts, updates configured SQLite thread metadata titles, appends Rust-compatible `session_index.jsonl` entries, emits `thread/name/updated`, and projects distinct stored titles back onto state-backed thread objects.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` thread read and turns pagination
   - `thread/resume`, `thread/fork`, `thread/read`, `thread/turns/list`, and the currently unsupported `thread/turns/items/list` now preserve Rust-shaped typed param decoding for required `threadId`/`turnId`, optional `cursor`, `includeTurns`, `itemsView`, `sortDirection`, and `limit` fields before performing rollout lookup, pagination, or unsupported-route handling.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` and `turn_processor.rs` thread/turn control request decoding
