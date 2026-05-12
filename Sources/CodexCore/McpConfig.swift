@@ -709,6 +709,9 @@ public enum McpAuthStatusResolver {
     }
 
     public static func authStatus(for server: McpServerConfig) -> McpAuthStatus {
+        guard server.enabled else {
+            return .unsupported
+        }
         switch server.transport {
         case .stdio:
             return .unsupported
@@ -724,6 +727,9 @@ public enum McpAuthStatusResolver {
         storeMode: OAuthCredentialsStoreMode,
         keyringStore: AuthKeyringStore = SystemAuthKeyringStore()
     ) -> McpAuthStatus {
+        guard server.enabled else {
+            return .unsupported
+        }
         switch server.transport {
         case .stdio:
             return .unsupported
@@ -755,6 +761,9 @@ public enum McpAuthStatusResolver {
         environment: [String: String],
         discoveryTransport: McpOAuthDiscoveryTransport? = nil
     ) async -> McpAuthStatus {
+        guard server.enabled else {
+            return .unsupported
+        }
         switch server.transport {
         case .stdio:
             return .unsupported

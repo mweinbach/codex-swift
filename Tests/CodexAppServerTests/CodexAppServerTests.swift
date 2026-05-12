@@ -18185,6 +18185,43 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(toolsOnlyData.map { $0["name"] as? String }, ["docs", "github"])
     }
 
+    func testMcpServerStatusListReportsDisabledServerAuthUnsupportedLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [mcp_servers.disabled]
+        url = "https://disabled.example.test/mcp"
+        bearer_token_env_var = "MCP_TOKEN"
+        enabled = false
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"mcpServerStatus/list","params":{"detail":"full"}}"#,
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                requiresOpenAIAuth: false,
+                environment: [
+                    "MCP_TOKEN": "token-value",
+                    CodexConfigLayerLoader.managedConfigEnvironmentVariable: temp.url
+                        .appendingPathComponent("missing-managed-config.toml", isDirectory: false)
+                        .path
+                ],
+                mcpHTTPTransport: { _ in
+                    XCTFail("Disabled MCP servers should not be contacted for status inventory")
+                    return URLSessionTransportResponse(statusCode: 500, body: Data())
+                }
+            )
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        XCTAssertEqual(data.map { $0["name"] as? String }, ["disabled"])
+        let status = try XCTUnwrap(data.first)
+        XCTAssertEqual(status["authStatus"] as? String, "unsupported")
+        XCTAssertEqual((status["tools"] as? [String: Any])?.count, 0)
+        XCTAssertEqual((status["resources"] as? [Any])?.count, 0)
+        XCTAssertEqual((status["resourceTemplates"] as? [Any])?.count, 0)
+    }
+
     func testMcpServerStatusListReturnsRawToolNamesFromConfiguredHTTPServer() throws {
         let temp = try TemporaryDirectory()
         try """

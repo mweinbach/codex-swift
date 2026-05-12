@@ -588,6 +588,24 @@ final class McpConfigTests: XCTestCase {
         XCTAssertTrue(json.contains(#""auth_status": "bearer_token""#))
     }
 
+    func testAuthStatusResolverTreatsDisabledServersAsUnsupportedLikeRust() {
+        let servers = [
+            "github": McpServerConfig(
+                transport: .streamableHttp(
+                    url: "https://example.com/mcp",
+                    bearerTokenEnvVar: "GITHUB_TOKEN",
+                    httpHeaders: nil,
+                    envHttpHeaders: nil
+                ),
+                enabled: false
+            )
+        ]
+
+        XCTAssertEqual(McpAuthStatusResolver.authStatuses(for: servers), [
+            "github": .unsupported
+        ])
+    }
+
     func testValidateServerNameMatchesRustAllowedCharacters() {
         XCTAssertNoThrow(try McpServerName.validate("docs-1_server"))
         XCTAssertThrowsError(try McpServerName.validate("docs.server")) { error in

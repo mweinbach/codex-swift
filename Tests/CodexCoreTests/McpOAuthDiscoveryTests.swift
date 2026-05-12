@@ -123,6 +123,41 @@ final class McpOAuthDiscoveryTests: XCTestCase {
 
         XCTAssertEqual(statuses, ["linear": .notLoggedIn])
     }
+
+    func testAsyncAuthStatusResolverSkipsDiscoveryForDisabledServersLikeRust() async throws {
+        let temp = try OAuthDiscoveryTemporaryDirectory()
+        let probe = OAuthDiscoveryProbe(responses: [
+            "/.well-known/oauth-authorization-server/mcp": McpOAuthDiscoveryHTTPResponse(
+                statusCode: 200,
+                body: Data(#"{"authorization_endpoint":"https://auth.example/authorize","token_endpoint":"https://auth.example/token"}"#.utf8)
+            )
+        ])
+        let servers = [
+            "linear": McpServerConfig(
+                transport: .streamableHttp(
+                    url: "https://linear.example/mcp",
+                    bearerTokenEnvVar: nil,
+                    httpHeaders: nil,
+                    envHttpHeaders: nil
+                ),
+                enabled: false
+            )
+        ]
+
+        let statuses = await McpAuthStatusResolver.authStatuses(
+            for: servers,
+            codexHome: temp.url,
+            storeMode: .file,
+            environment: [:],
+            discoveryTransport: { request in
+                await probe.handle(request)
+            }
+        )
+
+        XCTAssertEqual(statuses, ["linear": .unsupported])
+        let requests = await probe.requests()
+        XCTAssertEqual(requests, [])
+    }
 }
 
 private struct RecordedOAuthDiscoveryRequest: Equatable, Sendable {

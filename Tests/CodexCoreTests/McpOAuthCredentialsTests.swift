@@ -102,6 +102,39 @@ final class McpOAuthCredentialsTests: XCTestCase {
         )
     }
 
+    func testAuthStatusResolverIgnoresStoredOAuthTokensForDisabledServersLikeRust() throws {
+        let temp = try McpOAuthTemporaryDirectory()
+        try writeFallbackStore(
+            codexHome: temp.url,
+            entries: [
+                "stub": fallbackEntry(
+                    serverName: "linear",
+                    serverURL: "https://linear.example/mcp"
+                )
+            ]
+        )
+        let servers = [
+            "linear": McpServerConfig(
+                transport: .streamableHttp(
+                    url: "https://linear.example/mcp",
+                    bearerTokenEnvVar: nil,
+                    httpHeaders: nil,
+                    envHttpHeaders: nil
+                ),
+                enabled: false
+            )
+        ]
+
+        XCTAssertEqual(
+            McpAuthStatusResolver.authStatuses(
+                for: servers,
+                codexHome: temp.url,
+                storeMode: .file
+            ),
+            ["linear": .unsupported]
+        )
+    }
+
     func testSaveOAuthTokensWritesFallbackFileShapeAndPermissions() throws {
         let temp = try McpOAuthTemporaryDirectory()
         let tokens = sampleStoredTokens(expiresAt: nil)
