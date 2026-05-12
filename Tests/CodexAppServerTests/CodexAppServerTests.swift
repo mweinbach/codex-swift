@@ -15757,6 +15757,32 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual((range["end"] as? [String: Any])?["column"] as? Int, 8)
     }
 
+    func testInitializeEmitsInvalidConfigWarningFromConfigLoadLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        try #"model = 42"#.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(
+            codexHome: temp.url
+        ))
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"test","version":"0"}}}"#.utf8
+        )))
+
+        XCTAssertEqual(messages.count, 2)
+        XCTAssertEqual(messages[0]["id"] as? Int, 1)
+        XCTAssertNotNil(messages[0]["result"] as? [String: Any])
+        XCTAssertEqual(messages[1]["method"] as? String, "configWarning")
+        let params = try XCTUnwrap(messages[1]["params"] as? [String: Any])
+        XCTAssertEqual(params["summary"] as? String, "Invalid configuration; using defaults.")
+        XCTAssertEqual(params["details"] as? String, "Invalid value for model: expected string")
+        XCTAssertNil(params["path"])
+        XCTAssertNil(params["range"])
+    }
+
     func testInitializeConfigWarningsUseExplicitNullDetailsAndOptOutLikeRust() throws {
         let temp = try TemporaryDirectory()
         let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(

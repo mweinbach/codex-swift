@@ -13696,6 +13696,16 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func configWarningFromLoadError(
+        summary: String,
+        error: any Error
+    ) -> CodexAppServerConfiguration.ConfigWarning {
+        CodexAppServerConfiguration.ConfigWarning(
+            summary: summary,
+            details: String(describing: error)
+        )
+    }
+
     fileprivate static func activeThreadStatus(activeFlags: [String] = []) -> [String: Any] {
         [
             "type": "active",
@@ -22933,9 +22943,9 @@ final class CodexAppServerMessageProcessor {
                 CodexAppServerConfiguration.ConfigWarning(summary: $0)
             })
         } catch {
-            warnings.append(CodexAppServerConfiguration.ConfigWarning(
+            warnings.append(CodexAppServer.configWarningFromLoadError(
                 summary: "Invalid configuration; using defaults.",
-                details: String(describing: error)
+                error: error
             ))
         }
         return warnings.map(CodexAppServer.configWarningNotification)
