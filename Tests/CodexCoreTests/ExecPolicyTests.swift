@@ -2533,18 +2533,56 @@ final class ExecPolicyTests: XCTestCase {
         """))
     }
 
-    func testParserRejectsUnsupportedRustStarlarkListOrderingMethods() throws {
-        XCTAssertThrowsError(try parsePolicy("""
+    func testParserEvaluatesRustStarlarkListOrderingMethods() throws {
+        let policy = try parsePolicy("""
         TOOLS = ["pnpm", "git", "node"]
         TOOLS.sort()
-        prefix_rule(["git", "status"], "allow")
-        """))
+        SORT_RESULT = TOOLS.sort(key = None, reverse = True)
+        prefix_rule([TOOLS[2], "status"], "allow", justification = "sorted " + TOOLS[0])
 
-        XCTAssertThrowsError(try parsePolicy("""
+        COMMANDS = ["log", "status", "diff"]
+        COMMANDS.sort(key = len, reverse = True)
+        prefix_rule(["git", COMMANDS[0]], "prompt", justification = "length " + COMMANDS[-1])
+
+        PAIRS = [["pnpm", "install"], ["git", "diff"], ["git", "status"]]
+        PAIRS.sort(key = lambda pair: [pair[0], pair[1]])
+        PAIRS.reverse()
+        prefix_rule(PAIRS[0], "allow", justification = "pair " + PAIRS[-1][1])
+
         PATHS = ["/opt/homebrew/bin/git", "/usr/bin/git"]
+        PATHS.sort()
         PATHS.reverse()
         host_executable("git", PATHS)
-        """))
+
+        if SORT_RESULT == None:
+            network_rule(TOOLS[2] + ".example.com", "https", "allow")
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .allow,
+                justification: "sorted pnpm"
+            ),
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .prompt,
+                justification: "length log"
+            ),
+        ])
+        XCTAssertEqual(policy.rules(for: "pnpm"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "pnpm", rest: [.single("install")]),
+                decision: .allow,
+                justification: "pair diff"
+            )
+        ])
+        XCTAssertEqual(policy.hostExecutables(), [
+            "git": ["/usr/bin/git", "/opt/homebrew/bin/git"]
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "git.example.com", protocol: .https, decision: .allow)
+        ])
     }
 
     func testParserEvaluatesRustStarlarkListIndexMethod() throws {

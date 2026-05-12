@@ -1988,7 +1988,16 @@ public final class PolicyParser {
         return true
     }
 
-    private static let starlarkListMutationMethods = ["append", "extend", "insert", "clear", "pop", "remove"]
+    private static let starlarkListMutationMethods = [
+        "append",
+        "extend",
+        "insert",
+        "clear",
+        "pop",
+        "remove",
+        "sort",
+        "reverse",
+    ]
 
     private static func applyStarlarkListMutation(
         methodName: String,
@@ -2066,6 +2075,29 @@ public final class PolicyParser {
                 throw ConfigOverrideError.invalidLiteral(expression)
             }
             items.remove(at: removalIndex)
+        case "sort":
+            let arguments = try parseStarlarkSortArguments(
+                rawArguments,
+                expression: expression,
+                constants: constants,
+                functions: functions
+            )
+            guard arguments.positionalArguments.isEmpty else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            items = try sortedStarlarkItems(
+                items,
+                keyFunction: arguments.keyFunction,
+                reverse: arguments.reverse,
+                constants: constants,
+                functions: functions,
+                expression: expression
+            )
+        case "reverse":
+            guard rawArguments.isEmpty else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            items.reverse()
         default:
             throw ConfigOverrideError.invalidLiteral(expression)
         }
@@ -5905,9 +5937,46 @@ public final class PolicyParser {
         constants: [String: ConfigValue],
         functions: [String: StarlarkFunction]
     ) throws -> ConfigValue {
+        let arguments = try parseStarlarkSortArguments(
+            rawArguments,
+            expression: expression,
+            constants: constants,
+            functions: functions
+        )
+        guard arguments.positionalArguments.count == 1,
+              let rawArgument = arguments.positionalArguments.first
+        else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+
+        let iterable = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
+        let items = try starlarkIterableItems(iterable, expression: expression)
+        return try .array(sortedStarlarkItems(
+            items,
+            keyFunction: arguments.keyFunction,
+            reverse: arguments.reverse,
+            constants: constants,
+            functions: functions,
+            expression: expression
+        ))
+    }
+
+    private struct StarlarkSortArguments {
+        let positionalArguments: [String]
+        let keyFunction: StarlarkKeyFunction?
+        let reverse: Bool
+    }
+
+    private static func parseStarlarkSortArguments(
+        _ rawArguments: [String],
+        expression: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> StarlarkSortArguments {
         var positionalArguments: [String] = []
         var keyFunction: StarlarkKeyFunction?
         var reverse = false
+        var sawKey = false
         var sawReverse = false
         var sawKeywordArgument = false
 
@@ -5919,10 +5988,13 @@ public final class PolicyParser {
                 let rawValue = String(rawArgument[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
                 switch rawName {
                 case "key":
-                    guard keyFunction == nil else {
+                    guard !sawKey else {
                         throw ConfigOverrideError.invalidLiteral(expression)
                     }
-                    keyFunction = try parseStarlarkKeyFunction(rawValue, expression: expression)
+                    if rawValue != "None" {
+                        keyFunction = try parseStarlarkKeyFunction(rawValue, expression: expression)
+                    }
+                    sawKey = true
                 case "reverse":
                     guard !sawReverse else {
                         throw ConfigOverrideError.invalidLiteral(expression)
@@ -5945,14 +6017,21 @@ public final class PolicyParser {
             positionalArguments.append(rawArgument)
         }
 
-        guard positionalArguments.count == 1,
-              let rawArgument = positionalArguments.first
-        else {
-            throw ConfigOverrideError.invalidLiteral(expression)
-        }
+        return StarlarkSortArguments(
+            positionalArguments: positionalArguments,
+            keyFunction: keyFunction,
+            reverse: reverse
+        )
+    }
 
-        let iterable = try parsePolicyLiteral(rawArgument, constants: constants, functions: functions)
-        let items = try starlarkIterableItems(iterable, expression: expression)
+    private static func sortedStarlarkItems(
+        _ items: [ConfigValue],
+        keyFunction: StarlarkKeyFunction?,
+        reverse: Bool,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction],
+        expression: String
+    ) throws -> [ConfigValue] {
         let keyedItems = try items.enumerated().map { index, item in
             (
                 index: index,
@@ -5973,7 +6052,7 @@ public final class PolicyParser {
             }
             return reverse ? comparison > 0 : comparison < 0
         }
-        return .array(sortedItems.map(\.value))
+        return sortedItems.map(\.value)
     }
 
     private static func parseStarlarkReversedCall(
