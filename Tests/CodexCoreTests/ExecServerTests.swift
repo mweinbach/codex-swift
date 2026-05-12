@@ -3585,6 +3585,147 @@ final class ExecServerTests: XCTestCase {
         XCTAssertEqual(tracker.activeConnectionCount, 0)
     }
 
+    func testRemoteControlVirtualTransportCoreRoutesClientEffectsLikeRust() {
+        let clientID = RemoteControlClientID("client-1")
+        let streamID = RemoteControlStreamID("stream-1")
+        let connectionID = RemoteControlVirtualConnectionID(1)
+        let followupMessage = ExecServerJSONRPCMessage.notification(ExecServerJSONRPCNotification(method: "initialized"))
+        let outgoing = ExecServerJSONRPCMessage.notification(ExecServerJSONRPCNotification(method: "configWarning"))
+        var transport = RemoteControlVirtualTransportCore()
+
+        XCTAssertEqual(
+            transport.handleClientEnvelope(RemoteControlClientEnvelope(
+                event: .ping,
+                clientID: clientID,
+                streamID: streamID,
+                seqID: nil,
+                cursor: nil
+            ), now: 8),
+            RemoteControlVirtualTransportStep(
+                serverEvents: [RemoteControlQueuedServerEnvelope(
+                    event: .pong(status: .unknown),
+                    clientID: clientID,
+                    streamID: streamID
+                )]
+            )
+        )
+
+        XCTAssertEqual(
+            transport.handleClientEnvelope(RemoteControlClientEnvelope(
+                event: .clientMessage(message: followupMessage),
+                clientID: clientID,
+                streamID: streamID,
+                seqID: 0,
+                cursor: nil
+            ), now: 9),
+            RemoteControlVirtualTransportStep()
+        )
+
+        XCTAssertEqual(
+            transport.handleClientEnvelope(
+                remoteControlInitializeEnvelope(clientID: clientID, streamID: streamID, seqID: 1),
+                now: 10
+            ),
+            RemoteControlVirtualTransportStep(transportEvents: [
+                .connectionOpened(
+                    connectionID: connectionID,
+                    clientID: clientID,
+                    streamID: streamID
+                ),
+                .incomingMessage(
+                    connectionID: connectionID,
+                    message: tryInitializeMessage()
+                )
+            ])
+        )
+
+        XCTAssertEqual(
+            transport.handleClientEnvelope(RemoteControlClientEnvelope(
+                event: .clientMessage(message: followupMessage),
+                clientID: clientID,
+                streamID: streamID,
+                seqID: 2,
+                cursor: nil
+            ), now: 11),
+            RemoteControlVirtualTransportStep(transportEvents: [
+                .incomingMessage(connectionID: connectionID, message: followupMessage)
+            ])
+        )
+
+        XCTAssertEqual(
+            transport.handleClientEnvelope(RemoteControlClientEnvelope(
+                event: .ping,
+                clientID: clientID,
+                streamID: streamID,
+                seqID: nil,
+                cursor: nil
+            ), now: 12),
+            RemoteControlVirtualTransportStep(
+                serverEvents: [RemoteControlQueuedServerEnvelope(
+                    event: .pong(status: .active),
+                    clientID: clientID,
+                    streamID: streamID
+                )]
+            )
+        )
+        XCTAssertEqual(
+            transport.enqueueOutgoingMessage(connectionID: connectionID, message: outgoing),
+            RemoteControlQueuedServerEnvelope(event: .serverMessage(message: outgoing), clientID: clientID, streamID: streamID)
+        )
+
+        XCTAssertEqual(
+            transport.handleClientEnvelope(RemoteControlClientEnvelope(
+                event: .clientClosed,
+                clientID: clientID,
+                streamID: streamID,
+                seqID: 3,
+                cursor: nil
+            ), now: 13),
+            RemoteControlVirtualTransportStep(transportEvents: [
+                .connectionClosed(connectionID: connectionID)
+            ])
+        )
+        XCTAssertNil(transport.enqueueOutgoingMessage(connectionID: connectionID, message: outgoing))
+        XCTAssertEqual(transport.activeConnectionCount, 0)
+    }
+
+    func testRemoteControlVirtualTransportCoreDisconnectsAndClosesIdleClientsLikeRust() {
+        let clientID = RemoteControlClientID("client-1")
+        let streamID = RemoteControlStreamID("stream-1")
+        let connectionID = RemoteControlVirtualConnectionID(1)
+        let outgoing = ExecServerJSONRPCMessage.notification(ExecServerJSONRPCNotification(method: "configWarning"))
+        var transport = RemoteControlVirtualTransportCore()
+
+        _ = transport.handleClientEnvelope(
+            remoteControlInitializeEnvelope(clientID: clientID, streamID: streamID, seqID: 0),
+            now: 10
+        )
+        XCTAssertEqual(
+            transport.disconnect(connectionID: connectionID),
+            RemoteControlVirtualTransportStep(transportEvents: [
+                .connectionClosed(connectionID: connectionID)
+            ])
+        )
+        XCTAssertEqual(transport.disconnect(connectionID: connectionID), RemoteControlVirtualTransportStep())
+        XCTAssertNil(transport.enqueueOutgoingMessage(connectionID: connectionID, message: outgoing))
+
+        _ = transport.handleClientEnvelope(
+            remoteControlInitializeEnvelope(clientID: clientID, streamID: streamID, seqID: 1),
+            now: 20
+        )
+        XCTAssertEqual(
+            transport.closeExpiredClients(now: 20 + RemoteControlClientTracker.idleTimeoutSeconds - 1),
+            RemoteControlVirtualTransportStep()
+        )
+        XCTAssertEqual(
+            transport.closeExpiredClients(now: 20 + RemoteControlClientTracker.idleTimeoutSeconds),
+            RemoteControlVirtualTransportStep(transportEvents: [
+                .connectionClosed(connectionID: RemoteControlVirtualConnectionID(2))
+            ])
+        )
+        XCTAssertEqual(transport.activeConnectionCount, 0)
+    }
+
     func testRemoteControlWebsocketReaderCoreRoutesTextFramesThroughStateAndTrackerLikeRust() throws {
         let clientID = RemoteControlClientID("client-1")
         let streamID = RemoteControlStreamID("stream-1")

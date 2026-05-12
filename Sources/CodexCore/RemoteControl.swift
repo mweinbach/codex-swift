@@ -832,6 +832,32 @@ public enum RemoteControlClientTrackerEffect: Equatable, Sendable {
     case serverEvent(RemoteControlQueuedServerEnvelope)
 }
 
+public enum RemoteControlVirtualTransportEvent: Equatable, Sendable {
+    case connectionOpened(
+        connectionID: RemoteControlVirtualConnectionID,
+        clientID: RemoteControlClientID,
+        streamID: RemoteControlStreamID
+    )
+    case incomingMessage(
+        connectionID: RemoteControlVirtualConnectionID,
+        message: ExecServerJSONRPCMessage
+    )
+    case connectionClosed(connectionID: RemoteControlVirtualConnectionID)
+}
+
+public struct RemoteControlVirtualTransportStep: Equatable, Sendable {
+    public var transportEvents: [RemoteControlVirtualTransportEvent]
+    public var serverEvents: [RemoteControlQueuedServerEnvelope]
+
+    public init(
+        transportEvents: [RemoteControlVirtualTransportEvent] = [],
+        serverEvents: [RemoteControlQueuedServerEnvelope] = []
+    ) {
+        self.transportEvents = transportEvents
+        self.serverEvents = serverEvents
+    }
+}
+
 public struct RemoteControlClosedClientStream: Equatable, Sendable {
     public var clientID: RemoteControlClientID
     public var streamID: RemoteControlStreamID
@@ -975,6 +1001,15 @@ public struct RemoteControlClientTracker: Equatable, Sendable {
         )
     }
 
+    public mutating func closeConnection(
+        connectionID: RemoteControlVirtualConnectionID
+    ) -> [RemoteControlClientTrackerEffect] {
+        guard let entry = clients.first(where: { $0.value.connectionID == connectionID }) else {
+            return []
+        }
+        return closeClient(clientID: entry.key.clientID, streamID: entry.key.streamID)
+    }
+
     public mutating func closeClient(
         clientID: RemoteControlClientID,
         streamID: RemoteControlStreamID
@@ -1039,6 +1074,87 @@ public struct RemoteControlClientTracker: Equatable, Sendable {
             return false
         }
         return request.method == "initialize"
+    }
+}
+
+public struct RemoteControlVirtualTransportCore: Equatable, Sendable {
+    private var clientTracker: RemoteControlClientTracker
+    private var openConnectionIDs: Set<RemoteControlVirtualConnectionID> = []
+
+    public var activeConnectionCount: Int {
+        openConnectionIDs.count
+    }
+
+    public init(clientTracker: RemoteControlClientTracker = RemoteControlClientTracker()) {
+        self.clientTracker = clientTracker
+    }
+
+    public mutating func handleClientEnvelope(
+        _ envelope: RemoteControlClientEnvelope,
+        now: TimeInterval = Date().timeIntervalSinceReferenceDate
+    ) -> RemoteControlVirtualTransportStep {
+        apply(clientTracker.handleClientEnvelope(envelope, now: now))
+    }
+
+    public mutating func enqueueOutgoingMessage(
+        connectionID: RemoteControlVirtualConnectionID,
+        message: ExecServerJSONRPCMessage
+    ) -> RemoteControlQueuedServerEnvelope? {
+        guard openConnectionIDs.contains(connectionID) else {
+            return nil
+        }
+        return clientTracker.enqueueOutgoingMessage(connectionID: connectionID, message: message)
+    }
+
+    public mutating func disconnect(
+        connectionID: RemoteControlVirtualConnectionID
+    ) -> RemoteControlVirtualTransportStep {
+        guard openConnectionIDs.contains(connectionID) else {
+            return RemoteControlVirtualTransportStep()
+        }
+        return apply(clientTracker.closeConnection(connectionID: connectionID))
+    }
+
+    public mutating func closeExpiredClients(
+        now: TimeInterval
+    ) -> RemoteControlVirtualTransportStep {
+        apply(clientTracker.closeExpiredClients(now: now))
+    }
+
+    private mutating func apply(
+        _ effects: [RemoteControlClientTrackerEffect]
+    ) -> RemoteControlVirtualTransportStep {
+        var step = RemoteControlVirtualTransportStep()
+        for effect in effects {
+            switch effect {
+            case let .connectionOpened(connectionID, clientID, streamID):
+                openConnectionIDs.insert(connectionID)
+                step.transportEvents.append(.connectionOpened(
+                    connectionID: connectionID,
+                    clientID: clientID,
+                    streamID: streamID
+                ))
+
+            case let .incomingMessage(connectionID, message):
+                guard openConnectionIDs.contains(connectionID) else {
+                    continue
+                }
+                step.transportEvents.append(.incomingMessage(
+                    connectionID: connectionID,
+                    message: message
+                ))
+
+            case let .connectionClosed(connectionID):
+                guard openConnectionIDs.remove(connectionID) != nil else {
+                    continue
+                }
+                step.transportEvents.append(.connectionClosed(connectionID: connectionID))
+
+            case let .serverEvent(envelope):
+                step.serverEvents.append(envelope)
+            }
+        }
+        return step
     }
 }
 
