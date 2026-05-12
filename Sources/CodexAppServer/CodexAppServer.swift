@@ -134,6 +134,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let configLayerOverrides: ConfigLayerLoaderOverrides
     public let stateStore: SQLiteAgentGraphStore?
     public let pluginStartupTasksEnabled: Bool
+    public let curatedPluginStartupSyncEnabled: Bool
 
     public init(
         codexHome: URL,
@@ -160,7 +161,8 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         cliConfigOverrides: CliConfigOverrides = CliConfigOverrides(),
         configLayerOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides(),
         stateStore: SQLiteAgentGraphStore? = nil,
-        pluginStartupTasksEnabled: Bool = true
+        pluginStartupTasksEnabled: Bool = true,
+        curatedPluginStartupSyncEnabled: Bool = true
     ) {
         self.codexHome = codexHome
         self.cwd = cwd
@@ -193,6 +195,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         self.configLayerOverrides = configLayerOverrides
         self.stateStore = stateStore
         self.pluginStartupTasksEnabled = pluginStartupTasksEnabled
+        self.curatedPluginStartupSyncEnabled = curatedPluginStartupSyncEnabled
     }
 
     public static func == (lhs: CodexAppServerConfiguration, rhs: CodexAppServerConfiguration) -> Bool {
@@ -207,7 +210,8 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
             lhs.activeProfile == rhs.activeProfile &&
             lhs.cliConfigOverrides == rhs.cliConfigOverrides &&
             lhs.configLayerOverrides == rhs.configLayerOverrides &&
-            lhs.pluginStartupTasksEnabled == rhs.pluginStartupTasksEnabled
+            lhs.pluginStartupTasksEnabled == rhs.pluginStartupTasksEnabled &&
+            lhs.curatedPluginStartupSyncEnabled == rhs.curatedPluginStartupSyncEnabled
     }
 }
 
@@ -4680,6 +4684,194 @@ public enum CodexAppServer {
         }
         var seen: Set<String> = []
         return roots.map(\.standardizedFileURL).filter { seen.insert($0.path).inserted }
+    }
+
+    @discardableResult
+    fileprivate static func syncOpenAICuratedPluginsRepoViaGit(
+        codexHome: URL,
+        environment: [String: String]
+    ) throws -> String {
+        let repoPath = curatedPluginsRepoPath(codexHome: codexHome)
+        let shaPath = curatedPluginsSHAPath(codexHome: codexHome)
+        let remoteSHA = try gitCuratedPluginsRemoteHeadSHA(environment: environment)
+        let localSHA = gitHeadSHA(repository: repoPath, environment: environment)
+            ?? readCuratedPluginsSHA(codexHome: codexHome)
+
+        if localSHA == remoteSHA, FileManager.default.fileExists(atPath: repoPath.appendingPathComponent(".git", isDirectory: true).path) {
+            return remoteSHA
+        }
+
+        let parent = repoPath.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        let stagedPath = parent.appendingPathComponent("plugins-clone-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            if FileManager.default.fileExists(atPath: stagedPath.path) {
+                try? FileManager.default.removeItem(at: stagedPath)
+            }
+        }
+
+        _ = try runCuratedPluginsGit(
+            ["clone", "--depth", "1", "https://github.com/openai/plugins.git", stagedPath.path],
+            cwd: nil,
+            environment: environment,
+            context: "git clone curated plugins repo"
+        )
+        let clonedSHA = try gitHeadSHAOrThrow(repository: stagedPath, environment: environment)
+        guard clonedSHA == remoteSHA else {
+            throw AppServerError.internalError(
+                "curated plugins clone HEAD mismatch: expected \(remoteSHA), got \(clonedSHA)"
+            )
+        }
+        try ensureCuratedMarketplaceManifestExists(repoPath: stagedPath)
+        try activateCuratedPluginsRepo(repoPath: repoPath, stagedPath: stagedPath)
+        try writeCuratedPluginsSHA(shaPath: shaPath, sha: remoteSHA)
+        return remoteSHA
+    }
+
+    private static func curatedPluginsRepoPath(codexHome: URL) -> URL {
+        codexHome.appendingPathComponent(".tmp/plugins", isDirectory: true)
+    }
+
+    private static func curatedPluginsSHAPath(codexHome: URL) -> URL {
+        codexHome.appendingPathComponent(".tmp/plugins.sha", isDirectory: false)
+    }
+
+    private static func readCuratedPluginsSHA(codexHome: URL) -> String? {
+        let path = curatedPluginsSHAPath(codexHome: codexHome)
+        return (try? String(contentsOf: path, encoding: .utf8))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    private static func gitCuratedPluginsRemoteHeadSHA(environment: [String: String]) throws -> String {
+        let output = try runCuratedPluginsGit(
+            ["ls-remote", "https://github.com/openai/plugins.git", "HEAD"],
+            cwd: nil,
+            environment: environment,
+            context: "git ls-remote curated plugins repo"
+        )
+        guard let firstLine = output.split(separator: "\n", omittingEmptySubsequences: false).first,
+              let tab = firstLine.firstIndex(of: "\t")
+        else {
+            throw AppServerError.internalError("unexpected git ls-remote output for curated plugins repo: \(output)")
+        }
+        let sha = String(firstLine[..<tab])
+        guard !sha.isEmpty else {
+            throw AppServerError.internalError("git ls-remote returned empty sha for curated plugins repo")
+        }
+        return sha
+    }
+
+    private static func gitHeadSHA(repository: URL, environment: [String: String]) -> String? {
+        try? gitHeadSHAOrThrow(repository: repository, environment: environment)
+    }
+
+    private static func gitHeadSHAOrThrow(repository: URL, environment: [String: String]) throws -> String {
+        let output = try runCuratedPluginsGit(
+            ["-C", repository.path, "rev-parse", "HEAD"],
+            cwd: nil,
+            environment: environment,
+            context: "git rev-parse HEAD"
+        )
+        let sha = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sha.isEmpty else {
+            throw AppServerError.internalError("git rev-parse HEAD returned empty output in \(repository.path)")
+        }
+        return sha
+    }
+
+    private static func ensureCuratedMarketplaceManifestExists(repoPath: URL) throws {
+        let manifest = repoPath.appendingPathComponent(".agents/plugins/marketplace.json", isDirectory: false)
+        guard FileManager.default.fileExists(atPath: manifest.path) else {
+            throw AppServerError.internalError(
+                "curated plugins archive missing marketplace manifest at \(manifest.path)"
+            )
+        }
+    }
+
+    private static func activateCuratedPluginsRepo(repoPath: URL, stagedPath: URL) throws {
+        let fileManager = FileManager.default
+        if fileManager.fileExists(atPath: repoPath.path) {
+            let backupPath = repoPath.deletingLastPathComponent()
+                .appendingPathComponent("plugins-backup-\(UUID().uuidString)", isDirectory: true)
+            try fileManager.moveItem(at: repoPath, to: backupPath)
+            do {
+                try fileManager.moveItem(at: stagedPath, to: repoPath)
+                try? fileManager.removeItem(at: backupPath)
+            } catch {
+                try? fileManager.moveItem(at: backupPath, to: repoPath)
+                throw AppServerError.internalError(
+                    "failed to activate new curated plugins repo at \(repoPath.path): \(error)"
+                )
+            }
+        } else {
+            try fileManager.moveItem(at: stagedPath, to: repoPath)
+        }
+    }
+
+    private static func writeCuratedPluginsSHA(shaPath: URL, sha: String) throws {
+        try FileManager.default.createDirectory(
+            at: shaPath.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try "\(sha)\n".write(to: shaPath, atomically: true, encoding: .utf8)
+    }
+
+    private static func runCuratedPluginsGit(
+        _ args: [String],
+        cwd: URL?,
+        environment: [String: String],
+        context: String
+    ) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["git"] + args
+        if let cwd {
+            process.currentDirectoryURL = cwd
+        }
+        var processEnvironment = environment
+        processEnvironment["GIT_TERMINAL_PROMPT"] = "0"
+        processEnvironment["GIT_OPTIONAL_LOCKS"] = "0"
+        process.environment = processEnvironment
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+        do {
+            try process.run()
+        } catch {
+            throw AppServerError.internalError("failed to run \(context): \(error)")
+        }
+
+        let deadline = Date().addingTimeInterval(30)
+        while process.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        var timedOut = false
+        if process.isRunning {
+            timedOut = true
+            process.terminate()
+        }
+        process.waitUntilExit()
+
+        let stdout = String(decoding: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let stderr = String(decoding: stderrPipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if timedOut {
+            if stderr.isEmpty {
+                throw AppServerError.internalError("\(context) timed out after 30s")
+            }
+            throw AppServerError.internalError("\(context) timed out after 30s: \(stderr)")
+        }
+        guard process.terminationStatus == 0 else {
+            if stderr.isEmpty {
+                throw AppServerError.internalError("\(context) failed with status \(process.terminationStatus)")
+            }
+            throw AppServerError.internalError("\(context) failed with status \(process.terminationStatus): \(stderr)")
+        }
+        return stdout
     }
 
     private static func configuredMarketplaceRoots(in config: ConfigValue, codexHome: URL) -> [URL] {
@@ -22086,6 +22278,9 @@ final class CodexAppServerMessageProcessor {
             return
         }
 
+        if configuration.curatedPluginStartupSyncEnabled {
+            syncOpenAICuratedPluginsRepo()
+        }
         warmFeaturedPluginIDs(runtimeConfig: runtimeConfig)
         autoUpgradeConfiguredMarketplaces()
 
@@ -22104,6 +22299,13 @@ final class CodexAppServerMessageProcessor {
         if !outcome.installedPluginReferences.isEmpty {
             remoteInstalledPluginsCache = outcome.installedPluginReferences
         }
+    }
+
+    private func syncOpenAICuratedPluginsRepo() {
+        _ = try? CodexAppServer.syncOpenAICuratedPluginsRepoViaGit(
+            codexHome: configuration.codexHome,
+            environment: configuration.environment
+        )
     }
 
     private func warmFeaturedPluginIDs(runtimeConfig: CodexRuntimeConfig) {

@@ -7165,6 +7165,90 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(transport.requestCount, 1)
     }
 
+    func testAppServerStartupSyncsOpenAICuratedRepoViaGitLikeRustManager() throws {
+        let temp = try TemporaryDirectory()
+        let bin = temp.url.appendingPathComponent("bin", isDirectory: true)
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        let git = bin.appendingPathComponent("git", isDirectory: false)
+        let sha = "0123456789abcdef0123456789abcdef01234567"
+        try """
+        #!/bin/sh
+        if [ "$1" = "ls-remote" ]; then
+          printf '%s\\tHEAD\\n' "\(sha)"
+          exit 0
+        fi
+        if [ "$1" = "clone" ]; then
+          dest="$5"
+          mkdir -p "$dest/.git" "$dest/.agents/plugins" "$dest/plugins/gmail/.codex-plugin"
+          cat > "$dest/.agents/plugins/marketplace.json" <<'JSON'
+        {
+          "name": "openai-curated",
+          "plugins": [
+            {
+              "name": "gmail",
+              "source": "./plugins/gmail"
+            }
+          ]
+        }
+        JSON
+          cat > "$dest/plugins/gmail/.codex-plugin/plugin.json" <<'JSON'
+        {
+          "name": "gmail",
+          "description": "Search mail"
+        }
+        JSON
+          exit 0
+        fi
+        if [ "$1" = "-C" ] && [ "$3" = "rev-parse" ] && [ "$4" = "HEAD" ]; then
+          printf '%s\\n' "\(sha)"
+          exit 0
+        fi
+        echo "unexpected git invocation: $@" >&2
+        exit 1
+        """.write(to: git, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: git.path)
+        try """
+        [features]
+        plugins = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let processor = try initializedProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            environment: ["PATH": "\(bin.path):/usr/bin:/bin"],
+            pluginHTTPTransport: { _ in
+                URLSessionTransportResponse(statusCode: 500, body: Data())
+            },
+            pluginStartupTasksEnabled: true,
+            curatedPluginStartupSyncEnabled: true
+        ))
+
+        let curatedRepo = temp.url.appendingPathComponent(".tmp/plugins", isDirectory: true)
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: curatedRepo.appendingPathComponent(".git", isDirectory: true).path
+        ))
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: curatedRepo.appendingPathComponent(".agents/plugins/marketplace.json").path
+        ))
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: curatedRepo.appendingPathComponent("plugins/gmail/.codex-plugin/plugin.json").path
+        ))
+        XCTAssertEqual(
+            try String(contentsOf: temp.url.appendingPathComponent(".tmp/plugins.sha"), encoding: .utf8),
+            "\(sha)\n"
+        )
+
+        let response = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"plugin/list","params":{}}"#.utf8
+        )))
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let marketplaces = try XCTUnwrap(result["marketplaces"] as? [[String: Any]])
+        XCTAssertEqual(marketplaces.count, 1)
+        XCTAssertEqual(marketplaces[0]["name"] as? String, "openai-curated")
+        let plugins = try XCTUnwrap(marketplaces[0]["plugins"] as? [[String: Any]])
+        XCTAssertEqual(plugins.count, 1)
+        XCTAssertEqual(plugins[0]["id"] as? String, "gmail@openai-curated")
+    }
+
     func testPluginListIncludesRemoteGlobalMarketplaceWhenRemotePluginEnabled() throws {
         let temp = try TemporaryDirectory()
         try """
@@ -23308,7 +23392,8 @@ final class CodexAppServerTests: XCTestCase {
         cliConfigOverrides: CliConfigOverrides = CliConfigOverrides(),
         configLayerOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides(),
         stateStore: SQLiteAgentGraphStore? = nil,
-        pluginStartupTasksEnabled: Bool = false
+        pluginStartupTasksEnabled: Bool = false,
+        curatedPluginStartupSyncEnabled: Bool = false
     ) -> CodexAppServerConfiguration {
         var mergedEnvironment = [
             CodexConfigLayerLoader.managedConfigEnvironmentVariable: codexHome
@@ -23336,7 +23421,8 @@ final class CodexAppServerTests: XCTestCase {
             cliConfigOverrides: cliConfigOverrides,
             configLayerOverrides: configLayerOverrides,
             stateStore: stateStore,
-            pluginStartupTasksEnabled: pluginStartupTasksEnabled
+            pluginStartupTasksEnabled: pluginStartupTasksEnabled,
+            curatedPluginStartupSyncEnabled: curatedPluginStartupSyncEnabled
         )
     }
 
