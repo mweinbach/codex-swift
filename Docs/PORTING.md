@@ -1096,7 +1096,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/app-server` turn-start override compatibility
   - matched Rust's `turn/start` rejection when experimental `permissions` are combined with legacy `sandboxPolicy`, preserving null-as-absent handling.
 - `codex-rs/app-server` turn-start cwd context overrides
-  - `turn/start` now records a rollout `turn_context` item for supported context overrides and preserves Rust's visible cwd behavior: later `thread/resume` and `thread/read` report the turn cwd rather than the session-start cwd. Live runtime-backed `turn/start` now dispatches those context overrides through `UserInputWithTurnContext`; active-thread mismatch validation and runtime completion projection remain pending.
+  - `turn/start` now records a rollout `turn_context` item for supported context overrides and preserves Rust's visible cwd behavior: later `thread/resume` and `thread/read` report the turn cwd rather than the session-start cwd. Managed config requirements reject disallowed explicit approval-policy, legacy sandbox-policy, and permission-profile overrides before the app-server persists rollout input or submits live runtime work, preserving Rust's `invalid turn context override` failure path. Live runtime-backed `turn/start` now dispatches accepted context overrides through `UserInputWithTurnContext`; active-thread mismatch validation and runtime completion projection remain pending.
 - `codex-rs/app-server` thread-start override compatibility
   - matched Rust's `thread/start` rejection when experimental `permissions` are combined with legacy `sandbox`, preserving null-as-absent handling.
 - `codex-rs/app-server-protocol` thread resume/fork experimental gating

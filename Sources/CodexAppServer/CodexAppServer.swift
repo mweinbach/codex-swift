@@ -1390,11 +1390,12 @@ public enum CodexAppServer {
                 runtimeConfig.sandboxPolicy = sandbox
             }
         }
-        try rejectDisallowedTurnPermissionSelection(
-            runtimeConfig: runtimeConfig,
-            permissionSelection: permissionSelection,
+        try validateTurnContextOverrideRequirements(
             configuration: configuration,
-            cwd: cwd
+            cwd: cwd,
+            approvalPolicy: nil,
+            sandboxPolicy: nil,
+            permissionProfile: permissionSelection == nil ? nil : runtimeConfig.permissionProfile
         )
         if let message = McpRequiredStartupValidator.requiredStartupFailureMessage(
             mcpServers: runtimeConfig.mcpServers,
@@ -1405,26 +1406,14 @@ public enum CodexAppServer {
         return runtimeConfig
     }
 
-    private static func rejectDisallowedTurnPermissionSelection(
-        runtimeConfig: CodexRuntimeConfig,
-        permissionSelection: PermissionProfileSelection?,
+    private static func validateTurnContextOverrideRequirements(
         configuration: CodexAppServerConfiguration,
-        cwd: URL?
+        cwd: URL?,
+        approvalPolicy: AskForApproval?,
+        sandboxPolicy: SandboxPolicy?,
+        permissionProfile: PermissionProfile?
     ) throws {
-        guard permissionSelection != nil,
-              let permissionProfile = runtimeConfig.permissionProfile
-        else {
-            return
-        }
-        let cwdURL = cwd ?? configuration.codexHome
-        let cwdPath = cwdURL.standardizedFileURL.path
-        let sandboxPolicy: SandboxPolicy
-        do {
-            sandboxPolicy = try permissionProfile.fileSystemSandboxPolicy.toLegacySandboxPolicy(
-                networkPolicy: permissionProfile.networkSandboxPolicy,
-                cwd: cwdPath
-            )
-        } catch {
+        guard approvalPolicy != nil || sandboxPolicy != nil || permissionProfile != nil else {
             return
         }
         let stack: ConfigLayerStack
@@ -1440,11 +1429,40 @@ public enum CodexAppServer {
         } catch {
             throw configLoadError(error)
         }
-        switch stack.requirements.sandboxPolicy.canSet(sandboxPolicy) {
-        case .success:
-            return
-        case let .failure(error):
-            throw AppServerError.invalidRequest("invalid turn context override: \(error.description)")
+        if let approvalPolicy {
+            switch stack.requirements.approvalPolicy.canSet(approvalPolicy) {
+            case .success:
+                break
+            case let .failure(error):
+                throw AppServerError.invalidRequest("invalid turn context override: \(error.description)")
+            }
+        }
+        if let sandboxPolicy {
+            switch stack.requirements.sandboxPolicy.canSet(sandboxPolicy) {
+            case .success:
+                break
+            case let .failure(error):
+                throw AppServerError.invalidRequest("invalid turn context override: \(error.description)")
+            }
+        }
+        if let permissionProfile {
+            let cwdURL = cwd ?? configuration.codexHome
+            let cwdPath = cwdURL.standardizedFileURL.path
+            let legacySandboxPolicy: SandboxPolicy
+            do {
+                legacySandboxPolicy = try permissionProfile.fileSystemSandboxPolicy.toLegacySandboxPolicy(
+                    networkPolicy: permissionProfile.networkSandboxPolicy,
+                    cwd: cwdPath
+                )
+            } catch {
+                return
+            }
+            switch stack.requirements.sandboxPolicy.canSet(legacySandboxPolicy) {
+            case .success:
+                break
+            case let .failure(error):
+                throw AppServerError.invalidRequest("invalid turn context override: \(error.description)")
+            }
         }
     }
 
@@ -2444,6 +2462,13 @@ public enum CodexAppServer {
                 baseSandboxPolicy,
                 cwd: contextCwd
             )
+        try validateTurnContextOverrideRequirements(
+            configuration: configuration,
+            cwd: URL(fileURLWithPath: contextCwd, isDirectory: true),
+            approvalPolicy: approvalPolicy,
+            sandboxPolicy: sandboxPolicy,
+            permissionProfile: permissionProfile
+        )
         let contextSandboxPolicy = permissionProfile.map {
             responseSandboxPolicy(for: $0, cwd: contextCwd, fallback: baseSandboxPolicy)
         } ?? baseSandboxPolicy
@@ -2902,6 +2927,13 @@ public enum CodexAppServer {
             permissionProfile = nil
             activePermissionProfile = nil
         }
+        try validateTurnContextOverrideRequirements(
+            configuration: configuration,
+            cwd: URL(fileURLWithPath: cwd ?? existing.cwd, isDirectory: true),
+            approvalPolicy: approvalPolicy,
+            sandboxPolicy: sandboxPolicy,
+            permissionProfile: permissionProfile
+        )
 
         let hasAnyOverrides = cwd != nil
             || approvalPolicy != nil

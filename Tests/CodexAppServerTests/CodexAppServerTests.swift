@@ -2828,6 +2828,78 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(capture.submissions.isEmpty)
     }
 
+    func testTurnStartRejectsDisallowedApprovalPolicyBeforePersistingInputLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let requirementsPath = temp.url.appendingPathComponent("requirements.toml", isDirectory: false)
+        try """
+        allowed_approval_policies = ["untrusted"]
+        """.write(to: requirementsPath, atomically: true, encoding: .utf8)
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                configLayerOverrides: ConfigLayerLoaderOverrides(requirementsPath: requirementsPath)
+            )
+        )
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"blocked"}],"approvalPolicy":"never"}}"#.utf8
+        )))
+
+        XCTAssertEqual(messages.count, 1)
+        let error = try XCTUnwrap(messages[0]["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        let message = try XCTUnwrap(error["message"] as? String)
+        XCTAssertTrue(message.contains("invalid turn context override"))
+        XCTAssertTrue(message.contains("allowed set [UnlessTrusted]"))
+        XCTAssertNil(messages[0]["method"])
+
+        let resume = try decode(processor.processLine(Data(#"{"id":3,"method":"thread/resume","params":{"threadId":"\#(threadID)"}}"#.utf8)))
+        let resumeResult = try XCTUnwrap(resume["result"] as? [String: Any])
+        let resumedThread = try XCTUnwrap(resumeResult["thread"] as? [String: Any])
+        let turns = try XCTUnwrap(resumedThread["turns"] as? [[String: Any]])
+        XCTAssertEqual(turns.count, 0)
+    }
+
+    func testTurnStartRuntimeSubmitterRejectsDisallowedSandboxPolicyBeforeSubmittingLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let requirementsPath = temp.url.appendingPathComponent("requirements.toml", isDirectory: false)
+        try """
+        allowed_sandbox_modes = ["read-only"]
+        """.write(to: requirementsPath, atomically: true, encoding: .utf8)
+        let capture = AppServerCoreOpCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                configLayerOverrides: ConfigLayerLoaderOverrides(requirementsPath: requirementsPath)
+            ),
+            coreOpSubmitter: capture.submit
+        )
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"blocked"}],"sandboxPolicy":{"type":"dangerFullAccess"}}}"#.utf8
+        )))
+
+        XCTAssertEqual(messages.count, 1)
+        let error = try XCTUnwrap(messages[0]["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        let message = try XCTUnwrap(error["message"] as? String)
+        XCTAssertTrue(message.contains("invalid turn context override"))
+        XCTAssertTrue(message.contains("allowed set [ReadOnly]"))
+        XCTAssertTrue(capture.submissions.isEmpty)
+    }
+
     func testTurnSteerAppendsInputAndReturnsActiveTurnID() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
