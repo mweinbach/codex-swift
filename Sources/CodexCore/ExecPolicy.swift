@@ -6065,14 +6065,57 @@ public final class PolicyParser {
         constants: [String: ConfigValue],
         functions: [String: StarlarkFunction]
     ) throws -> ConfigValue {
-        switch rawArguments.count {
-        case 0:
+        guard !rawArguments.isEmpty else {
             return .integer(0)
-        case 1:
-            let value = try parsePolicyLiteral(rawArguments[0], constants: constants, functions: functions)
-            return try .integer(starlarkInteger(value, expression: expression))
-        default:
+        }
+
+        var positionalArguments: [String] = []
+        var rawBase: String?
+        var sawKeywordArgument = false
+
+        for rawArgument in rawArguments {
+            if let equalsIndex = topLevelEqualsIndex(in: rawArgument) {
+                sawKeywordArgument = true
+                let rawName = String(rawArgument[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let valueStart = rawArgument.index(after: equalsIndex)
+                let rawValue = String(rawArgument[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard rawName == "base", rawBase == nil else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                rawBase = rawValue
+                continue
+            }
+
+            guard !sawKeywordArgument else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            positionalArguments.append(rawArgument)
+        }
+
+        guard (1...2).contains(positionalArguments.count),
+              rawBase == nil || positionalArguments.count == 1
+        else {
             throw ConfigOverrideError.invalidLiteral(expression)
+        }
+
+        let value = try parsePolicyLiteral(positionalArguments[0], constants: constants, functions: functions)
+        if positionalArguments.count == 2 {
+            rawBase = positionalArguments[1]
+        }
+
+        if let rawBase {
+            guard case let .string(string) = value else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            let base = try parseStarlarkInteger(
+                rawBase,
+                constants: constants,
+                functions: functions,
+                expression: expression
+            )
+            return try .integer(starlarkInteger(string: string, base: base, expression: expression))
+        } else {
+            return try .integer(starlarkInteger(value, expression: expression))
         }
     }
 
@@ -6213,13 +6256,57 @@ public final class PolicyParser {
         case let .bool(value):
             return value ? 1 : 0
         case let .string(value):
-            guard let integer = Int64(value.trimmingCharacters(in: .whitespacesAndNewlines)) else {
-                throw ConfigOverrideError.invalidLiteral(expression)
-            }
-            return integer
+            return try starlarkInteger(string: value, base: 10, expression: expression)
         default:
             throw ConfigOverrideError.invalidLiteral(expression)
         }
+    }
+
+    private static func starlarkInteger(string rawValue: String, base rawBase: Int, expression: String) throws -> Int64 {
+        guard rawBase == 0 || (2...36).contains(rawBase) else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+
+        var value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sign: String
+        if value.hasPrefix("-") {
+            sign = "-"
+            value.removeFirst()
+        } else if value.hasPrefix("+") {
+            sign = ""
+            value.removeFirst()
+        } else {
+            sign = ""
+        }
+
+        var base = rawBase == 0 ? 10 : rawBase
+        if value.hasPrefix("0x") || value.hasPrefix("0X") {
+            guard rawBase == 0 || rawBase == 16 else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            base = 16
+            value.removeFirst(2)
+        } else if value.hasPrefix("0o") || value.hasPrefix("0O") {
+            guard rawBase == 0 || rawBase == 8 else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            base = 8
+            value.removeFirst(2)
+        } else if value.hasPrefix("0b") || value.hasPrefix("0B") {
+            guard rawBase == 0 || rawBase == 2 else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            base = 2
+            value.removeFirst(2)
+        }
+
+        let digits = value.filter { $0 != "_" }
+        guard !digits.isEmpty,
+              let integer = Int64(sign + digits, radix: base)
+        else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        return integer
     }
 
     private static func starlarkHashCode(for value: String) -> Int32 {

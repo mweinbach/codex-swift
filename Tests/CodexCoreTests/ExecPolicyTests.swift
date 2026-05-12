@@ -3341,6 +3341,45 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/1/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkIntegerBaseConversion() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        HEX = int("ff", 16)
+        BINARY = int("111", base = 2)
+        OCTAL = int("77", 8)
+        AUTO_HEX = int("0xff", 0)
+        AUTO_BINARY = int("0b101", 0)
+        UNDERSCORE = int("1_000")
+
+        prefix_rule([TOOL, "hex-" + str(HEX)], "allow")
+        prefix_rule([TOOL, "bin-" + str(BINARY)], "prompt")
+        prefix_rule([TOOL, "oct-" + str(OCTAL)], "forbidden")
+
+        if AUTO_HEX == 255 and AUTO_BINARY == 5 and UNDERSCORE == 1000:
+            network_rule("api" + str(AUTO_HEX + AUTO_BINARY) + ".github.com", "https", "allow")
+            host_executable(TOOL, ["/opt/" + str(UNDERSCORE) + "/" + TOOL])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("hex-255")]),
+                decision: .allow
+            ),
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("bin-7")]),
+                decision: .prompt
+            ),
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("oct-63")]),
+                decision: .forbidden
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api260.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/1000/git"]])
+    }
+
     func testParserEvaluatesRustStarlarkDictBuiltin() throws {
         let policy = try parsePolicy("""
         TOOL = "git"
