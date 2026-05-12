@@ -25588,6 +25588,58 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(contents.contains(#"model = "prod""#))
     }
 
+    func testSetDefaultModelMigratesInlineProfileTableLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        try """
+        profile = "fast"
+
+        profiles = { fast = { model = "gpt-4o", sandbox_mode = "strict" } }
+        """.write(to: configFile, atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"setDefaultModel","params":{"model":"o4-mini"}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertNotNil(response["result"] as? [String: Any])
+
+        let contents = try String(contentsOf: configFile, encoding: .utf8)
+        XCTAssertEqual(contents, """
+        profile = "fast"
+
+        [profiles.fast]
+        model = "o4-mini"
+        sandbox_mode = "strict"
+
+        """)
+    }
+
+    func testSetDefaultModelClearMigratesInlineProfileTableLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        try """
+        profile = "fast"
+
+        profiles = { fast = { model = "gpt-4o", sandbox_mode = "strict" } }
+        """.write(to: configFile, atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"setDefaultModel","params":{"reasoningEffort":"high"}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertNotNil(response["result"] as? [String: Any])
+
+        let contents = try String(contentsOf: configFile, encoding: .utf8)
+        XCTAssertEqual(contents, """
+        profile = "fast"
+
+        [profiles.fast]
+        sandbox_mode = "strict"
+        model_reasoning_effort = "high"
+
+        """)
+    }
+
     private func appServerResponse(
         _ line: String,
         codexHome: URL,

@@ -21885,7 +21885,8 @@ public enum CodexAppServer {
         reasoningEffort: String?
     ) -> String {
         var lines = contents.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-        let targetHeader = profile.map { "profiles.\($0)" }
+        migrateInlineProfilesTableIfNeeded(profile: profile, lines: &lines)
+        let targetHeader = profile.map { "profiles.\(tomlKey($0))" }
         let range = configSectionRange(targetHeader, in: lines)
         if range.isEmpty {
             if let targetHeader {
@@ -21901,6 +21902,140 @@ public enum CodexAppServer {
             rewriteModelLines(in: &lines, range: range, model: model, reasoningEffort: reasoningEffort)
         }
         return trimTrailingBlankLines(lines.joined(separator: "\n")) + "\n"
+    }
+
+    private static func migrateInlineProfilesTableIfNeeded(profile: String?, lines: inout [String]) {
+        guard let profile else {
+            return
+        }
+        let topLevelRange = configSectionRange(nil, in: lines)
+        guard let index = topLevelRange.first(where: { tomlAssignmentKey(lines[$0]) == "profiles" }),
+              let equalsIndex = lines[index].firstIndex(of: "=")
+        else {
+            return
+        }
+        let rawValue = lines[index][lines[index].index(after: equalsIndex)...]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let profiles = parseInlineProfilesTable(rawValue),
+              profiles.contains(where: { $0.name == profile })
+        else {
+            return
+        }
+
+        lines.remove(at: index)
+        while let last = lines.last, last.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            lines.removeLast()
+        }
+        if !lines.isEmpty, lines.last?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+            lines.append("")
+        }
+        for (profileIndex, profileTable) in profiles.enumerated() {
+            if profileIndex > 0, lines.last?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+                lines.append("")
+            }
+            lines.append("[profiles.\(tomlKey(profileTable.name))]")
+            for entry in profileTable.entries {
+                lines.append("\(tomlKey(entry.key)) = \(entry.literal)")
+            }
+        }
+    }
+
+    private static func parseInlineProfilesTable(_ raw: String) -> [(name: String, entries: [(key: String, literal: String)])]? {
+        guard raw.hasPrefix("{"), raw.hasSuffix("}") else {
+            return nil
+        }
+        let body = raw.dropFirst().dropLast()
+        var profiles: [(name: String, entries: [(key: String, literal: String)])] = []
+        for segment in splitTopLevelComma(String(body)) {
+            guard let equalsIndex = segment.firstIndex(of: "=") else {
+                return nil
+            }
+            let rawName = segment[..<equalsIndex].trimmingCharacters(in: .whitespacesAndNewlines)
+            let rawTable = segment[segment.index(after: equalsIndex)...].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let name = parseTomlKeySegment(String(rawName)),
+                  rawTable.hasPrefix("{"),
+                  rawTable.hasSuffix("}")
+            else {
+                return nil
+            }
+            var entries: [(key: String, literal: String)] = []
+            let entryBody = rawTable.dropFirst().dropLast()
+            for entrySegment in splitTopLevelComma(String(entryBody)) {
+                guard let entryEquals = entrySegment.firstIndex(of: "=") else {
+                    return nil
+                }
+                let rawKey = entrySegment[..<entryEquals].trimmingCharacters(in: .whitespacesAndNewlines)
+                let literal = entrySegment[entrySegment.index(after: entryEquals)...]
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let key = parseTomlKeySegment(String(rawKey)),
+                      !literal.isEmpty
+                else {
+                    return nil
+                }
+                entries.append((key, String(literal)))
+            }
+            profiles.append((name, entries))
+        }
+        return profiles
+    }
+
+    private static func splitTopLevelComma(_ raw: String) -> [String] {
+        var segments: [String] = []
+        var current = ""
+        var depth = 0
+        var quote: Character?
+        var isEscaped = false
+        for character in raw {
+            if let activeQuote = quote {
+                current.append(character)
+                if isEscaped {
+                    isEscaped = false
+                } else if character == "\\" {
+                    isEscaped = true
+                } else if character == activeQuote {
+                    quote = nil
+                }
+                continue
+            }
+            switch character {
+            case "\"", "'":
+                quote = character
+                current.append(character)
+            case "{", "[":
+                depth += 1
+                current.append(character)
+            case "}", "]":
+                depth = max(0, depth - 1)
+                current.append(character)
+            case "," where depth == 0:
+                let segment = current.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !segment.isEmpty {
+                    segments.append(segment)
+                }
+                current = ""
+            default:
+                current.append(character)
+            }
+        }
+        let segment = current.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !segment.isEmpty {
+            segments.append(segment)
+        }
+        return segments
+    }
+
+    private static func parseTomlKeySegment(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+        if trimmed.hasPrefix("\"") || trimmed.hasPrefix("'") {
+            guard case let .string(value) = try? ConfigValueParser.parseTomlLiteral(trimmed) else {
+                return nil
+            }
+            return value
+        }
+        return trimmed
     }
 
     private static func rewriteModelLines(
