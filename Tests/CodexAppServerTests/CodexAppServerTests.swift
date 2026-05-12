@@ -2176,6 +2176,31 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertFalse(interruptMessages.contains { $0["method"] as? String == "thread/status/changed" })
     }
 
+    func testThreadStartedCanBeOptedOutLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            optOutNotificationMethods: ["thread/started"]
+        )
+
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+        XCTAssertEqual(startMessages.count, 1)
+        XCTAssertNotNil(startMessages[0]["result"] as? [String: Any])
+        XCTAssertFalse(startMessages.contains { $0["method"] as? String == "thread/started" })
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let forkMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"thread/fork","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        XCTAssertEqual(forkMessages.count, 1)
+        XCTAssertNotNil(forkMessages[0]["result"] as? [String: Any])
+        XCTAssertFalse(forkMessages.contains { $0["method"] as? String == "thread/started" })
+    }
+
     func testRuntimeTurnDiffEventEmitsUpdatedNotification() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()

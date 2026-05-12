@@ -22799,6 +22799,13 @@ final class CodexAppServerMessageProcessor {
         return CodexAppServer.threadStatusChangedNotification(threadID: threadID, status: status)
     }
 
+    private func threadStartedNotification(thread: [String: Any]) -> [String: Any]? {
+        guard !optOutNotificationMethods.contains("thread/started") else {
+            return nil
+        }
+        return CodexAppServer.threadStartedNotification(thread: thread)
+    }
+
     private func subscribeCurrentConnection(toThreadID threadID: String) {
         rememberLoadedThreadFeatureState(threadID: threadID)
         let manager = threadStateManager
@@ -24042,7 +24049,9 @@ final class CodexAppServerMessageProcessor {
                             rememberThreadAnalyticsMetadata(threadID: threadID, result: result)
                             subscribeCurrentConnection(toThreadID: threadID)
                         }
-                        notifications.append(CodexAppServer.threadStartedNotification(thread: thread))
+                        if let notification = threadStartedNotification(thread: thread) {
+                            notifications.append(notification)
+                        }
                     }
                 case "thread/list":
                     response = CodexAppServer.responseObject(
@@ -24157,7 +24166,9 @@ final class CodexAppServerMessageProcessor {
                         }
                         var notificationThread = thread
                         notificationThread["turns"] = []
-                        notifications.append(CodexAppServer.threadStartedNotification(thread: notificationThread))
+                        if let notification = threadStartedNotification(thread: notificationThread) {
+                            notifications.append(notification)
+                        }
                     }
                 case "turn/start":
                     try CodexAppServer.requireTurnStartExperimentalFieldsAPI(
@@ -24241,7 +24252,9 @@ final class CodexAppServerMessageProcessor {
                         if let threadID = thread["id"] as? String {
                             subscribeCurrentConnection(toThreadID: threadID)
                         }
-                        notifications.append(CodexAppServer.threadStartedNotification(thread: thread))
+                        if let notification = threadStartedNotification(thread: thread) {
+                            notifications.append(notification)
+                        }
                     }
                     if let reviewThreadID = outcome.result["reviewThreadId"] as? String {
                         subscribeCurrentConnection(toThreadID: reviewThreadID)
