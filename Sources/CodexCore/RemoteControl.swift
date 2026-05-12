@@ -403,6 +403,212 @@ public struct RemoteControlQueuedServerEnvelope: Equatable, Sendable {
     }
 }
 
+public struct RemoteControlVirtualConnectionID: Equatable, Hashable, Sendable {
+    public var rawValue: UInt64
+
+    public init(_ rawValue: UInt64) {
+        self.rawValue = rawValue
+    }
+}
+
+public enum RemoteControlClientTrackerEffect: Equatable, Sendable {
+    case connectionOpened(
+        connectionID: RemoteControlVirtualConnectionID,
+        clientID: RemoteControlClientID,
+        streamID: RemoteControlStreamID
+    )
+    case incomingMessage(
+        connectionID: RemoteControlVirtualConnectionID,
+        message: ExecServerJSONRPCMessage
+    )
+    case connectionClosed(connectionID: RemoteControlVirtualConnectionID)
+    case serverEvent(RemoteControlQueuedServerEnvelope)
+}
+
+public struct RemoteControlClientTracker: Equatable, Sendable {
+    public static var idleTimeoutSeconds: TimeInterval { 10 * 60 }
+
+    private struct ClientKey: Hashable, Sendable {
+        var clientID: RemoteControlClientID
+        var streamID: RemoteControlStreamID
+    }
+
+    private struct ClientState: Equatable, Sendable {
+        var connectionID: RemoteControlVirtualConnectionID
+        var lastActivityAt: TimeInterval
+        var lastInboundSeqID: UInt64?
+    }
+
+    private var clients: [ClientKey: ClientState] = [:]
+    private var legacyStreamIDs: [RemoteControlClientID: RemoteControlStreamID] = [:]
+    private var nextConnectionID: UInt64
+
+    public var activeConnectionCount: Int {
+        clients.count
+    }
+
+    public init(nextConnectionID: UInt64 = 1) {
+        self.nextConnectionID = nextConnectionID
+    }
+
+    public mutating func handleClientEnvelope(
+        _ envelope: RemoteControlClientEnvelope,
+        now: TimeInterval = Date().timeIntervalSinceReferenceDate
+    ) -> [RemoteControlClientTrackerEffect] {
+        let isLegacyStreamID = envelope.streamID == nil
+        let isInitialize = Self.messageStartsConnection(envelope.event)
+        let streamID = resolvedStreamID(
+            for: envelope,
+            startsConnection: isInitialize
+        )
+        guard !streamID.rawValue.isEmpty else {
+            return []
+        }
+
+        let clientKey = ClientKey(clientID: envelope.clientID, streamID: streamID)
+        switch envelope.event {
+        case let .clientMessage(message):
+            if let seqID = envelope.seqID,
+               let client = clients[clientKey],
+               let lastSeqID = client.lastInboundSeqID,
+               lastSeqID >= seqID,
+               !isInitialize
+            {
+                return []
+            }
+
+            var effects: [RemoteControlClientTrackerEffect] = []
+            if isInitialize, clients[clientKey] != nil {
+                effects.append(contentsOf: closeClient(clientID: envelope.clientID, streamID: streamID))
+            }
+
+            if var client = clients[clientKey] {
+                client.lastActivityAt = now
+                if let seqID = envelope.seqID {
+                    client.lastInboundSeqID = seqID
+                }
+                clients[clientKey] = client
+                effects.append(.incomingMessage(connectionID: client.connectionID, message: message))
+                return effects
+            }
+
+            guard isInitialize else {
+                return effects
+            }
+
+            let connectionID = RemoteControlVirtualConnectionID(nextConnectionID)
+            nextConnectionID = nextConnectionID == UInt64.max ? UInt64.max : nextConnectionID + 1
+            clients[clientKey] = ClientState(
+                connectionID: connectionID,
+                lastActivityAt: now,
+                lastInboundSeqID: isLegacyStreamID ? nil : envelope.seqID
+            )
+            if isLegacyStreamID {
+                legacyStreamIDs[envelope.clientID] = streamID
+            }
+            effects.append(.connectionOpened(
+                connectionID: connectionID,
+                clientID: envelope.clientID,
+                streamID: streamID
+            ))
+            effects.append(.incomingMessage(connectionID: connectionID, message: message))
+            return effects
+
+        case .clientMessageChunk, .ack:
+            return []
+
+        case .ping:
+            if var client = clients[clientKey] {
+                client.lastActivityAt = now
+                clients[clientKey] = client
+                return [.serverEvent(RemoteControlQueuedServerEnvelope(
+                    event: .pong(status: .active),
+                    clientID: envelope.clientID,
+                    streamID: streamID
+                ))]
+            }
+            return [.serverEvent(RemoteControlQueuedServerEnvelope(
+                event: .pong(status: .unknown),
+                clientID: envelope.clientID,
+                streamID: streamID
+            ))]
+
+        case .clientClosed:
+            return closeClient(clientID: envelope.clientID, streamID: streamID)
+        }
+    }
+
+    public mutating func enqueueOutgoingMessage(
+        connectionID: RemoteControlVirtualConnectionID,
+        message: ExecServerJSONRPCMessage
+    ) -> RemoteControlQueuedServerEnvelope? {
+        guard let entry = clients.first(where: { $0.value.connectionID == connectionID }) else {
+            return nil
+        }
+        return RemoteControlQueuedServerEnvelope(
+            event: .serverMessage(message: message),
+            clientID: entry.key.clientID,
+            streamID: entry.key.streamID
+        )
+    }
+
+    public mutating func closeClient(
+        clientID: RemoteControlClientID,
+        streamID: RemoteControlStreamID
+    ) -> [RemoteControlClientTrackerEffect] {
+        let key = ClientKey(clientID: clientID, streamID: streamID)
+        guard let client = clients.removeValue(forKey: key) else {
+            return []
+        }
+        if legacyStreamIDs[clientID] == streamID {
+            legacyStreamIDs.removeValue(forKey: clientID)
+        }
+        return [.connectionClosed(connectionID: client.connectionID)]
+    }
+
+    public mutating func closeExpiredClients(
+        now: TimeInterval
+    ) -> [RemoteControlClientTrackerEffect] {
+        let expiredKeys = clients.compactMap { key, client in
+            now - client.lastActivityAt >= Self.idleTimeoutSeconds ? key : nil
+        }
+        return expiredKeys.flatMap { key in
+            closeClient(clientID: key.clientID, streamID: key.streamID)
+        }
+    }
+
+    private mutating func resolvedStreamID(
+        for envelope: RemoteControlClientEnvelope,
+        startsConnection: Bool
+    ) -> RemoteControlStreamID {
+        if let streamID = envelope.streamID {
+            return streamID
+        }
+        if startsConnection {
+            if let existingStreamID = legacyStreamIDs.removeValue(forKey: envelope.clientID) {
+                return existingStreamID
+            }
+            return .newRandom()
+        }
+        if let existingStreamID = legacyStreamIDs[envelope.clientID] {
+            return existingStreamID
+        }
+        if case .ping = envelope.event {
+            return .newRandom()
+        }
+        return RemoteControlStreamID("")
+    }
+
+    private static func messageStartsConnection(_ event: RemoteControlClientEvent) -> Bool {
+        guard case let .clientMessage(message) = event,
+              case let .request(request) = message
+        else {
+            return false
+        }
+        return request.method == "initialize"
+    }
+}
+
 public struct RemoteControlWebsocketState: Equatable, Sendable {
     private struct StreamKey: Hashable, Sendable {
         var clientID: RemoteControlClientID

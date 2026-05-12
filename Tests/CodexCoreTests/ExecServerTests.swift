@@ -2865,6 +2865,151 @@ final class ExecServerTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(ExecServerJSONRPCMessage.self, from: reassembled), message)
     }
 
+    func testRemoteControlClientTrackerOpensAndRoutesVirtualClientsLikeRust() {
+        let clientID = RemoteControlClientID("client-1")
+        let streamID = RemoteControlStreamID("stream-1")
+        let initialize = remoteControlInitializeEnvelope(clientID: clientID, streamID: streamID, seqID: 0)
+        let followup = RemoteControlClientEnvelope(
+            event: .clientMessage(message: .notification(ExecServerJSONRPCNotification(method: "initialized"))),
+            clientID: clientID,
+            streamID: streamID,
+            seqID: 1,
+            cursor: nil
+        )
+        var tracker = RemoteControlClientTracker()
+
+        XCTAssertEqual(tracker.handleClientEnvelope(initialize, now: 10), [
+            .connectionOpened(
+                connectionID: RemoteControlVirtualConnectionID(1),
+                clientID: clientID,
+                streamID: streamID
+            ),
+            .incomingMessage(
+                connectionID: RemoteControlVirtualConnectionID(1),
+                message: tryInitializeMessage()
+            )
+        ])
+        XCTAssertEqual(tracker.handleClientEnvelope(followup, now: 11), [
+            .incomingMessage(
+                connectionID: RemoteControlVirtualConnectionID(1),
+                message: .notification(ExecServerJSONRPCNotification(method: "initialized"))
+            )
+        ])
+
+        let outgoing = ExecServerJSONRPCMessage.notification(ExecServerJSONRPCNotification(method: "configWarning"))
+        XCTAssertEqual(
+            tracker.enqueueOutgoingMessage(connectionID: RemoteControlVirtualConnectionID(1), message: outgoing),
+            RemoteControlQueuedServerEnvelope(event: .serverMessage(message: outgoing), clientID: clientID, streamID: streamID)
+        )
+        XCTAssertEqual(tracker.activeConnectionCount, 1)
+    }
+
+    func testRemoteControlClientTrackerDropsStaleSeqAndReinitializesSameStreamLikeRust() {
+        let clientID = RemoteControlClientID("client-1")
+        let streamID = RemoteControlStreamID("stream-1")
+        let initialize = remoteControlInitializeEnvelope(clientID: clientID, streamID: streamID, seqID: 2)
+        var tracker = RemoteControlClientTracker()
+        _ = tracker.handleClientEnvelope(initialize, now: 10)
+
+        let stale = RemoteControlClientEnvelope(
+            event: .clientMessage(message: .notification(ExecServerJSONRPCNotification(method: "initialized"))),
+            clientID: clientID,
+            streamID: streamID,
+            seqID: 2,
+            cursor: nil
+        )
+        XCTAssertEqual(tracker.handleClientEnvelope(stale, now: 11), [])
+
+        XCTAssertEqual(tracker.handleClientEnvelope(initialize, now: 12), [
+            .connectionClosed(connectionID: RemoteControlVirtualConnectionID(1)),
+            .connectionOpened(
+                connectionID: RemoteControlVirtualConnectionID(2),
+                clientID: clientID,
+                streamID: streamID
+            ),
+            .incomingMessage(
+                connectionID: RemoteControlVirtualConnectionID(2),
+                message: tryInitializeMessage()
+            )
+        ])
+    }
+
+    func testRemoteControlClientTrackerPreservesLegacyStreamAndPingRulesLikeRust() {
+        let clientID = RemoteControlClientID("client-1")
+        let initialize = remoteControlInitializeEnvelope(clientID: clientID, streamID: nil, seqID: 0)
+        var tracker = RemoteControlClientTracker()
+        let opened = tracker.handleClientEnvelope(initialize, now: 10)
+        guard case let .connectionOpened(connectionID: connectionID, clientID: _, streamID: legacyStreamID) = opened.first else {
+            return XCTFail("Expected legacy initialize to open a connection")
+        }
+
+        let legacyFollowup = RemoteControlClientEnvelope(
+            event: .clientMessage(message: .notification(ExecServerJSONRPCNotification(method: "initialized"))),
+            clientID: clientID,
+            streamID: nil,
+            seqID: 0,
+            cursor: nil
+        )
+        XCTAssertEqual(tracker.handleClientEnvelope(legacyFollowup, now: 11), [
+            .incomingMessage(
+                connectionID: connectionID,
+                message: .notification(ExecServerJSONRPCNotification(method: "initialized"))
+            )
+        ])
+
+        let activePing = RemoteControlClientEnvelope(
+            event: .ping,
+            clientID: clientID,
+            streamID: nil,
+            seqID: nil,
+            cursor: nil
+        )
+        XCTAssertEqual(tracker.handleClientEnvelope(activePing, now: 12), [
+            .serverEvent(RemoteControlQueuedServerEnvelope(
+                event: .pong(status: .active),
+                clientID: clientID,
+                streamID: legacyStreamID
+            ))
+        ])
+
+        let unknownClientID = RemoteControlClientID("missing-client")
+        let unknownPing = RemoteControlClientEnvelope(
+            event: .ping,
+            clientID: unknownClientID,
+            streamID: nil,
+            seqID: nil,
+            cursor: nil
+        )
+        let unknownEffects = tracker.handleClientEnvelope(unknownPing, now: 13)
+        guard case let .serverEvent(unknownPong) = unknownEffects.first else {
+            return XCTFail("Expected ping from an unknown client to queue an unknown pong")
+        }
+        XCTAssertEqual(unknownEffects.count, 1)
+        XCTAssertEqual(unknownPong.event, .pong(status: .unknown))
+        XCTAssertEqual(unknownPong.clientID, unknownClientID)
+        XCTAssertFalse(unknownPong.streamID.rawValue.isEmpty)
+    }
+
+    func testRemoteControlClientTrackerClosesExpiredClientsLikeRust() {
+        let clientID = RemoteControlClientID("client-1")
+        let streamID = RemoteControlStreamID("stream-1")
+        var tracker = RemoteControlClientTracker()
+        _ = tracker.handleClientEnvelope(
+            remoteControlInitializeEnvelope(clientID: clientID, streamID: streamID, seqID: 0),
+            now: 10
+        )
+
+        XCTAssertEqual(
+            tracker.closeExpiredClients(now: 10 + RemoteControlClientTracker.idleTimeoutSeconds - 1),
+            []
+        )
+        XCTAssertEqual(
+            tracker.closeExpiredClients(now: 10 + RemoteControlClientTracker.idleTimeoutSeconds),
+            [.connectionClosed(connectionID: RemoteControlVirtualConnectionID(1))]
+        )
+        XCTAssertEqual(tracker.activeConnectionCount, 0)
+    }
+
     func testRemoteControlWebsocketStateSequencesSplitsAndBuffersLikeRust() throws {
         let clientID = RemoteControlClientID("client-1")
         let streamID = RemoteControlStreamID("stream-1")
@@ -3974,6 +4119,33 @@ final class ExecServerTests: XCTestCase {
     private func jsonObject<T: Encodable>(from value: T) throws -> [String: Any] {
         let data = try JSONEncoder().encode(value)
         return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    private func remoteControlInitializeEnvelope(
+        clientID: RemoteControlClientID,
+        streamID: RemoteControlStreamID?,
+        seqID: UInt64?
+    ) -> RemoteControlClientEnvelope {
+        RemoteControlClientEnvelope(
+            event: .clientMessage(message: tryInitializeMessage()),
+            clientID: clientID,
+            streamID: streamID,
+            seqID: seqID,
+            cursor: nil
+        )
+    }
+
+    private func tryInitializeMessage() -> ExecServerJSONRPCMessage {
+        .request(ExecServerJSONRPCRequest(
+            id: .integer(1),
+            method: execServerInitializeMethod,
+            params: .object([
+                "clientInfo": .object([
+                    "name": .string("remote-test-client"),
+                    "version": .string("0.1.0")
+                ])
+            ])
+        ))
     }
 
     private actor RemoteControlAuthSequence {
