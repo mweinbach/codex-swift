@@ -940,7 +940,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/execpolicy/src/parser.rs` Starlark numeric multiplicative expressions
   - Added Swift execpolicy parser support for numeric `*`, `/`, `//`, and `%` expressions, including Starlark-style floor division/modulo for integers and computed range, index, and condition expressions.
 - `codex-rs/execpolicy/src/parser.rs` Starlark numeric bitwise expressions
-  - Added Swift execpolicy parser support for integer `&`, `^`, `<<`, and `>>` expressions, preserving Starlark operator precedence around additive/multiplicative expressions and covering numeric flag composition in generated prefix rules, network hosts, and host executable paths.
+  - Added Swift execpolicy parser support for integer `&`, `^`, `<<`, `>>`, and unary `~` expressions, preserving Starlark operator precedence around additive/multiplicative expressions and covering numeric flag composition in generated prefix rules, network hosts, and host executable paths.
 - `codex-rs/execpolicy/src/parser.rs` Starlark sequence repetition
   - Added Swift execpolicy parser support for Starlark string and list repetition with `*`, including left- and right-hand integer counts, empty results for non-positive counts, and use in generated prefix rules, examples, network hosts, and executable paths.
 - `codex-rs/execpolicy/src/parser.rs` Starlark sequence builtins and assignment destructuring

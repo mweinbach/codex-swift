@@ -6981,7 +6981,7 @@ public final class PolicyParser {
         functions: [String: StarlarkFunction]
     ) throws -> ConfigValue? {
         guard let sign = text.first,
-              sign == "-" || sign == "+",
+              sign == "-" || sign == "+" || sign == "~",
               text.dropFirst().first?.isWhitespace != true
         else {
             return nil
@@ -6993,8 +6993,18 @@ public final class PolicyParser {
         let operand = try parsePolicyLiteral(operandText, constants: constants, functions: functions)
         switch operand {
         case let .integer(value):
-            return .integer(sign == "-" ? -value : value)
+            switch sign {
+            case "-":
+                return .integer(-value)
+            case "~":
+                return .integer(~value)
+            default:
+                return .integer(value)
+            }
         case let .double(value):
+            guard sign != "~" else {
+                throw ConfigOverrideError.invalidLiteral(text)
+            }
             return .double(sign == "-" ? -value : value)
         default:
             throw ConfigOverrideError.invalidLiteral(text)
