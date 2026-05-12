@@ -3164,6 +3164,61 @@ final class ExecServerTests: XCTestCase {
         )
     }
 
+    func testRemoteControlWebsocketWriterCoreReplaysBufferedServerFramesLikeRust() throws {
+        let clientID = RemoteControlClientID("client-1")
+        let streamID = RemoteControlStreamID("stream-1")
+        let queued = RemoteControlQueuedServerEnvelope(
+            event: .pong(status: .active),
+            clientID: clientID,
+            streamID: streamID
+        )
+        var writer = RemoteControlWebsocketWriterCore()
+        var state = RemoteControlWebsocketState()
+
+        let firstWrite = try writer.process(.queuedServerEvent(queued), state: &state)
+        XCTAssertEqual(firstWrite.count, 1)
+        XCTAssertEqual(state.bufferedEnvelopeCount, 1)
+
+        let firstEnvelope = try remoteControlServerEnvelope(from: firstWrite[0])
+        XCTAssertEqual(
+            firstEnvelope,
+            RemoteControlServerEnvelope(
+                event: .pong(status: .active),
+                clientID: clientID,
+                streamID: streamID,
+                seqID: 1
+            )
+        )
+
+        let replay = try writer.process(.connectionOpened, state: &state)
+        XCTAssertEqual(replay, firstWrite)
+        XCTAssertEqual(state.bufferedEnvelopeCount, 1)
+    }
+
+    func testRemoteControlWebsocketWriterCoreAppliesRustCapacityAndPingRules() throws {
+        let clientID = RemoteControlClientID("client-1")
+        let streamID = RemoteControlStreamID("stream-1")
+        let queued = RemoteControlQueuedServerEnvelope(
+            event: .pong(status: .active),
+            clientID: clientID,
+            streamID: streamID
+        )
+        var writer = RemoteControlWebsocketWriterCore()
+        var state = RemoteControlWebsocketState()
+
+        XCTAssertEqual(try writer.process(.pingTick, state: &state), [.ping])
+        for index in 0..<RemoteControlWebsocketState.channelCapacity {
+            let frames = try writer.process(.queuedServerEvent(queued), state: &state)
+            XCTAssertEqual(frames.count, 1)
+            XCTAssertEqual(try remoteControlServerEnvelope(from: frames[0]).seqID, UInt64(index + 1))
+        }
+        XCTAssertEqual(state.bufferedEnvelopeCount, RemoteControlWebsocketState.channelCapacity)
+        XCTAssertFalse(state.outboundHasCapacity)
+
+        XCTAssertEqual(try writer.process(.queuedServerEvent(queued), state: &state), [])
+        XCTAssertEqual(state.bufferedEnvelopeCount, RemoteControlWebsocketState.channelCapacity)
+    }
+
     func testRemoteControlWebsocketStateSequencesSplitsAndBuffersLikeRust() throws {
         let clientID = RemoteControlClientID("client-1")
         let streamID = RemoteControlStreamID("stream-1")
@@ -4077,6 +4132,21 @@ final class ExecServerTests: XCTestCase {
 
     private func remoteControlEnvelopeText(_ envelope: RemoteControlClientEnvelope) throws -> String {
         String(decoding: try JSONEncoder().encode(envelope), as: UTF8.self)
+    }
+
+    private func remoteControlServerEnvelope(from frame: RemoteControlWebsocketWriterFrame) throws -> RemoteControlServerEnvelope {
+        guard case let .text(text) = frame else {
+            throw TestError("expected websocket text frame")
+        }
+        return try JSONDecoder().decode(RemoteControlServerEnvelope.self, from: Data(text.utf8))
+    }
+
+    private struct TestError: Error, CustomStringConvertible, Equatable, Sendable {
+        var description: String
+
+        init(_ description: String) {
+            self.description = description
+        }
     }
 
     private actor StdioTransportOutput {

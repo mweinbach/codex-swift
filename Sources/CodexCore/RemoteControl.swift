@@ -610,6 +610,8 @@ public struct RemoteControlClientTracker: Equatable, Sendable {
 }
 
 public struct RemoteControlWebsocketState: Equatable, Sendable {
+    public static var channelCapacity: Int { 128 }
+
     private struct StreamKey: Hashable, Sendable {
         var clientID: RemoteControlClientID
         var streamID: RemoteControlStreamID
@@ -622,6 +624,10 @@ public struct RemoteControlWebsocketState: Equatable, Sendable {
 
     public var bufferedEnvelopeCount: Int {
         outboundBuffer.usedCount
+    }
+
+    public var outboundHasCapacity: Bool {
+        outboundBuffer.usedCount < Self.channelCapacity
     }
 
     public init() {}
@@ -683,6 +689,66 @@ public struct RemoteControlWebsocketState: Equatable, Sendable {
 
     public mutating func invalidateClientMessageClient(clientID: RemoteControlClientID) {
         clientMessageObserver.invalidateClient(clientID: clientID)
+    }
+}
+
+public enum RemoteControlWebsocketWriterFrame: Equatable, Sendable {
+    case text(String)
+    case ping
+}
+
+public enum RemoteControlWebsocketWriterInput: Equatable, Sendable {
+    case connectionOpened
+    case queuedServerEvent(RemoteControlQueuedServerEnvelope)
+    case pingTick
+}
+
+public enum RemoteControlWebsocketWriterError: Error, CustomStringConvertible, Equatable, Sendable {
+    case serializationFailed(String)
+
+    public var description: String {
+        switch self {
+        case let .serializationFailed(message):
+            return "failed to serialize remote-control server event: \(message)"
+        }
+    }
+}
+
+public struct RemoteControlWebsocketWriterCore: Equatable, Sendable {
+    public static var pingIntervalSeconds: TimeInterval { 10 }
+
+    public init() {}
+
+    public mutating func process(
+        _ input: RemoteControlWebsocketWriterInput,
+        state: inout RemoteControlWebsocketState
+    ) throws -> [RemoteControlWebsocketWriterFrame] {
+        switch input {
+        case .connectionOpened:
+            return try state.replayBufferedServerEnvelopes().map { try textFrame(for: $0) }
+        case let .queuedServerEvent(queuedEnvelope):
+            guard state.outboundHasCapacity else {
+                return []
+            }
+            return try state.enqueueServerEvent(queuedEnvelope).map { try textFrame(for: $0) }
+        case .pingTick:
+            return [.ping]
+        }
+    }
+
+    private func textFrame(for envelope: RemoteControlServerEnvelope) throws -> RemoteControlWebsocketWriterFrame {
+        do {
+            return .text(String(decoding: try JSONEncoder().encode(envelope), as: UTF8.self))
+        } catch {
+            throw RemoteControlWebsocketWriterError.serializationFailed(Self.errorDescription(error))
+        }
+    }
+
+    private static func errorDescription(_ error: Error) -> String {
+        if let localized = error as? LocalizedError, let description = localized.errorDescription {
+            return description
+        }
+        return String(describing: error)
     }
 }
 
