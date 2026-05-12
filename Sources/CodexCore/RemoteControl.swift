@@ -294,6 +294,101 @@ public struct RemoteControlConnectLoopCore: Equatable, Sendable {
     }
 }
 
+public enum RemoteControlAppServerClientNameEvent: Equatable, Sendable {
+    case notRequired
+    case received(String)
+    case unavailable
+    case shutdown
+}
+
+public enum RemoteControlSessionConnectionEnd: Equatable, Sendable {
+    case disabled
+    case shutdown
+    case workerEnded
+}
+
+public enum RemoteControlSessionLoopAction: Equatable, Sendable {
+    case waitForAppServerClientName
+    case waitUntilEnabled(appServerClientName: String?)
+    case connect(appServerClientName: String?)
+    case reconnect(appServerClientName: String?)
+    case shutdownTracker
+}
+
+public struct RemoteControlSessionLoopStep: Equatable, Sendable {
+    public var action: RemoteControlSessionLoopAction
+    public var statusUpdates: [RemoteControlStatusSnapshot]
+
+    public init(action: RemoteControlSessionLoopAction, statusUpdates: [RemoteControlStatusSnapshot] = []) {
+        self.action = action
+        self.statusUpdates = statusUpdates
+    }
+}
+
+public struct RemoteControlSessionLoopCore: Equatable, Sendable {
+    public private(set) var appServerClientName: String?
+    public var statusPublisher: RemoteControlStatusPublisherCore
+
+    public init(
+        appServerClientName: String? = nil,
+        statusPublisher: RemoteControlStatusPublisherCore
+    ) {
+        self.appServerClientName = appServerClientName
+        self.statusPublisher = statusPublisher
+    }
+
+    public func start(appServerClientNameRequired: Bool) -> RemoteControlSessionLoopStep {
+        if appServerClientNameRequired {
+            return RemoteControlSessionLoopStep(action: .waitForAppServerClientName)
+        }
+        return RemoteControlSessionLoopStep(action: .waitUntilEnabled(appServerClientName: nil))
+    }
+
+    public mutating func receiveAppServerClientName(
+        _ event: RemoteControlAppServerClientNameEvent
+    ) -> RemoteControlSessionLoopStep {
+        switch event {
+        case .notRequired:
+            appServerClientName = nil
+            return RemoteControlSessionLoopStep(action: .waitUntilEnabled(appServerClientName: nil))
+        case let .received(name):
+            appServerClientName = name
+            return RemoteControlSessionLoopStep(action: .waitUntilEnabled(appServerClientName: name))
+        case .unavailable, .shutdown:
+            return RemoteControlSessionLoopStep(action: .shutdownTracker)
+        }
+    }
+
+    public func enabled() -> RemoteControlSessionLoopStep {
+        RemoteControlSessionLoopStep(action: .connect(appServerClientName: appServerClientName))
+    }
+
+    public mutating func connectDisabled() -> RemoteControlSessionLoopStep {
+        let updates = statusPublisher.publishStatus(.disabled).map { [$0] } ?? []
+        return RemoteControlSessionLoopStep(
+            action: .waitUntilEnabled(appServerClientName: appServerClientName),
+            statusUpdates: updates
+        )
+    }
+
+    public mutating func connectionEnded(
+        _ end: RemoteControlSessionConnectionEnd
+    ) -> RemoteControlSessionLoopStep {
+        switch end {
+        case .disabled:
+            let updates = statusPublisher.publishStatus(.disabled).map { [$0] } ?? []
+            return RemoteControlSessionLoopStep(
+                action: .waitUntilEnabled(appServerClientName: appServerClientName),
+                statusUpdates: updates
+            )
+        case .shutdown:
+            return RemoteControlSessionLoopStep(action: .shutdownTracker)
+        case .workerEnded:
+            return RemoteControlSessionLoopStep(action: .reconnect(appServerClientName: appServerClientName))
+        }
+    }
+}
+
 public struct RemoteControlClientID: Codable, Equatable, Hashable, Sendable {
     public var rawValue: String
 

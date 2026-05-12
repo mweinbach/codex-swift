@@ -2734,6 +2734,69 @@ final class ExecServerTests: XCTestCase {
         XCTAssertEqual(loop.reconnectAttempt, 0)
     }
 
+    func testRemoteControlSessionLoopCoreWaitsForStdioClientNameLikeRust() {
+        var loop = RemoteControlSessionLoopCore(statusPublisher: RemoteControlStatusPublisherCore(
+            snapshot: RemoteControlStatusSnapshot(
+                status: .connecting,
+                installationID: "install-123",
+                environmentID: "env-test"
+            )
+        ))
+
+        XCTAssertEqual(loop.start(appServerClientNameRequired: true), RemoteControlSessionLoopStep(
+            action: .waitForAppServerClientName
+        ))
+        XCTAssertEqual(loop.receiveAppServerClientName(.received("stdio-client")), RemoteControlSessionLoopStep(
+            action: .waitUntilEnabled(appServerClientName: "stdio-client")
+        ))
+        XCTAssertEqual(loop.enabled(), RemoteControlSessionLoopStep(
+            action: .connect(appServerClientName: "stdio-client")
+        ))
+
+        var unavailableLoop = RemoteControlSessionLoopCore(statusPublisher: RemoteControlStatusPublisherCore(
+            snapshot: RemoteControlStatusSnapshot(
+                status: .connecting,
+                installationID: "install-123",
+                environmentID: nil
+            )
+        ))
+        XCTAssertEqual(unavailableLoop.receiveAppServerClientName(.unavailable), RemoteControlSessionLoopStep(
+            action: .shutdownTracker
+        ))
+    }
+
+    func testRemoteControlSessionLoopCoreMirrorsRustReconnectAndDisableActions() {
+        var loop = RemoteControlSessionLoopCore(
+            appServerClientName: "stdio-client",
+            statusPublisher: RemoteControlStatusPublisherCore(snapshot: RemoteControlStatusSnapshot(
+                status: .connected,
+                installationID: "install-123",
+                environmentID: "env-test"
+            ))
+        )
+
+        XCTAssertEqual(loop.connectionEnded(.workerEnded), RemoteControlSessionLoopStep(
+            action: .reconnect(appServerClientName: "stdio-client")
+        ))
+        XCTAssertEqual(loop.statusPublisher.snapshot, RemoteControlStatusSnapshot(
+            status: .connected,
+            installationID: "install-123",
+            environmentID: "env-test"
+        ))
+
+        XCTAssertEqual(loop.connectionEnded(.disabled), RemoteControlSessionLoopStep(
+            action: .waitUntilEnabled(appServerClientName: "stdio-client"),
+            statusUpdates: [RemoteControlStatusSnapshot(
+                status: .disabled,
+                installationID: "install-123",
+                environmentID: nil
+            )]
+        ))
+        XCTAssertEqual(loop.connectionEnded(.shutdown), RemoteControlSessionLoopStep(
+            action: .shutdownTracker
+        ))
+    }
+
     func testRemoteControlEnrollmentClientBuildsRustRequestShape() async throws {
         let target = try RemoteControlURLNormalizer.normalize("https://chatgpt.com/backend-api")
         let client = RemoteControlEnrollmentClient(
