@@ -14074,17 +14074,19 @@ public enum CodexAppServer {
     ) -> [String: Any] {
         let rawCwds = stringArrayParam(params?["cwds"]) ?? []
         let cwds = rawCwds.isEmpty ? [configuration.cwd.standardizedFileURL.path] : rawCwds
-        let configRules = (try? CodexConfigLayerLoader.loadConfigLayerStack(
+        let configLayerStack = try? CodexConfigLayerLoader.loadConfigLayerStack(
             codexHome: configuration.codexHome,
             cliOverrides: configuration.cliConfigOverrides,
             overrides: configuration.configLayerOverrides,
             environment: configuration.environment
-        )).map { skillConfigRules(from: $0.effectiveConfig()) } ?? []
+        )
+        let configRules = configLayerStack.map { skillConfigRules(from: $0.effectiveConfig()) } ?? []
         return [
             "data": cwds.map { cwd in
                 var outcome = loadSkills(
                     cwd: URL(fileURLWithPath: cwd, isDirectory: true),
-                    codexHome: configuration.codexHome
+                    codexHome: configuration.codexHome,
+                    configLayerStack: configLayerStack
                 )
                 outcome.skills = outcome.skills.filter { isSkillEnabled($0, rules: configRules) }
                 return [
@@ -18812,11 +18814,23 @@ public enum CodexAppServer {
         return data.prefix(max(outputBytesCap, 0))
     }
 
-    private static func loadSkills(cwd: URL, codexHome: URL) -> SkillLoadOutcome {
+    private static func loadSkills(
+        cwd: URL,
+        codexHome: URL,
+        configLayerStack: ConfigLayerStack?
+    ) -> SkillLoadOutcome {
         var outcome = SkillLoadOutcome()
-        for root in skillRoots(cwd: cwd, codexHome: codexHome) {
+        var skillRoots = skillRoots(cwd: cwd, codexHome: codexHome)
+            .map { (path: $0.path, scope: $0.scope, pluginID: Optional<String>.none) }
+        if let configLayerStack {
+            skillRoots.append(contentsOf: SkillLoader.configuredPluginSkillRoots(
+                codexHome: codexHome,
+                configLayerStack: configLayerStack
+            ).map { (path: $0.path, scope: SkillScope.user, pluginID: Optional($0.pluginID)) })
+        }
+        for root in skillRoots {
             let standardizedRoot = root.path.resolvingSymlinksInPath().standardizedFileURL
-            discoverSkills(root: standardizedRoot, scope: root.scope, outcome: &outcome)
+            discoverSkills(root: standardizedRoot, scope: root.scope, pluginID: root.pluginID, outcome: &outcome)
         }
 
         var seen: Set<String> = []
@@ -19085,7 +19099,12 @@ public enum CodexAppServer {
         return isDirectory(candidate) ? candidate : nil
     }
 
-    private static func discoverSkills(root: URL, scope: SkillScope, outcome: inout SkillLoadOutcome) {
+    private static func discoverSkills(
+        root: URL,
+        scope: SkillScope,
+        pluginID: String? = nil,
+        outcome: inout SkillLoadOutcome
+    ) {
         let fileManager = FileManager.default
         let root = root.resolvingSymlinksInPath().standardizedFileURL
         guard isDirectory(root) else {
@@ -19119,7 +19138,7 @@ public enum CodexAppServer {
                 }
                 if values?.isRegularFile == true, entry.lastPathComponent == "SKILL.md" {
                     do {
-                        let skill = try parseSkillFile(entry, scope: scope)
+                        let skill = try parseSkillFile(entry, scope: scope, pluginID: pluginID)
                         outcome.skills.append(skill)
                         outcome.skillRootByPath[skill.path] = root.path
                     } catch {
@@ -19132,9 +19151,9 @@ public enum CodexAppServer {
         }
     }
 
-    private static func parseSkillFile(_ url: URL, scope: SkillScope) throws -> SkillMetadata {
+    private static func parseSkillFile(_ url: URL, scope: SkillScope, pluginID: String? = nil) throws -> SkillMetadata {
         do {
-            return try SkillLoader.parseSkillFile(url, scope: scope)
+            return try SkillLoader.parseSkillFile(url, scope: scope, pluginID: pluginID)
         } catch let error as CodexCore.SkillParseError {
             switch error {
             case .missingFrontmatter:

@@ -28,10 +28,13 @@ public enum SkillLoader {
         fileManager: FileManager = .default
     ) -> SkillLoadOutcome {
         var outcome = SkillLoadOutcome()
+        let configuredPluginRoots = configLayerStack.map {
+            configuredPluginSkillRoots(codexHome: codexHome, configLayerStack: $0, fileManager: fileManager)
+        } ?? []
         for root in resolvedSkillRoots(
             cwd: cwd,
             codexHome: codexHome,
-            pluginSkillRoots: pluginSkillRoots,
+            pluginSkillRoots: configuredPluginRoots + pluginSkillRoots,
             includeSystemSkills: includeSystemSkills,
             fileManager: fileManager
         ) {
@@ -74,6 +77,39 @@ public enum SkillLoader {
         roots.append((URL(fileURLWithPath: "/etc/codex/skills", isDirectory: true), .admin))
         #endif
         return roots
+    }
+
+    public static func configuredPluginSkillRoots(
+        codexHome: URL,
+        configLayerStack: ConfigLayerStack,
+        fileManager: FileManager = .default
+    ) -> [PluginSkillRoot] {
+        let effectiveConfig = configLayerStack.effectiveConfig()
+        guard configFeatureEnabled("plugins", in: effectiveConfig, defaultValue: true),
+              let userConfig = configLayerStack.getUserLayer()?.config,
+              let root = configTable(userConfig),
+              let plugins = root["plugins"].flatMap(configTable)
+        else {
+            return []
+        }
+
+        var roots: [PluginSkillRoot] = []
+        var seenPaths: Set<String> = []
+        for pluginID in plugins.keys.sorted() {
+            guard let pluginConfig = plugins[pluginID].flatMap(configTable),
+                  boolConfig(pluginConfig, "enabled") ?? true,
+                  let pluginRoot = activeLocalPluginRoot(id: pluginID, codexHome: codexHome, fileManager: fileManager)
+            else {
+                continue
+            }
+            for root in pluginSkillRootPaths(pluginRoot: pluginRoot, fileManager: fileManager) {
+                let normalizedPath = root.resolvingSymlinksInPath().standardizedFileURL.path
+                if seenPaths.insert(normalizedPath).inserted {
+                    roots.append(PluginSkillRoot(path: root, pluginID: pluginID))
+                }
+            }
+        }
+        return roots.sorted { $0.path.path < $1.path.path }
     }
 
     public static func discoverSkills(
@@ -201,6 +237,126 @@ public enum SkillLoader {
         return roots.filter { root in
             seenPaths.insert(root.path.resolvingSymlinksInPath().standardizedFileURL.path).inserted
         }
+    }
+
+    private static func activeLocalPluginRoot(
+        id: String,
+        codexHome: URL,
+        fileManager: FileManager
+    ) -> URL? {
+        guard let version = activeLocalPluginVersion(id: id, codexHome: codexHome, fileManager: fileManager) else {
+            return nil
+        }
+        let parts = id.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+        guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else {
+            return nil
+        }
+        return codexHome
+            .appendingPathComponent("plugins/cache", isDirectory: true)
+            .appendingPathComponent(parts[1], isDirectory: true)
+            .appendingPathComponent(parts[0], isDirectory: true)
+            .appendingPathComponent(version, isDirectory: true)
+    }
+
+    private static func activeLocalPluginVersion(id: String, codexHome: URL, fileManager: FileManager) -> String? {
+        let parts = id.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+        guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else {
+            return nil
+        }
+        let installRoot = codexHome
+            .appendingPathComponent("plugins/cache", isDirectory: true)
+            .appendingPathComponent(parts[1], isDirectory: true)
+            .appendingPathComponent(parts[0], isDirectory: true)
+        guard let entries = try? fileManager.contentsOfDirectory(
+            at: installRoot,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return nil
+        }
+        return entries
+            .filter { isDirectory($0, fileManager: fileManager) }
+            .map(\.lastPathComponent)
+            .sorted()
+            .last
+    }
+
+    private static func pluginSkillRootPaths(pluginRoot: URL, fileManager: FileManager) -> [URL] {
+        var roots: [URL] = []
+        let defaultRoot = pluginRoot.appendingPathComponent("skills", isDirectory: true)
+        if isDirectory(defaultRoot, fileManager: fileManager) {
+            roots.append(defaultRoot)
+        }
+        if let manifestRoot = localPluginManifestPath(pluginRoot: pluginRoot, key: "skills", fileManager: fileManager) {
+            roots.append(manifestRoot)
+        }
+
+        var seenPaths: Set<String> = []
+        return roots
+            .map(\.standardizedFileURL)
+            .filter { seenPaths.insert($0.path).inserted }
+            .sorted { $0.path < $1.path }
+    }
+
+    private static func localPluginManifestPath(
+        pluginRoot: URL,
+        key: String,
+        fileManager: FileManager
+    ) -> URL? {
+        for relativePath in [".codex-plugin/plugin.json", ".claude-plugin/plugin.json"] {
+            let manifest = pluginRoot.appendingPathComponent(relativePath, isDirectory: false)
+            guard fileManager.fileExists(atPath: manifest.path),
+                  let data = try? Data(contentsOf: manifest),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let rawPath = object[key] as? String
+            else {
+                continue
+            }
+            return resolvedManifestPath(pluginRoot: pluginRoot, rawPath: rawPath)
+        }
+        return nil
+    }
+
+    private static func resolvedManifestPath(pluginRoot: URL, rawPath: String) -> URL? {
+        guard rawPath.hasPrefix("./"), rawPath.count > 2 else {
+            return nil
+        }
+        let relative = String(rawPath.dropFirst(2))
+        let components = relative.split(separator: "/", omittingEmptySubsequences: false)
+        guard components.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else {
+            return nil
+        }
+        return components.reduce(pluginRoot) { partial, component in
+            partial.appendingPathComponent(String(component), isDirectory: false)
+        }.standardizedFileURL
+    }
+
+    private static func configFeatureEnabled(_ key: String, in config: ConfigValue, defaultValue: Bool) -> Bool {
+        guard let root = configTable(config),
+              let features = root["features"].flatMap(configTable),
+              let value = features[key]
+        else {
+            return defaultValue
+        }
+        return boolConfigValue(value) ?? defaultValue
+    }
+
+    private static func configTable(_ value: ConfigValue) -> [String: ConfigValue]? {
+        if case let .table(table) = value {
+            return table
+        }
+        return nil
+    }
+
+    private static func boolConfig(_ table: [String: ConfigValue], _ key: String) -> Bool? {
+        table[key].flatMap(boolConfigValue)
+    }
+
+    private static func boolConfigValue(_ value: ConfigValue) -> Bool? {
+        if case let .bool(bool) = value {
+            return bool
+        }
+        return nil
     }
 
     private static func finalize(outcome: inout SkillLoadOutcome) {

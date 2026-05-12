@@ -18321,6 +18321,50 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue((skills[0]["path"] as? String)?.hasSuffix("/skills/codex/SKILL.md") == true)
     }
 
+    func testSkillsListIncludesConfiguredInstalledPluginSkillsLikeRust() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let pluginRoot = codexHome.url.appendingPathComponent(
+            "plugins/cache/test/sample/local",
+            isDirectory: true
+        )
+        let skillPath = pluginRoot.appendingPathComponent("skills/search/SKILL.md", isDirectory: false)
+        try FileManager.default.createDirectory(at: skillPath.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try skillContents(name: "search", description: "search sample data")
+            .write(to: skillPath, atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(
+            at: pluginRoot.appendingPathComponent(".codex-plugin", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try #"{"name":"sample"}"#.write(
+            to: pluginRoot.appendingPathComponent(".codex-plugin/plugin.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        [features]
+        plugins = true
+
+        [plugins."sample@test"]
+        enabled = true
+        """.write(
+            to: codexHome.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"skills/list","params":{"cwds":["\#(cwd.url.path)"],"forceReload":true}}"#,
+            codexHome: codexHome.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        let skills = try XCTUnwrap(data[0]["skills"] as? [[String: Any]])
+
+        XCTAssertEqual(skills.map { $0["name"] as? String }, ["sample:search"])
+        XCTAssertTrue((skills[0]["path"] as? String)?.hasSuffix("/plugins/cache/test/sample/local/skills/search/SKILL.md") == true)
+    }
+
     func testSkillsListReportsInvalidUserSkillErrors() throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()

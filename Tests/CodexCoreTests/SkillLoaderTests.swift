@@ -167,6 +167,77 @@ final class SkillLoaderTests: XCTestCase {
         XCTAssertNil(outcome.skillRootByPath[pluginSkill.path])
     }
 
+    func testConfiguredInstalledPluginSkillRootsLoadLikeRustManager() throws {
+        let tmp = try SkillLoaderTemporaryDirectory()
+        let cwd = tmp.url.appendingPathComponent("repo", isDirectory: true)
+        let codexHome = tmp.url.appendingPathComponent("home", isDirectory: true)
+        let pluginRoot = codexHome.appendingPathComponent(
+            "plugins/cache/test/sample/2026-05-11",
+            isDirectory: true
+        )
+        let defaultSkill = pluginRoot.appendingPathComponent("skills/search/SKILL.md", isDirectory: false)
+        let customSkill = pluginRoot.appendingPathComponent("more-skills/deep/SKILL.md", isDirectory: false)
+        try FileManager.default.createDirectory(at: cwd, withIntermediateDirectories: true)
+        try writeSkill(name: "search", description: "search sample data", to: defaultSkill)
+        try writeSkill(name: "deep", description: "deep sample data", to: customSkill)
+        try writePluginManifest(
+            name: "sample",
+            skillsPath: "./more-skills",
+            to: pluginRoot.appendingPathComponent(".codex-plugin/plugin.json")
+        )
+        let stack = try pluginConfigStack(codexHome: codexHome, pluginID: "sample@test")
+
+        let roots = SkillLoader.configuredPluginSkillRoots(codexHome: codexHome, configLayerStack: stack)
+        let outcome = SkillLoader.load(
+            cwd: cwd,
+            codexHome: codexHome,
+            configLayerStack: stack,
+            includeSystemSkills: false
+        )
+
+        XCTAssertEqual(roots, [
+            PluginSkillRoot(path: pluginRoot.appendingPathComponent("more-skills", isDirectory: true), pluginID: "sample@test"),
+            PluginSkillRoot(path: pluginRoot.appendingPathComponent("skills", isDirectory: true), pluginID: "sample@test")
+        ])
+        XCTAssertEqual(outcome.errors, [])
+        XCTAssertEqual(outcome.skills.map(\.name), ["sample:deep", "sample:search"])
+        XCTAssertEqual(outcome.skills.map(\.pluginID), ["sample@test", "sample@test"])
+        XCTAssertEqual(outcome.skillRootByPath[customSkill.path], pluginRoot.appendingPathComponent("more-skills").path)
+        XCTAssertEqual(outcome.skillRootByPath[defaultSkill.path], pluginRoot.appendingPathComponent("skills").path)
+    }
+
+    func testConfiguredPluginSkillRootsRespectFeatureAndEnablementLikeRustManager() throws {
+        let tmp = try SkillLoaderTemporaryDirectory()
+        let codexHome = tmp.url.appendingPathComponent("home", isDirectory: true)
+        let pluginRoot = codexHome.appendingPathComponent("plugins/cache/test/sample/local", isDirectory: true)
+        try writeSkill(
+            name: "search",
+            description: "search sample data",
+            to: pluginRoot.appendingPathComponent("skills/search/SKILL.md", isDirectory: false)
+        )
+        try writePluginManifest(name: "sample", to: pluginRoot.appendingPathComponent(".codex-plugin/plugin.json"))
+
+        let disabledPluginStack = try pluginConfigStack(
+            codexHome: codexHome,
+            pluginID: "sample@test",
+            enabled: false
+        )
+        let disabledFeatureStack = try pluginConfigStack(
+            codexHome: codexHome,
+            pluginID: "sample@test",
+            pluginsFeatureEnabled: false
+        )
+
+        XCTAssertTrue(SkillLoader.configuredPluginSkillRoots(
+            codexHome: codexHome,
+            configLayerStack: disabledPluginStack
+        ).isEmpty)
+        XCTAssertTrue(SkillLoader.configuredPluginSkillRoots(
+            codexHome: codexHome,
+            configLayerStack: disabledFeatureStack
+        ).isEmpty)
+    }
+
     func testFallsBackToDirectoryNameWhenSkillNameIsMissingLikeRust() throws {
         let tmp = try SkillLoaderTemporaryDirectory()
         let cwd = tmp.url.appendingPathComponent("repo", isDirectory: true)
@@ -414,9 +485,36 @@ final class SkillLoaderTests: XCTestCase {
         path?.replacingOccurrences(of: "/private/var/", with: "/var/")
     }
 
-    private func writePluginManifest(name: String, to url: URL) throws {
+    private func writePluginManifest(name: String, skillsPath: String? = nil, to url: URL) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try #"{"name":"\#(name)"}"#.write(to: url, atomically: true, encoding: .utf8)
+        if let skillsPath {
+            try #"{"name":"\#(name)","skills":"\#(skillsPath)"}"#.write(to: url, atomically: true, encoding: .utf8)
+        } else {
+            try #"{"name":"\#(name)"}"#.write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
+
+    private func pluginConfigStack(
+        codexHome: URL,
+        pluginID: String,
+        enabled: Bool = true,
+        pluginsFeatureEnabled: Bool = true
+    ) throws -> ConfigLayerStack {
+        try ConfigLayerStack(layers: [
+            ConfigLayerEntry(
+                name: .user(file: try AbsolutePath(absolutePath: codexHome.appendingPathComponent("config.toml").path)),
+                config: .table([
+                    "features": .table([
+                        "plugins": .bool(pluginsFeatureEnabled)
+                    ]),
+                    "plugins": .table([
+                        pluginID: .table([
+                            "enabled": .bool(enabled)
+                        ])
+                    ])
+                ])
+            )
+        ])
     }
 }
 
