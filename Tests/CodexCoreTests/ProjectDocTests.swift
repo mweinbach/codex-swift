@@ -79,6 +79,44 @@ final class ProjectDocTests: XCTestCase {
         XCTAssertEqual(ProjectDoc.getUserInstructions(config: config(cwd: nested)), "root doc\n\ncrate doc")
     }
 
+    func testProjectRootMarkersAreHonoredForAgentsDiscoveryLikeRust() throws {
+        let repo = try CoreTemporaryDirectory()
+        try write("", to: repo.url.appendingPathComponent(".codex-root"))
+        try write("parent doc", to: repo.url.appendingPathComponent("AGENTS.md"))
+
+        let nested = repo.url.appendingPathComponent("dir1", isDirectory: true)
+        try FileManager.default.createDirectory(at: nested.appendingPathComponent(".git", isDirectory: true), withIntermediateDirectories: true)
+        try write("child doc", to: nested.appendingPathComponent("AGENTS.md"))
+
+        let cfg = config(cwd: nested, projectRootMarkers: [".codex-root"])
+        let discovery = try ProjectDoc.discoverProjectDocPaths(config: cfg)
+
+        XCTAssertEqual(discovery.map { $0.lastPathComponent }, ["AGENTS.md", "AGENTS.md"])
+        XCTAssertEqual(discovery.map { $0.standardizedFileURL.path }, [
+            repo.url.appendingPathComponent("AGENTS.md").standardizedFileURL.path,
+            nested.appendingPathComponent("AGENTS.md").standardizedFileURL.path
+        ])
+        XCTAssertEqual(ProjectDoc.getUserInstructions(config: cfg), "parent doc\n\nchild doc")
+    }
+
+    func testEmptyProjectRootMarkersDisableAncestorProjectDocSearchLikeRust() throws {
+        let repo = try CoreTemporaryDirectory()
+        try write("root doc", to: repo.url.appendingPathComponent("AGENTS.md"))
+        try write("gitdir: /path/to/actual/git/dir\n", to: repo.url.appendingPathComponent(".git"))
+
+        let nested = repo.url.appendingPathComponent("workspace/crate_a", isDirectory: true)
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        try write("crate doc", to: nested.appendingPathComponent("AGENTS.md"))
+
+        let cfg = config(cwd: nested, projectRootMarkers: [])
+
+        XCTAssertEqual(ProjectDoc.getUserInstructions(config: cfg), "crate doc")
+        XCTAssertEqual(
+            try ProjectDoc.discoverProjectDocPaths(config: cfg).map { $0.standardizedFileURL.path },
+            [nested.appendingPathComponent("AGENTS.md").standardizedFileURL.path]
+        )
+    }
+
     func testLocalOverridePreferredOverAgents() throws {
         let tmp = try CoreTemporaryDirectory()
         try write("versioned", to: tmp.url.appendingPathComponent(ProjectDoc.defaultFilename))
@@ -142,21 +180,43 @@ final class ProjectDocTests: XCTestCase {
 
         XCTAssertEqual(runtime.projectDocMaxBytes, 123)
         XCTAssertEqual(runtime.projectDocFallbackFilenames, ["GUIDE.md", "NOTES.md"])
+        XCTAssertEqual(runtime.projectRootMarkers, [".git"])
         XCTAssertEqual(projectConfig.projectDocMaxBytes, 123)
         XCTAssertEqual(projectConfig.projectDocFallbackFilenames, ["GUIDE.md", "NOTES.md"])
+        XCTAssertEqual(projectConfig.projectRootMarkers, [".git"])
+    }
+
+    func testConfigLoaderProjectRootMarkersFeedProjectDocDiscovery() throws {
+        let tmp = try CoreTemporaryDirectory()
+        let repo = tmp.url.appendingPathComponent("repo", isDirectory: true)
+        let nested = repo.appendingPathComponent("nested", isDirectory: true)
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        try write("", to: repo.appendingPathComponent(".hg"))
+        try write("root doc", to: repo.appendingPathComponent("AGENTS.md"))
+        try write("child doc", to: nested.appendingPathComponent("AGENTS.md"))
+        try #"project_root_markers = [".hg"]"#
+            .write(to: tmp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let runtime = try CodexConfigLoader.load(codexHome: tmp.url, systemConfigFile: nil)
+        let projectConfig = ProjectDocConfig(runtimeConfig: runtime, cwd: nested)
+
+        XCTAssertEqual(projectConfig.projectRootMarkers, [".hg"])
+        XCTAssertEqual(ProjectDoc.getUserInstructions(config: projectConfig), "root doc\n\nchild doc")
     }
 
     private func config(
         cwd: URL,
         userInstructions: String? = nil,
         maxBytes: Int = CodexConfigDefaults.projectDocMaxBytes,
-        fallbackFilenames: [String] = []
+        fallbackFilenames: [String] = [],
+        projectRootMarkers: [String] = CodexConfigDefaults.projectRootMarkers
     ) -> ProjectDocConfig {
         ProjectDocConfig(
             cwd: cwd,
             userInstructions: userInstructions,
             projectDocMaxBytes: maxBytes,
-            projectDocFallbackFilenames: fallbackFilenames
+            projectDocFallbackFilenames: fallbackFilenames,
+            projectRootMarkers: projectRootMarkers
         )
     }
 

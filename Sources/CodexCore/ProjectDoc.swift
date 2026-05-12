@@ -5,17 +5,20 @@ public struct ProjectDocConfig: Equatable, Sendable {
     public var userInstructions: String?
     public var projectDocMaxBytes: Int
     public var projectDocFallbackFilenames: [String]
+    public var projectRootMarkers: [String]
 
     public init(
         cwd: URL,
         userInstructions: String? = nil,
         projectDocMaxBytes: Int = CodexConfigDefaults.projectDocMaxBytes,
-        projectDocFallbackFilenames: [String] = []
+        projectDocFallbackFilenames: [String] = [],
+        projectRootMarkers: [String] = CodexConfigDefaults.projectRootMarkers
     ) {
         self.cwd = cwd
         self.userInstructions = userInstructions
         self.projectDocMaxBytes = projectDocMaxBytes
         self.projectDocFallbackFilenames = projectDocFallbackFilenames
+        self.projectRootMarkers = projectRootMarkers
     }
 
     public init(runtimeConfig: CodexRuntimeConfig, cwd: URL, userInstructions: String? = nil) {
@@ -23,7 +26,8 @@ public struct ProjectDocConfig: Equatable, Sendable {
             cwd: cwd,
             userInstructions: userInstructions,
             projectDocMaxBytes: runtimeConfig.projectDocMaxBytes,
-            projectDocFallbackFilenames: runtimeConfig.projectDocFallbackFilenames
+            projectDocFallbackFilenames: runtimeConfig.projectDocFallbackFilenames,
+            projectRootMarkers: runtimeConfig.projectRootMarkers
         )
     }
 }
@@ -108,13 +112,17 @@ public enum ProjectDoc {
         }
 
         let cwd = normalizedDirectoryURL(config.cwd)
-        let chain = try directoryChainAndGitRoot(from: cwd, fileManager: fileManager)
+        let chain = try directoryChainAndProjectRoot(
+            from: cwd,
+            projectRootMarkers: config.projectRootMarkers,
+            fileManager: fileManager
+        )
         let searchDirs: [URL]
-        if let gitRoot = chain.gitRoot {
+        if let projectRoot = chain.projectRoot {
             var sawRoot = false
             searchDirs = chain.directories.reversed().compactMap { directory in
                 if !sawRoot {
-                    if samePath(directory, gitRoot) {
+                    if samePath(directory, projectRoot) {
                         sawRoot = true
                     } else {
                         return nil
@@ -123,7 +131,7 @@ public enum ProjectDoc {
                 return directory
             }
         } else {
-            searchDirs = [config.cwd]
+            searchDirs = [cwd]
         }
 
         let candidates = candidateFilenames(config)
@@ -154,16 +162,24 @@ public enum ProjectDoc {
         return names
     }
 
-    private static func directoryChainAndGitRoot(
+    private static func directoryChainAndProjectRoot(
         from cwd: URL,
+        projectRootMarkers: [String],
         fileManager: FileManager
-    ) throws -> (directories: [URL], gitRoot: URL?) {
+    ) throws -> (directories: [URL], projectRoot: URL?) {
         var directories = [cwd]
         var cursor = cwd
 
+        guard !projectRootMarkers.isEmpty else {
+            return (directories, cwd)
+        }
+
         while true {
-            let gitMarker = cursor.appendingPathComponent(".git", isDirectory: false)
-            if fileManager.fileExists(atPath: gitMarker.path) {
+            let hasMarker = projectRootMarkers.contains { marker in
+                let markerPath = cursor.appendingPathComponent(marker, isDirectory: false)
+                return fileManager.fileExists(atPath: markerPath.path)
+            }
+            if hasMarker {
                 return (directories, cursor)
             }
 
