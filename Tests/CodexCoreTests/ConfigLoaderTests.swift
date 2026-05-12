@@ -76,6 +76,8 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.mcpOAuthCredentialsStoreMode, .auto)
         XCTAssertNil(config.mcpOAuthCallbackPort)
         XCTAssertNil(config.mcpOAuthCallbackURL)
+        XCTAssertEqual(config.windowsSandboxLevel, .disabled)
+        XCTAssertTrue(config.windowsSandboxPrivateDesktop)
         XCTAssertNil(config.activeProfile)
         XCTAssertEqual(config.projectRootMarkers, [".git"])
         XCTAssertEqual(config.projectDocMaxBytes, 32 * 1024)
@@ -94,6 +96,81 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.fileOpener, .vsCode)
         XCTAssertEqual(config.tui, TuiRuntimeConfig())
         XCTAssertEqual(config.terminalResizeReflow, TerminalResizeReflowConfig())
+    }
+
+    func testWindowsSandboxConfigResolvesRustSandboxModeAndPrivateDesktop() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [windows]
+        sandbox = "unelevated"
+        sandbox_private_desktop = false
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.windowsSandboxLevel, .restrictedToken)
+        XCTAssertFalse(config.windowsSandboxPrivateDesktop)
+    }
+
+    func testWindowsSandboxProfileOverridesTopLevelConfig() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        profile = "work"
+
+        [windows]
+        sandbox = "elevated"
+        sandbox_private_desktop = false
+
+        [profiles.work.windows]
+        sandbox = "unelevated"
+        sandbox_private_desktop = true
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.windowsSandboxLevel, .restrictedToken)
+        XCTAssertTrue(config.windowsSandboxPrivateDesktop)
+    }
+
+    func testWindowsSandboxProfileLegacyFeaturePresenceTakesPrecedenceLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        profile = "legacy"
+
+        [windows]
+        sandbox = "elevated"
+
+        [profiles.legacy.windows]
+        sandbox = "unelevated"
+
+        [profiles.legacy.features]
+        elevated_windows_sandbox = false
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.windowsSandboxLevel, .disabled)
+    }
+
+    func testWindowsSandboxCliOverridesConfig() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [windows]
+        sandbox = "unelevated"
+        sandbox_private_desktop = true
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(
+            codexHome: dir.url,
+            overrides: CliConfigOverrides(rawOverrides: [
+                #"windows.sandbox="elevated""#,
+                "windows.sandbox_private_desktop=false"
+            ]),
+            systemConfigFile: nil
+        )
+
+        XCTAssertEqual(config.windowsSandboxLevel, .elevated)
+        XCTAssertFalse(config.windowsSandboxPrivateDesktop)
     }
 
     func testLoadsRustRuntimePathAndPersonalityFields() throws {

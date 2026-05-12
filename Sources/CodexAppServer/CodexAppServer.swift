@@ -11141,9 +11141,50 @@ public enum CodexAppServer {
         ]
     }
 
-    fileprivate static func windowsSandboxReadinessResult() -> [String: Any] {
-        [
-            "status": "notConfigured"
+    static func windowsSandboxReadinessStatus(
+        windowsSandboxLevel: WindowsSandboxLevel,
+        sandboxSetupIsComplete: Bool,
+        isWindows: Bool
+    ) -> String {
+        guard isWindows else {
+            return "notConfigured"
+        }
+        switch windowsSandboxLevel {
+        case .disabled:
+            return "notConfigured"
+        case .restrictedToken:
+            return "ready"
+        case .elevated:
+            return sandboxSetupIsComplete ? "ready" : "updateRequired"
+        }
+    }
+
+    fileprivate static func windowsSandboxReadinessResult(
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let runtimeConfig: CodexRuntimeConfig
+        do {
+            runtimeConfig = try CodexConfigLoader.load(
+                codexHome: configuration.codexHome,
+                systemConfigFile: nil,
+                environment: configuration.environment
+            )
+        } catch {
+            throw AppServerError.internalError("failed to reload config: \(error)")
+        }
+
+        let isWindows: Bool
+        #if os(Windows)
+        isWindows = true
+        #else
+        isWindows = false
+        #endif
+        return [
+            "status": windowsSandboxReadinessStatus(
+                windowsSandboxLevel: runtimeConfig.windowsSandboxLevel,
+                sandboxSetupIsComplete: false,
+                isWindows: isWindows
+            )
         ]
     }
 
@@ -23561,7 +23602,7 @@ final class CodexAppServerMessageProcessor {
                 case "windowsSandbox/readiness":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: CodexAppServer.windowsSandboxReadinessResult()
+                        result: try CodexAppServer.windowsSandboxReadinessResult(configuration: configuration)
                     )
                 case "windowsSandbox/setupStart":
                     let result = try CodexAppServer.windowsSandboxSetupStartResult(params: params)

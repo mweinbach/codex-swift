@@ -16654,6 +16654,49 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(result["status"] as? String, "notConfigured")
     }
 
+    func testWindowsSandboxReadinessStatusMatchesRustStateTable() {
+        XCTAssertEqual(
+            CodexAppServer.windowsSandboxReadinessStatus(
+                windowsSandboxLevel: .disabled,
+                sandboxSetupIsComplete: false,
+                isWindows: true
+            ),
+            "notConfigured"
+        )
+        XCTAssertEqual(
+            CodexAppServer.windowsSandboxReadinessStatus(
+                windowsSandboxLevel: .restrictedToken,
+                sandboxSetupIsComplete: false,
+                isWindows: true
+            ),
+            "ready"
+        )
+        XCTAssertEqual(
+            CodexAppServer.windowsSandboxReadinessStatus(
+                windowsSandboxLevel: .elevated,
+                sandboxSetupIsComplete: false,
+                isWindows: true
+            ),
+            "updateRequired"
+        )
+        XCTAssertEqual(
+            CodexAppServer.windowsSandboxReadinessStatus(
+                windowsSandboxLevel: .elevated,
+                sandboxSetupIsComplete: true,
+                isWindows: true
+            ),
+            "ready"
+        )
+        XCTAssertEqual(
+            CodexAppServer.windowsSandboxReadinessStatus(
+                windowsSandboxLevel: .elevated,
+                sandboxSetupIsComplete: true,
+                isWindows: false
+            ),
+            "notConfigured"
+        )
+    }
+
     func testWindowsSandboxSetupStartReturnsStartedAndCompletionNotificationOffWindows() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))

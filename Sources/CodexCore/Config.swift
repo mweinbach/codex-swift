@@ -305,6 +305,8 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var mcpOAuthCredentialsStoreMode: OAuthCredentialsStoreMode
     public var mcpOAuthCallbackPort: UInt16?
     public var mcpOAuthCallbackURL: String?
+    public var windowsSandboxLevel: WindowsSandboxLevel
+    public var windowsSandboxPrivateDesktop: Bool
     public var activeProfile: String?
     public var projectRootMarkers: [String]
     public var projectDocMaxBytes: Int
@@ -412,6 +414,8 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         mcpOAuthCredentialsStoreMode: OAuthCredentialsStoreMode = .auto,
         mcpOAuthCallbackPort: UInt16? = nil,
         mcpOAuthCallbackURL: String? = nil,
+        windowsSandboxLevel: WindowsSandboxLevel = .disabled,
+        windowsSandboxPrivateDesktop: Bool = true,
         activeProfile: String? = nil,
         projectRootMarkers: [String] = CodexConfigDefaults.projectRootMarkers,
         projectDocMaxBytes: Int = CodexConfigDefaults.projectDocMaxBytes,
@@ -487,6 +491,8 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.mcpOAuthCredentialsStoreMode = mcpOAuthCredentialsStoreMode
         self.mcpOAuthCallbackPort = mcpOAuthCallbackPort
         self.mcpOAuthCallbackURL = mcpOAuthCallbackURL
+        self.windowsSandboxLevel = windowsSandboxLevel
+        self.windowsSandboxPrivateDesktop = windowsSandboxPrivateDesktop
         self.activeProfile = activeProfile
         self.projectRootMarkers = projectRootMarkers
         self.projectDocMaxBytes = projectDocMaxBytes
@@ -1795,6 +1801,8 @@ private struct ParsedCodexConfigToml {
     var appsMcpPathOverride: [String: ConfigValue] = [:]
     var profileAppsMcpPathOverride: [String: [String: ConfigValue]] = [:]
     var memories: [String: ConfigValue] = [:]
+    var windows: [String: ConfigValue] = [:]
+    var profileWindows: [String: [String: ConfigValue]] = [:]
     var mcpServers: [String: McpServerConfig] = [:]
     var modelProviders: [String: ConfigValue] = [:]
     var sandboxWorkspaceWrite: [String: ConfigValue] = [:]
@@ -1872,6 +1880,11 @@ private struct ParsedCodexConfigToml {
                         parsed.profiles[name] = [:]
                     }
                 }
+                if case let .profileWindows(name) = section {
+                    if parsed.profiles[name] == nil {
+                        parsed.profiles[name] = [:]
+                    }
+                }
                 continue
             }
 
@@ -1909,6 +1922,16 @@ private struct ParsedCodexConfigToml {
                     }
                     for (historyKey, historyValue) in table {
                         parsed.history[historyKey] = historyValue
+                    }
+                    continue
+                }
+                if key == "windows" {
+                    let value = try ConfigValueParser.parseTomlLiteral(valueText)
+                    guard case let .table(table) = value else {
+                        throw CodexConfigLoadError.invalidConfigLine(key)
+                    }
+                    for (windowsKey, windowsValue) in table {
+                        parsed.windows[windowsKey] = windowsValue
                     }
                     continue
                 }
@@ -1976,6 +1999,14 @@ private struct ParsedCodexConfigToml {
                     }
                     continue
                 }
+                if key == "windows",
+                   case let .table(windowsTable) = try ConfigValueParser.parseTomlLiteral(valueText)
+                {
+                    for (windowsKey, windowsValue) in windowsTable {
+                        parsed.profileWindows[name, default: [:]][windowsKey] = windowsValue
+                    }
+                    continue
+                }
                 guard isRelevantProfileKey(key) else { continue }
                 parsed.profiles[name, default: [:]][key] = try normalizePathLikeValue(
                     ConfigValueParser.parseTomlLiteral(valueText),
@@ -2014,12 +2045,16 @@ private struct ParsedCodexConfigToml {
                 parsed.sandboxWorkspaceWrite[key] = try ConfigValueParser.parseTomlLiteral(valueText)
             case .history:
                 parsed.history[key] = try ConfigValueParser.parseTomlLiteral(valueText)
+            case .windows:
+                parsed.windows[key] = try ConfigValueParser.parseTomlLiteral(valueText)
             case .analytics:
                 parsed.analytics[key] = try ConfigValueParser.parseTomlLiteral(valueText)
             case .feedback:
                 parsed.feedback[key] = try ConfigValueParser.parseTomlLiteral(valueText)
             case let .profileAnalytics(name):
                 parsed.profileAnalytics[name, default: [:]][key] = try ConfigValueParser.parseTomlLiteral(valueText)
+            case let .profileWindows(name):
+                parsed.profileWindows[name, default: [:]][key] = try ConfigValueParser.parseTomlLiteral(valueText)
             case .agents:
                 if Self.isRelevantAgentKey(key) {
                     parsed.agents[key] = try ConfigValueParser.parseTomlLiteral(valueText)
@@ -2256,6 +2291,11 @@ private struct ParsedCodexConfigToml {
                 continue
             }
 
+            if parts.count == 2, parts[0] == "windows" {
+                windows[parts[1]] = value
+                continue
+            }
+
             if parts.count == 2, parts[0] == "analytics" {
                 analytics[parts[1]] = value
                 continue
@@ -2342,6 +2382,11 @@ private struct ParsedCodexConfigToml {
 
             if parts.count == 4, parts[0] == "profiles", parts[2] == "analytics" {
                 profileAnalytics[parts[1], default: [:]][parts[3]] = value
+                continue
+            }
+
+            if parts.count == 4, parts[0] == "profiles", parts[2] == "windows" {
+                profileWindows[parts[1], default: [:]][parts[3]] = value
                 continue
             }
 
@@ -2455,6 +2500,10 @@ private struct ParsedCodexConfigToml {
             history[key] = value
         }
 
+        for (key, value) in overlay.windows {
+            windows[key] = value
+        }
+
         for (key, value) in overlay.analytics {
             analytics[key] = value
         }
@@ -2469,6 +2518,14 @@ private struct ParsedCodexConfigToml {
                 mergedProfile[key] = value
             }
             profileAnalytics[profileName] = mergedProfile
+        }
+
+        for (profileName, profileValue) in overlay.profileWindows {
+            var mergedProfile = profileWindows[profileName] ?? [:]
+            for (key, value) in profileValue {
+                mergedProfile[key] = value
+            }
+            profileWindows[profileName] = mergedProfile
         }
 
         for (key, value) in overlay.agents {
@@ -2578,6 +2635,12 @@ private struct ParsedCodexConfigToml {
         if case let .table(workspaceWrite) = table["sandbox_workspace_write"] {
             for (key, value) in workspaceWrite {
                 sandboxWorkspaceWrite[key] = value
+            }
+        }
+
+        if case let .table(windowsTable) = table["windows"] {
+            for (key, value) in windowsTable {
+                windows[key] = value
             }
         }
 
@@ -2737,6 +2800,12 @@ private struct ParsedCodexConfigToml {
                             profileAnalytics[profileName, default: [:]][analyticsKey] = analyticsValue
                         }
                     }
+
+                    if key == "windows", case let .table(windowsTable) = value {
+                        for (windowsKey, windowsValue) in windowsTable {
+                            profileWindows[profileName, default: [:]][windowsKey] = windowsValue
+                        }
+                    }
                 }
             }
         }
@@ -2890,6 +2959,16 @@ private struct ParsedCodexConfigToml {
         config.serviceTier = Self.normalizedServiceTier(
             config.serviceTier,
             features: featureStates
+        )
+        config.windowsSandboxLevel = try Self.windowsSandboxLevelValue(
+            base: windows,
+            profile: config.activeProfile.flatMap { profileWindows[$0] },
+            profileFeatures: config.activeProfile.flatMap { profileFeatures[$0] } ?? [:],
+            resolvedFeatures: featureStates
+        )
+        config.windowsSandboxPrivateDesktop = try Self.windowsSandboxPrivateDesktopValue(
+            base: windows,
+            profile: config.activeProfile.flatMap { profileWindows[$0] }
         )
 
         let mcpOAuthCredentialsStoreMode: OAuthCredentialsStoreMode
@@ -3779,6 +3858,80 @@ private struct ParsedCodexConfigToml {
         }
         let value = profile?["path"] ?? base["path"]
         return try value.map { try stringValue($0, key: "features.apps_mcp_path_override.path") }
+    }
+
+    private static func windowsSandboxLevelValue(
+        base: [String: ConfigValue],
+        profile: [String: ConfigValue]?,
+        profileFeatures: [String: Bool],
+        resolvedFeatures: FeatureStates
+    ) throws -> WindowsSandboxLevel {
+        if let profileMode = legacyWindowsSandboxMode(from: profileFeatures) {
+            return profileMode
+        }
+        if legacyWindowsSandboxKeysPresent(in: profileFeatures) {
+            return windowsSandboxLevel(from: resolvedFeatures)
+        }
+        if let profileSandbox = profile?["sandbox"] {
+            return try windowsSandboxLevel(profileSandbox, key: "profiles.<active>.windows.sandbox")
+        }
+        if let baseSandbox = base["sandbox"] {
+            return try windowsSandboxLevel(baseSandbox, key: "windows.sandbox")
+        }
+        return windowsSandboxLevel(from: resolvedFeatures)
+    }
+
+    private static func windowsSandboxPrivateDesktopValue(
+        base: [String: ConfigValue],
+        profile: [String: ConfigValue]?
+    ) throws -> Bool {
+        if let profileValue = profile?["sandbox_private_desktop"] {
+            return try boolValue(profileValue, key: "profiles.<active>.windows.sandbox_private_desktop")
+        }
+        if let baseValue = base["sandbox_private_desktop"] {
+            return try boolValue(baseValue, key: "windows.sandbox_private_desktop")
+        }
+        return true
+    }
+
+    private static func windowsSandboxLevel(_ value: ConfigValue, key: String) throws -> WindowsSandboxLevel {
+        let raw = try stringValue(value, key: key)
+        switch raw {
+        case "elevated":
+            return .elevated
+        case "unelevated":
+            return .restrictedToken
+        default:
+            throw CodexConfigLoadError.invalidConfigLine(key)
+        }
+    }
+
+    private static func legacyWindowsSandboxMode(from features: [String: Bool]) -> WindowsSandboxLevel? {
+        if features[FeatureKey.windowsSandboxElevated.rawValue] == true {
+            return .elevated
+        }
+        if features[FeatureKey.windowsSandbox.rawValue] == true
+            || features["enable_experimental_windows_sandbox"] == true
+        {
+            return .restrictedToken
+        }
+        return nil
+    }
+
+    private static func legacyWindowsSandboxKeysPresent(in features: [String: Bool]) -> Bool {
+        features.keys.contains(FeatureKey.windowsSandboxElevated.rawValue)
+            || features.keys.contains(FeatureKey.windowsSandbox.rawValue)
+            || features.keys.contains("enable_experimental_windows_sandbox")
+    }
+
+    private static func windowsSandboxLevel(from features: FeatureStates) -> WindowsSandboxLevel {
+        if features.isEnabled(.windowsSandboxElevated) {
+            return .elevated
+        }
+        if features.isEnabled(.windowsSandbox) {
+            return .restrictedToken
+        }
+        return .disabled
     }
 
     private static func readNonEmptyFile(_ path: String?, description: String) throws -> String? {
@@ -4674,6 +4827,9 @@ private struct ParsedCodexConfigToml {
         if parts.count == 1, parts[0] == "history" {
             return .history
         }
+        if parts.count == 1, parts[0] == "windows" {
+            return .windows
+        }
         if parts.count == 1, parts[0] == "analytics" {
             return .analytics
         }
@@ -4748,6 +4904,9 @@ private struct ParsedCodexConfigToml {
         }
         if parts.count == 3, parts[0] == "profiles", parts[2] == "analytics" {
             return .profileAnalytics(parts[1])
+        }
+        if parts.count == 3, parts[0] == "profiles", parts[2] == "windows" {
+            return .profileWindows(parts[1])
         }
         if parts.count == 3, parts[0] == "profiles", parts[2] == "features" {
             return .profileFeatures(parts[1])
@@ -4940,9 +5099,11 @@ private enum ConfigSection {
     case memories
     case sandboxWorkspaceWrite
     case history
+    case windows
     case analytics
     case feedback
     case profileAnalytics(String)
+    case profileWindows(String)
     case agents
     case agentRole(String)
     case permissionFilesystem(String)
