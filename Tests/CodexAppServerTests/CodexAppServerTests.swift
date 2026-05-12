@@ -2858,7 +2858,7 @@ final class CodexAppServerTests: XCTestCase {
         let turn = try XCTUnwrap(result["turn"] as? [String: Any])
         XCTAssertEqual(turn["status"] as? String, "inProgress")
         let turnID = try XCTUnwrap(turn["id"] as? String)
-        XCTAssertFalse(turnID.isEmpty)
+        XCTAssertEqual(turnID, "turn-2")
         XCTAssertEqual(messages.count, 1)
         let submissions = capture.submissions
         XCTAssertEqual(submissions.map(\.requestID), [.integer(2)])
@@ -2937,7 +2937,7 @@ final class CodexAppServerTests: XCTestCase {
                 if requestID == .integer(3) {
                     throw AppServerCoreOpCaptureError(message: "channel closed")
                 }
-                capture.submit(requestID: requestID, threadID: threadID, op: op)
+                return capture.submit(requestID: requestID, threadID: threadID, op: op)
             }
         )
         let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
@@ -27749,13 +27749,19 @@ private final class AppServerCoreOpCapture: @unchecked Sendable {
         }
     }
 
-    func submit(requestID: RequestID, threadID: String, op: Op) {
+    func submit(requestID: RequestID, threadID: String, op: Op) -> String {
         lock.withLock {
             recordedSubmissions.append(SubmittedCoreOp(
                 requestID: requestID,
                 threadID: threadID,
                 op: op
             ))
+        }
+        switch requestID {
+        case let .integer(value):
+            return "turn-\(value)"
+        case let .string(value):
+            return "turn-\(value)"
         }
     }
 }

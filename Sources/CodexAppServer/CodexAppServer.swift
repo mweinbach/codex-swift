@@ -13,7 +13,7 @@ public typealias AppServerCoreOpSubmitter = @Sendable (
     _ requestID: RequestID,
     _ threadID: String,
     _ op: Op
-) throws -> Void
+) throws -> String
 public typealias AppServerAccessibleConnectorProvider = @Sendable (
     _ runtimeConfig: CodexRuntimeConfig,
     _ usesChatGPTBackend: Bool
@@ -2798,7 +2798,7 @@ public enum CodexAppServer {
     fileprivate static func turnStartCoreOp(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
-    ) throws -> (threadID: String, turnID: String, op: Op) {
+    ) throws -> (threadID: String, op: Op) {
         let input = v2UserInput(params?["input"])
         try validateV2UserInputLimit((text: input.text, images: input.images))
         _ = try approvalsReviewerParam(params?["approvalsReviewer"])
@@ -2886,7 +2886,7 @@ public enum CodexAppServer {
                 responsesAPIClientMetadata: metadata
             )
         }
-        return (threadID, UUID().uuidString.lowercased(), op)
+        return (threadID, op)
     }
 
     private static func validatedTurnSteer(
@@ -24225,7 +24225,7 @@ final class CodexAppServerMessageProcessor {
                     else {
                         return
                     }
-                    try? submitter(submission.requestID, threadID, submission.op)
+                    _ = try? submitter(submission.requestID, threadID, submission.op)
                 }
             }
         default:
@@ -24378,7 +24378,7 @@ final class CodexAppServerMessageProcessor {
         }
         if let coreOpSubmitter,
            let requestID = rawRequestID.flatMap(AppServerRequestIDCodec.requestID(from:)) {
-            try coreOpSubmitter(requestID, threadID, .refreshMcpServers(config: config))
+            _ = try coreOpSubmitter(requestID, threadID, .refreshMcpServers(config: config))
         }
     }
 
@@ -24437,7 +24437,7 @@ final class CodexAppServerMessageProcessor {
                 throw AppServerError.invalidRequest("thread not found: \(threadID)")
             }
             if let coreOpSubmitter, let requestID {
-                try? coreOpSubmitter(requestID, threadID, .reloadUserConfig)
+                _ = try? coreOpSubmitter(requestID, threadID, .reloadUserConfig)
             }
         }
     }
@@ -25068,15 +25068,15 @@ final class CodexAppServerMessageProcessor {
         threadID: String,
         op: Op,
         failureMessage: String
-    ) throws {
+    ) throws -> String? {
         guard let coreOpSubmitter else {
-            return
+            return nil
         }
         guard let requestID = AppServerRequestIDCodec.requestID(from: rawRequestID) else {
             throw AppServerError.invalidRequest("invalid request id")
         }
         do {
-            try coreOpSubmitter(requestID, threadID, op)
+            return try coreOpSubmitter(requestID, threadID, op)
         } catch {
             throw AppServerError.internalError("\(failureMessage): \(error)")
         }
@@ -25302,14 +25302,14 @@ final class CodexAppServerMessageProcessor {
                             params: params,
                             configuration: configuration
                         )
-                        try submitCoreOp(
+                        let turnID = try submitCoreOp(
                             requestID: id,
                             threadID: coreOp.threadID,
                             op: coreOp.op,
                             failureMessage: "failed to start turn"
-                        )
-                        activeTurnIDs[coreOp.threadID] = coreOp.turnID
-                        let turn = CodexAppServer.inProgressTurnObject(id: coreOp.turnID)
+                        ) ?? UUID().uuidString.lowercased()
+                        activeTurnIDs[coreOp.threadID] = turnID
+                        let turn = CodexAppServer.inProgressTurnObject(id: turnID)
                         response = CodexAppServer.responseObject(id: id, result: ["turn": turn])
                         break
                     }
@@ -25359,7 +25359,7 @@ final class CodexAppServerMessageProcessor {
                             configuration: configuration,
                             activeTurnID: threadID.flatMap { activeTurnIDs[$0] }
                         )
-                        try submitCoreOp(
+                        _ = try submitCoreOp(
                             requestID: id,
                             threadID: coreOp.threadID,
                             op: coreOp.op,
@@ -25449,7 +25449,7 @@ final class CodexAppServerMessageProcessor {
                         params: params,
                         configuration: configuration
                     )
-                    try submitCoreOp(
+                    _ = try submitCoreOp(
                         requestID: id,
                         threadID: coreOp.threadID,
                         op: coreOp.op,
@@ -25464,7 +25464,7 @@ final class CodexAppServerMessageProcessor {
                         params: params,
                         configuration: configuration
                     )
-                    try submitCoreOp(
+                    _ = try submitCoreOp(
                         requestID: id,
                         threadID: coreOp.threadID,
                         op: coreOp.op,
@@ -25479,7 +25479,7 @@ final class CodexAppServerMessageProcessor {
                         params: params,
                         configuration: configuration
                     )
-                    try submitCoreOp(
+                    _ = try submitCoreOp(
                         requestID: id,
                         threadID: coreOp.threadID,
                         op: coreOp.op,
@@ -25500,7 +25500,7 @@ final class CodexAppServerMessageProcessor {
                         }
                         pendingRollbackRequests[rollback.threadID] = requestID
                         do {
-                            try submitCoreOp(
+                            _ = try submitCoreOp(
                                 requestID: id,
                                 threadID: rollback.threadID,
                                 op: .threadRollback(numTurns: rollback.numTurns),
@@ -25523,7 +25523,7 @@ final class CodexAppServerMessageProcessor {
                         configuration: configuration,
                         experimentalAPIEnabled: experimentalAPIEnabled
                     )
-                    try submitCoreOp(
+                    _ = try submitCoreOp(
                         requestID: id,
                         threadID: coreOp.threadID,
                         op: coreOp.op,
@@ -25933,7 +25933,7 @@ final class CodexAppServerMessageProcessor {
                         configuration: configuration,
                         runtimeFeatureEnablement: runtimeFeatureEnablement
                     )
-                    try submitCoreOp(
+                    _ = try submitCoreOp(
                         requestID: id,
                         threadID: coreOp.threadID,
                         op: coreOp.op,
