@@ -9023,7 +9023,7 @@ final class CodexAppServerTests: XCTestCase {
         {
           "file_id": "file_123",
           "upload_url": "https://uploads.example/upload/file_123",
-          "etag": "\\"upload_etag_123\\""
+          "etag": ""
         }
         """
         let createBody = """
@@ -9097,7 +9097,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(try archiveContains(uploadedArchive, "marker.txt", in: temp.url))
         let finalizeRequest = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(requests[2].httpBody)) as? [String: Any])
         XCTAssertEqual(finalizeRequest["file_id"] as? String, "file_123")
-        XCTAssertEqual(finalizeRequest["etag"] as? String, "\"upload_etag_123\"")
+        XCTAssertEqual(finalizeRequest["etag"] as? String, "")
         XCTAssertEqual(finalizeRequest["discoverability"] as? String, "UNLISTED")
         let targets = try XCTUnwrap(finalizeRequest["share_targets"] as? [[String: Any]])
         XCTAssertEqual(targets.count, 2)
@@ -18784,6 +18784,11 @@ final class CodexAppServerTests: XCTestCase {
                     return URLSessionTransportResponse(statusCode: 200, body: Data(emptyInstalledBody.utf8))
                 case ("/linear.tar.gz", nil):
                     return URLSessionTransportResponse(statusCode: 200, body: bundleBytes)
+                case ("/backend-api/ps/plugins/\(pluginID)/shares", nil):
+                    return URLSessionTransportResponse(
+                        statusCode: 200,
+                        body: Data(#"{"principals":[],"discoverability":"PRIVATE"}"#.utf8)
+                    )
                 default:
                     return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
                 }
@@ -18801,11 +18806,25 @@ final class CodexAppServerTests: XCTestCase {
 
         XCTAssertEqual(skills.map { $0["name"] as? String }, ["linear:search"])
         XCTAssertTrue((skills[0]["path"] as? String)?.hasSuffix("/plugins/cache/chatgpt-global/linear/1.2.3/skills/search/SKILL.md") == true)
+
+        let update = try decode(processor.processLine(Data(
+            #"{"id":3,"method":"plugin/share/updateTargets","params":{"remotePluginId":"\#(pluginID)","discoverability":"PRIVATE","shareTargets":[]}}"#.utf8
+        )))
+        XCTAssertNil(update["error"])
+
+        let refreshed = try decode(processor.processLine(Data(
+            #"{"id":4,"method":"skills/list","params":{"cwds":["\#(cwd.url.path)"],"forceReload":true}}"#.utf8
+        )))
+        let refreshedResult = try XCTUnwrap(refreshed["result"] as? [String: Any])
+        let refreshedData = try XCTUnwrap(refreshedResult["data"] as? [[String: Any]])
+        let refreshedSkills = try XCTUnwrap(refreshedData[0]["skills"] as? [[String: Any]])
+        XCTAssertTrue(refreshedSkills.isEmpty)
         XCTAssertEqual(capture.requests.map { $0.url?.query }, [
             "platform=codex",
             "scope=GLOBAL&includeDownloadUrls=true",
             nil,
-            "scope=WORKSPACE&includeDownloadUrls=true"
+            "scope=WORKSPACE&includeDownloadUrls=true",
+            nil
         ])
     }
 

@@ -6265,7 +6265,7 @@ public enum CodexAppServer {
                 "save remote plugin share: workspace plugin upload response did not include a valid upload URL"
             )
         }
-        guard let etag = upload["etag"] as? String, !etag.isEmpty else {
+        guard let etag = upload["etag"] as? String else {
             throw AppServerError.internalError(
                 "save remote plugin share: workspace plugin upload response did not include an etag"
             )
@@ -22123,6 +22123,10 @@ final class CodexAppServerMessageProcessor {
         _ = try? CodexAppServer.marketplaceUpgradeResult(params: nil, configuration: configuration)
     }
 
+    private func clearPluginRelatedCaches() {
+        remoteInstalledPluginsCache = []
+    }
+
     private func skillsListResult(params: [String: Any]?) -> [String: Any] {
         CodexAppServer.skillsListResult(
             params: params,
@@ -23623,25 +23627,22 @@ final class CodexAppServerMessageProcessor {
                         result: try CodexAppServer.pluginSkillReadResult(params: params, configuration: configuration)
                     )
                 case "plugin/share/save":
-                    response = CodexAppServer.responseObject(
-                        id: id,
-                        result: try CodexAppServer.pluginShareSaveResult(params: params, configuration: configuration)
-                    )
+                    let result = try CodexAppServer.pluginShareSaveResult(params: params, configuration: configuration)
+                    clearPluginRelatedCaches()
+                    response = CodexAppServer.responseObject(id: id, result: result)
                 case "plugin/share/updateTargets":
-                    response = CodexAppServer.responseObject(
-                        id: id,
-                        result: try CodexAppServer.pluginShareUpdateTargetsResult(params: params, configuration: configuration)
-                    )
+                    let result = try CodexAppServer.pluginShareUpdateTargetsResult(params: params, configuration: configuration)
+                    clearPluginRelatedCaches()
+                    response = CodexAppServer.responseObject(id: id, result: result)
                 case "plugin/share/list":
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.pluginShareListResult(params: params, configuration: configuration)
                     )
                 case "plugin/share/delete":
-                    response = CodexAppServer.responseObject(
-                        id: id,
-                        result: try CodexAppServer.pluginShareDeleteResult(params: params, configuration: configuration)
-                    )
+                    let result = try CodexAppServer.pluginShareDeleteResult(params: params, configuration: configuration)
+                    clearPluginRelatedCaches()
+                    response = CodexAppServer.responseObject(id: id, result: result)
                 case "plugin/install":
                     response = CodexAppServer.responseObject(
                         id: id,
