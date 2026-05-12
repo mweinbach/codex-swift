@@ -2619,6 +2619,121 @@ final class ExecServerTests: XCTestCase {
         XCTAssertNil(publisher.publishStatus(.disabled))
     }
 
+    func testRemoteControlConnectLoopCoreMirrorsRustStatusAndReconnectDecisions() throws {
+        var loop = RemoteControlConnectLoopCore(
+            remoteControlURL: "https://chatgpt.com/backend-api",
+            statusPublisher: RemoteControlStatusPublisherCore(snapshot: RemoteControlStatusSnapshot(
+                status: .disabled,
+                installationID: "install-123",
+                environmentID: nil
+            ))
+        )
+
+        XCTAssertEqual(loop.beginConnect(), RemoteControlConnectLoopStep(
+            action: .connect(RemoteControlTarget(
+                websocketURL: "wss://chatgpt.com/backend-api/wham/remote/control/server",
+                enrollURL: "https://chatgpt.com/backend-api/wham/remote/control/server/enroll"
+            )),
+            statusUpdates: [RemoteControlStatusSnapshot(
+                status: .connecting,
+                installationID: "install-123",
+                environmentID: nil
+            )]
+        ))
+        XCTAssertEqual(loop.target, RemoteControlTarget(
+            websocketURL: "wss://chatgpt.com/backend-api/wham/remote/control/server",
+            enrollURL: "https://chatgpt.com/backend-api/wham/remote/control/server/enroll"
+        ))
+
+        XCTAssertEqual(loop.connectionEstablished(environmentID: "env-test"), RemoteControlConnectLoopStep(
+            action: .connected,
+            statusUpdates: [
+                RemoteControlStatusSnapshot(
+                    status: .connecting,
+                    installationID: "install-123",
+                    environmentID: "env-test"
+                ),
+                RemoteControlStatusSnapshot(
+                    status: .connected,
+                    installationID: "install-123",
+                    environmentID: "env-test"
+                ),
+            ]
+        ))
+
+        let waitingForAccountID = loop.connectionFailed(.waitingForAccountID)
+        XCTAssertEqual(waitingForAccountID, RemoteControlConnectLoopStep(
+            action: .retryAfterAccountID,
+            statusUpdates: []
+        ))
+        XCTAssertEqual(loop.reconnectAttempt, 0)
+        XCTAssertEqual(loop.statusPublisher.snapshot.status, .connected)
+
+        XCTAssertEqual(loop.connectionFailed(.failed("connection refused")), RemoteControlConnectLoopStep(
+            action: .retryAfterBackoff(RemoteControlReconnectDelay(
+                attempt: 0,
+                baseMilliseconds: 200,
+                minimumMilliseconds: 180,
+                maximumMilliseconds: 220
+            )),
+            statusUpdates: [RemoteControlStatusSnapshot(
+                status: .errored,
+                installationID: "install-123",
+                environmentID: "env-test"
+            )]
+        ))
+        XCTAssertEqual(loop.reconnectAttempt, 1)
+        XCTAssertEqual(loop.connectionFailed(.failed("connection refused")).action, .retryAfterBackoff(
+            RemoteControlReconnectDelay(
+                attempt: 1,
+                baseMilliseconds: 200,
+                minimumMilliseconds: 180,
+                maximumMilliseconds: 220
+            )
+        ))
+        XCTAssertEqual(loop.reconnectAttempt, 2)
+
+        XCTAssertEqual(loop.disabled(), RemoteControlConnectLoopStep(
+            action: .disabled,
+            statusUpdates: [RemoteControlStatusSnapshot(
+                status: .disabled,
+                installationID: "install-123",
+                environmentID: nil
+            )]
+        ))
+    }
+
+    func testRemoteControlConnectLoopCoreHandlesInvalidURLLikeRust() {
+        var loop = RemoteControlConnectLoopCore(
+            remoteControlURL: "https://example.com/backend-api",
+            statusPublisher: RemoteControlStatusPublisherCore(snapshot: RemoteControlStatusSnapshot(
+                status: .disabled,
+                installationID: "install-123",
+                environmentID: nil
+            ))
+        )
+
+        let step = loop.beginConnect()
+        XCTAssertEqual(step.statusUpdates, [
+            RemoteControlStatusSnapshot(
+                status: .connecting,
+                installationID: "install-123",
+                environmentID: nil
+            ),
+            RemoteControlStatusSnapshot(
+                status: .errored,
+                installationID: "install-123",
+                environmentID: nil
+            ),
+        ])
+        XCTAssertEqual(
+            step.action,
+            .waitForDisableAfterInvalidURL("invalid remote control URL `https://example.com/backend-api`; expected HTTPS URL for chatgpt.com or chatgpt-staging.com, or HTTP/HTTPS URL for localhost")
+        )
+        XCTAssertNil(loop.target)
+        XCTAssertEqual(loop.reconnectAttempt, 0)
+    }
+
     func testRemoteControlEnrollmentClientBuildsRustRequestShape() async throws {
         let target = try RemoteControlURLNormalizer.normalize("https://chatgpt.com/backend-api")
         let client = RemoteControlEnrollmentClient(

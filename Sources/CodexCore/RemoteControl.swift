@@ -166,6 +166,134 @@ public struct RemoteControlStartState: Equatable, Sendable {
     }
 }
 
+public struct RemoteControlReconnectDelay: Equatable, Sendable {
+    public var attempt: UInt64
+    public var baseMilliseconds: UInt64
+    public var minimumMilliseconds: UInt64
+    public var maximumMilliseconds: UInt64
+
+    public init(attempt: UInt64, baseMilliseconds: UInt64, minimumMilliseconds: UInt64, maximumMilliseconds: UInt64) {
+        self.attempt = attempt
+        self.baseMilliseconds = baseMilliseconds
+        self.minimumMilliseconds = minimumMilliseconds
+        self.maximumMilliseconds = maximumMilliseconds
+    }
+}
+
+public enum RemoteControlConnectLoopFailure: Equatable, Sendable {
+    case waitingForAccountID
+    case failed(String)
+}
+
+public enum RemoteControlConnectLoopAction: Equatable, Sendable {
+    case connect(RemoteControlTarget)
+    case waitForDisableAfterInvalidURL(String)
+    case connected
+    case disabled
+    case retryAfterAccountID
+    case retryAfterBackoff(RemoteControlReconnectDelay)
+}
+
+public struct RemoteControlConnectLoopStep: Equatable, Sendable {
+    public var action: RemoteControlConnectLoopAction
+    public var statusUpdates: [RemoteControlStatusSnapshot]
+
+    public init(action: RemoteControlConnectLoopAction, statusUpdates: [RemoteControlStatusSnapshot]) {
+        self.action = action
+        self.statusUpdates = statusUpdates
+    }
+}
+
+public struct RemoteControlConnectLoopCore: Equatable, Sendable {
+    public static var accountIDRetryIntervalSeconds: TimeInterval { 1 }
+    public static var initialBackoffMilliseconds: UInt64 { 200 }
+    public static var backoffJitterLowerBound: Double { 0.9 }
+    public static var backoffJitterUpperBound: Double { 1.1 }
+
+    public var remoteControlURL: String
+    public var target: RemoteControlTarget?
+    public var reconnectAttempt: UInt64
+    public var statusPublisher: RemoteControlStatusPublisherCore
+
+    public init(
+        remoteControlURL: String,
+        target: RemoteControlTarget? = nil,
+        reconnectAttempt: UInt64 = 0,
+        statusPublisher: RemoteControlStatusPublisherCore
+    ) {
+        self.remoteControlURL = remoteControlURL
+        self.target = target
+        self.reconnectAttempt = reconnectAttempt
+        self.statusPublisher = statusPublisher
+    }
+
+    public mutating func beginConnect() -> RemoteControlConnectLoopStep {
+        var updates = [RemoteControlStatusSnapshot]()
+        if let update = statusPublisher.publishStatus(.connecting) {
+            updates.append(update)
+        }
+        if let target {
+            return RemoteControlConnectLoopStep(action: .connect(target), statusUpdates: updates)
+        }
+        do {
+            let normalizedTarget = try RemoteControlURLNormalizer.normalize(remoteControlURL)
+            target = normalizedTarget
+            return RemoteControlConnectLoopStep(action: .connect(normalizedTarget), statusUpdates: updates)
+        } catch {
+            if let update = statusPublisher.publishStatus(.errored) {
+                updates.append(update)
+            }
+            return RemoteControlConnectLoopStep(
+                action: .waitForDisableAfterInvalidURL(String(describing: error)),
+                statusUpdates: updates
+            )
+        }
+    }
+
+    public mutating func connectionEstablished(environmentID: String?) -> RemoteControlConnectLoopStep {
+        reconnectAttempt = 0
+        var updates = [RemoteControlStatusSnapshot]()
+        if let update = statusPublisher.publishEnvironmentID(environmentID) {
+            updates.append(update)
+        }
+        if let update = statusPublisher.publishStatus(.connected) {
+            updates.append(update)
+        }
+        return RemoteControlConnectLoopStep(action: .connected, statusUpdates: updates)
+    }
+
+    public mutating func connectionFailed(_ failure: RemoteControlConnectLoopFailure) -> RemoteControlConnectLoopStep {
+        switch failure {
+        case .waitingForAccountID:
+            return RemoteControlConnectLoopStep(action: .retryAfterAccountID, statusUpdates: [])
+        case .failed:
+            var updates = [RemoteControlStatusSnapshot]()
+            if let update = statusPublisher.publishStatus(.errored) {
+                updates.append(update)
+            }
+            let delay = Self.backoffDelay(for: reconnectAttempt)
+            reconnectAttempt = reconnectAttempt == UInt64.max ? UInt64.max : reconnectAttempt + 1
+            return RemoteControlConnectLoopStep(action: .retryAfterBackoff(delay), statusUpdates: updates)
+        }
+    }
+
+    public mutating func disabled() -> RemoteControlConnectLoopStep {
+        let updates = statusPublisher.publishStatus(.disabled).map { [$0] } ?? []
+        return RemoteControlConnectLoopStep(action: .disabled, statusUpdates: updates)
+    }
+
+    public static func backoffDelay(for attempt: UInt64) -> RemoteControlReconnectDelay {
+        let exponent = attempt == 0 ? 0 : min(attempt - 1, 56)
+        let base = initialBackoffMilliseconds * (UInt64(1) << exponent)
+        return RemoteControlReconnectDelay(
+            attempt: attempt,
+            baseMilliseconds: base,
+            minimumMilliseconds: UInt64(Double(base) * backoffJitterLowerBound),
+            maximumMilliseconds: UInt64(Double(base) * backoffJitterUpperBound)
+        )
+    }
+}
+
 public struct RemoteControlClientID: Codable, Equatable, Hashable, Sendable {
     public var rawValue: String
 
