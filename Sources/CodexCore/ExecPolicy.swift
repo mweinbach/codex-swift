@@ -1054,6 +1054,11 @@ public final class PolicyParser {
             return
         }
 
+        if let callee = try Self.parseTopLevelFunctionCallName(statement),
+           !["prefix_rule", "network_rule", "host_executable"].contains(callee) {
+            throw ExecPolicyError.invalidSyntax("unsupported Starlark top-level call: \(callee)")
+        }
+
         let prefixRuleBodies = try Self.extractCallBodies(
             named: "prefix_rule",
             from: statement,
@@ -1078,6 +1083,79 @@ public final class PolicyParser {
         for body in hostExecutableBodies {
             try addHostExecutable(from: body, constants: constants, functions: functions)
         }
+    }
+
+    private static func parseTopLevelFunctionCallName(_ statement: String) throws -> String? {
+        let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let first = trimmed.first,
+              first == "_" || first.isLetter
+        else {
+            return nil
+        }
+
+        var index = trimmed.startIndex
+        while index < trimmed.endIndex {
+            let character = trimmed[index]
+            guard character == "_" || character.isLetter || character.isNumber else {
+                break
+            }
+            index = trimmed.index(after: index)
+        }
+
+        let name = String(trimmed[..<index])
+        var cursor = index
+        while cursor < trimmed.endIndex, trimmed[cursor].isWhitespace {
+            cursor = trimmed.index(after: cursor)
+        }
+        guard cursor < trimmed.endIndex, trimmed[cursor] == "(" else {
+            return nil
+        }
+
+        let closeIndex = try matchingCloseParenIndex(in: trimmed, openIndex: cursor)
+        var trailing = trimmed.index(after: closeIndex)
+        while trailing < trimmed.endIndex, trimmed[trailing].isWhitespace {
+            trailing = trimmed.index(after: trailing)
+        }
+        guard trailing == trimmed.endIndex else {
+            return nil
+        }
+        return name
+    }
+
+    private static func matchingCloseParenIndex(in text: String, openIndex: String.Index) throws -> String.Index {
+        var index = openIndex
+        var quote: Character?
+        var previousWasBackslash = false
+        var depth = 0
+
+        while index < text.endIndex {
+            let character = text[index]
+            if let activeQuote = quote {
+                if character == activeQuote && !previousWasBackslash {
+                    quote = nil
+                }
+                previousWasBackslash = character == "\\" && !previousWasBackslash
+                if character != "\\" {
+                    previousWasBackslash = false
+                }
+                index = text.index(after: index)
+                continue
+            }
+
+            if character == "\"" || character == "'" {
+                quote = character
+            } else if character == "(" {
+                depth += 1
+            } else if character == ")" {
+                depth -= 1
+                if depth == 0 {
+                    return index
+                }
+            }
+            index = text.index(after: index)
+        }
+
+        throw ExecPolicyError.invalidSyntax("unterminated Starlark top-level call")
     }
 
     private func addPrefixRule(

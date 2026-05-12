@@ -546,6 +546,24 @@ final class ExecPolicyTests: XCTestCase {
         )
     }
 
+    func testParserRejectsUnsupportedTopLevelStarlarkCallsLikeRust() throws {
+        for (source, callee) in [
+            (#"load("//foo:bar.star", "x")"#, "load"),
+            (#"fail("nope")"#, "fail"),
+            (#"print("hi")"#, "print")
+        ] {
+            XCTAssertThrowsError(try parsePolicy("""
+            \(source)
+            prefix_rule(["git", "status"])
+            """)) { error in
+                XCTAssertEqual(
+                    error as? ExecPolicyError,
+                    .invalidSyntax("unsupported Starlark top-level call: \(callee)")
+                )
+            }
+        }
+    }
+
     func testParserAcceptsRustStarlarkBuiltinPositionalArguments() throws {
         let policy = try parsePolicy("""
         prefix_rule(["git", "status"], "prompt", [["git", "status"]], ["git commit"], "inspect git state")

@@ -973,6 +973,8 @@ Source baseline inspected for this scaffold:
   - Added Swift execpolicy parser support for unary `+` numeric expressions and zero-argument string `.split()` whitespace tokenization, matching Rust Starlark expression behavior for generated policy rules.
 - `codex-rs/execpolicy/src/parser.rs` Starlark dictionary expansion
   - Extended Swift execpolicy parser support for `dict(**mapping)` expansion, including Rust's positional-map override behavior and rejection of named arguments after `**` or duplicate explicit keyword/expanded keys.
+- `codex-rs/execpolicy/src/parser.rs` unsupported top-level Starlark calls
+  - Matched Rust Starlark policy evaluation by rejecting unsupported top-level calls such as `load(...)`, `fail(...)`, and missing builtins like `print(...)` instead of silently ignoring the call and loading later rules.
 - `codex-rs/shell-command/src/parse_command.rs` command parser `cd_target` parity
   - added Swift `cd -L`/`cd -P` option skipping, `cd -- path` target handling, Rust-matching empty-base joins, quoted-empty shell word preservation, and `cd` path joining for read summaries only.
 - `codex-rs/shell-command/src/parse_command.rs` positional operand parity
