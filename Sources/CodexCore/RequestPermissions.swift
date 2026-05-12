@@ -1916,8 +1916,127 @@ public struct RequestPermissionProfile: Codable, Equatable, Sendable {
     }
 
     public var isEmpty: Bool {
-        network == nil && fileSystem == nil
+        network?.enabled != true && (fileSystem?.isEmpty ?? true)
     }
+
+    public static func mergeAdditionalPermissionProfiles(
+        base: RequestPermissionProfile?,
+        permissions: RequestPermissionProfile?
+    ) -> RequestPermissionProfile? {
+        guard let permissions else {
+            return base?.nonEmpty
+        }
+
+        guard let base else {
+            return permissions.nonEmpty
+        }
+
+        let network: RequestPermissionNetworkPermissions? = {
+            switch (base.network?.enabled, permissions.network?.enabled) {
+            case (true, _), (_, true):
+                return RequestPermissionNetworkPermissions(enabled: true)
+            default:
+                return nil
+            }
+        }()
+        let fileSystem = FileSystemPermissions.mergeAdditionalPermissions(
+            base: base.fileSystem,
+            permissions: permissions.fileSystem
+        )
+
+        return RequestPermissionProfile(network: network, fileSystem: fileSystem).nonEmpty
+    }
+
+    private var nonEmpty: RequestPermissionProfile? {
+        isEmpty ? nil : self
+    }
+}
+
+public extension FileSystemPermissions {
+    static func mergeAdditionalPermissions(
+        base: FileSystemPermissions?,
+        permissions: FileSystemPermissions?
+    ) -> FileSystemPermissions? {
+        switch (base, permissions) {
+        case let (base?, permissions?):
+            return FileSystemPermissions(
+                entries: uniqueEntries(base.entries + permissions.entries),
+                globScanMaxDepth: mergeGlobScanMaxDepth(
+                    leftEntries: base.entries,
+                    leftDepth: base.globScanMaxDepth,
+                    rightEntries: permissions.entries,
+                    rightDepth: permissions.globScanMaxDepth
+                )
+            ).nonEmpty
+        case let (base?, nil):
+            return base.nonEmpty
+        case let (nil, permissions?):
+            return permissions.nonEmpty
+        case (nil, nil):
+            return nil
+        }
+    }
+
+    private static func uniqueEntries(_ entries: [FileSystemSandboxEntry]) -> [FileSystemSandboxEntry] {
+        var unique: [FileSystemSandboxEntry] = []
+        unique.reserveCapacity(entries.count)
+        for entry in entries where !unique.contains(entry) {
+            unique.append(entry)
+        }
+        return unique
+    }
+
+    private static func mergeGlobScanMaxDepth(
+        leftEntries: [FileSystemSandboxEntry],
+        leftDepth: Int?,
+        rightEntries: [FileSystemSandboxEntry],
+        rightDepth: Int?
+    ) -> Int? {
+        switch (
+            effectiveGlobScanDepth(entries: leftEntries, depth: leftDepth),
+            effectiveGlobScanDepth(entries: rightEntries, depth: rightDepth)
+        ) {
+        case (.unbounded?, _), (_, .unbounded?):
+            return nil
+        case let (.bounded(left)?, .bounded(right)?):
+            return max(left, right)
+        case let (.bounded(depth)?, nil), let (nil, .bounded(depth)?):
+            return depth
+        case (nil, nil):
+            return nil
+        }
+    }
+
+    private static func effectiveGlobScanDepth(
+        entries: [FileSystemSandboxEntry],
+        depth: Int?
+    ) -> GlobScanDepth? {
+        let hasDenyGlob = entries.contains { entry in
+            guard entry.access == .none else {
+                return false
+            }
+            if case .globPattern = entry.path {
+                return true
+            }
+            return false
+        }
+        guard hasDenyGlob else {
+            return nil
+        }
+        if let depth {
+            return .bounded(depth)
+        }
+        return .unbounded
+    }
+
+    private var nonEmpty: FileSystemPermissions? {
+        isEmpty ? nil : self
+    }
+}
+
+private enum GlobScanDepth: Equatable {
+    case bounded(Int)
+    case unbounded
 }
 
 public struct RequestPermissionsArgs: Codable, Equatable, Sendable {

@@ -122,6 +122,7 @@ final class TurnStateTests: XCTestCase {
         var state = TurnState()
 
         XCTAssertTrue(state.acceptsMailboxDeliveryForCurrentTurn)
+        XCTAssertNil(state.grantedPermissionsForTurn)
         XCTAssertFalse(state.hasMemoryCitation)
         XCTAssertFalse(state.isStrictAutoReviewEnabled)
         XCTAssertEqual(state.toolCallCount, 0)
@@ -142,6 +143,89 @@ final class TurnStateTests: XCTestCase {
         XCTAssertTrue(state.hasMemoryCitation)
         XCTAssertTrue(state.isStrictAutoReviewEnabled)
         XCTAssertEqual(state.tokenUsageAtTurnStart, TokenUsage(inputTokens: 3, outputTokens: 4, totalTokens: 7))
+    }
+
+    func testRecordGrantedPermissionsMergesNetworkAndFileSystemLikeRust() {
+        var state = TurnState()
+        let firstGrant = RequestPermissionProfile(
+            fileSystem: FileSystemPermissions(
+                entries: [
+                    FileSystemSandboxEntry(path: .path("/repo"), access: .read),
+                    FileSystemSandboxEntry(path: .globPattern("**/*.secret"), access: .none)
+                ],
+                globScanMaxDepth: 2
+            )
+        )
+        let secondGrant = RequestPermissionProfile(
+            network: RequestPermissionNetworkPermissions(enabled: true),
+            fileSystem: FileSystemPermissions(
+                entries: [
+                    FileSystemSandboxEntry(path: .path("/repo"), access: .read),
+                    FileSystemSandboxEntry(path: .path("/repo/build"), access: .write),
+                    FileSystemSandboxEntry(path: .globPattern("**/*.secret"), access: .none),
+                    FileSystemSandboxEntry(path: .globPattern("**/*.token"), access: .none)
+                ],
+                globScanMaxDepth: 5
+            )
+        )
+
+        state.recordGrantedPermissions(firstGrant)
+        state.recordGrantedPermissions(secondGrant)
+
+        XCTAssertEqual(
+            state.grantedPermissionsForTurn,
+            RequestPermissionProfile(
+                network: RequestPermissionNetworkPermissions(enabled: true),
+                fileSystem: FileSystemPermissions(
+                    entries: [
+                        FileSystemSandboxEntry(path: .path("/repo"), access: .read),
+                        FileSystemSandboxEntry(path: .globPattern("**/*.secret"), access: .none),
+                        FileSystemSandboxEntry(path: .path("/repo/build"), access: .write),
+                        FileSystemSandboxEntry(path: .globPattern("**/*.token"), access: .none)
+                    ],
+                    globScanMaxDepth: 5
+                )
+            )
+        )
+    }
+
+    func testMergeAdditionalPermissionProfilesPreservesRustEmptyAndUnboundedGlobDepthRules() {
+        XCTAssertNil(
+            RequestPermissionProfile.mergeAdditionalPermissionProfiles(
+                base: nil,
+                permissions: RequestPermissionProfile()
+            )
+        )
+        XCTAssertNil(
+            RequestPermissionProfile.mergeAdditionalPermissionProfiles(
+                base: RequestPermissionProfile(network: RequestPermissionNetworkPermissions(enabled: false)),
+                permissions: nil
+            )
+        )
+
+        let merged = RequestPermissionProfile.mergeAdditionalPermissionProfiles(
+            base: RequestPermissionProfile(
+                fileSystem: FileSystemPermissions(
+                    entries: [FileSystemSandboxEntry(path: .globPattern("**/*.secret"), access: .none)],
+                    globScanMaxDepth: 3
+                )
+            ),
+            permissions: RequestPermissionProfile(
+                fileSystem: FileSystemPermissions(
+                    entries: [FileSystemSandboxEntry(path: .globPattern("**/*.token"), access: .none)]
+                )
+            )
+        )
+
+        XCTAssertEqual(
+            merged?.fileSystem,
+            FileSystemPermissions(
+                entries: [
+                    FileSystemSandboxEntry(path: .globPattern("**/*.secret"), access: .none),
+                    FileSystemSandboxEntry(path: .globPattern("**/*.token"), access: .none)
+                ]
+            )
+        )
     }
 
     func testActiveTurnTaskOrderingReplacementAndDrain() {

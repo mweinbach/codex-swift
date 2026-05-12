@@ -61,6 +61,7 @@ public struct TurnState: Equatable, Sendable {
     private var pendingDynamicTools: [String: PendingApprovalSender]
     private var pendingInput: [ResponseInputItem]
     private var mailboxDeliveryPhase: MailboxDeliveryPhase
+    private var grantedPermissions: RequestPermissionProfile?
     public private(set) var toolCallCount: UInt64
     public var hasMemoryCitation: Bool
     public private(set) var tokenUsageAtTurnStart: TokenUsage
@@ -74,6 +75,7 @@ public struct TurnState: Equatable, Sendable {
         pendingDynamicTools: [String: PendingApprovalSender] = [:],
         pendingInput: [ResponseInputItem] = [],
         mailboxDeliveryPhase: MailboxDeliveryPhase = .currentTurn,
+        grantedPermissions: RequestPermissionProfile? = nil,
         toolCallCount: UInt64 = 0,
         hasMemoryCitation: Bool = false,
         tokenUsageAtTurnStart: TokenUsage = TokenUsage(),
@@ -86,6 +88,7 @@ public struct TurnState: Equatable, Sendable {
         self.pendingDynamicTools = pendingDynamicTools
         self.pendingInput = pendingInput
         self.mailboxDeliveryPhase = mailboxDeliveryPhase
+        self.grantedPermissions = grantedPermissions
         self.toolCallCount = toolCallCount
         self.hasMemoryCitation = hasMemoryCitation
         self.tokenUsageAtTurnStart = tokenUsageAtTurnStart
@@ -126,6 +129,10 @@ public struct TurnState: Equatable, Sendable {
 
     public var isStrictAutoReviewEnabled: Bool {
         strictAutoReviewEnabled
+    }
+
+    public var grantedPermissionsForTurn: RequestPermissionProfile? {
+        grantedPermissions
     }
 
     @discardableResult
@@ -238,6 +245,13 @@ public struct TurnState: Equatable, Sendable {
 
     public mutating func acceptMailboxDeliveryForCurrentTurn() {
         setMailboxDeliveryPhase(.currentTurn)
+    }
+
+    public mutating func recordGrantedPermissions(_ permissions: RequestPermissionProfile) {
+        grantedPermissions = RequestPermissionProfile.mergeAdditionalPermissionProfiles(
+            base: grantedPermissions,
+            permissions: permissions
+        )
     }
 
     public mutating func incrementToolCallCount() {
