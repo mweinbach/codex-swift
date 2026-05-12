@@ -31,6 +31,8 @@ public struct AppServerWebSocketTransport: Sendable {
 
     private let configuration: CodexAppServerConfiguration
     private let authPolicy: AppServerWebsocketAuthPolicy
+    private let connectionIDAllocator = AppServerConnectionIDAllocator()
+    private let threadStateManager = AppServerThreadStateManager()
 
     public init(
         configuration: CodexAppServerConfiguration,
@@ -72,11 +74,15 @@ public struct AppServerWebSocketTransport: Sendable {
 
             let configuration = configuration
             let authPolicy = authPolicy
+            let connectionID = await connectionIDAllocator.allocate()
+            let threadStateManager = threadStateManager
             Task.detached {
                 try? await Self.runConnectedClient(
                     fileDescriptor: clientFD,
                     configuration: configuration,
+                    connectionID: connectionID,
                     authPolicy: authPolicy,
+                    threadStateManager: threadStateManager,
                     rejectOriginHeaders: true
                 )
             }
@@ -114,11 +120,15 @@ public struct AppServerWebSocketTransport: Sendable {
             }
 
             let configuration = configuration
+            let connectionID = await connectionIDAllocator.allocate()
+            let threadStateManager = threadStateManager
             Task.detached {
                 try? await Self.runConnectedClient(
                     fileDescriptor: clientFD,
                     configuration: configuration,
+                    connectionID: connectionID,
                     authPolicy: AppServerWebsocketAuthPolicy(),
+                    threadStateManager: threadStateManager,
                     rejectOriginHeaders: false
                 )
             }
@@ -128,7 +138,9 @@ public struct AppServerWebSocketTransport: Sendable {
     private static func runConnectedClient(
         fileDescriptor: Int32,
         configuration: CodexAppServerConfiguration,
+        connectionID: AppServerConnectionID,
         authPolicy: AppServerWebsocketAuthPolicy,
+        threadStateManager: AppServerThreadStateManager,
         rejectOriginHeaders: Bool
     ) async throws {
         defer {
@@ -148,12 +160,17 @@ public struct AppServerWebSocketTransport: Sendable {
         let writer = AppServerWebSocketFrameWriter(fileDescriptor: fileDescriptor)
         let processor = CodexAppServerMessageProcessor(
             configuration: configuration,
+            connectionID: connectionID,
             notificationSink: { data in
                 for text in websocketTexts(from: data) {
                     try? await writer.writeText(text)
                 }
-            }
+            },
+            threadStateManager: threadStateManager
         )
+        defer {
+            processor.closeConnection()
+        }
 
         do {
             while !Task.isCancelled {
@@ -607,6 +624,17 @@ public struct AppServerWebSocketTransport: Sendable {
 
     private static func posixMessage(operation: String, errno: Int32) -> String {
         "\(operation) failed: \(String(cString: strerror(errno)))"
+    }
+}
+
+private actor AppServerConnectionIDAllocator {
+    private var next: AppServerConnectionID = 1
+
+    func allocate() -> AppServerConnectionID {
+        defer {
+            next += 1
+        }
+        return next
     }
 }
 

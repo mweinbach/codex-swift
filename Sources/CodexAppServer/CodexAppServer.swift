@@ -22859,7 +22859,7 @@ final class CodexAppServerMessageProcessor {
         let ids: [String]
     }
 
-    private let connectionID: AppServerConnectionID = 0
+    private let connectionID: AppServerConnectionID
     private var initialized = false
     private var requestAttestation = false
     private var experimentalAPIEnabled = false
@@ -22899,12 +22899,14 @@ final class CodexAppServerMessageProcessor {
 
     init(
         configuration: CodexAppServerConfiguration,
+        connectionID: AppServerConnectionID = 0,
         notificationSink: AppServerNotificationSink? = nil,
         coreOpSubmitter: AppServerCoreOpSubmitter? = nil,
         threadStateManager: AppServerThreadStateManager = AppServerThreadStateManager(),
         outgoingRequestBroker: AppServerOutgoingRequestBroker? = nil
     ) {
         self.configuration = configuration
+        self.connectionID = connectionID
         self.notificationSink = notificationSink
         self.coreOpSubmitter = coreOpSubmitter
         self.acceptedLineAnalyticsClient = AcceptedLineAnalyticsClient(
@@ -22922,6 +22924,16 @@ final class CodexAppServerMessageProcessor {
         activeDeviceCodeLogins.cancelAll()
         for watch in fsWatches.values {
             watch.cancel()
+        }
+        activeCommandExecs.terminateAll()
+        activeProcesses.terminateAll()
+    }
+
+    func closeConnection() {
+        let manager = threadStateManager
+        let connectionID = connectionID
+        _ = try? CodexAppServer.runAsyncBlocking {
+            await manager.removeConnection(connectionID)
         }
         activeCommandExecs.terminateAll()
         activeProcesses.terminateAll()

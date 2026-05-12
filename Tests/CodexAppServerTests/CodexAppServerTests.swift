@@ -14753,6 +14753,39 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
+    func testThreadSubscriptionsAreConnectionScopedAndDisconnectClosesOnlyThatConnectionLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let threadStateManager = AppServerThreadStateManager()
+        let firstProcessor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            connectionID: 101,
+            threadStateManager: threadStateManager
+        )
+        let secondProcessor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            connectionID: 202,
+            threadStateManager: threadStateManager
+        )
+        let start = try decodeMessages(firstProcessor.processLine(
+            Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)
+        ))
+        let threadID = try XCTUnwrap(((start[0]["result"] as? [String: Any])?["thread"] as? [String: Any])?["id"] as? String)
+
+        let secondUnsubscribe = try decode(secondProcessor.processLine(
+            Data(#"{"id":2,"method":"thread/unsubscribe","params":{"threadId":"\#(threadID)"}}"#.utf8)
+        ))
+        XCTAssertEqual((secondUnsubscribe["result"] as? [String: Any])?["status"] as? String, "notSubscribed")
+        let subscribedBeforeClose = await threadStateManager.subscribedConnectionIDs(forThreadID: threadID)
+        XCTAssertEqual(subscribedBeforeClose, [101])
+
+        firstProcessor.closeConnection()
+
+        let subscribedAfterClose = await threadStateManager.subscribedConnectionIDs(forThreadID: threadID)
+        let loadedThreadIDs = await threadStateManager.listLoadedThreadIDs()
+        XCTAssertEqual(subscribedAfterClose, [])
+        XCTAssertEqual(loadedThreadIDs, [threadID])
+    }
+
     func testThreadUnsubscribeReportsSubscriptionStatus() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
@@ -24284,15 +24317,19 @@ final class CodexAppServerTests: XCTestCase {
 
     private func initializedProcessor(
         configuration: CodexAppServerConfiguration,
+        connectionID: AppServerConnectionID = 0,
         notificationSink: AppServerNotificationSink? = nil,
         coreOpSubmitter: AppServerCoreOpSubmitter? = nil,
+        threadStateManager: AppServerThreadStateManager = AppServerThreadStateManager(),
         experimentalAPIEnabled: Bool = false,
         optOutNotificationMethods: [String] = []
     ) throws -> CodexAppServerMessageProcessor {
         let processor = CodexAppServerMessageProcessor(
             configuration: configuration,
+            connectionID: connectionID,
             notificationSink: notificationSink,
-            coreOpSubmitter: coreOpSubmitter
+            coreOpSubmitter: coreOpSubmitter,
+            threadStateManager: threadStateManager
         )
         var capabilities: [String: Any] = [:]
         if experimentalAPIEnabled {
