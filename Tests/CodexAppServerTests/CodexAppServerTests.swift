@@ -5225,6 +5225,69 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(firstItems[1]["text"] as? String, "Done")
     }
 
+    func testThreadReadReconstructsDynamicToolItemsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "Run dynamic tool",
+            provider: "mock_provider"
+        )
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        try appendRolloutEvents(
+            to: rolloutPath,
+            timestamp: "2025-01-05T12:00:01Z",
+            events: [
+                .dynamicToolCallRequest(DynamicToolCallRequest(
+                    callID: "dyn-1",
+                    turnID: "turn-1",
+                    startedAtMilliseconds: 0,
+                    namespace: "codex_app",
+                    tool: "lookup_ticket",
+                    arguments: .object(["id": .string("ABC-123")])
+                )),
+                .dynamicToolCallResponse(DynamicToolCallResponseEvent(
+                    callID: "dyn-1",
+                    turnID: "turn-1",
+                    completedAtMilliseconds: 0,
+                    namespace: "codex_app",
+                    tool: "lookup_ticket",
+                    arguments: .object(["id": .string("ABC-123")]),
+                    contentItems: [.text("Ticket is open")],
+                    success: true,
+                    duration: ProtocolDuration(secs: 0, nanos: 42_000_000)
+                ))
+            ]
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"thread/read","params":{"threadId":"\#(threadID)","includeTurns":true}}"#,
+            codexHome: temp.url
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        let turns = try XCTUnwrap(thread["turns"] as? [[String: Any]])
+        XCTAssertEqual(turns.count, 1)
+        let items = try XCTUnwrap(turns[0]["items"] as? [[String: Any]])
+        XCTAssertEqual(items.map { $0["type"] as? String }, ["userMessage", "dynamicToolCall"])
+        let dynamicItem = items[1]
+        XCTAssertEqual(dynamicItem["id"] as? String, "dyn-1")
+        XCTAssertEqual(dynamicItem["namespace"] as? String, "codex_app")
+        XCTAssertEqual(dynamicItem["tool"] as? String, "lookup_ticket")
+        XCTAssertEqual((dynamicItem["arguments"] as? [String: Any])?["id"] as? String, "ABC-123")
+        XCTAssertEqual(dynamicItem["status"] as? String, "completed")
+        XCTAssertEqual(dynamicItem["success"] as? Bool, true)
+        XCTAssertEqual(dynamicItem["durationMs"] as? Int, 42)
+        let contentItems = try XCTUnwrap(dynamicItem["contentItems"] as? [[String: Any]])
+        XCTAssertEqual(contentItems[0]["type"] as? String, "inputText")
+        XCTAssertEqual(contentItems[0]["text"] as? String, "Ticket is open")
+    }
+
     func testThreadReadCanReturnArchivedThreadsByIDLikeRust() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(

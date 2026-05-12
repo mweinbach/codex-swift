@@ -14317,7 +14317,7 @@ public enum CodexAppServer {
         }
     }
 
-    private static func dynamicToolCallItemObject(_ item: DynamicToolCallRequest) -> [String: Any] {
+    fileprivate static func dynamicToolCallItemObject(_ item: DynamicToolCallRequest) -> [String: Any] {
         [
             "type": "dynamicToolCall",
             "id": item.callID,
@@ -14331,7 +14331,7 @@ public enum CodexAppServer {
         ]
     }
 
-    private static func dynamicToolCallItemObject(_ item: DynamicToolCallResponseEvent) -> [String: Any] {
+    fileprivate static func dynamicToolCallItemObject(_ item: DynamicToolCallResponseEvent) -> [String: Any] {
         [
             "type": "dynamicToolCall",
             "id": item.callID,
@@ -14345,7 +14345,7 @@ public enum CodexAppServer {
         ]
     }
 
-    private static func dynamicToolCallContentItemObject(_ item: DynamicToolCallOutputContentItem) -> [String: Any] {
+    fileprivate static func dynamicToolCallContentItemObject(_ item: DynamicToolCallOutputContentItem) -> [String: Any] {
         switch item {
         case let .text(text):
             return [
@@ -14452,7 +14452,7 @@ public enum CodexAppServer {
         ["message": error.message]
     }
 
-    private static func durationMilliseconds(_ duration: ProtocolDuration) -> Int64 {
+    fileprivate static func durationMilliseconds(_ duration: ProtocolDuration) -> Int64 {
         Int64((duration.timeInterval * 1000).rounded(.towardZero))
     }
 
@@ -14980,7 +14980,7 @@ public enum CodexAppServer {
         ]
     }
 
-    private static func jsonObject(from value: JSONValue) -> Any {
+    fileprivate static func jsonObject(from value: JSONValue) -> Any {
         switch value {
         case .null:
             return NSNull()
@@ -25524,6 +25524,10 @@ private struct AppServerThreadHistoryBuilder {
                 result: payload.result,
                 savedPath: payload.savedPath
             )
+        case let .dynamicToolCallRequest(payload):
+            upsertDynamicToolCall(CodexAppServer.dynamicToolCallItemObject(payload))
+        case let .dynamicToolCallResponse(payload):
+            upsertDynamicToolCall(CodexAppServer.dynamicToolCallItemObject(payload))
         case let .enteredReviewMode(request):
             finishCurrentTurn()
             startTurn()
@@ -25640,6 +25644,18 @@ private struct AppServerThreadHistoryBuilder {
 
         if let index = currentItems.firstIndex(where: {
             $0["type"] as? String == "imageGeneration" && $0["id"] as? String == id
+        }) {
+            currentItems[index] = item
+        } else {
+            currentItems.append(item)
+        }
+    }
+
+    private mutating func upsertDynamicToolCall(_ item: [String: Any]) {
+        ensureTurn()
+        let id = item["id"] as? String
+        if let index = currentItems.firstIndex(where: {
+            $0["type"] as? String == "dynamicToolCall" && $0["id"] as? String == id
         }) {
             currentItems[index] = item
         } else {
