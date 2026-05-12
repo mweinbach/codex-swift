@@ -109,6 +109,40 @@ private actor AppServerMcpOAuthAuthorizationURLCapture {
 }
 
 public struct CodexAppServerConfiguration: Equatable, Sendable {
+    public struct AppTextPosition: Equatable, Sendable {
+        public let line: Int
+        public let column: Int
+
+        public init(line: Int, column: Int) {
+            self.line = line
+            self.column = column
+        }
+    }
+
+    public struct AppTextRange: Equatable, Sendable {
+        public let start: AppTextPosition
+        public let end: AppTextPosition
+
+        public init(start: AppTextPosition, end: AppTextPosition) {
+            self.start = start
+            self.end = end
+        }
+    }
+
+    public struct ConfigWarning: Equatable, Sendable {
+        public let summary: String
+        public let details: String?
+        public let path: String?
+        public let range: AppTextRange?
+
+        public init(summary: String, details: String? = nil, path: String? = nil, range: AppTextRange? = nil) {
+            self.summary = summary
+            self.details = details
+            self.path = path
+            self.range = range
+        }
+    }
+
     public struct RemoteControlStatusSnapshot: Equatable, Sendable {
         public enum Status: String, Sendable {
             case disabled
@@ -152,6 +186,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let cliConfigOverrides: CliConfigOverrides
     public let configLayerOverrides: ConfigLayerLoaderOverrides
     public let stateStore: SQLiteAgentGraphStore?
+    public let configWarnings: [ConfigWarning]
     public let remoteControlStatusSnapshot: RemoteControlStatusSnapshot?
     public let pluginStartupTasksEnabled: Bool
     public let curatedPluginStartupSyncEnabled: Bool
@@ -181,6 +216,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         cliConfigOverrides: CliConfigOverrides = CliConfigOverrides(),
         configLayerOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides(),
         stateStore: SQLiteAgentGraphStore? = nil,
+        configWarnings: [ConfigWarning] = [],
         remoteControlStatusSnapshot: RemoteControlStatusSnapshot? = nil,
         pluginStartupTasksEnabled: Bool = true,
         curatedPluginStartupSyncEnabled: Bool = true
@@ -215,6 +251,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         self.cliConfigOverrides = cliConfigOverrides
         self.configLayerOverrides = configLayerOverrides
         self.stateStore = stateStore
+        self.configWarnings = configWarnings
         self.remoteControlStatusSnapshot = remoteControlStatusSnapshot
         self.pluginStartupTasksEnabled = pluginStartupTasksEnabled
         self.curatedPluginStartupSyncEnabled = curatedPluginStartupSyncEnabled
@@ -232,6 +269,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
             lhs.activeProfile == rhs.activeProfile &&
             lhs.cliConfigOverrides == rhs.cliConfigOverrides &&
             lhs.configLayerOverrides == rhs.configLayerOverrides &&
+            lhs.configWarnings == rhs.configWarnings &&
             lhs.remoteControlStatusSnapshot == rhs.remoteControlStatusSnapshot &&
             lhs.pluginStartupTasksEnabled == rhs.pluginStartupTasksEnabled &&
             lhs.curatedPluginStartupSyncEnabled == rhs.curatedPluginStartupSyncEnabled
@@ -13630,6 +13668,34 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func configWarningNotification(
+        _ warning: CodexAppServerConfiguration.ConfigWarning
+    ) -> [String: Any] {
+        var params: [String: Any] = [
+            "summary": warning.summary,
+            "details": warning.details as Any? ?? NSNull()
+        ]
+        if let path = warning.path {
+            params["path"] = path
+        }
+        if let range = warning.range {
+            params["range"] = [
+                "start": [
+                    "line": range.start.line,
+                    "column": range.start.column
+                ],
+                "end": [
+                    "line": range.end.line,
+                    "column": range.end.column
+                ]
+            ]
+        }
+        return [
+            "method": "configWarning",
+            "params": params
+        ]
+    }
+
     fileprivate static func activeThreadStatus(activeFlags: [String] = []) -> [String: Any] {
         [
             "type": "active",
@@ -22853,6 +22919,28 @@ final class CodexAppServerMessageProcessor {
         notifications.filter { acceptsNotification($0) }
     }
 
+    private func initializeConfigWarningNotifications() -> [[String: Any]] {
+        var warnings = configuration.configWarnings
+        do {
+            let runtimeConfig = try CodexConfigLoader.load(
+                codexHome: configuration.codexHome,
+                cwd: configuration.cwd,
+                systemConfigFile: nil,
+                managedConfigOverrides: configuration.configLayerOverrides,
+                environment: configuration.environment
+            )
+            warnings.append(contentsOf: runtimeConfig.startupWarnings.map {
+                CodexAppServerConfiguration.ConfigWarning(summary: $0)
+            })
+        } catch {
+            warnings.append(CodexAppServerConfiguration.ConfigWarning(
+                summary: "Invalid configuration; using defaults.",
+                details: String(describing: error)
+            ))
+        }
+        return warnings.map(CodexAppServer.configWarningNotification)
+    }
+
     private func subscribeCurrentConnection(toThreadID threadID: String) {
         rememberLoadedThreadFeatureState(threadID: threadID)
         let manager = threadStateManager
@@ -24064,6 +24152,7 @@ final class CodexAppServerMessageProcessor {
                     "platformFamily": CodexAppServer.platformFamily,
                     "platformOs": CodexAppServer.platformOS
                 ])
+                notifications.append(contentsOf: initializeConfigWarningNotifications())
                 if let snapshot = configuration.remoteControlStatusSnapshot {
                     notifications.append(CodexAppServer.remoteControlStatusChangedNotification(snapshot: snapshot))
                 }

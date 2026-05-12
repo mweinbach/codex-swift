@@ -15722,6 +15722,101 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(params["environmentId"] is NSNull)
     }
 
+    func testInitializeEmitsConfigWarningsWithRustShape() throws {
+        let temp = try TemporaryDirectory()
+        let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            configWarnings: [
+                CodexAppServerConfiguration.ConfigWarning(
+                    summary: "Invalid configuration; using defaults.",
+                    details: "bad TOML",
+                    path: "/tmp/config.toml",
+                    range: CodexAppServerConfiguration.AppTextRange(
+                        start: CodexAppServerConfiguration.AppTextPosition(line: 2, column: 3),
+                        end: CodexAppServerConfiguration.AppTextPosition(line: 2, column: 8)
+                    )
+                )
+            ]
+        ))
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"test","version":"0"}}}"#.utf8
+        )))
+
+        XCTAssertEqual(messages.count, 2)
+        XCTAssertEqual(messages[0]["id"] as? Int, 1)
+        XCTAssertEqual(messages[1]["method"] as? String, "configWarning")
+        let params = try XCTUnwrap(messages[1]["params"] as? [String: Any])
+        XCTAssertEqual(params["summary"] as? String, "Invalid configuration; using defaults.")
+        XCTAssertEqual(params["details"] as? String, "bad TOML")
+        XCTAssertEqual(params["path"] as? String, "/tmp/config.toml")
+        let range = try XCTUnwrap(params["range"] as? [String: Any])
+        XCTAssertEqual((range["start"] as? [String: Any])?["line"] as? Int, 2)
+        XCTAssertEqual((range["start"] as? [String: Any])?["column"] as? Int, 3)
+        XCTAssertEqual((range["end"] as? [String: Any])?["line"] as? Int, 2)
+        XCTAssertEqual((range["end"] as? [String: Any])?["column"] as? Int, 8)
+    }
+
+    func testInitializeConfigWarningsUseExplicitNullDetailsAndOptOutLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            configWarnings: [
+                CodexAppServerConfiguration.ConfigWarning(summary: "Project config ignored.")
+            ]
+        ))
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"test","version":"0"},"capabilities":{"optOutNotificationMethods":["configWarning"]}}}"#.utf8
+        )))
+
+        XCTAssertEqual(messages.count, 1)
+        XCTAssertEqual(messages[0]["id"] as? Int, 1)
+
+        let secondProcessor = CodexAppServerMessageProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            configWarnings: [
+                CodexAppServerConfiguration.ConfigWarning(summary: "Project config ignored.")
+            ]
+        ))
+        let unfiltered = try decodeMessages(secondProcessor.processLine(Data(
+            #"{"id":2,"method":"initialize","params":{"clientInfo":{"name":"test","version":"0"}}}"#.utf8
+        )))
+        let params = try XCTUnwrap(unfiltered.last?["params"] as? [String: Any])
+        XCTAssertEqual(params["summary"] as? String, "Project config ignored.")
+        XCTAssertTrue(params["details"] is NSNull)
+        XCTAssertNil(params["path"])
+        XCTAssertNil(params["range"])
+    }
+
+    func testInitializeEmitsConfigStartupWarningsFromAgentRoleDiscoveryLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let agentsDir = temp.url.appendingPathComponent("agents", isDirectory: true)
+        try FileManager.default.createDirectory(at: agentsDir, withIntermediateDirectories: true)
+        try """
+        name = "broken"
+        description = "Missing developer instructions"
+        """.write(
+            to: agentsDir.appendingPathComponent("broken.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(
+            codexHome: temp.url
+        ))
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"test","version":"0"}}}"#.utf8
+        )))
+
+        XCTAssertEqual(messages.count, 2)
+        XCTAssertEqual(messages[1]["method"] as? String, "configWarning")
+        let params = try XCTUnwrap(messages[1]["params"] as? [String: Any])
+        XCTAssertTrue((params["summary"] as? String)?.contains("Ignoring malformed agent role definition:") == true)
+        XCTAssertTrue((params["summary"] as? String)?.contains("must define `developer_instructions`") == true)
+        XCTAssertTrue(params["details"] is NSNull)
+    }
+
     func testRequestsRequireInitializeAndRejectDuplicateInitialize() throws {
         let temp = try TemporaryDirectory()
         let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(codexHome: temp.url))
@@ -23735,7 +23830,8 @@ final class CodexAppServerTests: XCTestCase {
         let processor = CodexAppServerMessageProcessor(configuration: configuration)
         if initializeFirst {
             let capabilities = experimentalAPIEnabled ? #","capabilities":{"experimentalApi":true}"# : ""
-            _ = try decode(processor.processLine(Data(#"{"id":"init","method":"initialize","params":{"clientInfo":{"name":"test","version":"0"}\#(capabilities)}}"#.utf8)))
+            let initMessages = try decodeMessages(processor.processLine(Data(#"{"id":"init","method":"initialize","params":{"clientInfo":{"name":"test","version":"0"}\#(capabilities)}}"#.utf8)))
+            XCTAssertEqual(initMessages.first?["id"] as? String, "init")
         }
         return try decode(processor.processLine(Data(line.utf8)))
     }
@@ -23988,6 +24084,7 @@ final class CodexAppServerTests: XCTestCase {
         cliConfigOverrides: CliConfigOverrides = CliConfigOverrides(),
         configLayerOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides(),
         stateStore: SQLiteAgentGraphStore? = nil,
+        configWarnings: [CodexAppServerConfiguration.ConfigWarning] = [],
         remoteControlStatusSnapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot? = nil,
         pluginStartupTasksEnabled: Bool = false,
         curatedPluginStartupSyncEnabled: Bool = false
@@ -24018,6 +24115,7 @@ final class CodexAppServerTests: XCTestCase {
             cliConfigOverrides: cliConfigOverrides,
             configLayerOverrides: configLayerOverrides,
             stateStore: stateStore,
+            configWarnings: configWarnings,
             remoteControlStatusSnapshot: remoteControlStatusSnapshot,
             pluginStartupTasksEnabled: pluginStartupTasksEnabled,
             curatedPluginStartupSyncEnabled: curatedPluginStartupSyncEnabled
