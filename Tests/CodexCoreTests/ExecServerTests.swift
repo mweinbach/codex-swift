@@ -2346,6 +2346,50 @@ final class ExecServerTests: XCTestCase {
         }
     }
 
+    func testAppServerExecutableTransportValidatorRejectsUnsupportedRuntimeModes() {
+        XCTAssertNoThrow(try AppServerExecutableTransportValidator.validateSupportedTransport(
+            .stdio,
+            remoteControlFeatureEnabled: false,
+            stateStoreAvailable: false
+        ))
+
+        XCTAssertThrowsError(try AppServerExecutableTransportValidator.validateSupportedTransport(
+            .off,
+            remoteControlFeatureEnabled: false,
+            stateStoreAvailable: true
+        )) { error in
+            XCTAssertEqual(error as? AppServerExecutableTransportError, .noTransportConfigured)
+            XCTAssertEqual(
+                String(describing: error),
+                "no transport configured; use --listen or enable remote control"
+            )
+        }
+
+        XCTAssertThrowsError(try AppServerExecutableTransportValidator.validateSupportedTransport(
+            .off,
+            remoteControlFeatureEnabled: true,
+            stateStoreAvailable: false
+        )) { error in
+            XCTAssertEqual(error as? AppServerExecutableTransportError, .remoteControlUnavailableWithoutStateDB)
+            XCTAssertEqual(
+                String(describing: error),
+                "no transport configured; remote control disabled because sqlite state db is unavailable"
+            )
+        }
+
+        XCTAssertThrowsError(try AppServerExecutableTransportValidator.validateSupportedTransport(
+            .webSocket(host: "::1", port: 4500),
+            remoteControlFeatureEnabled: false,
+            stateStoreAvailable: false
+        )) { error in
+            XCTAssertEqual(error as? AppServerExecutableTransportError, .liveTransportPending("ws://[::1]:4500"))
+            XCTAssertEqual(
+                String(describing: error),
+                "live app-server transport for --listen `ws://[::1]:4500` is not implemented yet"
+            )
+        }
+    }
+
     func testRemoteExecutorConfigurationNormalizesRustValues() throws {
         let config = try ExecServerRemoteExecutorConfiguration.fromEnvironment(
             baseURL: " https://registry.example.test/// ",

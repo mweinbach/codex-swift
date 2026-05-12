@@ -429,6 +429,11 @@ private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) as
             fputs("failed to initialize sqlite state db: \(error)\n", stderr)
             stateStore = nil
         }
+        try AppServerExecutableTransportValidator.validateSupportedTransport(
+            request.listenTransport,
+            remoteControlFeatureEnabled: settings.features.isEnabled(.remoteControl),
+            stateStoreAvailable: stateStore != nil
+        )
         try CodexAppServer.run(configuration: CodexAppServerConfiguration(
             codexHome: codexHome,
             defaultModelProvider: settings.selectedModelProviderID,

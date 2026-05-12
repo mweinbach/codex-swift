@@ -2520,6 +2520,7 @@ public struct CodexCLI: Sendable {
             rawOverrides.append("features.remote_control=true")
             return .success(AppServerCommandRequest(
                 action: .remoteControl,
+                listenTransport: .off,
                 configOverrides: CliConfigOverrides(rawOverrides: rawOverrides)
             ))
         case let .failure(message, exitCode):

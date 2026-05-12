@@ -924,6 +924,7 @@ final class CommandSurfaceCLITests: XCTestCase {
 
         XCTAssertEqual(exitCode, 0)
         XCTAssertEqual(request?.action, .remoteControl)
+        XCTAssertEqual(request?.listenTransport, .off)
         XCTAssertEqual(request?.configOverrides.rawOverrides, [
             "features.remote_control=false",
             "features.web_search_request=true",

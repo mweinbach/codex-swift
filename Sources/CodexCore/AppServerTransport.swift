@@ -8,6 +8,20 @@ public enum AppServerListenTransport: Equatable, Sendable {
     case unixSocket(socketPath: String)
     case webSocket(host: String, port: UInt16)
     case off
+
+    public var listenURLDescription: String {
+        switch self {
+        case .stdio:
+            return defaultAppServerListenURL
+        case let .unixSocket(socketPath):
+            return "unix://\(socketPath)"
+        case let .webSocket(host, port):
+            let displayHost = host.contains(":") ? "[\(host)]" : host
+            return "ws://\(displayHost):\(port)"
+        case .off:
+            return "off"
+        }
+    }
 }
 
 public enum AppServerTransportParseError: Error, CustomStringConvertible, Equatable, Sendable {
@@ -107,6 +121,46 @@ public enum AppServerListenURLParser {
             return String(host.dropFirst().dropLast())
         }
         return host
+    }
+}
+
+public enum AppServerExecutableTransportError: Error, CustomStringConvertible, Equatable, Sendable {
+    case noTransportConfigured
+    case remoteControlUnavailableWithoutStateDB
+    case liveTransportPending(String)
+
+    public var description: String {
+        switch self {
+        case .noTransportConfigured:
+            return "no transport configured; use --listen or enable remote control"
+        case .remoteControlUnavailableWithoutStateDB:
+            return "no transport configured; remote control disabled because sqlite state db is unavailable"
+        case let .liveTransportPending(listenURL):
+            return "live app-server transport for --listen `\(listenURL)` is not implemented yet"
+        }
+    }
+}
+
+public enum AppServerExecutableTransportValidator {
+    public static func validateSupportedTransport(
+        _ transport: AppServerListenTransport,
+        remoteControlFeatureEnabled: Bool,
+        stateStoreAvailable: Bool
+    ) throws {
+        switch transport {
+        case .stdio:
+            return
+        case .off:
+            guard remoteControlFeatureEnabled else {
+                throw AppServerExecutableTransportError.noTransportConfigured
+            }
+            guard stateStoreAvailable else {
+                throw AppServerExecutableTransportError.remoteControlUnavailableWithoutStateDB
+            }
+            throw AppServerExecutableTransportError.liveTransportPending(transport.listenURLDescription)
+        case .unixSocket, .webSocket:
+            throw AppServerExecutableTransportError.liveTransportPending(transport.listenURLDescription)
+        }
     }
 }
 
