@@ -7422,8 +7422,19 @@ public final class PolicyParser {
         case let (.double(lhs), .integer(rhs)):
             let rhs = Double(rhs)
             return lhs == rhs ? 0 : (lhs < rhs ? -1 : 1)
+        case let (.bool(lhs), .bool(rhs)):
+            return lhs == rhs ? 0 : (!lhs && rhs ? -1 : 1)
         case let (.string(lhs), .string(rhs)):
             return lhs == rhs ? 0 : (lhs < rhs ? -1 : 1)
+        case let (.array(lhs), .array(rhs)):
+            let sharedCount = Swift.min(lhs.count, rhs.count)
+            for index in 0..<sharedCount {
+                let comparison = try compareStarlarkValues(lhs[index], rhs[index], expression: expression)
+                if comparison != 0 {
+                    return comparison
+                }
+            }
+            return lhs.count == rhs.count ? 0 : (lhs.count < rhs.count ? -1 : 1)
         default:
             throw ConfigOverrideError.invalidLiteral(expression)
         }

@@ -2747,6 +2747,38 @@ final class ExecPolicyTests: XCTestCase {
         ])
     }
 
+    func testParserEvaluatesRustStarlarkBooleanAndSequenceOrdering() throws {
+        let policy = try parsePolicy("""
+        PAIRS = [["diff", 2], ["status", 1], ["log", 1]]
+        ORDERED = sorted(PAIRS, key = lambda pair: [pair[1], pair[0]])
+        BEST = min(PAIRS, key = lambda pair: [pair[1], pair[0]])
+        WORST = max(PAIRS, key = lambda pair: (pair[1], pair[0]))
+
+        if False < True and ["a"] < ["a", 0] and ["b"] > ["a", 99] and ("x", 1) < ("x", 2):
+            prefix_rule(["git", ORDERED[0][0]], "allow", justification = str(min([True, False])))
+            prefix_rule(["git", BEST[0]], "prompt", justification = BEST[0])
+            prefix_rule(["git", WORST[0]], "forbidden", justification = WORST[0])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("log")]),
+                decision: .allow,
+                justification: "False"
+            ),
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("log")]),
+                decision: .prompt,
+                justification: "log"
+            ),
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("diff")]),
+                decision: .forbidden,
+                justification: "diff"
+            )
+        ])
+    }
+
     func testParserEvaluatesRustStarlarkStringMethods() throws {
         let policy = try parsePolicy("""
         TOOL = "git"
