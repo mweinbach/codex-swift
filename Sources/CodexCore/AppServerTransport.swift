@@ -160,7 +160,7 @@ public enum AppServerExecutableTransportValidator {
             }
             throw AppServerExecutableTransportError.liveTransportPending(transport.listenURLDescription)
         case .unixSocket:
-            throw AppServerExecutableTransportError.liveTransportPending(transport.listenURLDescription)
+            return
         case .webSocket:
             return
         }

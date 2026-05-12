@@ -76,7 +76,50 @@ public struct AppServerWebSocketTransport: Sendable {
                 try? await Self.runConnectedClient(
                     fileDescriptor: clientFD,
                     configuration: configuration,
-                    authPolicy: authPolicy
+                    authPolicy: authPolicy,
+                    rejectOriginHeaders: true
+                )
+            }
+        }
+    }
+
+    public func run(socketPath: String, announce: @escaping Announce = { _ in }) async throws {
+        let listenFD = try Self.makeUnixListeningSocket(socketPath: socketPath)
+        defer {
+            Darwin.shutdown(listenFD, SHUT_RDWR)
+            Darwin.close(listenFD)
+            _ = try? FileManager.default.removeItem(atPath: socketPath)
+        }
+
+        try await announce(socketPath)
+
+        while !Task.isCancelled {
+            var descriptor = pollfd(fd: listenFD, events: Int16(POLLIN), revents: 0)
+            let ready = Darwin.poll(&descriptor, 1, 100)
+            if ready == 0 {
+                continue
+            }
+            guard ready > 0 else {
+                if errno == EINTR {
+                    continue
+                }
+                throw AppServerWebSocketTransportError.socket(Self.posixMessage(operation: "poll"))
+            }
+            let clientFD = Darwin.accept(listenFD, nil, nil)
+            guard clientFD >= 0 else {
+                if errno == EINTR || errno == ECONNABORTED {
+                    continue
+                }
+                throw AppServerWebSocketTransportError.socket(Self.posixMessage(operation: "accept"))
+            }
+
+            let configuration = configuration
+            Task.detached {
+                try? await Self.runConnectedClient(
+                    fileDescriptor: clientFD,
+                    configuration: configuration,
+                    authPolicy: AppServerWebsocketAuthPolicy(),
+                    rejectOriginHeaders: false
                 )
             }
         }
@@ -85,7 +128,8 @@ public struct AppServerWebSocketTransport: Sendable {
     private static func runConnectedClient(
         fileDescriptor: Int32,
         configuration: CodexAppServerConfiguration,
-        authPolicy: AppServerWebsocketAuthPolicy
+        authPolicy: AppServerWebsocketAuthPolicy,
+        rejectOriginHeaders: Bool
     ) async throws {
         defer {
             Darwin.shutdown(fileDescriptor, SHUT_RDWR)
@@ -93,7 +137,11 @@ public struct AppServerWebSocketTransport: Sendable {
         }
 
         do {
-            try performHandshake(fileDescriptor: fileDescriptor, authPolicy: authPolicy)
+            try performHandshake(
+                fileDescriptor: fileDescriptor,
+                authPolicy: authPolicy,
+                rejectOriginHeaders: rejectOriginHeaders
+            )
         } catch AppServerWebSocketTransportError.handledHTTPResponse {
             return
         }
@@ -143,14 +191,15 @@ public struct AppServerWebSocketTransport: Sendable {
 
     private static func performHandshake(
         fileDescriptor: Int32,
-        authPolicy: AppServerWebsocketAuthPolicy
+        authPolicy: AppServerWebsocketAuthPolicy,
+        rejectOriginHeaders: Bool
     ) throws {
         let request = try readHTTPRequest(fileDescriptor: fileDescriptor)
         guard request.method == "GET" else {
             throw AppServerWebSocketTransportError.invalidHandshake
         }
 
-        if request.headers["origin"] != nil {
+        if rejectOriginHeaders, request.headers["origin"] != nil {
             try writeHTTPResponse(fileDescriptor: fileDescriptor, statusCode: 403, reason: "Forbidden")
             throw AppServerWebSocketTransportError.handledHTTPResponse
         }
@@ -409,6 +458,120 @@ public struct AppServerWebSocketTransport: Sendable {
         throw AppServerWebSocketTransportError.socket(lastError)
     }
 
+    private static func makeUnixListeningSocket(socketPath: String) throws -> Int32 {
+        try prepareUnixSocketPath(socketPath)
+
+        let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else {
+            throw AppServerWebSocketTransportError.socket(posixMessage(operation: "socket"))
+        }
+
+        do {
+            var address = try unixSocketAddress(path: socketPath)
+            let bindResult = withUnsafePointer(to: &address) { pointer in
+                pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                    Darwin.bind(fd, sockaddrPointer, socklen_t(MemoryLayout<sockaddr_un>.size))
+                }
+            }
+            guard bindResult == 0 else {
+                throw AppServerWebSocketTransportError.socket(posixMessage(operation: "bind"))
+            }
+            guard Darwin.chmod(socketPath, 0o600) == 0 else {
+                throw AppServerWebSocketTransportError.socket(posixMessage(operation: "chmod"))
+            }
+            guard Darwin.listen(fd, SOMAXCONN) == 0 else {
+                throw AppServerWebSocketTransportError.socket(posixMessage(operation: "listen"))
+            }
+            return fd
+        } catch {
+            Darwin.close(fd)
+            _ = try? FileManager.default.removeItem(atPath: socketPath)
+            throw error
+        }
+    }
+
+    private static func prepareUnixSocketPath(_ socketPath: String) throws {
+        let fileManager = FileManager.default
+        let parent = URL(fileURLWithPath: socketPath).deletingLastPathComponent()
+        try fileManager.createDirectory(
+            at: parent,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        guard Darwin.chmod(parent.path, 0o700) == 0 else {
+            throw AppServerWebSocketTransportError.socket(posixMessage(operation: "chmod"))
+        }
+
+        let probe = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        guard probe >= 0 else {
+            throw AppServerWebSocketTransportError.socket(posixMessage(operation: "socket"))
+        }
+        defer { Darwin.close(probe) }
+
+        var address = try unixSocketAddress(path: socketPath)
+        let connectResult = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                Darwin.connect(probe, sockaddrPointer, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        if connectResult == 0 {
+            throw AppServerWebSocketTransportError.socket(
+                "app-server control socket is already in use at \(socketPath)"
+            )
+        }
+        let connectErrno = errno
+        if connectErrno == ENOENT {
+            return
+        }
+        guard connectErrno == ECONNREFUSED else {
+            if !fileManager.fileExists(atPath: socketPath) {
+                return
+            }
+            throw AppServerWebSocketTransportError.socket(posixMessage(operation: "connect", errno: connectErrno))
+        }
+
+        var status = stat()
+        if Darwin.lstat(socketPath, &status) != 0 {
+            if errno == ENOENT {
+                return
+            }
+            throw AppServerWebSocketTransportError.socket(posixMessage(operation: "lstat"))
+        }
+        guard (status.st_mode & S_IFMT) == S_IFSOCK else {
+            throw AppServerWebSocketTransportError.socket(
+                "app-server control socket path exists and is not a socket: \(socketPath)"
+            )
+        }
+        try fileManager.removeItem(atPath: socketPath)
+    }
+
+    private static func unixSocketAddress(path: String) throws -> sockaddr_un {
+        var address = sockaddr_un()
+        #if os(macOS)
+        address.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
+        #endif
+        address.sun_family = sa_family_t(AF_UNIX)
+
+        let pathBytes = Array(path.utf8)
+        let capacity = MemoryLayout.size(ofValue: address.sun_path)
+        guard pathBytes.count < capacity else {
+            throw AppServerWebSocketTransportError.socket("socket path is too long: \(path)")
+        }
+
+        withUnsafeMutablePointer(to: &address.sun_path) { pointer in
+            pointer.withMemoryRebound(to: CChar.self, capacity: capacity) { buffer in
+                for index in 0..<capacity {
+                    buffer[index] = 0
+                }
+                for (index, byte) in pathBytes.enumerated() {
+                    buffer[index] = CChar(bitPattern: byte)
+                }
+            }
+        }
+
+        return address
+    }
+
     private static func localPort(for fileDescriptor: Int32) throws -> UInt16 {
         var storage = sockaddr_storage()
         var length = socklen_t(MemoryLayout<sockaddr_storage>.size)
@@ -439,6 +602,10 @@ public struct AppServerWebSocketTransport: Sendable {
     }
 
     private static func posixMessage(operation: String) -> String {
+        posixMessage(operation: operation, errno: errno)
+    }
+
+    private static func posixMessage(operation: String, errno: Int32) -> String {
         "\(operation) failed: \(String(cString: strerror(errno)))"
     }
 }

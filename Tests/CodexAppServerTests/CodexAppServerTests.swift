@@ -1,6 +1,7 @@
 @testable import CodexAppServer
 import CodexCore
 import CryptoKit
+import Darwin
 import Foundation
 import SQLite3
 import XCTest
@@ -162,6 +163,75 @@ final class CodexAppServerTests: XCTestCase {
         let response = try decode(Data((try await receiveWebSocketText(webSocket)).utf8))
         XCTAssertEqual(response["id"] as? Int, 1)
         XCTAssertNotNil(response["result"] as? [String: Any])
+    }
+
+    func testAppServerUnixSocketTransportUpgradesWebSocketAndCleansPrivateSocketLikeRust() async throws {
+        let codexHome = URL(fileURLWithPath: "/tmp/csw-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: codexHome, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: codexHome)
+        }
+        let socketPath = codexHome
+            .appendingPathComponent("app-server-control", isDirectory: true)
+            .appendingPathComponent("app-server-control.sock", isDirectory: false)
+            .path
+        let transport = AppServerWebSocketTransport(configuration: testConfiguration(codexHome: codexHome))
+        let (stream, continuation) = AsyncStream.makeStream(of: String.self)
+        let serverTask = Task.detached {
+            try await transport.run(socketPath: socketPath) { path in
+                continuation.yield(path)
+            }
+        }
+        defer {
+            serverTask.cancel()
+        }
+
+        let announcedSocketPath = try await nextValueWithTimeout(from: stream)
+        XCTAssertEqual(announcedSocketPath, socketPath)
+        let socketFD = try connectUnixSocket(path: socketPath)
+        var socketClosed = false
+        defer {
+            if !socketClosed {
+                Darwin.shutdown(socketFD, SHUT_RDWR)
+                Darwin.close(socketFD)
+            }
+        }
+
+        #if os(macOS)
+        let attributes = try FileManager.default.attributesOfItem(atPath: socketPath)
+        XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+        #endif
+
+        let handshake = [
+            "GET /rpc HTTP/1.1",
+            "Host: localhost",
+            "Origin: https://example.test",
+            "Upgrade: websocket",
+            "Connection: Upgrade",
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+            "Sec-WebSocket-Version: 13",
+            "",
+            "",
+        ].joined(separator: "\r\n")
+        try writeAll(Array(handshake.utf8), to: socketFD)
+        let handshakeResponse = String(decoding: try readUntilHTTPHeaderEnd(from: socketFD), as: UTF8.self)
+        XCTAssertTrue(handshakeResponse.hasPrefix("HTTP/1.1 101 Switching Protocols"))
+
+        try writeWebSocketText(
+            #"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"unix-test","version":"0"}}}"#,
+            to: socketFD
+        )
+        let responseText = try readWebSocketText(from: socketFD)
+        let response = try decode(Data(responseText.utf8))
+        XCTAssertEqual(response["id"] as? Int, 1)
+        XCTAssertNotNil(response["result"] as? [String: Any])
+
+        Darwin.shutdown(socketFD, SHUT_RDWR)
+        Darwin.close(socketFD)
+        socketClosed = true
+        serverTask.cancel()
+        _ = await serverTask.result
+        XCTAssertFalse(FileManager.default.fileExists(atPath: socketPath))
     }
 
     func testThreadListReturnsRolloutsWithRustAppServerShape() throws {
@@ -24483,6 +24553,167 @@ final class CodexAppServerTests: XCTestCase {
         let (_, response) = try await URLSession.shared.data(for: request)
         let httpResponse = try XCTUnwrap(response as? HTTPURLResponse)
         return httpResponse.statusCode
+    }
+
+    private func nextValueWithTimeout(from stream: AsyncStream<String>, seconds: UInt64 = 5) async throws -> String? {
+        try await withThrowingTaskGroup(of: String?.self) { group in
+            group.addTask {
+                var iterator = stream.makeAsyncIterator()
+                return await iterator.next()
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: seconds * 1_000_000_000)
+                return nil
+            }
+            let value = try await group.next()!
+            group.cancelAll()
+            return value
+        }
+    }
+
+    private func connectUnixSocket(path: String) throws -> Int32 {
+        let socketFD = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        guard socketFD >= 0 else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        }
+
+        do {
+            var address = try unixSocketAddress(path: path)
+            let result = withUnsafePointer(to: &address) { pointer in
+                pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                    Darwin.connect(socketFD, sockaddrPointer, socklen_t(MemoryLayout<sockaddr_un>.size))
+                }
+            }
+            guard result == 0 else {
+                throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+            }
+            return socketFD
+        } catch {
+            Darwin.close(socketFD)
+            throw error
+        }
+    }
+
+    private func unixSocketAddress(path: String) throws -> sockaddr_un {
+        var address = sockaddr_un()
+        #if os(macOS)
+        address.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
+        #endif
+        address.sun_family = sa_family_t(AF_UNIX)
+
+        let pathBytes = Array(path.utf8)
+        let capacity = MemoryLayout.size(ofValue: address.sun_path)
+        XCTAssertLessThan(pathBytes.count, capacity)
+
+        withUnsafeMutablePointer(to: &address.sun_path) { pointer in
+            pointer.withMemoryRebound(to: CChar.self, capacity: capacity) { buffer in
+                for index in 0..<capacity {
+                    buffer[index] = 0
+                }
+                for (index, byte) in pathBytes.enumerated() {
+                    buffer[index] = CChar(bitPattern: byte)
+                }
+            }
+        }
+
+        return address
+    }
+
+    private func readUntilHTTPHeaderEnd(from fileDescriptor: Int32) throws -> [UInt8] {
+        var bytes: [UInt8] = []
+        while !bytes.suffix(4).elementsEqual([13, 10, 13, 10]) {
+            bytes.append(contentsOf: try readExact(byteCount: 1, from: fileDescriptor))
+        }
+        return bytes
+    }
+
+    private func writeWebSocketText(_ text: String, to fileDescriptor: Int32) throws {
+        try writeFrame(opcode: 0x1, payload: Array(text.utf8), masked: true, to: fileDescriptor)
+    }
+
+    private func readWebSocketText(from fileDescriptor: Int32) throws -> String {
+        let header = try readExact(byteCount: 2, from: fileDescriptor)
+        XCTAssertEqual(header[0] & 0x0F, 0x1)
+        var payloadLength = Int(header[1] & 0x7F)
+        if payloadLength == 126 {
+            let bytes = try readExact(byteCount: 2, from: fileDescriptor)
+            payloadLength = Int(bytes[0]) << 8 | Int(bytes[1])
+        } else if payloadLength == 127 {
+            let bytes = try readExact(byteCount: 8, from: fileDescriptor)
+            payloadLength = bytes.reduce(Int(0)) { ($0 << 8) | Int($1) }
+        }
+        let payload = try readExact(byteCount: payloadLength, from: fileDescriptor)
+        return String(decoding: payload, as: UTF8.self)
+    }
+
+    private func writeFrame(opcode: UInt8, payload: [UInt8], masked: Bool, to fileDescriptor: Int32) throws {
+        var frame: [UInt8] = [0x80 | opcode]
+        let maskBit: UInt8 = masked ? 0x80 : 0
+        if payload.count < 126 {
+            frame.append(maskBit | UInt8(payload.count))
+        } else {
+            frame.append(maskBit | 126)
+            frame.append(UInt8((payload.count >> 8) & 0xFF))
+            frame.append(UInt8(payload.count & 0xFF))
+        }
+        if masked {
+            let mask: [UInt8] = [0x12, 0x34, 0x56, 0x78]
+            frame += mask
+            frame += payload.enumerated().map { index, byte in byte ^ mask[index % 4] }
+        } else {
+            frame += payload
+        }
+        try writeAll(frame, to: fileDescriptor)
+    }
+
+    private func readExact(byteCount: Int, from fileDescriptor: Int32) throws -> [UInt8] {
+        var bytes = [UInt8](repeating: 0, count: byteCount)
+        var offset = 0
+        while offset < byteCount {
+            try waitForSocket(fileDescriptor, events: Int16(POLLIN))
+            let count = bytes.withUnsafeMutableBytes { buffer in
+                Darwin.recv(fileDescriptor, buffer.baseAddress!.advanced(by: offset), byteCount - offset, 0)
+            }
+            if count == 0 {
+                throw NSError(domain: NSPOSIXErrorDomain, code: Int(ECONNRESET))
+            }
+            guard count > 0 else {
+                if errno == EINTR {
+                    continue
+                }
+                throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+            }
+            offset += count
+        }
+        return bytes
+    }
+
+    private func writeAll(_ bytes: [UInt8], to fileDescriptor: Int32) throws {
+        var offset = 0
+        while offset < bytes.count {
+            try waitForSocket(fileDescriptor, events: Int16(POLLOUT))
+            let count = bytes.withUnsafeBytes { buffer in
+                Darwin.send(fileDescriptor, buffer.baseAddress!.advanced(by: offset), bytes.count - offset, 0)
+            }
+            guard count >= 0 else {
+                if errno == EINTR {
+                    continue
+                }
+                throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+            }
+            offset += count
+        }
+    }
+
+    private func waitForSocket(_ fileDescriptor: Int32, events: Int16) throws {
+        var descriptor = pollfd(fd: fileDescriptor, events: events, revents: 0)
+        let result = Darwin.poll(&descriptor, 1, 5_000)
+        guard result > 0 else {
+            if result == 0 {
+                throw NSError(domain: NSPOSIXErrorDomain, code: Int(ETIMEDOUT))
+            }
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        }
     }
 
     private func turnUserText(_ turn: [String: Any]) -> String {

@@ -462,7 +462,9 @@ private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) as
             ).run(host: host, port: port) { url in
                 printAppServerWebSocketStartupBanner(listenURL: url)
             }
-        case .unixSocket, .off:
+        case let .unixSocket(socketPath):
+            try await AppServerWebSocketTransport(configuration: configuration).run(socketPath: socketPath)
+        case .off:
             throw AppServerExecutableTransportError.liveTransportPending(request.listenTransport.listenURLDescription)
         }
         return CodexCLI.CommandExecutionResult(exitCode: 0)

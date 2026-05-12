@@ -2384,18 +2384,14 @@ final class ExecServerTests: XCTestCase {
                 "no transport configured; remote control disabled because sqlite state db is unavailable"
             )
         }
+    }
 
-        XCTAssertThrowsError(try AppServerExecutableTransportValidator.validateSupportedTransport(
+    func testAppServerExecutableTransportValidatorAllowsUnixSocketAfterControlSocketPort() {
+        XCTAssertNoThrow(try AppServerExecutableTransportValidator.validateSupportedTransport(
             .unixSocket(socketPath: "/tmp/codex.sock"),
             remoteControlFeatureEnabled: false,
             stateStoreAvailable: false
-        )) { error in
-            XCTAssertEqual(error as? AppServerExecutableTransportError, .liveTransportPending("unix:///tmp/codex.sock"))
-            XCTAssertEqual(
-                String(describing: error),
-                "live app-server transport for --listen `unix:///tmp/codex.sock` is not implemented yet"
-            )
-        }
+        ))
     }
 
     func testAppServerExecutableTransportValidatorAllowsWebSocketAuthAfterPolicyEnforcement() {
