@@ -3141,6 +3141,35 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkIdentityComparisons() throws {
+        let policy = try parsePolicy("""
+        SETTINGS = {}
+        DEFAULT_VALUE = SETTINGS.setdefault("command")
+        IS_DEFAULT_NONE = DEFAULT_VALUE is None
+        IS_NOT_FALSE = DEFAULT_VALUE is not False
+        TRUE_SINGLETON = True is not False
+
+        if IS_DEFAULT_NONE and IS_NOT_FALSE:
+            prefix_rule(["git", "status"], "allow", justification = "identity " + type(DEFAULT_VALUE))
+
+        if (DEFAULT_VALUE is None) and TRUE_SINGLETON:
+            network_rule("identity.example.com", "https", "allow")
+            host_executable("git", ["/usr/bin/git"])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .allow,
+                justification: "identity NoneType"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "identity.example.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
+    }
+
     func testParserEvaluatesRustStarlarkAllAndAnyBuiltins() throws {
         let policy = try parsePolicy("""
         TOOL = "git"

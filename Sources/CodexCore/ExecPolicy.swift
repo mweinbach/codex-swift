@@ -6680,6 +6680,10 @@ public final class PolicyParser {
                     comparison = try !containsStarlarkValue(previous, in: next, expression: condition)
                 case "in":
                     comparison = try containsStarlarkValue(previous, in: next, expression: condition)
+                case "is":
+                    comparison = starlarkIdentityMatches(previous, next)
+                case "is not":
+                    comparison = !starlarkIdentityMatches(previous, next)
                 default:
                     throw ConfigOverrideError.invalidLiteral(condition)
                 }
@@ -6765,7 +6769,7 @@ public final class PolicyParser {
     }
 
     private static func comparisonOperator(at index: String.Index, in text: String) -> String? {
-        for keyword in ["not in", "in"] where text[index...].hasPrefix(keyword) {
+        for keyword in ["is not", "not in", "is", "in"] where text[index...].hasPrefix(keyword) {
             let end = text.index(index, offsetBy: keyword.count)
             if isIdentifierBoundaryBefore(index, in: text),
                isIdentifierBoundaryAfter(end, in: text) {
@@ -6829,6 +6833,17 @@ public final class PolicyParser {
             return value.contains(needle)
         default:
             throw ConfigOverrideError.invalidLiteral(expression)
+        }
+    }
+
+    private static func starlarkIdentityMatches(_ lhs: ConfigValue, _ rhs: ConfigValue) -> Bool {
+        switch (lhs, rhs) {
+        case (.none, .none):
+            return true
+        case let (.bool(lhs), .bool(rhs)):
+            return lhs == rhs
+        default:
+            return false
         }
     }
 
