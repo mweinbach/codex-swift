@@ -872,7 +872,7 @@ final class ExecPolicyTests: XCTestCase {
         for tool, path in zip(TOOLS, PATHS):
             host_executable(tool, [path])
 
-        for host, char in zip(HOSTS, "ab"):
+        for host, char in zip(HOSTS, "ab".elems()):
             if char == "a":
                 network_rule(host, "https", "allow")
         """)
@@ -1054,7 +1054,7 @@ final class ExecPolicyTests: XCTestCase {
         for tool in HOSTS:
             network_rule(HOSTS[tool], "https", "allow")
 
-        for letter in "g":
+        for letter in "g".elems():
             if len(EXAMPLES) == 1 and letter == "g":
                 host_executable("git", ["/usr/bin/git"])
         """)
@@ -3454,7 +3454,7 @@ final class ExecPolicyTests: XCTestCase {
         if ALL_SAFE and ANY_DIFF and EMPTY_IS_ALL and EMPTY_IS_NOT_ANY:
             prefix_rule([TOOL, COMMANDS[0]], "prompt", justification = f"safe {ALL_SAFE}")
 
-        if all("ok") and any("x"):
+        if all("ok".elems()) and any("x".elems()):
             network_rule("api.github.com", "https", "allow")
 
         if not any([command == "commit" for command in COMMANDS]):
@@ -3472,6 +3472,31 @@ final class ExecPolicyTests: XCTestCase {
             NetworkRule(host: "api.github.com", protocol: .https, decision: .allow)
         ])
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
+    }
+
+    func testParserRejectsDirectStringIterationLikeRust() throws {
+        for source in [
+            #"prefix_rule(list("git"), "allow")"#,
+            #"prefix_rule(tuple("git"), "allow")"#,
+            """
+            if all("git"):
+                prefix_rule(["git"], "allow")
+            """,
+            """
+            if any("git"):
+                prefix_rule(["git"], "allow")
+            """,
+            """
+            for host, suffix in zip(["api.github.com"], "a"):
+                network_rule(host, "https", "allow")
+            """,
+            """
+            for letter in "g":
+                prefix_rule([letter], "allow")
+            """
+        ] {
+            XCTAssertThrowsError(try parsePolicy(source))
+        }
     }
 
     func testParserEvaluatesRustStarlarkFailBuiltin() throws {

@@ -6614,8 +6614,6 @@ public final class PolicyParser {
         switch value {
         case let .array(items):
             return items
-        case let .string(value):
-            return value.map { .string(String($0)) }
         case let .table(items):
             return items.keys.map(ConfigValue.string)
         case let .range(start, stop, step):

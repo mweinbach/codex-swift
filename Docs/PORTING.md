@@ -967,7 +967,8 @@ Source baseline inspected for this scaffold:
 - `codex-rs/execpolicy/src/parser.rs` Starlark iterable builtin empty and keyword forms
   - Extended Swift execpolicy parser support for Rust Starlark's empty `list()`, `tuple()`, and `zip()` results plus `enumerate(iterable, start = n)` keyword start offsets in generated policy rules.
 - `codex-rs/execpolicy/src/parser.rs` Starlark iterable builtins and dictionary iteration
-  - Added Swift execpolicy parser support for dictionary iteration as string keys plus `list(...)`, `tuple(...)`, `sorted(...)`, and `reversed(...)` over supported string/list/dictionary iterables, including `sorted(..., key = ..., reverse = ...)` keyword handling for supported key callables, covering deterministic map-driven rule, network, and host executable generation.
+  - Added Swift execpolicy parser support for dictionary iteration as string keys plus `list(...)`, `tuple(...)`, `sorted(...)`, and `reversed(...)` over supported list/range/dictionary iterables, including `sorted(..., key = ..., reverse = ...)` keyword handling for supported key callables, covering deterministic map-driven rule, network, and host executable generation.
+  - Tightened Swift execpolicy parser iterable handling to match Rust Starlark's direct-string rejection for `list("...")`, `tuple("...")`, `zip(..., "...")`, `all("...")`, `any("...")`, and `for x in "..."`; policy files must use string methods such as `.elems()` or `.codepoints()` when character iteration is intended.
 - `codex-rs/execpolicy/src/parser.rs` Starlark lambda key functions
   - Extended Swift execpolicy parser support for inline single-argument `lambda` key functions in `sorted(...)`, `min(...)`, and `max(...)`, matching Rust Starlark policy files that derive ordering keys without naming a helper function.
 - `codex-rs/execpolicy/src/parser.rs` Starlark dictionary comprehensions and iterable loops
@@ -979,7 +980,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/execpolicy/src/parser.rs` Starlark dictionary expansion
   - Extended Swift execpolicy parser support for `dict(**mapping)` expansion, including Rust's positional-map override behavior and rejection of named arguments after `**` or duplicate explicit keyword/expanded keys.
 - `codex-rs/execpolicy/src/parser.rs` unsupported top-level Starlark calls
-  - Matched Rust Starlark policy evaluation by rejecting unsupported top-level calls such as `load(...)`, `fail(...)`, and missing builtins like `print(...)` instead of silently ignoring the call and loading later rules.
+  - Matched Rust Starlark policy evaluation by rejecting unsupported top-level calls such as `load(...)` and missing builtins like `print(...)` instead of silently ignoring the call and loading later rules.
 - `codex-rs/shell-command/src/parse_command.rs` command parser `cd_target` parity
   - added Swift `cd -L`/`cd -P` option skipping, `cd -- path` target handling, Rust-matching empty-base joins, quoted-empty shell word preservation, and `cd` path joining for read summaries only.
 - `codex-rs/shell-command/src/parse_command.rs` positional operand parity
