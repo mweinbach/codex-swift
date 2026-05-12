@@ -4621,6 +4621,20 @@ public enum CodexAppServer {
         guard marketplaces.contains(where: { $0["name"] as? String == "openai-curated" }) else {
             return []
         }
+        return fetchFeaturedPluginIDs(
+            runtimeConfig: runtimeConfig,
+            configuration: configuration,
+            cachedFeaturedPluginIDs: cachedFeaturedPluginIDs,
+            cacheFeaturedPluginIDs: cacheFeaturedPluginIDs
+        )
+    }
+
+    fileprivate static func fetchFeaturedPluginIDs(
+        runtimeConfig: CodexRuntimeConfig,
+        configuration: CodexAppServerConfiguration,
+        cachedFeaturedPluginIDs: [String]? = nil,
+        cacheFeaturedPluginIDs: (([String]) -> Void)? = nil
+    ) -> [String] {
         if let cachedFeaturedPluginIDs {
             return cachedFeaturedPluginIDs
         }
@@ -22067,8 +22081,14 @@ final class CodexAppServerMessageProcessor {
             systemConfigFile: nil,
             environment: configuration.environment
         ),
-            runtimeConfig.features.isEnabled(.plugins),
-            runtimeConfig.features.isEnabled(.remotePlugin),
+            runtimeConfig.features.isEnabled(.plugins)
+        else {
+            return
+        }
+
+        warmFeaturedPluginIDs(runtimeConfig: runtimeConfig)
+
+        guard runtimeConfig.features.isEnabled(.remotePlugin),
             let auth = try? CodexAppServer.currentAuth(configuration: configuration),
             case .chatGPT = auth.kind
         else {
@@ -22083,6 +22103,19 @@ final class CodexAppServerMessageProcessor {
         if !outcome.installedPluginReferences.isEmpty {
             remoteInstalledPluginsCache = outcome.installedPluginReferences
         }
+    }
+
+    private func warmFeaturedPluginIDs(runtimeConfig: CodexRuntimeConfig) {
+        let cacheKey = featuredPluginIDsCacheKey()
+        let cachedIDs = featuredPluginIDsCache.flatMap { $0.key == cacheKey ? $0.ids : nil }
+        _ = CodexAppServer.fetchFeaturedPluginIDs(
+            runtimeConfig: runtimeConfig,
+            configuration: configuration,
+            cachedFeaturedPluginIDs: cachedIDs,
+            cacheFeaturedPluginIDs: { ids in
+                self.featuredPluginIDsCache = FeaturedPluginIDsCache(key: cacheKey, ids: ids)
+            }
+        )
     }
 
     private func skillsListResult(params: [String: Any]?) -> [String: Any] {

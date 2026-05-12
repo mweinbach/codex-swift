@@ -7128,6 +7128,43 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(transport.requestCount, 1)
     }
 
+    func testAppServerStartupWarmsFeaturedPluginIdsCacheLikeRustManager() throws {
+        let temp = try TemporaryDirectory()
+        let sourceRoot = try makeLocalMarketplaceRootWithPlugin(
+            named: "openai-curated",
+            pluginName: "linear",
+            in: temp.url
+        )
+        let sourcePath = sourceRoot.resolvingSymlinksInPath().standardizedFileURL.path
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        plugins = true
+
+        [marketplaces.openai-curated]
+        source_type = "local"
+        source = "\(sourcePath)"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let transport = FeaturedPluginIDsTransport()
+        let processor = try initializedProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                transport.response(for: request)
+            },
+            pluginStartupTasksEnabled: true
+        ))
+        XCTAssertEqual(transport.requestCount, 1)
+
+        transport.setFailing(true)
+        let response = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"plugin/list","params":{}}"#.utf8
+        )))
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["featuredPluginIds"] as? [String], ["linear@openai-curated"])
+        XCTAssertEqual(transport.requestCount, 1)
+    }
+
     func testPluginListIncludesRemoteGlobalMarketplaceWhenRemotePluginEnabled() throws {
         let temp = try TemporaryDirectory()
         try """
@@ -18698,6 +18735,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(skills.map { $0["name"] as? String }, ["linear:search"])
         XCTAssertTrue((skills[0]["path"] as? String)?.hasSuffix("/plugins/cache/chatgpt-global/linear/1.2.3/skills/search/SKILL.md") == true)
         XCTAssertEqual(capture.requests.map { $0.url?.query }, [
+            "platform=codex",
             "scope=GLOBAL&includeDownloadUrls=true",
             nil,
             "scope=WORKSPACE&includeDownloadUrls=true"
