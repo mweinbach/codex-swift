@@ -3496,6 +3496,38 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkDictStarStarExpansion() throws {
+        let policy = try parsePolicy("""
+        BASE = {"git": "status", "node": "test"}
+        OVERRIDES = {"git": "diff", "pnpm": "install"}
+        SETTINGS = dict(BASE, **OVERRIDES)
+
+        prefix_rule(["git", SETTINGS["git"], SETTINGS["node"], SETTINGS["pnpm"]], "allow")
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [
+                    .single("diff"),
+                    .single("test"),
+                    .single("install")
+                ]),
+                decision: .allow
+            )
+        ])
+
+        XCTAssertThrowsError(try parsePolicy("""
+        BASE = {"git": "status"}
+        SETTINGS = dict(**BASE, git = "diff")
+        prefix_rule(["git", SETTINGS["git"]], "allow")
+        """))
+        XCTAssertThrowsError(try parsePolicy("""
+        BASE = {"git": "status"}
+        SETTINGS = dict(git = "log", **BASE)
+        prefix_rule(["git", SETTINGS["git"]], "allow")
+        """))
+    }
+
     func testParserEvaluatesRustStarlarkMinAndMaxBuiltins() throws {
         let policy = try parsePolicy("""
         TOOL = "git"

@@ -5695,14 +5695,42 @@ public final class PolicyParser {
     ) throws -> ConfigValue {
         var table: [String: ConfigValue] = [:]
         var sawKeywordArgument = false
+        var sawStarStarArgument = false
+        var explicitKeywordKeys = Set<String>()
         var consumedPositionalArgument = false
 
         for rawArgument in rawArguments {
+            let trimmedArgument = rawArgument.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmedArgument.hasPrefix("**") {
+                sawStarStarArgument = true
+                let valueStart = trimmedArgument.index(
+                    trimmedArgument.startIndex,
+                    offsetBy: 2
+                )
+                let valueText = String(trimmedArgument[valueStart...])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !valueText.isEmpty else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                let value = try parsePolicyLiteral(valueText, constants: constants, functions: functions)
+                guard case let .table(items) = value else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                guard explicitKeywordKeys.isDisjoint(with: items.keys) else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                table.merge(items) { _, new in new }
+                continue
+            }
+
             if let equalsIndex = topLevelEqualsIndex(in: rawArgument) {
+                guard !sawStarStarArgument else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
                 let rawKey = String(rawArgument[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
                 let valueStart = rawArgument.index(after: equalsIndex)
                 let rawValue = String(rawArgument[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
-                guard isStarlarkIdentifier(rawKey), !rawValue.isEmpty else {
+                guard isStarlarkIdentifier(rawKey), !rawValue.isEmpty, explicitKeywordKeys.insert(rawKey).inserted else {
                     throw ConfigOverrideError.invalidLiteral(expression)
                 }
                 sawKeywordArgument = true
@@ -5710,7 +5738,7 @@ public final class PolicyParser {
                 continue
             }
 
-            guard !sawKeywordArgument, !consumedPositionalArgument else {
+            guard !sawKeywordArgument, !sawStarStarArgument, !consumedPositionalArgument else {
                 throw ConfigOverrideError.invalidLiteral(expression)
             }
             consumedPositionalArgument = true
