@@ -962,6 +962,8 @@ Source baseline inspected for this scaffold:
   - Extended Swift execpolicy parser support for Rust Starlark's empty `list()`, `tuple()`, and `zip()` results plus `enumerate(iterable, start = n)` keyword start offsets in generated policy rules.
 - `codex-rs/execpolicy/src/parser.rs` Starlark iterable builtins and dictionary iteration
   - Added Swift execpolicy parser support for dictionary iteration as string keys plus `list(...)`, `tuple(...)`, `sorted(...)`, and `reversed(...)` over supported string/list/dictionary iterables, including `sorted(..., key = ..., reverse = ...)` keyword handling for supported key callables, covering deterministic map-driven rule, network, and host executable generation.
+- `codex-rs/execpolicy/src/parser.rs` Starlark lambda key functions
+  - Extended Swift execpolicy parser support for inline single-argument `lambda` key functions in `sorted(...)`, `min(...)`, and `max(...)`, matching Rust Starlark policy files that derive ordering keys without naming a helper function.
 - `codex-rs/execpolicy/src/parser.rs` Starlark dictionary comprehensions and iterable loops
   - Added Swift execpolicy parser support for single-generator dictionary comprehensions with optional `if` filters, plus direct string and dictionary iteration in top-level loops and list comprehensions for map-driven rules, network hosts, and executable paths.
 - `codex-rs/execpolicy/src/parser.rs` Starlark multi-clause comprehensions

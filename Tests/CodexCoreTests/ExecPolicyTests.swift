@@ -993,6 +993,33 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/log/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkLambdaKeyFunctions() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        COMMANDS = ["status", "diff", "log", "show"]
+        BY_LAST = sorted(COMMANDS, key = lambda command: command[-1])
+        SHORTEST = min(COMMANDS, key = lambda command: len(command))
+        LONGEST = max(COMMANDS, key = lambda command: len(command))
+
+        prefix_rule([TOOL, BY_LAST[0], SHORTEST, LONGEST], "allow", justification = ",".join(BY_LAST))
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(
+                    first: "git",
+                    rest: [
+                        .single("diff"),
+                        .single("log"),
+                        .single("status")
+                    ]
+                ),
+                decision: .allow,
+                justification: "diff,log,status,show"
+            )
+        ])
+    }
+
     func testParserEvaluatesRustStarlarkDictComprehensionsAndDirectIteration() throws {
         let policy = try parsePolicy("""
         BASE = {

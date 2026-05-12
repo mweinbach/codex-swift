@@ -5743,7 +5743,7 @@ public final class PolicyParser {
         functions: [String: StarlarkFunction]
     ) throws -> ConfigValue {
         var positionalArguments: [String] = []
-        var rawKeyFunction: String?
+        var keyFunction: StarlarkKeyFunction?
         var reverse = false
         var sawReverse = false
         var sawKeywordArgument = false
@@ -5756,12 +5756,10 @@ public final class PolicyParser {
                 let rawValue = String(rawArgument[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
                 switch rawName {
                 case "key":
-                    guard rawKeyFunction == nil,
-                          isStarlarkIdentifier(rawValue)
-                    else {
+                    guard keyFunction == nil else {
                         throw ConfigOverrideError.invalidLiteral(expression)
                     }
-                    rawKeyFunction = rawValue
+                    keyFunction = try parseStarlarkKeyFunction(rawValue, expression: expression)
                 case "reverse":
                     guard !sawReverse else {
                         throw ConfigOverrideError.invalidLiteral(expression)
@@ -5798,7 +5796,7 @@ public final class PolicyParser {
                 value: item,
                 key: try starlarkComparableKey(
                     for: item,
-                    rawKeyFunction: rawKeyFunction,
+                    keyFunction: keyFunction,
                     constants: constants,
                     functions: functions,
                     expression: expression
@@ -5839,7 +5837,7 @@ public final class PolicyParser {
         selectsMinimum: Bool
     ) throws -> ConfigValue {
         var positionalArguments: [String] = []
-        var rawKeyFunction: String?
+        var keyFunction: StarlarkKeyFunction?
         var sawKeywordArgument = false
 
         for rawArgument in rawArguments {
@@ -5848,13 +5846,10 @@ public final class PolicyParser {
                 let rawName = String(rawArgument[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
                 let valueStart = rawArgument.index(after: equalsIndex)
                 let rawValue = String(rawArgument[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
-                guard rawName == "key",
-                      rawKeyFunction == nil,
-                      isStarlarkIdentifier(rawValue)
-                else {
+                guard rawName == "key", keyFunction == nil else {
                     throw ConfigOverrideError.invalidLiteral(expression)
                 }
-                rawKeyFunction = rawValue
+                keyFunction = try parseStarlarkKeyFunction(rawValue, expression: expression)
                 continue
             }
 
@@ -5888,7 +5883,7 @@ public final class PolicyParser {
         var selected = first
         var selectedKey = try starlarkComparableKey(
             for: first,
-            rawKeyFunction: rawKeyFunction,
+            keyFunction: keyFunction,
             constants: constants,
             functions: functions,
             expression: expression
@@ -5896,7 +5891,7 @@ public final class PolicyParser {
         for item in items.dropFirst() {
             let itemKey = try starlarkComparableKey(
                 for: item,
-                rawKeyFunction: rawKeyFunction,
+                keyFunction: keyFunction,
                 constants: constants,
                 functions: functions,
                 expression: expression
@@ -5960,24 +5955,62 @@ public final class PolicyParser {
         return result
     }
 
+    private enum StarlarkKeyFunction {
+        case identifier(String)
+        case lambda(parameter: String, body: String)
+    }
+
+    private static func parseStarlarkKeyFunction(
+        _ text: String,
+        expression: String
+    ) throws -> StarlarkKeyFunction {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if isStarlarkIdentifier(trimmed) {
+            return .identifier(trimmed)
+        }
+        guard let lambdaRange = topLevelKeywordRange("lambda", in: trimmed),
+              lambdaRange.lowerBound == trimmed.startIndex,
+              let colonIndex = topLevelColonIndex(in: trimmed)
+        else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        let parameter = String(trimmed[lambdaRange.upperBound..<colonIndex])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let body = String(trimmed[trimmed.index(after: colonIndex)...])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isStarlarkIdentifier(parameter),
+              !body.isEmpty
+        else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        return .lambda(parameter: parameter, body: body)
+    }
+
     private static func starlarkComparableKey(
         for value: ConfigValue,
-        rawKeyFunction: String?,
+        keyFunction: StarlarkKeyFunction?,
         constants: [String: ConfigValue],
         functions: [String: StarlarkFunction],
         expression: String
     ) throws -> ConfigValue {
-        guard let rawKeyFunction else {
+        guard let keyFunction else {
             return value
         }
-        var scopedConstants = constants
-        let keyArgumentName = "__codex_starlark_min_max_key_arg"
-        scopedConstants[keyArgumentName] = value
-        return try parsePolicyLiteral(
-            "\(rawKeyFunction)(\(keyArgumentName))",
-            constants: scopedConstants,
-            functions: functions
-        )
+        switch keyFunction {
+        case let .identifier(name):
+            var scopedConstants = constants
+            let keyArgumentName = "__codex_starlark_min_max_key_arg"
+            scopedConstants[keyArgumentName] = value
+            return try parsePolicyLiteral(
+                "\(name)(\(keyArgumentName))",
+                constants: scopedConstants,
+                functions: functions
+            )
+        case let .lambda(parameter, body):
+            var scopedConstants = constants
+            scopedConstants[parameter] = value
+            return try parsePolicyLiteral(body, constants: scopedConstants, functions: functions)
+        }
     }
 
     private static func parseStarlarkAbsoluteValueCall(
