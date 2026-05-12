@@ -15817,6 +15817,40 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(params["details"] is NSNull)
     }
 
+    func testInitializeEmitsProjectLocalConfigWarningsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let project = temp.url.appendingPathComponent("project", isDirectory: true)
+        let child = project.appendingPathComponent("child", isDirectory: true)
+        try FileManager.default.createDirectory(at: child, withIntermediateDirectories: true)
+        try "gitdir: here\n".write(to: project.appendingPathComponent(".git"), atomically: true, encoding: .utf8)
+        let projectCodex = project.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectCodex, withIntermediateDirectories: true)
+        let projectConfigFile = projectCodex.appendingPathComponent("config.toml", isDirectory: false)
+        try """
+        model = "project-model"
+        chatgpt_base_url = "https://project.example/backend-api/"
+        notify = ["unsafe"]
+        """.write(to: projectConfigFile, atomically: true, encoding: .utf8)
+
+        let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            cwd: child
+        ))
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"test","version":"0"}}}"#.utf8
+        )))
+
+        XCTAssertEqual(messages.count, 2)
+        XCTAssertEqual(messages[1]["method"] as? String, "configWarning")
+        let params = try XCTUnwrap(messages[1]["params"] as? [String: Any])
+        XCTAssertEqual(
+            params["summary"] as? String,
+            "Ignored unsupported project-local config keys in \(projectConfigFile.standardizedFileURL.path): chatgpt_base_url, notify. If you want these settings to apply, manually set them in your user-level config.toml."
+        )
+        XCTAssertTrue(params["details"] is NSNull)
+    }
+
     func testRequestsRequireInitializeAndRejectDuplicateInitialize() throws {
         let temp = try TemporaryDirectory()
         let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(codexHome: temp.url))

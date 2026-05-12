@@ -1074,7 +1074,13 @@ public enum CodexConfigLoader {
                         contents,
                         baseURL: configFile.deletingLastPathComponent()
                     )
-                    projectConfig.removeProjectLocalDenylistedKeys()
+                    let ignoredKeys = projectConfig.removeProjectLocalDenylistedKeys()
+                    if !ignoredKeys.isEmpty {
+                        parsed.startupWarnings.append(ParsedCodexConfigToml.projectIgnoredConfigKeysWarning(
+                            configFile: configFile,
+                            ignoredKeys: ignoredKeys
+                        ))
+                    }
                     parsed.merge(projectConfig)
                 }
             }
@@ -1783,7 +1789,7 @@ private struct ParsedPermissionProfileToml: Equatable, Sendable {
 
 private struct ParsedCodexConfigToml {
     private static let webSearchToolConfigKey = "__tools_web_search_config"
-    private static let projectLocalConfigDenylist: Set<String> = [
+    private static let projectLocalConfigDenylist: [String] = [
         "openai_base_url",
         "chatgpt_base_url",
         "model_provider",
@@ -1791,7 +1797,8 @@ private struct ParsedCodexConfigToml {
         "notify",
         "profile",
         "profiles",
-        "experimental_realtime_ws_base_url"
+        "experimental_realtime_ws_base_url",
+        "otel"
     ]
 
     var topLevel: [String: ConfigValue] = [:]
@@ -1813,6 +1820,7 @@ private struct ParsedCodexConfigToml {
     var agents: [String: ConfigValue] = [:]
     var agentRoles: [String: [String: ConfigValue]] = [:]
     var agentRoleDiscoveryDirs: [URL] = []
+    var ignoredDenylistedTables: Set<String> = []
     var startupWarnings: [String] = []
     var realtimeAudio: [String: ConfigValue] = [:]
     var realtime: [String: ConfigValue] = [:]
@@ -1825,9 +1833,22 @@ private struct ParsedCodexConfigToml {
     var skillsIncludeInstructions: Bool?
     var permissions: [String: ParsedPermissionProfileToml] = [:]
 
-    mutating func removeProjectLocalDenylistedKeys() {
+    mutating func removeProjectLocalDenylistedKeys() -> [String] {
+        let hasModelProviders = !modelProviders.isEmpty
+        let hasProfiles = !profiles.isEmpty
+            || !profileFeatures.isEmpty
+            || !profileAppsMcpPathOverride.isEmpty
+            || !profileAnalytics.isEmpty
+            || !profileTui.isEmpty
+        var ignoredKeys: [String] = []
         for key in Self.projectLocalConfigDenylist {
-            topLevel.removeValue(forKey: key)
+            let removedTopLevel = topLevel.removeValue(forKey: key) != nil
+            let removedNested = (key == "model_providers" && hasModelProviders)
+                || (key == "profiles" && hasProfiles)
+                || ignoredDenylistedTables.contains(key)
+            if removedTopLevel || removedNested {
+                ignoredKeys.append(key)
+            }
         }
         modelProviders.removeAll()
         profiles.removeAll()
@@ -1835,6 +1856,12 @@ private struct ParsedCodexConfigToml {
         profileAppsMcpPathOverride.removeAll()
         profileAnalytics.removeAll()
         profileTui.removeAll()
+        ignoredDenylistedTables.removeAll()
+        return ignoredKeys
+    }
+
+    static func projectIgnoredConfigKeysWarning(configFile: URL, ignoredKeys: [String]) -> String {
+        "Ignored unsupported project-local config keys in \(configFile.standardizedFileURL.path): \(ignoredKeys.joined(separator: ", ")). If you want these settings to apply, manually set them in your user-level config.toml."
     }
 
     static func parse(_ contents: String, baseURL: URL? = nil) throws -> ParsedCodexConfigToml {
@@ -1847,6 +1874,9 @@ private struct ParsedCodexConfigToml {
         for line in try logicalTomlLines(contents) {
             if line.hasPrefix("[") {
                 section = try parseSectionHeader(line)
+                if case let .ignoredDenylistedTable(key) = section {
+                    parsed.ignoredDenylistedTables.insert(key)
+                }
                 if case .toolSuggestDisabledToolsArray = section {
                     parsed.appendToolSuggestDisabledToolTable()
                 }
@@ -2166,7 +2196,7 @@ private struct ParsedCodexConfigToml {
                     value: try ConfigValueParser.parseTomlLiteral(valueText),
                     into: &parsed.profiles[name, default: [:]]
                 )
-            case .ignored:
+            case .ignored, .ignoredDenylistedTable:
                 continue
             }
         }
@@ -4836,6 +4866,9 @@ private struct ParsedCodexConfigToml {
         if parts.count == 1, parts[0] == "feedback" {
             return .feedback
         }
+        if parts.count == 1, parts[0] == "otel" {
+            return .ignoredDenylistedTable("otel")
+        }
         if parts.count == 1, parts[0] == "agents" {
             return .agents
         }
@@ -5126,6 +5159,7 @@ private enum ConfigSection {
     case profileFeaturesAppsMcpPathOverride(String)
     case profileToolsWebSearch(String)
     case profileToolsWebSearchLocation(String)
+    case ignoredDenylistedTable(String)
     case ignored
 }
 

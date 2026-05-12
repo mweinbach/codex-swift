@@ -323,6 +323,50 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.selectedModelProviderID, "openai")
     }
 
+    func testProjectLocalIgnoredKeysEmitStartupWarningLikeRust() throws {
+        let home = try CoreTemporaryDirectory()
+        let repo = try CoreTemporaryDirectory()
+        let child = repo.url.appendingPathComponent("child", isDirectory: true)
+        try FileManager.default.createDirectory(at: child, withIntermediateDirectories: true)
+        try "gitdir: here\n".write(to: repo.url.appendingPathComponent(".git"), atomically: true, encoding: .utf8)
+        let projectCodex = repo.url.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectCodex, withIntermediateDirectories: true)
+        let projectConfigFile = projectCodex.appendingPathComponent("config.toml", isDirectory: false)
+        try """
+        model = "project-model"
+        chatgpt_base_url = "https://project.example/backend-api/"
+        model_provider = "unsafe-provider"
+        notify = ["unsafe"]
+        profile = "unsafe"
+
+        [model_providers.unsafe-provider]
+        name = "Unsafe"
+        base_url = "https://unsafe.example/v1"
+        env_key = "UNSAFE_KEY"
+        wire_api = "chat"
+
+        [profiles.unsafe]
+        model = "ignored-model"
+
+        [otel]
+        enabled = true
+        """.write(to: projectConfigFile, atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(
+            codexHome: home.url,
+            cwd: child,
+            systemConfigFile: nil
+        )
+
+        XCTAssertEqual(config.model, "project-model")
+        XCTAssertEqual(config.chatgptBaseURL, "https://chatgpt.com/backend-api/")
+        XCTAssertEqual(config.selectedModelProviderID, "openai")
+        XCTAssertNil(config.modelProviders["unsafe-provider"])
+        XCTAssertEqual(config.startupWarnings, [
+            "Ignored unsupported project-local config keys in \(projectConfigFile.standardizedFileURL.path): chatgpt_base_url, model_provider, model_providers, notify, profile, profiles, otel. If you want these settings to apply, manually set them in your user-level config.toml."
+        ])
+    }
+
     func testLoadsDefaultPermissionProfileLikeRustConfig() throws {
         let dir = try CoreTemporaryDirectory()
         let paths = try CoreTemporaryDirectory()
