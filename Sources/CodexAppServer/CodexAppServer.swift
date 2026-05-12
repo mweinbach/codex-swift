@@ -22087,6 +22087,7 @@ final class CodexAppServerMessageProcessor {
         }
 
         warmFeaturedPluginIDs(runtimeConfig: runtimeConfig)
+        autoUpgradeConfiguredMarketplaces()
 
         guard runtimeConfig.features.isEnabled(.remotePlugin),
             let auth = try? CodexAppServer.currentAuth(configuration: configuration),
@@ -22116,6 +22117,10 @@ final class CodexAppServerMessageProcessor {
                 self.featuredPluginIDsCache = FeaturedPluginIDsCache(key: cacheKey, ids: ids)
             }
         )
+    }
+
+    private func autoUpgradeConfiguredMarketplaces() {
+        _ = try? CodexAppServer.marketplaceUpgradeResult(params: nil, configuration: configuration)
     }
 
     private func skillsListResult(params: [String: Any]?) -> [String: Any] {

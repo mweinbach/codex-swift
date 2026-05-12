@@ -10921,7 +10921,8 @@ final class CodexAppServerTests: XCTestCase {
                 CodexConfigLayerLoader.managedConfigEnvironmentVariable: temp.url
                     .appendingPathComponent("missing-managed-config.toml", isDirectory: false)
                     .path
-            ]
+            ],
+            pluginStartupTasksEnabled: false
         )
 
         let add = try appServerResponse(
@@ -11055,7 +11056,8 @@ final class CodexAppServerTests: XCTestCase {
                 CodexConfigLayerLoader.managedConfigEnvironmentVariable: temp.url
                     .appendingPathComponent("missing-managed-config.toml", isDirectory: false)
                     .path
-            ]
+            ],
+            pluginStartupTasksEnabled: false
         )
 
         let add = try appServerResponse(
@@ -11099,6 +11101,71 @@ final class CodexAppServerTests: XCTestCase {
             .appendingPathComponent("plugins/cache/debug/sample/1.2.3/marker.txt", isDirectory: false)
         XCTAssertEqual(try String(contentsOf: refreshedMarker, encoding: .utf8), "from-git-subdir")
         XCTAssertFalse(FileManager.default.fileExists(atPath: staleCache.path))
+    }
+
+    func testAppServerStartupAutoUpgradesConfiguredGitMarketplaceLikeRustManager() throws {
+        let temp = try TemporaryDirectory()
+        let marketplace = try makeGitMarketplaceSourceAndRemote(named: "debug", marker: "v1", in: temp.url)
+        let gitConfig = temp.url.appendingPathComponent("gitconfig", isDirectory: false)
+        try """
+        [url "\(URL(fileURLWithPath: marketplace.remote.path).absoluteString)"]
+            insteadOf = https://github.com/openai/debug-marketplace.git
+        """.write(to: gitConfig, atomically: true, encoding: .utf8)
+        let environment = [
+            "GIT_CONFIG_GLOBAL": gitConfig.path,
+            "GIT_CONFIG_NOSYSTEM": "1"
+        ]
+        try """
+        [features]
+        plugins = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            requiresOpenAIAuth: false,
+            environment: environment
+        )
+
+        let add = try appServerResponse(
+            #"{"id":1,"method":"marketplace/add","params":{"source":"openai/debug-marketplace","refName":"\#(marketplace.branch)"}}"#,
+            configuration: configuration
+        )
+        XCTAssertNil(add["error"])
+        let installedRoot = temp.url
+            .appendingPathComponent(".tmp/marketplaces/debug", isDirectory: true)
+            .path
+        let installedMarketplacePath = URL(fileURLWithPath: installedRoot)
+            .appendingPathComponent(".agents/plugins/marketplace.json", isDirectory: false)
+            .path
+        let installPlugin = try appServerResponse(
+            #"{"id":4,"method":"plugin/install","params":{"marketplacePath":"\#(installedMarketplacePath)","pluginName":"sample"}}"#,
+            configuration: configuration
+        )
+        XCTAssertNil(installPlugin["error"])
+        let cachedPluginMarker = temp.url
+            .appendingPathComponent("plugins/cache/debug/sample/local/marker.txt", isDirectory: false)
+        XCTAssertEqual(try String(contentsOf: cachedPluginMarker, encoding: .utf8), "v1")
+
+        try "v2".write(
+            to: marketplace.source.appendingPathComponent("plugins/sample/marker.txt", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try runGit(["add", "plugins/sample/marker.txt"], cwd: marketplace.source)
+        try runGit(["commit", "-m", "Update marketplace for startup"], cwd: marketplace.source)
+        try runGit(["push", "origin", marketplace.branch], cwd: marketplace.source)
+
+        _ = try initializedProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            requiresOpenAIAuth: false,
+            environment: environment,
+            pluginStartupTasksEnabled: true
+        ))
+
+        XCTAssertEqual(
+            try String(contentsOf: URL(fileURLWithPath: installedRoot).appendingPathComponent("plugins/sample/marker.txt"), encoding: .utf8),
+            "v2"
+        )
+        XCTAssertEqual(try String(contentsOf: cachedPluginMarker, encoding: .utf8), "v2")
     }
 
     func testMarketplaceAddRecordsLocalDirectoryAndDuplicateSource() throws {
