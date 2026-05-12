@@ -1817,6 +1817,20 @@ final class ExecPolicyTests: XCTestCase {
 
         if UPDATED == None and DICT_CLEARED == None and TEMP_UPDATED == None and len(SCRATCH) == 0:
             network_rule("mutation-none.example.com", "https", "allow")
+
+        def helper_rule():
+            commands = ["status"]
+            appended = commands.append("diff")
+            inserted = commands.insert(0, "show")
+            removed = commands.remove("diff")
+            settings = {"tool": "git"}
+            updated = settings.update({"command": commands[0]})
+            scratch = {"drop": "value"}
+            cleared = scratch.clear()
+            return [settings["tool"], settings["command"], repr(appended) + "/" + repr(updated) + "/" + repr(cleared) + "/" + str(len(scratch))]
+
+        HELPER_RULE = helper_rule()
+        prefix_rule([HELPER_RULE[0], HELPER_RULE[1]], "allow", justification = HELPER_RULE[2])
         """)
 
         XCTAssertEqual(policy.rules(for: "git"), [
@@ -1824,6 +1838,11 @@ final class ExecPolicyTests: XCTestCase {
                 pattern: PrefixPattern(first: "git", rest: [.single("show")]),
                 decision: .allow,
                 justification: "None/None"
+            ),
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("show")]),
+                decision: .allow,
+                justification: "None/None/None/0"
             )
         ])
         XCTAssertEqual(policy.networkRules(), [

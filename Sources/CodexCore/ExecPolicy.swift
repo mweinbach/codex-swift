@@ -5208,6 +5208,9 @@ public final class PolicyParser {
         if try parseStarlarkDictPopAssignment(statement, constants: &constants, functions: functions) {
             return true
         }
+        if try parseStarlarkCollectionNoneMutationAssignment(statement, constants: &constants, functions: functions) {
+            return true
+        }
         if try parseStarlarkDictMutationStatement(statement, constants: &constants, functions: functions) {
             return true
         }
