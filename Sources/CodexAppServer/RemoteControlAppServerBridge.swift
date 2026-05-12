@@ -362,6 +362,7 @@ struct RemoteControlAppServerExecutableRuntime<Transport: RemoteControlWebSocket
         maxReceives: Int?
     ) async throws -> [RemoteControlAppServerExecutableRuntimeStep] {
         var steps = [RemoteControlAppServerExecutableRuntimeStep(runtimeStep: runtimeStep)]
+        await publishStatusUpdates(runtimeStep.statusUpdates)
         guard case let .connect(target, appServerClientName) = runtimeStep.action else {
             return steps
         }
@@ -371,10 +372,12 @@ struct RemoteControlAppServerExecutableRuntime<Transport: RemoteControlWebSocket
             connection = try await connect(target, appServerClientName)
         } catch {
             let failureStep = runtime.connectionFailed(Self.connectionFailure(for: error))
+            await publishStatusUpdates(failureStep.statusUpdates)
             steps.append(RemoteControlAppServerExecutableRuntimeStep(runtimeStep: failureStep))
             return steps
         }
         let connectedStep = runtime.connectionEstablished(environmentID: connection.environmentID)
+        await publishStatusUpdates(connectedStep.statusUpdates)
         steps.append(RemoteControlAppServerExecutableRuntimeStep(runtimeStep: connectedStep))
 
         var session = RemoteControlAppServerWebSocketSession(
@@ -393,12 +396,22 @@ struct RemoteControlAppServerExecutableRuntime<Transport: RemoteControlWebSocket
         }
 
         let terminalStep = runtime.connectionEnded(Self.sessionEnd(for: terminalEnd))
+        await publishStatusUpdates(terminalStep.statusUpdates)
         steps.append(RemoteControlAppServerExecutableRuntimeStep(
             runtimeStep: terminalStep,
             sessionSteps: sessionSteps,
             terminalEnd: terminalEnd
         ))
         return steps
+    }
+
+    private func publishStatusUpdates(_ updates: [CodexCore.RemoteControlStatusSnapshot]) async {
+        guard let broadcaster = configuration.remoteControlStatusBroadcaster else {
+            return
+        }
+        for update in updates {
+            await broadcaster.publish(CodexAppServerConfiguration.RemoteControlStatusSnapshot(update))
+        }
     }
 
     private static func connectionFailure(for error: Error) -> RemoteControlConnectLoopFailure {
@@ -563,6 +576,7 @@ private extension CodexAppServerConfiguration {
             stateStore: stateStore,
             configWarnings: configWarnings,
             remoteControlStatusSnapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot(snapshot),
+            remoteControlStatusBroadcaster: remoteControlStatusBroadcaster,
             pluginStartupTasksEnabled: pluginStartupTasksEnabled,
             curatedPluginStartupSyncEnabled: curatedPluginStartupSyncEnabled
         )

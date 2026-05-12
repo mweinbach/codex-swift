@@ -497,6 +497,55 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(params["environmentId"], .string("env-1"))
     }
 
+    func testRemoteControlAppServerExecutableRuntimePublishesStatusToLocalClientsLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            remoteControlStatusSnapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot(
+                status: .connecting,
+                installationID: "install-1",
+                environmentID: nil
+            )
+        )
+        _ = try initializedProcessor(
+            configuration: configuration,
+            connectionID: 99,
+            notificationSink: { data in await notificationCapture.append(data) },
+            experimentalAPIEnabled: true
+        )
+        let transport = RemoteControlAppServerRecordingWebSocketTransport(incoming: [])
+        var runtime = RemoteControlAppServerExecutableRuntime(
+            runtime: try RemoteControlRuntimeCore(
+                remoteControlURL: "https://chatgpt.com/backend-api",
+                installationID: "install-1",
+                requestedEnabled: true,
+                stateDatabaseAvailable: true
+            ),
+            configuration: configuration,
+            connect: { _, _ in
+                RemoteControlAppServerExecutableConnection(
+                    transport: transport,
+                    environmentID: "env-1"
+                )
+            }
+        )
+
+        _ = try await runtime.start(now: { 10 }, maxReceives: 0)
+
+        let environmentMessages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        let connectedMessages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        let environmentParams = try XCTUnwrap(environmentMessages[0]["params"] as? [String: Any])
+        XCTAssertEqual(environmentParams["status"] as? String, "connecting")
+        XCTAssertEqual(environmentParams["installationId"] as? String, "install-1")
+        XCTAssertEqual(environmentParams["environmentId"] as? String, "env-1")
+        let connectedParams = try XCTUnwrap(connectedMessages[0]["params"] as? [String: Any])
+        XCTAssertEqual(connectedMessages[0]["method"] as? String, "remoteControl/status/changed")
+        XCTAssertEqual(connectedParams["status"] as? String, "connected")
+        XCTAssertEqual(connectedParams["installationId"] as? String, "install-1")
+        XCTAssertEqual(connectedParams["environmentId"] as? String, "env-1")
+    }
+
     func testRemoteControlAppServerExecutableRuntimeRetriesAccountIDWaitBeforeConnectingLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let clientID = RemoteControlClientID("client-1")
@@ -17123,6 +17172,81 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(enabledParams["environmentId"] as? String, "env-456")
     }
 
+    func testExperimentalFeatureEnablementSetPublishesRemoteControlStatusToInitializedConnectionsLikeRust()
+        async throws
+    {
+        let temp = try TemporaryDirectory()
+        let stateStore = try createAppServerStateStore(codexHome: temp.url)
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            stateStore: stateStore,
+            remoteControlStatusSnapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot(
+                status: .connected,
+                installationID: "install-123",
+                environmentID: "env-456"
+            )
+        )
+        let notificationCapture = AppServerNotificationCapture()
+        let publisher = try initializedProcessor(
+            configuration: configuration,
+            connectionID: 1,
+            experimentalAPIEnabled: true
+        )
+        _ = try initializedProcessor(
+            configuration: configuration,
+            connectionID: 2,
+            notificationSink: { data in await notificationCapture.append(data) },
+            experimentalAPIEnabled: true
+        )
+
+        let localMessages = try decodeMessages(publisher.processLine(Data(
+            #"{"id":1,"method":"experimentalFeature/enablement/set","params":{"enablement":{"remote_control":false}}}"#.utf8
+        )))
+
+        XCTAssertEqual(localMessages.count, 2)
+        let remoteMessages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(remoteMessages.count, 1)
+        XCTAssertEqual(remoteMessages[0]["method"] as? String, "remoteControl/status/changed")
+        let remoteParams = try XCTUnwrap(remoteMessages[0]["params"] as? [String: Any])
+        XCTAssertEqual(remoteParams["status"] as? String, "disabled")
+        XCTAssertEqual(remoteParams["installationId"] as? String, "install-123")
+        XCTAssertTrue(remoteParams["environmentId"] is NSNull)
+    }
+
+    func testRemoteControlStatusBroadcastRespectsInitializedConnectionOptOutLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let stateStore = try createAppServerStateStore(codexHome: temp.url)
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            stateStore: stateStore,
+            remoteControlStatusSnapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot(
+                status: .connected,
+                installationID: "install-123",
+                environmentID: "env-456"
+            )
+        )
+        let notificationCapture = AppServerNotificationCapture()
+        let publisher = try initializedProcessor(
+            configuration: configuration,
+            connectionID: 1,
+            experimentalAPIEnabled: true
+        )
+        _ = try initializedProcessor(
+            configuration: configuration,
+            connectionID: 2,
+            notificationSink: { data in await notificationCapture.append(data) },
+            experimentalAPIEnabled: true,
+            optOutNotificationMethods: ["remoteControl/status/changed"]
+        )
+
+        _ = try decodeMessages(publisher.processLine(Data(
+            #"{"id":1,"method":"experimentalFeature/enablement/set","params":{"enablement":{"remote_control":false}}}"#.utf8
+        )))
+
+        let capturedPayloads = await notificationCapture.payloadsData()
+        XCTAssertTrue(capturedPayloads.isEmpty)
+    }
+
     func testExperimentalFeatureEnablementSetRemoteControlStaysDisabledWithoutStateDBLikeRust() throws {
         let temp = try TemporaryDirectory()
         let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(
@@ -25380,7 +25504,8 @@ final class CodexAppServerTests: XCTestCase {
             "method": "initialize",
             "params": params
         ]
-        _ = try decode(processor.processLine(try JSONSerialization.data(withJSONObject: request)))
+        let messages = try decodeMessages(processor.processLine(try JSONSerialization.data(withJSONObject: request)))
+        XCTAssertEqual(messages.first?["id"] as? String, "init")
         return processor
     }
 

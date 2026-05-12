@@ -196,6 +196,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let stateStore: SQLiteAgentGraphStore?
     public let configWarnings: [ConfigWarning]
     public let remoteControlStatusSnapshot: RemoteControlStatusSnapshot?
+    public let remoteControlStatusBroadcaster: AppServerRemoteControlStatusBroadcaster?
     public let pluginStartupTasksEnabled: Bool
     public let curatedPluginStartupSyncEnabled: Bool
 
@@ -228,6 +229,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         stateStore: SQLiteAgentGraphStore? = nil,
         configWarnings: [ConfigWarning] = [],
         remoteControlStatusSnapshot: RemoteControlStatusSnapshot? = nil,
+        remoteControlStatusBroadcaster: AppServerRemoteControlStatusBroadcaster? = nil,
         pluginStartupTasksEnabled: Bool = true,
         curatedPluginStartupSyncEnabled: Bool = true
     ) {
@@ -265,6 +267,8 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         self.stateStore = stateStore
         self.configWarnings = configWarnings
         self.remoteControlStatusSnapshot = remoteControlStatusSnapshot
+        self.remoteControlStatusBroadcaster = remoteControlStatusBroadcaster
+            ?? remoteControlStatusSnapshot.map(AppServerRemoteControlStatusBroadcaster.init(snapshot:))
         self.pluginStartupTasksEnabled = pluginStartupTasksEnabled
         self.curatedPluginStartupSyncEnabled = curatedPluginStartupSyncEnabled
     }
@@ -287,6 +291,61 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
             lhs.remoteControlStatusSnapshot == rhs.remoteControlStatusSnapshot &&
             lhs.pluginStartupTasksEnabled == rhs.pluginStartupTasksEnabled &&
             lhs.curatedPluginStartupSyncEnabled == rhs.curatedPluginStartupSyncEnabled
+    }
+}
+
+public actor AppServerRemoteControlStatusBroadcaster {
+    private struct Subscriber: Sendable {
+        let optOutNotificationMethods: Set<String>
+        let notificationSink: AppServerNotificationSink
+    }
+
+    private var snapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot
+    private var subscribers: [AppServerConnectionID: Subscriber] = [:]
+
+    public init(snapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot) {
+        self.snapshot = snapshot
+    }
+
+    public func currentSnapshot() -> CodexAppServerConfiguration.RemoteControlStatusSnapshot {
+        snapshot
+    }
+
+    func register(
+        connectionID: AppServerConnectionID,
+        optOutNotificationMethods: Set<String>,
+        notificationSink: @escaping AppServerNotificationSink
+    ) {
+        subscribers[connectionID] = Subscriber(
+            optOutNotificationMethods: optOutNotificationMethods,
+            notificationSink: notificationSink
+        )
+    }
+
+    func unregister(connectionID: AppServerConnectionID) {
+        subscribers.removeValue(forKey: connectionID)
+    }
+
+    func publish(
+        _ nextSnapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot,
+        excluding excludedConnectionID: AppServerConnectionID? = nil
+    ) async {
+        guard snapshot != nextSnapshot else {
+            return
+        }
+        snapshot = nextSnapshot
+        let notification = CodexAppServer.remoteControlStatusChangedNotification(snapshot: nextSnapshot)
+        guard let data = CodexAppServer.encodeMessages([notification]) else {
+            return
+        }
+        for (connectionID, subscriber) in subscribers {
+            guard connectionID != excludedConnectionID,
+                  !subscriber.optOutNotificationMethods.contains("remoteControl/status/changed")
+            else {
+                continue
+            }
+            await subscriber.notificationSink(data)
+        }
     }
 }
 
@@ -23097,8 +23156,13 @@ final class CodexAppServerMessageProcessor {
         self.threadStateManager = threadStateManager
         self.outgoingRequestBroker = outgoingRequestBroker ?? AppServerOutgoingRequestBroker(notificationSink: notificationSink)
         self.userAgent = CodexAppServer.buildUserAgent(configuration: configuration, params: nil)
-        self.currentRemoteControlStatusSnapshot = configuration.remoteControlStatusSnapshot
-        self.lastRemoteControlEnvironmentID = configuration.remoteControlStatusSnapshot?.environmentID
+        if let snapshot = Self.remoteControlStatusSnapshot(configuration: configuration) {
+            self.currentRemoteControlStatusSnapshot = snapshot
+            self.lastRemoteControlEnvironmentID = snapshot.environmentID
+        } else {
+            self.currentRemoteControlStatusSnapshot = nil
+            self.lastRemoteControlEnvironmentID = nil
+        }
     }
 
     deinit {
@@ -23117,6 +23181,7 @@ final class CodexAppServerMessageProcessor {
         _ = try? CodexAppServer.runAsyncBlocking {
             await manager.removeConnection(connectionID)
         }
+        unregisterRemoteControlStatusSubscriber()
         activeCommandExecs.terminateAll()
         activeProcesses.terminateAll()
     }
@@ -23173,6 +23238,67 @@ final class CodexAppServerMessageProcessor {
         notifications.filter { acceptsNotification($0) }
     }
 
+    private static func remoteControlStatusSnapshot(
+        configuration: CodexAppServerConfiguration
+    ) -> CodexAppServerConfiguration.RemoteControlStatusSnapshot? {
+        guard let broadcaster = configuration.remoteControlStatusBroadcaster else {
+            return configuration.remoteControlStatusSnapshot
+        }
+        return (try? CodexAppServer.runAsyncBlocking {
+            await broadcaster.currentSnapshot()
+        }) ?? configuration.remoteControlStatusSnapshot
+    }
+
+    private func refreshRemoteControlStatusSnapshotFromBroadcaster() {
+        guard let snapshot = Self.remoteControlStatusSnapshot(configuration: configuration) else {
+            return
+        }
+        currentRemoteControlStatusSnapshot = snapshot
+        if let environmentID = snapshot.environmentID {
+            lastRemoteControlEnvironmentID = environmentID
+        }
+    }
+
+    private func registerRemoteControlStatusSubscriber() {
+        guard let broadcaster = configuration.remoteControlStatusBroadcaster,
+              let notificationSink
+        else {
+            return
+        }
+        let connectionID = connectionID
+        let optOutNotificationMethods = optOutNotificationMethods
+        _ = try? CodexAppServer.runAsyncBlocking {
+            await broadcaster.register(
+                connectionID: connectionID,
+                optOutNotificationMethods: optOutNotificationMethods,
+                notificationSink: notificationSink
+            )
+        }
+    }
+
+    private func unregisterRemoteControlStatusSubscriber() {
+        guard let broadcaster = configuration.remoteControlStatusBroadcaster else {
+            return
+        }
+        let connectionID = connectionID
+        _ = try? CodexAppServer.runAsyncBlocking {
+            await broadcaster.unregister(connectionID: connectionID)
+        }
+    }
+
+    private func publishRemoteControlStatus(
+        _ snapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot,
+        excludingCurrentConnection: Bool = false
+    ) {
+        guard let broadcaster = configuration.remoteControlStatusBroadcaster else {
+            return
+        }
+        let excludedConnectionID = excludingCurrentConnection ? connectionID : nil
+        _ = try? CodexAppServer.runAsyncBlocking {
+            await broadcaster.publish(snapshot, excluding: excludedConnectionID)
+        }
+    }
+
     private func remoteControlStatusNotification(
         applyingFeatureEnablement enablement: [String: Bool]
     ) -> [String: Any]? {
@@ -23203,6 +23329,7 @@ final class CodexAppServerMessageProcessor {
             return nil
         }
         currentRemoteControlStatusSnapshot = nextSnapshot
+        publishRemoteControlStatus(nextSnapshot, excludingCurrentConnection: true)
         return CodexAppServer.remoteControlStatusChangedNotification(snapshot: nextSnapshot)
     }
 
@@ -24537,6 +24664,8 @@ final class CodexAppServerMessageProcessor {
                     requestAttestation: requestAttestation,
                     optOutNotificationMethods: optOutNotificationMethods
                 )
+                refreshRemoteControlStatusSnapshotFromBroadcaster()
+                registerRemoteControlStatusSubscriber()
                 userAgent = CodexAppServer.buildUserAgent(configuration: configuration, params: params)
                 startPluginStartupTasksForCurrentConfig()
                 response = CodexAppServer.responseObject(id: id, result: [
