@@ -791,6 +791,7 @@ public enum ToolSpecFactory {
         config: ToolsConfig,
         mcpTools: [String: McpTool]? = nil,
         deferredMcpTools: [String: McpTool]? = nil,
+        dynamicTools: [DynamicToolSpec] = [],
         discoverableTools: [DiscoverableTool]? = nil
     ) -> [ConfiguredToolSpec] {
         var specs: [ConfiguredToolSpec] = []
@@ -820,8 +821,16 @@ public enum ToolSpecFactory {
         specs.append(ConfiguredToolSpec(spec: createReadMCPResourceTool(), supportsParallelToolCalls: true))
         specs.append(ConfiguredToolSpec(spec: createPlanTool(), supportsParallelToolCalls: false))
 
-        if config.toolSearch, let deferredMcpTools, !deferredMcpTools.isEmpty, config.namespaceTools {
-            let index = ToolSearchIndex.mcpIndex(from: deferredMcpTools)
+        let deferredMcpToolsForSearch = config.namespaceTools ? deferredMcpTools : nil
+        let deferredDynamicTools = dynamicTools.filter { tool in
+            tool.deferLoading && (config.namespaceTools || tool.namespace == nil)
+        }
+        if config.toolSearch,
+           (deferredMcpToolsForSearch?.isEmpty == false || !deferredDynamicTools.isEmpty) {
+            let index = ToolSearchIndex.deferredToolIndex(
+                mcpTools: deferredMcpToolsForSearch ?? [:],
+                dynamicTools: deferredDynamicTools
+            )
             specs.append(ConfiguredToolSpec(spec: index.toolSpec(), supportsParallelToolCalls: true))
         }
 
@@ -907,6 +916,12 @@ public enum ToolSpecFactory {
             }
         }
 
+        for spec in createDynamicToolSpecs(from: dynamicTools) {
+            if config.namespaceTools || !isNamespace(spec) {
+                specs.append(ConfiguredToolSpec(spec: spec, supportsParallelToolCalls: false))
+            }
+        }
+
         return specs
     }
 
@@ -987,6 +1002,56 @@ public enum ToolSpecFactory {
                 tools: tools
             )
         }
+    }
+
+    static func createDynamicToolSpecs(from dynamicTools: [DynamicToolSpec]) -> [ToolSpec] {
+        var specs: [ToolSpec] = []
+        for tool in dynamicTools {
+            let function = createDynamicResponsesAPITool(name: tool.name, tool: tool)
+            guard let namespaceName = tool.namespace else {
+                specs.append(.function(function))
+                continue
+            }
+
+            if let index = specs.firstIndex(where: { spec in
+                guard case let .namespace(namespace) = spec else {
+                    return false
+                }
+                return namespace.name == namespaceName
+            }), case let .namespace(existingNamespace) = specs[index] {
+                var tools = existingNamespace.tools
+                tools.append(.function(function))
+                specs[index] = .namespace(ResponsesAPINamespace(
+                    name: existingNamespace.name,
+                    description: existingNamespace.description,
+                    tools: tools
+                ))
+            } else {
+                specs.append(.namespace(ResponsesAPINamespace(
+                    name: namespaceName,
+                    description: defaultNamespaceDescription(namespaceName),
+                    tools: [.function(function)]
+                )))
+            }
+        }
+        return specs
+    }
+
+    private static func isNamespace(_ spec: ToolSpec) -> Bool {
+        if case .namespace = spec {
+            return true
+        }
+        return false
+    }
+
+    static func createDynamicResponsesAPITool(name: String, tool: DynamicToolSpec) -> ResponsesAPITool {
+        ResponsesAPITool(
+            name: name,
+            description: tool.description,
+            strict: false,
+            deferLoading: tool.deferLoading ? true : nil,
+            parameters: JSONSchema.sanitized(from: jsonCompatibleValue(tool.inputSchema))
+        )
     }
 
     static func createMCPResponsesAPITool(

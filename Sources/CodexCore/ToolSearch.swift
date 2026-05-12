@@ -59,6 +59,23 @@ public struct ToolSearchIndex: Equatable, Sendable {
         )
     }
 
+    public static func deferredToolIndex(
+        mcpTools: [String: McpTool],
+        dynamicTools: [DynamicToolSpec]
+    ) -> ToolSearchIndex {
+        var sourceInfos = mcpSourceInfos(from: mcpTools)
+        if !dynamicTools.isEmpty {
+            sourceInfos.append(ToolSearchSourceInfo(
+                name: "Dynamic tools",
+                description: "Tools provided by the current Codex thread."
+            ))
+        }
+        return ToolSearchIndex(
+            entries: mcpEntries(from: mcpTools) + dynamicEntries(from: dynamicTools),
+            sourceInfos: sourceInfos
+        )
+    }
+
     public static func mcpEntries(from tools: [String: McpTool]) -> [ToolSearchEntry] {
         tools.keys.sorted().compactMap { qualifiedName in
             guard let tool = tools[qualifiedName],
@@ -91,11 +108,43 @@ public struct ToolSearchIndex: Equatable, Sendable {
         }
     }
 
+    public static func dynamicEntries(from tools: [DynamicToolSpec]) -> [ToolSearchEntry] {
+        tools.map { tool in
+            let output: ToolSpec
+            let function = ToolSpecFactory.createDynamicResponsesAPITool(name: tool.name, tool: tool)
+            if let namespace = tool.namespace {
+                output = .namespace(ResponsesAPINamespace(
+                    name: namespace,
+                    description: ToolSpecFactory.defaultNamespaceDescription(namespace),
+                    tools: [.function(function)]
+                ))
+            } else {
+                output = .function(function)
+            }
+            return ToolSearchEntry(
+                searchText: buildDynamicSearchText(tool: tool),
+                output: output,
+                limitBucket: tool.namespace ?? "Dynamic tools"
+            )
+        }
+    }
+
     public static func mcpSourceInfos(from tools: [String: McpTool]) -> [ToolSearchSourceInfo] {
         let names = Set(tools.keys.compactMap { qualifiedName in
             McpToolName.splitQualifiedToolName(qualifiedName)?.serverName
         })
         return names.sorted().map { ToolSearchSourceInfo(name: $0) }
+    }
+
+    private static func buildDynamicSearchText(tool: DynamicToolSpec) -> String {
+        [
+            tool.namespace,
+            tool.name,
+            tool.description
+        ]
+        .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
+        .joined(separator: " ")
     }
 
     public func toolSpec(defaultLimit: Int = ToolSearchIndex.defaultLimit) -> ToolSpec {

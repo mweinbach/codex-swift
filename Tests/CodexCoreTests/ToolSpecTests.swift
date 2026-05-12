@@ -673,6 +673,157 @@ final class ToolSpecTests: XCTestCase {
         ])
     }
 
+    func testBuildSpecsCoalescesDynamicToolNamespacesLikeRust() throws {
+        let specs = ToolSpecFactory.buildSpecs(
+            config: ToolsConfig(
+                shellType: .disabled,
+                applyPatchToolType: nil,
+                includeViewImageTool: false
+            ),
+            dynamicTools: [
+                DynamicToolSpec(
+                    namespace: "codex_app",
+                    name: "automation_update",
+                    description: "Create or update automations.",
+                    inputSchema: .object([
+                        "type": .string("object"),
+                        "properties": .object([
+                            "name": .object(["type": .string("string")])
+                        ]),
+                        "required": .array([.string("name")]),
+                        "additionalProperties": .bool(false)
+                    ]),
+                    deferLoading: true
+                ),
+                DynamicToolSpec(
+                    namespace: "codex_app",
+                    name: "automation_list",
+                    description: "List automations.",
+                    inputSchema: .object([
+                        "type": .string("object"),
+                        "properties": .object([:])
+                    ]),
+                    deferLoading: true
+                )
+            ]
+        )
+
+        XCTAssertEqual(specs.filter { $0.spec.name == "codex_app" }.count, 1)
+        let dynamicSpec = try XCTUnwrap(specs.first { $0.spec.name == "codex_app" })
+        XCTAssertFalse(dynamicSpec.supportsParallelToolCalls)
+
+        guard case let .namespace(namespace) = dynamicSpec.spec else {
+            return XCTFail("expected namespace")
+        }
+        XCTAssertEqual(namespace.description, "Tools in the codex_app namespace.")
+        XCTAssertEqual(namespace.tools.map(namespaceToolName), ["automation_update", "automation_list"])
+
+        guard case let .function(updateTool) = namespace.tools[0] else {
+            return XCTFail("expected function")
+        }
+        XCTAssertEqual(updateTool.description, "Create or update automations.")
+        XCTAssertEqual(updateTool.deferLoading, true)
+        XCTAssertEqual(
+            updateTool.parameters,
+            .object(
+                properties: ["name": .string(description: nil)],
+                required: ["name"],
+                additionalProperties: .boolean(false)
+            )
+        )
+    }
+
+    func testBuildSpecsHidesNamespacedDynamicToolsWhenNamespaceToolsDisabledLikeRust() {
+        let specs = ToolSpecFactory.buildSpecs(
+            config: ToolsConfig(
+                shellType: .disabled,
+                applyPatchToolType: nil,
+                includeViewImageTool: false,
+                namespaceTools: false
+            ),
+            dynamicTools: [
+                DynamicToolSpec(
+                    namespace: "codex_app",
+                    name: "automation_update",
+                    description: "Create or update automations.",
+                    inputSchema: .object(["type": .string("object"), "properties": .object([:])])
+                ),
+                DynamicToolSpec(
+                    name: "plain_dynamic",
+                    description: "Plain dynamic tool.",
+                    inputSchema: .object(["type": .string("object"), "properties": .object([:])])
+                )
+            ]
+        )
+
+        XCTAssertFalse(specs.contains { $0.spec.name == "codex_app" })
+        XCTAssertTrue(specs.contains { $0.spec.name == "plain_dynamic" })
+    }
+
+    func testToolSearchIndexReturnsCoalescedDeferredDynamicNamespaceLikeRust() throws {
+        let specs = ToolSpecFactory.buildSpecs(
+            config: ToolsConfig(
+                shellType: .disabled,
+                applyPatchToolType: nil,
+                includeViewImageTool: false,
+                toolSearch: true
+            ),
+            dynamicTools: [
+                DynamicToolSpec(
+                    namespace: "codex_app",
+                    name: "automation_update",
+                    description: "Create or update recurring automations.",
+                    inputSchema: .object(["type": .string("object"), "properties": .object([:])]),
+                    deferLoading: true
+                ),
+                DynamicToolSpec(
+                    namespace: "codex_app",
+                    name: "automation_list",
+                    description: "List recurring automations.",
+                    inputSchema: .object(["type": .string("object"), "properties": .object([:])]),
+                    deferLoading: true
+                )
+            ]
+        )
+
+        let searchSpec = try XCTUnwrap(specs.first { $0.spec.name == "tool_search" }?.spec)
+        guard case let .toolSearch(_, description, _) = searchSpec else {
+            return XCTFail("expected tool_search")
+        }
+        XCTAssertTrue(description.contains("- Dynamic tools: Tools provided by the current Codex thread."))
+
+        let index = ToolSearchIndex.deferredToolIndex(mcpTools: [:], dynamicTools: [
+            DynamicToolSpec(
+                namespace: "codex_app",
+                name: "automation_update",
+                description: "Create or update recurring automations.",
+                inputSchema: .object(["type": .string("object"), "properties": .object([:])]),
+                deferLoading: true
+            ),
+            DynamicToolSpec(
+                namespace: "codex_app",
+                name: "automation_list",
+                description: "List recurring automations.",
+                inputSchema: .object(["type": .string("object"), "properties": .object([:])]),
+                deferLoading: true
+            )
+        ])
+        let tools = try index.search(arguments: .object([
+            "query": .string("automation"),
+            "limit": .integer(8)
+        ]))
+
+        XCTAssertEqual(tools.count, 1)
+        guard case let .object(namespace) = tools[0],
+              case let .array(children)? = namespace["tools"]
+        else {
+            return XCTFail("expected namespace result")
+        }
+        XCTAssertEqual(namespace["name"], .string("codex_app"))
+        XCTAssertEqual(Set(children.compactMap(toolName)), Set(["automation_update", "automation_list"]))
+        XCTAssertEqual(children.compactMap(deferLoading), [true, true])
+    }
+
     func testToolSearchIndexReturnsCoalescedDeferredMCPNamespace() throws {
         let index = ToolSearchIndex.mcpIndex(from: [
             "mcp__calendar__create_event": makeMcpTool(name: "create_event", description: "Create events"),
