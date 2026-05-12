@@ -109,6 +109,25 @@ private actor AppServerMcpOAuthAuthorizationURLCapture {
 }
 
 public struct CodexAppServerConfiguration: Equatable, Sendable {
+    public struct RemoteControlStatusSnapshot: Equatable, Sendable {
+        public enum Status: String, Sendable {
+            case disabled
+            case connecting
+            case connected
+            case errored
+        }
+
+        public let status: Status
+        public let installationID: String
+        public let environmentID: String?
+
+        public init(status: Status, installationID: String, environmentID: String?) {
+            self.status = status
+            self.installationID = installationID
+            self.environmentID = environmentID
+        }
+    }
+
     public let codexHome: URL
     public let cwd: URL
     public let defaultModelProvider: String
@@ -133,6 +152,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let cliConfigOverrides: CliConfigOverrides
     public let configLayerOverrides: ConfigLayerLoaderOverrides
     public let stateStore: SQLiteAgentGraphStore?
+    public let remoteControlStatusSnapshot: RemoteControlStatusSnapshot?
     public let pluginStartupTasksEnabled: Bool
     public let curatedPluginStartupSyncEnabled: Bool
 
@@ -161,6 +181,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         cliConfigOverrides: CliConfigOverrides = CliConfigOverrides(),
         configLayerOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides(),
         stateStore: SQLiteAgentGraphStore? = nil,
+        remoteControlStatusSnapshot: RemoteControlStatusSnapshot? = nil,
         pluginStartupTasksEnabled: Bool = true,
         curatedPluginStartupSyncEnabled: Bool = true
     ) {
@@ -194,6 +215,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         self.cliConfigOverrides = cliConfigOverrides
         self.configLayerOverrides = configLayerOverrides
         self.stateStore = stateStore
+        self.remoteControlStatusSnapshot = remoteControlStatusSnapshot
         self.pluginStartupTasksEnabled = pluginStartupTasksEnabled
         self.curatedPluginStartupSyncEnabled = curatedPluginStartupSyncEnabled
     }
@@ -210,6 +232,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
             lhs.activeProfile == rhs.activeProfile &&
             lhs.cliConfigOverrides == rhs.cliConfigOverrides &&
             lhs.configLayerOverrides == rhs.configLayerOverrides &&
+            lhs.remoteControlStatusSnapshot == rhs.remoteControlStatusSnapshot &&
             lhs.pluginStartupTasksEnabled == rhs.pluginStartupTasksEnabled &&
             lhs.curatedPluginStartupSyncEnabled == rhs.curatedPluginStartupSyncEnabled
     }
@@ -13594,6 +13617,19 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func remoteControlStatusChangedNotification(
+        snapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot
+    ) -> [String: Any] {
+        [
+            "method": "remoteControl/status/changed",
+            "params": [
+                "status": snapshot.status.rawValue,
+                "installationId": snapshot.installationID,
+                "environmentId": snapshot.environmentID as Any? ?? NSNull()
+            ]
+        ]
+    }
+
     fileprivate static func activeThreadStatus(activeFlags: [String] = []) -> [String: Any] {
         [
             "type": "active",
@@ -24028,6 +24064,9 @@ final class CodexAppServerMessageProcessor {
                     "platformFamily": CodexAppServer.platformFamily,
                     "platformOs": CodexAppServer.platformOS
                 ])
+                if let snapshot = configuration.remoteControlStatusSnapshot {
+                    notifications.append(CodexAppServer.remoteControlStatusChangedNotification(snapshot: snapshot))
+                }
             }
         } else if !initialized {
             response = CodexAppServer.errorObject(id: id, code: -32600, message: "Not initialized")
