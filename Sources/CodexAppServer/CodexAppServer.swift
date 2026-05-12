@@ -133,6 +133,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let cliConfigOverrides: CliConfigOverrides
     public let configLayerOverrides: ConfigLayerLoaderOverrides
     public let stateStore: SQLiteAgentGraphStore?
+    public let pluginStartupTasksEnabled: Bool
 
     public init(
         codexHome: URL,
@@ -158,7 +159,8 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         mcpOAuthLoginStarter: @escaping AppServerMcpOAuthLoginStarter = CodexAppServer.defaultMcpOAuthLoginStarter,
         cliConfigOverrides: CliConfigOverrides = CliConfigOverrides(),
         configLayerOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides(),
-        stateStore: SQLiteAgentGraphStore? = nil
+        stateStore: SQLiteAgentGraphStore? = nil,
+        pluginStartupTasksEnabled: Bool = true
     ) {
         self.codexHome = codexHome
         self.cwd = cwd
@@ -190,6 +192,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         self.cliConfigOverrides = cliConfigOverrides
         self.configLayerOverrides = configLayerOverrides
         self.stateStore = stateStore
+        self.pluginStartupTasksEnabled = pluginStartupTasksEnabled
     }
 
     public static func == (lhs: CodexAppServerConfiguration, rhs: CodexAppServerConfiguration) -> Bool {
@@ -203,7 +206,8 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
             lhs.environment == rhs.environment &&
             lhs.activeProfile == rhs.activeProfile &&
             lhs.cliConfigOverrides == rhs.cliConfigOverrides &&
-            lhs.configLayerOverrides == rhs.configLayerOverrides
+            lhs.configLayerOverrides == rhs.configLayerOverrides &&
+            lhs.pluginStartupTasksEnabled == rhs.pluginStartupTasksEnabled
     }
 }
 
@@ -6876,13 +6880,14 @@ public enum CodexAppServer {
         ]
     }
 
-    private struct RemoteInstalledPluginCacheRefreshOutcome {
+    fileprivate struct RemoteInstalledPluginCacheRefreshOutcome {
         var installedPluginIDs: Set<String> = []
         var removedCachePluginIDs: Set<String> = []
         var failedRemotePluginIDs: Set<String> = []
+        var installedPluginReferences: [RemoteInstalledPluginReference] = []
     }
 
-    private static func refreshRemoteInstalledPluginCachesAfterMutation(
+    fileprivate static func refreshRemoteInstalledPluginCachesAfterMutation(
         runtimeConfig: CodexRuntimeConfig,
         configuration: CodexAppServerConfiguration,
         auth: AppServerAuth,
@@ -6928,6 +6933,11 @@ public enum CodexAppServer {
                 }
                 installedPluginNamesByMarketplace[marketplaceName, default: []].insert(pluginName)
                 let localPluginID = "\(pluginName)@\(marketplaceName)"
+                outcome.installedPluginReferences.append(RemoteInstalledPluginReference(
+                    marketplaceName: marketplaceName,
+                    pluginName: pluginName,
+                    enabled: plugin["enabled"] as? Bool ?? true
+                ))
                 let release = plugin["release"] as? [String: Any]
                 let releaseVersion = (release?["version"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
                 if let releaseVersion,
@@ -22050,6 +22060,31 @@ final class CodexAppServerMessageProcessor {
         )
     }
 
+    private func startPluginStartupTasksForCurrentConfig() {
+        guard configuration.pluginStartupTasksEnabled,
+            let runtimeConfig = try? CodexConfigLoader.load(
+            codexHome: configuration.codexHome,
+            systemConfigFile: nil,
+            environment: configuration.environment
+        ),
+            runtimeConfig.features.isEnabled(.plugins),
+            runtimeConfig.features.isEnabled(.remotePlugin),
+            let auth = try? CodexAppServer.currentAuth(configuration: configuration),
+            case .chatGPT = auth.kind
+        else {
+            return
+        }
+
+        let outcome = CodexAppServer.refreshRemoteInstalledPluginCachesAfterMutation(
+            runtimeConfig: runtimeConfig,
+            configuration: configuration,
+            auth: auth
+        )
+        if !outcome.installedPluginReferences.isEmpty {
+            remoteInstalledPluginsCache = outcome.installedPluginReferences
+        }
+    }
+
     private func skillsListResult(params: [String: Any]?) -> [String: Any] {
         CodexAppServer.skillsListResult(
             params: params,
@@ -23065,6 +23100,7 @@ final class CodexAppServerMessageProcessor {
                     optOutNotificationMethods: optOutNotificationMethods
                 )
                 userAgent = CodexAppServer.buildUserAgent(configuration: configuration, params: params)
+                startPluginStartupTasksForCurrentConfig()
                 response = CodexAppServer.responseObject(id: id, result: [
                     "userAgent": userAgent,
                     "codexHome": configuration.codexHome.standardizedFileURL.path,

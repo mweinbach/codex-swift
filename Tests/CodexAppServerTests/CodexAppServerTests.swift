@@ -18587,6 +18587,123 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue((skills[0]["path"] as? String)?.hasSuffix("/plugins/cache/chatgpt-global/linear/1.2.3/skills/search/SKILL.md") == true)
     }
 
+    func testAppServerStartupSyncsRemoteInstalledPluginCacheForSkillsListLikeRust() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let pluginID = "plugins_123"
+        let bundleSource = codexHome.url.appendingPathComponent("remote-bundle-source", isDirectory: true)
+        try writePluginFixture(
+            root: bundleSource,
+            relativePath: "linear",
+            pluginName: "linear",
+            version: "0.0.1-local-ignored",
+            marker: "from-startup-sync"
+        )
+        let skillPath = bundleSource.appendingPathComponent("linear/skills/search/SKILL.md", isDirectory: false)
+        try FileManager.default.createDirectory(at: skillPath.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try skillContents(name: "search", description: "search Linear data")
+            .write(to: skillPath, atomically: true, encoding: .utf8)
+        let bundleBytes = try remotePluginBundleTarGzBytes(
+            pluginRoot: bundleSource.appendingPathComponent("linear", isDirectory: true),
+            in: codexHome.url
+        )
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        plugins = true
+        remote_plugin = true
+        """.write(
+            to: codexHome.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: codexHome.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+        let installedBody = """
+        {
+          "plugins": [
+            {
+              "id": "\(pluginID)",
+              "name": "linear",
+              "scope": "GLOBAL",
+              "installation_policy": "AVAILABLE",
+              "authentication_policy": "ON_USE",
+              "status": "ENABLED",
+              "release": {
+                "display_name": "Linear",
+                "description": "Track work",
+                "version": "1.2.3",
+                "bundle_download_url": "https://bundles.example/linear.tar.gz",
+                "app_ids": [],
+                "interface": {},
+                "skills": []
+              },
+              "enabled": true,
+              "disabled_skill_names": []
+            }
+          ],
+          "pagination": {
+            "limit": 50,
+            "next_page_token": null
+          }
+        }
+        """
+        let emptyInstalledBody = """
+        {
+          "plugins": [],
+          "pagination": {
+            "limit": 50,
+            "next_page_token": null
+          }
+        }
+        """
+        let capture = MCPHTTPTransportCapture()
+        let configuration = testConfiguration(
+            codexHome: codexHome.url,
+            pluginHTTPTransport: { request in
+                capture.append(request)
+                switch (request.url?.path, request.url?.query) {
+                case ("/backend-api/ps/plugins/installed", "scope=GLOBAL&includeDownloadUrls=true"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(installedBody.utf8))
+                case ("/backend-api/ps/plugins/installed", "scope=WORKSPACE&includeDownloadUrls=true"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(emptyInstalledBody.utf8))
+                case ("/linear.tar.gz", nil):
+                    return URLSessionTransportResponse(statusCode: 200, body: bundleBytes)
+                default:
+                    return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
+                }
+            },
+            pluginStartupTasksEnabled: true
+        )
+        let processor = try initializedProcessor(configuration: configuration)
+
+        let response = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"skills/list","params":{"cwds":["\#(cwd.url.path)"],"forceReload":true}}"#.utf8
+        )))
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        let skills = try XCTUnwrap(data[0]["skills"] as? [[String: Any]])
+
+        XCTAssertEqual(skills.map { $0["name"] as? String }, ["linear:search"])
+        XCTAssertTrue((skills[0]["path"] as? String)?.hasSuffix("/plugins/cache/chatgpt-global/linear/1.2.3/skills/search/SKILL.md") == true)
+        XCTAssertEqual(capture.requests.map { $0.url?.query }, [
+            "scope=GLOBAL&includeDownloadUrls=true",
+            nil,
+            "scope=WORKSPACE&includeDownloadUrls=true"
+        ])
+    }
+
     func testSkillsListReportsInvalidUserSkillErrors() throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
@@ -23066,7 +23183,8 @@ final class CodexAppServerTests: XCTestCase {
         mcpOAuthLoginStarter: @escaping AppServerMcpOAuthLoginStarter = CodexAppServer.defaultMcpOAuthLoginStarter,
         cliConfigOverrides: CliConfigOverrides = CliConfigOverrides(),
         configLayerOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides(),
-        stateStore: SQLiteAgentGraphStore? = nil
+        stateStore: SQLiteAgentGraphStore? = nil,
+        pluginStartupTasksEnabled: Bool = false
     ) -> CodexAppServerConfiguration {
         var mergedEnvironment = [
             CodexConfigLayerLoader.managedConfigEnvironmentVariable: codexHome
@@ -23093,7 +23211,8 @@ final class CodexAppServerTests: XCTestCase {
             mcpOAuthLoginStarter: mcpOAuthLoginStarter,
             cliConfigOverrides: cliConfigOverrides,
             configLayerOverrides: configLayerOverrides,
-            stateStore: stateStore
+            stateStore: stateStore,
+            pluginStartupTasksEnabled: pluginStartupTasksEnabled
         )
     }
 
