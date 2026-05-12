@@ -416,7 +416,7 @@ private func runMcpServerCommand(_ request: CodexCLI.McpServerCommandRequest) as
 private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
     switch request.action {
     case .run, .remoteControl:
-        _ = try AppServerWebsocketAuthValidator.settings(from: request.websocketAuth)
+        let websocketAuth = try AppServerWebsocketAuthValidator.settings(from: request.websocketAuth)
         let codexHome = try CodexHome.find()
         let settings = try CodexConfigLoader.load(
             codexHome: codexHome,
@@ -431,10 +431,11 @@ private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) as
         }
         try AppServerExecutableTransportValidator.validateSupportedTransport(
             request.listenTransport,
+            websocketAuth: websocketAuth,
             remoteControlFeatureEnabled: settings.features.isEnabled(.remoteControl),
             stateStoreAvailable: stateStore != nil
         )
-        try CodexAppServer.run(configuration: CodexAppServerConfiguration(
+        let configuration = CodexAppServerConfiguration(
             codexHome: codexHome,
             defaultModelProvider: settings.selectedModelProviderID,
             version: CodexCLI.version,
@@ -442,7 +443,17 @@ private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) as
             authCredentialsStoreMode: settings.cliAuthCredentialsStoreMode,
             activeProfile: settings.activeProfile,
             stateStore: stateStore
-        ))
+        )
+        switch request.listenTransport {
+        case .stdio:
+            try CodexAppServer.run(configuration: configuration)
+        case let .webSocket(host, port):
+            try await AppServerWebSocketTransport(configuration: configuration).run(host: host, port: port) { url in
+                printAppServerWebSocketStartupBanner(listenURL: url)
+            }
+        case .unixSocket, .off:
+            throw AppServerExecutableTransportError.liveTransportPending(request.listenTransport.listenURLDescription)
+        }
         return CodexCLI.CommandExecutionResult(exitCode: 0)
     case let .proxy(socketPath):
         let resolvedSocketPath: String
@@ -477,6 +488,45 @@ private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) as
             arguments: ["--out", outDir]
         )
     }
+}
+
+private func printAppServerWebSocketStartupBanner(listenURL: String) {
+    let trimmed = listenURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    let readyURL = httpURL(fromWebSocketURL: trimmed, path: "readyz")
+    let healthURL = httpURL(fromWebSocketURL: trimmed, path: "healthz")
+    fputs("codex app-server (WebSockets)\n", stderr)
+    fputs("  listening on: \(trimmed)\n", stderr)
+    fputs("  readyz: \(readyURL)\n", stderr)
+    fputs("  healthz: \(healthURL)\n", stderr)
+    let note = isLoopbackWebSocketURL(trimmed)
+        ? "binds localhost only (use SSH port-forwarding for remote access)"
+        : "websocket auth is opt-in in this build; configure `--ws-auth ...` before real remote use"
+    fputs("  note: \(note)\n", stderr)
+}
+
+private func httpURL(fromWebSocketURL url: String, path: String) -> String {
+    guard var components = URLComponents(string: url) else {
+        return url
+    }
+    components.scheme = "http"
+    components.path = "/\(path)"
+    return components.string ?? url
+}
+
+private func isLoopbackWebSocketURL(_ url: String) -> Bool {
+    guard let host = URLComponents(string: url)?.host else {
+        return false
+    }
+    var ipv4 = in_addr()
+    if host.withCString({ inet_pton(AF_INET, $0, &ipv4) }) == 1 {
+        return (UInt32(bigEndian: ipv4.s_addr) & 0xff00_0000) == 0x7f00_0000
+    }
+    var ipv6 = in6_addr()
+    if host.withCString({ inet_pton(AF_INET6, $0, &ipv6) }) == 1 {
+        var loopback = in6addr_loopback
+        return memcmp(&ipv6, &loopback, MemoryLayout<in6_addr>.size) == 0
+    }
+    return false
 }
 
 private func runAppCommand(_ request: CodexCLI.AppCommandRequest) async throws -> CodexCLI.CommandExecutionResult {

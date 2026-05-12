@@ -128,6 +128,7 @@ public enum AppServerExecutableTransportError: Error, CustomStringConvertible, E
     case noTransportConfigured
     case remoteControlUnavailableWithoutStateDB
     case liveTransportPending(String)
+    case webSocketAuthPending(String)
 
     public var description: String {
         switch self {
@@ -137,6 +138,8 @@ public enum AppServerExecutableTransportError: Error, CustomStringConvertible, E
             return "no transport configured; remote control disabled because sqlite state db is unavailable"
         case let .liveTransportPending(listenURL):
             return "live app-server transport for --listen `\(listenURL)` is not implemented yet"
+        case let .webSocketAuthPending(listenURL):
+            return "live app-server websocket auth for --listen `\(listenURL)` is not implemented yet"
         }
     }
 }
@@ -144,6 +147,7 @@ public enum AppServerExecutableTransportError: Error, CustomStringConvertible, E
 public enum AppServerExecutableTransportValidator {
     public static func validateSupportedTransport(
         _ transport: AppServerListenTransport,
+        websocketAuth: AppServerWebsocketAuthSettings = AppServerWebsocketAuthSettings(),
         remoteControlFeatureEnabled: Bool,
         stateStoreAvailable: Bool
     ) throws {
@@ -158,8 +162,13 @@ public enum AppServerExecutableTransportValidator {
                 throw AppServerExecutableTransportError.remoteControlUnavailableWithoutStateDB
             }
             throw AppServerExecutableTransportError.liveTransportPending(transport.listenURLDescription)
-        case .unixSocket, .webSocket:
+        case .unixSocket:
             throw AppServerExecutableTransportError.liveTransportPending(transport.listenURLDescription)
+        case .webSocket:
+            guard websocketAuth.config == nil else {
+                throw AppServerExecutableTransportError.webSocketAuthPending(transport.listenURLDescription)
+            }
+            return
         }
     }
 }

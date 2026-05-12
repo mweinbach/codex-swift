@@ -2346,13 +2346,21 @@ final class ExecServerTests: XCTestCase {
         }
     }
 
-    func testAppServerExecutableTransportValidatorRejectsUnsupportedRuntimeModes() {
+    func testAppServerExecutableTransportValidatorAcceptsStdioAndUnauthenticatedWebSocket() {
         XCTAssertNoThrow(try AppServerExecutableTransportValidator.validateSupportedTransport(
             .stdio,
             remoteControlFeatureEnabled: false,
             stateStoreAvailable: false
         ))
 
+        XCTAssertNoThrow(try AppServerExecutableTransportValidator.validateSupportedTransport(
+            .webSocket(host: "::1", port: 4500),
+            remoteControlFeatureEnabled: false,
+            stateStoreAvailable: false
+        ))
+    }
+
+    func testAppServerExecutableTransportValidatorRejectsUnsupportedRuntimeModes() {
         XCTAssertThrowsError(try AppServerExecutableTransportValidator.validateSupportedTransport(
             .off,
             remoteControlFeatureEnabled: false,
@@ -2378,14 +2386,29 @@ final class ExecServerTests: XCTestCase {
         }
 
         XCTAssertThrowsError(try AppServerExecutableTransportValidator.validateSupportedTransport(
-            .webSocket(host: "::1", port: 4500),
+            .unixSocket(socketPath: "/tmp/codex.sock"),
             remoteControlFeatureEnabled: false,
             stateStoreAvailable: false
         )) { error in
-            XCTAssertEqual(error as? AppServerExecutableTransportError, .liveTransportPending("ws://[::1]:4500"))
+            XCTAssertEqual(error as? AppServerExecutableTransportError, .liveTransportPending("unix:///tmp/codex.sock"))
             XCTAssertEqual(
                 String(describing: error),
-                "live app-server transport for --listen `ws://[::1]:4500` is not implemented yet"
+                "live app-server transport for --listen `unix:///tmp/codex.sock` is not implemented yet"
+            )
+        }
+    }
+
+    func testAppServerExecutableTransportValidatorRejectsWebSocketAuthUntilEnforced() {
+        XCTAssertThrowsError(try AppServerExecutableTransportValidator.validateSupportedTransport(
+            .webSocket(host: "::1", port: 4500),
+            websocketAuth: AppServerWebsocketAuthSettings(config: .capabilityToken(source: .tokenSHA256([]))),
+            remoteControlFeatureEnabled: false,
+            stateStoreAvailable: false
+        )) { error in
+            XCTAssertEqual(error as? AppServerExecutableTransportError, .webSocketAuthPending("ws://[::1]:4500"))
+            XCTAssertEqual(
+                String(describing: error),
+                "live app-server websocket auth for --listen `ws://[::1]:4500` is not implemented yet"
             )
         }
     }
