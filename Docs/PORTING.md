@@ -1180,6 +1180,8 @@ Source baseline inspected for this scaffold:
   - added Swift `ContextUpdateBuilder` parity for environment diffs from persisted `TurnContextItem` baselines, full environment reinjection when the baseline is missing, `include_environment_context` suppression, model-switch developer updates, permission-profile/approval-policy developer updates, collaboration-mode developer updates, realtime start/end developer updates, custom realtime start instructions, personality-spec developer updates, and Rust's previous-turn realtime fallback for older records without `realtime_active`.
 - `codex-rs/core/src/personality_migration.rs` startup personality migration
   - added Swift `PersonalityMigration` parity for Rust's `.personality_migration` marker, selected-profile validation before writes, explicit top-level/profile personality skip behavior, active and archived session detection that ignores meta-only rollouts, `personality = "pragmatic"` config persistence for existing-session homes, marker idempotency, and no-marker invalid-profile failures.
+- `codex-rs/app-server/src/request_processors/thread_goal_processor.rs` goal parameter decoding
+  - tightened Swift `thread/goal/set` optional field decoding to match Rust serde semantics for `objective`, `status`, and `tokenBudget`: explicit `status: null` now behaves like omission, malformed optional strings/enums/integers return Rust-shaped invalid-request errors, and explicit `tokenBudget: null` remains a budget clear rather than a preserve operation.
 
 ## Known Gaps
 

@@ -3271,7 +3271,7 @@ public enum CodexAppServer {
         let thread = try ThreadId(string: threadID)
         let stateStore = try stateStoreForThreadGoals(configuration: configuration)
         let status = try goalStatus(params?["status"])
-        let objective = stringParam(params?["objective"])?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let objective = try goalObjective(params: params)
         let tokenBudget = try goalTokenBudget(params: params)
         let tokenBudgetUpdate: ThreadGoalTokenBudgetUpdate = tokenBudget.wasProvided
             ? .set(tokenBudget.value.map(Int64.init))
@@ -3481,18 +3481,42 @@ public enum CodexAppServer {
         if raw is NSNull {
             return GoalTokenBudget(wasProvided: true, value: nil)
         }
-        guard let value = raw as? Int else {
-            throw AppServerError.invalidRequest("goal budget must be an integer or null")
+        try validateRustIntegerParam(raw, expected: "i64")
+        if let value = raw as? Int {
+            return GoalTokenBudget(wasProvided: true, value: value)
         }
-        return GoalTokenBudget(wasProvided: true, value: value)
+        if let number = raw as? NSNumber {
+            return GoalTokenBudget(wasProvided: true, value: number.intValue)
+        }
+        throw AppServerError.invalidRequest(
+            "Invalid request: \(rustInvalidTypeDescription(raw ?? NSNull())), expected i64"
+        )
+    }
+
+    private static func goalObjective(params: [String: Any]?) throws -> String? {
+        guard let params, params.keys.contains("objective") else {
+            return nil
+        }
+        let raw = params["objective"]
+        if raw is NSNull {
+            return nil
+        }
+        guard let objective = stringParam(raw) else {
+            throw AppServerError.invalidRequest(
+                "Invalid request: \(rustInvalidTypeDescription(raw ?? NSNull())), expected a string"
+            )
+        }
+        return objective.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func goalStatus(_ raw: Any?) throws -> ThreadGoalStatus? {
-        guard let raw else {
+        guard let raw, !(raw is NSNull) else {
             return nil
         }
         guard let status = stringParam(raw) else {
-            throw AppServerError.invalidRequest("invalid goal status")
+            throw AppServerError.invalidRequest(
+                "Invalid request: \(rustInvalidTypeDescription(raw)), expected enum ThreadGoalStatus"
+            )
         }
         switch status {
         case "active":
@@ -3504,7 +3528,9 @@ public enum CodexAppServer {
         case "complete":
             return .complete
         default:
-            throw AppServerError.invalidRequest("invalid goal status: \(status)")
+            throw AppServerError.invalidRequest(
+                "Invalid request: unknown variant `\(status)`, expected one of `active`, `paused`, `budgetLimited`, `complete`"
+            )
         }
     }
 

@@ -6428,6 +6428,13 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(replacementGoal["status"] as? String, "budgetLimited")
         XCTAssertEqual(replacementGoal["tokenBudget"] as? Int, 10)
 
+        let clearBudget = try decodeMessages(processor.processLine(Data(
+            #"{"id":7,"method":"thread/goal/set","params":{"threadId":"\#(threadID)","status":null,"tokenBudget":null}}"#.utf8
+        )))
+        let clearBudgetGoal = try XCTUnwrap((clearBudget[0]["result"] as? [String: Any])?["goal"] as? [String: Any])
+        XCTAssertEqual(clearBudgetGoal["status"] as? String, "budgetLimited")
+        XCTAssertEqual(clearBudgetGoal["tokenBudget"] as? NSNull, NSNull())
+
         let clear = try decodeMessages(processor.processLine(Data(
             #"{"id":4,"method":"thread/goal/clear","params":{"threadId":"\#(threadID)"}}"#.utf8
         )))
@@ -6601,6 +6608,44 @@ final class CodexAppServerTests: XCTestCase {
             missingGoalError["message"] as? String,
             "cannot update goal for thread \(threadID): no goal exists"
         )
+
+        let malformedCases: [(String, String)] = [
+            (
+                #"{"threadId":"\#(threadID)","objective":1}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"threadId":"\#(threadID)","objective":"keep polishing","status":1}"#,
+                "Invalid request: invalid type: integer `1`, expected enum ThreadGoalStatus"
+            ),
+            (
+                #"{"threadId":"\#(threadID)","objective":"keep polishing","status":"done"}"#,
+                "Invalid request: unknown variant `done`, expected one of `active`, `paused`, `budgetLimited`, `complete`"
+            ),
+            (
+                #"{"threadId":"\#(threadID)","objective":"keep polishing","tokenBudget":true}"#,
+                "Invalid request: invalid type: boolean `true`, expected i64"
+            ),
+            (
+                #"{"threadId":"\#(threadID)","objective":"keep polishing","tokenBudget":"soon"}"#,
+                #"Invalid request: invalid type: string "soon", expected i64"#
+            ),
+            (
+                #"{"threadId":"\#(threadID)","objective":"keep polishing","tokenBudget":1.5}"#,
+                "Invalid request: invalid type: floating point `1.5`, expected i64"
+            ),
+        ]
+
+        for (index, testCase) in malformedCases.enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 4),"method":"thread/goal/set","params":\#(testCase.0)}"#,
+                configuration: configuration,
+                experimentalAPIEnabled: true
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, testCase.1)
+        }
     }
 
     func testThreadMemoryModeSetAppendsSessionMetaMarker() throws {
