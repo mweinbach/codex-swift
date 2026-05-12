@@ -3948,6 +3948,177 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(toolResponse, DynamicToolResponse(contentItems: [.text("done")], success: true))
     }
 
+    func testRuntimeApprovalAndUserInputRequestsSubmitClientResponsesLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let coreOpCapture = AppServerCoreOpCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) },
+            coreOpSubmitter: coreOpCapture.submit
+        )
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-runtime",
+            event: .requestUserInput(RequestUserInputEvent(
+                callID: "input-1",
+                turnID: "turn-runtime",
+                questions: [
+                    RequestUserInputQuestion(
+                        id: "choice",
+                        header: "Choice",
+                        question: "Pick",
+                        options: [RequestUserInputQuestionOption(label: "A", description: "Alpha")]
+                    )
+                ]
+            ))
+        )
+        let userInputRequest = try await nextClientRequest(
+            notificationCapture,
+            method: "item/tool/requestUserInput"
+        )
+        let userInputRequestID = try XCTUnwrap(userInputRequest["id"])
+        let userInputParams = try XCTUnwrap(userInputRequest["params"] as? [String: Any])
+        XCTAssertEqual(userInputParams["threadId"] as? String, "thread-1")
+        XCTAssertEqual(userInputParams["turnId"] as? String, "turn-runtime")
+        XCTAssertEqual(userInputParams["itemId"] as? String, "input-1")
+
+        let userInputResponse = try JSONSerialization.data(withJSONObject: [
+            "method": "item/tool/requestUserInput",
+            "id": userInputRequestID,
+            "response": [
+                "answers": [
+                    "choice": ["answers": ["A"]]
+                ]
+            ]
+        ])
+        XCTAssertNil(processor.processLine(userInputResponse))
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-runtime",
+            event: .requestPermissions(RequestPermissionsEvent(
+                callID: "permissions-1",
+                turnID: "turn-runtime",
+                startedAtMilliseconds: 321,
+                reason: "needs network",
+                permissions: RequestPermissionProfile(
+                    network: RequestPermissionNetworkPermissions(enabled: true)
+                ),
+                cwd: "/repo"
+            ))
+        )
+        let permissionsRequest = try await nextClientRequest(
+            notificationCapture,
+            method: "item/permissions/requestApproval"
+        )
+        let permissionsRequestID = try XCTUnwrap(permissionsRequest["id"])
+        let permissionsParams = try XCTUnwrap(permissionsRequest["params"] as? [String: Any])
+        XCTAssertEqual(permissionsParams["cwd"] as? String, "/repo")
+        XCTAssertEqual(permissionsParams["reason"] as? String, "needs network")
+
+        let permissionsResponse = try JSONSerialization.data(withJSONObject: [
+            "method": "item/permissions/requestApproval",
+            "id": permissionsRequestID,
+            "response": [
+                "permissions": [
+                    "network": ["enabled": true]
+                ],
+                "scope": "turn",
+                "strictAutoReview": true
+            ]
+        ])
+        XCTAssertNil(processor.processLine(permissionsResponse))
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-runtime",
+            event: .applyPatchApprovalRequest(ApplyPatchApprovalRequestEvent(
+                callID: "patch-1",
+                turnID: "turn-runtime",
+                startedAtMilliseconds: 222,
+                changes: [:],
+                reason: "edit file",
+                grantRoot: "/repo"
+            ))
+        )
+        let patchRequest = try await nextClientRequest(
+            notificationCapture,
+            method: "item/fileChange/requestApproval"
+        )
+        let patchRequestID = try XCTUnwrap(patchRequest["id"])
+        let patchParams = try XCTUnwrap(patchRequest["params"] as? [String: Any])
+        XCTAssertEqual(patchParams["itemId"] as? String, "patch-1")
+        XCTAssertEqual(patchParams["grantRoot"] as? String, "/repo")
+
+        let patchResponse = try JSONSerialization.data(withJSONObject: [
+            "method": "item/fileChange/requestApproval",
+            "id": patchRequestID,
+            "response": ["decision": "acceptForSession"]
+        ])
+        XCTAssertNil(processor.processLine(patchResponse))
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-runtime",
+            event: .execApprovalRequest(ExecApprovalRequestEvent(
+                callID: "exec-1",
+                approvalID: "approval-1",
+                turnID: "turn-runtime",
+                startedAtMilliseconds: 111,
+                command: ["git", "status"],
+                cwd: "/repo",
+                reason: "inspect status",
+                parsedCmd: [.unknown(cmd: "git status")]
+            ))
+        )
+        let execRequest = try await nextClientRequest(
+            notificationCapture,
+            method: "item/commandExecution/requestApproval"
+        )
+        let execRequestID = try XCTUnwrap(execRequest["id"])
+        let execParams = try XCTUnwrap(execRequest["params"] as? [String: Any])
+        XCTAssertEqual(execParams["itemId"] as? String, "exec-1")
+        XCTAssertEqual(execParams["approvalId"] as? String, "approval-1")
+        XCTAssertEqual(execParams["command"] as? String, "git status")
+
+        let execResponse = try JSONSerialization.data(withJSONObject: [
+            "method": "item/commandExecution/requestApproval",
+            "id": execRequestID,
+            "response": ["decision": "accept"]
+        ])
+        XCTAssertNil(processor.processLine(execResponse))
+
+        let submissions = try await waitForSubmissions(coreOpCapture, count: 4)
+        guard case let .userInputAnswer(turnID, userInputAnswer) = submissions[0].op else {
+            return XCTFail("expected user input answer")
+        }
+        XCTAssertEqual(turnID, "turn-runtime")
+        XCTAssertEqual(userInputAnswer.answers["choice"]?.answers, ["A"])
+
+        guard case let .requestPermissionsResponse(id, permissionsAnswer) = submissions[1].op else {
+            return XCTFail("expected permissions response")
+        }
+        XCTAssertEqual(id, "permissions-1")
+        XCTAssertEqual(permissionsAnswer.permissions.network, RequestPermissionNetworkPermissions(enabled: true))
+        XCTAssertEqual(permissionsAnswer.scope, .turn)
+        XCTAssertTrue(permissionsAnswer.strictAutoReview)
+
+        guard case let .patchApproval(id, decision) = submissions[2].op else {
+            return XCTFail("expected patch approval")
+        }
+        XCTAssertEqual(id, "patch-1")
+        XCTAssertEqual(decision, .approvedForSession)
+
+        guard case let .execApproval(id, turnID, decision) = submissions[3].op else {
+            return XCTFail("expected exec approval")
+        }
+        XCTAssertEqual(id, "approval-1")
+        XCTAssertEqual(turnID, "turn-runtime")
+        XCTAssertEqual(decision, .approved)
+    }
+
     func testRuntimeDynamicToolCallResponseFallbacksMatchRust() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()
@@ -4560,7 +4731,7 @@ final class CodexAppServerTests: XCTestCase {
             ))
         )
 
-        let active = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        let active = try await nextNotificationMessages(notificationCapture, method: "thread/status/changed")
         XCTAssertEqual(active[0]["method"] as? String, "thread/status/changed")
         let activeParams = try XCTUnwrap(active[0]["params"] as? [String: Any])
         let activeStatus = try XCTUnwrap(activeParams["status"] as? [String: Any])
@@ -4568,19 +4739,19 @@ final class CodexAppServerTests: XCTestCase {
 
         _ = try await nextNotificationPayload(notificationCapture)
 
-        let waitingOnApproval = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        let waitingOnApproval = try await nextNotificationMessages(notificationCapture, method: "thread/status/changed")
         XCTAssertEqual(waitingOnApproval[0]["method"] as? String, "thread/status/changed")
         let waitingOnApprovalParams = try XCTUnwrap(waitingOnApproval[0]["params"] as? [String: Any])
         let waitingOnApprovalStatus = try XCTUnwrap(waitingOnApprovalParams["status"] as? [String: Any])
         XCTAssertEqual(waitingOnApprovalStatus["activeFlags"] as? [String], ["waitingOnApproval"])
 
-        let waitingOnBoth = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        let waitingOnBoth = try await nextNotificationMessages(notificationCapture, method: "thread/status/changed")
         XCTAssertEqual(waitingOnBoth[0]["method"] as? String, "thread/status/changed")
         let waitingOnBothParams = try XCTUnwrap(waitingOnBoth[0]["params"] as? [String: Any])
         let waitingOnBothStatus = try XCTUnwrap(waitingOnBothParams["status"] as? [String: Any])
         XCTAssertEqual(waitingOnBothStatus["activeFlags"] as? [String], ["waitingOnApproval", "waitingOnUserInput"])
 
-        let idle = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        let idle = try await nextNotificationMessages(notificationCapture, method: "thread/status/changed")
         XCTAssertEqual(idle[0]["method"] as? String, "thread/status/changed")
         let idleParams = try XCTUnwrap(idle[0]["params"] as? [String: Any])
         let idleStatus = try XCTUnwrap(idleParams["status"] as? [String: Any])
@@ -25929,6 +26100,41 @@ final class CodexAppServerTests: XCTestCase {
         while DispatchTime.now().uptimeNanoseconds - start < timeoutNanoseconds {
             if let payload = await capture.popPayload() {
                 return payload
+            }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        throw AppServerTestTimeout()
+    }
+
+    private func nextClientRequest(
+        _ capture: AppServerNotificationCapture,
+        method: String,
+        timeoutNanoseconds: UInt64 = 5_000_000_000
+    ) async throws -> [String: Any] {
+        let start = DispatchTime.now().uptimeNanoseconds
+        while DispatchTime.now().uptimeNanoseconds - start < timeoutNanoseconds {
+            if let payload = await capture.popPayload(),
+               let object = try JSONSerialization.jsonObject(with: payload) as? [String: Any],
+               object["method"] as? String == method {
+                return object
+            }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        throw AppServerTestTimeout()
+    }
+
+    private func nextNotificationMessages(
+        _ capture: AppServerNotificationCapture,
+        method: String,
+        timeoutNanoseconds: UInt64 = 5_000_000_000
+    ) async throws -> [[String: Any]] {
+        let start = DispatchTime.now().uptimeNanoseconds
+        while DispatchTime.now().uptimeNanoseconds - start < timeoutNanoseconds {
+            if let payload = await capture.popPayload() {
+                let messages = try decodeMessages(payload)
+                if messages.contains(where: { $0["method"] as? String == method }) {
+                    return messages
+                }
             }
             try await Task.sleep(nanoseconds: 10_000_000)
         }

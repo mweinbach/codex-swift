@@ -818,6 +818,13 @@ public enum CodexAppServer {
         "persistExtendedHistory is deprecated and ignored"
     fileprivate static let persistExtendedHistoryDeprecationDetails =
         "Remove this parameter. App-server always uses limited history persistence."
+    fileprivate static let clientResponseMethods: Set<String> = [
+        AppServerProtocol.CommandExecutionRequestApprovalParams.method,
+        AppServerProtocol.FileChangeRequestApprovalParams.method,
+        AppServerProtocol.ToolRequestUserInputParams.method,
+        AppServerProtocol.DynamicToolCallParams.method,
+        AppServerProtocol.PermissionsRequestApprovalParams.method
+    ]
     fileprivate static let fuzzyFileSearchLimitPerRoot = 50
     private static let interactiveSessionSources: [SessionSource] = [.cli, .vscode]
     fileprivate static let platformFamily = "unix"
@@ -24156,14 +24163,134 @@ final class CodexAppServerMessageProcessor {
             }
             runtimeSystemErrorThreadIDs.insert(threadID)
             notifications = projected
-        case .applyPatchApprovalRequest, .execApprovalRequest, .elicitationRequest, .requestPermissions:
+        case let .applyPatchApprovalRequest(event):
             notifications = [
                 markRuntimeApprovalRequested(threadID: threadID)
             ].compactMap(\.self)
-        case .requestUserInput:
+            let broker = outgoingRequestBroker
+            let submitter = coreOpSubmitter
+            afterNotifications = {
+                Task { [broker, submitter, threadID, event] in
+                    let result = await broker.requestFileChangeApproval(
+                        params: AppServerProtocol.FileChangeRequestApprovalParams(
+                            threadID: threadID,
+                            turnID: event.turnID,
+                            itemID: event.callID,
+                            startedAtMilliseconds: event.startedAtMilliseconds,
+                            reason: event.reason,
+                            grantRoot: event.grantRoot
+                        )
+                    )
+                    guard let submitter,
+                          let submission = Self.fileChangeApprovalSubmission(callID: event.callID, result: result)
+                    else {
+                        return
+                    }
+                    _ = try? submitter(submission.requestID, threadID, submission.op)
+                }
+            }
+        case let .execApprovalRequest(event):
+            notifications = [
+                markRuntimeApprovalRequested(threadID: threadID)
+            ].compactMap(\.self)
+            let broker = outgoingRequestBroker
+            let submitter = coreOpSubmitter
+            afterNotifications = {
+                Task { [broker, submitter, threadID, turnID, event] in
+                    let result = await broker.requestCommandExecutionApproval(
+                        params: AppServerProtocol.CommandExecutionRequestApprovalParams(
+                            threadID: threadID,
+                            turnID: event.turnID,
+                            itemID: event.callID,
+                            startedAtMilliseconds: event.startedAtMilliseconds,
+                            approvalID: event.approvalID,
+                            reason: event.reason,
+                            networkApprovalContext: event.networkApprovalContext,
+                            command: CommandParser.shlexJoin(event.command),
+                            cwd: event.cwd,
+                            commandActions: event.parsedCmd.map {
+                                Self.commandAction($0, cwd: event.cwd)
+                            },
+                            additionalPermissions: Self.additionalPermissionProfile(event.additionalPermissions),
+                            proposedExecPolicyAmendment: event.proposedExecPolicyAmendment,
+                            proposedNetworkPolicyAmendments: event.proposedNetworkPolicyAmendments,
+                            availableDecisions: event.effectiveAvailableDecisions.compactMap(
+                                Self.commandExecutionApprovalDecision
+                            )
+                        )
+                    )
+                    guard let submitter,
+                          let submission = Self.commandExecutionApprovalSubmission(
+                            callID: event.callID,
+                            approvalID: event.approvalID,
+                            turnID: turnID,
+                            result: result
+                          )
+                    else {
+                        return
+                    }
+                    _ = try? submitter(submission.requestID, threadID, submission.op)
+                }
+            }
+        case .elicitationRequest:
+            notifications = [
+                markRuntimeApprovalRequested(threadID: threadID)
+            ].compactMap(\.self)
+        case let .requestPermissions(event):
+            notifications = [
+                markRuntimeApprovalRequested(threadID: threadID)
+            ].compactMap(\.self)
+            let broker = outgoingRequestBroker
+            let submitter = coreOpSubmitter
+            afterNotifications = {
+                Task { [broker, submitter, threadID, event] in
+                    let result = await broker.requestPermissionsApproval(
+                        params: AppServerProtocol.PermissionsRequestApprovalParams(
+                            threadID: threadID,
+                            turnID: event.turnID,
+                            itemID: event.callID,
+                            startedAtMilliseconds: event.startedAtMilliseconds,
+                            cwd: event.cwd ?? "",
+                            reason: event.reason,
+                            permissions: Self.permissionsProfile(event.permissions)
+                        )
+                    )
+                    guard let submitter,
+                          let submission = Self.permissionsApprovalSubmission(
+                            callID: event.callID,
+                            requestedPermissions: event.permissions,
+                            result: result
+                          )
+                    else {
+                        return
+                    }
+                    _ = try? submitter(submission.requestID, threadID, submission.op)
+                }
+            }
+        case let .requestUserInput(event):
             notifications = [
                 markRuntimeUserInputRequested(threadID: threadID)
             ].compactMap(\.self)
+            let broker = outgoingRequestBroker
+            let submitter = coreOpSubmitter
+            afterNotifications = {
+                Task { [broker, submitter, threadID, turnID, event] in
+                    let result = await broker.requestToolUserInput(
+                        params: AppServerProtocol.ToolRequestUserInputParams(
+                            threadID: threadID,
+                            turnID: event.turnID,
+                            itemID: event.callID,
+                            questions: event.questions
+                        )
+                    )
+                    guard let submitter,
+                          let submission = Self.toolRequestUserInputSubmission(turnID: turnID, result: result)
+                    else {
+                        return
+                    }
+                    _ = try? submitter(submission.requestID, threadID, submission.op)
+                }
+            }
         case let .execCommandBegin(event):
             guard event.source != .unifiedExecInteraction else {
                 notifications = []
@@ -24236,6 +24363,7 @@ final class CodexAppServerMessageProcessor {
             )
         }
         guard !notifications.isEmpty else {
+            afterNotifications?()
             return
         }
         if case let .turnDiff(turnDiff) = event {
@@ -24280,8 +24408,260 @@ final class CodexAppServerMessageProcessor {
         return (requestID, .dynamicToolResponse(id: callID, response: response))
     }
 
+    private static func fileChangeApprovalSubmission(
+        callID: String,
+        result: AppServerOutgoingRequestResult<AppServerProtocol.FileChangeRequestApprovalResponse>
+    ) -> (requestID: RequestID, op: Op)? {
+        let requestID: RequestID
+        let decision: ReviewDecision
+        switch result {
+        case let .success(id, response):
+            requestID = id
+            decision = fileChangeReviewDecision(response.decision)
+        case let .malformedResponse(id):
+            requestID = id
+            decision = .denied
+        case let .requestFailed(id, _, _, data):
+            guard !isTurnTransitionServerRequestError(data) else {
+                return nil
+            }
+            requestID = id
+            decision = .denied
+        case .requestCanceled:
+            return nil
+        }
+        return (requestID, .patchApproval(id: callID, decision: decision))
+    }
+
+    private static func commandExecutionApprovalSubmission(
+        callID: String,
+        approvalID: String?,
+        turnID: String,
+        result: AppServerOutgoingRequestResult<AppServerProtocol.CommandExecutionRequestApprovalResponse>
+    ) -> (requestID: RequestID, op: Op)? {
+        let requestID: RequestID
+        let decision: ReviewDecision
+        switch result {
+        case let .success(id, response):
+            requestID = id
+            decision = commandReviewDecision(response.decision)
+        case let .malformedResponse(id):
+            requestID = id
+            decision = .denied
+        case let .requestFailed(id, _, _, data):
+            guard !isTurnTransitionServerRequestError(data) else {
+                return nil
+            }
+            requestID = id
+            decision = .denied
+        case .requestCanceled:
+            return nil
+        }
+        return (requestID, .execApproval(id: approvalID ?? callID, turnID: turnID, decision: decision))
+    }
+
+    private static func toolRequestUserInputSubmission(
+        turnID: String,
+        result: AppServerOutgoingRequestResult<AppServerProtocol.ToolRequestUserInputResponse>
+    ) -> (requestID: RequestID, op: Op)? {
+        let requestID: RequestID
+        let response: RequestUserInputResponse
+        switch result {
+        case let .success(id, userInputResponse):
+            requestID = id
+            response = RequestUserInputResponse(answers: userInputResponse.answers)
+        case let .malformedResponse(id):
+            requestID = id
+            response = RequestUserInputResponse(answers: [:])
+        case let .requestFailed(id, _, _, data):
+            guard !isTurnTransitionServerRequestError(data) else {
+                return nil
+            }
+            requestID = id
+            response = RequestUserInputResponse(answers: [:])
+        case .requestCanceled:
+            return nil
+        }
+        return (requestID, .userInputAnswer(id: turnID, response: response))
+    }
+
+    private static func permissionsApprovalSubmission(
+        callID: String,
+        requestedPermissions: RequestPermissionProfile,
+        result: AppServerOutgoingRequestResult<AppServerProtocol.PermissionsRequestApprovalResponse>
+    ) -> (requestID: RequestID, op: Op)? {
+        let requestID: RequestID
+        let response: RequestPermissionsResponse
+        switch result {
+        case let .success(id, permissionsResponse):
+            requestID = id
+            response = requestPermissionsResponse(
+                requestedPermissions: requestedPermissions,
+                permissionsResponse: permissionsResponse
+            )
+        case let .malformedResponse(id):
+            requestID = id
+            response = RequestPermissionsResponse(permissions: RequestPermissionProfile())
+        case let .requestFailed(id, _, _, data):
+            guard !isTurnTransitionServerRequestError(data) else {
+                return nil
+            }
+            requestID = id
+            response = RequestPermissionsResponse(permissions: RequestPermissionProfile())
+        case .requestCanceled:
+            return nil
+        }
+        return (requestID, .requestPermissionsResponse(id: callID, response: response))
+    }
+
     private static func dynamicToolFallbackResponse(_ message: String) -> DynamicToolResponse {
         DynamicToolResponse(contentItems: [.text(message)], success: false)
+    }
+
+    private static func fileChangeReviewDecision(
+        _ decision: AppServerProtocol.FileChangeApprovalDecision
+    ) -> ReviewDecision {
+        switch decision {
+        case .accept:
+            return .approved
+        case .acceptForSession:
+            return .approvedForSession
+        case .decline:
+            return .denied
+        case .cancel:
+            return .abort
+        }
+    }
+
+    private static func commandReviewDecision(
+        _ decision: AppServerProtocol.CommandExecutionApprovalDecision
+    ) -> ReviewDecision {
+        switch decision {
+        case .accept:
+            return .approved
+        case .acceptForSession:
+            return .approvedForSession
+        case let .acceptWithExecpolicyAmendment(amendment):
+            return .approvedExecpolicyAmendment(proposedExecpolicyAmendment: amendment)
+        case let .applyNetworkPolicyAmendment(amendment):
+            return .networkPolicyAmendment(networkPolicyAmendment: amendment)
+        case .decline:
+            return .denied
+        case .cancel:
+            return .abort
+        }
+    }
+
+    private static func commandExecutionApprovalDecision(
+        _ decision: ReviewDecision
+    ) -> AppServerProtocol.CommandExecutionApprovalDecision? {
+        switch decision {
+        case .approved:
+            return .accept
+        case let .approvedExecpolicyAmendment(amendment):
+            return .acceptWithExecpolicyAmendment(execpolicyAmendment: amendment)
+        case .approvedForSession:
+            return .acceptForSession
+        case let .networkPolicyAmendment(amendment):
+            return .applyNetworkPolicyAmendment(networkPolicyAmendment: amendment)
+        case .denied:
+            return .decline
+        case .abort:
+            return .cancel
+        case .timedOut:
+            return nil
+        }
+    }
+
+    private static func requestPermissionsResponse(
+        requestedPermissions: RequestPermissionProfile,
+        permissionsResponse: AppServerProtocol.PermissionsRequestApprovalResponse
+    ) -> RequestPermissionsResponse {
+        let strictAutoReview = permissionsResponse.strictAutoReview ?? false
+        guard !(strictAutoReview && permissionsResponse.scope == .session) else {
+            return RequestPermissionsResponse(permissions: RequestPermissionProfile())
+        }
+        return RequestPermissionsResponse(
+            permissions: intersectPermissionProfiles(
+                requestedPermissions: requestedPermissions,
+                grantedPermissions: RequestPermissionProfile(
+                    network: permissionsResponse.permissions.network,
+                    fileSystem: permissionsResponse.permissions.fileSystem
+                )
+            ),
+            scope: permissionsResponse.scope,
+            strictAutoReview: strictAutoReview
+        )
+    }
+
+    private static func intersectPermissionProfiles(
+        requestedPermissions: RequestPermissionProfile,
+        grantedPermissions: RequestPermissionProfile
+    ) -> RequestPermissionProfile {
+        RequestPermissionProfile(
+            network: requestedPermissions.network == nil ? nil : grantedPermissions.network,
+            fileSystem: intersectFileSystemPermissions(
+                requestedPermissions.fileSystem,
+                grantedPermissions.fileSystem
+            )
+        )
+    }
+
+    private static func intersectFileSystemPermissions(
+        _ requested: FileSystemPermissions?,
+        _ granted: FileSystemPermissions?
+    ) -> FileSystemPermissions? {
+        guard let requested, let granted else {
+            return nil
+        }
+        let entries = granted.entries.filter { grantedEntry in
+            requested.entries.contains(grantedEntry)
+        }
+        let globScanMaxDepth: Int?
+        if let requestedDepth = requested.globScanMaxDepth, let grantedDepth = granted.globScanMaxDepth {
+            globScanMaxDepth = min(requestedDepth, grantedDepth)
+        } else {
+            globScanMaxDepth = requested.globScanMaxDepth ?? granted.globScanMaxDepth
+        }
+        guard !entries.isEmpty || globScanMaxDepth != nil else {
+            return nil
+        }
+        return FileSystemPermissions(entries: entries, globScanMaxDepth: globScanMaxDepth)
+    }
+
+    private static func permissionsProfile(
+        _ permissions: RequestPermissionProfile
+    ) -> AppServerProtocol.PermissionsProfile {
+        AppServerProtocol.PermissionsProfile(
+            network: permissions.network,
+            fileSystem: permissions.fileSystem
+        )
+    }
+
+    private static func additionalPermissionProfile(
+        _ permissions: RequestPermissionProfile?
+    ) -> AppServerProtocol.AdditionalPermissionProfile? {
+        guard let permissions else {
+            return nil
+        }
+        return AppServerProtocol.AdditionalPermissionProfile(
+            network: permissions.network,
+            fileSystem: permissions.fileSystem
+        )
+    }
+
+    private static func commandAction(_ command: ParsedCommand, cwd: String) -> AppServerProtocol.CommandAction {
+        switch command {
+        case let .read(cmd, name, path):
+            let resolvedPath = path.hasPrefix("/") ? path : (cwd as NSString).appendingPathComponent(path)
+            return .read(command: cmd, name: name, path: resolvedPath)
+        case let .listFiles(cmd, path):
+            return .listFiles(command: cmd, path: path)
+        case let .search(cmd, query, path):
+            return .search(command: cmd, query: query, path: path)
+        case let .unknown(cmd):
+            return .unknown(command: cmd)
+        }
     }
 
     private static func isTurnTransitionServerRequestError(_ data: JSONValue?) -> Bool {
@@ -24551,7 +24931,8 @@ final class CodexAppServerMessageProcessor {
             }
             return true
         }
-        if object["method"] as? String == AppServerProtocol.DynamicToolCallParams.method,
+        if let method = object["method"] as? String,
+           CodexAppServer.clientResponseMethods.contains(method),
            let response = object["response"] {
             if JSONSerialization.isValidJSONObject(["response": response]),
                let responseData = try? JSONSerialization.data(withJSONObject: response) {

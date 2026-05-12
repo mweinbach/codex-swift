@@ -27,6 +27,13 @@ enum AppServerDynamicToolCallRequestResult: Equatable, Sendable {
     case requestCanceled
 }
 
+enum AppServerOutgoingRequestResult<Response: Equatable & Sendable>: Equatable, Sendable {
+    case success(requestID: RequestID, response: Response)
+    case malformedResponse(requestID: RequestID)
+    case requestFailed(requestID: RequestID, code: Int64?, message: String?, data: JSONValue?)
+    case requestCanceled
+}
+
 actor AppServerThreadStateManager {
     private var liveConnections: [AppServerConnectionID: AppServerConnectionCapabilities] = [:]
     private var threadConnectionIDs: [String: Set<AppServerConnectionID>] = [:]
@@ -188,6 +195,10 @@ actor AppServerOutgoingRequestBroker {
     private var pendingAttestationRequests: [String: CheckedContinuation<AppServerAttestationRequestResult, Never>] = [:]
     private var pendingExternalAuthRefreshRequests: [String: CheckedContinuation<AppServerExternalAuthRefreshRequestResult, Never>] = [:]
     private var pendingDynamicToolCallRequests: [String: CheckedContinuation<AppServerDynamicToolCallRequestResult, Never>] = [:]
+    private var pendingFileChangeApprovalRequests: [String: CheckedContinuation<AppServerOutgoingRequestResult<AppServerProtocol.FileChangeRequestApprovalResponse>, Never>] = [:]
+    private var pendingCommandExecutionApprovalRequests: [String: CheckedContinuation<AppServerOutgoingRequestResult<AppServerProtocol.CommandExecutionRequestApprovalResponse>, Never>] = [:]
+    private var pendingToolRequestUserInputRequests: [String: CheckedContinuation<AppServerOutgoingRequestResult<AppServerProtocol.ToolRequestUserInputResponse>, Never>] = [:]
+    private var pendingPermissionsApprovalRequests: [String: CheckedContinuation<AppServerOutgoingRequestResult<AppServerProtocol.PermissionsRequestApprovalResponse>, Never>] = [:]
 
     init(notificationSink: AppServerNotificationSink?) {
         self.notificationSink = notificationSink
@@ -281,11 +292,159 @@ actor AppServerOutgoingRequestBroker {
         }
     }
 
+    func requestFileChangeApproval(
+        params: AppServerProtocol.FileChangeRequestApprovalParams
+    ) async -> AppServerOutgoingRequestResult<AppServerProtocol.FileChangeRequestApprovalResponse> {
+        guard let notificationSink else {
+            return .requestCanceled
+        }
+
+        let requestID = RequestID.integer(nextRequestID)
+        nextRequestID += 1
+        let request = AppServerProtocol.ServerRequest.fileChangeRequestApproval(requestID: requestID, params: params)
+        guard let data = try? JSONEncoder().encode(request) else {
+            return .malformedResponse(requestID: requestID)
+        }
+
+        let key = AppServerRequestIDCodec.key(for: requestID)
+        return await withCheckedContinuation { continuation in
+            pendingFileChangeApprovalRequests[key] = continuation
+            Task {
+                await notificationSink(data)
+            }
+        }
+    }
+
+    func requestCommandExecutionApproval(
+        params: AppServerProtocol.CommandExecutionRequestApprovalParams
+    ) async -> AppServerOutgoingRequestResult<AppServerProtocol.CommandExecutionRequestApprovalResponse> {
+        guard let notificationSink else {
+            return .requestCanceled
+        }
+
+        let requestID = RequestID.integer(nextRequestID)
+        nextRequestID += 1
+        let request = AppServerProtocol.ServerRequest.commandExecutionRequestApproval(requestID: requestID, params: params)
+        guard let data = try? JSONEncoder().encode(request) else {
+            return .malformedResponse(requestID: requestID)
+        }
+
+        let key = AppServerRequestIDCodec.key(for: requestID)
+        return await withCheckedContinuation { continuation in
+            pendingCommandExecutionApprovalRequests[key] = continuation
+            Task {
+                await notificationSink(data)
+            }
+        }
+    }
+
+    func requestToolUserInput(
+        params: AppServerProtocol.ToolRequestUserInputParams
+    ) async -> AppServerOutgoingRequestResult<AppServerProtocol.ToolRequestUserInputResponse> {
+        guard let notificationSink else {
+            return .requestCanceled
+        }
+
+        let requestID = RequestID.integer(nextRequestID)
+        nextRequestID += 1
+        let request = AppServerProtocol.ServerRequest.toolRequestUserInput(requestID: requestID, params: params)
+        guard let data = try? JSONEncoder().encode(request) else {
+            return .malformedResponse(requestID: requestID)
+        }
+
+        let key = AppServerRequestIDCodec.key(for: requestID)
+        return await withCheckedContinuation { continuation in
+            pendingToolRequestUserInputRequests[key] = continuation
+            Task {
+                await notificationSink(data)
+            }
+        }
+    }
+
+    func requestPermissionsApproval(
+        params: AppServerProtocol.PermissionsRequestApprovalParams
+    ) async -> AppServerOutgoingRequestResult<AppServerProtocol.PermissionsRequestApprovalResponse> {
+        guard let notificationSink else {
+            return .requestCanceled
+        }
+
+        let requestID = RequestID.integer(nextRequestID)
+        nextRequestID += 1
+        let request = AppServerProtocol.ServerRequest.permissionsRequestApproval(requestID: requestID, params: params)
+        guard let data = try? JSONEncoder().encode(request) else {
+            return .malformedResponse(requestID: requestID)
+        }
+
+        let key = AppServerRequestIDCodec.key(for: requestID)
+        return await withCheckedContinuation { continuation in
+            pendingPermissionsApprovalRequests[key] = continuation
+            Task {
+                await notificationSink(data)
+            }
+        }
+    }
+
     func receiveResponse(id: RequestID, resultData: Data) {
         let key = AppServerRequestIDCodec.key(for: id)
         if pendingDynamicToolCallRequests[key] != nil {
             let decoded = try? JSONDecoder().decode(AppServerProtocol.DynamicToolCallResponse.self, from: resultData)
             resolveDynamicToolCallRequest(
+                key: key,
+                result: decoded
+                    .map { .success(requestID: id, response: $0) }
+                    ?? .malformedResponse(requestID: id)
+            )
+            return
+        }
+
+        if pendingFileChangeApprovalRequests[key] != nil {
+            let decoded = try? JSONDecoder().decode(
+                AppServerProtocol.FileChangeRequestApprovalResponse.self,
+                from: resultData
+            )
+            resolveFileChangeApprovalRequest(
+                key: key,
+                result: decoded
+                    .map { .success(requestID: id, response: $0) }
+                    ?? .malformedResponse(requestID: id)
+            )
+            return
+        }
+
+        if pendingCommandExecutionApprovalRequests[key] != nil {
+            let decoded = try? JSONDecoder().decode(
+                AppServerProtocol.CommandExecutionRequestApprovalResponse.self,
+                from: resultData
+            )
+            resolveCommandExecutionApprovalRequest(
+                key: key,
+                result: decoded
+                    .map { .success(requestID: id, response: $0) }
+                    ?? .malformedResponse(requestID: id)
+            )
+            return
+        }
+
+        if pendingToolRequestUserInputRequests[key] != nil {
+            let decoded = try? JSONDecoder().decode(
+                AppServerProtocol.ToolRequestUserInputResponse.self,
+                from: resultData
+            )
+            resolveToolRequestUserInputRequest(
+                key: key,
+                result: decoded
+                    .map { .success(requestID: id, response: $0) }
+                    ?? .malformedResponse(requestID: id)
+            )
+            return
+        }
+
+        if pendingPermissionsApprovalRequests[key] != nil {
+            let decoded = try? JSONDecoder().decode(
+                AppServerProtocol.PermissionsRequestApprovalResponse.self,
+                from: resultData
+            )
+            resolvePermissionsApprovalRequest(
                 key: key,
                 result: decoded
                     .map { .success(requestID: id, response: $0) }
@@ -314,6 +473,14 @@ actor AppServerOutgoingRequestBroker {
         let key = AppServerRequestIDCodec.key(for: id)
         if pendingDynamicToolCallRequests[key] != nil {
             resolveDynamicToolCallRequest(key: key, result: .malformedResponse(requestID: id))
+        } else if pendingFileChangeApprovalRequests[key] != nil {
+            resolveFileChangeApprovalRequest(key: key, result: .malformedResponse(requestID: id))
+        } else if pendingCommandExecutionApprovalRequests[key] != nil {
+            resolveCommandExecutionApprovalRequest(key: key, result: .malformedResponse(requestID: id))
+        } else if pendingToolRequestUserInputRequests[key] != nil {
+            resolveToolRequestUserInputRequest(key: key, result: .malformedResponse(requestID: id))
+        } else if pendingPermissionsApprovalRequests[key] != nil {
+            resolvePermissionsApprovalRequest(key: key, result: .malformedResponse(requestID: id))
         } else if pendingExternalAuthRefreshRequests[key] != nil {
             resolveExternalAuthRefreshRequest(key: key, result: .malformedResponse)
         } else {
@@ -328,6 +495,26 @@ actor AppServerOutgoingRequestBroker {
                 key: key,
                 result: .requestFailed(requestID: id, code: code, message: message, data: data)
             )
+        } else if pendingFileChangeApprovalRequests[key] != nil {
+            resolveFileChangeApprovalRequest(
+                key: key,
+                result: .requestFailed(requestID: id, code: code, message: message, data: data)
+            )
+        } else if pendingCommandExecutionApprovalRequests[key] != nil {
+            resolveCommandExecutionApprovalRequest(
+                key: key,
+                result: .requestFailed(requestID: id, code: code, message: message, data: data)
+            )
+        } else if pendingToolRequestUserInputRequests[key] != nil {
+            resolveToolRequestUserInputRequest(
+                key: key,
+                result: .requestFailed(requestID: id, code: code, message: message, data: data)
+            )
+        } else if pendingPermissionsApprovalRequests[key] != nil {
+            resolvePermissionsApprovalRequest(
+                key: key,
+                result: .requestFailed(requestID: id, code: code, message: message, data: data)
+            )
         } else if pendingExternalAuthRefreshRequests[key] != nil {
             resolveExternalAuthRefreshRequest(key: key, result: .requestFailed(code: code, message: message))
         } else {
@@ -339,6 +526,14 @@ actor AppServerOutgoingRequestBroker {
         let key = AppServerRequestIDCodec.key(for: id)
         if pendingDynamicToolCallRequests[key] != nil {
             resolveDynamicToolCallRequest(key: key, result: .requestCanceled)
+        } else if pendingFileChangeApprovalRequests[key] != nil {
+            resolveFileChangeApprovalRequest(key: key, result: .requestCanceled)
+        } else if pendingCommandExecutionApprovalRequests[key] != nil {
+            resolveCommandExecutionApprovalRequest(key: key, result: .requestCanceled)
+        } else if pendingToolRequestUserInputRequests[key] != nil {
+            resolveToolRequestUserInputRequest(key: key, result: .requestCanceled)
+        } else if pendingPermissionsApprovalRequests[key] != nil {
+            resolvePermissionsApprovalRequest(key: key, result: .requestCanceled)
         } else if pendingExternalAuthRefreshRequests[key] != nil {
             resolveExternalAuthRefreshRequest(key: key, result: .requestCanceled)
         } else {
@@ -362,6 +557,46 @@ actor AppServerOutgoingRequestBroker {
 
     private func resolveDynamicToolCallRequest(key: String, result: AppServerDynamicToolCallRequestResult) {
         guard let continuation = pendingDynamicToolCallRequests.removeValue(forKey: key) else {
+            return
+        }
+        continuation.resume(returning: result)
+    }
+
+    private func resolveFileChangeApprovalRequest(
+        key: String,
+        result: AppServerOutgoingRequestResult<AppServerProtocol.FileChangeRequestApprovalResponse>
+    ) {
+        guard let continuation = pendingFileChangeApprovalRequests.removeValue(forKey: key) else {
+            return
+        }
+        continuation.resume(returning: result)
+    }
+
+    private func resolveCommandExecutionApprovalRequest(
+        key: String,
+        result: AppServerOutgoingRequestResult<AppServerProtocol.CommandExecutionRequestApprovalResponse>
+    ) {
+        guard let continuation = pendingCommandExecutionApprovalRequests.removeValue(forKey: key) else {
+            return
+        }
+        continuation.resume(returning: result)
+    }
+
+    private func resolveToolRequestUserInputRequest(
+        key: String,
+        result: AppServerOutgoingRequestResult<AppServerProtocol.ToolRequestUserInputResponse>
+    ) {
+        guard let continuation = pendingToolRequestUserInputRequests.removeValue(forKey: key) else {
+            return
+        }
+        continuation.resume(returning: result)
+    }
+
+    private func resolvePermissionsApprovalRequest(
+        key: String,
+        result: AppServerOutgoingRequestResult<AppServerProtocol.PermissionsRequestApprovalResponse>
+    ) {
+        guard let continuation = pendingPermissionsApprovalRequests.removeValue(forKey: key) else {
             return
         }
         continuation.resume(returning: result)
