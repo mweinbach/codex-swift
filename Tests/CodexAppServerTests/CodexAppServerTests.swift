@@ -16021,6 +16021,68 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(params["environmentId"] is NSNull)
     }
 
+    func testExperimentalFeatureEnablementSetBroadcastsRemoteControlStatusLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            remoteControlStatusSnapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot(
+                status: .connected,
+                installationID: "install-123",
+                environmentID: "env-456"
+            )
+        ))
+        _ = try decodeMessages(processor.processLine(Data(
+            #"{"id":0,"method":"initialize","params":{"clientInfo":{"name":"test","version":"0"}}}"#.utf8
+        )))
+
+        let disabled = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"experimentalFeature/enablement/set","params":{"enablement":{"remote_control":false}}}"#.utf8
+        )))
+
+        XCTAssertEqual(disabled.count, 2)
+        XCTAssertEqual(disabled[0]["id"] as? Int, 1)
+        let disabledParams = try XCTUnwrap(disabled[1]["params"] as? [String: Any])
+        XCTAssertEqual(disabled[1]["method"] as? String, "remoteControl/status/changed")
+        XCTAssertEqual(disabledParams["status"] as? String, "disabled")
+        XCTAssertEqual(disabledParams["installationId"] as? String, "install-123")
+        XCTAssertTrue(disabledParams["environmentId"] is NSNull)
+
+        let enabled = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"experimentalFeature/enablement/set","params":{"enablement":{"remote_control":true}}}"#.utf8
+        )))
+
+        XCTAssertEqual(enabled.count, 2)
+        XCTAssertEqual(enabled[0]["id"] as? Int, 2)
+        let enabledParams = try XCTUnwrap(enabled[1]["params"] as? [String: Any])
+        XCTAssertEqual(enabled[1]["method"] as? String, "remoteControl/status/changed")
+        XCTAssertEqual(enabledParams["status"] as? String, "connecting")
+        XCTAssertEqual(enabledParams["installationId"] as? String, "install-123")
+        XCTAssertEqual(enabledParams["environmentId"] as? String, "env-456")
+    }
+
+    func testExperimentalFeatureEnablementSetRemoteControlStatusRespectsOptOutLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            remoteControlStatusSnapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot(
+                status: .connected,
+                installationID: "install-123",
+                environmentID: "env-456"
+            )
+        ))
+        _ = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"test","version":"0"},"capabilities":{"optOutNotificationMethods":["remoteControl/status/changed"]}}}"#.utf8
+        )))
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"experimentalFeature/enablement/set","params":{"enablement":{"remote_control":false}}}"#.utf8
+        )))
+
+        XCTAssertEqual(messages.count, 1)
+        XCTAssertEqual(messages[0]["id"] as? Int, 2)
+        XCTAssertNotNil(messages[0]["result"] as? [String: Any])
+    }
+
     func testInitializeEmitsConfigWarningsWithRustShape() throws {
         let temp = try TemporaryDirectory()
         let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(

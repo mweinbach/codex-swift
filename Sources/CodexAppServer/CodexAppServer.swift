@@ -22868,6 +22868,8 @@ final class CodexAppServerMessageProcessor {
     private let activeChatGPTLogins = AppServerChatGPTLoginRegistry()
     private let activeDeviceCodeLogins = AppServerCancellableLoginRegistry()
     private var runtimeFeatureEnablement: [String: Bool] = [:]
+    private var currentRemoteControlStatusSnapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot?
+    private var lastRemoteControlEnvironmentID: String?
     private var loadedThreadAppsFeatureEnabled: [String: Bool] = [:]
     private var cachedAppList: [[String: Any]]?
     private var lastGlobalAppListRefreshFailed = false
@@ -22905,6 +22907,8 @@ final class CodexAppServerMessageProcessor {
         self.threadStateManager = threadStateManager
         self.outgoingRequestBroker = outgoingRequestBroker ?? AppServerOutgoingRequestBroker(notificationSink: notificationSink)
         self.userAgent = CodexAppServer.buildUserAgent(configuration: configuration, params: nil)
+        self.currentRemoteControlStatusSnapshot = configuration.remoteControlStatusSnapshot
+        self.lastRemoteControlEnvironmentID = configuration.remoteControlStatusSnapshot?.environmentID
     }
 
     deinit {
@@ -22967,6 +22971,38 @@ final class CodexAppServerMessageProcessor {
 
     private func filterOptedOutNotifications(_ notifications: [[String: Any]]) -> [[String: Any]] {
         notifications.filter { acceptsNotification($0) }
+    }
+
+    private func remoteControlStatusNotification(
+        applyingFeatureEnablement enablement: [String: Bool]
+    ) -> [String: Any]? {
+        guard let enabled = enablement["remote_control"],
+              let snapshot = currentRemoteControlStatusSnapshot
+        else {
+            return nil
+        }
+        if let environmentID = snapshot.environmentID {
+            lastRemoteControlEnvironmentID = environmentID
+        }
+        let nextSnapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot
+        if enabled {
+            nextSnapshot = CodexAppServerConfiguration.RemoteControlStatusSnapshot(
+                status: .connecting,
+                installationID: snapshot.installationID,
+                environmentID: lastRemoteControlEnvironmentID
+            )
+        } else {
+            nextSnapshot = CodexAppServerConfiguration.RemoteControlStatusSnapshot(
+                status: .disabled,
+                installationID: snapshot.installationID,
+                environmentID: nil
+            )
+        }
+        guard nextSnapshot != snapshot else {
+            return nil
+        }
+        currentRemoteControlStatusSnapshot = nextSnapshot
+        return CodexAppServer.remoteControlStatusChangedNotification(snapshot: nextSnapshot)
     }
 
     private func initializeConfigWarningNotifications() -> [[String: Any]] {
@@ -24203,7 +24239,7 @@ final class CodexAppServerMessageProcessor {
                     "platformOs": CodexAppServer.platformOS
                 ])
                 notifications.append(contentsOf: initializeConfigWarningNotifications())
-                if let snapshot = configuration.remoteControlStatusSnapshot {
+                if let snapshot = currentRemoteControlStatusSnapshot {
                     notifications.append(CodexAppServer.remoteControlStatusChangedNotification(snapshot: snapshot))
                 }
             }
@@ -24934,6 +24970,10 @@ final class CodexAppServerMessageProcessor {
                         ) {
                             notifications.append(notification)
                         }
+                    }
+                    if let enablement = (response?["result"] as? [String: Any])?["enablement"] as? [String: Bool],
+                       let notification = remoteControlStatusNotification(applyingFeatureEnablement: enablement) {
+                        notifications.append(notification)
                     }
                 case "collaborationMode/list":
                     try CodexAppServer.requireExperimentalAPI(
