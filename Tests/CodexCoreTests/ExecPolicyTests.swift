@@ -1988,6 +1988,43 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/mode-7/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkIntegerBitwiseOperators() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        READ = 1 << 2
+        WRITE = 1 << 1
+        EXECUTE = 1
+        MASK = (1 << 3) - 1
+        MODE = (READ | WRITE | EXECUTE) & MASK
+        TOGGLED = MODE ^ WRITE
+        HOST_ID = (TOGGLED << 1) >> 1
+        AUGMENTED = 1
+        AUGMENTED <<= 3
+        AUGMENTED >>= 1
+        AUGMENTED &= 6
+        AUGMENTED ^= 1
+        AUGMENTED |= 2
+
+        prefix_rule([TOOL, "mode-" + str(MODE), "toggle-" + str(TOGGLED)], "allow", justification = "bits " + str(HOST_ID + AUGMENTED))
+
+        if MODE == 7 and TOGGLED == 5 and AUGMENTED == 7:
+            network_rule("api" + str(HOST_ID) + ".github.com", "https", "allow")
+            host_executable(TOOL, ["/opt/bits-" + str(AUGMENTED) + "/" + TOOL])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("mode-7"), .single("toggle-5")]),
+                decision: .allow,
+                justification: "bits 12"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api5.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/bits-7/git"]])
+    }
+
     func testParserEvaluatesRustStarlarkCollectionRemovalMethods() throws {
         let policy = try parsePolicy("""
         COMMANDS = [

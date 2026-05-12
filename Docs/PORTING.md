@@ -862,7 +862,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/execpolicy/src/parser.rs` Starlark unsupported list ordering methods
   - Corrected Swift execpolicy parsing to match Rust Starlark's rejection of list `.sort()` and `.reverse()` methods, and aligned list `dir(...)`/`hasattr(...)` results with Rust's supported `append`, `clear`, `extend`, `index`, `insert`, `pop`, and `remove` surface.
 - `codex-rs/execpolicy/src/parser.rs` Starlark augmented assignments
-  - Added Swift execpolicy parser support for identifier-target `+=`, `-=`, `*=`, `/=`, `//=`, `%=`, and `|=` statements using the same supported Starlark operator semantics as expressions, covering incrementally updated numbers, strings, lists, tuple-backed lists, and dictionaries used by rules, network hosts, and host executable paths.
+  - Added Swift execpolicy parser support for identifier-target `+=`, `-=`, `*=`, `/=`, `//=`, `%=`, `|=`, `&=`, `^=`, `<<=`, and `>>=` statements using the same supported Starlark operator semantics as expressions, covering incrementally updated numbers, strings, lists, tuple-backed lists, dictionaries, and bit flags used by rules, network hosts, and host executable paths.
 - `codex-rs/execpolicy/src/parser.rs` Starlark indexed assignments
   - Added Swift execpolicy parser support for assigning through top-level list and dictionary constants with supported `NAME[index] = value` and nested `NAME[key][key] = value` forms, including string-key table insert/replacement and positive or negative list-index replacement.
 - `codex-rs/execpolicy/src/parser.rs` Starlark delete statements
@@ -939,6 +939,8 @@ Source baseline inspected for this scaffold:
   - Added Swift execpolicy parser support for integer and floating-point `+` and `-` expressions while preserving existing string/list `+` concatenation and supporting unary negative numeric literals or scoped values, covering computed `range(...)` arguments and array indexes.
 - `codex-rs/execpolicy/src/parser.rs` Starlark numeric multiplicative expressions
   - Added Swift execpolicy parser support for numeric `*`, `/`, `//`, and `%` expressions, including Starlark-style floor division/modulo for integers and computed range, index, and condition expressions.
+- `codex-rs/execpolicy/src/parser.rs` Starlark numeric bitwise expressions
+  - Added Swift execpolicy parser support for integer `&`, `^`, `<<`, and `>>` expressions, preserving Starlark operator precedence around additive/multiplicative expressions and covering numeric flag composition in generated prefix rules, network hosts, and host executable paths.
 - `codex-rs/execpolicy/src/parser.rs` Starlark sequence repetition
   - Added Swift execpolicy parser support for Starlark string and list repetition with `*`, including left- and right-hand integer counts, empty results for non-positive counts, and use in generated prefix rules, examples, network hosts, and executable paths.
 - `codex-rs/execpolicy/src/parser.rs` Starlark sequence builtins and assignment destructuring

@@ -2180,6 +2180,14 @@ public final class PolicyParser {
             return try evaluateStarlarkModulo(lhs, rhs, expression: expression)
         case "|=":
             return try evaluateStarlarkUnion(lhs, rhs, expression: expression)
+        case "&=":
+            return try evaluateStarlarkIntegerBitwise(lhs, rhs, operatorText: "&", expression: expression)
+        case "^=":
+            return try evaluateStarlarkIntegerBitwise(lhs, rhs, operatorText: "^", expression: expression)
+        case "<<=":
+            return try evaluateStarlarkIntegerShift(lhs, rhs, operatorText: "<<", expression: expression)
+        case ">>=":
+            return try evaluateStarlarkIntegerShift(lhs, rhs, operatorText: ">>", expression: expression)
         default:
             throw ConfigOverrideError.invalidLiteral(expression)
         }
@@ -2628,7 +2636,7 @@ public final class PolicyParser {
                 parenDepth += 1
             case ")":
                 parenDepth -= 1
-            case "+", "-", "*", "/", "%", "|":
+            case "+", "-", "*", "/", "%", "|", "&", "^", "<", ">":
                 guard squareDepth == 0 && braceDepth == 0 && parenDepth == 0 else {
                     break
                 }
@@ -2641,7 +2649,12 @@ public final class PolicyParser {
                     if equalsIndex < text.endIndex, text[equalsIndex] == "=" {
                         return ("//=", index..<text.index(after: equalsIndex))
                     }
-                } else if text[nextIndex] == "=" {
+                } else if (character == "<" || character == ">"), text[nextIndex] == character {
+                    let equalsIndex = text.index(after: nextIndex)
+                    if equalsIndex < text.endIndex, text[equalsIndex] == "=" {
+                        return ("\(character)\(character)=", index..<text.index(after: equalsIndex))
+                    }
+                } else if character != "<", character != ">", text[nextIndex] == "=" {
                     return ("\(character)=", index..<text.index(after: nextIndex))
                 }
             default:
@@ -2713,12 +2726,21 @@ public final class PolicyParser {
         ) {
             return boolean
         }
-        if let dictionaryUnion = try parseStarlarkDictionaryUnionExpression(
+        if let bitwise = try parseStarlarkBitwiseOrExpression(
             trimmed,
             constants: constants,
             functions: functions
         ) {
-            return dictionaryUnion
+            return bitwise
+        }
+        if let bitwise = try parseStarlarkBitwiseXorExpression(trimmed, constants: constants, functions: functions) {
+            return bitwise
+        }
+        if let bitwise = try parseStarlarkBitwiseAndExpression(trimmed, constants: constants, functions: functions) {
+            return bitwise
+        }
+        if let shift = try parseStarlarkShiftExpression(trimmed, constants: constants, functions: functions) {
+            return shift
         }
         if let additive = try parseStarlarkAdditiveExpression(trimmed, constants: constants, functions: functions) {
             return additive
@@ -6482,7 +6504,39 @@ public final class PolicyParser {
         in text: String,
         startingAt start: String.Index? = nil
     ) -> Range<String.Index>? {
-        topLevelTokenRange(operatorText, in: text, startingAt: start, requiresIdentifierBoundaries: false)
+        var searchStart = start
+        while let range = topLevelTokenRange(
+            operatorText,
+            in: text,
+            startingAt: searchStart,
+            requiresIdentifierBoundaries: false
+        ) {
+            guard !isShiftTokenPart(range, operatorText: operatorText, in: text) else {
+                searchStart = range.upperBound
+                continue
+            }
+            return range
+        }
+        return nil
+    }
+
+    private static func isShiftTokenPart(
+        _ range: Range<String.Index>,
+        operatorText: String,
+        in text: String
+    ) -> Bool {
+        guard operatorText == "<" || operatorText == ">" else {
+            return false
+        }
+        if range.lowerBound > text.startIndex,
+           text[text.index(before: range.lowerBound)] == Character(operatorText) {
+            return true
+        }
+        if range.upperBound < text.endIndex,
+           text[range.upperBound] == Character(operatorText) {
+            return true
+        }
+        return false
     }
 
     private static func topLevelTokenRange(
@@ -6805,12 +6859,12 @@ public final class PolicyParser {
         return result
     }
 
-    private static func parseStarlarkDictionaryUnionExpression(
+    private static func parseStarlarkBitwiseOrExpression(
         _ text: String,
         constants: [String: ConfigValue],
         functions: [String: StarlarkFunction]
     ) throws -> ConfigValue? {
-        let pieces = splitTopLevelDictionaryUnionExpression(text)
+        let pieces = splitTopLevelBitwiseExpression(text, operators: ["|"])
         guard pieces.count > 1 else {
             return nil
         }
@@ -6830,6 +6884,93 @@ public final class PolicyParser {
             }
             let next = try parsePolicyLiteral(piece.text, constants: constants, functions: functions)
             result = try evaluateStarlarkUnion(result, next, expression: text)
+        }
+        return result
+    }
+
+    private static func parseStarlarkBitwiseXorExpression(
+        _ text: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue? {
+        let pieces = splitTopLevelBitwiseExpression(text, operators: ["^"])
+        guard pieces.count > 1 else {
+            return nil
+        }
+        guard let first = pieces.first,
+              first.operator == nil,
+              !first.text.isEmpty
+        else {
+            throw ConfigOverrideError.invalidLiteral(text)
+        }
+
+        var result = try parsePolicyLiteral(first.text, constants: constants, functions: functions)
+        for piece in pieces.dropFirst() {
+            guard piece.operator == "^",
+                  !piece.text.isEmpty
+            else {
+                throw ConfigOverrideError.invalidLiteral(text)
+            }
+            let next = try parsePolicyLiteral(piece.text, constants: constants, functions: functions)
+            result = try evaluateStarlarkIntegerBitwise(result, next, operatorText: "^", expression: text)
+        }
+        return result
+    }
+
+    private static func parseStarlarkBitwiseAndExpression(
+        _ text: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue? {
+        let pieces = splitTopLevelBitwiseExpression(text, operators: ["&"])
+        guard pieces.count > 1 else {
+            return nil
+        }
+        guard let first = pieces.first,
+              first.operator == nil,
+              !first.text.isEmpty
+        else {
+            throw ConfigOverrideError.invalidLiteral(text)
+        }
+
+        var result = try parsePolicyLiteral(first.text, constants: constants, functions: functions)
+        for piece in pieces.dropFirst() {
+            guard piece.operator == "&",
+                  !piece.text.isEmpty
+            else {
+                throw ConfigOverrideError.invalidLiteral(text)
+            }
+            let next = try parsePolicyLiteral(piece.text, constants: constants, functions: functions)
+            result = try evaluateStarlarkIntegerBitwise(result, next, operatorText: "&", expression: text)
+        }
+        return result
+    }
+
+    private static func parseStarlarkShiftExpression(
+        _ text: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue? {
+        let pieces = splitTopLevelBitwiseExpression(text, operators: ["<<", ">>"])
+        guard pieces.count > 1 else {
+            return nil
+        }
+        guard let first = pieces.first,
+              first.operator == nil,
+              !first.text.isEmpty
+        else {
+            throw ConfigOverrideError.invalidLiteral(text)
+        }
+
+        var result = try parsePolicyLiteral(first.text, constants: constants, functions: functions)
+        for piece in pieces.dropFirst() {
+            guard let operatorText = piece.operator,
+                  !piece.text.isEmpty
+            else {
+                throw ConfigOverrideError.invalidLiteral(text)
+            }
+            let next = try parsePolicyLiteral(piece.text, constants: constants, functions: functions)
+            result = try evaluateStarlarkIntegerShift(result, next, operatorText: operatorText, expression: text)
         }
         return result
     }
@@ -6956,6 +7097,58 @@ public final class PolicyParser {
             return .table(lhsItems)
         case let (.integer(lhs), .integer(rhs)):
             return .integer(lhs | rhs)
+        default:
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+    }
+
+    private static func evaluateStarlarkIntegerBitwise(
+        _ lhs: ConfigValue,
+        _ rhs: ConfigValue,
+        operatorText: String,
+        expression: String
+    ) throws -> ConfigValue {
+        guard case let .integer(lhs) = lhs,
+              case let .integer(rhs) = rhs
+        else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        switch operatorText {
+        case "&":
+            return .integer(lhs & rhs)
+        case "^":
+            return .integer(lhs ^ rhs)
+        default:
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+    }
+
+    private static func evaluateStarlarkIntegerShift(
+        _ lhs: ConfigValue,
+        _ rhs: ConfigValue,
+        operatorText: String,
+        expression: String
+    ) throws -> ConfigValue {
+        guard case let .integer(lhs) = lhs,
+              case let .integer(rhs) = rhs,
+              rhs >= 0,
+              let shift = Int(exactly: rhs)
+        else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        switch operatorText {
+        case "<<":
+            var result = lhs
+            for _ in 0..<shift {
+                let (next, overflow) = result.multipliedReportingOverflow(by: 2)
+                guard !overflow else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                result = next
+            }
+            return .integer(result)
+        case ">>":
+            return .integer(shift >= Int64.bitWidth ? (lhs < 0 ? -1 : 0) : lhs >> shift)
         default:
             throw ConfigOverrideError.invalidLiteral(expression)
         }
@@ -7342,17 +7535,22 @@ public final class PolicyParser {
         return !["+", "-", "*", "/", "%", "(", "[", "{", ",", ":", "<", ">", "=", "!"].contains(previous)
     }
 
-    private static func splitTopLevelDictionaryUnionExpression(_ text: String) -> [(operator: Character?, text: String)] {
-        var pieces: [(operator: Character?, text: String)] = []
+    private static func splitTopLevelBitwiseExpression(
+        _ text: String,
+        operators: Set<String>
+    ) -> [(operator: String?, text: String)] {
+        var pieces: [(operator: String?, text: String)] = []
         var current = ""
-        var currentOperator: Character?
+        var currentOperator: String?
         var squareDepth = 0
         var braceDepth = 0
         var parenDepth = 0
         var quote: Character?
         var previousWasBackslash = false
+        var index = text.startIndex
 
-        for character in text {
+        while index < text.endIndex {
+            let character = text[index]
             if let activeQuote = quote {
                 current.append(character)
                 if character == activeQuote && !previousWasBackslash {
@@ -7362,6 +7560,7 @@ public final class PolicyParser {
                 if character != "\\" {
                     previousWasBackslash = false
                 }
+                index = text.index(after: index)
                 continue
             }
 
@@ -7387,17 +7586,43 @@ public final class PolicyParser {
             case ")":
                 parenDepth -= 1
                 current.append(character)
-            case "|" where squareDepth == 0 && braceDepth == 0 && parenDepth == 0:
-                pieces.append((currentOperator, current.trimmingCharacters(in: .whitespacesAndNewlines)))
-                current = ""
-                currentOperator = character
             default:
-                current.append(character)
+                if squareDepth == 0,
+                   braceDepth == 0,
+                   parenDepth == 0,
+                   let operatorText = bitwiseOperator(at: index, in: text, matching: operators) {
+                    pieces.append((currentOperator, current.trimmingCharacters(in: .whitespacesAndNewlines)))
+                    current = ""
+                    currentOperator = operatorText
+                    index = text.index(index, offsetBy: operatorText.count)
+                    continue
+                } else {
+                    current.append(character)
+                }
             }
+            index = text.index(after: index)
         }
 
         pieces.append((currentOperator, current.trimmingCharacters(in: .whitespacesAndNewlines)))
         return pieces
+    }
+
+    private static func bitwiseOperator(
+        at index: String.Index,
+        in text: String,
+        matching operators: Set<String>
+    ) -> String? {
+        if operators.contains("<<") || operators.contains(">>") {
+            let next = text.index(after: index)
+            if next < text.endIndex {
+                let twoCharacterOperator = String(text[index...next])
+                if operators.contains(twoCharacterOperator) {
+                    return twoCharacterOperator
+                }
+            }
+        }
+        let oneCharacterOperator = String(text[index])
+        return operators.contains(oneCharacterOperator) ? oneCharacterOperator : nil
     }
 
     private static func splitTopLevelMultiplicativeExpression(_ text: String) -> [(operator: String?, text: String)] {
