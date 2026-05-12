@@ -3643,6 +3643,44 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkGetAttributeCollectionMutations() throws {
+        let policy = try parsePolicy("""
+        COMMANDS = ["status"]
+        getattr(COMMANDS, "append")("diff")
+        APPENDED = getattr(COMMANDS, "append")("branch")
+        INSERTED = getattr(COMMANDS, "insert")(0, "show")
+        REMOVED = getattr(COMMANDS, "pop")()
+        SETTINGS = {"tool": "git", "remove": "gone"}
+        getattr(SETTINGS, "update")({"command": COMMANDS[0]})
+        UPDATED = getattr(SETTINGS, "update")({"extra": COMMANDS[1]})
+        REMOVED_SETTING = getattr(SETTINGS, "pop")("remove")
+        DEFAULT_SETTING = getattr(SETTINGS, "setdefault")("fallback", COMMANDS[2])
+        SCRATCH = {"drop": "value"}
+        CLEARED = getattr(SCRATCH, "clear")()
+
+        def helper():
+            local = ["log"]
+            getattr(local, "append")("branch")
+            added = getattr(local, "append")("tree")
+            popped = getattr(local, "pop")()
+            table = {"path": "/opt"}
+            getattr(table, "update")({"command": local[1]})
+            changed = getattr(table, "update")({"tail": popped})
+            return repr(added) + ":" + table["command"] + ":" + table["tail"]
+
+        if APPENDED == None and INSERTED == None and UPDATED == None and CLEARED == None and REMOVED == "branch" and REMOVED_SETTING == "gone" and DEFAULT_SETTING == "diff" and len(SCRATCH) == 0:
+            prefix_rule([SETTINGS["tool"], SETTINGS["command"]], "allow", justification = repr(APPENDED) + "/" + SETTINGS["extra"] + "/" + helper())
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("show")]),
+                decision: .allow,
+                justification: "None/status/None:branch:tree"
+            )
+        ])
+    }
+
     func testParserEvaluatesRustStarlarkUnaryPlusAndDefaultSplit() throws {
         let policy = try parsePolicy("""
         TOOL = "git"

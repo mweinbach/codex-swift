@@ -742,6 +742,11 @@ public final class PolicyParser {
         let body: [String]
     }
 
+    private struct StarlarkMethodCallee {
+        let receiverText: String
+        let methodName: String
+    }
+
     private struct StarlarkFormatArguments {
         let positional: [ConfigValue]
         let named: [String: ConfigValue]
@@ -1386,6 +1391,51 @@ public final class PolicyParser {
         return true
     }
 
+    private static func parseStarlarkMethodCallee(
+        _ callee: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction],
+        expression: String
+    ) throws -> StarlarkMethodCallee? {
+        if let methodDotIndex = topLevelMethodDotIndex(in: callee) {
+            let receiverText = String(callee[..<methodDotIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let methodStart = callee.index(after: methodDotIndex)
+            let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            return StarlarkMethodCallee(receiverText: receiverText, methodName: methodName)
+        }
+
+        guard callee.hasSuffix(")"),
+              let openIndex = matchingTopLevelCallOpen(in: callee)
+        else {
+            return nil
+        }
+
+        let calleeName = String(callee[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard calleeName == "getattr" else {
+            return nil
+        }
+
+        let bodyStart = callee.index(after: openIndex)
+        let body = String(callee[bodyStart..<callee.index(before: callee.endIndex)])
+        let rawArguments = splitTopLevel(body, separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard rawArguments.count == 2 || rawArguments.count == 3 else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+
+        let receiverText = rawArguments[0]
+        let receiver = try parsePolicyLiteral(receiverText, constants: constants, functions: functions)
+        let attribute = try parsePolicyLiteral(rawArguments[1], constants: constants, functions: functions)
+        guard case let .string(methodName) = attribute,
+              starlarkAttributeNames(for: receiver).contains(methodName)
+        else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+
+        return StarlarkMethodCallee(receiverText: receiverText, methodName: methodName)
+    }
+
     private static func parseStarlarkDictMutationStatement(
         _ statement: String,
         constants: inout [String: ConfigValue],
@@ -1402,13 +1452,17 @@ public final class PolicyParser {
         }
 
         let callee = String(trimmed[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let methodDotIndex = topLevelMethodDotIndex(in: callee) else {
+        guard let methodCallee = try parseStarlarkMethodCallee(
+            callee,
+            constants: constants,
+            functions: functions,
+            expression: trimmed
+        ) else {
             return false
         }
 
-        let receiverText = String(callee[..<methodDotIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-        let methodStart = callee.index(after: methodDotIndex)
-        let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let receiverText = methodCallee.receiverText
+        let methodName = methodCallee.methodName
         guard ["update", "clear", "pop", "popitem", "setdefault"].contains(methodName) else {
             return false
         }
@@ -1544,13 +1598,17 @@ public final class PolicyParser {
         }
 
         let callee = String(valueText[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let methodDotIndex = topLevelMethodDotIndex(in: callee) else {
+        guard let methodCallee = try parseStarlarkMethodCallee(
+            callee,
+            constants: constants,
+            functions: functions,
+            expression: trimmed
+        ) else {
             return false
         }
 
-        let receiverText = String(callee[..<methodDotIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-        let methodStart = callee.index(after: methodDotIndex)
-        let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let receiverText = methodCallee.receiverText
+        let methodName = methodCallee.methodName
         guard methodName == "pop" || methodName == "popitem" || methodName == "setdefault" else {
             return false
         }
@@ -1617,13 +1675,17 @@ public final class PolicyParser {
         }
 
         let callee = String(valueText[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let methodDotIndex = topLevelMethodDotIndex(in: callee) else {
+        guard let methodCallee = try parseStarlarkMethodCallee(
+            callee,
+            constants: constants,
+            functions: functions,
+            expression: trimmed
+        ) else {
             return false
         }
 
-        let receiverText = String(callee[..<methodDotIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-        let methodStart = callee.index(after: methodDotIndex)
-        let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let receiverText = methodCallee.receiverText
+        let methodName = methodCallee.methodName
 
         let bodyStart = valueText.index(after: openIndex)
         let body = String(valueText[bodyStart..<valueText.index(before: valueText.endIndex)])
@@ -1807,13 +1869,17 @@ public final class PolicyParser {
         }
 
         let callee = String(trimmed[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let methodDotIndex = topLevelMethodDotIndex(in: callee) else {
+        guard let methodCallee = try parseStarlarkMethodCallee(
+            callee,
+            constants: constants,
+            functions: functions,
+            expression: trimmed
+        ) else {
             return false
         }
 
-        let receiverText = String(callee[..<methodDotIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-        let methodStart = callee.index(after: methodDotIndex)
-        let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let receiverText = methodCallee.receiverText
+        let methodName = methodCallee.methodName
         guard isStarlarkIdentifier(receiverText),
               case var .array(items) = constants[receiverText]
         else {
@@ -1969,13 +2035,17 @@ public final class PolicyParser {
         }
 
         let callee = String(valueText[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let methodDotIndex = topLevelMethodDotIndex(in: callee) else {
+        guard let methodCallee = try parseStarlarkMethodCallee(
+            callee,
+            constants: constants,
+            functions: functions,
+            expression: trimmed
+        ) else {
             return false
         }
 
-        let receiverText = String(callee[..<methodDotIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-        let methodStart = callee.index(after: methodDotIndex)
-        let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let receiverText = methodCallee.receiverText
+        let methodName = methodCallee.methodName
         guard methodName == "pop" else {
             return false
         }
