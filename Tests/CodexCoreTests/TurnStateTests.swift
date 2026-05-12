@@ -228,6 +228,97 @@ final class TurnStateTests: XCTestCase {
         )
     }
 
+    func testIntersectAdditionalPermissionProfilesMaterializesProjectRootsAndRelativeDenyGlobsLikeRust() {
+        let cwd = "/tmp/codex-project"
+        let requestedPermissions = RequestPermissionProfile(
+            fileSystem: FileSystemPermissions(
+                entries: [
+                    FileSystemSandboxEntry(
+                        path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue),
+                        access: .write
+                    ),
+                    FileSystemSandboxEntry(path: .globPattern("**/*.env"), access: .none)
+                ]
+            )
+        )
+
+        let storedGrant = RequestPermissionProfile.intersectAdditionalPermissionProfiles(
+            requested: requestedPermissions,
+            granted: requestedPermissions,
+            cwd: cwd
+        )
+
+        XCTAssertEqual(
+            storedGrant.fileSystem,
+            FileSystemPermissions(
+                entries: [
+                    FileSystemSandboxEntry(path: .path(cwd), access: .write),
+                    FileSystemSandboxEntry(path: .globPattern("\(cwd)/**/*.env"), access: .none)
+                ]
+            )
+        )
+        let effectivePermissions = RequestPermissionProfile.mergeAdditionalPermissionProfiles(
+            base: requestedPermissions,
+            permissions: storedGrant
+        )
+        XCTAssertEqual(
+            effectivePermissions.map {
+                RequestPermissionProfile.additionalPermissionsArePreapproved(
+                    effectivePermissions: $0,
+                    grantedPermissions: storedGrant,
+                    cwd: cwd
+                )
+            },
+            true
+        )
+    }
+
+    func testIntersectAdditionalPermissionProfilesRejectsNarrowOrDeniedGrantsLikeRust() {
+        let requestedPermissions = RequestPermissionProfile(
+            network: RequestPermissionNetworkPermissions(enabled: true),
+            fileSystem: FileSystemPermissions(
+                entries: [
+                    FileSystemSandboxEntry(path: .path("/repo"), access: .write),
+                    FileSystemSandboxEntry(path: .path("/repo/private"), access: .none)
+                ]
+            )
+        )
+        let grantedPermissions = RequestPermissionProfile(
+            network: RequestPermissionNetworkPermissions(enabled: true),
+            fileSystem: FileSystemPermissions(
+                entries: [
+                    FileSystemSandboxEntry(path: .path("/repo/src"), access: .read),
+                    FileSystemSandboxEntry(path: .path("/repo/private"), access: .write),
+                    FileSystemSandboxEntry(path: .path("/repo/cache"), access: .write)
+                ]
+            )
+        )
+
+        let accepted = RequestPermissionProfile.intersectAdditionalPermissionProfiles(
+            requested: requestedPermissions,
+            granted: grantedPermissions,
+            cwd: "/repo"
+        )
+
+        XCTAssertEqual(accepted.network, RequestPermissionNetworkPermissions(enabled: true))
+        XCTAssertEqual(
+            accepted.fileSystem,
+            FileSystemPermissions(
+                entries: [
+                    FileSystemSandboxEntry(path: .path("/repo/src"), access: .read),
+                    FileSystemSandboxEntry(path: .path("/repo/cache"), access: .write)
+                ]
+            )
+        )
+        XCTAssertFalse(
+            RequestPermissionProfile.additionalPermissionsArePreapproved(
+                effectivePermissions: requestedPermissions,
+                grantedPermissions: accepted,
+                cwd: "/repo"
+            )
+        )
+    }
+
     func testActiveTurnTaskOrderingReplacementAndDrain() {
         var activeTurn = ActiveTurn()
         let first = runningTask(subID: "a", kind: .regular)

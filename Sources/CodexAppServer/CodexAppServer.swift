@@ -24266,6 +24266,7 @@ final class CodexAppServerMessageProcessor {
                           let submission = Self.permissionsApprovalSubmission(
                             callID: event.callID,
                             requestedPermissions: event.permissions,
+                            cwd: event.cwd ?? "",
                             result: result
                           )
                     else {
@@ -24495,6 +24496,7 @@ final class CodexAppServerMessageProcessor {
     private static func permissionsApprovalSubmission(
         callID: String,
         requestedPermissions: RequestPermissionProfile,
+        cwd: String,
         result: AppServerOutgoingRequestResult<AppServerProtocol.PermissionsRequestApprovalResponse>
     ) -> (requestID: RequestID, op: Op)? {
         let requestID: RequestID
@@ -24504,6 +24506,7 @@ final class CodexAppServerMessageProcessor {
             requestID = id
             response = requestPermissionsResponse(
                 requestedPermissions: requestedPermissions,
+                cwd: cwd,
                 permissionsResponse: permissionsResponse
             )
         case let .malformedResponse(id):
@@ -24582,6 +24585,7 @@ final class CodexAppServerMessageProcessor {
 
     private static func requestPermissionsResponse(
         requestedPermissions: RequestPermissionProfile,
+        cwd: String,
         permissionsResponse: AppServerProtocol.PermissionsRequestApprovalResponse
     ) -> RequestPermissionsResponse {
         let strictAutoReview = permissionsResponse.strictAutoReview ?? false
@@ -24589,51 +24593,17 @@ final class CodexAppServerMessageProcessor {
             return RequestPermissionsResponse(permissions: RequestPermissionProfile())
         }
         return RequestPermissionsResponse(
-            permissions: intersectPermissionProfiles(
-                requestedPermissions: requestedPermissions,
-                grantedPermissions: RequestPermissionProfile(
+            permissions: RequestPermissionProfile.intersectAdditionalPermissionProfiles(
+                requested: requestedPermissions,
+                granted: RequestPermissionProfile(
                     network: permissionsResponse.permissions.network,
                     fileSystem: permissionsResponse.permissions.fileSystem
-                )
+                ),
+                cwd: cwd
             ),
             scope: permissionsResponse.scope,
             strictAutoReview: strictAutoReview
         )
-    }
-
-    private static func intersectPermissionProfiles(
-        requestedPermissions: RequestPermissionProfile,
-        grantedPermissions: RequestPermissionProfile
-    ) -> RequestPermissionProfile {
-        RequestPermissionProfile(
-            network: requestedPermissions.network == nil ? nil : grantedPermissions.network,
-            fileSystem: intersectFileSystemPermissions(
-                requestedPermissions.fileSystem,
-                grantedPermissions.fileSystem
-            )
-        )
-    }
-
-    private static func intersectFileSystemPermissions(
-        _ requested: FileSystemPermissions?,
-        _ granted: FileSystemPermissions?
-    ) -> FileSystemPermissions? {
-        guard let requested, let granted else {
-            return nil
-        }
-        let entries = granted.entries.filter { grantedEntry in
-            requested.entries.contains(grantedEntry)
-        }
-        let globScanMaxDepth: Int?
-        if let requestedDepth = requested.globScanMaxDepth, let grantedDepth = granted.globScanMaxDepth {
-            globScanMaxDepth = min(requestedDepth, grantedDepth)
-        } else {
-            globScanMaxDepth = requested.globScanMaxDepth ?? granted.globScanMaxDepth
-        }
-        guard !entries.isEmpty || globScanMaxDepth != nil else {
-            return nil
-        }
-        return FileSystemPermissions(entries: entries, globScanMaxDepth: globScanMaxDepth)
     }
 
     private static func permissionsProfile(

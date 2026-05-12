@@ -2039,6 +2039,298 @@ private enum GlobScanDepth: Equatable {
     case unbounded
 }
 
+public extension RequestPermissionProfile {
+    static func intersectAdditionalPermissionProfiles(
+        requested: RequestPermissionProfile,
+        granted: RequestPermissionProfile,
+        cwd: String
+    ) -> RequestPermissionProfile {
+        RequestPermissionProfile(
+            network: requested.network?.enabled == true && granted.network?.enabled == true
+                ? RequestPermissionNetworkPermissions(enabled: true)
+                : nil,
+            fileSystem: FileSystemPermissions.intersectAdditionalPermissions(
+                requested: requested.fileSystem,
+                granted: granted.fileSystem,
+                cwd: cwd
+            )
+        )
+    }
+
+    static func additionalPermissionsArePreapproved(
+        effectivePermissions: RequestPermissionProfile,
+        grantedPermissions: RequestPermissionProfile,
+        cwd: String
+    ) -> Bool {
+        let materializedEffective = intersectAdditionalPermissionProfiles(
+            requested: effectivePermissions,
+            granted: effectivePermissions,
+            cwd: cwd
+        )
+        let acceptedGrant = intersectAdditionalPermissionProfiles(
+            requested: effectivePermissions,
+            granted: grantedPermissions,
+            cwd: cwd
+        )
+        return acceptedGrant == materializedEffective
+    }
+}
+
+public extension FileSystemPermissions {
+    static func intersectAdditionalPermissions(
+        requested: FileSystemPermissions?,
+        granted: FileSystemPermissions?,
+        cwd: String
+    ) -> FileSystemPermissions? {
+        guard let requested else {
+            return nil
+        }
+
+        let granted = granted ?? FileSystemPermissions(entries: [])
+        let requestedDenyMatcher = AdditionalPermissionReadDenyMatcher(entries: requested.entries, cwd: cwd)
+        var acceptedEntries: [FileSystemSandboxEntry] = []
+        for grantedEntry in granted.entries where grantedEntry.access.canRead {
+            guard grantedFileSystemEntry(grantedEntry, isWithin: requested, deniedBy: requestedDenyMatcher, cwd: cwd)
+            else {
+                continue
+            }
+            let entry = materializeCwdDependentEntry(grantedEntry, cwd: cwd)
+            if !acceptedEntries.contains(entry) {
+                acceptedEntries.append(entry)
+            }
+        }
+
+        var entries = acceptedEntries
+        let requestedDenyEntries = retainConstrainingDenyEntries(
+            requested.entries,
+            acceptedEntries: acceptedEntries,
+            cwd: cwd,
+            outputEntries: &entries
+        )
+        let grantedDenyEntries = retainConstrainingDenyEntries(
+            granted.entries,
+            acceptedEntries: acceptedEntries,
+            cwd: cwd,
+            outputEntries: &entries
+        )
+
+        return FileSystemPermissions(
+            entries: entries,
+            globScanMaxDepth: mergeGlobScanMaxDepth(
+                leftEntries: requestedDenyEntries,
+                leftDepth: requested.globScanMaxDepth,
+                rightEntries: grantedDenyEntries,
+                rightDepth: granted.globScanMaxDepth
+            )
+        ).nonEmpty
+    }
+
+    private static func grantedFileSystemEntry(
+        _ grantedEntry: FileSystemSandboxEntry,
+        isWithin requested: FileSystemPermissions,
+        deniedBy requestedDenyMatcher: AdditionalPermissionReadDenyMatcher,
+        cwd: String
+    ) -> Bool {
+        if let path = resolvePermissionPath(grantedEntry.path, cwd: cwd) {
+            guard !requestedDenyMatcher.isReadDenied(path) else {
+                return false
+            }
+            return accessCovers(requestedAccess(for: path, in: requested, cwd: cwd), grantedEntry.access)
+        }
+
+        return requested.entries.contains { requestedEntry in
+            accessCovers(requestedEntry.access, grantedEntry.access) && requestedEntry.path == grantedEntry.path
+        }
+    }
+
+    private static func requestedAccess(
+        for path: String,
+        in requested: FileSystemPermissions,
+        cwd: String
+    ) -> FileSystemAccessMode {
+        var best: FileSystemAccessMode = .none
+        for entry in requested.entries {
+            guard let entryPath = resolvePermissionPath(entry.path, cwd: cwd),
+                  path.hasPathPrefix(entryPath)
+            else {
+                continue
+            }
+            if entry.access.precedence > best.precedence {
+                best = entry.access
+            }
+        }
+        return best
+    }
+
+    private static func retainConstrainingDenyEntries(
+        _ sourceEntries: [FileSystemSandboxEntry],
+        acceptedEntries: [FileSystemSandboxEntry],
+        cwd: String,
+        outputEntries: inout [FileSystemSandboxEntry]
+    ) -> [FileSystemSandboxEntry] {
+        var retainedEntries: [FileSystemSandboxEntry] = []
+        for entry in sourceEntries where entry.access == .none {
+            guard denyEntryConstrainsAcceptedGrant(entry, acceptedEntries: acceptedEntries, cwd: cwd) else {
+                continue
+            }
+            let materialized = materializeCwdDependentEntry(entry, cwd: cwd)
+            if !outputEntries.contains(materialized) {
+                outputEntries.append(materialized)
+            }
+            retainedEntries.append(materialized)
+        }
+        return retainedEntries
+    }
+
+    private static func denyEntryConstrainsAcceptedGrant(
+        _ denyEntry: FileSystemSandboxEntry,
+        acceptedEntries: [FileSystemSandboxEntry],
+        cwd: String
+    ) -> Bool {
+        acceptedEntries.filter(\.access.canRead).contains { entry in
+            guard let grantPath = resolvePermissionPath(entry.path, cwd: cwd) else {
+                return false
+            }
+            switch denyEntry.path {
+            case let .globPattern(pattern):
+                return globStaticPrefixPath(pattern, cwd: cwd)
+                    .map { pathsOverlap($0, grantPath) } ?? false
+            case .path, .special:
+                return resolvePermissionPath(denyEntry.path, cwd: cwd)
+                    .map { pathsOverlap($0, grantPath) } ?? false
+            }
+        }
+    }
+
+    private static func materializeCwdDependentEntry(
+        _ entry: FileSystemSandboxEntry,
+        cwd: String
+    ) -> FileSystemSandboxEntry {
+        switch entry.path {
+        case let .special(value):
+            guard case .projectRoots = FileSystemSpecialPath(jsonValue: value),
+                  let path = resolvePermissionPath(entry.path, cwd: cwd)
+            else {
+                return entry
+            }
+            return FileSystemSandboxEntry(path: .path(path), access: entry.access)
+        case let .globPattern(pattern):
+            return FileSystemSandboxEntry(
+                path: .globPattern(resolveAgainstCwd(pattern, cwd: cwd)),
+                access: entry.access
+            )
+        case .path:
+            return entry
+        }
+    }
+
+    fileprivate static func resolvePermissionPath(_ path: FileSystemPath, cwd: String) -> String? {
+        switch path {
+        case let .path(path):
+            return standardizeAbsolutePath(path)
+        case .globPattern:
+            return nil
+        case let .special(value):
+            switch FileSystemSpecialPath(jsonValue: value) {
+            case .root:
+                return "/"
+            case let .projectRoots(subpath):
+                guard let subpath else {
+                    return standardizeAbsolutePath(cwd)
+                }
+                return standardizeAbsolutePath(resolveAgainstCwd(subpath, cwd: cwd))
+            case .tmpdir:
+                guard let tmpdir = ProcessInfo.processInfo.environment["TMPDIR"], !tmpdir.isEmpty else {
+                    return nil
+                }
+                return standardizeAbsolutePath(tmpdir)
+            case .slashTmp:
+                return FileManager.default.fileExists(atPath: "/tmp") ? "/tmp" : nil
+            case .minimal, .unknown:
+                return nil
+            }
+        }
+    }
+
+    fileprivate static func globStaticPrefixPath(_ pattern: String, cwd: String) -> String? {
+        let resolvedPattern = resolveAgainstCwd(pattern, cwd: cwd)
+        guard let wildcardIndex = resolvedPattern.firstIndex(where: { "*?[]".contains($0) }) else {
+            return standardizeAbsolutePath(resolvedPattern)
+        }
+        guard wildcardIndex != resolvedPattern.startIndex else {
+            return nil
+        }
+        let prefix = String(resolvedPattern[..<wildcardIndex])
+        let candidate: String
+        if prefix.hasSuffix("/") || prefix.hasSuffix("\\") {
+            candidate = String(prefix.dropLast())
+        } else {
+            candidate = (prefix as NSString).deletingLastPathComponent
+        }
+        return candidate.isEmpty ? nil : standardizeAbsolutePath(candidate)
+    }
+
+    fileprivate static func resolveAgainstCwd(_ path: String, cwd: String) -> String {
+        let absolute = (path as NSString).isAbsolutePath ? path : (cwd as NSString).appendingPathComponent(path)
+        return standardizeAbsolutePath(absolute)
+    }
+
+    fileprivate static func standardizeAbsolutePath(_ path: String) -> String {
+        URL(fileURLWithPath: path).standardizedFileURL.path
+    }
+
+    private static func pathsOverlap(_ left: String, _ right: String) -> Bool {
+        left.hasPathPrefix(right) || right.hasPathPrefix(left)
+    }
+
+    private static func accessCovers(_ requested: FileSystemAccessMode, _ granted: FileSystemAccessMode) -> Bool {
+        switch granted {
+        case .read:
+            return requested.canRead
+        case .write:
+            return requested.canWrite
+        case .none:
+            return false
+        }
+    }
+}
+
+private struct AdditionalPermissionReadDenyMatcher {
+    private let denyEntries: [FileSystemSandboxEntry]
+    private let cwd: String
+
+    init(entries: [FileSystemSandboxEntry], cwd: String) {
+        denyEntries = entries.filter { $0.access == .none }
+        self.cwd = cwd
+    }
+
+    func isReadDenied(_ path: String) -> Bool {
+        denyEntries.contains { entry in
+            switch entry.path {
+            case let .path(deniedPath):
+                return path.hasPathPrefix(FileSystemPermissions.standardizeAbsolutePath(deniedPath))
+            case .globPattern:
+                return false
+            case .special:
+                guard let deniedPath = FileSystemPermissions.resolvePermissionPath(entry.path, cwd: cwd) else {
+                    return false
+                }
+                return path.hasPathPrefix(deniedPath)
+            }
+        }
+    }
+}
+
+private extension String {
+    func hasPathPrefix(_ prefix: String) -> Bool {
+        if self == prefix {
+            return true
+        }
+        let normalizedPrefix = prefix.hasSuffix("/") ? prefix : prefix + "/"
+        return hasPrefix(normalizedPrefix)
+    }
+}
+
 public struct RequestPermissionsArgs: Codable, Equatable, Sendable {
     public let reason: String?
     public let permissions: RequestPermissionProfile
