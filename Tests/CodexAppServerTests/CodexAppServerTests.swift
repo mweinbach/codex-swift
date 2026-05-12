@@ -345,6 +345,61 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
+    func testRemoteControlAppServerWebSocketSessionRunsUntilTerminalEventLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let clientID = RemoteControlClientID("client-1")
+        let streamID = RemoteControlStreamID("stream-1")
+        let initialize = ExecServerJSONRPCMessage.request(ExecServerJSONRPCRequest(
+            id: .integer(1),
+            method: "initialize",
+            params: .object([
+                "clientInfo": .object([
+                    "name": .string("test"),
+                    "version": .string("0")
+                ]),
+                "capabilities": .object([
+                    "experimentalApi": .bool(true)
+                ])
+            ])
+        ))
+        let transport = RemoteControlAppServerRecordingWebSocketTransport(incoming: [
+            .text(try remoteControlEnvelopeText(RemoteControlClientEnvelope(
+                event: .clientMessage(message: initialize),
+                clientID: clientID,
+                streamID: streamID,
+                seqID: 1,
+                cursor: nil
+            )))
+        ])
+        var session = RemoteControlAppServerWebSocketSession(
+            transport: transport,
+            statusPublisher: RemoteControlStatusPublisherCore(snapshot: RemoteControlStatusSnapshot(
+                status: .connected,
+                installationID: "install-1",
+                environmentID: "env-1"
+            )),
+            configuration: testConfiguration(codexHome: temp.url)
+        )
+
+        let steps = try await session.runUntilTerminal(now: { 10 })
+
+        XCTAssertEqual(steps.count, 2)
+        XCTAssertEqual(steps[0].connectionStep.trackerEffects.count, 2)
+        XCTAssertNil(steps[0].terminalEnd)
+        XCTAssertEqual(steps[1].terminalEnd, .reconnect("websocket stream ended"))
+        let closeCount = await transport.closeCount()
+        XCTAssertEqual(closeCount, 1)
+        let frames = await transport.sentFrames()
+        XCTAssertEqual(frames.count, 1)
+        let envelope = try remoteControlServerEnvelope(from: try XCTUnwrap(frames.first))
+        XCTAssertEqual(envelope.clientID, clientID)
+        XCTAssertEqual(envelope.streamID, streamID)
+        guard case let .serverMessage(.response(response)) = envelope.event else {
+            return XCTFail("initialize response was not forwarded before terminal websocket EOF")
+        }
+        XCTAssertEqual(response.id, .integer(1))
+    }
+
     func testRemoteControlAppServerBridgeDropsUnknownAndClosesConnectionLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let clientID = RemoteControlClientID("client-1")

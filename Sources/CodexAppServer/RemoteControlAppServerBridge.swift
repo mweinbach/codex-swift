@@ -134,6 +134,13 @@ struct RemoteControlAppServerWebSocketSessionStep: Equatable, Sendable {
         self.appServerStep = appServerStep
         self.writerSteps = writerSteps
     }
+
+    var terminalEnd: RemoteControlWebsocketConnectionEnd? {
+        if let end = connectionStep.end {
+            return end
+        }
+        return writerSteps.first { $0.end != nil }?.end
+    }
 }
 
 struct RemoteControlAppServerWebSocketSession<Transport: RemoteControlWebSocketTransport> {
@@ -174,6 +181,23 @@ struct RemoteControlAppServerWebSocketSession<Transport: RemoteControlWebSocketT
         now: TimeInterval = Date().timeIntervalSinceReferenceDate
     ) async throws -> RemoteControlAppServerWebSocketSessionStep {
         try await process(.receive(now: now))
+    }
+
+    mutating func runUntilTerminal(
+        now: @Sendable () -> TimeInterval = { Date().timeIntervalSinceReferenceDate },
+        maxReceives: Int? = nil
+    ) async throws -> [RemoteControlAppServerWebSocketSessionStep] {
+        var steps: [RemoteControlAppServerWebSocketSessionStep] = []
+        var receiveCount = 0
+        while maxReceives.map({ receiveCount < $0 }) ?? true {
+            let step = try await receive(now: now())
+            steps.append(step)
+            receiveCount += 1
+            if step.terminalEnd != nil {
+                break
+            }
+        }
+        return steps
     }
 
     mutating func process(
