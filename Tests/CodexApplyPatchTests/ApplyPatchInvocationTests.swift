@@ -56,6 +56,17 @@ final class ApplyPatchInvocationTests: XCTestCase {
         )
     }
 
+    func testMultiDotShellNamesUseRustFileStemClassification() {
+        XCTAssertEqual(
+            maybeParseApplyPatch(["pwsh.preview.exe", "-Command", heredocScript(prefix: "")]),
+            .notApplyPatch
+        )
+        XCTAssertEqual(
+            maybeParseApplyPatch(["bash.preview.exe", "-lc", heredocScript(prefix: "")]),
+            .notApplyPatch
+        )
+    }
+
     func testHeredocWithLeadingCDCapturesWorkdir() {
         assertBody(
             maybeParseApplyPatch(["bash", "-lc", heredocScript(prefix: "cd foo && ")]),

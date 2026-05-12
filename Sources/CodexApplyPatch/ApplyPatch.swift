@@ -278,8 +278,13 @@ public enum ApplyPatchInvocation {
             .split(separator: "/")
             .last
             .map(String.init) ?? shell
-        let stem = executable.split(separator: ".", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init)
-        return stem?.lowercased()
+        let stem: String
+        if let dot = executable.lastIndex(of: ".") {
+            stem = String(executable[..<dot])
+        } else {
+            stem = executable
+        }
+        return stem.isEmpty ? nil : stem.lowercased()
     }
 
     private static func extractApplyPatchFromShell(
