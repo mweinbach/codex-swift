@@ -175,6 +175,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let version: String
     public let requiresOpenAIAuth: Bool
     public let authCredentialsStoreMode: AuthCredentialsStoreMode
+    public let sessionSource: SessionSource
     public let environment: [String: String]
     public let activeProfile: String?
     public let feedback: CodexFeedback
@@ -206,6 +207,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         version: String = "0.0.0",
         requiresOpenAIAuth: Bool = true,
         authCredentialsStoreMode: AuthCredentialsStoreMode = .file,
+        sessionSource: SessionSource = .mcp,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         activeProfile: String? = nil,
         feedback: CodexFeedback = CodexFeedback(),
@@ -236,6 +238,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         self.version = version
         self.requiresOpenAIAuth = requiresOpenAIAuth
         self.authCredentialsStoreMode = authCredentialsStoreMode
+        self.sessionSource = sessionSource
         self.environment = environment
         self.activeProfile = activeProfile
         self.feedback = feedback
@@ -274,6 +277,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
             lhs.version == rhs.version &&
             lhs.requiresOpenAIAuth == rhs.requiresOpenAIAuth &&
             lhs.authCredentialsStoreMode == rhs.authCredentialsStoreMode &&
+            lhs.sessionSource == rhs.sessionSource &&
             lhs.environment == rhs.environment &&
             lhs.activeProfile == rhs.activeProfile &&
             lhs.cliConfigOverrides == rhs.cliConfigOverrides &&
@@ -1162,7 +1166,7 @@ public enum CodexAppServer {
                 ?? stringParam(params?["developer_instructions"])
                 ?? stringParam(params?["baseInstructions"])
                 ?? stringParam(params?["base_instructions"]),
-            source: .mcp,
+            source: configuration.sessionSource,
             originator: "codex_app_server",
             cliVersion: configuration.version,
             modelProvider: modelProvider,
@@ -1735,7 +1739,7 @@ public enum CodexAppServer {
                 ?? stringParam(params?["developer_instructions"])
                 ?? stringParam(params?["baseInstructions"])
                 ?? stringParam(params?["base_instructions"]),
-            source: .mcp,
+            source: configuration.sessionSource,
             forkedFromID: sourceConversationID,
             threadSource: threadSource,
             originator: "codex_app_server",
@@ -2042,7 +2046,7 @@ public enum CodexAppServer {
                 ?? stringParam(overrides?["developer_instructions"])
                 ?? stringParam(overrides?["baseInstructions"])
                 ?? stringParam(overrides?["base_instructions"]),
-            source: .mcp,
+            source: configuration.sessionSource,
             originator: "codex_app_server",
             cliVersion: configuration.version,
             modelProvider: modelProvider,
@@ -2757,7 +2761,7 @@ public enum CodexAppServer {
                 cwd: URL(fileURLWithPath: summary.cwd, isDirectory: true),
                 conversationID: reviewConversationID,
                 instructions: nil,
-                source: .mcp,
+                source: configuration.sessionSource,
                 originator: "codex_app_server",
                 cliVersion: configuration.version,
                 modelProvider: summary.modelProvider
@@ -16984,7 +16988,7 @@ public enum CodexAppServer {
                 reason: reason,
                 includeLogs: includeLogs,
                 rolloutPath: rolloutPath,
-                sessionSource: .mcp,
+                sessionSource: configuration.sessionSource,
                 cliVersion: configuration.version,
                 transport: configuration.feedbackUploadTransport
             )

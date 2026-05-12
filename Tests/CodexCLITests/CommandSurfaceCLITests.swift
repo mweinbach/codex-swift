@@ -844,6 +844,8 @@ final class CommandSurfaceCLITests: XCTestCase {
                 "app-server",
                 "--listen",
                 "ws://127.0.0.1:4500",
+                "--session-source",
+                " Atlas ",
                 "--analytics-default-enabled",
                 "--ws-auth",
                 "signed-bearer-token",
@@ -864,6 +866,7 @@ final class CommandSurfaceCLITests: XCTestCase {
         XCTAssertEqual(exitCode, 0)
         XCTAssertEqual(request?.action, .run)
         XCTAssertEqual(request?.listenTransport, .webSocket(host: "127.0.0.1", port: 4500))
+        XCTAssertEqual(request?.sessionSource, .custom("atlas"))
         XCTAssertEqual(request?.analyticsDefaultEnabled, true)
         XCTAssertEqual(request?.websocketAuth, AppServerWebsocketAuthArguments(
             mode: .signedBearerToken,
@@ -872,6 +875,22 @@ final class CommandSurfaceCLITests: XCTestCase {
             audience: "audience",
             maxClockSkewSeconds: 30
         ))
+    }
+
+    func testRunAsyncAppServerDefaultsSessionSourceToVSCodeLikeRust() async {
+        var request: CodexCLI.AppServerCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["app-server"],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            appServerRunner: {
+                request = $0
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(request?.sessionSource, .vscode)
     }
 
     func testRunAsyncAppServerParsesCapabilityTokenFlagsBeforeSubcommand() async {
@@ -1094,6 +1113,14 @@ final class CommandSurfaceCLITests: XCTestCase {
             (
                 ["app-server", "--listen"],
                 "codex-swift: missing value for --listen"
+            ),
+            (
+                ["app-server", "--session-source"],
+                "codex-swift: missing value for --session-source"
+            ),
+            (
+                ["app-server", "--session-source", "  "],
+                "codex-swift: invalid value for --session-source: session source must not be empty"
             ),
             (
                 ["app-server", "--listen", "http://foo"],

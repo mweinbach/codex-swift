@@ -448,6 +448,7 @@ private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) as
             version: CodexCLI.version,
             requiresOpenAIAuth: settings.selectedModelProvider?.requiresOpenAIAuth ?? true,
             authCredentialsStoreMode: settings.cliAuthCredentialsStoreMode,
+            sessionSource: request.sessionSource,
             activeProfile: settings.activeProfile,
             stateStore: stateStore,
             remoteControlStatusSnapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot(

@@ -369,6 +369,7 @@ public struct CodexCLI: Sendable {
     public struct AppServerCommandRequest: Equatable, Sendable {
         public let action: AppServerCommandAction
         public let listenTransport: AppServerListenTransport
+        public let sessionSource: SessionSource
         public let analyticsDefaultEnabled: Bool
         public let websocketAuth: AppServerWebsocketAuthArguments
         public let configOverrides: CliConfigOverrides
@@ -376,12 +377,14 @@ public struct CodexCLI: Sendable {
         public init(
             action: AppServerCommandAction,
             listenTransport: AppServerListenTransport = .stdio,
+            sessionSource: SessionSource = .vscode,
             analyticsDefaultEnabled: Bool = false,
             websocketAuth: AppServerWebsocketAuthArguments = AppServerWebsocketAuthArguments(),
             configOverrides: CliConfigOverrides = CliConfigOverrides()
         ) {
             self.action = action
             self.listenTransport = listenTransport
+            self.sessionSource = sessionSource
             self.analyticsDefaultEnabled = analyticsDefaultEnabled
             self.websocketAuth = websocketAuth
             self.configOverrides = configOverrides
@@ -2715,6 +2718,7 @@ public struct CodexCLI: Sendable {
             return .success(AppServerCommandRequest(
                 action: action,
                 listenTransport: options.listenTransport,
+                sessionSource: options.sessionSource,
                 analyticsDefaultEnabled: options.analyticsDefaultEnabled,
                 websocketAuth: options.websocketAuth,
                 configOverrides: configOverrides
@@ -2726,6 +2730,7 @@ public struct CodexCLI: Sendable {
 
     private struct ParsedAppServerOptions {
         var listenTransport: AppServerListenTransport = .stdio
+        var sessionSource: SessionSource = .vscode
         var analyticsDefaultEnabled = false
         var websocketAuth = AppServerWebsocketAuthArguments()
     }
@@ -2777,6 +2782,32 @@ public struct CodexCLI: Sendable {
                 switch parseAppServerListenTransport(listenURL) {
                 case let .success(transport):
                     options.listenTransport = transport
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
+                index += 1
+                continue
+            }
+            if argument == "--session-source" {
+                switch value(after: argument) {
+                case let .success(rawSource):
+                    switch parseAppServerSessionSource(rawSource) {
+                    case let .success(source):
+                        options.sessionSource = source
+                    case let .failure(message, exitCode):
+                        return .failure(message, exitCode)
+                    }
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
+                index += 2
+                continue
+            }
+            if argument.hasPrefix("--session-source=") {
+                let rawSource = String(argument.dropFirst("--session-source=".count))
+                switch parseAppServerSessionSource(rawSource) {
+                case let .success(source):
+                    options.sessionSource = source
                 case let .failure(message, exitCode):
                     return .failure(message, exitCode)
                 }
@@ -2864,6 +2895,7 @@ public struct CodexCLI: Sendable {
             return .success((
                 options: ParsedAppServerOptions(
                     listenTransport: options.listenTransport,
+                    sessionSource: options.sessionSource,
                     analyticsDefaultEnabled: options.analyticsDefaultEnabled,
                     websocketAuth: AppServerWebsocketAuthArguments(
                         mode: websocketAuthMode,
@@ -2889,6 +2921,14 @@ public struct CodexCLI: Sendable {
             maxClockSkewSeconds: maxClockSkewSeconds
         )
         return .success((options: options, remainingArguments: []))
+    }
+
+    private func parseAppServerSessionSource(_ rawValue: String) -> ParseResult<SessionSource> {
+        do {
+            return .success(try SessionSource.fromStartupArg(rawValue))
+        } catch {
+            return .failure("codex-swift: invalid value for --session-source: \(error)", 64)
+        }
     }
 
     private func parseAppServerListenTransport(_ listenURL: String) -> ParseResult<AppServerListenTransport> {
