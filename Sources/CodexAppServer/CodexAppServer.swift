@@ -4694,12 +4694,31 @@ public enum CodexAppServer {
     ) throws -> String {
         do {
             return try syncOpenAICuratedPluginsRepoViaGit(codexHome: codexHome, environment: environment)
-        } catch {
-            return try syncOpenAICuratedPluginsRepoViaHTTP(
-                codexHome: codexHome,
-                environment: environment,
-                pluginHTTPTransport: pluginHTTPTransport
-            )
+        } catch let gitError {
+            do {
+                return try syncOpenAICuratedPluginsRepoViaHTTP(
+                    codexHome: codexHome,
+                    environment: environment,
+                    pluginHTTPTransport: pluginHTTPTransport
+                )
+            } catch let httpError {
+                guard !hasLocalCuratedPluginsSnapshot(codexHome: codexHome) else {
+                    throw AppServerError.internalError(
+                        "git sync failed for curated plugin sync: \(gitError); GitHub HTTP sync failed for curated plugin sync: \(httpError); export archive fallback skipped because a local curated plugins snapshot already exists"
+                    )
+                }
+                do {
+                    return try syncOpenAICuratedPluginsRepoViaBackupArchive(
+                        codexHome: codexHome,
+                        environment: environment,
+                        pluginHTTPTransport: pluginHTTPTransport
+                    )
+                } catch let exportError {
+                    throw AppServerError.internalError(
+                        "git sync failed for curated plugin sync: \(gitError); GitHub HTTP sync failed for curated plugin sync: \(httpError); export archive sync failed for curated plugin sync: \(exportError)"
+                    )
+                }
+            }
         }
     }
 
@@ -4743,6 +4762,32 @@ public enum CodexAppServer {
         try activateCuratedPluginsRepo(repoPath: repoPath, stagedPath: stagedPath)
         try writeCuratedPluginsSHA(shaPath: shaPath, sha: remoteSHA)
         return remoteSHA
+    }
+
+    @discardableResult
+    fileprivate static func syncOpenAICuratedPluginsRepoViaBackupArchive(
+        codexHome: URL,
+        environment: [String: String],
+        pluginHTTPTransport: AppServerPluginHTTPTransport
+    ) throws -> String {
+        let repoPath = curatedPluginsRepoPath(codexHome: codexHome)
+        let shaPath = curatedPluginsSHAPath(codexHome: codexHome)
+        let parent = repoPath.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        let stagedPath = parent.appendingPathComponent("plugins-clone-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            if FileManager.default.fileExists(atPath: stagedPath.path) {
+                try? FileManager.default.removeItem(at: stagedPath)
+            }
+        }
+
+        let zipball = try fetchCuratedRepoBackupArchiveZip(pluginHTTPTransport: pluginHTTPTransport)
+        try extractCuratedPluginsZipball(zipball, destination: stagedPath, environment: environment)
+        try ensureCuratedMarketplaceManifestExists(repoPath: stagedPath)
+        let exportVersion = try readExtractedBackupArchiveGitSHA(repoPath: stagedPath) ?? curatedPluginsBackupArchiveFallbackVersion
+        try activateCuratedPluginsRepo(repoPath: repoPath, stagedPath: stagedPath)
+        try writeCuratedPluginsSHA(shaPath: shaPath, sha: exportVersion)
+        return exportVersion
     }
 
     @discardableResult
@@ -4797,6 +4842,8 @@ public enum CodexAppServer {
     private static let curatedPluginsGitHubAPIBaseURL = "https://api.github.com"
     private static let curatedPluginsGitHubAcceptHeader = "application/vnd.github+json"
     private static let curatedPluginsGitHubAPIVersionHeader = "2022-11-28"
+    private static let curatedPluginsBackupArchiveAPIURL = "https://chatgpt.com/backend-api/plugins/export/curated"
+    private static let curatedPluginsBackupArchiveFallbackVersion = "export-backup"
 
     private struct CuratedPluginsGitHubRepositorySummary: Decodable {
         let defaultBranch: String
@@ -4812,6 +4859,14 @@ public enum CodexAppServer {
         }
 
         let object: Object
+    }
+
+    private struct CuratedPluginsBackupArchiveResponse: Decodable {
+        let downloadURL: String
+
+        private enum CodingKeys: String, CodingKey {
+            case downloadURL = "download_url"
+        }
     }
 
     private static func fetchCuratedRepoRemoteSHA(
@@ -4879,6 +4934,37 @@ public enum CodexAppServer {
         )
     }
 
+    private static func fetchCuratedRepoBackupArchiveZip(
+        pluginHTTPTransport: AppServerPluginHTTPTransport
+    ) throws -> Data {
+        let exportBody = try fetchCuratedPluginsPublicText(
+            urlString: curatedPluginsBackupArchiveAPIURL,
+            context: "get curated plugins export archive metadata",
+            pluginHTTPTransport: pluginHTTPTransport
+        )
+        let exportResponse: CuratedPluginsBackupArchiveResponse
+        do {
+            exportResponse = try JSONDecoder().decode(
+                CuratedPluginsBackupArchiveResponse.self,
+                from: Data(exportBody.utf8)
+            )
+        } catch {
+            throw AppServerError.internalError(
+                "failed to parse curated plugins backup archive response from \(curatedPluginsBackupArchiveAPIURL): \(error)"
+            )
+        }
+        guard !exportResponse.downloadURL.isEmpty else {
+            throw AppServerError.internalError(
+                "curated plugins backup archive response from \(curatedPluginsBackupArchiveAPIURL) did not include a download URL"
+            )
+        }
+        return try fetchCuratedPluginsPublicBytes(
+            urlString: exportResponse.downloadURL,
+            context: "download curated plugins export archive",
+            pluginHTTPTransport: pluginHTTPTransport
+        )
+    }
+
     private static func fetchCuratedPluginsGitHubText(
         urlString: String,
         context: String,
@@ -4905,6 +4991,44 @@ public enum CodexAppServer {
         request.setValue(curatedPluginsGitHubAcceptHeader, forHTTPHeaderField: "Accept")
         request.setValue(curatedPluginsGitHubAPIVersionHeader, forHTTPHeaderField: "X-GitHub-Api-Version")
         request.setValue("codex", forHTTPHeaderField: "User-Agent")
+        let response: URLSessionTransportResponse
+        do {
+            response = try pluginHTTPTransport(request)
+        } catch {
+            throw AppServerError.internalError("failed to \(context) from \(urlString): \(error)")
+        }
+        guard (200..<300).contains(response.statusCode) else {
+            let bodyText = String(decoding: response.body, as: UTF8.self)
+            throw AppServerError.internalError(
+                "\(context) from \(urlString) failed with status \(response.statusCode): \(bodyText)"
+            )
+        }
+        return response.body
+    }
+
+    private static func fetchCuratedPluginsPublicText(
+        urlString: String,
+        context: String,
+        pluginHTTPTransport: AppServerPluginHTTPTransport
+    ) throws -> String {
+        let body = try fetchCuratedPluginsPublicBytes(
+            urlString: urlString,
+            context: context,
+            pluginHTTPTransport: pluginHTTPTransport
+        )
+        return String(decoding: body, as: UTF8.self)
+    }
+
+    private static func fetchCuratedPluginsPublicBytes(
+        urlString: String,
+        context: String,
+        pluginHTTPTransport: AppServerPluginHTTPTransport
+    ) throws -> Data {
+        guard let url = URL(string: urlString) else {
+            throw AppServerError.internalError("invalid curated plugins public URL: \(urlString)")
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
         let response: URLSessionTransportResponse
         do {
             response = try pluginHTTPTransport(request)
@@ -4964,6 +5088,95 @@ public enum CodexAppServer {
                 "curated plugins archive missing marketplace manifest at \(manifest.path)"
             )
         }
+    }
+
+    private static func hasLocalCuratedPluginsSnapshot(codexHome: URL) -> Bool {
+        let manifest = curatedPluginsRepoPath(codexHome: codexHome)
+            .appendingPathComponent(".agents/plugins/marketplace.json", isDirectory: false)
+        let shaPath = curatedPluginsSHAPath(codexHome: codexHome)
+        return FileManager.default.fileExists(atPath: manifest.path) &&
+            FileManager.default.fileExists(atPath: shaPath.path)
+    }
+
+    private static func readExtractedBackupArchiveGitSHA(repoPath: URL) throws -> String? {
+        let gitDirectory = repoPath.appendingPathComponent(".git", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: gitDirectory.path) else {
+            return nil
+        }
+
+        let headPath = gitDirectory.appendingPathComponent("HEAD", isDirectory: false)
+        let head: String
+        do {
+            head = try String(contentsOf: headPath, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
+            throw AppServerError.internalError(
+                "failed to read curated plugins backup archive git HEAD \(headPath.path): \(error)"
+            )
+        }
+        guard !head.isEmpty else {
+            throw AppServerError.internalError(
+                "curated plugins backup archive git HEAD is empty at \(headPath.path)"
+            )
+        }
+
+        if head.hasPrefix("ref: ") {
+            let reference = try validateBackupArchiveGitRef(
+                String(head.dropFirst("ref: ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+            return try readBackupArchiveGitRefSHA(gitDirectory: gitDirectory, reference: reference)
+        }
+
+        return head
+    }
+
+    private static func validateBackupArchiveGitRef(_ reference: String) throws -> String {
+        guard reference.hasPrefix("refs/") else {
+            throw AppServerError.internalError(
+                "curated plugins backup archive git ref must stay under refs/: \(reference)"
+            )
+        }
+        guard !reference.hasPrefix("/") else {
+            throw AppServerError.internalError(
+                "curated plugins backup archive git ref must be relative: \(reference)"
+            )
+        }
+        let components = reference.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        if components.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }) {
+            throw AppServerError.internalError(
+                "curated plugins backup archive git ref contains invalid path components: \(reference)"
+            )
+        }
+        return reference
+    }
+
+    private static func readBackupArchiveGitRefSHA(gitDirectory: URL, reference: String) throws -> String {
+        let refPath = gitDirectory.appendingPathComponent(reference, isDirectory: false)
+        if let sha = try? String(contentsOf: refPath, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines) {
+            guard !sha.isEmpty else {
+                throw AppServerError.internalError(
+                    "curated plugins backup archive git ref \(reference) is empty at \(refPath.path)"
+                )
+            }
+            return sha
+        }
+
+        let packedRefsPath = gitDirectory.appendingPathComponent("packed-refs", isDirectory: false)
+        if let packedRefs = try? String(contentsOf: packedRefsPath, encoding: .utf8) {
+            for line in packedRefs.split(separator: "\n", omittingEmptySubsequences: false) {
+                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty || trimmed.hasPrefix("#") || trimmed.hasPrefix("^") {
+                    continue
+                }
+                let parts = trimmed.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: false)
+                if parts.count == 2, String(parts[1]) == reference {
+                    return String(parts[0])
+                }
+            }
+        }
+
+        throw AppServerError.internalError(
+            "failed to resolve curated plugins backup archive git ref \(reference) from \(gitDirectory.path)"
+        )
     }
 
     private static func extractCuratedPluginsZipball(
