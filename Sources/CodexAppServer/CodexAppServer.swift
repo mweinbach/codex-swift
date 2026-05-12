@@ -22806,6 +22806,17 @@ final class CodexAppServerMessageProcessor {
         return CodexAppServer.threadStartedNotification(thread: thread)
     }
 
+    private func acceptsNotification(_ notification: [String: Any]) -> Bool {
+        guard let method = notification["method"] as? String else {
+            return true
+        }
+        return !optOutNotificationMethods.contains(method)
+    }
+
+    private func filterOptedOutNotifications(_ notifications: [[String: Any]]) -> [[String: Any]] {
+        notifications.filter { acceptsNotification($0) }
+    }
+
     private func subscribeCurrentConnection(toThreadID threadID: String) {
         rememberLoadedThreadFeatureState(threadID: threadID)
         let manager = threadStateManager
@@ -23243,7 +23254,8 @@ final class CodexAppServerMessageProcessor {
     }
 
     private func sendNotification(_ notification: [String: Any]) async {
-        guard let notificationSink,
+        guard acceptsNotification(notification),
+              let notificationSink,
               let data = CodexAppServer.encodeMessages([notification])
         else {
             return
@@ -25038,7 +25050,7 @@ final class CodexAppServerMessageProcessor {
                 response = CodexAppServer.errorObject(id: id, code: -32603, message: String(describing: error))
             }
         }
-        let envelopes = (response.map { [$0] } ?? []) + notifications
+        let envelopes = (response.map { [$0] } ?? []) + filterOptedOutNotifications(notifications)
         return CodexAppServer.encodeMessages(envelopes)
     }
 }

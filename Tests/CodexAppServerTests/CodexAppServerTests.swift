@@ -2201,6 +2201,28 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertFalse(forkMessages.contains { $0["method"] as? String == "thread/started" })
     }
 
+    func testNotificationOptOutFiltersGeneralAppServerNotificationsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "Saved user message",
+            provider: "mock_provider"
+        )
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            optOutNotificationMethods: ["thread/name/updated"]
+        )
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/name/set","params":{"threadId":"\#(threadID)","name":"  Sharper thread name  "}}"#.utf8
+        )))
+        XCTAssertEqual(messages.count, 1)
+        XCTAssertNotNil(messages[0]["result"] as? [String: Any])
+        XCTAssertFalse(messages.contains { $0["method"] as? String == "thread/name/updated" })
+    }
+
     func testRuntimeTurnDiffEventEmitsUpdatedNotification() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()
