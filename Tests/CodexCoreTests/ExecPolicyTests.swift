@@ -2224,6 +2224,45 @@ final class ExecPolicyTests: XCTestCase {
         """))
     }
 
+    func testParserEvaluatesRustStarlarkTemporaryDictReturnMethods() throws {
+        let policy = try parsePolicy("""
+        COMMAND = {"name": "status"}.pop("name")
+        FALLBACK = {"name": "status"}.pop("missing", "diff")
+        PAIR = {"tool": "git"}.popitem()
+        DEFAULTED = {}.setdefault("fallback", "show")
+        NONE_VALUE = {}.setdefault("empty")
+
+        prefix_rule([PAIR[1], COMMAND], "allow", justification = PAIR[0] + ":" + DEFAULTED)
+        prefix_rule([PAIR[1], FALLBACK], "prompt", justification = type(NONE_VALUE) + "/" + repr(NONE_VALUE))
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .allow,
+                justification: "tool:show"
+            ),
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("diff")]),
+                decision: .prompt,
+                justification: "NoneType/None"
+            )
+        ])
+
+        XCTAssertThrowsError(try parsePolicy("""
+        VALUE = {}.pop("missing")
+        prefix_rule(["git", VALUE], "allow")
+        """))
+        XCTAssertThrowsError(try parsePolicy("""
+        PAIR = {}.popitem()
+        prefix_rule(["git", PAIR[0]], "allow")
+        """))
+        XCTAssertThrowsError(try parsePolicy("""
+        VALUE = {}.setdefault(["bad"], "value")
+        prefix_rule(["git", VALUE], "allow")
+        """))
+    }
+
     func testParserEvaluatesRustStarlarkListPopReturnValues() throws {
         let policy = try parsePolicy("""
         COMMANDS = ["status", "diff", "log", "show"]

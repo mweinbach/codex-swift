@@ -1384,6 +1384,9 @@ public final class PolicyParser {
         functions: [String: StarlarkFunction]
     ) throws -> Bool {
         let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard topLevelEqualsIndex(in: trimmed) == nil else {
+            return false
+        }
         guard trimmed.hasSuffix(")"),
               let openIndex = matchingTopLevelCallOpen(in: trimmed)
         else {
@@ -3470,9 +3473,15 @@ public final class PolicyParser {
         let receiverText = String(callee[..<methodDotIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
         let methodStart = callee.index(after: methodDotIndex)
         let methodName = String(callee[methodStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let mutatingExpressionMethods = ["pop", "popitem", "setdefault"]
         guard !receiverText.isEmpty,
-              ["get", "keys", "values", "items"].contains(methodName)
+              ["get", "keys", "values", "items"].contains(methodName) ||
+                mutatingExpressionMethods.contains(methodName)
         else {
+            return nil
+        }
+        if mutatingExpressionMethods.contains(methodName),
+           isStarlarkIdentifier(strippingEnclosingParentheses(from: receiverText)) {
             return nil
         }
 
@@ -3514,6 +3523,27 @@ public final class PolicyParser {
         case "items":
             try requireNoStringMethodArguments(rawArguments, expression: text)
             return .array(items.map { key, value in .array([.string(key), value]) })
+        case "pop":
+            var mutableItems = items
+            return try popStarlarkDictValue(
+                from: &mutableItems,
+                rawArguments: rawArguments,
+                constants: constants,
+                functions: functions,
+                expression: text
+            )
+        case "popitem":
+            var mutableItems = items
+            return try popFirstStarlarkDictItem(from: &mutableItems, rawArguments: rawArguments, expression: text)
+        case "setdefault":
+            var mutableItems = items
+            return try setDefaultStarlarkDictValue(
+                in: &mutableItems,
+                rawArguments: rawArguments,
+                constants: constants,
+                functions: functions,
+                expression: text
+            )
         default:
             return nil
         }
