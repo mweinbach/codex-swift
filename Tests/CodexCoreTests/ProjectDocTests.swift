@@ -1,5 +1,8 @@
 import XCTest
 @testable import CodexCore
+#if canImport(Darwin)
+import Darwin
+#endif
 
 final class ProjectDocTests: XCTestCase {
     func testNoDocFileReturnsNil() throws {
@@ -138,6 +141,50 @@ final class ProjectDocTests: XCTestCase {
             "example instructions"
         )
     }
+
+    func testAgentsDirectoryIsIgnoredLikeRust() throws {
+        let tmp = try CoreTemporaryDirectory()
+        try FileManager.default.createDirectory(
+            at: tmp.url.appendingPathComponent(ProjectDoc.defaultFilename, isDirectory: true),
+            withIntermediateDirectories: true
+        )
+
+        let cfg = config(cwd: tmp.url)
+
+        XCTAssertNil(ProjectDoc.getUserInstructions(config: cfg))
+        XCTAssertEqual(try ProjectDoc.discoverProjectDocPaths(config: cfg), [])
+    }
+
+    func testOverrideDirectoryFallsBackToAgentsFileLikeRust() throws {
+        let tmp = try CoreTemporaryDirectory()
+        try FileManager.default.createDirectory(
+            at: tmp.url.appendingPathComponent(ProjectDoc.localOverrideFilename, isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try write("primary", to: tmp.url.appendingPathComponent(ProjectDoc.defaultFilename))
+
+        let cfg = config(cwd: tmp.url)
+        let discovery = try ProjectDoc.discoverProjectDocPaths(config: cfg)
+
+        XCTAssertEqual(ProjectDoc.getUserInstructions(config: cfg), "primary")
+        XCTAssertEqual(discovery.map { $0.lastPathComponent }, [ProjectDoc.defaultFilename])
+    }
+
+#if canImport(Darwin)
+    func testAgentsSpecialFileIsIgnoredLikeRust() throws {
+        let tmp = try CoreTemporaryDirectory()
+        let fifoPath = tmp.url.appendingPathComponent(ProjectDoc.defaultFilename).path
+        let created = fifoPath.withCString { path in
+            mkfifo(path, mode_t(0o644))
+        }
+        XCTAssertEqual(created, 0)
+
+        let cfg = config(cwd: tmp.url)
+
+        XCTAssertNil(ProjectDoc.getUserInstructions(config: cfg))
+        XCTAssertEqual(try ProjectDoc.discoverProjectDocPaths(config: cfg), [])
+    }
+#endif
 
     func testAgentsPreferredOverFallbacks() throws {
         let tmp = try CoreTemporaryDirectory()

@@ -83,6 +83,10 @@ public enum ProjectDoc {
                 break
             }
 
+            guard try regularFileExists(at: path, fileManager: fileManager) else {
+                continue
+            }
+
             let data: Data
             do {
                 data = try Data(contentsOf: path)
@@ -139,10 +143,7 @@ public enum ProjectDoc {
         for directory in searchDirs {
             for filename in candidates {
                 let candidate = directory.appendingPathComponent(filename, isDirectory: false)
-                var isDirectory: ObjCBool = false
-                if fileManager.fileExists(atPath: candidate.path, isDirectory: &isDirectory),
-                   !isDirectory.boolValue
-                {
+                if try regularFileExists(at: candidate, fileManager: fileManager) {
                     found.append(candidate)
                     break
                 }
@@ -197,6 +198,17 @@ public enum ProjectDoc {
         URL(fileURLWithPath: url.path, isDirectory: true)
             .standardizedFileURL
             .resolvingSymlinksInPath()
+    }
+
+    private static func regularFileExists(at url: URL, fileManager: FileManager) throws -> Bool {
+        do {
+            let attributes = try fileManager.attributesOfItem(atPath: url.path)
+            return (attributes[.type] as? FileAttributeType) == .typeRegular
+        } catch let error as NSError where error.domain == NSCocoaErrorDomain
+            && error.code == NSFileReadNoSuchFileError
+        {
+            return false
+        }
     }
 
     private static func samePath(_ lhs: URL, _ rhs: URL) -> Bool {
