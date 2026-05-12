@@ -1959,6 +1959,35 @@ final class ExecPolicyTests: XCTestCase {
         """))
     }
 
+    func testParserEvaluatesRustStarlarkIntegerBitwiseOrExpressions() throws {
+        let policy = try parsePolicy("""
+        TOOL = "git"
+        READ = 4
+        WRITE = 2
+        EXECUTE = 1
+        MODE = READ | WRITE | EXECUTE
+        HOST_ID = (1 | 4) + 2
+
+        prefix_rule([TOOL, "mode-" + str(MODE)], "allow", justification = "bitwise " + str(8 | 2))
+
+        if MODE == 7 and HOST_ID == 7:
+            network_rule("api" + str(HOST_ID) + ".github.com", "https", "allow")
+            host_executable(TOOL, ["/opt/mode-" + str(MODE) + "/" + TOOL])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("mode-7")]),
+                decision: .allow,
+                justification: "bitwise 10"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api7.github.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/mode-7/git"]])
+    }
+
     func testParserEvaluatesRustStarlarkCollectionRemovalMethods() throws {
         let policy = try parsePolicy("""
         COMMANDS = [

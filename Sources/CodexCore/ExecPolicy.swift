@@ -2179,7 +2179,7 @@ public final class PolicyParser {
         case "%=":
             return try evaluateStarlarkModulo(lhs, rhs, expression: expression)
         case "|=":
-            return try evaluateStarlarkDictionaryUnion(lhs, rhs, expression: expression)
+            return try evaluateStarlarkUnion(lhs, rhs, expression: expression)
         default:
             throw ConfigOverrideError.invalidLiteral(expression)
         }
@@ -6829,7 +6829,7 @@ public final class PolicyParser {
                 throw ConfigOverrideError.invalidLiteral(text)
             }
             let next = try parsePolicyLiteral(piece.text, constants: constants, functions: functions)
-            result = try evaluateStarlarkDictionaryUnion(result, next, expression: text)
+            result = try evaluateStarlarkUnion(result, next, expression: text)
         }
         return result
     }
@@ -6943,20 +6943,22 @@ public final class PolicyParser {
         }
     }
 
-    private static func evaluateStarlarkDictionaryUnion(
+    private static func evaluateStarlarkUnion(
         _ lhs: ConfigValue,
         _ rhs: ConfigValue,
         expression: String
     ) throws -> ConfigValue {
-        guard case var .table(lhsItems) = lhs,
-              case let .table(rhsItems) = rhs
-        else {
+        switch (lhs, rhs) {
+        case (var .table(lhsItems), let .table(rhsItems)):
+            for (key, value) in rhsItems {
+                lhsItems[key] = value
+            }
+            return .table(lhsItems)
+        case let (.integer(lhs), .integer(rhs)):
+            return .integer(lhs | rhs)
+        default:
             throw ConfigOverrideError.invalidLiteral(expression)
         }
-        for (key, value) in rhsItems {
-            lhsItems[key] = value
-        }
-        return .table(lhsItems)
     }
 
     private static func evaluateStarlarkMultiplication(

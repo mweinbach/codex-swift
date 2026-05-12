@@ -850,7 +850,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/execpolicy/src/parser.rs` Starlark dict update argument forms
   - Extended Swift execpolicy parser support for dictionary `.update(...)` statements to match Rust Starlark's no-argument, `None`, dictionary, iterable pair, and keyword-argument insertion forms, including helper-function local mutation before returning generated policy values.
 - `codex-rs/execpolicy/src/parser.rs` Starlark dict union expressions
-  - Added Swift execpolicy parser support for dictionary `|` union expressions with right-hand override semantics across constants, helper returns, generated prefix/network rules, and host executable paths, while rejecting non-dictionary operands.
+  - Added Swift execpolicy parser support for dictionary `|` union expressions with right-hand override semantics across constants, helper returns, generated prefix/network rules, and host executable paths, while rejecting non-dictionary operands. Swift also now matches Rust Starlark integer bitwise-or expressions on the same operator for numeric flag composition in generated policy values.
 - `codex-rs/execpolicy/src/parser.rs` Starlark collection removal methods
   - Added Swift execpolicy parser support for named list constant `.clear()`, `.pop([index])`, and `.remove(value)` statements plus named dictionary constant `.clear()` and `.pop(key[, default])` statements before generated rules, network hosts, and host executable paths.
 - `codex-rs/execpolicy/src/parser.rs` Starlark dict pop return values
