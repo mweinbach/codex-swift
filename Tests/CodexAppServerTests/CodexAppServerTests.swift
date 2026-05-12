@@ -3994,6 +3994,11 @@ final class CodexAppServerTests: XCTestCase {
             ]
         ])
         XCTAssertNil(processor.processLine(userInputResponse))
+        try await assertResolvedServerRequest(
+            notificationCapture,
+            threadID: "thread-1",
+            requestID: userInputRequestID
+        )
 
         await processor.handleRuntimeEvent(
             threadID: "thread-1",
@@ -4030,6 +4035,11 @@ final class CodexAppServerTests: XCTestCase {
             ]
         ])
         XCTAssertNil(processor.processLine(permissionsResponse))
+        try await assertResolvedServerRequest(
+            notificationCapture,
+            threadID: "thread-1",
+            requestID: permissionsRequestID
+        )
 
         await processor.handleRuntimeEvent(
             threadID: "thread-1",
@@ -4058,6 +4068,11 @@ final class CodexAppServerTests: XCTestCase {
             "response": ["decision": "acceptForSession"]
         ])
         XCTAssertNil(processor.processLine(patchResponse))
+        try await assertResolvedServerRequest(
+            notificationCapture,
+            threadID: "thread-1",
+            requestID: patchRequestID
+        )
 
         await processor.handleRuntimeEvent(
             threadID: "thread-1",
@@ -4089,6 +4104,11 @@ final class CodexAppServerTests: XCTestCase {
             "response": ["decision": "accept"]
         ])
         XCTAssertNil(processor.processLine(execResponse))
+        try await assertResolvedServerRequest(
+            notificationCapture,
+            threadID: "thread-1",
+            requestID: execRequestID
+        )
 
         let submissions = try await waitForSubmissions(coreOpCapture, count: 4)
         guard case let .userInputAnswer(turnID, userInputAnswer) = submissions[0].op else {
@@ -26139,6 +26159,25 @@ final class CodexAppServerTests: XCTestCase {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
         throw AppServerTestTimeout()
+    }
+
+    private func assertResolvedServerRequest(
+        _ capture: AppServerNotificationCapture,
+        threadID: String,
+        requestID: Any,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async throws {
+        let messages = try await nextNotificationMessages(capture, method: "serverRequest/resolved")
+        XCTAssertEqual(messages[0]["method"] as? String, "serverRequest/resolved", file: file, line: line)
+        let params = try XCTUnwrap(messages[0]["params"] as? [String: Any], file: file, line: line)
+        XCTAssertEqual(params["threadId"] as? String, threadID, file: file, line: line)
+        XCTAssertEqual(
+            (params["requestId"] as? NSNumber)?.int64Value,
+            (requestID as? NSNumber)?.int64Value,
+            file: file,
+            line: line
+        )
     }
 
     private func waitForSubmissions(
