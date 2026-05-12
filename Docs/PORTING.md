@@ -938,6 +938,8 @@ Source baseline inspected for this scaffold:
   - Added Swift execpolicy parser support for `dir(...)` and `hasattr(...)` over supported string, list, and dictionary policy values, returning Rust-style sorted attribute names for the modeled Starlark methods and enabling attribute-based policy branches.
 - `codex-rs/execpolicy/src/parser.rs` Starlark getattr method calls
   - Added Swift execpolicy parser support for direct calls through `getattr(value, "method")(...)` for modeled string, list, and dictionary methods, matching Rust's standard Starlark globals for generated rule values, hosts, executable paths, and list/dictionary mutations with Rust-style `None` or removed-value returns.
+- `codex-rs/execpolicy/src/parser.rs` Starlark getattr default values
+  - Added Swift execpolicy parser support for `getattr(value, "missing", default)` default fallback values across supported policy literals, covering generated prefix rules and host executable paths.
 - `codex-rs/execpolicy/src/parser.rs` Starlark loop target destructuring
   - Added Swift execpolicy parser support for simple list/tuple-style target destructuring in top-level `for` loops and list comprehensions over supported array values, matching Rust Starlark policy files that iterate pairs such as `for tool, subcommand in commands:`.
 - `codex-rs/execpolicy/src/parser.rs` Starlark numeric ranges and computed indexes

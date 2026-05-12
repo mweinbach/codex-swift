@@ -5319,7 +5319,7 @@ public final class PolicyParser {
         }
 
         let name = String(text[..<openIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard ["all", "any", "dir", "enumerate", "hasattr", "zip", "list", "tuple", "dict", "sorted", "reversed", "min", "max", "sum", "abs", "hash", "chr", "ord", "repr", "type", "str", "int", "float", "bool"].contains(name) else {
+        guard ["all", "any", "dir", "enumerate", "getattr", "hasattr", "zip", "list", "tuple", "dict", "sorted", "reversed", "min", "max", "sum", "abs", "hash", "chr", "ord", "repr", "type", "str", "int", "float", "bool"].contains(name) else {
             return nil
         }
 
@@ -5352,6 +5352,13 @@ public final class PolicyParser {
             )
         case "enumerate":
             return try parseStarlarkEnumerateCall(
+                rawArguments,
+                expression: text,
+                constants: constants,
+                functions: functions
+            )
+        case "getattr":
+            return try parseStarlarkGetAttributeCall(
                 rawArguments,
                 expression: text,
                 constants: constants,
@@ -5575,6 +5582,30 @@ public final class PolicyParser {
         return .array(items.enumerated().map { offset, item in
             .array([.integer(start + Int64(offset)), item])
         })
+    }
+
+    private static func parseStarlarkGetAttributeCall(
+        _ rawArguments: [String],
+        expression: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> ConfigValue {
+        guard rawArguments.count == 2 || rawArguments.count == 3 else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+
+        let value = try parsePolicyLiteral(rawArguments[0], constants: constants, functions: functions)
+        let attribute = try parsePolicyLiteral(rawArguments[1], constants: constants, functions: functions)
+        guard case let .string(attributeName) = attribute else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+
+        guard !starlarkAttributeNames(for: value).contains(attributeName),
+              rawArguments.count == 3
+        else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        return try parsePolicyLiteral(rawArguments[2], constants: constants, functions: functions)
     }
 
     private static func parseStarlarkHasAttributeCall(

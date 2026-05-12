@@ -3682,6 +3682,27 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkGetAttributeDefaultValues() throws {
+        let policy = try parsePolicy("""
+        TOOL = getattr({"tool": "git"}, "missing", "git")
+        SUBCOMMAND = getattr("codex", "missing", "fallback")
+        NONE_VALUE = getattr(["git"], "missing", None)
+        PATHS = getattr(["git"], "missing", ["/opt/git"])
+
+        prefix_rule([TOOL, SUBCOMMAND], "allow")
+        if NONE_VALUE == None:
+            host_executable(TOOL, PATHS)
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("fallback")]),
+                decision: .allow
+            )
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/git"]])
+    }
+
     func testParserEvaluatesRustStarlarkGetAttributeCollectionMutations() throws {
         let policy = try parsePolicy("""
         COMMANDS = ["status"]
