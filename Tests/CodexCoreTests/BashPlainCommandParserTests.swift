@@ -65,6 +65,10 @@ final class BashPlainCommandParserTests: XCTestCase {
             BashPlainCommandParser.parseWordOnlyCommandsSequence(#"echo '/usr'"/"'local'/bin"#),
             [["echo", "/usr/local/bin"]]
         )
+        XCTAssertEqual(
+            BashPlainCommandParser.parseWordOnlyCommandsSequence(##"echo ""#literal ''#raw"##),
+            [["echo", "#literal", "#raw"]]
+        )
     }
 
     func testAcceptsEscapedSpecialsInDoubleQuotedStringsLikeRust() {

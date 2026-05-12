@@ -173,6 +173,16 @@ final class ParsedCommandTests: XCTestCase {
         ])
     }
 
+    func testShellWrappedQuoteHashConcatenationMatchesRustBashParser() {
+        XCTAssertEqual(parseCommand(["bash", "-lc", ##"rg ""#TODO Sources"##]), [
+            .search(cmd: "rg '#TODO' Sources", query: "#TODO", path: "Sources")
+        ])
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", ##"rg ''#TODO Sources"##]), [
+            .search(cmd: "rg '#TODO' Sources", query: "#TODO", path: "Sources")
+        ])
+    }
+
     func testBashCdThenUnknownCollapsesToWholeUnknownLikeRust() {
         XCTAssertEqual(parseCommand(["bash", "-lc", "cd foo && bar"]), [
             .unknown(cmd: "cd foo && bar")

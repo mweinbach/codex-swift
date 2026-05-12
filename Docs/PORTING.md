@@ -975,6 +975,8 @@ Source baseline inspected for this scaffold:
   - matched Rust tree-sitter handling for backslash-newline continuations in word-only shell scripts so wrapped `bash`/`zsh`/`sh` read, search, and list summaries can span continued lines without collapsing to whole-script unknowns.
 - `codex-rs/shell-command/src/bash.rs` comment-token rejection
   - matched Rust tree-sitter parser behavior for shell comments by rejecting unquoted `#` at word boundaries in Swift's word-only bash fallback, preventing comment-bearing `bash -lc` scripts from being auto-classified as safe while preserving literal `#` inside words and escaped `\#` arguments.
+- `codex-rs/shell-command/src/bash.rs` quote/hash concatenation
+  - matched Rust tree-sitter word-concatenation handling for empty quoted prefixes followed by literal `#`, so shell-wrapped commands like `rg ""#TODO Sources` summarize as searches instead of collapsing to whole-script unknowns.
 - `codex-rs/shell-command/src/powershell.rs` UTF-8 output prefixing
   - added Swift PowerShell command prefixing with Rust's `[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;` prelude, including idempotence, accepted flag validation, and non-interactive shell/unified exec wiring.
 - `codex-rs/shell-command/src/powershell.rs` wrapper command extraction

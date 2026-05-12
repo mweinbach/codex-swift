@@ -179,7 +179,7 @@ public enum BashPlainCommandParser {
                 return nil
 
             case "#":
-                if currentWord.isEmpty {
+                if currentWord.isEmpty, !justClosedQuote {
                     return nil
                 }
                 currentWord.append(character)
