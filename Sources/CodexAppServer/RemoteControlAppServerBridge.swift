@@ -24,6 +24,96 @@ struct RemoteControlAppServerBridgeStep: Equatable, Sendable {
     }
 }
 
+struct RemoteControlAppServerVirtualLoopStep: Equatable, Sendable {
+    var transportStep: RemoteControlVirtualTransportStep
+    var bridgeStep: RemoteControlAppServerBridgeStep
+    var serverEvents: [RemoteControlQueuedServerEnvelope]
+
+    init(
+        transportStep: RemoteControlVirtualTransportStep = RemoteControlVirtualTransportStep(),
+        bridgeStep: RemoteControlAppServerBridgeStep = RemoteControlAppServerBridgeStep(),
+        serverEvents: [RemoteControlQueuedServerEnvelope] = []
+    ) {
+        self.transportStep = transportStep
+        self.bridgeStep = bridgeStep
+        self.serverEvents = serverEvents
+    }
+}
+
+struct RemoteControlAppServerVirtualLoop {
+    private var transport: RemoteControlVirtualTransportCore
+    private var bridge: RemoteControlAppServerBridge
+
+    init(
+        transport: RemoteControlVirtualTransportCore = RemoteControlVirtualTransportCore(),
+        bridge: RemoteControlAppServerBridge
+    ) {
+        self.transport = transport
+        self.bridge = bridge
+    }
+
+    init(
+        configuration: CodexAppServerConfiguration,
+        threadStateManager: AppServerThreadStateManager = AppServerThreadStateManager()
+    ) {
+        self.init(
+            bridge: RemoteControlAppServerBridge(
+                configuration: configuration,
+                threadStateManager: threadStateManager
+            )
+        )
+    }
+
+    mutating func handleClientEnvelope(
+        _ envelope: RemoteControlClientEnvelope,
+        now: TimeInterval = Date().timeIntervalSinceReferenceDate
+    ) async -> RemoteControlAppServerVirtualLoopStep {
+        await apply(transport.handleClientEnvelope(envelope, now: now))
+    }
+
+    mutating func disconnect(
+        connectionID: RemoteControlVirtualConnectionID
+    ) async -> RemoteControlAppServerVirtualLoopStep {
+        await apply(transport.disconnect(connectionID: connectionID))
+    }
+
+    mutating func closeExpiredClients(
+        now: TimeInterval
+    ) async -> RemoteControlAppServerVirtualLoopStep {
+        await apply(transport.closeExpiredClients(now: now))
+    }
+
+    mutating func drainPendingNotifications() async -> RemoteControlAppServerVirtualLoopStep {
+        let bridgeStep = await bridge.drainPendingNotifications()
+        return RemoteControlAppServerVirtualLoopStep(
+            bridgeStep: bridgeStep,
+            serverEvents: enqueue(bridgeStep.outgoingMessages)
+        )
+    }
+
+    private mutating func apply(
+        _ transportStep: RemoteControlVirtualTransportStep
+    ) async -> RemoteControlAppServerVirtualLoopStep {
+        let bridgeStep = await bridge.handle(transportStep.transportEvents)
+        return RemoteControlAppServerVirtualLoopStep(
+            transportStep: transportStep,
+            bridgeStep: bridgeStep,
+            serverEvents: transportStep.serverEvents + enqueue(bridgeStep.outgoingMessages)
+        )
+    }
+
+    private mutating func enqueue(
+        _ outgoingMessages: [RemoteControlAppServerBridgeOutgoingMessage]
+    ) -> [RemoteControlQueuedServerEnvelope] {
+        outgoingMessages.compactMap { outgoing in
+            transport.enqueueOutgoingMessage(
+                connectionID: outgoing.connectionID,
+                message: outgoing.message
+            )
+        }
+    }
+}
+
 struct RemoteControlAppServerBridge {
     private let configuration: CodexAppServerConfiguration
     private let threadStateManager: AppServerThreadStateManager

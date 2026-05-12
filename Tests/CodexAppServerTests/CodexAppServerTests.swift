@@ -137,6 +137,130 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
+    func testRemoteControlAppServerVirtualLoopQueuesServerEventsLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let clientID = RemoteControlClientID("client-1")
+        let streamID = RemoteControlStreamID("stream-1")
+        let connectionID = RemoteControlVirtualConnectionID(1)
+        let initialize = ExecServerJSONRPCMessage.request(ExecServerJSONRPCRequest(
+            id: .integer(1),
+            method: "initialize",
+            params: .object([
+                "clientInfo": .object([
+                    "name": .string("test"),
+                    "version": .string("0")
+                ]),
+                "capabilities": .object([
+                    "experimentalApi": .bool(true)
+                ])
+            ])
+        ))
+        var loop = RemoteControlAppServerVirtualLoop(configuration: testConfiguration(codexHome: temp.url))
+
+        let initializeStep = await loop.handleClientEnvelope(RemoteControlClientEnvelope(
+            event: .clientMessage(message: initialize),
+            clientID: clientID,
+            streamID: streamID,
+            seqID: 1,
+            cursor: nil
+        ), now: 10)
+
+        XCTAssertEqual(initializeStep.transportStep.transportEvents, [
+            .connectionOpened(connectionID: connectionID, clientID: clientID, streamID: streamID),
+            .incomingMessage(connectionID: connectionID, message: initialize)
+        ])
+        XCTAssertEqual(initializeStep.bridgeStep.droppedUnknownConnectionIDs, [])
+        let initializeResponse = try response(with: .integer(1), in: initializeStep.serverEvents)
+        guard case let .object(result) = initializeResponse.result else {
+            return XCTFail("initialize response did not include an object result")
+        }
+        XCTAssertEqual(result["codexHome"], .string(temp.url.standardizedFileURL.path))
+        XCTAssertEqual(result["platformFamily"], .string("unix"))
+        XCTAssertEqual(initializeStep.serverEvents.map(\.clientID), [clientID])
+        XCTAssertEqual(initializeStep.serverEvents.map(\.streamID), [streamID])
+
+        let pingStep = await loop.handleClientEnvelope(RemoteControlClientEnvelope(
+            event: .ping,
+            clientID: clientID,
+            streamID: streamID,
+            seqID: nil,
+            cursor: nil
+        ), now: 11)
+        XCTAssertEqual(pingStep.transportStep.transportEvents, [])
+        XCTAssertEqual(pingStep.bridgeStep, RemoteControlAppServerBridgeStep())
+        XCTAssertEqual(pingStep.serverEvents, [
+            RemoteControlQueuedServerEnvelope(
+                event: .pong(status: .active),
+                clientID: clientID,
+                streamID: streamID
+            )
+        ])
+    }
+
+    func testRemoteControlAppServerVirtualLoopClosesConnectionsLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let clientID = RemoteControlClientID("client-1")
+        let streamID = RemoteControlStreamID("stream-1")
+        let connectionID = RemoteControlVirtualConnectionID(1)
+        let initialize = ExecServerJSONRPCMessage.request(ExecServerJSONRPCRequest(
+            id: .integer(1),
+            method: "initialize",
+            params: .object([
+                "clientInfo": .object([
+                    "name": .string("test"),
+                    "version": .string("0")
+                ])
+            ])
+        ))
+        let initialized = ExecServerJSONRPCMessage.notification(ExecServerJSONRPCNotification(method: "initialized"))
+        var loop = RemoteControlAppServerVirtualLoop(configuration: testConfiguration(codexHome: temp.url))
+
+        _ = await loop.handleClientEnvelope(RemoteControlClientEnvelope(
+            event: .clientMessage(message: initialize),
+            clientID: clientID,
+            streamID: streamID,
+            seqID: 1,
+            cursor: nil
+        ), now: 10)
+        let closeStep = await loop.handleClientEnvelope(RemoteControlClientEnvelope(
+            event: .clientClosed,
+            clientID: clientID,
+            streamID: streamID,
+            seqID: 2,
+            cursor: nil
+        ), now: 11)
+        XCTAssertEqual(closeStep.transportStep.transportEvents, [
+            .connectionClosed(connectionID: connectionID)
+        ])
+        XCTAssertEqual(closeStep.serverEvents, [])
+
+        let afterCloseStep = await loop.handleClientEnvelope(RemoteControlClientEnvelope(
+            event: .clientMessage(message: initialized),
+            clientID: clientID,
+            streamID: streamID,
+            seqID: 3,
+            cursor: nil
+        ), now: 12)
+        XCTAssertEqual(afterCloseStep.transportStep, RemoteControlVirtualTransportStep())
+        XCTAssertEqual(afterCloseStep.bridgeStep, RemoteControlAppServerBridgeStep())
+        XCTAssertEqual(afterCloseStep.serverEvents, [])
+
+        let pingStep = await loop.handleClientEnvelope(RemoteControlClientEnvelope(
+            event: .ping,
+            clientID: clientID,
+            streamID: streamID,
+            seqID: nil,
+            cursor: nil
+        ), now: 13)
+        XCTAssertEqual(pingStep.serverEvents, [
+            RemoteControlQueuedServerEnvelope(
+                event: .pong(status: .unknown),
+                clientID: clientID,
+                streamID: streamID
+            )
+        ])
+    }
+
     func testRemoteControlAppServerBridgeDropsUnknownAndClosesConnectionLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let clientID = RemoteControlClientID("client-1")
@@ -24762,6 +24886,21 @@ final class CodexAppServerTests: XCTestCase {
     ) throws -> ExecServerJSONRPCResponse {
         for outgoing in messages {
             if case let .response(response) = outgoing.message, response.id == id {
+                return response
+            }
+        }
+        XCTFail("missing response with id \(id)", file: file, line: line)
+        throw AppServerTestTimeout()
+    }
+
+    private func response(
+        with id: RequestID,
+        in envelopes: [RemoteControlQueuedServerEnvelope],
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws -> ExecServerJSONRPCResponse {
+        for envelope in envelopes {
+            if case let .serverMessage(.response(response)) = envelope.event, response.id == id {
                 return response
             }
         }
