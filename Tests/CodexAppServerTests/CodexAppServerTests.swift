@@ -5603,12 +5603,31 @@ final class CodexAppServerTests: XCTestCase {
         guard case let .resumed(resumed) = history else {
             return XCTFail("expected resumed rollout history")
         }
-        XCTAssertTrue(resumed.history.contains {
+        let injectedIndex = try XCTUnwrap(resumed.history.firstIndex {
             guard case let .responseItem(.message(_, role, content, _)) = $0 else {
                 return false
             }
             return role == "assistant" && content == [.outputText(text: "Injected assistant context")]
         })
+        let environmentIndex = try XCTUnwrap(resumed.history.firstIndex {
+            guard case let .responseItem(.message(_, role, content, _)) = $0,
+                  role == "user",
+                  content.count == 1,
+                  case let .inputText(text) = content[0]
+            else {
+                return false
+            }
+            return text.contains("<environment_context>") && text.contains("<cwd>/</cwd>")
+        })
+        let turnContextIndex = try XCTUnwrap(resumed.history.firstIndex {
+            guard case let .turnContext(context) = $0 else {
+                return false
+            }
+            return context.cwd == "/"
+                && context.model == ModelsManager.offlineModel(explicitModel: nil)
+        })
+        XCTAssertLessThan(environmentIndex, turnContextIndex)
+        XCTAssertLessThan(turnContextIndex, injectedIndex)
     }
 
     func testThreadInjectItemsAppendsResponseItemsAfterExistingTurnLikeRust() throws {

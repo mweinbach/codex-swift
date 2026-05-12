@@ -3436,7 +3436,9 @@ public enum CodexAppServer {
 
     fileprivate static func threadInjectItemsResult(
         params: [String: Any]?,
-        configuration: CodexAppServerConfiguration
+        configuration: CodexAppServerConfiguration,
+        loadedThreadModel: String? = nil,
+        loadedThreadApprovalPolicy: AskForApproval? = nil
     ) throws -> [String: Any] {
         let rawThreadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
         let rawItems = try rustRequiredArrayParam(params?["items"], field: "items")
@@ -3451,6 +3453,7 @@ public enum CodexAppServer {
         guard !rawItems.isEmpty else {
             throw AppServerError.invalidRequest("items must not be empty")
         }
+        let existing = try RolloutSummary(path: rolloutPath, defaultProvider: configuration.defaultModelProvider)
 
         let items = try rawItems.enumerated().map { index, value in
             do {
@@ -3467,9 +3470,48 @@ public enum CodexAppServer {
         }
 
         let recorder = try RolloutRecorder.resume(path: URL(fileURLWithPath: rolloutPath, isDirectory: false))
-        try recorder.recordItems(items.map { .responseItem($0) })
+        var rolloutItems: [RolloutRecordItem] = []
+        if !existing.hasTurnContext {
+            let turnContext = try defaultTurnContextItem(
+                existing: existing,
+                configuration: configuration,
+                loadedThreadModel: loadedThreadModel,
+                loadedThreadApprovalPolicy: loadedThreadApprovalPolicy
+            )
+            rolloutItems.append(contentsOf: ContextUpdateBuilder.buildSettingsUpdateItems(
+                previous: nil,
+                current: turnContext,
+                shell: ShellResolver.defaultUserShell()
+            ).map(RolloutRecordItem.responseItem))
+            rolloutItems.append(.turnContext(turnContext))
+        }
+        rolloutItems.append(contentsOf: items.map { .responseItem($0) })
+        try recorder.recordItems(rolloutItems)
         try recorder.shutdown()
         return [:]
+    }
+
+    private static func defaultTurnContextItem(
+        existing: RolloutSummary,
+        configuration: CodexAppServerConfiguration,
+        loadedThreadModel: String?,
+        loadedThreadApprovalPolicy: AskForApproval?
+    ) throws -> TurnContextItem {
+        let contextCwd = existing.cwd
+        let runtimeConfig = try loadRuntimeConfigForThreadStartup(
+            configuration: configuration,
+            cwd: URL(fileURLWithPath: contextCwd, isDirectory: true),
+            permissionSelection: nil
+        )
+        let sandboxPolicy = runtimeConfig.legacySandboxPolicy()
+        return TurnContextItem(
+            cwd: contextCwd,
+            approvalPolicy: loadedThreadApprovalPolicy ?? runtimeConfig.approvalPolicy ?? .unlessTrusted,
+            sandboxPolicy: sandboxPolicy,
+            model: loadedThreadModel ?? existing.model ?? runtimeConfig.model ?? ModelsManager.offlineModel(explicitModel: nil),
+            effort: existing.reasoningEffort ?? runtimeConfig.modelReasoningEffort,
+            summary: runtimeConfig.modelReasoningSummary ?? .auto
+        )
     }
 
     fileprivate static func memoryResetResult(
@@ -23402,9 +23444,16 @@ final class CodexAppServerMessageProcessor {
                         )
                     )
                 case "thread/inject_items":
+                    let loadedThreadMetadata = (params?["threadId"] as? String)
+                        .flatMap { threadAnalyticsMetadata[$0] }
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.threadInjectItemsResult(params: params, configuration: configuration)
+                        result: try CodexAppServer.threadInjectItemsResult(
+                            params: params,
+                            configuration: configuration,
+                            loadedThreadModel: loadedThreadMetadata?.modelSlug,
+                            loadedThreadApprovalPolicy: loadedThreadMetadata?.approvalPolicy
+                        )
                     )
                 case "fs/readFile":
                     response = CodexAppServer.responseObject(
@@ -24428,6 +24477,7 @@ private struct RolloutSummary {
     let gitInfo: [String: Any]?
     let v1GitInfo: [String: Any]?
     let name: String?
+    let hasTurnContext: Bool
 
     init(path: String, defaultProvider: String) throws {
         let text = try String(contentsOf: URL(fileURLWithPath: path), encoding: .utf8)
@@ -24436,6 +24486,7 @@ private struct RolloutSummary {
         var latestTurnContextCwd: String?
         var latestTurnContextModel: String?
         var latestTurnContextReasoningEffort: ReasoningEffort?
+        var sawTurnContext = false
 
         for rawLine in text.split(whereSeparator: \.isNewline) {
             guard let data = rawLine.data(using: .utf8),
@@ -24457,6 +24508,7 @@ private struct RolloutSummary {
                     preview = text
                 }
             case let .turnContext(turnContext):
+                sawTurnContext = true
                 latestTurnContextCwd = turnContext.cwd
                 latestTurnContextModel = turnContext.model
                 latestTurnContextReasoningEffort = turnContext.effort
@@ -24484,6 +24536,7 @@ private struct RolloutSummary {
         self.agentNickname = meta.meta.agentNickname
         self.agentRole = meta.meta.agentRole
         self.name = Self.findThreadName(threadID: meta.meta.id.description, rolloutPath: path)
+        self.hasTurnContext = sawTurnContext
         if let git = meta.git {
             self.gitInfo = [
                 "sha": git.commitHash as Any,
