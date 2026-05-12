@@ -1035,6 +1035,7 @@ public enum CodexConfigLoader {
         codexHome: URL,
         cwd: URL? = nil,
         overrides: CliConfigOverrides = CliConfigOverrides(),
+        threadConfigSources: [ThreadConfigSource] = [],
         fileManager: FileManager = .default,
         systemConfigFile: URL? = defaultSystemConfigFile(),
         managedConfigOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides(),
@@ -1087,6 +1088,11 @@ public enum CodexConfigLoader {
         }
 
         try parsed.apply(overrides: overrides)
+        for source in threadConfigSources {
+            if let layer = try source.configLayerEntry() {
+                try parsed.merge(layer.config)
+            }
+        }
         let managedConfigLayers = try CodexConfigLayerLoader.loadConfigLayers(
             codexHome: codexHome,
             overrides: managedConfigOverrides,

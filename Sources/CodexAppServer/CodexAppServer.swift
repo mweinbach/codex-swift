@@ -184,6 +184,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let accessibleConnectorProvider: AppServerAccessibleConnectorProvider
     public let mcpOAuthLoginStarter: AppServerMcpOAuthLoginStarter
     public let cliConfigOverrides: CliConfigOverrides
+    public let threadConfigSources: [ThreadConfigSource]
     public let configLayerOverrides: ConfigLayerLoaderOverrides
     public let stateStore: SQLiteAgentGraphStore?
     public let configWarnings: [ConfigWarning]
@@ -214,6 +215,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         accessibleConnectorProvider: @escaping AppServerAccessibleConnectorProvider = CodexAppServer.defaultAccessibleConnectorProvider,
         mcpOAuthLoginStarter: @escaping AppServerMcpOAuthLoginStarter = CodexAppServer.defaultMcpOAuthLoginStarter,
         cliConfigOverrides: CliConfigOverrides = CliConfigOverrides(),
+        threadConfigSources: [ThreadConfigSource] = [],
         configLayerOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides(),
         stateStore: SQLiteAgentGraphStore? = nil,
         configWarnings: [ConfigWarning] = [],
@@ -249,6 +251,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         self.accessibleConnectorProvider = accessibleConnectorProvider
         self.mcpOAuthLoginStarter = mcpOAuthLoginStarter
         self.cliConfigOverrides = cliConfigOverrides
+        self.threadConfigSources = threadConfigSources
         self.configLayerOverrides = configLayerOverrides
         self.stateStore = stateStore
         self.configWarnings = configWarnings
@@ -268,6 +271,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
             lhs.environment == rhs.environment &&
             lhs.activeProfile == rhs.activeProfile &&
             lhs.cliConfigOverrides == rhs.cliConfigOverrides &&
+            lhs.threadConfigSources == rhs.threadConfigSources &&
             lhs.configLayerOverrides == rhs.configLayerOverrides &&
             lhs.configWarnings == rhs.configWarnings &&
             lhs.remoteControlStatusSnapshot == rhs.remoteControlStatusSnapshot &&
@@ -1083,8 +1087,12 @@ public enum CodexAppServer {
         let model = stringParam(params?["model"])
             ?? runtimeConfig.model
             ?? ModelsManager.offlineModel(explicitModel: nil)
-        let modelProvider = stringParam(params?["modelProvider"])
-            ?? runtimeConfig.selectedModelProviderID
+        let modelProvider = modelProviderForThreadConfigPrecedence(
+            requested: stringParam(params?["modelProvider"]),
+            fallback: runtimeConfig.selectedModelProviderID,
+            runtimeConfig: runtimeConfig,
+            configuration: configuration
+        )
         let approvalPolicy = approvalPolicyParam(params?["approvalPolicy"])
             ?? runtimeConfig.approvalPolicy
             ?? .unlessTrusted
@@ -1272,6 +1280,7 @@ public enum CodexAppServer {
                 codexHome: configuration.codexHome,
                 cwd: cwd,
                 overrides: overrides,
+                threadConfigSources: configuration.threadConfigSources,
                 managedConfigOverrides: configuration.configLayerOverrides,
                 environment: configuration.environment
             )
@@ -1395,6 +1404,23 @@ public enum CodexAppServer {
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
         return "\"\(escaped)\""
+    }
+
+    private static func modelProviderForThreadConfigPrecedence(
+        requested: String?,
+        fallback: String,
+        runtimeConfig: CodexRuntimeConfig,
+        configuration: CodexAppServerConfiguration
+    ) -> String {
+        if configuration.threadConfigSources.contains(where: { source in
+            if case let .session(config) = source {
+                return config.modelProvider != nil
+            }
+            return false
+        }) {
+            return runtimeConfig.selectedModelProviderID
+        }
+        return requested ?? fallback
     }
 
     private static func persistTrustedProjectForThreadStartIfNeeded(
@@ -1551,8 +1577,12 @@ public enum CodexAppServer {
             ?? (hasModelResumeOverride ? nil : summary.model)
             ?? runtimeConfig.model
             ?? ModelsManager.offlineModel(explicitModel: nil)
-        let modelProvider = requestedModelProvider
-            ?? (hasModelResumeOverride ? runtimeConfig.selectedModelProviderID : summary.modelProvider)
+        let modelProvider = modelProviderForThreadConfigPrecedence(
+            requested: requestedModelProvider,
+            fallback: hasModelResumeOverride ? runtimeConfig.selectedModelProviderID : summary.modelProvider,
+            runtimeConfig: runtimeConfig,
+            configuration: configuration
+        )
         let reasoningEffort = hasModelResumeOverride
             ? runtimeConfig.modelReasoningEffort
             : summary.reasoningEffort ?? runtimeConfig.modelReasoningEffort
@@ -1654,8 +1684,12 @@ public enum CodexAppServer {
             ?? (hasModelResumeOverride ? nil : sourceSummary.model)
             ?? runtimeConfig.model
             ?? ModelsManager.offlineModel(explicitModel: nil)
-        let modelProvider = requestedModelProvider
-            ?? (hasModelResumeOverride ? runtimeConfig.selectedModelProviderID : sourceSummary.modelProvider)
+        let modelProvider = modelProviderForThreadConfigPrecedence(
+            requested: requestedModelProvider,
+            fallback: hasModelResumeOverride ? runtimeConfig.selectedModelProviderID : sourceSummary.modelProvider,
+            runtimeConfig: runtimeConfig,
+            configuration: configuration
+        )
         let reasoningEffort = hasModelResumeOverride
             ? runtimeConfig.modelReasoningEffort
             : sourceSummary.reasoningEffort ?? runtimeConfig.modelReasoningEffort

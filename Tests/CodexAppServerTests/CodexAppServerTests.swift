@@ -175,6 +175,73 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual((activePermissionProfile["modifications"] as? [[String: Any]])?.count, 0)
     }
 
+    func testThreadStartUsesSessionThreadConfigModelProviderLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let requestProvider = ModelProviderInfo(
+            name: "request",
+            baseURL: "http://127.0.0.1:9999/api/codex",
+            wireAPI: .responses,
+            requiresOpenAIAuth: false
+        )
+        let sessionProvider = ModelProviderInfo(
+            name: "session",
+            baseURL: "http://127.0.0.1:8061/api/codex",
+            wireAPI: .responses,
+            requiresOpenAIAuth: false
+        )
+        try """
+        model_provider = "request"
+
+        [model_providers.request]
+        name = "request"
+        base_url = "http://127.0.0.1:9999/api/codex"
+        wire_api = "responses"
+        requires_openai_auth = false
+        """.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            threadConfigSources: [
+                .session(SessionThreadConfig(
+                    modelProvider: "session",
+                    modelProviders: ["session": sessionProvider],
+                    features: ["plugins": false]
+                ))
+            ]
+        )
+        let processor = try initializedProcessor(configuration: configuration)
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"request"}}"#.utf8
+        )))
+
+        let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
+        XCTAssertEqual(result["modelProvider"] as? String, "session")
+        XCTAssertNotEqual(result["modelProvider"] as? String, requestProvider.name)
+        let thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+        let resumeMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"thread/resume","params":{"threadId":"\#(threadID)","modelProvider":"request"}}"#.utf8
+        )))
+        let resumeResult = try XCTUnwrap(resumeMessages[0]["result"] as? [String: Any])
+        XCTAssertEqual(resumeResult["modelProvider"] as? String, "session")
+        let forkMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":3,"method":"thread/fork","params":{"threadId":"\#(threadID)","modelProvider":"request"}}"#.utf8
+        )))
+        let forkResult = try XCTUnwrap(forkMessages[0]["result"] as? [String: Any])
+        XCTAssertEqual(forkResult["modelProvider"] as? String, "session")
+        let runtimeConfig = try CodexConfigLoader.load(
+            codexHome: temp.url,
+            threadConfigSources: configuration.threadConfigSources
+        )
+        XCTAssertEqual(runtimeConfig.selectedModelProviderID, "session")
+        XCTAssertEqual(runtimeConfig.selectedModelProvider, sessionProvider)
+        XCTAssertFalse(runtimeConfig.features.isEnabled(.plugins))
+    }
+
     func testThreadLifecyclePermissionsSelectionAppliesProfileLikeRust() throws {
         let temp = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
@@ -24187,6 +24254,7 @@ final class CodexAppServerTests: XCTestCase {
         accessibleConnectorProvider: @escaping AppServerAccessibleConnectorProvider = CodexAppServer.defaultAccessibleConnectorProvider,
         mcpOAuthLoginStarter: @escaping AppServerMcpOAuthLoginStarter = CodexAppServer.defaultMcpOAuthLoginStarter,
         cliConfigOverrides: CliConfigOverrides = CliConfigOverrides(),
+        threadConfigSources: [ThreadConfigSource] = [],
         configLayerOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides(),
         stateStore: SQLiteAgentGraphStore? = nil,
         configWarnings: [CodexAppServerConfiguration.ConfigWarning] = [],
@@ -24218,6 +24286,7 @@ final class CodexAppServerTests: XCTestCase {
             accessibleConnectorProvider: accessibleConnectorProvider,
             mcpOAuthLoginStarter: mcpOAuthLoginStarter,
             cliConfigOverrides: cliConfigOverrides,
+            threadConfigSources: threadConfigSources,
             configLayerOverrides: configLayerOverrides,
             stateStore: stateStore,
             configWarnings: configWarnings,
