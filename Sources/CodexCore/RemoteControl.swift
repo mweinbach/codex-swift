@@ -36,6 +36,30 @@ public struct RemoteControlEnrollmentRecord: Equatable, Sendable {
     }
 }
 
+public struct RemoteControlEnrollment: Equatable, Sendable {
+    public var accountID: String
+    public var environmentID: String
+    public var serverID: String
+    public var serverName: String
+
+    public init(accountID: String, environmentID: String, serverID: String, serverName: String) {
+        self.accountID = accountID
+        self.environmentID = environmentID
+        self.serverID = serverID
+        self.serverName = serverName
+    }
+}
+
+public struct RemoteControlConnectionAuth<Auth: APIAuthProvider>: Sendable {
+    public var authProvider: Auth
+    public var accountID: String
+
+    public init(authProvider: Auth, accountID: String) {
+        self.authProvider = authProvider
+        self.accountID = accountID
+    }
+}
+
 public enum RemoteControlURLNormalizationError: Error, CustomStringConvertible, Equatable, Sendable {
     case invalidURL(remoteControlURL: String, message: String)
     case unsupportedURL(remoteControlURL: String)
@@ -46,6 +70,273 @@ public enum RemoteControlURLNormalizationError: Error, CustomStringConvertible, 
             return "invalid remote control URL `\(remoteControlURL)`: \(message)"
         case let .unsupportedURL(remoteControlURL):
             return "invalid remote control URL `\(remoteControlURL)`; expected HTTPS URL for chatgpt.com or chatgpt-staging.com, or HTTP/HTTPS URL for localhost"
+        }
+    }
+}
+
+public enum RemoteControlEnrollmentError: Error, CustomStringConvertible, Equatable, Sendable {
+    case requestFailed(enrollURL: String, message: String)
+    case enrollmentFailed(enrollURL: String, statusCode: Int, headers: [String: String], bodyPreview: String)
+    case decodeFailed(enrollURL: String, statusCode: Int, headers: [String: String], bodyPreview: String, message: String)
+
+    public var description: String {
+        switch self {
+        case let .requestFailed(enrollURL, message):
+            return "failed to enroll remote control server at `\(enrollURL)`: \(message)"
+        case let .enrollmentFailed(enrollURL, statusCode, headers, bodyPreview):
+            return "remote control server enrollment failed at `\(enrollURL)`: HTTP \(Self.statusDescription(statusCode)), \(Self.formattedHeaders(headers)), body: \(bodyPreview)"
+        case let .decodeFailed(enrollURL, statusCode, headers, bodyPreview, message):
+            return "failed to parse remote control enrollment response from `\(enrollURL)`: HTTP \(Self.statusDescription(statusCode)), \(Self.formattedHeaders(headers)), body: \(bodyPreview), decode error: \(message)"
+        }
+    }
+
+    public var isPermissionDenied: Bool {
+        switch self {
+        case let .enrollmentFailed(_, statusCode, _, _):
+            return statusCode == 401 || statusCode == 403
+        case .requestFailed, .decodeFailed:
+            return false
+        }
+    }
+
+    private static func formattedHeaders(_ headers: [String: String]) -> String {
+        let normalized = Dictionary(uniqueKeysWithValues: headers.map { key, value in
+            (key.lowercased(), value)
+        })
+        let requestID = normalized["x-request-id"] ?? normalized["x-oai-request-id"] ?? "<none>"
+        let cfRay = normalized["cf-ray"] ?? "<none>"
+        return "request-id: \(requestID), cf-ray: \(cfRay)"
+    }
+
+    private static func statusDescription(_ statusCode: Int) -> String {
+        switch statusCode {
+        case 400:
+            return "400 Bad Request"
+        case 401:
+            return "401 Unauthorized"
+        case 403:
+            return "403 Forbidden"
+        case 404:
+            return "404 Not Found"
+        case 429:
+            return "429 Too Many Requests"
+        case 500:
+            return "500 Internal Server Error"
+        case 502:
+            return "502 Bad Gateway"
+        case 503:
+            return "503 Service Unavailable"
+        case 504:
+            return "504 Gateway Timeout"
+        default:
+            return "\(statusCode)"
+        }
+    }
+}
+
+public struct RemoteControlEnrollmentClient<Auth: APIAuthProvider>: Sendable {
+    public typealias Send = @Sendable (URLRequest) async throws -> URLSessionTransportResponse
+
+    public static var enrollTimeout: TimeInterval { 30 }
+    public static var accountIDHeader: String { "chatgpt-account-id" }
+    public static var installationIDHeader: String { "x-codex-installation-id" }
+
+    private let auth: RemoteControlConnectionAuth<Auth>
+    private let installationID: String
+    private let appServerVersion: String
+    private let serverName: String
+    private let os: String
+    private let arch: String
+    private let send: Send
+
+    public init(
+        auth: RemoteControlConnectionAuth<Auth>,
+        installationID: String,
+        appServerVersion: String,
+        serverName: String = Host.current().localizedName ?? "unknown",
+        os: String = RemoteControlEnrollmentClient.defaultOS,
+        arch: String = RemoteControlEnrollmentClient.defaultArch,
+        send: @escaping Send = RemoteControlEnrollmentClient.urlSessionSend
+    ) {
+        self.auth = auth
+        self.installationID = installationID
+        self.appServerVersion = appServerVersion
+        self.serverName = serverName.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.os = os
+        self.arch = arch
+        self.send = send
+    }
+
+    public func enroll(target: RemoteControlTarget) async throws -> RemoteControlEnrollment {
+        let enrollURL = target.enrollURL
+        let request = try buildEnrollmentRequest(enrollURL: enrollURL)
+        let response: URLSessionTransportResponse
+        do {
+            response = try await send(request)
+        } catch {
+            throw RemoteControlEnrollmentError.requestFailed(
+                enrollURL: enrollURL,
+                message: Self.errorDescription(error)
+            )
+        }
+
+        let bodyPreview = Self.previewResponseBody(response.body)
+        guard (200..<300).contains(response.statusCode) else {
+            throw RemoteControlEnrollmentError.enrollmentFailed(
+                enrollURL: enrollURL,
+                statusCode: response.statusCode,
+                headers: response.headers,
+                bodyPreview: bodyPreview
+            )
+        }
+
+        do {
+            let payload = try JSONDecoder().decode(EnrollRemoteServerResponse.self, from: response.body)
+            return RemoteControlEnrollment(
+                accountID: auth.accountID,
+                environmentID: payload.environmentID,
+                serverID: payload.serverID,
+                serverName: serverName
+            )
+        } catch {
+            throw RemoteControlEnrollmentError.decodeFailed(
+                enrollURL: enrollURL,
+                statusCode: response.statusCode,
+                headers: response.headers,
+                bodyPreview: bodyPreview,
+                message: Self.errorDescription(error)
+            )
+        }
+    }
+
+    public func buildEnrollmentRequest(enrollURL: String) throws -> URLRequest {
+        guard let url = URL(string: enrollURL) else {
+            throw RemoteControlEnrollmentError.requestFailed(
+                enrollURL: enrollURL,
+                message: "invalid URL"
+            )
+        }
+        var request = URLRequest(url: url, timeoutInterval: Self.enrollTimeout)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        addAuthHeaders(to: &request)
+        request.setValue(auth.accountID, forHTTPHeaderField: Self.accountIDHeader)
+        request.setValue(installationID, forHTTPHeaderField: Self.installationIDHeader)
+        request.httpBody = try JSONEncoder().encode(EnrollRemoteServerRequest(
+            name: serverName,
+            os: os,
+            arch: arch,
+            appServerVersion: appServerVersion,
+            installationID: installationID
+        ))
+        return request
+    }
+
+    public static func previewResponseBody(_ body: Data) -> String {
+        let trimmed = String(decoding: body, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return "<empty>"
+        }
+        guard trimmed.utf8.count > 4_096 else {
+            return trimmed
+        }
+        let bytes = Array(trimmed.utf8)
+        var end = 4_096
+        while end > 0, String(data: Data(bytes.prefix(end)), encoding: .utf8) == nil {
+            end -= 1
+        }
+        return "\(String(decoding: bytes.prefix(end), as: UTF8.self))..."
+    }
+
+    private func addAuthHeaders(to request: inout URLRequest) {
+        if let bearerToken = auth.authProvider.bearerToken {
+            let value = "Bearer \(bearerToken)"
+            if Self.isHeaderValue(value) {
+                request.setValue(value, forHTTPHeaderField: APIAuthHeaders.authorization)
+            }
+        }
+        if let providerAccountID = auth.authProvider.accountID, Self.isHeaderValue(providerAccountID) {
+            request.setValue(providerAccountID, forHTTPHeaderField: APIAuthHeaders.chatGPTAccountID)
+        }
+    }
+
+    public static var defaultOS: String {
+        #if os(macOS)
+        return "macos"
+        #elseif os(Linux)
+        return "linux"
+        #elseif os(Windows)
+        return "windows"
+        #else
+        return "unknown"
+        #endif
+    }
+
+    public static var defaultArch: String {
+        #if arch(arm64)
+        return "aarch64"
+        #elseif arch(x86_64)
+        return "x86_64"
+        #else
+        return "unknown"
+        #endif
+    }
+
+    private static func isHeaderValue(_ value: String) -> Bool {
+        value.unicodeScalars.allSatisfy { scalar in
+            scalar.value == 0x09 || (scalar.value >= 0x20 && scalar.value != 0x7F)
+        }
+    }
+
+    private static func errorDescription(_ error: Error) -> String {
+        if let localized = error as? LocalizedError, let description = localized.errorDescription {
+            return description
+        }
+        return String(describing: error)
+    }
+
+    public static func urlSessionSend(_ request: URLRequest) async throws -> URLSessionTransportResponse {
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw RemoteControlEnrollmentError.requestFailed(
+                enrollURL: request.url?.absoluteString ?? "<unknown>",
+                message: "non-HTTP response"
+            )
+        }
+        return URLSessionTransportResponse(
+            statusCode: http.statusCode,
+            headers: http.allHeaderFields.reduce(into: [:]) { headers, entry in
+                if let key = entry.key as? String, let value = entry.value as? String {
+                    headers[key] = value
+                }
+            },
+            body: data
+        )
+    }
+
+    private struct EnrollRemoteServerRequest: Encodable {
+        var name: String
+        var os: String
+        var arch: String
+        var appServerVersion: String
+        var installationID: String
+
+        enum CodingKeys: String, CodingKey {
+            case name
+            case os
+            case arch
+            case appServerVersion = "app_server_version"
+            case installationID = "installation_id"
+        }
+    }
+
+    private struct EnrollRemoteServerResponse: Decodable {
+        var serverID: String
+        var environmentID: String
+
+        enum CodingKeys: String, CodingKey {
+            case serverID = "server_id"
+            case environmentID = "environment_id"
         }
     }
 }

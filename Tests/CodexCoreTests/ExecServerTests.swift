@@ -2495,6 +2495,112 @@ final class ExecServerTests: XCTestCase {
         }
     }
 
+    func testRemoteControlEnrollmentClientBuildsRustRequestShape() async throws {
+        let target = try RemoteControlURLNormalizer.normalize("https://chatgpt.com/backend-api")
+        let client = RemoteControlEnrollmentClient(
+            auth: RemoteControlConnectionAuth(
+                authProvider: StaticAPIAuthProvider(bearerToken: "chatgpt-token"),
+                accountID: "remote-account"
+            ),
+            installationID: "install-123",
+            appServerVersion: "1.2.3",
+            serverName: "test-host",
+            os: "macos",
+            arch: "aarch64"
+        )
+
+        let request = try client.buildEnrollmentRequest(enrollURL: target.enrollURL)
+        let body = try XCTUnwrap(request.httpBody)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+
+        XCTAssertEqual(request.url?.absoluteString, "https://chatgpt.com/backend-api/wham/remote/control/server/enroll")
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.timeoutInterval, 30)
+        XCTAssertEqual(request.value(forHTTPHeaderField: "authorization"), "Bearer chatgpt-token")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "chatgpt-account-id"), "remote-account")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "x-codex-installation-id"), "install-123")
+        XCTAssertEqual(object, [
+            "name": "test-host",
+            "os": "macos",
+            "arch": "aarch64",
+            "app_server_version": "1.2.3",
+            "installation_id": "install-123",
+        ])
+    }
+
+    func testRemoteControlEnrollmentClientDecodesSuccessLikeRust() async throws {
+        let target = try RemoteControlURLNormalizer.normalize("https://chatgpt.com/backend-api")
+        let client = RemoteControlEnrollmentClient(
+            auth: RemoteControlConnectionAuth(
+                authProvider: StaticAPIAuthProvider(bearerToken: "chatgpt-token"),
+                accountID: "remote-account"
+            ),
+            installationID: "install-123",
+            appServerVersion: "1.2.3",
+            serverName: "test-host",
+            os: "macos",
+            arch: "aarch64",
+            send: { _ in
+                URLSessionTransportResponse(
+                    statusCode: 200,
+                    headers: ["x-request-id": "req-1"],
+                    body: Data(#"{"server_id":"srv_123","environment_id":"env_123"}"#.utf8)
+                )
+            }
+        )
+
+        let enrollment = try await client.enroll(target: target)
+
+        XCTAssertEqual(enrollment, RemoteControlEnrollment(
+            accountID: "remote-account",
+            environmentID: "env_123",
+            serverID: "srv_123",
+            serverName: "test-host"
+        ))
+    }
+
+    func testRemoteControlEnrollmentClientErrorsPreserveRustPreviewAndHeaders() async throws {
+        let target = try RemoteControlURLNormalizer.normalize("https://chatgpt.com/backend-api")
+        let client = RemoteControlEnrollmentClient(
+            auth: RemoteControlConnectionAuth(
+                authProvider: StaticAPIAuthProvider(bearerToken: "chatgpt-token"),
+                accountID: "remote-account"
+            ),
+            installationID: "install-123",
+            appServerVersion: "1.2.3",
+            serverName: "test-host",
+            send: { _ in
+                URLSessionTransportResponse(
+                    statusCode: 403,
+                    headers: ["x-oai-request-id": "req-oai", "cf-ray": "cf-1"],
+                    body: Data("  denied  ".utf8)
+                )
+            }
+        )
+
+        do {
+            _ = try await client.enroll(target: target)
+            XCTFail("enrollment should fail")
+        } catch let error as RemoteControlEnrollmentError {
+            XCTAssertTrue(error.isPermissionDenied)
+            XCTAssertEqual(
+                error.description,
+                "remote control server enrollment failed at `https://chatgpt.com/backend-api/wham/remote/control/server/enroll`: HTTP 403 Forbidden, request-id: req-oai, cf-ray: cf-1, body: denied"
+            )
+        }
+    }
+
+    func testRemoteControlEnrollmentClientBodyPreviewMatchesRustLimits() {
+        typealias Client = RemoteControlEnrollmentClient<StaticAPIAuthProvider>
+        XCTAssertEqual(Client.previewResponseBody(Data(" \n\t ".utf8)), "<empty>")
+        XCTAssertEqual(Client.previewResponseBody(Data("  ok  ".utf8)), "ok")
+
+        let body = String(repeating: "a", count: 4_095) + "é" + "tail"
+        let preview = Client.previewResponseBody(Data(body.utf8))
+
+        XCTAssertEqual(preview, "\(String(repeating: "a", count: 4_095))...")
+    }
+
     func testRemoteExecutorConfigurationNormalizesRustValues() throws {
         let config = try ExecServerRemoteExecutorConfiguration.fromEnvironment(
             baseURL: " https://registry.example.test/// ",
