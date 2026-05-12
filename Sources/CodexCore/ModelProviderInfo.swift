@@ -573,6 +573,10 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
         name == Self.amazonBedrockProviderName
     }
 
+    public func hasCommandAuth() -> Bool {
+        auth != nil
+    }
+
     public func supportsRemoteCompaction() -> Bool {
         isOpenAI() || isAzureResponsesProvider(name: name, baseURL: baseURL)
     }

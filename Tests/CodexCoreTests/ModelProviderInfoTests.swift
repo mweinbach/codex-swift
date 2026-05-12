@@ -109,6 +109,20 @@ final class ModelProviderInfoTests: XCTestCase {
         XCTAssertFalse(provider.supportsWebsockets)
     }
 
+    func testProviderInfoReportsCommandAuthLikeRust() throws {
+        let provider = try ModelProviderInfo(
+            name: "Provider",
+            auth: ModelProviderAuthInfo(
+                command: "print-token",
+                timeoutMilliseconds: 5_000,
+                cwd: AbsolutePath.currentDirectory()
+            )
+        )
+
+        XCTAssertTrue(provider.hasCommandAuth())
+        XCTAssertFalse(ModelProviderInfo.createOpenAIProvider().hasCommandAuth())
+    }
+
     func testRetryAndTimeoutDefaultsAndCaps() {
         let defaults = ModelProviderInfo(name: "defaults")
         XCTAssertEqual(defaults.requestMaxRetryCount(), 4)
