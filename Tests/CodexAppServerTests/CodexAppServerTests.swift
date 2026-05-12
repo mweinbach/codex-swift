@@ -19006,6 +19006,28 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual((data[0]["errors"] as? [Any])?.count, 0)
     }
 
+    func testSkillsListIgnoresRemovedPerCwdExtraUserRootsLikeRust() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let extraRoot = try TemporaryDirectory()
+        let extraSkill = extraRoot.url.appendingPathComponent("extra/SKILL.md", isDirectory: false)
+        try FileManager.default.createDirectory(at: extraSkill.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try skillContents(name: "extra-skill", description: "removed API field")
+            .write(to: extraSkill, atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            """
+            {"id":1,"method":"skills/list","params":{"cwds":["\(cwd.url.path)"],"forceReload":true,"perCwdExtraUserRoots":[{"cwd":"\(cwd.url.path)","extraUserRoots":["\(extraRoot.url.path)"]}]}}
+            """,
+            codexHome: codexHome.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        let skills = try XCTUnwrap(data[0]["skills"] as? [[String: Any]])
+        XCTAssertEqual(skills.map { $0["name"] as? String }, [])
+        XCTAssertEqual((data[0]["errors"] as? [Any])?.count, 0)
+    }
+
     func testSkillsListProjectsOpenAIMetadataLikeRust() throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
