@@ -99,7 +99,7 @@ public struct ModelFamily: Equatable, Sendable {
 
     public func withRemoteOverrides(_ remoteModels: [ModelInfo]) -> ModelFamily {
         var family = self
-        for model in remoteModels where model.slug == family.slug {
+        if let model = Self.remoteModelMetadata(for: family.slug, candidates: remoteModels) {
             family.applyRemoteOverrides(model)
         }
         return family
@@ -136,6 +136,32 @@ public struct ModelFamily: Equatable, Sendable {
 
     private static func defaultAutoCompactLimit(contextWindow: Int64) -> Int64 {
         (contextWindow * 9) / 10
+    }
+
+    private static func remoteModelMetadata(for model: String, candidates: [ModelInfo]) -> ModelInfo? {
+        longestPrefixMatch(model: model, candidates: candidates)
+            ?? namespacedSuffixMatch(model: model, candidates: candidates)
+    }
+
+    private static func longestPrefixMatch(model: String, candidates: [ModelInfo]) -> ModelInfo? {
+        var best: ModelInfo?
+        for candidate in candidates where model.hasPrefix(candidate.slug) {
+            if best.map({ candidate.slug.count > $0.slug.count }) ?? true {
+                best = candidate
+            }
+        }
+        return best
+    }
+
+    private static func namespacedSuffixMatch(model: String, candidates: [ModelInfo]) -> ModelInfo? {
+        let parts = model.split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count == 2,
+              !parts[0].isEmpty,
+              parts[0].allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_" || $0 == "-") })
+        else {
+            return nil
+        }
+        return longestPrefixMatch(model: String(parts[1]), candidates: candidates)
     }
 }
 

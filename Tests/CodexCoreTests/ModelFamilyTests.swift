@@ -99,6 +99,42 @@ final class ModelFamilyTests: XCTestCase {
         XCTAssertEqual(updated.shellType, .shellCommand)
     }
 
+    func testRemoteOverridesUseLongestPrefixLikeRustModelInfoLookup() {
+        let family = ModelFamily(slug: "gpt-overlay-experiment", family: "gpt-overlay-experiment")
+
+        let updated = family.withRemoteOverrides([
+            remote("gpt", effort: .low, shell: .local),
+            remote("gpt-overlay", effort: .high, shell: .shellCommand),
+            remote("other-model", effort: .medium, shell: .unifiedExec)
+        ])
+
+        XCTAssertEqual(updated.slug, "gpt-overlay-experiment")
+        XCTAssertEqual(updated.defaultReasoningEffort, .high)
+        XCTAssertEqual(updated.shellType, .shellCommand)
+    }
+
+    func testRemoteOverridesMatchSingleProviderNamespaceSuffixLikeRustModelInfoLookup() {
+        let family = ModelFamily(slug: "openai-codex/gpt-image-preview", family: "openai-codex/gpt-image-preview")
+
+        let updated = family.withRemoteOverrides([
+            remote("gpt-image", effort: .high, shell: .shellCommand)
+        ])
+
+        XCTAssertEqual(updated.defaultReasoningEffort, .high)
+        XCTAssertEqual(updated.shellType, .shellCommand)
+    }
+
+    func testRemoteOverridesRejectMultiSegmentNamespaceSuffixLikeRustModelInfoLookup() {
+        let family = ModelFamily(slug: "ns1/ns2/gpt-image", family: "ns1/ns2/gpt-image")
+
+        let updated = family.withRemoteOverrides([
+            remote("gpt-image", effort: .high, shell: .shellCommand)
+        ])
+
+        XCTAssertEqual(updated.defaultReasoningEffort, family.defaultReasoningEffort)
+        XCTAssertEqual(updated.shellType, family.shellType)
+    }
+
     func testRemoteOverridesSkipNonMatchingModels() {
         let family = ModelFamily(
             slug: "codex-mini-latest",
