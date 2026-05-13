@@ -579,7 +579,9 @@ public enum NonInteractiveExec {
         backgroundTerminalMaxTimeoutMS: UInt64 = CodexConfigDefaults.backgroundTerminalMaxTimeoutMS,
         toolSearchIndex: ToolSearchIndex? = nil,
         agentJobContext: AgentJobToolContext? = nil,
-        turnEnvironmentSelections: [TurnEnvironmentSelection]? = nil
+        turnEnvironmentSelections: [TurnEnvironmentSelection]? = nil,
+        configuredEnvironmentSnapshot: ConfiguredEnvironmentSnapshot? = nil,
+        remoteEnvironmentFileSystems: [String: ExecServerRemoteFileSystem] = [:]
     ) async -> ResponseItem {
         switch item {
         case let .functionCall(_, name, _, arguments, callID):
@@ -599,7 +601,9 @@ public enum NonInteractiveExec {
                 canRequestOriginalImageDetail: canRequestOriginalImageDetail,
                 backgroundTerminalMaxTimeoutMS: backgroundTerminalMaxTimeoutMS,
                 agentJobContext: agentJobContext,
-                turnEnvironmentSelections: turnEnvironmentSelections
+                turnEnvironmentSelections: turnEnvironmentSelections,
+                configuredEnvironmentSnapshot: configuredEnvironmentSnapshot,
+                remoteEnvironmentFileSystems: remoteEnvironmentFileSystems
             )
 
         case let .customToolCall(_, _, callID, name, input):
@@ -685,7 +689,9 @@ public enum NonInteractiveExec {
         backgroundTerminalMaxTimeoutMS: UInt64 = CodexConfigDefaults.backgroundTerminalMaxTimeoutMS,
         toolSearchIndex: ToolSearchIndex? = nil,
         agentJobContext: AgentJobToolContext? = nil,
-        turnEnvironmentSelections: [TurnEnvironmentSelection]? = nil
+        turnEnvironmentSelections: [TurnEnvironmentSelection]? = nil,
+        configuredEnvironmentSnapshot: ConfiguredEnvironmentSnapshot? = nil,
+        remoteEnvironmentFileSystems: [String: ExecServerRemoteFileSystem] = [:]
     ) async -> FunctionCallExecutionResult {
         let hookPayload = toolHookPayload(for: item)
         if let hookPayload {
@@ -742,7 +748,9 @@ public enum NonInteractiveExec {
                 backgroundTerminalMaxTimeoutMS: backgroundTerminalMaxTimeoutMS,
                 toolSearchIndex: toolSearchIndex,
                 agentJobContext: agentJobContext,
-                turnEnvironmentSelections: turnEnvironmentSelections
+                turnEnvironmentSelections: turnEnvironmentSelections,
+                configuredEnvironmentSnapshot: configuredEnvironmentSnapshot,
+                remoteEnvironmentFileSystems: remoteEnvironmentFileSystems
             )
             guard toolOutputSucceeded(output),
                   let postPayload = postToolHookPayload(for: item, output: output, prePayload: hookPayload)
@@ -781,7 +789,9 @@ public enum NonInteractiveExec {
             backgroundTerminalMaxTimeoutMS: backgroundTerminalMaxTimeoutMS,
             toolSearchIndex: toolSearchIndex,
             agentJobContext: agentJobContext,
-            turnEnvironmentSelections: turnEnvironmentSelections
+            turnEnvironmentSelections: turnEnvironmentSelections,
+            configuredEnvironmentSnapshot: configuredEnvironmentSnapshot,
+            remoteEnvironmentFileSystems: remoteEnvironmentFileSystems
         )
         return FunctionCallExecutionResult(output: output)
     }
@@ -932,7 +942,9 @@ public enum NonInteractiveExec {
         canRequestOriginalImageDetail: Bool,
         backgroundTerminalMaxTimeoutMS: UInt64,
         agentJobContext: AgentJobToolContext?,
-        turnEnvironmentSelections: [TurnEnvironmentSelection]?
+        turnEnvironmentSelections: [TurnEnvironmentSelection]?,
+        configuredEnvironmentSnapshot: ConfiguredEnvironmentSnapshot?,
+        remoteEnvironmentFileSystems: [String: ExecServerRemoteFileSystem]
     ) async -> ResponseItem {
         let decoder = JSONDecoder()
         do {
@@ -1030,12 +1042,15 @@ public enum NonInteractiveExec {
 
             case "view_image":
                 let params = try decoder.decode(ViewImageToolCallParams.self, from: Data(arguments.utf8))
-                return try executeViewImageTool(
+                return try await executeViewImageTool(
                     params: params,
                     callID: callID,
                     cwd: cwd,
+                    sandboxPolicy: sandboxPolicy,
                     canRequestOriginalImageDetail: canRequestOriginalImageDetail,
-                    turnEnvironmentSelections: turnEnvironmentSelections
+                    turnEnvironmentSelections: turnEnvironmentSelections,
+                    configuredEnvironmentSnapshot: configuredEnvironmentSnapshot,
+                    remoteEnvironmentFileSystems: remoteEnvironmentFileSystems
                 )
 
             default:
@@ -1093,9 +1108,12 @@ public enum NonInteractiveExec {
         params: ViewImageToolCallParams,
         callID: String,
         cwd: URL,
+        sandboxPolicy: SandboxPolicy,
         canRequestOriginalImageDetail: Bool,
-        turnEnvironmentSelections: [TurnEnvironmentSelection]?
-    ) throws -> ResponseItem {
+        turnEnvironmentSelections: [TurnEnvironmentSelection]?,
+        configuredEnvironmentSnapshot: ConfiguredEnvironmentSnapshot?,
+        remoteEnvironmentFileSystems: [String: ExecServerRemoteFileSystem]
+    ) async throws -> ResponseItem {
         let requestedOriginalDetail: Bool
         switch params.detail {
         case nil:
@@ -1108,26 +1126,78 @@ public enum NonInteractiveExec {
             )
         }
 
-        let resolvedCwd = try resolveViewImageCwd(
+        let resolution = try resolveViewImageEnvironment(
             environmentID: params.environmentID,
             cwd: cwd,
             turnEnvironmentSelections: turnEnvironmentSelections
         )
-        let imageURL = resolveViewImagePath(params.path, relativeTo: resolvedCwd)
-        var isDirectory = ObjCBool(false)
-        guard FileManager.default.fileExists(atPath: imageURL.path, isDirectory: &isDirectory) else {
-            throw FunctionCallError.respondToModel("unable to locate image at `\(imageURL.path)`: No such file")
-        }
-        guard !isDirectory.boolValue else {
-            throw FunctionCallError.respondToModel("image path `\(imageURL.path)` is not a file")
+        let imageURL = resolveViewImagePath(params.path, relativeTo: resolution.cwd)
+        let absolutePath = try AbsolutePath(absolutePath: imageURL.path)
+        let metadata: FileMetadata
+        let fileBytes: Data
+        if let remoteFileSystem = viewImageRemoteFileSystem(
+            environmentID: resolution.environmentID,
+            configuredEnvironmentSnapshot: configuredEnvironmentSnapshot,
+            remoteEnvironmentFileSystems: remoteEnvironmentFileSystems
+        ) {
+            let sandbox = FileSystemSandboxContext(
+                permissions: PermissionProfile.fromLegacySandboxPolicyForCwd(
+                    sandboxPolicy,
+                    cwd: resolution.cwd.path
+                ),
+                cwd: try AbsolutePath(absolutePath: resolution.cwd.path)
+            )
+            do {
+                metadata = try await remoteFileSystem.getMetadata(absolutePath, sandbox: sandbox)
+            } catch {
+                throw FunctionCallError.respondToModel(
+                    "unable to locate image at `\(imageURL.path)`: \(String(describing: error))"
+                )
+            }
+            guard metadata.isFile else {
+                throw FunctionCallError.respondToModel("image path `\(imageURL.path)` is not a file")
+            }
+            do {
+                fileBytes = try await remoteFileSystem.readFile(absolutePath, sandbox: sandbox)
+            } catch {
+                throw FunctionCallError.respondToModel(
+                    "unable to read image at `\(imageURL.path)`: \(String(describing: error))"
+                )
+            }
+        } else {
+            let localFileSystem = ExecServerFileSystem()
+            do {
+                metadata = FileMetadata(try localFileSystem.getMetadata(ExecServerFsGetMetadataParams(path: absolutePath)))
+            } catch {
+                throw FunctionCallError.respondToModel(
+                    "unable to locate image at `\(imageURL.path)`: \(String(describing: error))"
+                )
+            }
+            guard metadata.isFile else {
+                throw FunctionCallError.respondToModel("image path `\(imageURL.path)` is not a file")
+            }
+            do {
+                let response = try localFileSystem.readFile(ExecServerFsReadFileParams(path: absolutePath))
+                guard let data = Data(base64Encoded: response.dataBase64) else {
+                    throw ExecServerFileSystemError(
+                        kind: .invalidInput,
+                        message: "local fs/readFile returned invalid base64 dataBase64"
+                    )
+                }
+                fileBytes = data
+            } catch {
+                throw FunctionCallError.respondToModel(
+                    "unable to read image at `\(imageURL.path)`: \(String(describing: error))"
+                )
+            }
         }
 
         let useOriginal = canRequestOriginalImageDetail && requestedOriginalDetail
         let image: EncodedImage
         do {
             image = try useOriginal
-                ? LocalImageProcessor.loadOriginal(path: imageURL)
-                : LocalImageProcessor.loadAndResizeToFit(path: imageURL)
+                ? LocalImageProcessor.loadOriginal(fileBytes: fileBytes, path: imageURL)
+                : LocalImageProcessor.loadAndResizeToFit(fileBytes: fileBytes, path: imageURL)
         } catch {
             throw FunctionCallError.respondToModel(
                 "unable to process image at `\(imageURL.path)`: \(String(describing: error))"
@@ -1149,22 +1219,60 @@ public enum NonInteractiveExec {
         )
     }
 
-    private static func resolveViewImageCwd(
+    private struct ViewImageEnvironmentResolution {
+        let environmentID: String?
+        let cwd: URL
+    }
+
+    private static func resolveViewImageEnvironment(
         environmentID: String?,
         cwd: URL,
         turnEnvironmentSelections: [TurnEnvironmentSelection]?
-    ) throws -> URL {
+    ) throws -> ViewImageEnvironmentResolution {
         guard let environmentID else {
             if let primary = turnEnvironmentSelections?.first {
-                return URL(fileURLWithPath: primary.cwd, isDirectory: true)
+                return ViewImageEnvironmentResolution(
+                    environmentID: primary.environmentID,
+                    cwd: URL(fileURLWithPath: primary.cwd, isDirectory: true)
+                )
             }
-            return cwd
+            return ViewImageEnvironmentResolution(environmentID: nil, cwd: cwd)
         }
 
         guard let selection = turnEnvironmentSelections?.first(where: { $0.environmentID == environmentID }) else {
             throw FunctionCallError.respondToModel("unknown turn environment id `\(environmentID)`")
         }
-        return URL(fileURLWithPath: selection.cwd, isDirectory: true)
+        return ViewImageEnvironmentResolution(
+            environmentID: selection.environmentID,
+            cwd: URL(fileURLWithPath: selection.cwd, isDirectory: true)
+        )
+    }
+
+    private static func viewImageRemoteFileSystem(
+        environmentID: String?,
+        configuredEnvironmentSnapshot: ConfiguredEnvironmentSnapshot?,
+        remoteEnvironmentFileSystems: [String: ExecServerRemoteFileSystem]
+    ) -> ExecServerRemoteFileSystem? {
+        guard let environmentID,
+              let entry = configuredEnvironmentSnapshot?.environment(id: environmentID)
+        else {
+            return nil
+        }
+        switch entry.transport {
+        case .local:
+            return nil
+        case let .websocketURL(url):
+            return remoteEnvironmentFileSystems[environmentID]
+                ?? ExecServerRemoteFileSystem(transportParams: .webSocketURL(url))
+        case let .stdio(command):
+            return remoteEnvironmentFileSystems[environmentID]
+                ?? ExecServerRemoteFileSystem(transportParams: .stdioCommand(StdioExecServerCommand(
+                    program: command.program,
+                    args: command.args,
+                    env: command.env,
+                    cwd: command.cwd
+                )))
+        }
     }
 
     private static func resolveViewImagePath(_ path: String, relativeTo cwd: URL) -> URL {

@@ -1237,6 +1237,87 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(detail, defaultImageDetail)
     }
 
+    func testViewImageReadsRemoteEnvironmentFilesystemLikeRust() async throws {
+        let primary = try NonInteractiveExecTemporaryDirectory()
+        let imageBytes = try XCTUnwrap(Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="))
+        let transport = NonInteractiveExecScriptedExecServerClientTransport { message in
+            guard case let .request(request) = message else {
+                return nil
+            }
+            switch request.method {
+            case execServerFsGetMetadataMethod:
+                XCTAssertEqual(request.params?["path"], .string("/workspace/remote.png"))
+                return ExecServerRPC.response(
+                    id: request.id,
+                    result: try ExecServerRPC.jsonValue(from: ExecServerFsGetMetadataResponse(
+                        isDirectory: false,
+                        isFile: true,
+                        isSymlink: false,
+                        createdAtMs: 0,
+                        modifiedAtMs: 0
+                    ))
+                )
+            case execServerFsReadFileMethod:
+                XCTAssertEqual(request.params?["path"], .string("/workspace/remote.png"))
+                return ExecServerRPC.response(
+                    id: request.id,
+                    result: try ExecServerRPC.jsonValue(from: ExecServerFsReadFileResponse(
+                        dataBase64: imageBytes.base64EncodedString()
+                    ))
+                )
+            default:
+                XCTFail("unexpected exec-server method \(request.method)")
+                return nil
+            }
+        }
+        let remoteFileSystem = ExecServerRemoteFileSystem(client: ExecServerClient(transport: transport))
+        let snapshot = ConfiguredEnvironmentSnapshot(
+            environments: [
+                ConfiguredEnvironmentEntry(id: "local", transport: .local),
+                ConfiguredEnvironmentEntry(id: "remote-dev", transport: .websocketURL("wss://example.com/exec"))
+            ],
+            defaultEnvironment: .environmentID("local")
+        )
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            .functionCall(
+                name: "view_image",
+                arguments: #"{"path":"remote.png","environment_id":"remote-dev"}"#,
+                callID: "call-remote-view"
+            ),
+            cwd: primary.url,
+            approvalPolicy: .never,
+            sandboxPolicy: .readOnly,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: [:],
+            turnEnvironmentSelections: [
+                TurnEnvironmentSelection(environmentID: "local", cwd: primary.url.path),
+                TurnEnvironmentSelection(environmentID: "remote-dev", cwd: "/workspace")
+            ],
+            configuredEnvironmentSnapshot: snapshot,
+            remoteEnvironmentFileSystems: ["remote-dev": remoteFileSystem]
+        )
+
+        guard case let .functionCallOutput(callID, payload) = output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-remote-view")
+        XCTAssertEqual(payload.success, true)
+        guard case let .inputImage(imageURL, detail)? = payload.contentItems?.first else {
+            return XCTFail("expected image output")
+        }
+        XCTAssertTrue(imageURL.starts(with: "data:image/png;base64,"))
+        XCTAssertEqual(detail, defaultImageDetail)
+        let methods = await transport.snapshot().compactMap { message -> String? in
+            guard case let .request(request) = message else {
+                return nil
+            }
+            return request.method
+        }
+        XCTAssertEqual(methods, [execServerFsGetMetadataMethod, execServerFsReadFileMethod])
+    }
+
     func testViewImageOriginalDetailPreservesSourceWhenAllowedLikeRust() async throws {
         let temp = try NonInteractiveExecTemporaryDirectory()
         let imagePath = temp.url.appendingPathComponent("original.png")
@@ -2595,5 +2676,34 @@ private final class NonInteractiveExecTemporaryDirectory {
 
     deinit {
         try? FileManager.default.removeItem(at: url)
+    }
+}
+
+private actor NonInteractiveExecScriptedExecServerClientTransport: ExecServerClientTransport {
+    typealias Handler = @Sendable (ExecServerJSONRPCMessage) async throws -> ExecServerJSONRPCMessage?
+
+    private let handler: Handler
+    private var messages: [ExecServerJSONRPCMessage] = []
+
+    init(handler: @escaping Handler) {
+        self.handler = handler
+    }
+
+    func send(_ message: ExecServerJSONRPCMessage) async throws -> ExecServerJSONRPCMessage? {
+        messages.append(message)
+        return try await handler(message)
+    }
+
+    func snapshot() -> [ExecServerJSONRPCMessage] {
+        messages
+    }
+}
+
+private extension JSONValue {
+    subscript(key: String) -> JSONValue? {
+        guard case let .object(object) = self else {
+            return nil
+        }
+        return object[key]
     }
 }

@@ -78,7 +78,7 @@ public enum LocalImageProcessor {
         }
     }
 
-    private static func loadAndResizeToFit(fileBytes: Data, path: URL) throws -> EncodedImage {
+    static func loadAndResizeToFit(fileBytes: Data, path: URL) throws -> EncodedImage {
         guard let inputFormat = ImageFileFormat(fileBytes: fileBytes) else {
             throw ImageProcessingError.decode(
                 path: path.path,
@@ -121,7 +121,7 @@ public enum LocalImageProcessor {
         )
     }
 
-    private static func loadOriginal(fileBytes: Data, path: URL) throws -> EncodedImage {
+    static func loadOriginal(fileBytes: Data, path: URL) throws -> EncodedImage {
         guard let inputFormat = ImageFileFormat(fileBytes: fileBytes) else {
             throw ImageProcessingError.decode(
                 path: path.path,
