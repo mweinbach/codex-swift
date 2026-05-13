@@ -230,8 +230,8 @@ Source baseline inspected for this scaffold:
   - hosted `request_plugin_install` Responses API tool schema, description guardrails, discoverable connector/plugin listing order, plugin capability fallback summaries, `tool_suggest` registration gate, and parallel-tool-call support flag
 - `codex-rs/tools/src/tool_discovery.rs` and `codex-rs/tools/src/request_plugin_install.rs`
   - request-plugin-install discoverable connector/plugin metadata, entry collection, snake_case tool/action enums, Codex TUI plugin filtering, `tool_suggestion` elicitation metadata, connector install completion checks, Rust-shaped MCP elicitation request construction, decline-always persistence into `tool_suggest.disabled_tools`, configured connector suggestion ID collection, and installed/disabled/allowlisted/configured plugin suggestion filtering including Rust's OpenAI Developers curated plugin allowlist entry
-- `codex-rs/core/src/unified_exec/errors.rs`
-  - unified exec error cases, Rust `thiserror` display strings, sandbox-denied output carrying, and constructor helpers
+- `codex-rs/core/src/unified_exec/errors.rs` and `codex-rs/protocol/src/error.rs`
+  - unified exec error cases, Rust `thiserror` display strings, sandbox-denied output carrying, constructor helpers, and Rust's sandbox-denied UI message selection/truncation
 - `codex-rs/core/src/config/constraint.rs` and `codex-rs/core/src/config_loader/config_requirements.rs`
   - constrained config values, Rust-matching constraint error strings, admin allowed approval policy constraints, sandbox-mode requirement constraints, unset-field requirements merging, `/etc/codex/requirements.toml` loading, legacy `managed_config.toml`/MDM requirement derivation, and runtime config enforcement
 - `codex-rs/app-server-protocol/src/protocol/v2.rs` config-layer models plus `codex-rs/core/src/config_loader/state.rs` and `codex-rs/core/src/config_loader/fingerprint.rs`

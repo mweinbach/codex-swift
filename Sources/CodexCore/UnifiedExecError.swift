@@ -1,5 +1,7 @@
 import Foundation
 
+private let sandboxDeniedUIMessageMaxBytes = 2 * 1024
+
 public enum UnifiedExecError: Error, Equatable, CustomStringConvertible, Sendable {
     case createSession(message: String)
     case unknownSessionID(processID: String)
@@ -27,6 +29,35 @@ public enum UnifiedExecError: Error, Equatable, CustomStringConvertible, Sendabl
             return "missing command line for unified exec request"
         case let .sandboxDenied(message, _):
             return "Command denied by sandbox: \(message)"
+        }
+    }
+
+    public var userFacingMessage: String {
+        let message = switch self {
+        case let .sandboxDenied(_, output):
+            Self.sandboxDeniedUserFacingMessage(output)
+        default:
+            description
+        }
+        return Truncation.truncateText(message, policy: .bytes(sandboxDeniedUIMessageMaxBytes))
+    }
+
+    private static func sandboxDeniedUserFacingMessage(_ output: ExecToolCallOutput) -> String {
+        if !output.aggregatedOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return output.aggregatedOutput
+        }
+
+        let stderr = output.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+        let stdout = output.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch (stderr.isEmpty, stdout.isEmpty) {
+        case (false, false):
+            return "\(stderr)\n\(stdout)"
+        case (false, true):
+            return output.stderr
+        case (true, false):
+            return output.stdout
+        case (true, true):
+            return "command failed inside sandbox with exit code \(output.exitCode)"
         }
     }
 }
