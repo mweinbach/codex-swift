@@ -1582,6 +1582,51 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(inputSchema["type"] as? String, "object")
     }
 
+    func testThreadStartAcceptsLegacyDynamicToolExposeToContextLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
+        )
+
+        let messages = try decodeMessages(processor.processLine(Data(#"""
+        {
+          "id": 1,
+          "method": "thread/start",
+          "params": {
+            "dynamicTools": [
+              {
+                "namespace": "codex_app",
+                "name": "lookup",
+                "description": "Lookup dynamic tool",
+                "inputSchema": {
+                  "type": "object",
+                  "properties": {}
+                },
+                "exposeToContext": false
+              }
+            ]
+          }
+        }
+        """#.utf8)))
+
+        XCTAssertNil(messages[0]["error"])
+        let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        let meta = try firstSessionMetaPayload(at: rolloutPath)
+        let dynamicTools = try XCTUnwrap(meta["dynamic_tools"] as? [[String: Any]])
+        XCTAssertEqual(dynamicTools.count, 1)
+        XCTAssertEqual(dynamicTools[0]["namespace"] as? String, "codex_app")
+        XCTAssertEqual(dynamicTools[0]["name"] as? String, "lookup")
+        XCTAssertEqual(dynamicTools[0]["deferLoading"] as? Bool, true)
+        XCTAssertNil(dynamicTools[0]["exposeToContext"])
+    }
+
     func testThreadForkCarriesSourceDynamicToolsIntoNewSessionMetadataLikeRust() throws {
         let temp = try TemporaryDirectory()
         let dynamicTools = [

@@ -2,6 +2,122 @@ import CodexCore
 import XCTest
 
 final class DynamicToolsTests: XCTestCase {
+    func testDynamicToolSpecDecodesCanonicalDeferLoadingLikeRust() throws {
+        let spec = try decodeDynamicTool(#"""
+        {
+          "name": "lookup_ticket",
+          "description": "Fetch a ticket",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" }
+            }
+          },
+          "deferLoading": true
+        }
+        """#)
+
+        XCTAssertEqual(
+            spec,
+            DynamicToolSpec(
+                name: "lookup_ticket",
+                description: "Fetch a ticket",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "id": .object([
+                            "type": .string("string")
+                        ])
+                    ])
+                ]),
+                deferLoading: true
+            )
+        )
+    }
+
+    func testDynamicToolSpecDecodesLegacyExposeToContextLikeRust() throws {
+        let hidden = try decodeDynamicTool(#"""
+        {
+          "name": "lookup_ticket",
+          "description": "Fetch a ticket",
+          "inputSchema": {
+            "type": "object",
+            "properties": {}
+          },
+          "exposeToContext": false
+        }
+        """#)
+        XCTAssertTrue(hidden.deferLoading)
+
+        let visible = try decodeDynamicTool(#"""
+        {
+          "name": "lookup_ticket",
+          "description": "Fetch a ticket",
+          "inputSchema": {
+            "type": "object",
+            "properties": {}
+          },
+          "exposeToContext": true
+        }
+        """#)
+        XCTAssertFalse(visible.deferLoading)
+
+        let explicitDeferLoading = try decodeDynamicTool(#"""
+        {
+          "name": "lookup_ticket",
+          "description": "Fetch a ticket",
+          "inputSchema": {
+            "type": "object",
+            "properties": {}
+          },
+          "deferLoading": false,
+          "exposeToContext": false
+        }
+        """#)
+        XCTAssertFalse(explicitDeferLoading.deferLoading)
+
+        let defaulted = try decodeDynamicTool(#"""
+        {
+          "name": "lookup_ticket",
+          "description": "Fetch a ticket",
+          "inputSchema": {
+            "type": "object",
+            "properties": {}
+          }
+        }
+        """#)
+        XCTAssertFalse(defaulted.deferLoading)
+    }
+
+    func testDynamicToolSpecEncodesCanonicalDeferLoadingLikeRust() throws {
+        try XCTAssertJSONObjectEqual(DynamicToolSpec(
+            namespace: "codex_app",
+            name: "lookup_ticket",
+            description: "Fetch a ticket",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "id": .object([
+                        "type": .string("string")
+                    ])
+                ])
+            ])
+        ), [
+            "namespace": "codex_app",
+            "name": "lookup_ticket",
+            "description": "Fetch a ticket",
+            "inputSchema": [
+                "type": "object",
+                "properties": [
+                    "id": [
+                        "type": "string"
+                    ]
+                ]
+            ],
+            "deferLoading": false
+        ])
+    }
+
     func testValidateDynamicToolsAcceptsRustSupportedSchemasAndIdentifiers() throws {
         try DynamicToolSpec.validate([
             dynamicTool(
@@ -168,6 +284,19 @@ final class DynamicToolsTests: XCTestCase {
                 file: file,
                 line: line
             )
+        }
+    }
+
+    private func decodeDynamicTool(
+        _ json: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws -> DynamicToolSpec {
+        do {
+            return try JSONDecoder().decode(DynamicToolSpec.self, from: Data(json.utf8))
+        } catch {
+            XCTFail("Failed to decode dynamic tool: \(error)", file: file, line: line)
+            throw error
         }
     }
 }
