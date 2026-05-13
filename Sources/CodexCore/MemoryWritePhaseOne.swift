@@ -81,6 +81,25 @@ public struct MemoryStageOneStreamResult: Equatable, Sendable {
     }
 }
 
+public func memoryStageOneModelName(config: CodexRuntimeConfig) -> String {
+    config.memories.extractModel ?? memoryStageOneModel
+}
+
+public func buildMemoryStageOneRequestContext(
+    config: CodexRuntimeConfig,
+    modelInfo: ModelInfo,
+    configSnapshotServiceTier: String?,
+    turnMetadataHeader: String?
+) -> MemoryStageOneRequestContext {
+    MemoryStageOneRequestContext(
+        modelInfo: modelInfo,
+        reasoningEffort: memoryStageOneReasoningEffort,
+        reasoningSummary: config.modelReasoningSummary ?? modelInfo.defaultReasoningSummary,
+        serviceTier: configSnapshotServiceTier,
+        turnMetadataHeader: turnMetadataHeader
+    )
+}
+
 private struct MemoryStageOneOutputDynamicCodingKey: CodingKey {
     let stringValue: String
     let intValue: Int?

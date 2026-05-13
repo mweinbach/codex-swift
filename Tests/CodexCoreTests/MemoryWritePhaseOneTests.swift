@@ -170,6 +170,50 @@ final class MemoryWritePhaseOneTests: XCTestCase {
         ))
     }
 
+    func testBuildMemoryStageOneRequestContextUsesRustModelAndLiveSnapshotValues() {
+        let modelInfo = minimalModelInfo(
+            defaultReasoningSummary: .auto,
+            defaultVerbosity: .medium
+        )
+        let config = CodexRuntimeConfig(
+            modelReasoningSummary: .detailed,
+            serviceTier: "priority",
+            memories: MemoriesConfig(extractModel: "custom-extractor")
+        )
+
+        let context = buildMemoryStageOneRequestContext(
+            config: config,
+            modelInfo: modelInfo,
+            configSnapshotServiceTier: "fast",
+            turnMetadataHeader: #"{"thread_id":"thread-live"}"#
+        )
+
+        XCTAssertEqual(memoryStageOneModelName(config: config), "custom-extractor")
+        XCTAssertEqual(context.modelInfo, modelInfo)
+        XCTAssertEqual(context.reasoningEffort, Optional<ReasoningEffort>.some(.low))
+        XCTAssertEqual(context.reasoningSummary, ReasoningSummary.detailed)
+        XCTAssertEqual(context.serviceTier, "fast")
+        XCTAssertEqual(context.turnMetadataHeader, #"{"thread_id":"thread-live"}"#)
+    }
+
+    func testBuildMemoryStageOneRequestContextFallsBackToRustDefaults() {
+        let modelInfo = minimalModelInfo(defaultReasoningSummary: .concise)
+        let config = CodexRuntimeConfig()
+
+        let context = buildMemoryStageOneRequestContext(
+            config: config,
+            modelInfo: modelInfo,
+            configSnapshotServiceTier: nil,
+            turnMetadataHeader: nil
+        )
+
+        XCTAssertEqual(memoryStageOneModelName(config: config), memoryStageOneModel)
+        XCTAssertEqual(context.reasoningEffort, memoryStageOneReasoningEffort)
+        XCTAssertEqual(context.reasoningSummary, .concise)
+        XCTAssertNil(context.serviceTier)
+        XCTAssertNil(context.turnMetadataHeader)
+    }
+
     func testCollectMemoryStageOneStreamResultConcatenatesDeltasUntilCompleted() throws {
         let usage = TokenUsage(inputTokens: 2, outputTokens: 3, totalTokens: 5)
 
