@@ -15668,15 +15668,18 @@ public enum CodexAppServer {
         let rawCwds = stringArrayParam(params?["cwds"]) ?? []
         let cwds = rawCwds.isEmpty ? [configuration.cwd.standardizedFileURL.path] : rawCwds
         let forceReload = boolParam(params?["forceReload"], defaultValue: false)
-        let configLayerStack = try? CodexConfigLayerLoader.loadConfigLayerStack(
-            codexHome: configuration.codexHome,
-            cliOverrides: configuration.cliConfigOverrides,
-            overrides: configuration.configLayerOverrides,
-            environment: configuration.environment
-        )
-        let configRules = configLayerStack.map { skillConfigRules(from: $0.effectiveConfig()) } ?? []
+        let includeCwdSkillRoots = skillsListIncludesCwdSkillRoots(configuration: configuration)
         return [
             "data": cwds.map { cwd in
+                let cwdURL = URL(fileURLWithPath: cwd, isDirectory: true)
+                let configLayerStack = try? CodexConfigLayerLoader.loadConfigLayerStack(
+                    codexHome: configuration.codexHome,
+                    cwd: cwdURL,
+                    cliOverrides: configuration.cliConfigOverrides,
+                    overrides: configuration.configLayerOverrides,
+                    environment: configuration.environment
+                )
+                let configRules = configLayerStack.map { skillConfigRules(from: $0.effectiveConfig()) } ?? []
                 let cacheKey = skillsListCacheKey(
                     cwd: cwd,
                     codexHome: configuration.codexHome,
@@ -15687,9 +15690,10 @@ public enum CodexAppServer {
                     outcome = cached
                 } else {
                     outcome = loadSkills(
-                        cwd: URL(fileURLWithPath: cwd, isDirectory: true),
+                        cwd: cwdURL,
                         codexHome: configuration.codexHome,
                         configLayerStack: configLayerStack,
+                        includeCwdSkillRoots: includeCwdSkillRoots,
                         remoteInstalledPlugins: remoteInstalledPlugins
                     )
                     cacheOutcome?(cacheKey, outcome)
@@ -15718,6 +15722,19 @@ public enum CodexAppServer {
             codexHome.standardizedFileURL.path,
             pluginKey
         ].joined(separator: "\u{1f}")
+    }
+
+    private static func skillsListIncludesCwdSkillRoots(configuration: CodexAppServerConfiguration) -> Bool {
+        guard let snapshot = try? ConfiguredEnvironmentLoader.load(
+            codexHome: configuration.codexHome,
+            environment: configuration.environment
+        ) else {
+            return true
+        }
+        if case .disabled = snapshot.defaultEnvironment {
+            return false
+        }
+        return true
     }
 
     fileprivate static func skillsConfigWriteResult(
@@ -20546,10 +20563,11 @@ public enum CodexAppServer {
         cwd: URL,
         codexHome: URL,
         configLayerStack: ConfigLayerStack?,
+        includeCwdSkillRoots: Bool = true,
         remoteInstalledPlugins: [RemoteInstalledPluginReference] = []
     ) -> SkillLoadOutcome {
         var outcome = SkillLoadOutcome()
-        var skillRoots = skillRoots(cwd: cwd, codexHome: codexHome)
+        var skillRoots = skillRoots(cwd: cwd, codexHome: codexHome, includeCwdSkillRoots: includeCwdSkillRoots)
             .map { (path: $0.path, scope: $0.scope, pluginID: Optional<String>.none) }
         if let configLayerStack {
             skillRoots.append(contentsOf: SkillLoader.configuredPluginSkillRoots(
@@ -20783,9 +20801,13 @@ public enum CodexAppServer {
         return formatter
     }()
 
-    private static func skillRoots(cwd: URL, codexHome: URL) -> [(path: URL, scope: SkillScope)] {
+    private static func skillRoots(
+        cwd: URL,
+        codexHome: URL,
+        includeCwdSkillRoots: Bool = true
+    ) -> [(path: URL, scope: SkillScope)] {
         var roots: [(URL, SkillScope)] = []
-        if let repoRoot = repoSkillsRoot(cwd: cwd) {
+        if includeCwdSkillRoots, let repoRoot = repoSkillsRoot(cwd: cwd) {
             roots.append((repoRoot, .repo))
         }
         roots.append((codexHome.appendingPathComponent("skills", isDirectory: true), .user))
