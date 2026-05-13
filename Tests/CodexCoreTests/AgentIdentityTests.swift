@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import XCTest
 @testable import CodexCore
 
@@ -87,6 +88,105 @@ final class AgentIdentityTests: XCTestCase {
                 runningLocation: "cli-linux"
             )
         )
+    }
+
+    func testGenerateAgentKeyMaterialEncodesPKCS8AndSSHPublicKeyLikeRust() throws {
+        let material = try AgentIdentity.generateAgentKeyMaterial(privateKeyBytes: Self.testEd25519Seed)
+
+        XCTAssertEqual(
+            material.privateKeyPKCS8Base64,
+            "MC4CAQAwBQYDK2VwBCIEIAcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcH"
+        )
+        XCTAssertEqual(
+            try AgentIdentity.publicKeySSH(privateKeyPKCS8Base64: material.privateKeyPKCS8Base64),
+            material.publicKeySSH
+        )
+        XCTAssertTrue(material.publicKeySSH.hasPrefix("ssh-ed25519 "))
+    }
+
+    func testSignTaskRegistrationPayloadUsesRuntimeAndTimestamp() throws {
+        let material = try AgentIdentity.generateAgentKeyMaterial(privateKeyBytes: Self.testEd25519Seed)
+        let key = AgentIdentityKey(agentRuntimeID: "agent-123", privateKeyPKCS8Base64: material.privateKeyPKCS8Base64)
+
+        let signature = try AgentIdentity.signTaskRegistrationPayload(
+            key: key,
+            timestamp: "2026-05-13T12:00:00Z"
+        )
+
+        let signatureBytes = try XCTUnwrap(Data(base64Encoded: signature))
+        let privateKey = try Curve25519.Signing.PrivateKey(rawRepresentation: Data(Self.testEd25519Seed))
+        XCTAssertTrue(
+            privateKey.publicKey.isValidSignature(
+                signatureBytes,
+                for: Data("agent-123:2026-05-13T12:00:00Z".utf8)
+            )
+        )
+    }
+
+    func testAuthorizationHeaderForAgentTaskSerializesSignedAgentAssertionLikeRust() throws {
+        let material = try AgentIdentity.generateAgentKeyMaterial(privateKeyBytes: Self.testEd25519Seed)
+        let key = AgentIdentityKey(agentRuntimeID: "agent-123", privateKeyPKCS8Base64: material.privateKeyPKCS8Base64)
+        let target = AgentTaskAuthorizationTarget(agentRuntimeID: "agent-123", taskID: "task-123")
+
+        let header = try AgentIdentity.authorizationHeaderForAgentTask(
+            key: key,
+            target: target,
+            timestamp: "2026-05-13T12:00:00Z"
+        )
+
+        let headerPrefix = "AgentAssertion "
+        XCTAssertTrue(header.hasPrefix(headerPrefix))
+        let token = String(header.dropFirst(headerPrefix.count))
+        XCTAssertFalse(token.contains("="))
+        let payload = try base64URLDecode(token)
+        let payloadString = try XCTUnwrap(String(data: payload, encoding: .utf8))
+        let agentRuntimeIDRange = try XCTUnwrap(payloadString.range(of: #""agent_runtime_id""#))
+        let signatureRange = try XCTUnwrap(payloadString.range(of: #""signature""#))
+        let taskIDRange = try XCTUnwrap(payloadString.range(of: #""task_id""#))
+        let timestampRange = try XCTUnwrap(payloadString.range(of: #""timestamp""#))
+        XCTAssertLessThan(agentRuntimeIDRange.lowerBound, signatureRange.lowerBound)
+        XCTAssertLessThan(signatureRange.lowerBound, taskIDRange.lowerBound)
+        XCTAssertLessThan(taskIDRange.lowerBound, timestampRange.lowerBound)
+
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: payload) as? [String: String])
+        XCTAssertEqual(object["agent_runtime_id"], "agent-123")
+        XCTAssertEqual(object["task_id"], "task-123")
+        XCTAssertEqual(object["timestamp"], "2026-05-13T12:00:00Z")
+
+        let signature = try XCTUnwrap(object["signature"].flatMap { Data(base64Encoded: $0) })
+        let privateKey = try Curve25519.Signing.PrivateKey(rawRepresentation: Data(Self.testEd25519Seed))
+        XCTAssertTrue(
+            privateKey.publicKey.isValidSignature(
+                signature,
+                for: Data("agent-123:task-123:2026-05-13T12:00:00Z".utf8)
+            )
+        )
+    }
+
+    func testAuthorizationHeaderForAgentTaskRejectsMismatchedRuntime() throws {
+        let material = try AgentIdentity.generateAgentKeyMaterial(privateKeyBytes: Self.testEd25519Seed)
+        let key = AgentIdentityKey(agentRuntimeID: "agent-123", privateKeyPKCS8Base64: material.privateKeyPKCS8Base64)
+        let target = AgentTaskAuthorizationTarget(agentRuntimeID: "agent-456", taskID: "task-123")
+
+        XCTAssertThrowsError(try AgentIdentity.authorizationHeaderForAgentTask(
+            key: key,
+            target: target,
+            timestamp: "2026-05-13T12:00:00Z"
+        )) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "agent task runtime agent-456 does not match stored agent identity agent-123"
+            )
+        }
+    }
+
+    func testStoredAgentPrivateKeyDecodeErrorsMatchRust() {
+        XCTAssertThrowsError(try AgentIdentity.publicKeySSH(privateKeyPKCS8Base64: "not base64")) { error in
+            XCTAssertEqual(String(describing: error), "stored agent identity private key is not valid base64")
+        }
+        XCTAssertThrowsError(try AgentIdentity.publicKeySSH(privateKeyPKCS8Base64: Data("nope".utf8).base64EncodedString())) { error in
+            XCTAssertEqual(String(describing: error), "stored agent identity private key is not valid PKCS#8")
+        }
     }
 
     func testDecodeAgentIdentityJWTReadsClaims() throws {
@@ -225,6 +325,16 @@ final class AgentIdentityTests: XCTestCase {
             .replacingOccurrences(of: "=", with: "")
     }
 
+    private func base64URLDecode(_ value: String) throws -> Data {
+        var standard = value
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        while standard.count % 4 != 0 {
+            standard.append("=")
+        }
+        return try XCTUnwrap(Data(base64Encoded: standard))
+    }
+
     private func testJWKS(kid: String) -> AgentIdentityJWKS {
         AgentIdentityJWKS(keys: [
             AgentIdentityJWK(
@@ -249,4 +359,6 @@ final class AgentIdentityTests: XCTestCase {
     eyJhY2NvdW50X2lkIjoiYWNjb3VudC1pZCIsImFnZW50X3ByaXZhdGVfa2V5IjoicHJpdmF0ZS1rZXkiLCJhZ2VudF9ydW50aW1lX2lkIjoiYWdlbnQtcnVudGltZS1pZCIsImNoYXRncHRfYWNjb3VudF9pc19mZWRyYW1wIjpmYWxzZSwiY2hhdGdwdF91c2VyX2lkIjoidXNlci1pZCIsImVtYWlsIjoidXNlckBleGFtcGxlLmNvbSIsImV4cCI6NDAwMDAwMDAwMCwiaWF0IjoxNzAwMDAwMDAwLCJwbGFuX3R5cGUiOiJwcm8ifQ.\
     QmHUZqnS48T8-vKmjxhwiYoGywLzhpQOAl_FNOPoYe2Xi11uBA_dZRK9s7I75swqF6h6MoZXZOzKJWjyAEi2Uq8_hbz845Nd9Ie3nZJoxSLV28uaP67z07-1XhaQ6vtCYbJr8gg6nCTsMDqpMEisyokq6bMgzIOhdBxfTQdOqj4xiguKhMUToahF9J6VAJjNbHpmlj0p42HYMUG2DgoYUsI-1rrb1bEqHftRgVIDyNME3l9B6BqGCz9WnCa2IQqn2O4XCSZkHkpWDbFW7hFD6VoaP8XFIHLdBuPx25mwdeVt_Pxy2Liwk69FJbrTHL-WiP0gnoheQD8fhliWQlgauQ
     """
+
+    private static let testEd25519Seed = [UInt8](repeating: 7, count: 32)
 }

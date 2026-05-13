@@ -1,10 +1,12 @@
 import Foundation
+import CryptoKit
 import Security
 
 public enum AgentIdentity {
     public static let jwtAudience = "codex-app-server"
     public static let jwtIssuer = "https://chatgpt.com/codex-backend/agent-identity"
     public static let requestIDByteCount = 16
+    public static let agentPrivateKeyByteCount = 32
 
     public static func agentRegistrationURL(chatGPTBaseURL: String) -> String {
         "\(trimmedBaseURL(chatGPTBaseURL))/v1/agent/register"
@@ -52,6 +54,65 @@ public enum AgentIdentity {
             agentHarnessID: sessionSource == .vscode ? "codex-app" : "codex-cli",
             runningLocation: "\(sessionSource.description)-\(operatingSystem)"
         )
+    }
+
+    public static func generateAgentKeyMaterial() throws -> GeneratedAgentKeyMaterial {
+        var bytes = [UInt8](repeating: 0, count: agentPrivateKeyByteCount)
+        let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        guard status == errSecSuccess else {
+            throw AgentIdentityError.message("failed to generate agent identity private key bytes")
+        }
+        return try generateAgentKeyMaterial(privateKeyBytes: bytes)
+    }
+
+    static func generateAgentKeyMaterial(privateKeyBytes bytes: [UInt8]) throws -> GeneratedAgentKeyMaterial {
+        guard bytes.count == agentPrivateKeyByteCount else {
+            throw AgentIdentityError.invalidPrivateKeyByteCount(bytes.count)
+        }
+        let privateKey = try Curve25519.Signing.PrivateKey(rawRepresentation: Data(bytes))
+        let privateKeyPKCS8 = ed25519PKCS8PrivateKey(seed: privateKey.rawRepresentation)
+        return GeneratedAgentKeyMaterial(
+            privateKeyPKCS8Base64: privateKeyPKCS8.base64EncodedString(),
+            publicKeySSH: encodeSSHEd25519PublicKey(publicKey: privateKey.publicKey)
+        )
+    }
+
+    public static func publicKeySSH(privateKeyPKCS8Base64: String) throws -> String {
+        let privateKey = try signingPrivateKeyFromPKCS8Base64(privateKeyPKCS8Base64)
+        return encodeSSHEd25519PublicKey(publicKey: privateKey.publicKey)
+    }
+
+    public static func signTaskRegistrationPayload(key: AgentIdentityKey, timestamp: String) throws -> String {
+        let signingKey = try signingPrivateKeyFromPKCS8Base64(key.privateKeyPKCS8Base64)
+        let signature = try signingKey.signature(for: Data("\(key.agentRuntimeID):\(timestamp)".utf8))
+        return signature.base64EncodedString()
+    }
+
+    public static func authorizationHeaderForAgentTask(
+        key: AgentIdentityKey,
+        target: AgentTaskAuthorizationTarget
+    ) throws -> String {
+        try authorizationHeaderForAgentTask(key: key, target: target, timestamp: currentTimestamp())
+    }
+
+    static func authorizationHeaderForAgentTask(
+        key: AgentIdentityKey,
+        target: AgentTaskAuthorizationTarget,
+        timestamp: String
+    ) throws -> String {
+        guard key.agentRuntimeID == target.agentRuntimeID else {
+            throw AgentIdentityError.message(
+                "agent task runtime \(target.agentRuntimeID) does not match stored agent identity \(key.agentRuntimeID)"
+            )
+        }
+        let signature = try signAgentAssertionPayload(key: key, taskID: target.taskID, timestamp: timestamp)
+        let envelope = AgentAssertionEnvelope(
+            agentRuntimeID: target.agentRuntimeID,
+            taskID: target.taskID,
+            timestamp: timestamp,
+            signature: signature
+        )
+        return "AgentAssertion \(try serializeAgentAssertion(envelope))"
     }
 
     public static func decodeJWTClaims(_ jwt: String, jwks: AgentIdentityJWKS? = nil, now: Date = Date()) throws -> AgentIdentityJWTClaims {
@@ -245,6 +306,114 @@ public enum AgentIdentity {
         return nil
     }
 
+    private static func signingPrivateKeyFromPKCS8Base64(_ privateKeyPKCS8Base64: String) throws -> Curve25519.Signing.PrivateKey {
+        let privateKeyDER: Data
+        guard let decoded = Data(base64Encoded: privateKeyPKCS8Base64) else {
+            throw AgentIdentityError.message("stored agent identity private key is not valid base64")
+        }
+        privateKeyDER = decoded
+        guard let seed = ed25519SeedFromPKCS8PrivateKey(privateKeyDER) else {
+            throw AgentIdentityError.message("stored agent identity private key is not valid PKCS#8")
+        }
+        do {
+            return try Curve25519.Signing.PrivateKey(rawRepresentation: seed)
+        } catch {
+            throw AgentIdentityError.message("stored agent identity private key is not valid PKCS#8")
+        }
+    }
+
+    private static func ed25519PKCS8PrivateKey(seed: Data) -> Data {
+        Data([
+            0x30, 0x2e,
+            0x02, 0x01, 0x00,
+            0x30, 0x05,
+            0x06, 0x03, 0x2b, 0x65, 0x70,
+            0x04, 0x22,
+            0x04, 0x20,
+        ]) + seed
+    }
+
+    private static func ed25519SeedFromPKCS8PrivateKey(_ der: Data) -> Data? {
+        let prefix = Data([
+            0x30, 0x2e,
+            0x02, 0x01, 0x00,
+            0x30, 0x05,
+            0x06, 0x03, 0x2b, 0x65, 0x70,
+            0x04, 0x22,
+            0x04, 0x20,
+        ])
+        guard der.count == prefix.count + agentPrivateKeyByteCount,
+              der.starts(with: prefix)
+        else {
+            return nil
+        }
+        return der.suffix(agentPrivateKeyByteCount)
+    }
+
+    private static func encodeSSHEd25519PublicKey(publicKey: Curve25519.Signing.PublicKey) -> String {
+        var blob = Data()
+        appendSSHString(Data("ssh-ed25519".utf8), to: &blob)
+        appendSSHString(publicKey.rawRepresentation, to: &blob)
+        return "ssh-ed25519 \(blob.base64EncodedString())"
+    }
+
+    private static func appendSSHString(_ value: Data, to data: inout Data) {
+        data.append(UInt8((value.count >> 24) & 0xff))
+        data.append(UInt8((value.count >> 16) & 0xff))
+        data.append(UInt8((value.count >> 8) & 0xff))
+        data.append(UInt8(value.count & 0xff))
+        data.append(value)
+    }
+
+    private static func signAgentAssertionPayload(key: AgentIdentityKey, taskID: String, timestamp: String) throws -> String {
+        let signingKey = try signingPrivateKeyFromPKCS8Base64(key.privateKeyPKCS8Base64)
+        let signature = try signingKey.signature(for: Data("\(key.agentRuntimeID):\(taskID):\(timestamp)".utf8))
+        return signature.base64EncodedString()
+    }
+
+    private static func serializeAgentAssertion(_ envelope: AgentAssertionEnvelope) throws -> String {
+        let payload = """
+        {"agent_runtime_id":\(jsonString(envelope.agentRuntimeID)),"signature":\(jsonString(envelope.signature)),"task_id":\(jsonString(envelope.taskID)),"timestamp":\(jsonString(envelope.timestamp))}
+        """
+        return PKCE.base64URLEncodedNoPadding(Data(payload.utf8))
+    }
+
+    private static func jsonString(_ value: String) -> String {
+        var result = "\""
+        for scalar in value.unicodeScalars {
+            switch scalar {
+            case "\"":
+                result += "\\\""
+            case "\\":
+                result += "\\\\"
+            case "\u{08}":
+                result += "\\b"
+            case "\u{0c}":
+                result += "\\f"
+            case "\n":
+                result += "\\n"
+            case "\r":
+                result += "\\r"
+            case "\t":
+                result += "\\t"
+            default:
+                if scalar.value < 0x20 {
+                    result += String(format: "\\u%04x", scalar.value)
+                } else {
+                    result += String(scalar)
+                }
+            }
+        }
+        result += "\""
+        return result
+    }
+
+    private static func currentTimestamp() -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.string(from: Date())
+    }
+
     private static func rsaPublicKey(from jwk: AgentIdentityJWK) throws -> SecKey {
         let modulus = try base64URLDecodeNoPadding(jwk.n)
         let exponent = try base64URLDecodeNoPadding(jwk.e)
@@ -436,9 +605,24 @@ private struct AgentIdentityJWTHeader: Decodable {
     let kid: String?
 }
 
+private struct AgentAssertionEnvelope: Encodable {
+    let agentRuntimeID: String
+    let taskID: String
+    let timestamp: String
+    let signature: String
+
+    private enum CodingKeys: String, CodingKey {
+        case agentRuntimeID = "agent_runtime_id"
+        case signature
+        case taskID = "task_id"
+        case timestamp
+    }
+}
+
 public enum AgentIdentityError: Error, Equatable, CustomStringConvertible, Sendable {
     case message(String)
     case invalidRequestIDByteCount(Int)
+    case invalidPrivateKeyByteCount(Int)
     case randomBytesFailed(OSStatus)
 
     public var description: String {
@@ -447,6 +631,8 @@ public enum AgentIdentityError: Error, Equatable, CustomStringConvertible, Senda
             return message
         case let .invalidRequestIDByteCount(count):
             return "agent identity request id generation requires 16 random bytes, got \(count)"
+        case let .invalidPrivateKeyByteCount(count):
+            return "agent identity key generation requires 32 private key bytes, got \(count)"
         case let .randomBytesFailed(status):
             return "failed to generate agent identity request id: OSStatus \(status)"
         }
