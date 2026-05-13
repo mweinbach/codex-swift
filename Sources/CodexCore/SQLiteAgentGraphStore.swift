@@ -13,6 +13,7 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
     private static let memoryStage1JobKind = "memory_stage1"
     private static let memoryConsolidateGlobalJobKind = "memory_consolidate_global"
     private static let memoryConsolidationJobKey = "global"
+    private static let phase2SuccessCooldownSeconds: Int64 = 6 * 60 * 60
 
     public init(databaseURL: URL, defaultProvider: String = "openai") throws {
         var openedDatabase: OpaquePointer?
@@ -1557,6 +1558,238 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         try Self.enqueueGlobalConsolidation(inputWatermark: inputWatermark, database: handle.database)
     }
 
+    public func tryClaimGlobalPhase2Job(
+        workerID: ThreadId,
+        leaseSeconds: Int64
+    ) async throws -> Phase2JobClaimOutcome {
+        let database = handle.database
+        let now = Self.currentTimeSeconds()
+        let leaseUntil = Self.saturatingAdd(now, max(leaseSeconds, 0))
+        let cooldownCutoff = Self.saturatingAdd(now, -Self.phase2SuccessCooldownSeconds)
+        let ownershipToken = UUID().uuidString.lowercased()
+
+        try Self.execute("BEGIN IMMEDIATE TRANSACTION", bindings: [SQLiteBinding](), database: database)
+        do {
+            let existingJob = try Self.phase2JobSnapshot(database: database)
+            guard let existingJob else {
+                try Self.execute(
+                    """
+                    INSERT INTO jobs (
+                        kind,
+                        job_key,
+                        status,
+                        worker_id,
+                        ownership_token,
+                        started_at,
+                        finished_at,
+                        lease_until,
+                        retry_at,
+                        retry_remaining,
+                        last_error,
+                        input_watermark,
+                        last_success_watermark
+                    ) VALUES (?, ?, 'running', ?, ?, ?, NULL, ?, NULL, ?, NULL, 0, 0)
+                    """,
+                    bindings: [
+                        .text(Self.memoryConsolidateGlobalJobKind),
+                        .text(Self.memoryConsolidationJobKey),
+                        .text(workerID.description),
+                        .text(ownershipToken),
+                        .int(now),
+                        .int(leaseUntil),
+                        .int(Self.defaultRetryRemaining)
+                    ],
+                    database: database
+                )
+                let rowsChanged = sqlite3_changes(database)
+                try Self.execute("COMMIT", bindings: [SQLiteBinding](), database: database)
+                if rowsChanged == 0 {
+                    return .skippedRunning
+                }
+                return .claimed(ownershipToken: ownershipToken, inputWatermark: 0)
+            }
+
+            let inputWatermark = existingJob.inputWatermark ?? 0
+            if existingJob.retryAt.map({ $0 > now }) == true {
+                try Self.execute("COMMIT", bindings: [SQLiteBinding](), database: database)
+                return .skippedRetryUnavailable
+            }
+            if existingJob.status == "running", existingJob.leaseUntil.map({ $0 > now }) == true {
+                try Self.execute("COMMIT", bindings: [SQLiteBinding](), database: database)
+                return .skippedRunning
+            }
+            if existingJob.lastError == nil, existingJob.finishedAt.map({ $0 > cooldownCutoff }) == true {
+                try Self.execute("COMMIT", bindings: [SQLiteBinding](), database: database)
+                return .skippedCooldown
+            }
+
+            try Self.execute(
+                """
+                UPDATE jobs
+                SET
+                    status = 'running',
+                    worker_id = ?,
+                    ownership_token = ?,
+                    started_at = ?,
+                    finished_at = NULL,
+                    lease_until = ?,
+                    retry_at = NULL,
+                    last_error = NULL
+                WHERE kind = ? AND job_key = ?
+                  AND (status != 'running' OR lease_until IS NULL OR lease_until <= ?)
+                  AND (retry_at IS NULL OR retry_at <= ?)
+                  AND (last_error IS NOT NULL OR finished_at IS NULL OR finished_at <= ?)
+                """,
+                bindings: [
+                    .text(workerID.description),
+                    .text(ownershipToken),
+                    .int(now),
+                    .int(leaseUntil),
+                    .text(Self.memoryConsolidateGlobalJobKind),
+                    .text(Self.memoryConsolidationJobKey),
+                    .int(now),
+                    .int(now),
+                    .int(cooldownCutoff)
+                ],
+                database: database
+            )
+            let rowsChanged = sqlite3_changes(database)
+            try Self.execute("COMMIT", bindings: [SQLiteBinding](), database: database)
+            if rowsChanged == 0 {
+                return .skippedRunning
+            }
+            return .claimed(ownershipToken: ownershipToken, inputWatermark: inputWatermark)
+        } catch {
+            try? Self.execute("ROLLBACK", bindings: [SQLiteBinding](), database: database)
+            throw error
+        }
+    }
+
+    public func heartbeatGlobalPhase2Job(
+        ownershipToken: String,
+        leaseSeconds: Int64
+    ) async throws -> Bool {
+        let database = handle.database
+        let now = Self.currentTimeSeconds()
+        try Self.execute(
+            """
+            UPDATE jobs
+            SET lease_until = ?
+            WHERE kind = ? AND job_key = ?
+              AND status = 'running' AND ownership_token = ?
+            """,
+            bindings: [
+                .int(Self.saturatingAdd(now, max(leaseSeconds, 0))),
+                .text(Self.memoryConsolidateGlobalJobKind),
+                .text(Self.memoryConsolidationJobKey),
+                .text(ownershipToken)
+            ],
+            database: database
+        )
+        return sqlite3_changes(database) > 0
+    }
+
+    public func markGlobalPhase2JobSucceeded(
+        ownershipToken: String,
+        completedWatermark: Int64,
+        selectedOutputs: [Stage1Output]
+    ) async throws -> Bool {
+        let database = handle.database
+        let now = Self.currentTimeSeconds()
+        try Self.execute("BEGIN TRANSACTION", bindings: [SQLiteBinding](), database: database)
+        do {
+            try Self.execute(
+                """
+                UPDATE jobs
+                SET
+                    status = 'done',
+                    finished_at = ?,
+                    lease_until = NULL,
+                    last_error = NULL,
+                    last_success_watermark = max(COALESCE(last_success_watermark, 0), ?)
+                WHERE kind = ? AND job_key = ?
+                  AND status = 'running' AND ownership_token = ?
+                """,
+                bindings: [
+                    .int(now),
+                    .int(completedWatermark),
+                    .text(Self.memoryConsolidateGlobalJobKind),
+                    .text(Self.memoryConsolidationJobKey),
+                    .text(ownershipToken)
+                ],
+                database: database
+            )
+
+            guard sqlite3_changes(database) > 0 else {
+                try Self.execute("COMMIT", bindings: [SQLiteBinding](), database: database)
+                return false
+            }
+
+            try Self.execute(
+                """
+                UPDATE stage1_outputs
+                SET
+                    selected_for_phase2 = 0,
+                    selected_for_phase2_source_updated_at = NULL
+                WHERE selected_for_phase2 != 0 OR selected_for_phase2_source_updated_at IS NOT NULL
+                """,
+                bindings: [SQLiteBinding](),
+                database: database
+            )
+
+            for output in selectedOutputs {
+                let sourceUpdatedAt = Self.epochSeconds(output.sourceUpdatedAt)
+                try Self.execute(
+                    """
+                    UPDATE stage1_outputs
+                    SET
+                        selected_for_phase2 = 1,
+                        selected_for_phase2_source_updated_at = ?
+                    WHERE thread_id = ? AND source_updated_at = ?
+                    """,
+                    bindings: [
+                        .int(sourceUpdatedAt),
+                        .text(output.threadID.description),
+                        .int(sourceUpdatedAt)
+                    ],
+                    database: database
+                )
+            }
+
+            try Self.execute("COMMIT", bindings: [SQLiteBinding](), database: database)
+            return true
+        } catch {
+            try? Self.execute("ROLLBACK", bindings: [SQLiteBinding](), database: database)
+            throw error
+        }
+    }
+
+    public func markGlobalPhase2JobFailed(
+        ownershipToken: String,
+        failureReason: String,
+        retryDelaySeconds: Int64
+    ) async throws -> Bool {
+        try markGlobalPhase2JobFailed(
+            ownershipToken: ownershipToken,
+            failureReason: failureReason,
+            retryDelaySeconds: retryDelaySeconds,
+            allowUnowned: false
+        )
+    }
+
+    public func markGlobalPhase2JobFailedIfUnowned(
+        ownershipToken: String,
+        failureReason: String,
+        retryDelaySeconds: Int64
+    ) async throws -> Bool {
+        try markGlobalPhase2JobFailed(
+            ownershipToken: ownershipToken,
+            failureReason: failureReason,
+            retryDelaySeconds: retryDelaySeconds,
+            allowUnowned: true
+        )
+    }
+
     public func setThreadSpawnEdgeStatus(
         childThreadID: ThreadId,
         status: ThreadSpawnEdgeStatus
@@ -2344,6 +2577,84 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
                 retryRemaining: sqlite3_column_int64(statement, 3)
             )
         }
+    }
+
+    private struct Phase2JobSnapshot {
+        var status: String
+        var leaseUntil: Int64?
+        var retryAt: Int64?
+        var inputWatermark: Int64?
+        var finishedAt: Int64?
+        var lastError: String?
+    }
+
+    private static func phase2JobSnapshot(database: OpaquePointer) throws -> Phase2JobSnapshot? {
+        try withStatement(
+            query: """
+                SELECT status, lease_until, retry_at, input_watermark, finished_at, last_error
+                FROM jobs
+                WHERE kind = ? AND job_key = ?
+                """,
+            bindings: [
+                .text(memoryConsolidateGlobalJobKind),
+                .text(memoryConsolidationJobKey)
+            ],
+            database: database
+        ) { statement in
+            let result = sqlite3_step(statement)
+            if result == SQLITE_DONE {
+                return nil
+            }
+            guard result == SQLITE_ROW else {
+                throw sqliteError(database: database)
+            }
+            return Phase2JobSnapshot(
+                status: try requiredTextColumn(statement, index: 0, columnName: "status"),
+                leaseUntil: optionalIntColumn(statement, index: 1),
+                retryAt: optionalIntColumn(statement, index: 2),
+                inputWatermark: optionalIntColumn(statement, index: 3),
+                finishedAt: optionalIntColumn(statement, index: 4),
+                lastError: optionalTextColumn(statement, index: 5)
+            )
+        }
+    }
+
+    private func markGlobalPhase2JobFailed(
+        ownershipToken: String,
+        failureReason: String,
+        retryDelaySeconds: Int64,
+        allowUnowned: Bool
+    ) throws -> Bool {
+        let database = handle.database
+        let now = Self.currentTimeSeconds()
+        let ownershipPredicate = allowUnowned
+            ? "AND (ownership_token = ? OR ownership_token IS NULL)"
+            : "AND ownership_token = ?"
+        try Self.execute(
+            """
+            UPDATE jobs
+            SET
+                status = 'error',
+                finished_at = ?,
+                lease_until = NULL,
+                retry_at = ?,
+                retry_remaining = max(retry_remaining - 1, 0),
+                last_error = ?
+            WHERE kind = ? AND job_key = ?
+              AND status = 'running'
+              \(ownershipPredicate)
+            """,
+            bindings: [
+                .int(now),
+                .int(Self.saturatingAdd(now, max(retryDelaySeconds, 0))),
+                .text(failureReason),
+                .text(Self.memoryConsolidateGlobalJobKind),
+                .text(Self.memoryConsolidationJobKey),
+                .text(ownershipToken)
+            ],
+            database: database
+        )
+        return sqlite3_changes(database) > 0
     }
 
     private static func optionalIntValue(

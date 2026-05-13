@@ -80,6 +80,21 @@ public enum Stage1JobClaimOutcome: Equatable, Sendable {
     case skippedRetryExhausted
 }
 
+/// Result of trying to claim a phase-2 memory consolidation job.
+public enum Phase2JobClaimOutcome: Equatable, Sendable {
+    /// The caller owns the global lock and may inspect the memory workspace.
+    case claimed(ownershipToken: String, inputWatermark: Int64)
+
+    /// The global job is in retry backoff.
+    case skippedRetryUnavailable
+
+    /// The global job completed recently enough that consolidation is cooling down.
+    case skippedCooldown
+
+    /// Another worker currently owns a fresh global consolidation lease.
+    case skippedRunning
+}
+
 /// Storage-neutral boundary for persisted thread-spawn parent/child topology.
 ///
 /// Implementations return stable ordering for list methods so callers can merge persisted graph

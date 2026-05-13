@@ -1159,6 +1159,247 @@ final class AgentGraphStoreTests: XCTestCase {
         XCTAssertEqual(globalAfterDelete?.inputWatermark, 501)
     }
 
+    func testSQLiteStoreClaimsGlobalPhase2JobWithRustLockAndCooldownStates() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        let firstWorkerID = try threadID(870)
+        let secondWorkerID = try threadID(871)
+
+        let firstClaim = try await store.tryClaimGlobalPhase2Job(
+            workerID: firstWorkerID,
+            leaseSeconds: 60
+        )
+        let runningSkip = try await store.tryClaimGlobalPhase2Job(
+            workerID: secondWorkerID,
+            leaseSeconds: 60
+        )
+        let firstToken = try claimedPhase2(firstClaim).ownershipToken
+        let wrongHeartbeat = try await store.heartbeatGlobalPhase2Job(
+            ownershipToken: "wrong",
+            leaseSeconds: 120
+        )
+        let heartbeat = try await store.heartbeatGlobalPhase2Job(
+            ownershipToken: firstToken,
+            leaseSeconds: 120
+        )
+        let staleLeaseTime = Int64(Date().timeIntervalSince1970.rounded(.down)) - 1
+        try updateRawMemoryJobLease(
+            kind: "memory_consolidate_global",
+            jobKey: "global",
+            leaseUntil: staleLeaseTime,
+            databaseURL: databaseURL
+        )
+
+        let takeoverClaim = try await store.tryClaimGlobalPhase2Job(
+            workerID: secondWorkerID,
+            leaseSeconds: 60
+        )
+        let takeoverToken = try claimedPhase2(takeoverClaim).ownershipToken
+        let oldTokenSuccess = try await store.markGlobalPhase2JobSucceeded(
+            ownershipToken: firstToken,
+            completedWatermark: 0,
+            selectedOutputs: []
+        )
+        let success = try await store.markGlobalPhase2JobSucceeded(
+            ownershipToken: takeoverToken,
+            completedWatermark: 0,
+            selectedOutputs: []
+        )
+        let cooldownSkip = try await store.tryClaimGlobalPhase2Job(
+            workerID: firstWorkerID,
+            leaseSeconds: 60
+        )
+
+        XCTAssertEqual(runningSkip, Phase2JobClaimOutcome.skippedRunning)
+        XCTAssertFalse(wrongHeartbeat)
+        XCTAssertTrue(heartbeat)
+        XCTAssertEqual(try claimedPhase2(takeoverClaim).inputWatermark, 0)
+        XCTAssertFalse(oldTokenSuccess)
+        XCTAssertTrue(success)
+        XCTAssertEqual(cooldownSkip, Phase2JobClaimOutcome.skippedCooldown)
+    }
+
+    func testSQLiteStoreGlobalPhase2FailureAndRetrySemanticsMatchRust() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        let workerID = try threadID(872)
+
+        let claim = try await store.tryClaimGlobalPhase2Job(
+            workerID: workerID,
+            leaseSeconds: 60
+        )
+        let token = try claimedPhase2(claim).ownershipToken
+        let wrongFailure = try await store.markGlobalPhase2JobFailed(
+            ownershipToken: "wrong",
+            failureReason: "ignored",
+            retryDelaySeconds: 60
+        )
+        let failed = try await store.markGlobalPhase2JobFailed(
+            ownershipToken: token,
+            failureReason: "network unavailable",
+            retryDelaySeconds: 60
+        )
+        let retrySkip = try await store.tryClaimGlobalPhase2Job(
+            workerID: workerID,
+            leaseSeconds: 60
+        )
+        let failedJob = try readRawMemoryJob(
+            kind: "memory_consolidate_global",
+            jobKey: "global",
+            databaseURL: databaseURL
+        )
+
+        XCTAssertFalse(wrongFailure)
+        XCTAssertTrue(failed)
+        XCTAssertEqual(retrySkip, Phase2JobClaimOutcome.skippedRetryUnavailable)
+        XCTAssertEqual(failedJob?.status, "error")
+        XCTAssertEqual(failedJob?.retryRemaining, 2)
+        XCTAssertEqual(failedJob?.lastError, "network unavailable")
+
+        let past = Int64(Date().timeIntervalSince1970.rounded(.down)) - 1
+        try overwriteRawMemoryJob(
+            kind: "memory_consolidate_global",
+            jobKey: "global",
+            status: "error",
+            retryAt: past,
+            retryRemaining: 0,
+            lastError: "already exhausted",
+            inputWatermark: 9,
+            databaseURL: databaseURL
+        )
+        let exhaustedRetryClaim = try await store.tryClaimGlobalPhase2Job(
+            workerID: workerID,
+            leaseSeconds: 60
+        )
+        XCTAssertEqual(try claimedPhase2(exhaustedRetryClaim).inputWatermark, 9)
+
+        try overwriteRawMemoryJob(
+            kind: "memory_consolidate_global",
+            jobKey: "global",
+            status: "running",
+            ownershipToken: nil,
+            leaseUntil: Int64(Date().timeIntervalSince1970.rounded(.down)) + 60,
+            retryRemaining: 0,
+            inputWatermark: 9,
+            databaseURL: databaseURL
+        )
+        let unownedFailed = try await store.markGlobalPhase2JobFailedIfUnowned(
+            ownershipToken: token,
+            failureReason: "lost owner",
+            retryDelaySeconds: 60
+        )
+        let unownedJob = try readRawMemoryJob(
+            kind: "memory_consolidate_global",
+            jobKey: "global",
+            databaseURL: databaseURL
+        )
+        XCTAssertTrue(unownedFailed)
+        XCTAssertEqual(unownedJob?.status, "error")
+        XCTAssertEqual(unownedJob?.retryRemaining, 0)
+        XCTAssertEqual(unownedJob?.lastError, "lost owner")
+    }
+
+    func testSQLiteStoreMarksGlobalPhase2SuccessSelectionLikeRust() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let selectedThreadID = try threadID(873)
+        let refreshedThreadID = try threadID(874)
+        let staleThreadID = try threadID(875)
+        let workerID = try threadID(876)
+        for threadID in [selectedThreadID, refreshedThreadID, staleThreadID] {
+            try insertRawSQLiteThread(
+                id: threadID,
+                agentPath: try AgentPath(validating: "/root/memory/phase2_\(threadID.description.suffix(4))"),
+                memoryMode: "enabled",
+                rolloutPath: "/tmp/\(threadID.description).jsonl",
+                cwd: "/tmp/phase2",
+                databaseURL: databaseURL
+            )
+        }
+        try insertRawStage1Output(
+            threadID: selectedThreadID,
+            sourceUpdatedAt: 100,
+            rawMemory: "selected raw",
+            rolloutSummary: "selected summary",
+            generatedAt: 101,
+            databaseURL: databaseURL
+        )
+        try insertRawStage1Output(
+            threadID: refreshedThreadID,
+            sourceUpdatedAt: 101,
+            rawMemory: "refreshed raw",
+            rolloutSummary: "refreshed summary",
+            generatedAt: 102,
+            databaseURL: databaseURL
+        )
+        try insertRawStage1Output(
+            threadID: staleThreadID,
+            sourceUpdatedAt: 90,
+            rawMemory: "stale raw",
+            rolloutSummary: "stale summary",
+            generatedAt: 91,
+            databaseURL: databaseURL
+        )
+        try markRawStage1Selection(
+            threadID: staleThreadID,
+            selectedForPhase2: 1,
+            selectedSourceUpdatedAt: 90,
+            databaseURL: databaseURL
+        )
+        try await store.enqueueGlobalConsolidation(inputWatermark: 101)
+        let claim = try await store.tryClaimGlobalPhase2Job(
+            workerID: workerID,
+            leaseSeconds: 60
+        )
+        let token = try claimedPhase2(claim).ownershipToken
+        let success = try await store.markGlobalPhase2JobSucceeded(
+            ownershipToken: token,
+            completedWatermark: 101,
+            selectedOutputs: [
+                Stage1Output(
+                    threadID: selectedThreadID,
+                    rolloutPath: "/tmp/selected.jsonl",
+                    sourceUpdatedAt: Date(timeIntervalSince1970: 100),
+                    rawMemory: "selected raw",
+                    rolloutSummary: "selected summary",
+                    cwd: "/tmp/phase2",
+                    generatedAt: Date(timeIntervalSince1970: 101)
+                ),
+                Stage1Output(
+                    threadID: refreshedThreadID,
+                    rolloutPath: "/tmp/refreshed.jsonl",
+                    sourceUpdatedAt: Date(timeIntervalSince1970: 100),
+                    rawMemory: "old refreshed raw",
+                    rolloutSummary: "old refreshed summary",
+                    cwd: "/tmp/phase2",
+                    generatedAt: Date(timeIntervalSince1970: 101)
+                )
+            ]
+        )
+        let selectedState = try readRawStage1Selection(threadID: selectedThreadID, databaseURL: databaseURL)
+        let refreshedState = try readRawStage1Selection(threadID: refreshedThreadID, databaseURL: databaseURL)
+        let staleState = try readRawStage1Selection(threadID: staleThreadID, databaseURL: databaseURL)
+        let phase2Job = try readRawMemoryJob(
+            kind: "memory_consolidate_global",
+            jobKey: "global",
+            databaseURL: databaseURL
+        )
+
+        XCTAssertTrue(success)
+        XCTAssertEqual(selectedState.selectedForPhase2, 1)
+        XCTAssertEqual(selectedState.selectedSourceUpdatedAt, 100)
+        XCTAssertEqual(refreshedState.selectedForPhase2, 0)
+        XCTAssertNil(refreshedState.selectedSourceUpdatedAt)
+        XCTAssertEqual(staleState.selectedForPhase2, 0)
+        XCTAssertNil(staleState.selectedSourceUpdatedAt)
+        XCTAssertEqual(phase2Job?.status, "done")
+        XCTAssertEqual(phase2Job?.lastSuccessWatermark, 101)
+    }
+
     func testSQLiteStoreFindsRolloutPathWithArchiveFilter() async throws {
         let temp = try AgentGraphStoreTemporaryDirectory()
         let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
@@ -2639,6 +2880,129 @@ final class AgentGraphStoreTests: XCTestCase {
             throw AgentGraphStoreTestError.unexpectedClaimOutcome
         }
         return ownershipToken
+    }
+
+    private func claimedPhase2(_ outcome: Phase2JobClaimOutcome) throws -> (ownershipToken: String, inputWatermark: Int64) {
+        guard case let .claimed(ownershipToken, inputWatermark) = outcome else {
+            XCTFail("expected phase2 claimed outcome, got \(outcome)")
+            throw AgentGraphStoreTestError.unexpectedClaimOutcome
+        }
+        return (ownershipToken, inputWatermark)
+    }
+
+    private func updateRawMemoryJobLease(
+        kind: String,
+        jobKey: String,
+        leaseUntil: Int64,
+        databaseURL: URL
+    ) throws {
+        try withRawSQLiteDatabase(databaseURL: databaseURL) { database in
+            var statement: OpaquePointer?
+            let query = "UPDATE jobs SET lease_until = ? WHERE kind = ? AND job_key = ?"
+            XCTAssertEqual(sqlite3_prepare_v2(database, query, -1, &statement, nil), SQLITE_OK)
+            let preparedStatement = try XCTUnwrap(statement)
+            defer {
+                sqlite3_finalize(preparedStatement)
+            }
+            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 1, leaseUntil), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 2, kind, -1, testSQLiteTransient), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 3, jobKey, -1, testSQLiteTransient), SQLITE_OK)
+            XCTAssertEqual(sqlite3_step(preparedStatement), SQLITE_DONE)
+        }
+    }
+
+    private func overwriteRawMemoryJob(
+        kind: String,
+        jobKey: String,
+        status: String,
+        ownershipToken: String? = nil,
+        leaseUntil: Int64? = nil,
+        retryAt: Int64? = nil,
+        retryRemaining: Int64,
+        lastError: String? = nil,
+        inputWatermark: Int64? = nil,
+        databaseURL: URL
+    ) throws {
+        try withRawSQLiteDatabase(databaseURL: databaseURL) { database in
+            var statement: OpaquePointer?
+            let query = """
+                UPDATE jobs
+                SET
+                    status = ?,
+                    ownership_token = ?,
+                    lease_until = ?,
+                    retry_at = ?,
+                    retry_remaining = ?,
+                    last_error = ?,
+                    input_watermark = ?
+                WHERE kind = ? AND job_key = ?
+                """
+            XCTAssertEqual(sqlite3_prepare_v2(database, query, -1, &statement, nil), SQLITE_OK)
+            let preparedStatement = try XCTUnwrap(statement)
+            defer {
+                sqlite3_finalize(preparedStatement)
+            }
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 1, status, -1, testSQLiteTransient), SQLITE_OK)
+            bindOptionalText(ownershipToken, to: preparedStatement, at: 2)
+            bindOptionalInt(leaseUntil, to: preparedStatement, at: 3)
+            bindOptionalInt(retryAt, to: preparedStatement, at: 4)
+            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 5, retryRemaining), SQLITE_OK)
+            bindOptionalText(lastError, to: preparedStatement, at: 6)
+            bindOptionalInt(inputWatermark, to: preparedStatement, at: 7)
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 8, kind, -1, testSQLiteTransient), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 9, jobKey, -1, testSQLiteTransient), SQLITE_OK)
+            XCTAssertEqual(sqlite3_step(preparedStatement), SQLITE_DONE)
+        }
+    }
+
+    private func markRawStage1Selection(
+        threadID: ThreadId,
+        selectedForPhase2: Int64,
+        selectedSourceUpdatedAt: Int64?,
+        databaseURL: URL
+    ) throws {
+        try withRawSQLiteDatabase(databaseURL: databaseURL) { database in
+            var statement: OpaquePointer?
+            let query = """
+                UPDATE stage1_outputs
+                SET selected_for_phase2 = ?, selected_for_phase2_source_updated_at = ?
+                WHERE thread_id = ?
+                """
+            XCTAssertEqual(sqlite3_prepare_v2(database, query, -1, &statement, nil), SQLITE_OK)
+            let preparedStatement = try XCTUnwrap(statement)
+            defer {
+                sqlite3_finalize(preparedStatement)
+            }
+            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 1, selectedForPhase2), SQLITE_OK)
+            bindOptionalInt(selectedSourceUpdatedAt, to: preparedStatement, at: 2)
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 3, threadID.description, -1, testSQLiteTransient), SQLITE_OK)
+            XCTAssertEqual(sqlite3_step(preparedStatement), SQLITE_DONE)
+        }
+    }
+
+    private func readRawStage1Selection(
+        threadID: ThreadId,
+        databaseURL: URL
+    ) throws -> (selectedForPhase2: Int64, selectedSourceUpdatedAt: Int64?) {
+        try withRawSQLiteDatabase(databaseURL: databaseURL) { database in
+            var statement: OpaquePointer?
+            let query = """
+                SELECT selected_for_phase2, selected_for_phase2_source_updated_at
+                FROM stage1_outputs
+                WHERE thread_id = ?
+                """
+            XCTAssertEqual(sqlite3_prepare_v2(database, query, -1, &statement, nil), SQLITE_OK)
+            let preparedStatement = try XCTUnwrap(statement)
+            defer {
+                sqlite3_finalize(preparedStatement)
+            }
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 1, threadID.description, -1, testSQLiteTransient), SQLITE_OK)
+            XCTAssertEqual(sqlite3_step(preparedStatement), SQLITE_ROW)
+            return (
+                sqlite3_column_int64(preparedStatement, 0),
+                optionalIntColumn(preparedStatement, index: 1)
+            )
+        }
     }
 
     private func stage1Usage(
