@@ -148,12 +148,10 @@ final class EndpointClientsTests: XCTestCase {
     func testResponsesClientStreamsWithAcceptAuthAndResponseParser() async {
         let transport = CapturingTransport(
             streamResults: [
-                .success(APIStreamResponse(statusCode: 200, sseText: """
-                data: {"type":"response.created","response":{}}
-
-                data: {"type":"response.completed","response":{"id":"resp_1","usage":null}}
-
-                """))
+                .success(APIStreamResponse(statusCode: 200, sseText: responseSSEText([
+                    #"{"type":"response.created","response":{}}"#,
+                    #"{"type":"response.completed","response":{"id":"resp_1","usage":null}}"#
+                ])))
             ]
         )
         let body: JSONValue = .object(["model": .string("gpt-test")])
@@ -195,12 +193,10 @@ final class EndpointClientsTests: XCTestCase {
         let transport = CapturingTransport(
             streamResults: [
                 .failure(.http(statusCode: 401, headers: nil, body: "unauthorized")),
-                .success(APIStreamResponse(statusCode: 200, sseText: """
-                data: {"type":"response.created","response":{}}
-
-                data: {"type":"response.completed","response":{"id":"resp_1","usage":null}}
-
-                """))
+                .success(APIStreamResponse(statusCode: 200, sseText: responseSSEText([
+                    #"{"type":"response.created","response":{}}"#,
+                    #"{"type":"response.completed","response":{"id":"resp_1","usage":null}}"#
+                ])))
             ]
         )
         let commandRunner = ProviderAuthCommandRunner()
@@ -234,12 +230,10 @@ final class EndpointClientsTests: XCTestCase {
 
     func testResponsesClientParsesStreamingChunksAcrossUTF8AndSSEBoundaries() async {
         let delta = "hel\u{1F30A}"
-        let sse = """
-        data: {"type":"response.output_text.delta","delta":"\(delta)"}
-
-        data: {"type":"response.completed","response":{"id":"resp_1","usage":null}}
-
-        """
+        let sse = responseSSEText([
+            #"{"type":"response.output_text.delta","delta":"\#(delta)"}"#,
+            #"{"type":"response.completed","response":{"id":"resp_1","usage":null}}"#
+        ])
         let bytes = Data(sse.utf8)
         let emojiStart = bytes.firstIndex(of: 0xF0)!
         let splitInsideEmoji = emojiStart + 2
@@ -321,6 +315,31 @@ final class EndpointClientsTests: XCTestCase {
         ]))
     }
 
+    func testResponsesClientDoesNotDispatchUnterminatedCompletedEventLikeRust() async {
+        let transport = CapturingTransport(
+            streamResults: [
+                .success(APIStreamResponse(
+                    statusCode: 200,
+                    byteStream: byteStream([
+                        Data(#"data: {"type":"response.completed","response":{"id":"resp_unterminated"}}"#.utf8)
+                    ])
+                ))
+            ]
+        )
+        let client = ResponsesClient(
+            transport: transport,
+            provider: provider(),
+            auth: StaticAPIAuthProvider()
+        )
+
+        let result = await client.stream(body: .object([:]))
+
+        XCTAssertEqual(result, .success([
+            .success(.rateLimits(RateLimitSnapshot(limitID: "codex", primary: nil, secondary: nil, credits: nil, planType: nil))),
+            .failure(.stream("stream closed before response.completed"))
+        ]))
+    }
+
     func testResponsesClientStreamEventsEmitsRateLimitsBeforeSSEEvents() async {
         let snapshot = RateLimitSnapshot(
             limitID: "codex",
@@ -337,10 +356,9 @@ final class EndpointClientsTests: XCTestCase {
                         "x-codex-primary-used-percent": "42",
                         "x-codex-primary-window-minutes": "300"
                     ],
-                    sseText: """
-                    data: {"type":"response.completed","response":{"id":"resp_1","usage":null}}
-
-                    """
+                    sseText: responseSSEText([
+                        #"{"type":"response.completed","response":{"id":"resp_1","usage":null}}"#
+                    ])
                 ))
             ]
         )
@@ -373,14 +391,11 @@ final class EndpointClientsTests: XCTestCase {
                         "X-Models-Etag": "models-etag",
                         "X-Reasoning-Included": "true"
                     ],
-                    sseText: """
-                    data: {"type":"response.created","response":{"headers":{"x-openai-model":["gpt-event"]}}}
-
-                    data: {"type":"response.metadata","metadata":{"openai_verification_recommendation":["trusted_access_for_cyber"]}}
-
-                    data: {"type":"response.completed","response":{"id":"resp_metadata","usage":null}}
-
-                    """
+                    sseText: responseSSEText([
+                        #"{"type":"response.created","response":{"headers":{"x-openai-model":["gpt-event"]}}}"#,
+                        #"{"type":"response.metadata","metadata":{"openai_verification_recommendation":["trusted_access_for_cyber"]}}"#,
+                        #"{"type":"response.completed","response":{"id":"resp_metadata","usage":null}}"#
+                    ])
                 ))
             ]
         )
@@ -891,6 +906,12 @@ private func byteStream(_ chunks: [Data]) -> APIByteStream {
         }
         continuation.finish()
     }
+}
+
+private func responseSSEText(_ payloads: [String]) -> String {
+    payloads.map { payload in
+        "data: \(payload)\n\n"
+    }.joined()
 }
 
 private func collect(_ stream: ResponseEventStream) async -> ResponseEventResults {

@@ -290,14 +290,16 @@ final class MemoryWritePhaseOneTests: XCTestCase {
     }
 
     func testStreamMemoryStageOnePromptUsesResponsesClientWithRustRequestShape() async throws {
+        let sseText = [
+            #"data: {"type":"response.output_text.delta","delta":"{\"raw_memory\":\"raw\",\"rollout_summary\":\"summary\",\"rollout_slug\":null}"}"#,
+            "",
+            #"data: {"type":"response.completed","response":{"id":"resp_mem","usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}}"#,
+            "",
+            ""
+        ].joined(separator: "\n")
         let transport = MemoryPhaseOneCapturingTransport(
             streamResults: [
-                .success(APIStreamResponse(statusCode: 200, sseText: #"""
-                data: {"type":"response.output_text.delta","delta":"{\"raw_memory\":\"raw\",\"rollout_summary\":\"summary\",\"rollout_slug\":null}"}
-
-                data: {"type":"response.completed","response":{"id":"resp_mem","usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}}
-
-                """#))
+                .success(APIStreamResponse(statusCode: 200, sseText: sseText))
             ]
         )
         let client = ResponsesClient(

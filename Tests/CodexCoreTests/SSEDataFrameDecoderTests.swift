@@ -18,7 +18,7 @@ final class SSEDataFrameDecoderTests: XCTestCase {
         XCTAssertEqual(finished, [])
     }
 
-    func testFinishFlushesPendingFrameAndIgnoresNonDataLines() {
+    func testFinishDropsUnterminatedPendingFrameLikeRustEventsourceStream() {
         var decoder = SSEDataFrameDecoder()
 
         let first = decoder.receive(": comment\r\nid: 1\r\ndata: first\r\n")
@@ -27,7 +27,7 @@ final class SSEDataFrameDecoderTests: XCTestCase {
 
         XCTAssertEqual(first, [])
         XCTAssertEqual(second, [])
-        XCTAssertEqual(finished, ["first\n second"])
+        XCTAssertEqual(finished, [])
     }
 
     func testBlankLinesOnlyFlushWhenDataExists() {
@@ -46,14 +46,20 @@ final class SSEDataFrameDecoderTests: XCTestCase {
         XCTAssertEqual(frames, ["", "\n", ""])
     }
 
+    func testUnterminatedDataLineDoesNotDispatchAtEOF() {
+        XCTAssertEqual(SSEDataFrameDecoder.dataFrames(from: "data: unfinished"), [])
+        XCTAssertEqual(SSEDataFrameDecoder.dataFrames(from: "data: unfinished\n"), [])
+    }
+
     func testResponsesSSEParserUsesIncrementalFrameDecoder() {
-        let text = """
-        : ignored
-        data: {"type":"response.created","response":{}}
-
-        data: {"type":"response.completed","response":{"id":"resp_1","usage":null}}
-
-        """
+        let text = [
+            ": ignored",
+            #"data: {"type":"response.created","response":{}}"#,
+            "",
+            #"data: {"type":"response.completed","response":{"id":"resp_1","usage":null}}"#,
+            "",
+            ""
+        ].joined(separator: "\n")
 
         XCTAssertEqual(ResponsesSSEParser.dataFrames(fromSSEText: text), [
             #"{"type":"response.created","response":{}}"#,

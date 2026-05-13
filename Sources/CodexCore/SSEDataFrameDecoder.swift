@@ -20,13 +20,9 @@ public struct SSEDataFrameDecoder: Sendable {
     }
 
     public mutating func finish() -> [String] {
-        var frames: [String] = []
-        if !buffer.isEmpty {
-            process(line: normalizedLine(buffer), into: &frames)
-            buffer.removeAll(keepingCapacity: true)
-        }
-        flush(into: &frames)
-        return frames
+        buffer.removeAll(keepingCapacity: true)
+        dataLines.removeAll(keepingCapacity: true)
+        return []
     }
 
     public static func dataFrames(from text: String) -> [String] {

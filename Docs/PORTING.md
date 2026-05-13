@@ -521,7 +521,7 @@ Source baseline inspected for this scaffold:
 - Pure Responses SSE parsing from `codex-rs/codex-api/src/sse/responses.rs` and `ResponseEvent` from `codex-rs/codex-api/src/common.rs`
   - SSE `data:` frame extraction, response output/delta/created/completed event mapping, custom tool-call input deltas with Rust's `item_id`/`call_id` fallback, close-time completed/error emission with optional `end_turn`, Rust-style completed-stream termination, incomplete-response reasons, failed-response fatal/retryable classification for context-window/quota/usage/cyber-policy/invalid-prompt/server-overloaded errors, retry-after delay parsing, and token-usage conversion
 - Incremental SSE `data:` frame decoding needed by `codex-rs/codex-api/src/sse/{responses,chat}.rs`
-  - chunk-boundary buffering, CRLF normalization, non-data line ignoring, blank-line event flushes, multiline `data:` joins, colonless `data` fields as empty data lines, single-leading-space stripping, and EOF flush of pending frames
+  - chunk-boundary buffering, CRLF normalization, non-data line ignoring, blank-line event flushes, multiline `data:` joins, colonless `data` fields as empty data lines, single-leading-space stripping, and Rust-style EOF dropping of unterminated pending frames
 - Incremental UTF-8 and endpoint SSE parsing for `codex-rs/codex-api/src/endpoint/streaming.rs`
   - byte-stream decoding across multibyte scalar boundaries, Rust-style invalid EOF UTF-8 stream errors, transport chunk failure propagation, incremental `data:` frame parsing, and Responses/Chat frame parser adapters while preserving the current collected-result client shape
 - Response event stream surface from `codex-rs/codex-api/src/endpoint/{streaming,responses,chat}.rs`

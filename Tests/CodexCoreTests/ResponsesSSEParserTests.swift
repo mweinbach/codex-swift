@@ -156,6 +156,16 @@ final class ResponsesSSEParserTests: XCTestCase {
         ])
     }
 
+    func testUnterminatedCompletedEventIsNotDispatchedLikeRustEventsourceStream() {
+        let text = #"data: {"type":"response.completed","response":{"id":"resp_unterminated"}}"#
+
+        let events = ResponsesSSEParser.collectEvents(fromSSEText: text)
+
+        XCTAssertEqual(events, [
+            .failure(.stream("stream closed before response.completed"))
+        ])
+    }
+
     func testIncompleteResponseReturnsRustStreamErrorOnClose() {
         let text = sse([
             #"{"type":"response.incomplete","response":{"incomplete_details":{"reason":"max_output_tokens"}}}"#
@@ -293,17 +303,18 @@ final class ResponsesSSEParserTests: XCTestCase {
     }
 
     func testIgnoresMalformedJSONAndMalformedItems() {
-        let text = """
-        event: response.output_text.delta
-        data: not-json
-
-        event: response.output_item.done
-        data: {"type":"response.output_item.done","item":{"type":"message"}}
-
-        event: response.completed
-        data: {"type":"response.completed","response":{"id":"ok"}}
-
-        """
+        let text = [
+            "event: response.output_text.delta",
+            "data: not-json",
+            "",
+            "event: response.output_item.done",
+            #"data: {"type":"response.output_item.done","item":{"type":"message"}}"#,
+            "",
+            "event: response.completed",
+            #"data: {"type":"response.completed","response":{"id":"ok"}}"#,
+            "",
+            ""
+        ].joined(separator: "\n")
 
         XCTAssertEqual(
             ResponsesSSEParser.collectEvents(fromSSEText: text),
@@ -312,12 +323,13 @@ final class ResponsesSSEParserTests: XCTestCase {
     }
 
     func testDataFramesJoinMultilineDataAndStripOneLeadingSpace() {
-        let text = """
-        event: response.output_text.delta
-        data: {"type":"response.output_text.delta",
-        data: "delta":"hi"}
-
-        """
+        let text = [
+            "event: response.output_text.delta",
+            #"data: {"type":"response.output_text.delta","#,
+            #"data: "delta":"hi"}"#,
+            "",
+            ""
+        ].joined(separator: "\n")
 
         XCTAssertEqual(
             ResponsesSSEParser.dataFrames(fromSSEText: text),
