@@ -422,6 +422,232 @@ final class MemoryWritePhaseTwoTests: XCTestCase {
         ])
     }
 
+    func testCompleteMemoryPhaseTwoConsolidationResetsBaselineAndMarksSuccess() async throws {
+        let root = try temporaryDirectory().appendingPathComponent("memories", isDirectory: true)
+        let memory = stage1Output(suffix: 205, sourceUpdatedAt: Date(timeIntervalSince1970: 900))
+        let request = phaseTwoRequest(
+            claim: MemoryPhaseTwoClaim(token: "token-complete", watermark: 800),
+            completionWatermark: 900,
+            selectedOutputs: [memory]
+        )
+        let store = RecordingPhaseTwoJobStore(
+            claimOutcome: .skippedRunning,
+            heartbeatResults: [.success(true)]
+        )
+        let recorder = CounterRecorder()
+        let histograms = HistogramRecorder()
+        let resetRecorder = ResetRecorder()
+
+        let outcome = await completeMemoryPhaseTwoConsolidation(
+            finalStatus: .completed("done"),
+            request: request,
+            store: store,
+            memoryRoot: root,
+            tokenUsage: TokenUsage(
+                inputTokens: 10,
+                cachedInputTokens: 3,
+                outputTokens: 4,
+                reasoningOutputTokens: 2,
+                totalTokens: 14
+            ),
+            resetBaseline: { try resetRecorder.reset(root: $0) },
+            recordCounter: recorder.record,
+            recordHistogram: histograms.record
+        )
+
+        XCTAssertEqual(outcome, .succeeded)
+        let heartbeatRequests = await store.recordedHeartbeatRequests
+        XCTAssertEqual(heartbeatRequests, [
+            RecordingPhaseTwoJobStore.HeartbeatRequest(
+                ownershipToken: "token-complete",
+                leaseSeconds: memoryStageTwoJobLeaseSeconds
+            )
+        ])
+        XCTAssertEqual(resetRecorder.roots, [root])
+        let succeededRequests = await store.recordedSucceededRequests
+        XCTAssertEqual(succeededRequests, [
+            RecordingPhaseTwoJobStore.SucceededRequest(
+                ownershipToken: "token-complete",
+                completionWatermark: 900,
+                selectedOutputs: [memory]
+            )
+        ])
+        XCTAssertEqual(recorder.events, [
+            CounterEvent(
+                name: MemoryWriteMetrics.phaseTwoJobs,
+                increment: 1,
+                labels: [CounterLabel(name: "status", value: "succeeded")]
+            )
+        ])
+        XCTAssertEqual(histograms.events, [
+            HistogramEvent(
+                name: MemoryWriteMetrics.phaseTwoTokenUsage,
+                value: 14,
+                labels: [CounterLabel(name: "token_type", value: "total")]
+            ),
+            HistogramEvent(
+                name: MemoryWriteMetrics.phaseTwoTokenUsage,
+                value: 10,
+                labels: [CounterLabel(name: "token_type", value: "input")]
+            ),
+            HistogramEvent(
+                name: MemoryWriteMetrics.phaseTwoTokenUsage,
+                value: 3,
+                labels: [CounterLabel(name: "token_type", value: "cached_input")]
+            ),
+            HistogramEvent(
+                name: MemoryWriteMetrics.phaseTwoTokenUsage,
+                value: 4,
+                labels: [CounterLabel(name: "token_type", value: "output")]
+            ),
+            HistogramEvent(
+                name: MemoryWriteMetrics.phaseTwoTokenUsage,
+                value: 2,
+                labels: [CounterLabel(name: "token_type", value: "reasoning_output")]
+            )
+        ])
+    }
+
+    func testCompleteMemoryPhaseTwoConsolidationDoesNotResetWhenOwnershipIsLost() async throws {
+        let root = try temporaryDirectory().appendingPathComponent("memories", isDirectory: true)
+        let request = phaseTwoRequest(claim: MemoryPhaseTwoClaim(token: "token-lost", watermark: 1))
+        let store = RecordingPhaseTwoJobStore(
+            claimOutcome: .skippedRunning,
+            heartbeatResults: [.success(false)]
+        )
+        let recorder = CounterRecorder()
+        let resetRecorder = ResetRecorder()
+
+        let outcome = await completeMemoryPhaseTwoConsolidation(
+            finalStatus: .completed(nil),
+            request: request,
+            store: store,
+            memoryRoot: root,
+            resetBaseline: { try resetRecorder.reset(root: $0) },
+            recordCounter: recorder.record
+        )
+
+        XCTAssertEqual(outcome, .lostOwnership)
+        XCTAssertEqual(resetRecorder.roots, [])
+        let failedRequests = await store.recordedFailedRequests
+        let succeededRequests = await store.recordedSucceededRequests
+        XCTAssertEqual(failedRequests, [])
+        XCTAssertEqual(succeededRequests, [])
+        XCTAssertEqual(recorder.events, [])
+    }
+
+    func testCompleteMemoryPhaseTwoConsolidationMarksConfirmOwnershipFailure() async throws {
+        let root = try temporaryDirectory().appendingPathComponent("memories", isDirectory: true)
+        let request = phaseTwoRequest(claim: MemoryPhaseTwoClaim(token: "token-confirm", watermark: 1))
+        let store = RecordingPhaseTwoJobStore(
+            claimOutcome: .skippedRunning,
+            heartbeatResults: [.failure(StoreError.failed)]
+        )
+        let recorder = CounterRecorder()
+
+        let outcome = await completeMemoryPhaseTwoConsolidation(
+            finalStatus: .completed(nil),
+            request: request,
+            store: store,
+            memoryRoot: root,
+            recordCounter: recorder.record
+        )
+
+        XCTAssertEqual(outcome, .failed("failed_confirm_ownership"))
+        let failedRequests = await store.recordedFailedRequests
+        XCTAssertEqual(failedRequests, [
+            RecordingPhaseTwoJobStore.FailedRequest(
+                ownershipToken: "token-confirm",
+                reason: "failed_confirm_ownership",
+                retryDelaySeconds: memoryStageTwoJobRetryDelaySeconds,
+                unownedFallback: false
+            )
+        ])
+        XCTAssertEqual(recorder.events, [
+            CounterEvent(
+                name: MemoryWriteMetrics.phaseTwoJobs,
+                increment: 1,
+                labels: [CounterLabel(name: "status", value: "failed_confirm_ownership")]
+            )
+        ])
+    }
+
+    func testCompleteMemoryPhaseTwoConsolidationMarksWorkspaceCommitFailure() async throws {
+        let root = try temporaryDirectory().appendingPathComponent("memories", isDirectory: true)
+        let request = phaseTwoRequest(claim: MemoryPhaseTwoClaim(token: "token-reset", watermark: 1))
+        let store = RecordingPhaseTwoJobStore(
+            claimOutcome: .skippedRunning,
+            heartbeatResults: [.success(true)]
+        )
+        let recorder = CounterRecorder()
+
+        let outcome = await completeMemoryPhaseTwoConsolidation(
+            finalStatus: .completed(nil),
+            request: request,
+            store: store,
+            memoryRoot: root,
+            resetBaseline: { _ in throw StoreError.failed },
+            recordCounter: recorder.record
+        )
+
+        XCTAssertEqual(outcome, .failed("failed_workspace_commit"))
+        let failedRequests = await store.recordedFailedRequests
+        XCTAssertEqual(failedRequests, [
+            RecordingPhaseTwoJobStore.FailedRequest(
+                ownershipToken: "token-reset",
+                reason: "failed_workspace_commit",
+                retryDelaySeconds: memoryStageTwoJobRetryDelaySeconds,
+                unownedFallback: false
+            )
+        ])
+    }
+
+    func testCompleteMemoryPhaseTwoConsolidationMarksFailedAgentForNonCompletedStatus() async throws {
+        let root = try temporaryDirectory().appendingPathComponent("memories", isDirectory: true)
+        let request = phaseTwoRequest(claim: MemoryPhaseTwoClaim(token: "token-agent", watermark: 1))
+        let store = RecordingPhaseTwoJobStore(claimOutcome: .skippedRunning)
+        let recorder = CounterRecorder()
+        let resetRecorder = ResetRecorder()
+
+        let outcome = await completeMemoryPhaseTwoConsolidation(
+            finalStatus: .errored("boom"),
+            request: request,
+            store: store,
+            memoryRoot: root,
+            resetBaseline: { try resetRecorder.reset(root: $0) },
+            recordCounter: recorder.record
+        )
+
+        XCTAssertEqual(outcome, .failed("failed_agent"))
+        XCTAssertEqual(resetRecorder.roots, [])
+        let failedRequests = await store.recordedFailedRequests
+        XCTAssertEqual(failedRequests, [
+            RecordingPhaseTwoJobStore.FailedRequest(
+                ownershipToken: "token-agent",
+                reason: "failed_agent",
+                retryDelaySeconds: memoryStageTwoJobRetryDelaySeconds,
+                unownedFallback: false
+            )
+        ])
+    }
+
+    func testRecordMemoryPhaseTwoTokenUsageClampsNegativeValuesLikeRustMetrics() {
+        let histograms = HistogramRecorder()
+
+        recordMemoryPhaseTwoTokenUsage(
+            TokenUsage(
+                inputTokens: -1,
+                cachedInputTokens: -2,
+                outputTokens: -3,
+                reasoningOutputTokens: -4,
+                totalTokens: -5
+            ),
+            recordHistogram: histograms.record
+        )
+
+        XCTAssertEqual(histograms.events.map(\.value), [0, 0, 0, 0, 0])
+    }
+
     private func temporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("codex-swift-memory-phase-two-\(UUID().uuidString)", isDirectory: true)
@@ -460,6 +686,48 @@ private struct CounterEvent: Equatable, Sendable {
     var labels: [CounterLabel]
 }
 
+private final class HistogramRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [HistogramEvent] = []
+
+    var events: [HistogramEvent] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func record(name: String, value: Int64, labels: [(String, String)]) {
+        lock.lock()
+        storage.append(HistogramEvent(name: name, value: value, labels: labels.map {
+            CounterLabel(name: $0.0, value: $0.1)
+        }))
+        lock.unlock()
+    }
+}
+
+private struct HistogramEvent: Equatable, Sendable {
+    var name: String
+    var value: Int64
+    var labels: [CounterLabel]
+}
+
+private final class ResetRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [URL] = []
+
+    var roots: [URL] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func reset(root: URL) throws {
+        lock.lock()
+        storage.append(root)
+        lock.unlock()
+    }
+}
+
 private enum StoreError: Error {
     case failed
 }
@@ -488,10 +756,21 @@ private actor RecordingPhaseTwoJobStore: MemoryPhaseTwoJobStore {
         var maxUnusedDays: Int64
     }
 
+    struct HeartbeatRequest: Equatable, Sendable {
+        var ownershipToken: String
+        var leaseSeconds: Int64
+    }
+
+    enum HeartbeatResult: Sendable {
+        case success(Bool)
+        case failure(StoreError)
+    }
+
     private let claimOutcome: Phase2JobClaimOutcome
     private let claimError: Error?
     private let phase2InputSelection: [Stage1Output]
     private let phase2InputError: Error?
+    private var heartbeatResults: [HeartbeatResult]
     private let markFailedResult: Bool
     private let markFailedIfUnownedResult: Bool
     private let markSucceededResult: Bool
@@ -499,17 +778,20 @@ private actor RecordingPhaseTwoJobStore: MemoryPhaseTwoJobStore {
     private(set) var failedRequests: [FailedRequest] = []
     private(set) var succeededRequests: [SucceededRequest] = []
     private(set) var selectionRequests: [SelectionRequest] = []
+    private(set) var heartbeatRequests: [HeartbeatRequest] = []
 
     var recordedClaimRequests: [ClaimRequest] { claimRequests }
     var recordedFailedRequests: [FailedRequest] { failedRequests }
     var recordedSucceededRequests: [SucceededRequest] { succeededRequests }
     var recordedSelectionRequests: [SelectionRequest] { selectionRequests }
+    var recordedHeartbeatRequests: [HeartbeatRequest] { heartbeatRequests }
 
     init(
         claimOutcome: Phase2JobClaimOutcome,
         claimError: Error? = nil,
         phase2InputSelection: [Stage1Output] = [],
         phase2InputError: Error? = nil,
+        heartbeatResults: [HeartbeatResult] = [],
         markFailedResult: Bool = true,
         markFailedIfUnownedResult: Bool = false,
         markSucceededResult: Bool = true
@@ -518,6 +800,7 @@ private actor RecordingPhaseTwoJobStore: MemoryPhaseTwoJobStore {
         self.claimError = claimError
         self.phase2InputSelection = phase2InputSelection
         self.phase2InputError = phase2InputError
+        self.heartbeatResults = heartbeatResults
         self.markFailedResult = markFailedResult
         self.markFailedIfUnownedResult = markFailedIfUnownedResult
         self.markSucceededResult = markSucceededResult
@@ -573,6 +856,22 @@ private actor RecordingPhaseTwoJobStore: MemoryPhaseTwoJobStore {
         return markFailedIfUnownedResult
     }
 
+    func heartbeatGlobalPhase2Job(
+        ownershipToken: String,
+        leaseSeconds: Int64
+    ) async throws -> Bool {
+        heartbeatRequests.append(HeartbeatRequest(ownershipToken: ownershipToken, leaseSeconds: leaseSeconds))
+        guard !heartbeatResults.isEmpty else {
+            return true
+        }
+        switch heartbeatResults.removeFirst() {
+        case let .success(stillOwnsLock):
+            return stillOwnsLock
+        case let .failure(error):
+            throw error
+        }
+    }
+
     func markGlobalPhase2JobSucceeded(
         ownershipToken: String,
         completionWatermark: Int64,
@@ -585,6 +884,21 @@ private actor RecordingPhaseTwoJobStore: MemoryPhaseTwoJobStore {
         ))
         return markSucceededResult
     }
+}
+
+private func phaseTwoRequest(
+    claim: MemoryPhaseTwoClaim,
+    completionWatermark: Int64 = 1,
+    selectedOutputs: [Stage1Output] = []
+) -> MemoryPhaseTwoConsolidationRequest {
+    MemoryPhaseTwoConsolidationRequest(
+        claim: claim,
+        completionWatermark: completionWatermark,
+        selectedOutputs: selectedOutputs,
+        agentConfig: CodexRuntimeConfig(),
+        prompt: [],
+        workspaceDiff: MemoryWorkspaceDiff(changes: [], unifiedDiff: "")
+    )
 }
 
 private func stage1Output(

@@ -53,6 +53,11 @@ public protocol MemoryPhaseTwoJobStore: Sendable {
         retryDelaySeconds: Int64
     ) async throws -> Bool
 
+    func heartbeatGlobalPhase2Job(
+        ownershipToken: String,
+        leaseSeconds: Int64
+    ) async throws -> Bool
+
     func markGlobalPhase2JobSucceeded(
         ownershipToken: String,
         completionWatermark: Int64,
@@ -111,6 +116,12 @@ public typealias MemoryWriteCounterRecorder = @Sendable (
     _ labels: [(String, String)]
 ) -> Void
 
+public typealias MemoryWriteHistogramRecorder = @Sendable (
+    _ name: String,
+    _ value: Int64,
+    _ labels: [(String, String)]
+) -> Void
+
 public struct MemoryPhaseTwoConsolidationRequest: Equatable, Sendable {
     public let claim: MemoryPhaseTwoClaim
     public let completionWatermark: Int64
@@ -141,6 +152,13 @@ public enum MemoryPhaseTwoPreparationOutcome: Equatable, Sendable {
     case failed(String)
     case succeededNoWorkspaceChanges
     case readyToSpawn(MemoryPhaseTwoConsolidationRequest)
+}
+
+public enum MemoryPhaseTwoCompletionOutcome: Equatable, Sendable {
+    case succeeded
+    case failed(String)
+    case lostOwnership
+    case successRecordLost
 }
 
 public func memoryRoot(codexHome: URL) -> URL {
@@ -431,6 +449,110 @@ public func recordMemoryPhaseTwoAgentSpawned(
         recordCounter?(MemoryWriteMetrics.phaseTwoInput, Int64(rawMemoryCount), [])
     }
     recordCounter?(MemoryWriteMetrics.phaseTwoJobs, 1, [("status", "agent_spawned")])
+}
+
+public func completeMemoryPhaseTwoConsolidation(
+    finalStatus: AgentStatus,
+    request: MemoryPhaseTwoConsolidationRequest,
+    store: MemoryPhaseTwoJobStore,
+    memoryRoot root: URL,
+    tokenUsage: TokenUsage? = nil,
+    resetBaseline: @Sendable (URL) throws -> Void = { root in
+        try resetMemoryWorkspaceBaseline(root: root)
+    },
+    recordCounter: MemoryWriteCounterRecorder? = nil,
+    recordHistogram: MemoryWriteHistogramRecorder? = nil
+) async -> MemoryPhaseTwoCompletionOutcome {
+    guard case .completed = finalStatus else {
+        await recordMemoryPhaseTwoPreparationFailure(
+            store: store,
+            claim: request.claim,
+            reason: "failed_agent",
+            recordCounter: recordCounter
+        )
+        return .failed("failed_agent")
+    }
+
+    if let tokenUsage {
+        recordMemoryPhaseTwoTokenUsage(tokenUsage, recordHistogram: recordHistogram)
+    }
+
+    let stillOwnsLock: Bool
+    do {
+        stillOwnsLock = try await store.heartbeatGlobalPhase2Job(
+            ownershipToken: request.claim.token,
+            leaseSeconds: memoryStageTwoJobLeaseSeconds
+        )
+    } catch {
+        await recordMemoryPhaseTwoPreparationFailure(
+            store: store,
+            claim: request.claim,
+            reason: "failed_confirm_ownership",
+            recordCounter: recordCounter
+        )
+        return .failed("failed_confirm_ownership")
+    }
+
+    guard stillOwnsLock else {
+        return .lostOwnership
+    }
+
+    do {
+        try resetBaseline(root)
+    } catch {
+        await recordMemoryPhaseTwoPreparationFailure(
+            store: store,
+            claim: request.claim,
+            reason: "failed_workspace_commit",
+            recordCounter: recordCounter
+        )
+        return .failed("failed_workspace_commit")
+    }
+
+    do {
+        let recorded = try await markMemoryPhaseTwoJobSucceeded(
+            store: store,
+            claim: request.claim,
+            completionWatermark: request.completionWatermark,
+            selectedOutputs: request.selectedOutputs,
+            reason: "succeeded",
+            recordCounter: recordCounter
+        )
+        return recorded ? .succeeded : .successRecordLost
+    } catch {
+        return .successRecordLost
+    }
+}
+
+public func recordMemoryPhaseTwoTokenUsage(
+    _ tokenUsage: TokenUsage,
+    recordHistogram: MemoryWriteHistogramRecorder? = nil
+) {
+    recordHistogram?(
+        MemoryWriteMetrics.phaseTwoTokenUsage,
+        max(tokenUsage.totalTokens, 0),
+        [("token_type", "total")]
+    )
+    recordHistogram?(
+        MemoryWriteMetrics.phaseTwoTokenUsage,
+        max(tokenUsage.inputTokens, 0),
+        [("token_type", "input")]
+    )
+    recordHistogram?(
+        MemoryWriteMetrics.phaseTwoTokenUsage,
+        tokenUsage.cachedInput,
+        [("token_type", "cached_input")]
+    )
+    recordHistogram?(
+        MemoryWriteMetrics.phaseTwoTokenUsage,
+        max(tokenUsage.outputTokens, 0),
+        [("token_type", "output")]
+    )
+    recordHistogram?(
+        MemoryWriteMetrics.phaseTwoTokenUsage,
+        max(tokenUsage.reasoningOutputTokens, 0),
+        [("token_type", "reasoning_output")]
+    )
 }
 
 private func recordMemoryPhaseTwoPreparationFailure(
