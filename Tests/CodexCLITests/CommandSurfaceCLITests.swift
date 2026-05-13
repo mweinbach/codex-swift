@@ -304,7 +304,7 @@ final class CommandSurfaceCLITests: XCTestCase {
 
         let operation = try request.resolvedInitialOperation(
             stdinIsTerminal: false,
-            readStdin: { "from pipe" },
+            readStdin: { Data("from pipe".utf8) },
             readFile: { path in
                 XCTAssertEqual(path, "/tmp/schema.json")
                 return Data(#"{"type":"object"}"#.utf8)

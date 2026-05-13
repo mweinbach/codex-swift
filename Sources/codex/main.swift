@@ -261,7 +261,7 @@ private func runExecCommand(
 ) async throws -> CodexCLI.CommandExecutionResult {
     let operation = try request.resolvedInitialOperation(
         stdinIsTerminal: isatty(STDIN_FILENO) != 0,
-        readStdin: readUTF8FromStdin,
+        readStdin: readStdinData,
         readFile: { path in
             try Data(contentsOf: URL(fileURLWithPath: path))
         }
@@ -332,7 +332,7 @@ private func runReviewCommand(_ request: CodexCLI.ReviewCommandRequest) async th
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let reviewRequest = try request.target.resolvedReviewRequest(
         stdinIsTerminal: isatty(STDIN_FILENO) != 0,
-        readStdin: readUTF8FromStdin
+        readStdin: readStdinData
     )
     let resolved = try ReviewPrompts.resolveReviewRequest(
         reviewRequest,
@@ -1255,12 +1255,8 @@ private func resolveExecAuth(
     return ExecAuthResolution(auth: StaticAPIAuthProvider(), authMode: nil)
 }
 
-private func readUTF8FromStdin() throws -> String {
-    let data = FileHandle.standardInput.readDataToEndOfFile()
-    guard let input = String(data: data, encoding: .utf8) else {
-        throw ExecRuntimeError(description: "stream did not contain valid UTF-8")
-    }
-    return input
+private func readStdinData() throws -> Data {
+    FileHandle.standardInput.readDataToEndOfFile()
 }
 
 private func resolveExecWorkingDirectory(from arguments: [String]) -> URL {

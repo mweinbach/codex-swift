@@ -1,5 +1,6 @@
 import CodexCLI
 import CodexCore
+import Foundation
 import XCTest
 
 final class ReviewCommandTargetTests: XCTestCase {
@@ -23,7 +24,7 @@ final class ReviewCommandTargetTests: XCTestCase {
             .customFromStdin
             .resolvedReviewRequest(
                 stdinIsTerminal: true,
-                readStdin: { "  focus the auth flow\n" }
+                readStdin: { Data("  focus the auth flow\n".utf8) }
             )
 
         XCTAssertEqual(request, ReviewRequest(target: .custom(instructions: "focus the auth flow")))
@@ -34,7 +35,7 @@ final class ReviewCommandTargetTests: XCTestCase {
             .customFromStdin
             .resolvedReviewRequest(
                 stdinIsTerminal: true,
-                readStdin: { "\n\t " }
+                readStdin: { Data("\n\t ".utf8) }
             )) { error in
                 XCTAssertEqual(error as? NonInteractiveInputError, .emptyStdinPrompt)
             }

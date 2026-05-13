@@ -19,7 +19,7 @@ final class NonInteractiveInputTests: XCTestCase {
         let resolution = try NonInteractiveInput.resolvePrompt(
             "-",
             stdinIsTerminal: true,
-            readStdin: { "from stdin\n" }
+            readStdin: { Data("from stdin\n".utf8) }
         )
 
         XCTAssertEqual(resolution, NonInteractivePromptResolution(prompt: "from stdin\n"))
@@ -29,7 +29,7 @@ final class NonInteractiveInputTests: XCTestCase {
         let resolution = try NonInteractiveInput.resolvePrompt(
             nil,
             stdinIsTerminal: false,
-            readStdin: { "piped prompt" }
+            readStdin: { Data("piped prompt".utf8) }
         )
 
         XCTAssertEqual(resolution, NonInteractivePromptResolution(
@@ -42,7 +42,7 @@ final class NonInteractiveInputTests: XCTestCase {
         XCTAssertThrowsError(try NonInteractiveInput.resolvePrompt(
             nil,
             stdinIsTerminal: true,
-            readStdin: { "unused" }
+            readStdin: { Data("unused".utf8) }
         )) { error in
             XCTAssertEqual(error as? NonInteractiveInputError, .missingPrompt)
             XCTAssertEqual(
@@ -56,7 +56,7 @@ final class NonInteractiveInputTests: XCTestCase {
         XCTAssertThrowsError(try NonInteractiveInput.resolvePrompt(
             "-",
             stdinIsTerminal: true,
-            readStdin: { " \n\t " }
+            readStdin: { Data(" \n\t ".utf8) }
         )) { error in
             XCTAssertEqual(error as? NonInteractiveInputError, .emptyStdinPrompt)
             XCTAssertEqual(String(describing: error), "No prompt provided via stdin.")
@@ -71,6 +71,58 @@ final class NonInteractiveInputTests: XCTestCase {
         )) { error in
             XCTAssertEqual(error as? NonInteractiveInputError, .stdinReadFailed("broken pipe"))
             XCTAssertEqual(String(describing: error), "Failed to read prompt from stdin: broken pipe")
+        }
+    }
+
+    func testDecodePromptBytesStripsUTF8BOMLikeRust() throws {
+        XCTAssertEqual(
+            try NonInteractiveInput.decodePromptBytes(Data([0xEF, 0xBB, 0xBF]) + Data("hi\n".utf8)),
+            "hi\n"
+        )
+    }
+
+    func testDecodePromptBytesDecodesUTF16LEBOMLikeRust() throws {
+        let input = Data([0xFF, 0xFE, UInt8(ascii: "h"), 0x00, UInt8(ascii: "i"), 0x00, 0x0A, 0x00])
+
+        XCTAssertEqual(try NonInteractiveInput.decodePromptBytes(input), "hi\n")
+    }
+
+    func testDecodePromptBytesDecodesUTF16BEBOMLikeRust() throws {
+        let input = Data([0xFE, 0xFF, 0x00, UInt8(ascii: "h"), 0x00, UInt8(ascii: "i"), 0x00, 0x0A])
+
+        XCTAssertEqual(try NonInteractiveInput.decodePromptBytes(input), "hi\n")
+    }
+
+    func testDecodePromptBytesRejectsUTF32BOMLikeRust() {
+        XCTAssertThrowsError(try NonInteractiveInput.decodePromptBytes(Data([0xFF, 0xFE, 0x00, 0x00]))) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "input appears to be UTF-32LE. Convert it to UTF-8 and retry."
+            )
+        }
+
+        XCTAssertThrowsError(try NonInteractiveInput.decodePromptBytes(Data([0x00, 0x00, 0xFE, 0xFF]))) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "input appears to be UTF-32BE. Convert it to UTF-8 and retry."
+            )
+        }
+    }
+
+    func testResolvePromptWrapsDecodeErrorsLikeRust() {
+        XCTAssertThrowsError(try NonInteractiveInput.resolvePrompt(
+            "-",
+            stdinIsTerminal: true,
+            readStdin: { Data([0xC3, 0x28]) }
+        )) { error in
+            XCTAssertEqual(
+                error as? NonInteractiveInputError,
+                .stdinReadFailed("input is not valid UTF-8 (invalid byte at offset 0). Convert it to UTF-8 and retry (e.g., `iconv -f <ENC> -t UTF-8 prompt.txt`).")
+            )
+            XCTAssertEqual(
+                String(describing: error),
+                "Failed to read prompt from stdin: input is not valid UTF-8 (invalid byte at offset 0). Convert it to UTF-8 and retry (e.g., `iconv -f <ENC> -t UTF-8 prompt.txt`)."
+            )
         }
     }
 
