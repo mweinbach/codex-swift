@@ -131,7 +131,7 @@ Source baseline inspected for this scaffold:
   - tagged parsed-command model
 - `codex-rs/core/src/parse_command.rs`
   - first command parser parity slice for shell extraction, simple shell tokenization, small pipeline formatter dropping, relative-`cd` context including rebased read/search/list paths, `rg`, `grep`, `ls`, `cat`, `bat`/`batcat`, `less`, `more`, `head`, `tail`, `nl`, and `sed -n`
-  - Rust-style unknown-collapse behavior for mixed parsed/unknown command sequences, newline-separated Bash command boundaries, `rg --files`/`fd`/`find` list-file classification, `git grep`/`git ls-files`, `eza`/`exa`/`tree`/`du`, `ag`/`ack`/`pt`/`rga`/`ripgrep-all`, `awk` file reads, Python file-walk summaries, richer `grep`/`sed -n` flag handling, and mutating `xargs` pipeline preservation
+  - Rust-style unknown-collapse behavior for mixed parsed/unknown command sequences, newline-separated Bash command boundaries, `rg --files`/`fd`/`find` list-file classification, `git grep`/`git ls-files`, `eza`/`exa`/`tree`/`du`, `ag`/`ack`/`pt`/`rga`/`ripgrep-all`, `awk` file reads, Python file-walk summaries, richer `grep`/`sed -n` flag handling including explicit `-e`/`--regexp`/`-f`/`--file` patterns and `--` pattern boundaries, and mutating `xargs` pipeline preservation
 - `codex-rs/common/src/fuzzy_match.rs`
   - Unicode-aware case-insensitive subsequence matching, original-character highlight indices, scoring, and empty-needle behavior
 - `codex-rs/apply-patch`
@@ -1265,7 +1265,7 @@ The executable is not functionally equivalent yet. Some commands have native run
 - app-server live turn execution cancellation/completion/event streaming, review execution/item completion, MCP APIs, account write-refresh flows, general config writes, and protocol generators
 - Rust-complete apply-patch approval caching, subprocess self-invocation, sandbox retry/escalation, and diff event plumbing
 - cloud tasks TUI list/browse runtime
-- remaining Rust command parser parity for complex Bash/Powershell AST cases
+- remaining Rust command parser parity for complex PowerShell AST cases and any future Bash tree-sitter constructs outside the current Swift plain-command parser
 - config-layer file IO and full non-apply config loading
 - full apply-patch approval/diff event plumbing across shell-intercept and live-tool paths
 - Starlark-compatible execpolicy parser completeness, including full Starlark evaluation behavior

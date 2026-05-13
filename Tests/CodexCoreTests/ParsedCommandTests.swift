@@ -454,6 +454,24 @@ final class ParsedCommandTests: XCTestCase {
         ])
     }
 
+    func testGrepExplicitPatternOperandsMatchRust() {
+        XCTAssertEqual(parseCommand(["grep", "-R", "-e", "TODO", "src"]), [
+            .search(cmd: "grep -R -e TODO src", query: "TODO", path: "src")
+        ])
+
+        XCTAssertEqual(parseCommand(["grep", "--regexp", "TODO", "--after-context", "2", "src"]), [
+            .search(cmd: "grep --regexp TODO --after-context 2 src", query: "TODO", path: "src")
+        ])
+
+        XCTAssertEqual(parseCommand(["git", "grep", "-f", "patterns.txt", "Sources"]), [
+            .search(cmd: "git grep -f patterns.txt Sources", query: "patterns.txt", path: "Sources")
+        ])
+
+        XCTAssertEqual(parseCommand(["grep", "--", "-needle", "src"]), [
+            .search(cmd: "grep -- -needle src", query: "-needle", path: "src")
+        ])
+    }
+
     func testFileDiscoverySummariesMatchRustParser() {
         XCTAssertEqual(parseCommand(["tree", "-L", "2", "Sources/CodexCore"]), [
             .listFiles(cmd: "tree -L 2 Sources/CodexCore", path: "CodexCore")
