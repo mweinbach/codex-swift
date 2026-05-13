@@ -16520,9 +16520,12 @@ public enum CodexAppServer {
             return ["files": []]
         }
         let roots = stringArrayParam(params?["roots"]) ?? []
-        let files = roots.flatMap { root in
+        return ["files": limitedFuzzyFileSearchResults(query: query, roots: roots)]
+    }
+
+    fileprivate static func limitedFuzzyFileSearchResults(query: String, roots: [String]) -> [[String: Any]] {
+        Array(roots.flatMap { root in
             fuzzyFileSearch(query: query, root: root)
-                .prefix(fuzzyFileSearchLimitPerRoot)
         }
         .sorted { lhs, rhs in
             let lhsScore = lhs["score"] as? Int ?? 0
@@ -16532,7 +16535,7 @@ public enum CodexAppServer {
             }
             return (lhs["path"] as? String ?? "") < (rhs["path"] as? String ?? "")
         }
-        return ["files": files]
+        .prefix(fuzzyFileSearchLimitPerRoot))
     }
 
     fileprivate static func commandExecResult(
@@ -25701,18 +25704,7 @@ final class CodexAppServerMessageProcessor {
         if query.isEmpty {
             files = []
         } else {
-            files = roots.flatMap { root in
-                CodexAppServer.fuzzyFileSearch(query: query, root: root)
-                    .prefix(CodexAppServer.fuzzyFileSearchLimitPerRoot)
-            }
-            .sorted { lhs, rhs in
-                let lhsScore = lhs["score"] as? Int ?? 0
-                let rhsScore = rhs["score"] as? Int ?? 0
-                if lhsScore != rhsScore {
-                    return lhsScore > rhsScore
-                }
-                return (lhs["path"] as? String ?? "") < (rhs["path"] as? String ?? "")
-            }
+            files = CodexAppServer.limitedFuzzyFileSearchResults(query: query, roots: roots)
         }
         return (
             [:],

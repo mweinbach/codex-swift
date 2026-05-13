@@ -24719,6 +24719,32 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(files[0]["path"] as? String, "alpha.txt")
     }
 
+    func testFuzzyFileSearchAppliesRustMatchLimitAcrossAllRoots() throws {
+        let codexHome = try TemporaryDirectory()
+        let rootA = try TemporaryDirectory()
+        let rootB = try TemporaryDirectory()
+        for index in 0..<60 {
+            try "x".write(
+                to: rootA.url.appendingPathComponent(String(format: "afile-%03d.txt", index)),
+                atomically: true,
+                encoding: .utf8
+            )
+            try "x".write(
+                to: rootB.url.appendingPathComponent(String(format: "bfile-%03d.txt", index)),
+                atomically: true,
+                encoding: .utf8
+            )
+        }
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"fuzzyFileSearch","params":{"query":"file","roots":["\#(rootA.url.path)","\#(rootB.url.path)"]}}"#,
+            codexHome: codexHome.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let files = try XCTUnwrap(result["files"] as? [[String: Any]])
+        XCTAssertEqual(files.count, 50)
+    }
+
     func testFuzzyFileSearchSessionRoutesRequireExperimentalAPI() throws {
         let codexHome = try TemporaryDirectory()
 
@@ -24766,6 +24792,39 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(messages[2]["method"] as? String, "fuzzyFileSearch/sessionCompleted")
         let completedParams = try XCTUnwrap(messages[2]["params"] as? [String: Any])
         XCTAssertEqual(completedParams["sessionId"] as? String, "session-1")
+    }
+
+    func testFuzzyFileSearchSessionAppliesRustMatchLimitAcrossAllRoots() throws {
+        let codexHome = try TemporaryDirectory()
+        let rootA = try TemporaryDirectory()
+        let rootB = try TemporaryDirectory()
+        for index in 0..<60 {
+            try "x".write(
+                to: rootA.url.appendingPathComponent(String(format: "afile-%03d.txt", index)),
+                atomically: true,
+                encoding: .utf8
+            )
+            try "x".write(
+                to: rootB.url.appendingPathComponent(String(format: "bfile-%03d.txt", index)),
+                atomically: true,
+                encoding: .utf8
+            )
+        }
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: codexHome.url),
+            experimentalAPIEnabled: true
+        )
+
+        _ = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"fuzzyFileSearch/sessionStart","params":{"sessionId":"session-limit","roots":["\#(rootA.url.path)","\#(rootB.url.path)"]}}"#.utf8
+        )))
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"fuzzyFileSearch/sessionUpdate","params":{"sessionId":"session-limit","query":"file"}}"#.utf8
+        )))
+        XCTAssertEqual(messages[1]["method"] as? String, "fuzzyFileSearch/sessionUpdated")
+        let updateParams = try XCTUnwrap(messages[1]["params"] as? [String: Any])
+        let files = try XCTUnwrap(updateParams["files"] as? [[String: Any]])
+        XCTAssertEqual(files.count, 50)
     }
 
     func testFuzzyFileSearchSessionStopRemovesSessionAndEmptyQuerySendsBlankSnapshot() throws {
