@@ -136,6 +136,134 @@ final class MemoryWritePhaseTwoTests: XCTestCase {
         XCTAssertTrue(isFinalMemoryConsolidationAgentStatus(.notFound))
     }
 
+    func testPhaseTwoAgentLoopIntervalConstantsMatchRust() {
+        XCTAssertEqual(memoryStageTwoAgentStatusPollSeconds, 1)
+        XCTAssertEqual(memoryStageTwoJobHeartbeatSeconds, 90)
+    }
+
+    func testLoopMemoryPhaseTwoConsolidationAgentPollsUntilFinalLikeRust() async throws {
+        let threadID = try phaseTwoThreadID(suffix: 501)
+        let store = RecordingPhaseTwoJobStore(claimOutcome: .skippedRunning)
+        let statuses = AgentStatusSequence([.running, .running, .completed("done")])
+        let events = AgentLoopEventSequence([.statusPoll, .statusPoll])
+
+        let finalStatus = await loopMemoryPhaseTwoConsolidationAgent(
+            threadID: threadID,
+            claim: MemoryPhaseTwoClaim(token: "token-loop", watermark: 1),
+            store: store,
+            status: { await statuses.next() },
+            nextEvent: { await events.next() }
+        )
+
+        XCTAssertEqual(finalStatus, .completed("done"))
+        let heartbeatRequests = await store.recordedHeartbeatRequests
+        XCTAssertEqual(heartbeatRequests, [])
+    }
+
+    func testLoopMemoryPhaseTwoConsolidationAgentHeartbeatsWhileRunning() async throws {
+        let threadID = try phaseTwoThreadID(suffix: 502)
+        let store = RecordingPhaseTwoJobStore(
+            claimOutcome: .skippedRunning,
+            heartbeatResults: [.success(true)]
+        )
+        let statuses = AgentStatusSequence([.running, .running, .completed(nil)])
+        let events = AgentLoopEventSequence([.heartbeat, .statusPoll])
+
+        let finalStatus = await loopMemoryPhaseTwoConsolidationAgent(
+            threadID: threadID,
+            claim: MemoryPhaseTwoClaim(token: "token-heartbeat", watermark: 1),
+            store: store,
+            status: { await statuses.next() },
+            nextEvent: { await events.next() }
+        )
+
+        XCTAssertEqual(finalStatus, .completed(nil))
+        let heartbeatRequests = await store.recordedHeartbeatRequests
+        XCTAssertEqual(heartbeatRequests, [
+            RecordingPhaseTwoJobStore.HeartbeatRequest(
+                ownershipToken: "token-heartbeat",
+                leaseSeconds: memoryStageTwoJobLeaseSeconds
+            )
+        ])
+    }
+
+    func testLoopMemoryPhaseTwoConsolidationAgentErrorsWhenHeartbeatLosesOwnership() async throws {
+        let threadID = try phaseTwoThreadID(suffix: 503)
+        let store = RecordingPhaseTwoJobStore(
+            claimOutcome: .skippedRunning,
+            heartbeatResults: [.success(false)]
+        )
+        let statuses = AgentStatusSequence([.running])
+        let events = AgentLoopEventSequence([.heartbeat])
+
+        let finalStatus = await loopMemoryPhaseTwoConsolidationAgent(
+            threadID: threadID,
+            claim: MemoryPhaseTwoClaim(token: "token-lost-heartbeat", watermark: 1),
+            store: store,
+            status: { await statuses.next() },
+            nextEvent: { await events.next() }
+        )
+
+        XCTAssertEqual(finalStatus, .errored("lost global phase-2 ownership during heartbeat"))
+    }
+
+    func testLoopMemoryPhaseTwoConsolidationAgentErrorsWhenHeartbeatThrows() async throws {
+        let threadID = try phaseTwoThreadID(suffix: 504)
+        let store = RecordingPhaseTwoJobStore(
+            claimOutcome: .skippedRunning,
+            heartbeatResults: [.failure(.failed)]
+        )
+        let statuses = AgentStatusSequence([.running])
+        let events = AgentLoopEventSequence([.heartbeat])
+
+        let finalStatus = await loopMemoryPhaseTwoConsolidationAgent(
+            threadID: threadID,
+            claim: MemoryPhaseTwoClaim(token: "token-failed-heartbeat", watermark: 1),
+            store: store,
+            status: { await statuses.next() },
+            nextEvent: { await events.next() }
+        )
+
+        XCTAssertEqual(finalStatus, .errored("phase-2 heartbeat update failed: failed"))
+    }
+
+    func testLoopMemoryPhaseTwoConsolidationAgentRereadsFinalStatusAfterTermination() async throws {
+        let threadID = try phaseTwoThreadID(suffix: 505)
+        let store = RecordingPhaseTwoJobStore(claimOutcome: .skippedRunning)
+        let statuses = AgentStatusSequence([.running, .completed("done")])
+        let events = AgentLoopEventSequence([.sessionTerminated])
+
+        let finalStatus = await loopMemoryPhaseTwoConsolidationAgent(
+            threadID: threadID,
+            claim: MemoryPhaseTwoClaim(token: "token-terminated-final", watermark: 1),
+            store: store,
+            status: { await statuses.next() },
+            nextEvent: { await events.next() }
+        )
+
+        XCTAssertEqual(finalStatus, .completed("done"))
+    }
+
+    func testLoopMemoryPhaseTwoConsolidationAgentErrorsWhenTerminatedBeforeFinalStatus() async throws {
+        let threadID = try phaseTwoThreadID(suffix: 506)
+        let store = RecordingPhaseTwoJobStore(claimOutcome: .skippedRunning)
+        let statuses = AgentStatusSequence([.running, .running])
+        let events = AgentLoopEventSequence([.sessionTerminated])
+
+        let finalStatus = await loopMemoryPhaseTwoConsolidationAgent(
+            threadID: threadID,
+            claim: MemoryPhaseTwoClaim(token: "token-terminated-running", watermark: 1),
+            store: store,
+            status: { await statuses.next() },
+            nextEvent: { await events.next() }
+        )
+
+        XCTAssertEqual(
+            finalStatus,
+            .errored("memory consolidation agent exited before final status: Running")
+        )
+    }
+
     func testSyncPhaseTwoWorkspaceInputsRebuildsFilesAndPrunesExtensions() throws {
         let root = try temporaryDirectory().appendingPathComponent("memories", isDirectory: true)
         let staleDate = Date(timeIntervalSince1970: 1_700_000_000)
@@ -728,8 +856,45 @@ private final class ResetRecorder: @unchecked Sendable {
     }
 }
 
-private enum StoreError: Error {
+private actor AgentStatusSequence {
+    private var statuses: [AgentStatus]
+    private var index = 0
+
+    init(_ statuses: [AgentStatus]) {
+        self.statuses = statuses
+    }
+
+    func next() -> AgentStatus {
+        guard !statuses.isEmpty else {
+            return .running
+        }
+        if index >= statuses.count {
+            return statuses[statuses.count - 1]
+        }
+        defer { index += 1 }
+        return statuses[index]
+    }
+}
+
+private actor AgentLoopEventSequence {
+    private var events: [MemoryPhaseTwoAgentLoopEvent]
+
+    init(_ events: [MemoryPhaseTwoAgentLoopEvent]) {
+        self.events = events
+    }
+
+    func next() -> MemoryPhaseTwoAgentLoopEvent {
+        guard !events.isEmpty else {
+            return .statusPoll
+        }
+        return events.removeFirst()
+    }
+}
+
+private enum StoreError: Error, CustomStringConvertible {
     case failed
+
+    var description: String { "failed" }
 }
 
 private actor RecordingPhaseTwoJobStore: MemoryPhaseTwoJobStore {
@@ -901,6 +1066,10 @@ private func phaseTwoRequest(
     )
 }
 
+private func phaseTwoThreadID(suffix: Int) throws -> ThreadId {
+    try ThreadId(string: String(format: "00000000-0000-4000-8000-%012d", suffix))
+}
+
 private func stage1Output(
     suffix: Int,
     sourceUpdatedAt: Date,
@@ -908,7 +1077,7 @@ private func stage1Output(
     rolloutSummary: String = "summary"
 ) -> Stage1Output {
     Stage1Output(
-        threadID: try! ThreadId(string: String(format: "00000000-0000-4000-8000-%012d", suffix)),
+        threadID: try! phaseTwoThreadID(suffix: suffix),
         rolloutPath: "/tmp/rollout-\(suffix).jsonl",
         sourceUpdatedAt: sourceUpdatedAt,
         rawMemory: rawMemory,

@@ -5,6 +5,7 @@ public let memoryStageTwoReasoningEffort: ReasoningEffort = .medium
 public let memoryStageTwoJobLeaseSeconds: Int64 = 3_600
 public let memoryStageTwoJobRetryDelaySeconds: Int64 = 3_600
 public let memoryStageTwoJobHeartbeatSeconds: UInt64 = 90
+public let memoryStageTwoAgentStatusPollSeconds: UInt64 = 1
 
 public struct MemoryPhaseTwoClaim: Equatable, Sendable {
     public let token: String
@@ -159,6 +160,12 @@ public enum MemoryPhaseTwoCompletionOutcome: Equatable, Sendable {
     case failed(String)
     case lostOwnership
     case successRecordLost
+}
+
+public enum MemoryPhaseTwoAgentLoopEvent: Equatable, Sendable {
+    case statusPoll
+    case heartbeat
+    case sessionTerminated
 }
 
 public func memoryRoot(codexHome: URL) -> URL {
@@ -451,6 +458,47 @@ public func recordMemoryPhaseTwoAgentSpawned(
     recordCounter?(MemoryWriteMetrics.phaseTwoJobs, 1, [("status", "agent_spawned")])
 }
 
+public func loopMemoryPhaseTwoConsolidationAgent(
+    threadID: ThreadId,
+    claim: MemoryPhaseTwoClaim,
+    store: MemoryPhaseTwoJobStore,
+    status: @escaping @Sendable () async -> AgentStatus,
+    nextEvent: @escaping @Sendable () async -> MemoryPhaseTwoAgentLoopEvent
+) async -> AgentStatus {
+    while true {
+        let currentStatus = await status()
+        if isFinalMemoryConsolidationAgentStatus(currentStatus) {
+            return currentStatus
+        }
+
+        switch await nextEvent() {
+        case .statusPoll:
+            continue
+        case .sessionTerminated:
+            let terminationStatus = await status()
+            if isFinalMemoryConsolidationAgentStatus(terminationStatus) {
+                return terminationStatus
+            }
+            return .errored(
+                "memory consolidation agent exited before final status: "
+                    + terminationStatus.rustDebugDescription
+            )
+        case .heartbeat:
+            do {
+                let stillOwnsLock = try await store.heartbeatGlobalPhase2Job(
+                    ownershipToken: claim.token,
+                    leaseSeconds: memoryStageTwoJobLeaseSeconds
+                )
+                if !stillOwnsLock {
+                    return .errored("lost global phase-2 ownership during heartbeat")
+                }
+            } catch {
+                return .errored("phase-2 heartbeat update failed: \(error)")
+            }
+        }
+    }
+}
+
 public func completeMemoryPhaseTwoConsolidation(
     finalStatus: AgentStatus,
     request: MemoryPhaseTwoConsolidationRequest,
@@ -567,4 +615,29 @@ private func recordMemoryPhaseTwoPreparationFailure(
         reason: reason,
         recordCounter: recordCounter
     )
+}
+
+private extension AgentStatus {
+    var rustDebugDescription: String {
+        switch self {
+        case .pendingInit:
+            return "PendingInit"
+        case .running:
+            return "Running"
+        case .interrupted:
+            return "Interrupted"
+        case let .completed(message):
+            return if let message {
+                "Completed(\(String(reflecting: message)))"
+            } else {
+                "Completed(None)"
+            }
+        case let .errored(message):
+            return "Errored(\(String(reflecting: message)))"
+        case .shutdown:
+            return "Shutdown"
+        case .notFound:
+            return "NotFound"
+        }
+    }
 }
