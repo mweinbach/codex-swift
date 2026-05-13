@@ -58,7 +58,7 @@ public enum AgentJobToolExecutor {
                   let spawnWorker = context.spawnWorker,
                   let shutdownThread = context.shutdownThread
             else {
-                return functionOutput(callID: callID, content: "unsupported tool: \(name)", success: false)
+                return functionOutput(callID: callID, content: "unsupported call: \(name)", success: false)
             }
             do {
                 let inputCSVPath = resolvePath(
@@ -131,7 +131,7 @@ public enum AgentJobToolExecutor {
             guard let context,
                   AgentJobRuntime.isAgentJobWorkerSessionSource(context.sessionSource)
             else {
-                return functionOutput(callID: callID, content: "unsupported tool: \(name)", success: false)
+                return functionOutput(callID: callID, content: "unsupported call: \(name)", success: false)
             }
             do {
                 let result = try await AgentJobRuntime.recordReportAgentJobResult(

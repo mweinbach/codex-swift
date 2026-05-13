@@ -354,7 +354,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/core/src/tools/handlers/view_image{,_spec}.rs`
   - non-interactive `view_image` now executes locally instead of falling through as unsupported, returns Rust-shaped image content items with `defaultImageDetail`/`original` detail handling, rejects unknown detail strings with Rust's model-facing error, resolves paths against the selected turn environment cwd when an `environment_id` is supplied, reads configured remote turn-environment images through exec-server `fs/getMetadata` and `fs/readFile`, and exposes Rust's `detail` and multi-environment-only `environment_id` schema fields. Broader live app-server turn execution remains pending.
 - `codex-rs/core/src/function_tool.rs`
-  - function-call error variants and Rust `thiserror` display strings for respond-to-model, denied, missing local shell call id, and fatal errors
+  - function-call error variants and Rust `thiserror` display strings for respond-to-model, denied, missing local shell call id, fatal errors, and unsupported function/custom tool calls
 - `codex-rs/exec-server/src/environment_{provider,toml}.rs` and `codex-rs/core/src/environment_selection.rs`
   - `$CODEX_HOME/environments.toml` loading, config-path inspect error wrapping, legacy `CODEX_EXEC_SERVER_URL` fallback, environment id/default validation, websocket URL scheme/host/port validation, websocket and stdio environment entries, relative stdio cwd resolution, duplicate TOML key rejection, empty env-table handling, and default-first turn environment selections
 - `codex-rs/core/src/context_manager/normalize.rs`

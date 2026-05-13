@@ -85,7 +85,7 @@ final class AgentJobToolExecutorTests: XCTestCase {
         }
         XCTAssertEqual(callID, "call-report")
         XCTAssertEqual(payload.success, false)
-        XCTAssertEqual(payload.content, "unsupported tool: report_agent_job_result")
+        XCTAssertEqual(payload.content, "unsupported call: report_agent_job_result")
     }
 
     func testAgentJobExecutorReturnsNilForUnownedTools() async {
@@ -114,7 +114,7 @@ final class AgentJobToolExecutorTests: XCTestCase {
         }
         XCTAssertEqual(callID, "call-spawn")
         XCTAssertEqual(payload.success, false)
-        XCTAssertEqual(payload.content, "unsupported tool: spawn_agents_on_csv")
+        XCTAssertEqual(payload.content, "unsupported call: spawn_agents_on_csv")
     }
 }
 

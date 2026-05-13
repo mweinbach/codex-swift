@@ -1488,7 +1488,7 @@ public enum NonInteractiveExec {
                 }
                 return functionOutput(
                     callID: callID,
-                    content: "unsupported tool: \(name)",
+                    content: "unsupported call: \(name)",
                     success: false
                 )
             }
@@ -2500,7 +2500,7 @@ public enum NonInteractiveExec {
         environment: [String: String]
     ) -> ResponseItem {
         guard name == "apply_patch" else {
-            return .customToolCallOutput(callID: callID, output: "unsupported custom tool: \(name)")
+            return .customToolCallOutput(callID: callID, output: "unsupported custom tool call: \(name)")
         }
 
         let result = executeApplyPatch(

@@ -2278,7 +2278,7 @@ final class NonInteractiveExecTests: XCTestCase {
         }
         XCTAssertEqual(callID, "call-patch")
         XCTAssertEqual(payload.success, false)
-        XCTAssertEqual(payload.content, "unsupported tool: apply_patch")
+        XCTAssertEqual(payload.content, "unsupported call: apply_patch")
         XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("created.txt").path))
     }
 
@@ -2302,7 +2302,7 @@ final class NonInteractiveExecTests: XCTestCase {
         }
         XCTAssertEqual(callID, "call-report")
         XCTAssertEqual(payload.success, false)
-        XCTAssertEqual(payload.content, "unsupported tool: report_agent_job_result")
+        XCTAssertEqual(payload.content, "unsupported call: report_agent_job_result")
     }
 
     func testReportAgentJobResultRequiresAgentJobWorkerSessionLikeRustRegistry() async throws {
@@ -2333,7 +2333,7 @@ final class NonInteractiveExecTests: XCTestCase {
         }
         XCTAssertEqual(callID, "call-report")
         XCTAssertEqual(payload.success, false)
-        XCTAssertEqual(payload.content, "unsupported tool: report_agent_job_result")
+        XCTAssertEqual(payload.content, "unsupported call: report_agent_job_result")
     }
 
     func testReportAgentJobResultRecordsAcceptedResultLikeRustHandler() async throws {
@@ -2424,7 +2424,7 @@ final class NonInteractiveExecTests: XCTestCase {
         }
         XCTAssertEqual(callID, "call-spawn")
         XCTAssertEqual(payload.success, false)
-        XCTAssertEqual(payload.content, "unsupported tool: spawn_agents_on_csv")
+        XCTAssertEqual(payload.content, "unsupported call: spawn_agents_on_csv")
     }
 
     func testSpawnAgentsOnCSVRunsJobLoopAndReturnsRustShapedResult() async throws {
@@ -2533,6 +2533,28 @@ final class NonInteractiveExecTests: XCTestCase {
         let exported = try String(contentsOf: outputURL, encoding: .utf8)
         XCTAssertTrue(exported.contains(#"alpha,one,"#))
         XCTAssertTrue(exported.contains(#"alpha,completed,1,,"{""passed"":true}""#))
+    }
+
+    func testUnsupportedCustomToolCallUsesRustRegistryMessage() async throws {
+        let item = ResponseItem.customToolCall(callID: "custom-unknown", name: "missing_tool", input: "")
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            item,
+            cwd: URL(fileURLWithPath: "/tmp", isDirectory: true),
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: [:]
+        )
+
+        XCTAssertEqual(
+            output,
+            .customToolCallOutput(
+                callID: "custom-unknown",
+                output: "unsupported custom tool call: missing_tool"
+            )
+        )
     }
 
     func testApplyPatchCustomToolCallAppliesFreeformInput() async throws {
