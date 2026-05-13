@@ -148,6 +148,8 @@ Source baseline inspected for this scaffold:
   - parser support for add/delete/update/move hunks, lenient heredoc patch arguments, missing context errors, multiple chunks, parent directory creation, Rust move-summary paths, and committed-delta reporting for partial failures including exact destination writes from failed moves and inexact write-failure deltas
 - `codex-rs/apply-patch/src/streaming_parser.rs` and `codex-rs/core/src/tools/handlers/apply_patch.rs` streamed patch progress
   - streaming parser support for complete-line hunk snapshots before `*** End Patch`, CRLF scalar handling, bare empty update context lines, indented hunk markers as context, final-line finishing, Rust-shaped parser errors, and an apply-patch argument-diff consumer that emits/throttles `PatchApplyUpdatedEvent` payloads with add/delete/update/move progress metadata
+- `codex-rs/core/src/session/turn.rs` streamed apply-patch argument diff dispatch
+  - non-interactive Responses loops now replay `output_item.added`, `custom_tool_call_input.delta`, and item completion order to collect Rust-shaped `patch_apply_updated` runtime events for freeform `apply_patch` tool calls, gated by `apply_patch_streaming_events`, ignoring mismatched call ids, and flushing buffered progress when the item completes
 - `codex-rs/apply-patch/src/invocation.rs`
   - direct `apply_patch`/`applypatch` argv detection, Unix/PowerShell/Cmd shell heredoc extraction, Rust `file_stem` shell classification, shell heredoc `applypatch` alias detection, optional `cd <path> &&` workdir capture, implicit raw-patch rejection, verified action path/new-content/diff metadata, and conservative rejection of extra shell statements
 - `codex-rs/arg0/src/lib.rs` apply-patch dispatch path

@@ -54,10 +54,16 @@ public struct NonInteractiveExecRunResult: Equatable, Sendable {
 public struct NonInteractiveExecLoopResult: Equatable, Sendable {
     public let events: ResponseEventResults
     public let transcriptItems: [ResponseItem]
+    public let runtimeEvents: [EventMessage]
 
-    public init(events: ResponseEventResults, transcriptItems: [ResponseItem]) {
+    public init(
+        events: ResponseEventResults,
+        transcriptItems: [ResponseItem],
+        runtimeEvents: [EventMessage] = []
+    ) {
         self.events = events
         self.transcriptItems = transcriptItems
+        self.runtimeEvents = runtimeEvents
     }
 }
 
@@ -332,12 +338,14 @@ public enum NonInteractiveExec {
     public static func runResponsesLoop(
         initialPrompt: Prompt,
         maxToolIterations: Int = 20,
+        features: FeatureStates = .withDefaults(),
         streamPrompt: ResponseStreamer,
         executeFunctionCall: FunctionCallExecutor
     ) async -> ResponseEventResults {
         await runResponsesLoopWithTranscript(
             initialPrompt: initialPrompt,
             maxToolIterations: maxToolIterations,
+            features: features,
             streamPrompt: streamPrompt,
             executeFunctionCall: executeFunctionCall
         ).events
@@ -346,12 +354,14 @@ public enum NonInteractiveExec {
     public static func runResponsesLoopWithTranscript(
         initialPrompt: Prompt,
         maxToolIterations: Int = 20,
+        features: FeatureStates = .withDefaults(),
         streamPrompt: ResponseStreamer,
         executeFunctionCall: FunctionCallExecutor
     ) async -> NonInteractiveExecLoopResult {
         await runResponsesLoopWithTranscript(
             initialPrompt: initialPrompt,
             maxToolIterations: maxToolIterations,
+            features: features,
             streamPrompt: streamPrompt,
             executeFunctionCall: { item in
                 FunctionCallExecutionResult(output: await executeFunctionCall(item))
@@ -362,6 +372,7 @@ public enum NonInteractiveExec {
     public static func runResponsesLoopWithTranscript(
         initialPrompt: Prompt,
         maxToolIterations: Int = 20,
+        features: FeatureStates = .withDefaults(),
         streamPrompt: ResponseStreamer,
         stopHookContext: StopHookContext? = nil,
         executeFunctionCall: FunctionCallResultExecutor
@@ -369,6 +380,7 @@ public enum NonInteractiveExec {
         var prompt = initialPrompt
         var allEvents: ResponseEventResults = []
         var transcriptItems: [ResponseItem] = []
+        var runtimeEvents: [EventMessage] = []
         var stopHookActive = false
 
         for _ in 0..<maxToolIterations {
@@ -382,8 +394,13 @@ public enum NonInteractiveExec {
             }
 
             allEvents.append(contentsOf: turnEvents)
+            runtimeEvents.append(contentsOf: applyPatchStreamingEvents(from: turnEvents, features: features))
             if containsFailure(turnEvents) {
-                return NonInteractiveExecLoopResult(events: allEvents, transcriptItems: transcriptItems)
+                return NonInteractiveExecLoopResult(
+                    events: allEvents,
+                    transcriptItems: transcriptItems,
+                    runtimeEvents: runtimeEvents
+                )
             }
 
             let completedItems = completedOutputItems(from: turnEvents)
@@ -409,10 +426,18 @@ public enum NonInteractiveExec {
                         continue
                     }
                     if stopOutcome.shouldStop {
-                        return NonInteractiveExecLoopResult(events: allEvents, transcriptItems: transcriptItems)
+                        return NonInteractiveExecLoopResult(
+                            events: allEvents,
+                            transcriptItems: transcriptItems,
+                            runtimeEvents: runtimeEvents
+                        )
                     }
                 }
-                return NonInteractiveExecLoopResult(events: allEvents, transcriptItems: transcriptItems)
+                return NonInteractiveExecLoopResult(
+                    events: allEvents,
+                    transcriptItems: transcriptItems,
+                    runtimeEvents: runtimeEvents
+                )
             }
 
             for call in toolCalls {
@@ -427,7 +452,78 @@ public enum NonInteractiveExec {
         }
 
         allEvents.append(.failure(.stream("too many tool call iterations")))
-        return NonInteractiveExecLoopResult(events: allEvents, transcriptItems: transcriptItems)
+        return NonInteractiveExecLoopResult(
+            events: allEvents,
+            transcriptItems: transcriptItems,
+            runtimeEvents: runtimeEvents
+        )
+    }
+
+    private static func applyPatchStreamingEvents(
+        from responseEvents: ResponseEventResults,
+        features: FeatureStates
+    ) -> [EventMessage] {
+        guard features.isEnabled(.applyPatchStreamingEvents) else {
+            return []
+        }
+
+        var activeConsumer: (callID: String, consumer: ApplyPatchArgumentDiffConsumer)?
+        var events: [EventMessage] = []
+
+        for result in responseEvents {
+            guard case let .success(event) = result else {
+                continue
+            }
+
+            switch event {
+            case let .outputItemAdded(item):
+                switch item {
+                case let .customToolCall(_, _, callID, name, _):
+                    if name == "apply_patch" {
+                        activeConsumer = (callID, ApplyPatchArgumentDiffConsumer())
+                    } else {
+                        activeConsumer = nil
+                    }
+                case .functionCall:
+                    activeConsumer = nil
+                default:
+                    break
+                }
+
+            case let .toolCallInputDelta(_, callID, delta):
+                guard var current = activeConsumer else {
+                    continue
+                }
+                let resolvedCallID: String
+                if let callID {
+                    guard callID == current.callID else {
+                        continue
+                    }
+                    resolvedCallID = callID
+                } else {
+                    resolvedCallID = current.callID
+                }
+
+                if let update = current.consumer.pushDelta(callID: resolvedCallID, delta: delta) {
+                    events.append(.patchApplyUpdated(update))
+                }
+                activeConsumer = current
+
+            case .outputItemDone:
+                guard var current = activeConsumer else {
+                    continue
+                }
+                if let update = try? current.consumer.finishUpdateOnComplete() {
+                    events.append(.patchApplyUpdated(update))
+                }
+                activeConsumer = nil
+
+            default:
+                break
+            }
+        }
+
+        return events
     }
 
     public static func runUserPromptSubmitHooks(

@@ -1068,6 +1068,71 @@ final class NonInteractiveExecTests: XCTestCase {
         ])
     }
 
+    func testResponsesLoopCollectsApplyPatchStreamingEventsLikeRustTurn() async throws {
+        let initial = Prompt(input: [
+            .message(role: "user", content: [.inputText(text: "patch")])
+        ])
+        var features = FeatureStates.withDefaults()
+        features.set(.applyPatchStreamingEvents, enabled: true)
+        let script = StreamingApplyPatchToolLoopScript()
+
+        let result = await NonInteractiveExec.runResponsesLoopWithTranscript(
+            initialPrompt: initial,
+            features: features,
+            streamPrompt: { prompt in
+                .success(await script.next(prompt))
+            },
+            executeFunctionCall: { item in
+                guard case let .customToolCall(_, _, callID, name, _) = item else {
+                    return .customToolCallOutput(callID: "bad", output: "bad")
+                }
+                return .customToolCallOutput(callID: callID, output: "\(name) ok")
+            }
+        )
+
+        XCTAssertEqual(result.runtimeEvents, [
+            .patchApplyUpdated(PatchApplyUpdatedEvent(
+                callID: "custom-1",
+                changes: ["hello.txt": .add(content: "")]
+            )),
+            .patchApplyUpdated(PatchApplyUpdatedEvent(
+                callID: "custom-1",
+                changes: ["hello.txt": .add(content: "hello\nworld\n")]
+            ))
+        ])
+        XCTAssertEqual(result.transcriptItems, [
+            .customToolCall(
+                callID: "custom-1",
+                name: "apply_patch",
+                input: "*** Begin Patch\n*** Add File: hello.txt\n+hello\n+world\n*** End Patch"
+            ),
+            .customToolCallOutput(callID: "custom-1", output: "apply_patch ok"),
+            .message(role: "assistant", content: [.outputText(text: "done")])
+        ])
+    }
+
+    func testResponsesLoopDoesNotCollectApplyPatchStreamingEventsWhenFeatureDisabled() async throws {
+        let initial = Prompt(input: [
+            .message(role: "user", content: [.inputText(text: "patch")])
+        ])
+        let script = StreamingApplyPatchToolLoopScript()
+
+        let result = await NonInteractiveExec.runResponsesLoopWithTranscript(
+            initialPrompt: initial,
+            streamPrompt: { prompt in
+                .success(await script.next(prompt))
+            },
+            executeFunctionCall: { item in
+                guard case let .customToolCall(_, _, callID, name, _) = item else {
+                    return .customToolCallOutput(callID: "bad", output: "bad")
+                }
+                return .customToolCallOutput(callID: callID, output: "\(name) ok")
+            }
+        )
+
+        XCTAssertEqual(result.runtimeEvents, [])
+    }
+
     func testResponsesLoopDoesNotExecuteHostedImageGenerationCall() async throws {
         let initial = Prompt(input: [
             .message(role: "user", content: [.inputText(text: "generate an image")])
@@ -2608,6 +2673,40 @@ private actor CustomToolLoopScript {
 
     func prompts() -> [Prompt] {
         recordedPrompts
+    }
+}
+
+private actor StreamingApplyPatchToolLoopScript {
+    private var calls = 0
+
+    func next(_ prompt: Prompt) -> ResponseEventResults {
+        calls += 1
+
+        if calls == 1 {
+            return [
+                .success(.outputItemAdded(.customToolCall(
+                    callID: "custom-1",
+                    name: "apply_patch",
+                    input: ""
+                ))),
+                .success(.toolCallInputDelta(itemID: "item-1", callID: "other-call", delta: "*** ignored\n")),
+                .success(.toolCallInputDelta(itemID: "item-1", callID: "custom-1", delta: "*** Begin Patch\n")),
+                .success(.toolCallInputDelta(itemID: "item-1", callID: nil, delta: "*** Add File: hello.txt\n+hello")),
+                .success(.toolCallInputDelta(itemID: "item-1", callID: "custom-1", delta: "\n+world")),
+                .success(.toolCallInputDelta(itemID: "item-1", callID: "custom-1", delta: "\n*** End Patch")),
+                .success(.outputItemDone(.customToolCall(
+                    callID: "custom-1",
+                    name: "apply_patch",
+                    input: "*** Begin Patch\n*** Add File: hello.txt\n+hello\n+world\n*** End Patch"
+                ))),
+                .success(.completed(responseID: "resp-1", tokenUsage: nil))
+            ]
+        }
+
+        return [
+            .success(.outputItemDone(.message(role: "assistant", content: [.outputText(text: "done")]))),
+            .success(.completed(responseID: "resp-2", tokenUsage: nil))
+        ]
     }
 }
 
