@@ -77,7 +77,14 @@ final class CommandSafetyTests: XCTestCase {
             ["git", "--namespace=attacker", "show", "HEAD"],
             ["git", "--super-prefix", "attacker/", "show", "HEAD"],
             ["git", "--super-prefix=attacker/", "show", "HEAD"],
-            ["bash", "-lc", "git --git-dir=.evil-git diff HEAD~1..HEAD"]
+            ["git", "log", "--exec=touch /tmp/codex-poc", "-1"],
+            ["git", "log", "--exec", "touch /tmp/codex-poc", "-1"],
+            ["bash", "-lc", "git --paginate log -1"],
+            ["bash", "-lc", "git -p log -1"],
+            ["bash", "-lc", "git -C .project-deps/test-fixtures status"],
+            ["bash", "-lc", "git branch -d feature"],
+            ["bash", "-lc", "git --git-dir=.evil-git diff HEAD~1..HEAD"],
+            ["bash", "-lc", "git log --exec='touch /tmp/codex-poc' -1"]
         ] {
             XCTAssertFalse(CommandSafety.isKnownSafeCommand(args), "expected \(args) to be unsafe")
         }
