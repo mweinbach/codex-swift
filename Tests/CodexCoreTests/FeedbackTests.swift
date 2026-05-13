@@ -75,6 +75,7 @@ final class FeedbackTests: XCTestCase {
             includeLogs: true,
             rolloutPath: rolloutPath,
             sessionSource: .cli,
+            accountID: "actual-account",
             cliVersion: "1.2.3",
             eventID: "0123456789abcdef0123456789abcdef"
         )
@@ -98,6 +99,7 @@ final class FeedbackTests: XCTestCase {
         XCTAssertTrue(envelope.contains(#""classification":"bug""#))
         XCTAssertTrue(envelope.contains(#""cli_version":"1.2.3""#))
         XCTAssertTrue(envelope.contains(#""session_source":"cli""#))
+        XCTAssertTrue(envelope.contains(#""account_id":"actual-account""#))
         XCTAssertTrue(envelope.contains(#""reason":"it broke""#))
         XCTAssertTrue(envelope.contains(#""exception":{"values":[{"type":"[Bug]: Codex session thread-1","value":"it broke"}]}"#))
         XCTAssertTrue(envelope.contains(#""filename":"codex-logs.log""#))
@@ -136,6 +138,7 @@ final class FeedbackTests: XCTestCase {
             reason: "wrong answer",
             includeLogs: true,
             sessionSource: .exec,
+            accountID: "transport-account",
             cliVersion: "9.9.9",
             transport: transport
         )

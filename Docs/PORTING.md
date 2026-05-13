@@ -430,7 +430,7 @@ Source baseline inspected for this scaffold:
 - Initial `codex-rs/lmstudio/src/client.rs` provider probing
   - LM Studio clients now probe `/models`, preserve Rust's missing-base-url and connection/server error text, parse `/models` response `data[].id` model IDs, surface missing-data and failed-fetch errors with Rust strings, POST the minimal `/responses` model-load request with `input: ""` and `max_output_tokens: 1`, discover the `lms` CLI via PATH or `$HOME/.lmstudio/bin/lms`, print the Rust download banner, execute the Rust-matching `lms get --yes {model}` command with stdout inherited and stderr discarded, preserve the download spawn/nonzero-exit failure strings, and participate in non-interactive `--oss` startup readiness. Broader interactive startup wiring remains pending.
 - `codex-rs/feedback/src/lib.rs`
-  - bounded feedback log ring buffer, writer/snapshot APIs, no-active-thread fallback IDs, temp-file save path, Sentry feedback envelope upload requests, classification tags/levels, and optional log/rollout attachments
+  - bounded feedback log ring buffer, writer/snapshot APIs, no-active-thread fallback IDs, temp-file save path, Sentry feedback envelope upload requests, classification/account/session-source tags, levels, and optional log/rollout attachments
 - Additional `codex-rs/core/src/compact.rs` replacement-history helpers
   - compacted history now preserves Rust's initial-context reinsertion boundary: prefer before the last real user message, fall back before a compaction summary user message, fall back before a compaction/context-compaction item, and append when no boundary exists.
 - `codex-rs/hooks/src/legacy_notify.rs`

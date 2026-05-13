@@ -122,6 +122,7 @@ public struct CodexLogSnapshot: Equatable, Sendable {
         includeLogs: Bool,
         rolloutPath: URL? = nil,
         sessionSource: SessionSource? = nil,
+        accountID: String? = nil,
         cliVersion: String = "0.0.0",
         eventID: String = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
     ) throws -> FeedbackUploadRequest {
@@ -135,6 +136,9 @@ public struct CodexLogSnapshot: Equatable, Sendable {
         ]
         if let sessionSource {
             tags["session_source"] = sessionSource.description
+        }
+        if let accountID {
+            tags["account_id"] = accountID
         }
         if let reason {
             tags["reason"] = reason
@@ -198,6 +202,7 @@ public struct CodexLogSnapshot: Equatable, Sendable {
         includeLogs: Bool,
         rolloutPath: URL? = nil,
         sessionSource: SessionSource? = nil,
+        accountID: String? = nil,
         cliVersion: String = "0.0.0",
         transport: FeedbackUploadTransport = URLSessionFeedbackUploadTransport()
     ) async throws {
@@ -207,6 +212,7 @@ public struct CodexLogSnapshot: Equatable, Sendable {
             includeLogs: includeLogs,
             rolloutPath: rolloutPath,
             sessionSource: sessionSource,
+            accountID: accountID,
             cliVersion: cliVersion
         )
         try await transport.upload(request)

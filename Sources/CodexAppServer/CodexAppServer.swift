@@ -17591,6 +17591,7 @@ public enum CodexAppServer {
                 includeLogs: includeLogs,
                 rolloutPath: rolloutPath,
                 sessionSource: configuration.sessionSource,
+                accountID: try currentAuth(configuration: configuration)?.accountID,
                 cliVersion: configuration.version,
                 transport: configuration.feedbackUploadTransport
             )

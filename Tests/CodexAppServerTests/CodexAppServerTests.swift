@@ -19708,6 +19708,13 @@ final class CodexAppServerTests: XCTestCase {
 
     func testFeedbackUploadUsesInjectedTransportAndReturnsThreadID() async throws {
         let temp = try TemporaryDirectory()
+        try CodexAuthStorage.saveChatGPTTokens(
+            codexHome: temp.url,
+            apiKey: nil,
+            idToken: fakeJWT(email: "user@example.com", plan: "pro", accountID: "actual-account"),
+            accessToken: "access-token",
+            refreshToken: "refresh-token"
+        )
         let threadID = try writeRollout(
             codexHome: temp.url,
             filenameTimestamp: "2025-01-02T03-04-05",
@@ -19735,6 +19742,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(requests.count, 1)
         let envelope = String(decoding: requests[0].envelope, as: UTF8.self)
         XCTAssertTrue(envelope.contains(#""classification":"bad_result""#))
+        XCTAssertTrue(envelope.contains(#""account_id":"actual-account""#))
         XCTAssertTrue(envelope.contains("captured logs"))
         XCTAssertTrue(envelope.contains("feedback rollout"))
     }
