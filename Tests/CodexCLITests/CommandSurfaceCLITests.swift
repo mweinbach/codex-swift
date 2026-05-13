@@ -1,5 +1,6 @@
 import CodexCLI
 import CodexCore
+import Foundation
 import XCTest
 
 final class CommandSurfaceCLITests: XCTestCase {
@@ -1400,13 +1401,9 @@ final class CommandSurfaceCLITests: XCTestCase {
     }
 
     func testDebugRuntimeModelsBundledOutputsBundledCatalog() async throws {
-        // Match the online variant below: Swift 6.2 XCTest can crash when
-        // adjacent async tests complete entirely synchronously.
-        await Task.yield()
-
         let result = try await DebugCommandRuntime.run(CodexCLI.DebugCommandRequest(
             action: .models(bundled: true)
-        ), dependencies: debugModelDependencies())
+        ), dependencies: Self.debugModelDependencies())
 
         XCTAssertEqual(result.exitCode, 0)
         XCTAssertNil(result.stderrMessage)
@@ -1417,22 +1414,15 @@ final class CommandSurfaceCLITests: XCTestCase {
         XCTAssertEqual(decoded, try ModelsManager.bundledModelsResponse())
     }
 
-    func testDebugRuntimeModelsOnlineUsesRawCatalogLoader() async throws {
-        // Match the bundled variant above: Swift 6.2 XCTest can crash when
-        // adjacent async tests complete entirely synchronously.
-        await Task.yield()
-
+    func testDebugRuntimeModelsOnlineUsesRawCatalogLoader() throws {
         let expected = ModelsResponse(models: [])
-        let result = try await DebugCommandRuntime.run(CodexCLI.DebugCommandRequest(
-            action: .models(bundled: false)
-        ), dependencies: debugModelDependencies(
-            loadRawModelCatalog: { _, _ in
-                // Keep this async path suspended at least once; Swift 6.2 XCTest can crash
-                // when this focused test completes entirely synchronously.
-                await Task.yield()
-                return expected
-            }
-        ))
+        let result = try waitForAsyncResult {
+            try await DebugCommandRuntime.run(CodexCLI.DebugCommandRequest(
+                action: .models(bundled: false)
+            ), dependencies: Self.debugModelDependencies(
+                loadRawModelCatalog: { _, _ in expected }
+            ))
+        }
 
         XCTAssertEqual(result.exitCode, 0)
         XCTAssertNil(result.stderrMessage)
@@ -1512,7 +1502,54 @@ final class CommandSurfaceCLITests: XCTestCase {
         }
     }
 
-    private func debugModelDependencies(
+    private func waitForAsyncResult<Success: Sendable>(
+        timeout: DispatchTimeInterval = .seconds(5),
+        _ operation: @escaping @Sendable () async throws -> Success
+    ) throws -> Success {
+        let semaphore = DispatchSemaphore(value: 0)
+        let resultBox = AsyncTestResultBox<Success>()
+
+        Task {
+            do {
+                resultBox.set(.success(try await operation()))
+            } catch {
+                resultBox.set(.failure(error))
+            }
+            semaphore.signal()
+        }
+
+        guard semaphore.wait(timeout: .now() + timeout) == .success else {
+            throw TestError("timed out waiting for async test operation")
+        }
+
+        switch resultBox.result {
+        case let .success(value):
+            return value
+        case let .failure(error):
+            throw error
+        case nil:
+            throw TestError("async test operation completed without a result")
+        }
+    }
+
+    private final class AsyncTestResultBox<Success>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stored: Result<Success, Error>?
+
+        var result: Result<Success, Error>? {
+            lock.lock()
+            defer { lock.unlock() }
+            return stored
+        }
+
+        func set(_ result: Result<Success, Error>) {
+            lock.lock()
+            stored = result
+            lock.unlock()
+        }
+    }
+
+    private static func debugModelDependencies(
         loadRawModelCatalog: @escaping (URL, CodexRuntimeConfig) async throws -> ModelsResponse = { _, _ in
             ModelsResponse(models: [])
         }
