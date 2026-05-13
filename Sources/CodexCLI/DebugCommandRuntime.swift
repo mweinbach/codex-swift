@@ -380,6 +380,10 @@ public enum DebugCommandRuntime {
                 budget: Skills.defaultSkillMetadataBudget(contextWindow: modelFamily.contextWindow.map(Int.init))
             )
         }
+        let multiAgentV2UsageHintText = config.multiAgentV2.usageHintText(
+            features: config.features,
+            sessionSource: .exec
+        )
         var input = NonInteractiveExec.makeInitialPromptInput(
             cwd: cwd,
             approvalPolicy: approvalPolicy,
@@ -389,6 +393,7 @@ public enum DebugCommandRuntime {
             includePermissionsInstructions: config.includePermissionsInstructions,
             developerInstructions: config.developerInstructions,
             memoryToolDeveloperInstructions: memoryToolDeveloperInstructions,
+            multiAgentV2UsageHintText: multiAgentV2UsageHintText,
             availableSkills: availableSkills,
             userInstructions: projectInstructions,
             environmentContextEnvironments: environmentContextEnvironments(

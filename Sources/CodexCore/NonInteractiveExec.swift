@@ -80,6 +80,7 @@ public enum NonInteractiveExec {
         includePermissionsInstructions: Bool = true,
         developerInstructions: String? = nil,
         memoryToolDeveloperInstructions: String? = nil,
+        multiAgentV2UsageHintText: String? = nil,
         availableSkills: AvailableSkills? = nil,
         userInstructions: UserInstructions? = nil,
         environmentContextEnvironments: [EnvironmentContextEnvironment]? = nil,
@@ -118,6 +119,12 @@ public enum NonInteractiveExec {
         if !developerContent.isEmpty {
             input.append(.message(role: "developer", content: developerContent))
         }
+        if let multiAgentV2UsageHintText, !multiAgentV2UsageHintText.isEmpty {
+            input.append(.message(
+                role: "developer",
+                content: [.inputText(text: multiAgentV2UsageHintText)]
+            ))
+        }
 
         var contextualUserContent: [ContentItem] = []
         if let userInstructions {
@@ -155,6 +162,7 @@ public enum NonInteractiveExec {
         includePermissionsInstructions: Bool = true,
         developerInstructions: String? = nil,
         memoryToolDeveloperInstructions: String? = nil,
+        multiAgentV2UsageHintText: String? = nil,
         availableSkills: AvailableSkills? = nil,
         userInstructions: UserInstructions? = nil,
         environmentContextEnvironments: [EnvironmentContextEnvironment]? = nil,
@@ -174,6 +182,7 @@ public enum NonInteractiveExec {
             includePermissionsInstructions: includePermissionsInstructions,
             developerInstructions: developerInstructions,
             memoryToolDeveloperInstructions: memoryToolDeveloperInstructions,
+            multiAgentV2UsageHintText: multiAgentV2UsageHintText,
             availableSkills: availableSkills,
             userInstructions: userInstructions,
             environmentContextEnvironments: environmentContextEnvironments,

@@ -209,6 +209,57 @@ final class DebugCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(promptContent, [.inputText(text: "hello")])
     }
 
+    func testPromptInputIncludesMultiAgentV2UsageHintAsStandaloneDeveloperMessage() async throws {
+        let temp = try TemporaryDirectory()
+        var features = FeatureStates.withDefaults()
+        features.set(.multiAgentV2, enabled: true)
+        var config = CodexRuntimeConfig(
+            modelProvider: "test-provider",
+            developerInstructions: "Debug developer instructions",
+            features: features,
+            projectDocMaxBytes: 0
+        )
+        config.multiAgentV2 = MultiAgentV2Config(
+            rootAgentUsageHintText: "Root guidance.",
+            subagentUsageHintText: "Subagent guidance."
+        )
+
+        let result = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .promptInput(prompt: nil, imagePaths: [])),
+            dependencies: testDependencies(codexHome: temp.url, config: config)
+        )
+
+        let output = try XCTUnwrap(result.stdoutMessage)
+        let decoded = try JSONDecoder().decode([ResponseItem].self, from: Data(output.utf8))
+        XCTAssertEqual(decoded.count, 3)
+
+        guard case let .message(_, developerRole, developerContent, _) = decoded[0] else {
+            return XCTFail("expected aggregated developer context message")
+        }
+        XCTAssertEqual(developerRole, "developer")
+        XCTAssertEqual(developerContent.count, 2)
+        guard case let .inputText(developerText) = developerContent[1] else {
+            return XCTFail("expected configured developer instructions")
+        }
+        XCTAssertEqual(developerText, "Debug developer instructions")
+
+        guard case let .message(_, hintRole, hintContent, _) = decoded[1] else {
+            return XCTFail("expected standalone usage hint developer message")
+        }
+        XCTAssertEqual(hintRole, "developer")
+        XCTAssertEqual(hintContent, [.inputText(text: "Root guidance.")])
+        XCTAssertFalse(output.contains("Subagent guidance."))
+
+        guard case let .message(_, contextualRole, contextualContent, _) = decoded[2] else {
+            return XCTFail("expected contextual user message after usage hint")
+        }
+        XCTAssertEqual(contextualRole, "user")
+        guard case let .inputText(environmentText) = contextualContent.first else {
+            return XCTFail("expected environment context")
+        }
+        XCTAssertTrue(environmentText.contains("<environment_context>"))
+    }
+
     func testPromptInputIncludesMemoryToolInstructionsWhenEnabled() async throws {
         let temp = try TemporaryDirectory()
         let memories = temp.url.appendingPathComponent("memories", isDirectory: true)

@@ -931,6 +931,10 @@ private func runNonInteractiveExec(
         )
     }
     let memoryToolDeveloperInstructions = MemoryToolInstructions.build(codexHome: codexHome, config: settings)
+    let multiAgentV2UsageHintText = settings.multiAgentV2.usageHintText(
+        features: settings.features,
+        sessionSource: .exec
+    )
     var prompt = NonInteractiveExec.makePrompt(
         prompt: promptResolution.prompt,
         imagePaths: options.imagePaths,
@@ -943,6 +947,7 @@ private func runNonInteractiveExec(
         includePermissionsInstructions: settings.includePermissionsInstructions,
         developerInstructions: settings.developerInstructions,
         memoryToolDeveloperInstructions: memoryToolDeveloperInstructions,
+        multiAgentV2UsageHintText: multiAgentV2UsageHintText,
         availableSkills: availableSkills,
         userInstructions: projectInstructions,
         history: history,
