@@ -301,7 +301,12 @@ private func runExecCommand(
     case let .resume(sessionID, last, all, promptResolution, outputSchema):
         let codexHome = try CodexHome.find()
         let resumeResolution = try ResumeCommandResolver.resolve(
-            CodexCLI.ResumeCommandRequest(sessionID: sessionID, last: last, all: all),
+            CodexCLI.ResumeCommandRequest(
+                sessionID: sessionID,
+                last: last,
+                all: all,
+                includeNonInteractive: true
+            ),
             codexHome: codexHome
         )
         guard case let .session(session) = resumeResolution else {

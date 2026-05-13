@@ -296,17 +296,20 @@ public struct CodexCLI: Sendable {
         public let sessionID: String?
         public let last: Bool
         public let all: Bool
+        public let includeNonInteractive: Bool
         public let configOverrides: CliConfigOverrides
 
         public init(
             sessionID: String?,
             last: Bool,
             all: Bool,
+            includeNonInteractive: Bool = false,
             configOverrides: CliConfigOverrides = CliConfigOverrides()
         ) {
             self.sessionID = sessionID
             self.last = last
             self.all = all
+            self.includeNonInteractive = includeNonInteractive
             self.configOverrides = configOverrides
         }
     }
@@ -2203,6 +2206,7 @@ public struct CodexCLI: Sendable {
         var sessionID: String?
         var last = false
         var all = false
+        var includeNonInteractive = false
 
         for argument in arguments {
             if argument == "--last" {
@@ -2214,6 +2218,10 @@ public struct CodexCLI: Sendable {
             }
             if argument == "--all" {
                 all = true
+                continue
+            }
+            if argument == "--include-non-interactive" {
+                includeNonInteractive = true
                 continue
             }
             if argument.hasPrefix("-") {
@@ -2234,6 +2242,7 @@ public struct CodexCLI: Sendable {
                 sessionID: sessionID,
                 last: last,
                 all: all,
+                includeNonInteractive: includeNonInteractive,
                 configOverrides: configOverrides
             ))
         case let .failure(message, exitCode):

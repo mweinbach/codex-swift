@@ -512,11 +512,11 @@ final class CommandSurfaceCLITests: XCTestCase {
         XCTAssertEqual(stderr, ["codex-swift: --title requires --commit"])
     }
 
-    func testRunAsyncResumeParsesLastAllAndOverrides() async {
+    func testRunAsyncResumeParsesLastAllIncludeNonInteractiveAndOverrides() async {
         var receivedRequest: CodexCLI.ResumeCommandRequest?
 
         let exitCode = await CodexCLI().runAsync(
-            arguments: ["-c", "model=\"gpt-5.4\"", "resume", "--last", "--all"],
+            arguments: ["-c", "model=\"gpt-5.4\"", "resume", "--last", "--all", "--include-non-interactive"],
             stderr: { _ in XCTFail("stderr should not be written") },
             resumeRunner: { request in
                 receivedRequest = request
@@ -529,6 +529,7 @@ final class CommandSurfaceCLITests: XCTestCase {
             sessionID: nil,
             last: true,
             all: true,
+            includeNonInteractive: true,
             configOverrides: CliConfigOverrides(rawOverrides: ["model=\"gpt-5.4\""])
         ))
     }

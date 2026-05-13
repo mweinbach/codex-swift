@@ -90,6 +90,101 @@ final class ResumeCommandTests: XCTestCase {
         XCTAssertTrue(ResumeCommandFormatter.render(resolution).contains(sessionID.uuidString.lowercased()))
     }
 
+    func testResolveLastSkipsExecSessionUnlessIncluded() throws {
+        let temp = try ResumeCommandTemporaryDirectory()
+        let interactiveID = try XCTUnwrap(UUID(uuidString: "00000000-0000-0000-0000-000000000401"))
+        let execID = try XCTUnwrap(UUID(uuidString: "00000000-0000-0000-0000-000000000402"))
+
+        let interactive = try writeSessionFile(
+            home: temp.url,
+            timestamp: "2026-05-08T13-30-00",
+            id: interactiveID,
+            provider: "openai",
+            source: .cli
+        )
+        let exec = try writeSessionFile(
+            home: temp.url,
+            timestamp: "2026-05-08T14-00-00",
+            id: execID,
+            provider: "openai",
+            source: .exec
+        )
+
+        let defaultFiltered = try ResumeCommandResolver.resolve(
+            CodexCLI.ResumeCommandRequest(sessionID: nil, last: true, all: false),
+            codexHome: temp.url
+        )
+        assertSession(
+            defaultFiltered,
+            id: try ConversationId(string: interactiveID.uuidString.lowercased()),
+            path: interactive.path,
+            historyItemCount: 3
+        )
+
+        let includeNonInteractive = try ResumeCommandResolver.resolve(
+            CodexCLI.ResumeCommandRequest(
+                sessionID: nil,
+                last: true,
+                all: false,
+                includeNonInteractive: true
+            ),
+            codexHome: temp.url
+        )
+        assertSession(
+            includeNonInteractive,
+            id: try ConversationId(string: execID.uuidString.lowercased()),
+            path: exec.path,
+            historyItemCount: 3
+        )
+    }
+
+    func testPickerSkipsExecSessionUnlessIncluded() throws {
+        let temp = try ResumeCommandTemporaryDirectory()
+        let interactiveID = try XCTUnwrap(UUID(uuidString: "00000000-0000-0000-0000-000000000501"))
+        let execID = try XCTUnwrap(UUID(uuidString: "00000000-0000-0000-0000-000000000502"))
+
+        let interactive = try writeSessionFile(
+            home: temp.url,
+            timestamp: "2026-05-08T14-30-00",
+            id: interactiveID,
+            provider: "openai",
+            source: .vscode
+        )
+        let exec = try writeSessionFile(
+            home: temp.url,
+            timestamp: "2026-05-08T15-00-00",
+            id: execID,
+            provider: "openai",
+            source: .exec
+        )
+
+        let defaultFiltered = try ResumeCommandResolver.resolve(
+            CodexCLI.ResumeCommandRequest(sessionID: nil, last: false, all: false),
+            codexHome: temp.url
+        )
+        guard case let .picker(defaultPage) = defaultFiltered else {
+            return XCTFail("expected picker page")
+        }
+        XCTAssertEqual(defaultPage.items.map { comparablePath($0.path) }, [interactive.path].map(comparablePath))
+
+        let includeNonInteractive = try ResumeCommandResolver.resolve(
+            CodexCLI.ResumeCommandRequest(
+                sessionID: nil,
+                last: false,
+                all: false,
+                includeNonInteractive: true
+            ),
+            codexHome: temp.url
+        )
+        guard case let .picker(includedPage) = includeNonInteractive else {
+            return XCTFail("expected picker page")
+        }
+        XCTAssertEqual(
+            includedPage.items.map { comparablePath($0.path) },
+            [exec.path, interactive.path].map(comparablePath)
+        )
+    }
+
     func testResolveErrorsWhenNoLastSessionExists() throws {
         let temp = try ResumeCommandTemporaryDirectory()
 
@@ -109,7 +204,8 @@ final class ResumeCommandTests: XCTestCase {
         home: URL,
         timestamp: String,
         id: UUID,
-        provider: String
+        provider: String,
+        source: SessionSource = .cli
     ) throws -> WrittenSession {
         let sessions = home
             .appendingPathComponent("sessions", isDirectory: true)
@@ -129,7 +225,7 @@ final class ResumeCommandTests: XCTestCase {
                     cwd: ".",
                     originator: "test_originator",
                     cliVersion: "test_version",
-                    source: .exec,
+                    source: source,
                     modelProvider: provider
                 )))
             )),

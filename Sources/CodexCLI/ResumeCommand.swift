@@ -57,6 +57,7 @@ public enum ResumeCommandResolver {
                 codexHome: codexHome,
                 pageSize: 1,
                 modelProviders: request.all ? nil : [defaultProvider],
+                sourceMatcher: sourceMatcher(includeNonInteractive: request.includeNonInteractive),
                 defaultProvider: defaultProvider
             )
             guard let item = page.items.first else {
@@ -69,9 +70,14 @@ public enum ResumeCommandResolver {
             codexHome: codexHome,
             pageSize: pickerPageSize,
             modelProviders: request.all ? nil : [defaultProvider],
+            sourceMatcher: sourceMatcher(includeNonInteractive: request.includeNonInteractive),
             defaultProvider: defaultProvider
         )
         return .picker(page)
+    }
+
+    private static func sourceMatcher(includeNonInteractive: Bool) -> SessionSourceMatcher? {
+        includeNonInteractive ? nil : SessionSourceMatcher(kinds: [.cli, .vscode])
     }
 
     private static func resolvedSession(path: String) throws -> ResumeCommandResolvedSession {
