@@ -128,7 +128,9 @@ public enum AgentJobToolExecutor {
             }
 
         case "report_agent_job_result":
-            guard let context else {
+            guard let context,
+                  AgentJobRuntime.isAgentJobWorkerSessionSource(context.sessionSource)
+            else {
                 return functionOutput(callID: callID, content: "unsupported tool: \(name)", success: false)
             }
             do {

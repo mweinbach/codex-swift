@@ -42,7 +42,8 @@ final class AgentJobToolExecutorTests: XCTestCase {
             cwd: temp.url,
             context: AgentJobToolContext(
                 store: store,
-                reportingThreadID: "thread-1"
+                reportingThreadID: "thread-1",
+                sessionSource: .subagent(.other("agent_job:job-1"))
             )
         )
 
@@ -61,6 +62,30 @@ final class AgentJobToolExecutorTests: XCTestCase {
         let job = try XCTUnwrap(persistedJob)
         XCTAssertEqual(job.status, .cancelled)
         XCTAssertEqual(job.lastError, "cancelled by worker request")
+    }
+
+    func testReportAgentJobResultRequiresAgentJobWorkerSessionLikeRustRegistry() async throws {
+        let temp = try AgentJobToolExecutorTemporaryDirectory()
+        let store = try SQLiteAgentJobStore(databaseURL: temp.url.appendingPathComponent("state.sqlite3"))
+
+        let output = await AgentJobToolExecutor.execute(
+            name: "report_agent_job_result",
+            arguments: #"{"job_id":"job-1","item_id":"row-1","result":{"ok":true}}"#,
+            callID: "call-report",
+            cwd: temp.url,
+            context: AgentJobToolContext(
+                store: store,
+                reportingThreadID: "thread-1",
+                sessionSource: .cli
+            )
+        )
+
+        guard case let .functionCallOutput(callID, payload) = output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-report")
+        XCTAssertEqual(payload.success, false)
+        XCTAssertEqual(payload.content, "unsupported tool: report_agent_job_result")
     }
 
     func testAgentJobExecutorReturnsNilForUnownedTools() async {

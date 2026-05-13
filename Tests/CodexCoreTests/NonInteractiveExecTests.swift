@@ -1595,6 +1595,37 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(payload.content, "unsupported tool: report_agent_job_result")
     }
 
+    func testReportAgentJobResultRequiresAgentJobWorkerSessionLikeRustRegistry() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let store = try SQLiteAgentJobStore(databaseURL: temp.url.appendingPathComponent("state.sqlite3"))
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            .functionCall(
+                name: "report_agent_job_result",
+                arguments: #"{"job_id":"job-1","item_id":"row-1","result":{"ok":true}}"#,
+                callID: "call-report"
+            ),
+            cwd: temp.url,
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: [:],
+            agentJobContext: NonInteractiveExec.AgentJobToolContext(
+                store: store,
+                reportingThreadID: "thread-1",
+                sessionSource: .cli
+            )
+        )
+
+        guard case let .functionCallOutput(callID, payload) = output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-report")
+        XCTAssertEqual(payload.success, false)
+        XCTAssertEqual(payload.content, "unsupported tool: report_agent_job_result")
+    }
+
     func testReportAgentJobResultRecordsAcceptedResultLikeRustHandler() async throws {
         let temp = try NonInteractiveExecTemporaryDirectory()
         let store = try SQLiteAgentJobStore(databaseURL: temp.url.appendingPathComponent("state.sqlite3"))
@@ -1641,7 +1672,8 @@ final class NonInteractiveExecTests: XCTestCase {
             environment: [:],
             agentJobContext: NonInteractiveExec.AgentJobToolContext(
                 store: store,
-                reportingThreadID: "thread-1"
+                reportingThreadID: "thread-1",
+                sessionSource: .subagent(.other("agent_job:job-1"))
             )
         )
 
