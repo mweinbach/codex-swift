@@ -214,6 +214,7 @@ public enum NonInteractiveExec {
                  || config.experimentalUseFreeformApplyPatch == true)
                 ? .freeform
                 : nil)
+        let multiAgentV2Enabled = config.features.isEnabled(.multiAgentV2)
 
         return ToolsConfig(
             shellType: shellType,
@@ -227,6 +228,16 @@ public enum NonInteractiveExec {
             toolSearch: config.features.isEnabled(.toolSearch),
             toolSuggest: config.features.isEnabled(.toolSuggest),
             allowLoginShell: config.allowLoginShell,
+            multiAgentV2Tools: multiAgentV2Enabled,
+            spawnAgentUsageHint: config.multiAgentV2.usageHintEnabled,
+            spawnAgentUsageHintText: config.multiAgentV2.usageHintText,
+            hideSpawnAgentMetadata: config.multiAgentV2.hideSpawnAgentMetadata,
+            maxConcurrentThreadsPerSession: multiAgentV2Enabled
+                ? config.multiAgentV2.maxConcurrentThreadsPerSession
+                : nil,
+            waitAgentMinTimeoutMS: multiAgentV2Enabled
+                ? config.multiAgentV2.minWaitTimeoutMS
+                : nil,
             agentJobTools: config.features.isEnabled(.spawnCsv),
             agentJobWorkerTools: config.features.isEnabled(.spawnCsv)
                 && AgentJobRuntime.isAgentJobWorkerSessionSource(sessionSource)

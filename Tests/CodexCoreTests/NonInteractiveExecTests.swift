@@ -412,6 +412,61 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertTrue(workerNames.contains("report_agent_job_result"))
     }
 
+    func testToolSpecsForwardMultiAgentV2ConfigLikeRust() throws {
+        var features = FeatureStates.withDefaults()
+        features.set(.multiAgentV2, enabled: true)
+        var config = CodexRuntimeConfig(
+            toolsViewImage: false,
+            features: features
+        )
+        config.multiAgentV2 = MultiAgentV2Config(
+            maxConcurrentThreadsPerSession: 7,
+            minWaitTimeoutMS: 60_000,
+            usageHintEnabled: true,
+            usageHintText: "Runtime delegation hint.",
+            hideSpawnAgentMetadata: true
+        )
+        let modelFamily = ModelFamily(
+            slug: "test-model",
+            family: "test",
+            shellType: .disabled
+        )
+
+        let specs = NonInteractiveExec.toolSpecs(
+            modelFamily: modelFamily,
+            config: config,
+            sessionSource: .cli
+        )
+        let names = specs.map(\.spec.name)
+        XCTAssertTrue(names.contains("spawn_agent"))
+        XCTAssertTrue(names.contains("send_message"))
+        XCTAssertTrue(names.contains("followup_task"))
+        XCTAssertTrue(names.contains("wait_agent"))
+        XCTAssertTrue(names.contains("close_agent"))
+        XCTAssertTrue(names.contains("list_agents"))
+        XCTAssertFalse(names.contains("send_input"))
+        XCTAssertFalse(names.contains("resume_agent"))
+
+        let spawn = try functionTool(named: "spawn_agent", in: specs)
+        XCTAssertTrue(spawn.description.contains("Runtime delegation hint."))
+        XCTAssertTrue(spawn.description.contains("max_concurrent_threads_per_session = 7"))
+        guard case let .object(spawnProperties, _, _) = spawn.parameters else {
+            return XCTFail("expected spawn_agent object parameters")
+        }
+        XCTAssertNil(spawnProperties["agent_type"])
+        XCTAssertNil(spawnProperties["model"])
+        XCTAssertNil(spawnProperties["reasoning_effort"])
+
+        let waitAgent = try functionTool(named: "wait_agent", in: specs)
+        guard case let .object(waitProperties, _, _) = waitAgent.parameters else {
+            return XCTFail("expected wait_agent object parameters")
+        }
+        XCTAssertEqual(
+            waitProperties["timeout_ms"],
+            .number(description: "Optional timeout in milliseconds. Defaults to 60000, min 60000, max 3600000.")
+        )
+    }
+
     func testResponsesOptionsCarriesServiceTier() {
         let options = NonInteractiveExec.responsesOptions(
             conversationID: ConversationId(),
@@ -2955,6 +3010,14 @@ private final class WriteSink: @unchecked Sendable {
 }
 
 private extension NonInteractiveExecTests {
+    func functionTool(named name: String, in specs: [ConfiguredToolSpec]) throws -> ResponsesAPITool {
+        let spec = try XCTUnwrap(specs.first { $0.spec.name == name }?.spec)
+        guard case let .function(function) = spec else {
+            throw NSError(domain: "NonInteractiveExecTests", code: 1)
+        }
+        return function
+    }
+
     static func makeToolSearchIndex() -> ToolSearchIndex {
         ToolSearchIndex.mcpIndex(from: [
             "mcp__calendar__create_event": McpTool(

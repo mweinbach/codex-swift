@@ -271,6 +271,156 @@ final class ToolSpecTests: XCTestCase {
         })
     }
 
+    func testBuildSpecsMultiAgentV2UsesTaskNamesAndHidesLegacyToolsLikeRust() throws {
+        let specs = ToolSpecFactory.buildSpecs(config: ToolsConfig(
+            shellType: .disabled,
+            includeViewImageTool: false,
+            multiAgentV2Tools: true,
+            spawnAgentUsageHint: true,
+            spawnAgentUsageHintText: "Custom delegation guidance.",
+            maxConcurrentThreadsPerSession: 5,
+            waitAgentMinTimeoutMS: 2_500
+        ))
+
+        XCTAssertEqual(specs.map(\.spec.name), [
+            "list_mcp_resources",
+            "list_mcp_resource_templates",
+            "read_mcp_resource",
+            "update_plan",
+            "spawn_agent",
+            "send_message",
+            "followup_task",
+            "wait_agent",
+            "close_agent",
+            "list_agents"
+        ])
+        XCTAssertFalse(specs.contains { $0.spec.name == "send_input" })
+        XCTAssertFalse(specs.contains { $0.spec.name == "resume_agent" })
+        for name in ["spawn_agent", "send_message", "followup_task", "wait_agent", "close_agent", "list_agents"] {
+            XCTAssertFalse(try XCTUnwrap(specs.first { $0.spec.name == name }).supportsParallelToolCalls)
+        }
+
+        let spawn = try functionTool(named: "spawn_agent", in: specs)
+        XCTAssertTrue(spawn.description.contains("Spawns an agent to work on the specified task."))
+        XCTAssertTrue(spawn.description.contains("task_name \"task_3\""))
+        XCTAssertTrue(spawn.description.contains("max_concurrent_threads_per_session = 5"))
+        XCTAssertTrue(spawn.description.contains("Custom delegation guidance."))
+        XCTAssertEqual(
+            spawn.parameters,
+            .object(
+                properties: [
+                    "message": .string(description: "Initial plain-text task for the new agent."),
+                    "agent_type": .string(description: "Optional type name for the new agent. If omitted, `default` is used."),
+                    "fork_turns": .string(description: "Optional number of turns to fork. Defaults to `all`. Use `none`, `all`, or a positive integer string such as `3` to fork only the most recent turns."),
+                    "model": .string(description: "Optional model override for the new agent. Leave unset to inherit the same model as the parent, which is the preferred default. Only set this when the user explicitly asks for a different model or the task clearly requires one."),
+                    "reasoning_effort": .string(description: "Optional reasoning effort override for the new agent. Replaces the inherited reasoning effort."),
+                    "task_name": .string(description: "Task name for the new agent. Use lowercase letters, digits, and underscores.")
+                ],
+                required: ["task_name", "message"],
+                additionalProperties: .boolean(false)
+            )
+        )
+        XCTAssertEqual(outputRequiredFields(spawn.outputSchema), ["task_name", "nickname"])
+
+        let sendMessage = try functionTool(named: "send_message", in: specs)
+        XCTAssertNil(sendMessage.outputSchema)
+        XCTAssertEqual(
+            sendMessage.parameters,
+            .object(
+                properties: [
+                    "target": .string(description: "Relative or canonical task name to message (from spawn_agent)."),
+                    "message": .string(description: "Message text to queue on the target agent.")
+                ],
+                required: ["target", "message"],
+                additionalProperties: .boolean(false)
+            )
+        )
+
+        let followupTask = try functionTool(named: "followup_task", in: specs)
+        XCTAssertNil(followupTask.outputSchema)
+        XCTAssertEqual(
+            followupTask.parameters,
+            .object(
+                properties: [
+                    "target": .string(description: "Agent id or canonical task name to message (from spawn_agent)."),
+                    "message": .string(description: "Message text to send to the target agent.")
+                ],
+                required: ["target", "message"],
+                additionalProperties: .boolean(false)
+            )
+        )
+
+        let waitAgent = try functionTool(named: "wait_agent", in: specs)
+        XCTAssertEqual(
+            waitAgent.parameters,
+            .object(
+                properties: [
+                    "timeout_ms": .number(description: "Optional timeout in milliseconds. Defaults to 30000, min 2500, max 3600000.")
+                ],
+                required: nil,
+                additionalProperties: .boolean(false)
+            )
+        )
+        XCTAssertEqual(outputRequiredFields(waitAgent.outputSchema), ["message", "timed_out"])
+
+        let closeAgent = try functionTool(named: "close_agent", in: specs)
+        XCTAssertEqual(
+            closeAgent.parameters,
+            .object(
+                properties: [
+                    "target": .string(description: "Agent id or canonical task name to close (from spawn_agent).")
+                ],
+                required: ["target"],
+                additionalProperties: .boolean(false)
+            )
+        )
+        XCTAssertEqual(outputRequiredFields(closeAgent.outputSchema), ["previous_status"])
+
+        let listAgents = try functionTool(named: "list_agents", in: specs)
+        XCTAssertEqual(
+            listAgents.parameters,
+            .object(
+                properties: [
+                    "path_prefix": .string(description: "Optional task-path prefix (not ending with trailing slash). Accepts the same relative or absolute task-path syntax.")
+                ],
+                required: nil,
+                additionalProperties: .boolean(false)
+            )
+        )
+        XCTAssertEqual(outputRequiredFields(listAgents.outputSchema), ["agents"])
+    }
+
+    func testBuildSpecsMultiAgentV2HideMetadataMatchesRustSchema() throws {
+        let specs = ToolSpecFactory.buildSpecs(config: ToolsConfig(
+            shellType: .disabled,
+            includeViewImageTool: false,
+            multiAgentV2Tools: true,
+            spawnAgentUsageHint: false,
+            spawnAgentUsageHintText: "Should not appear.",
+            hideSpawnAgentMetadata: true,
+            waitAgentMinTimeoutMS: 50_000
+        ))
+
+        let spawn = try functionTool(named: "spawn_agent", in: specs)
+        XCTAssertFalse(spawn.description.contains("No picker-visible model overrides"))
+        XCTAssertFalse(spawn.description.contains("Should not appear."))
+        guard case let .object(properties, required, _) = spawn.parameters else {
+            return XCTFail("expected object parameters")
+        }
+        XCTAssertEqual(required, ["task_name", "message"])
+        XCTAssertEqual(Set(properties.keys), Set(["message", "fork_turns", "task_name"]))
+        XCTAssertEqual(outputRequiredFields(spawn.outputSchema), ["task_name"])
+
+        let waitAgent = try functionTool(named: "wait_agent", in: specs)
+        guard case let .object(waitProperties, _, _) = waitAgent.parameters else {
+            return XCTFail("expected wait_agent object parameters")
+        }
+        XCTAssertEqual(
+            waitProperties["timeout_ms"],
+            .number(description: "Optional timeout in milliseconds. Defaults to 50000, min 50000, max 3600000.")
+        )
+    }
+
     func testResponsesToolJSONShapeMatchesRustSerde() throws {
         let tool = ToolSpecFactory.createViewImageTool()
         let object = try JSONObject(tool)
@@ -1237,6 +1387,28 @@ final class ToolSpecTests: XCTestCase {
         switch tool {
         case let .function(function):
             return function.name
+        }
+    }
+
+    private func functionTool(named name: String, in specs: [ConfiguredToolSpec]) throws -> ResponsesAPITool {
+        let spec = try XCTUnwrap(specs.first { $0.spec.name == name }?.spec)
+        guard case let .function(function) = spec else {
+            throw NSError(domain: "ToolSpecTests", code: 1)
+        }
+        return function
+    }
+
+    private func outputRequiredFields(_ value: JSONValue?) -> [String]? {
+        guard case let .object(object)? = value,
+              case let .array(required)? = object["required"]
+        else {
+            return nil
+        }
+        return required.compactMap {
+            guard case let .string(value) = $0 else {
+                return nil
+            }
+            return value
         }
     }
 

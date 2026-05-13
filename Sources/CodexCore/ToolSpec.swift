@@ -780,6 +780,12 @@ public struct ToolsConfig: Equatable, Sendable {
     public let toolSearch: Bool
     public let toolSuggest: Bool
     public let allowLoginShell: Bool
+    public let multiAgentV2Tools: Bool
+    public let spawnAgentUsageHint: Bool
+    public let spawnAgentUsageHintText: String?
+    public let hideSpawnAgentMetadata: Bool
+    public let maxConcurrentThreadsPerSession: Int?
+    public let waitAgentMinTimeoutMS: Int64?
     public let agentJobTools: Bool
     public let agentJobWorkerTools: Bool
 
@@ -798,6 +804,12 @@ public struct ToolsConfig: Equatable, Sendable {
         toolSearch: Bool = true,
         toolSuggest: Bool = true,
         allowLoginShell: Bool = true,
+        multiAgentV2Tools: Bool = false,
+        spawnAgentUsageHint: Bool = true,
+        spawnAgentUsageHintText: String? = nil,
+        hideSpawnAgentMetadata: Bool = false,
+        maxConcurrentThreadsPerSession: Int? = nil,
+        waitAgentMinTimeoutMS: Int64? = nil,
         agentJobTools: Bool = false,
         agentJobWorkerTools: Bool = false
     ) {
@@ -815,12 +827,23 @@ public struct ToolsConfig: Equatable, Sendable {
         self.toolSearch = toolSearch
         self.toolSuggest = toolSuggest
         self.allowLoginShell = allowLoginShell
+        self.multiAgentV2Tools = multiAgentV2Tools
+        self.spawnAgentUsageHint = spawnAgentUsageHint
+        self.spawnAgentUsageHintText = spawnAgentUsageHintText
+        self.hideSpawnAgentMetadata = hideSpawnAgentMetadata
+        self.maxConcurrentThreadsPerSession = maxConcurrentThreadsPerSession
+        self.waitAgentMinTimeoutMS = waitAgentMinTimeoutMS
         self.agentJobTools = agentJobTools
         self.agentJobWorkerTools = agentJobWorkerTools
     }
 }
 
 public enum ToolSpecFactory {
+    private static let spawnAgentInheritedModelGuidance = "Spawned agents inherit your current model by default. Omit `model` to use that preferred default; set `model` only when an explicit override is needed."
+    private static let spawnAgentModelOverrideDescription = "Optional model override for the new agent. Leave unset to inherit the same model as the parent, which is the preferred default. Only set this when the user explicitly asks for a different model or the task clearly requires one."
+    private static let defaultAgentTypeDescription = "Optional type name for the new agent. If omitted, `default` is used."
+    private static let defaultWaitAgentTimeoutMS: Int64 = 30_000
+
     public static func buildSpecs(
         config: ToolsConfig,
         mcpTools: [String: McpTool]? = nil,
@@ -940,6 +963,18 @@ public enum ToolSpecFactory {
                 ),
                 supportsParallelToolCalls: true
             ))
+        }
+
+        if config.multiAgentV2Tools {
+            specs.append(contentsOf: createMultiAgentV2ToolSpecs(
+                includeUsageHint: config.spawnAgentUsageHint,
+                usageHintText: config.spawnAgentUsageHintText,
+                hideAgentMetadata: config.hideSpawnAgentMetadata,
+                maxConcurrentThreadsPerSession: config.maxConcurrentThreadsPerSession,
+                waitAgentMinTimeoutMS: config.waitAgentMinTimeoutMS
+            ).map {
+                ConfiguredToolSpec(spec: $0, supportsParallelToolCalls: false)
+            })
         }
 
         if config.includeComputerUseTools {
@@ -1436,6 +1471,123 @@ public enum ToolSpecFactory {
         )
     }
 
+    public static func createMultiAgentV2ToolSpecs(
+        includeUsageHint: Bool = true,
+        usageHintText: String? = nil,
+        hideAgentMetadata: Bool = false,
+        maxConcurrentThreadsPerSession: Int? = nil,
+        waitAgentMinTimeoutMS: Int64? = nil
+    ) -> [ToolSpec] {
+        [
+            createSpawnAgentV2Tool(
+                includeUsageHint: includeUsageHint,
+                usageHintText: usageHintText,
+                hideAgentMetadata: hideAgentMetadata,
+                maxConcurrentThreadsPerSession: maxConcurrentThreadsPerSession
+            ),
+            createSendMessageTool(),
+            createFollowupTaskTool(),
+            createWaitAgentV2Tool(minTimeoutMS: waitAgentMinTimeoutMS),
+            createCloseAgentV2Tool(),
+            createListAgentsTool()
+        ]
+    }
+
+    public static func createSpawnAgentV2Tool(
+        includeUsageHint: Bool = true,
+        usageHintText: String? = nil,
+        hideAgentMetadata: Bool = false,
+        maxConcurrentThreadsPerSession: Int? = nil
+    ) -> ToolSpec {
+        var properties: [String: JSONSchema] = [
+            "message": .string(description: "Initial plain-text task for the new agent."),
+            "agent_type": .string(description: defaultAgentTypeDescription),
+            "fork_turns": .string(description: "Optional number of turns to fork. Defaults to `all`. Use `none`, `all`, or a positive integer string such as `3` to fork only the most recent turns."),
+            "model": .string(description: spawnAgentModelOverrideDescription),
+            "reasoning_effort": .string(description: "Optional reasoning effort override for the new agent. Replaces the inherited reasoning effort."),
+            "task_name": .string(description: "Task name for the new agent. Use lowercase letters, digits, and underscores.")
+        ]
+        if hideAgentMetadata {
+            properties.removeValue(forKey: "agent_type")
+            properties.removeValue(forKey: "model")
+            properties.removeValue(forKey: "reasoning_effort")
+        }
+
+        return functionTool(
+            name: "spawn_agent",
+            description: spawnAgentV2Description(
+                includeUsageHint: includeUsageHint,
+                usageHintText: usageHintText,
+                hideAgentMetadata: hideAgentMetadata,
+                maxConcurrentThreadsPerSession: maxConcurrentThreadsPerSession
+            ),
+            properties: properties,
+            required: ["task_name", "message"],
+            outputSchema: spawnAgentV2OutputSchema(hideAgentMetadata: hideAgentMetadata)
+        )
+    }
+
+    public static func createSendMessageTool() -> ToolSpec {
+        functionTool(
+            name: "send_message",
+            description: "Send a message to an existing agent. The message will be delivered promptly. Does not trigger a new turn.",
+            properties: [
+                "target": .string(description: "Relative or canonical task name to message (from spawn_agent)."),
+                "message": .string(description: "Message text to queue on the target agent.")
+            ],
+            required: ["target", "message"]
+        )
+    }
+
+    public static func createFollowupTaskTool() -> ToolSpec {
+        functionTool(
+            name: "followup_task",
+            description: "Send a message to an existing non-root target agent and trigger a turn in that target. If the target is currently mid-turn, the message is queued and will be used to start the target's next turn, after the current turn completes.",
+            properties: [
+                "target": .string(description: "Agent id or canonical task name to message (from spawn_agent)."),
+                "message": .string(description: "Message text to send to the target agent.")
+            ],
+            required: ["target", "message"]
+        )
+    }
+
+    public static func createWaitAgentV2Tool(minTimeoutMS: Int64? = nil) -> ToolSpec {
+        let timeoutDescription = waitAgentTimeoutDescription(minTimeoutMS: minTimeoutMS)
+        return functionTool(
+            name: "wait_agent",
+            description: "Wait for a mailbox update from any live agent, including queued messages and final-status notifications. Does not return the content; returns either a summary of which agents have updates (if any), or a timeout summary if no mailbox update arrives before the deadline.",
+            properties: [
+                "timeout_ms": .number(description: timeoutDescription)
+            ],
+            required: nil,
+            outputSchema: waitAgentV2OutputSchema()
+        )
+    }
+
+    public static func createCloseAgentV2Tool() -> ToolSpec {
+        functionTool(
+            name: "close_agent",
+            description: "Close an agent and any open descendants when they are no longer needed, and return the target agent's previous status before shutdown was requested. Don't keep agents open for too long if they are not needed anymore.",
+            properties: [
+                "target": .string(description: "Agent id or canonical task name to close (from spawn_agent).")
+            ],
+            required: ["target"],
+            outputSchema: closeAgentOutputSchema()
+        )
+    }
+
+    public static func createListAgentsTool() -> ToolSpec {
+        functionTool(
+            name: "list_agents",
+            description: "List live agents in the current root thread tree. Optionally filter by task-path prefix.",
+            properties: [
+                "path_prefix": .string(description: "Optional task-path prefix (not ending with trailing slash). Accepts the same relative or absolute task-path syntax.")
+            ],
+            required: nil,
+            outputSchema: listAgentsOutputSchema()
+        )
+    }
+
     public static func createSpawnAgentsOnCSVTool() -> ToolSpec {
         functionTool(
             name: "spawn_agents_on_csv",
@@ -1577,6 +1729,178 @@ public enum ToolSpecFactory {
                 outputSchema: outputSchema
             )
         )
+    }
+
+    private static func spawnAgentV2Description(
+        includeUsageHint: Bool,
+        usageHintText: String?,
+        hideAgentMetadata: Bool,
+        maxConcurrentThreadsPerSession: Int?
+    ) -> String {
+        let modelGuidance = hideAgentMetadata
+            ? ""
+            : "No picker-visible model overrides are currently loaded.\n"
+        let concurrencyGuidance = maxConcurrentThreadsPerSession.map {
+            "This session is configured with `max_concurrent_threads_per_session = \($0)` for concurrently open agent threads."
+        } ?? ""
+        var description = """
+        \(modelGuidance)Spawns an agent to work on the specified task. If your current task is `/root/task1` and you spawn_agent with task_name "task_3" the agent will have canonical task name `/root/task1/task_3`.
+        You are then able to refer to this agent as `task_3` or `/root/task1/task_3` interchangeably. However an agent `/root/task2/task_3` would only be able to communicate with this agent via its canonical name `/root/task1/task_3`.
+        The spawned agent will have the same tools as you and the ability to spawn its own subagents.
+        \(spawnAgentInheritedModelGuidance)
+        It will be able to send you and other running agents messages, and its final answer will be provided to you when it finishes.
+        The new agent's canonical task name will be provided to it along with the message.
+        \(concurrencyGuidance)
+        """
+        if includeUsageHint, let usageHintText {
+            description += "\n\(usageHintText)"
+        }
+        return description
+    }
+
+    private static func waitAgentTimeoutDescription(minTimeoutMS: Int64?) -> String {
+        let maxTimeoutMS = MultiAgentV2Config.maxWaitTimeoutMS
+        let minTimeoutMS = Swift.min(
+            Swift.max(minTimeoutMS ?? MultiAgentV2Config.defaultMinWaitTimeoutMS, 1),
+            maxTimeoutMS
+        )
+        let defaultTimeoutMS = Swift.min(
+            Swift.max(defaultWaitAgentTimeoutMS, minTimeoutMS),
+            maxTimeoutMS
+        )
+        return "Optional timeout in milliseconds. Defaults to \(defaultTimeoutMS), min \(minTimeoutMS), max \(maxTimeoutMS)."
+    }
+
+    private static func spawnAgentV2OutputSchema(hideAgentMetadata: Bool) -> JSONValue {
+        if hideAgentMetadata {
+            return .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "task_name": .object([
+                        "type": .string("string"),
+                        "description": .string("Canonical task name for the spawned agent.")
+                    ])
+                ]),
+                "required": stringArray(["task_name"]),
+                "additionalProperties": .bool(false)
+            ])
+        }
+
+        return .object([
+            "type": .string("object"),
+            "properties": .object([
+                "task_name": .object([
+                    "type": .string("string"),
+                    "description": .string("Canonical task name for the spawned agent.")
+                ]),
+                "nickname": .object([
+                    "type": stringArray(["string", "null"]),
+                    "description": .string("User-facing nickname for the spawned agent when available.")
+                ])
+            ]),
+            "required": stringArray(["task_name", "nickname"]),
+            "additionalProperties": .bool(false)
+        ])
+    }
+
+    private static func waitAgentV2OutputSchema() -> JSONValue {
+        .object([
+            "type": .string("object"),
+            "properties": .object([
+                "message": .object([
+                    "type": .string("string"),
+                    "description": .string("Brief wait summary without the agent's final content.")
+                ]),
+                "timed_out": .object([
+                    "type": .string("boolean"),
+                    "description": .string("Whether the wait call returned because no mailbox update arrived before the timeout.")
+                ])
+            ]),
+            "required": stringArray(["message", "timed_out"]),
+            "additionalProperties": .bool(false)
+        ])
+    }
+
+    private static func closeAgentOutputSchema() -> JSONValue {
+        .object([
+            "type": .string("object"),
+            "properties": .object([
+                "previous_status": .object([
+                    "description": .string("The agent status observed before shutdown was requested."),
+                    "allOf": .array([agentStatusOutputSchema()])
+                ])
+            ]),
+            "required": stringArray(["previous_status"]),
+            "additionalProperties": .bool(false)
+        ])
+    }
+
+    private static func listAgentsOutputSchema() -> JSONValue {
+        .object([
+            "type": .string("object"),
+            "properties": .object([
+                "agents": .object([
+                    "type": .string("array"),
+                    "items": .object([
+                        "type": .string("object"),
+                        "properties": .object([
+                            "agent_name": .object([
+                                "type": .string("string"),
+                                "description": .string("Canonical task name for the agent when available, otherwise the agent id.")
+                            ]),
+                            "agent_status": .object([
+                                "description": .string("Last known status of the agent."),
+                                "allOf": .array([agentStatusOutputSchema()])
+                            ]),
+                            "last_task_message": .object([
+                                "type": stringArray(["string", "null"]),
+                                "description": .string("Most recent user or inter-agent instruction received by the agent, when available.")
+                            ])
+                        ]),
+                        "required": stringArray(["agent_name", "agent_status", "last_task_message"]),
+                        "additionalProperties": .bool(false)
+                    ]),
+                    "description": .string("Live agents visible in the current root thread tree.")
+                ])
+            ]),
+            "required": stringArray(["agents"]),
+            "additionalProperties": .bool(false)
+        ])
+    }
+
+    private static func agentStatusOutputSchema() -> JSONValue {
+        .object([
+            "oneOf": .array([
+                .object([
+                    "type": .string("string"),
+                    "enum": stringArray(["pending_init", "running", "interrupted", "shutdown", "not_found"])
+                ]),
+                .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "completed": .object([
+                            "type": stringArray(["string", "null"])
+                        ])
+                    ]),
+                    "required": stringArray(["completed"]),
+                    "additionalProperties": .bool(false)
+                ]),
+                .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "errored": .object([
+                            "type": .string("string")
+                        ])
+                    ]),
+                    "required": stringArray(["errored"]),
+                    "additionalProperties": .bool(false)
+                ])
+            ])
+        ])
+    }
+
+    private static func stringArray(_ values: [String]) -> JSONValue {
+        .array(values.map(JSONValue.string))
     }
 
     private static func requestPluginInstallToolDescription(entries: [RequestPluginInstallEntry]) -> String {
