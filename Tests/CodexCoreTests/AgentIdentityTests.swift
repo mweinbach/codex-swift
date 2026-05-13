@@ -142,6 +142,59 @@ final class AgentIdentityTests: XCTestCase {
         XCTAssertEqual(try AgentIdentity.decodeJWTClaims(jwt).planType, .enterprise)
     }
 
+    func testDecodeAgentIdentityJWTVerifiesWhenJWKSIsPresent() throws {
+        let claims = try AgentIdentity.decodeJWTClaims(Self.signedRS256JWT, jwks: testJWKS(kid: "test-key"))
+
+        XCTAssertEqual(
+            claims,
+            AgentIdentityJWTClaims(
+                iss: AgentIdentity.jwtIssuer,
+                aud: AgentIdentity.jwtAudience,
+                iat: 1_700_000_000,
+                exp: 4_000_000_000,
+                agentRuntimeID: "agent-runtime-id",
+                agentPrivateKey: "private-key",
+                accountID: "account-id",
+                chatGPTUserID: "user-id",
+                email: "user@example.com",
+                planType: .pro,
+                chatGPTAccountIsFedRAMP: false
+            )
+        )
+    }
+
+    func testDecodeAgentIdentityJWTRejectsUntrustedKid() {
+        XCTAssertThrowsError(try AgentIdentity.decodeJWTClaims(Self.signedRS256JWT, jwks: testJWKS(kid: "other-key"))) { error in
+            XCTAssertEqual(String(describing: error), "agent identity JWT kid test-key is not trusted")
+        }
+    }
+
+    func testDecodeAgentIdentityJWTRequiresIssuerAndAudience() {
+        XCTAssertThrowsError(
+            try AgentIdentity.decodeJWTClaims(Self.signedRS256JWTWithoutIssuerOrAudience, jwks: testJWKS(kid: "test-key"))
+        ) { error in
+            XCTAssertEqual(String(describing: error), "failed to verify agent identity JWT")
+        }
+    }
+
+    func testDecodeAgentIdentityJWTRequiresKidWhenJWKSIsPresent() {
+        XCTAssertThrowsError(try AgentIdentity.decodeJWTClaims(jwtWithPayload([
+            "iss": AgentIdentity.jwtIssuer,
+            "aud": AgentIdentity.jwtAudience,
+            "iat": 1_700_000_000,
+            "exp": 4_000_000_000,
+            "agent_runtime_id": "agent-runtime-id",
+            "agent_private_key": "private-key",
+            "account_id": "account-id",
+            "chatgpt_user_id": "user-id",
+            "email": "user@example.com",
+            "plan_type": "pro",
+            "chatgpt_account_is_fedramp": false,
+        ]), jwks: testJWKS(kid: "test-key"))) { error in
+            XCTAssertEqual(String(describing: error), "agent identity JWT header does not include a kid")
+        }
+    }
+
     func testDecodeAgentIdentityJWTRejectsMalformedInputWithRustMessages() {
         XCTAssertThrowsError(try AgentIdentity.decodeJWTClaims("header.payload")) { error in
             XCTAssertEqual(String(describing: error), "invalid agent identity JWT format")
@@ -171,4 +224,29 @@ final class AgentIdentityTests: XCTestCase {
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "=", with: "")
     }
+
+    private func testJWKS(kid: String) -> AgentIdentityJWKS {
+        AgentIdentityJWKS(keys: [
+            AgentIdentityJWK(
+                kty: "RSA",
+                kid: kid,
+                use: "sig",
+                alg: "RS256",
+                n: "1qQF2MqTrGAMDm7wXbjJP5sWqGA83tAGUs2ksy7iJXLJdhCg4AtwGm4SFl4f6kxhCSzlN1QdXuZjvRT2wZZiGUi9xUE28rf4WLrTxSnwqLuTy5knMP08yC0t_0YU_FGPZMcWb14hG05IvZr8UbmRaVagxSR8H4rSIymRoVwwmFSrqz068XrWGSYNIfLEASyo5GdAaqmk1JALINHgYGQJVxMxtwcvDxoVKmC7eltUNymMNBZhsv4E8sx9YNLpBoEibznfEpDU_DGzrM5eZCsQzaqbhBOlGd427ifud_Nnd9cPqzgCUc23-0FXSPfpbgksCXAwAmD0OFjQWrgqVdKL6Q",
+                e: "AQAB"
+            ),
+        ])
+    }
+
+    private static let signedRS256JWT = """
+    eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InRlc3Qta2V5In0.\
+    eyJhY2NvdW50X2lkIjoiYWNjb3VudC1pZCIsImFnZW50X3ByaXZhdGVfa2V5IjoicHJpdmF0ZS1rZXkiLCJhZ2VudF9ydW50aW1lX2lkIjoiYWdlbnQtcnVudGltZS1pZCIsImF1ZCI6ImNvZGV4LWFwcC1zZXJ2ZXIiLCJjaGF0Z3B0X2FjY291bnRfaXNfZmVkcmFtcCI6ZmFsc2UsImNoYXRncHRfdXNlcl9pZCI6InVzZXItaWQiLCJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJleHAiOjQwMDAwMDAwMDAsImlhdCI6MTcwMDAwMDAwMCwiaXNzIjoiaHR0cHM6Ly9jaGF0Z3B0LmNvbS9jb2RleC1iYWNrZW5kL2FnZW50LWlkZW50aXR5IiwicGxhbl90eXBlIjoicHJvIn0.\
+    zyIDXds5aNy0-pO9jz4BsXZ-7urXwd4fd6VyWOIV-57cksl_gUkr0F6Tx2O8f-8CQ_qDPuUDREfsFspunz-payxQiOjwhH1Rj4ko7vsndIO3L_bWInQOTANELA3UmBa2Rh669HWqiFg5hbvXsqEr84DK8TylLzd55roPqfhOU3MK5KOy8MO30AmQ0gcDJZWz12b18vM9tZNoHRsD1b0g_TbxrhtziwdqPy0Ptl_R_TiT1VeyMbMu_oj4EhN7eZ6KKWe2yo516pgIMA_o9nJfiYFD-lLzlnQPtR2Gk39Gn8xkGCLlBvilaPvyWypjNngOENqDkLQBfCk7_ESKNjJscA
+    """
+
+    private static let signedRS256JWTWithoutIssuerOrAudience = """
+    eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InRlc3Qta2V5In0.\
+    eyJhY2NvdW50X2lkIjoiYWNjb3VudC1pZCIsImFnZW50X3ByaXZhdGVfa2V5IjoicHJpdmF0ZS1rZXkiLCJhZ2VudF9ydW50aW1lX2lkIjoiYWdlbnQtcnVudGltZS1pZCIsImNoYXRncHRfYWNjb3VudF9pc19mZWRyYW1wIjpmYWxzZSwiY2hhdGdwdF91c2VyX2lkIjoidXNlci1pZCIsImVtYWlsIjoidXNlckBleGFtcGxlLmNvbSIsImV4cCI6NDAwMDAwMDAwMCwiaWF0IjoxNzAwMDAwMDAwLCJwbGFuX3R5cGUiOiJwcm8ifQ.\
+    QmHUZqnS48T8-vKmjxhwiYoGywLzhpQOAl_FNOPoYe2Xi11uBA_dZRK9s7I75swqF6h6MoZXZOzKJWjyAEi2Uq8_hbz845Nd9Ie3nZJoxSLV28uaP67z07-1XhaQ6vtCYbJr8gg6nCTsMDqpMEisyokq6bMgzIOhdBxfTQdOqj4xiguKhMUToahF9J6VAJjNbHpmlj0p42HYMUG2DgoYUsI-1rrb1bEqHftRgVIDyNME3l9B6BqGCz9WnCa2IQqn2O4XCSZkHkpWDbFW7hFD6VoaP8XFIHLdBuPx25mwdeVt_Pxy2Liwk69FJbrTHL-WiP0gnoheQD8fhliWQlgauQ
+    """
 }

@@ -54,7 +54,14 @@ public enum AgentIdentity {
         )
     }
 
-    public static func decodeJWTClaims(_ jwt: String) throws -> AgentIdentityJWTClaims {
+    public static func decodeJWTClaims(_ jwt: String, jwks: AgentIdentityJWKS? = nil, now: Date = Date()) throws -> AgentIdentityJWTClaims {
+        if let jwks {
+            return try decodeAndVerifyJWTClaims(jwt, jwks: jwks, now: now)
+        }
+        return try decodeJWTClaimsPayload(jwt)
+    }
+
+    private static func decodeJWTClaimsPayload(_ jwt: String) throws -> AgentIdentityJWTClaims {
         let parts = jwt.split(separator: ".", omittingEmptySubsequences: false)
         guard parts.count == 3, parts.allSatisfy({ !$0.isEmpty }) else {
             throw AgentIdentityError.message("invalid agent identity JWT format")
@@ -72,6 +79,86 @@ public enum AgentIdentity {
         } catch {
             throw AgentIdentityError.message("agent identity JWT payload is not valid JSON")
         }
+    }
+
+    private static func decodeAndVerifyJWTClaims(
+        _ jwt: String,
+        jwks: AgentIdentityJWKS,
+        now: Date
+    ) throws -> AgentIdentityJWTClaims {
+        let parts = jwt.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 3, parts.allSatisfy({ !$0.isEmpty }) else {
+            throw AgentIdentityError.message("failed to decode agent identity JWT header")
+        }
+
+        let headerData: Data
+        do {
+            headerData = try base64URLDecodeNoPadding(String(parts[0]))
+        } catch {
+            throw AgentIdentityError.message("failed to decode agent identity JWT header")
+        }
+
+        let header: AgentIdentityJWTHeader
+        do {
+            header = try JSONDecoder().decode(AgentIdentityJWTHeader.self, from: headerData)
+        } catch {
+            throw AgentIdentityError.message("failed to decode agent identity JWT header")
+        }
+
+        guard let kid = header.kid else {
+            throw AgentIdentityError.message("agent identity JWT header does not include a kid")
+        }
+        guard header.alg == "RS256" else {
+            throw AgentIdentityError.message("failed to verify agent identity JWT")
+        }
+        guard let jwk = jwks.keys.first(where: { $0.kid == kid }) else {
+            throw AgentIdentityError.message("agent identity JWT kid \(kid) is not trusted")
+        }
+        guard jwk.kty == "RSA" else {
+            throw AgentIdentityError.message("failed to build JWT decoding key")
+        }
+
+        let publicKey: SecKey
+        do {
+            publicKey = try rsaPublicKey(from: jwk)
+        } catch {
+            throw AgentIdentityError.message("failed to build JWT decoding key")
+        }
+
+        let signature: Data
+        do {
+            signature = try base64URLDecodeNoPadding(String(parts[2]))
+        } catch {
+            throw AgentIdentityError.message("failed to verify agent identity JWT")
+        }
+
+        let signingInput = "\(parts[0]).\(parts[1])"
+        guard SecKeyVerifySignature(
+            publicKey,
+            .rsaSignatureMessagePKCS1v15SHA256,
+            Data(signingInput.utf8) as CFData,
+            signature as CFData,
+            nil
+        ) else {
+            throw AgentIdentityError.message("failed to verify agent identity JWT")
+        }
+
+        let rawClaims: [String: Any]
+        do {
+            rawClaims = try jwtPayloadObject(String(parts[1]))
+        } catch {
+            throw AgentIdentityError.message("agent identity JWT payload is not valid JSON")
+        }
+        guard rawClaims["iss"] as? String == jwtIssuer,
+              rawClaims["aud"] as? String == jwtAudience,
+              let expiration = numericDate(rawClaims["exp"]),
+              Date(timeIntervalSince1970: TimeInterval(expiration)) > now
+        else {
+            throw AgentIdentityError.message("failed to verify agent identity JWT")
+        }
+
+        let claims = try decodeJWTClaimsPayload(jwt)
+        return claims
     }
 
     public static var currentOperatingSystemName: String {
@@ -126,6 +213,93 @@ public enum AgentIdentity {
             throw AgentIdentityError.message("agent identity JWT payload is not valid base64url")
         }
         return data
+    }
+
+    private static func jwtPayloadObject(_ payloadSegment: String) throws -> [String: Any] {
+        let payloadBytes = try base64URLDecodeNoPadding(payloadSegment)
+        guard let object = try JSONSerialization.jsonObject(with: payloadBytes) as? [String: Any] else {
+            throw AgentIdentityError.message("agent identity JWT payload is not valid JSON")
+        }
+        return object
+    }
+
+    private static func numericDate(_ value: Any?) -> Int64? {
+        if value is Bool {
+            return nil
+        }
+        if let value = value as? Int64 {
+            return value
+        }
+        if let value = value as? Int {
+            return Int64(value)
+        }
+        if let value = value as? Double, value.rounded() == value {
+            return Int64(value)
+        }
+        if let value = value as? NSNumber {
+            guard CFGetTypeID(value) != CFBooleanGetTypeID() else {
+                return nil
+            }
+            return value.int64Value
+        }
+        return nil
+    }
+
+    private static func rsaPublicKey(from jwk: AgentIdentityJWK) throws -> SecKey {
+        let modulus = try base64URLDecodeNoPadding(jwk.n)
+        let exponent = try base64URLDecodeNoPadding(jwk.e)
+        let der = asn1Sequence([
+            asn1Integer(modulus),
+            asn1Integer(exponent),
+        ])
+        let attributes: [CFString: Any] = [
+            kSecAttrKeyType: kSecAttrKeyTypeRSA,
+            kSecAttrKeyClass: kSecAttrKeyClassPublic,
+            kSecAttrKeySizeInBits: modulus.count * 8,
+        ]
+        var error: Unmanaged<CFError>?
+        guard let key = SecKeyCreateWithData(der as CFData, attributes as CFDictionary, &error) else {
+            throw error?.takeRetainedValue() ?? AgentIdentityError.message("failed to build JWT decoding key")
+        }
+        return key
+    }
+
+    private static func asn1Sequence(_ values: [Data]) -> Data {
+        let body = values.reduce(into: Data()) { result, value in
+            result.append(value)
+        }
+        return asn1(tag: 0x30, body: body)
+    }
+
+    private static func asn1Integer(_ value: Data) -> Data {
+        var body = value
+        while body.count > 1, body.first == 0, let next = body.dropFirst().first, next < 0x80 {
+            body.removeFirst()
+        }
+        if let first = body.first, first >= 0x80 {
+            body.insert(0, at: 0)
+        }
+        return asn1(tag: 0x02, body: body)
+    }
+
+    private static func asn1(tag: UInt8, body: Data) -> Data {
+        var data = Data([tag])
+        data.append(asn1Length(body.count))
+        data.append(body)
+        return data
+    }
+
+    private static func asn1Length(_ length: Int) -> Data {
+        guard length >= 0x80 else {
+            return Data([UInt8(length)])
+        }
+        var bytes: [UInt8] = []
+        var value = length
+        while value > 0 {
+            bytes.insert(UInt8(value & 0xff), at: 0)
+            value >>= 8
+        }
+        return Data([0x80 | UInt8(bytes.count)] + bytes)
     }
 }
 
@@ -229,6 +403,37 @@ public struct AgentIdentityJWTClaims: Decodable, Equatable, Sendable {
         case planType = "plan_type"
         case chatGPTAccountIsFedRAMP = "chatgpt_account_is_fedramp"
     }
+}
+
+public struct AgentIdentityJWKS: Decodable, Equatable, Sendable {
+    public let keys: [AgentIdentityJWK]
+
+    public init(keys: [AgentIdentityJWK]) {
+        self.keys = keys
+    }
+}
+
+public struct AgentIdentityJWK: Decodable, Equatable, Sendable {
+    public let kty: String
+    public let kid: String?
+    public let use: String?
+    public let alg: String?
+    public let n: String
+    public let e: String
+
+    public init(kty: String, kid: String?, use: String?, alg: String?, n: String, e: String) {
+        self.kty = kty
+        self.kid = kid
+        self.use = use
+        self.alg = alg
+        self.n = n
+        self.e = e
+    }
+}
+
+private struct AgentIdentityJWTHeader: Decodable {
+    let alg: String?
+    let kid: String?
 }
 
 public enum AgentIdentityError: Error, Equatable, CustomStringConvertible, Sendable {
