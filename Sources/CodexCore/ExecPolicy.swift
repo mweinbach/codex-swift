@@ -8959,8 +8959,12 @@ public enum ExecApprovalRequirement: Equatable, Sendable {
 
 private struct ExecPolicyCommands {
     let commands: [[String]]
-    let allowsAutoAmendment: Bool
+    let usedComplexParsing: Bool
     let origin: ExecPolicyCommandOrigin
+
+    var allowsAutoAmendment: Bool {
+        !usedComplexParsing
+    }
 }
 
 private enum ExecPolicyCommandOrigin {
@@ -9106,11 +9110,13 @@ public final class ExecPolicyManager: @unchecked Sendable {
         command: [String],
         approvalPolicy: AskForApproval,
         sandboxPolicy: SandboxPolicy,
-        sandboxPermissions: SandboxPermissions
+        sandboxPermissions: SandboxPermissions,
+        prefixRule: [String]? = nil
     ) -> ExecApprovalRequirement {
         _ = features
         let policyCommands = Self.commandsForExecPolicy(command)
-        let evaluation = policy.checkMultiple(policyCommands.commands) { commandSlice in
+        let matchOptions = ExecPolicyMatchOptions(resolveHostExecutables: true)
+        let execPolicyFallback: (ArraySlice<String>) -> ExecPolicyDecision = { commandSlice in
             let command = Array(commandSlice)
             switch policyCommands.origin {
             case .generic:
@@ -9129,6 +9135,23 @@ public final class ExecPolicyManager: @unchecked Sendable {
                 ) ? .prompt : .allow
             }
         }
+        let evaluation = PolicyEvaluation.fromMatches(policyCommands.commands.flatMap { command in
+            policy.matchesForCommand(
+                command,
+                heuristicsFallback: execPolicyFallback,
+                options: matchOptions
+            )
+        })
+        let requestedAmendment = policyCommands.allowsAutoAmendment
+            ? Self.deriveRequestedExecPolicyAmendment(
+                prefixRule: prefixRule,
+                matchedRules: evaluation.matchedRules,
+                policy: policy,
+                commands: policyCommands.commands,
+                execPolicyFallback: execPolicyFallback,
+                matchOptions: matchOptions
+            )
+            : nil
 
         switch evaluation.decision {
         case .forbidden:
@@ -9145,15 +9168,18 @@ public final class ExecPolicyManager: @unchecked Sendable {
             }
             return .needsApproval(
                 reason: Self.derivePromptReason(evaluation),
-                proposedExecPolicyAmendment: policyCommands.allowsAutoAmendment
-                    ? Self.tryDeriveExecPolicyAmendmentForPromptRules(evaluation.matchedRules)
-                    : nil
+                proposedExecPolicyAmendment: requestedAmendment
+                    ?? (policyCommands.allowsAutoAmendment
+                        ? Self.tryDeriveExecPolicyAmendmentForPromptRules(evaluation.matchedRules)
+                        : nil)
             )
         case .allow:
             return .skip(
-                bypassSandbox: evaluation.matchedRules.contains {
-                    $0.isPolicyMatch && $0.decision == .allow
-                },
+                bypassSandbox: Self.everyCommandSegmentMatchesAllowPolicy(
+                    policy: policy,
+                    commands: policyCommands.commands,
+                    matchOptions: matchOptions
+                ),
                 proposedExecPolicyAmendment: policyCommands.allowsAutoAmendment
                     ? Self.tryDeriveExecPolicyAmendmentForAllowRules(evaluation.matchedRules)
                     : nil
@@ -9163,15 +9189,15 @@ public final class ExecPolicyManager: @unchecked Sendable {
 
     private static func commandsForExecPolicy(_ command: [String]) -> ExecPolicyCommands {
         if let commands = BashPlainCommandParser.parseShellLcPlainCommands(command) {
-            return ExecPolicyCommands(commands: commands, allowsAutoAmendment: true, origin: .generic)
+            return ExecPolicyCommands(commands: commands, usedComplexParsing: false, origin: .generic)
         }
         if let commands = CommandSafety.parsePowerShellCommandIntoPlainCommands(command) {
-            return ExecPolicyCommands(commands: commands, allowsAutoAmendment: true, origin: .powerShell)
+            return ExecPolicyCommands(commands: commands, usedComplexParsing: false, origin: .powerShell)
         }
         if let command = BashPlainCommandParser.parseShellLcSingleCommandPrefix(command) {
-            return ExecPolicyCommands(commands: [command], allowsAutoAmendment: false, origin: .generic)
+            return ExecPolicyCommands(commands: [command], usedComplexParsing: true, origin: .generic)
         }
-        return ExecPolicyCommands(commands: [command], allowsAutoAmendment: true, origin: .generic)
+        return ExecPolicyCommands(commands: [command], usedComplexParsing: false, origin: .generic)
     }
 
     public func appendAmendmentAndUpdate(
@@ -9316,6 +9342,107 @@ public final class ExecPolicyManager: @unchecked Sendable {
             }
         }
         return nil
+    }
+
+    private static let bannedPrefixSuggestions: [[String]] = [
+        ["python3"],
+        ["python3", "-"],
+        ["python3", "-c"],
+        ["python"],
+        ["python", "-"],
+        ["python", "-c"],
+        ["py"],
+        ["py", "-3"],
+        ["pythonw"],
+        ["pyw"],
+        ["pypy"],
+        ["pypy3"],
+        ["git"],
+        ["bash"],
+        ["bash", "-lc"],
+        ["sh"],
+        ["sh", "-c"],
+        ["sh", "-lc"],
+        ["zsh"],
+        ["zsh", "-lc"],
+        ["/bin/zsh"],
+        ["/bin/zsh", "-lc"],
+        ["/bin/bash"],
+        ["/bin/bash", "-lc"],
+        ["pwsh"],
+        ["pwsh", "-Command"],
+        ["pwsh", "-c"],
+        ["powershell"],
+        ["powershell", "-Command"],
+        ["powershell", "-c"],
+        ["powershell.exe"],
+        ["powershell.exe", "-Command"],
+        ["powershell.exe", "-c"],
+        ["env"],
+        ["sudo"],
+        ["node"],
+        ["node", "-e"],
+        ["perl"],
+        ["perl", "-e"],
+        ["ruby"],
+        ["ruby", "-e"],
+        ["php"],
+        ["php", "-r"],
+        ["lua"],
+        ["lua", "-e"],
+        ["osascript"]
+    ]
+
+    private static func deriveRequestedExecPolicyAmendment(
+        prefixRule: [String]?,
+        matchedRules: [RuleMatch],
+        policy: ExecPolicy,
+        commands: [[String]],
+        execPolicyFallback: @escaping (ArraySlice<String>) -> ExecPolicyDecision,
+        matchOptions: ExecPolicyMatchOptions
+    ) -> ExecPolicyAmendment? {
+        guard let prefixRule, !prefixRule.isEmpty else {
+            return nil
+        }
+        guard !bannedPrefixSuggestions.contains(prefixRule) else {
+            return nil
+        }
+        guard !matchedRules.contains(where: \.isPolicyMatch) else {
+            return nil
+        }
+
+        var policyWithPrefixRule = policy
+        do {
+            try policyWithPrefixRule.addPrefixRule(prefixRule, decision: .allow)
+        } catch {
+            return nil
+        }
+
+        let approvesAllCommands = commands.allSatisfy { command in
+            policyWithPrefixRule.check(
+                command,
+                heuristicsFallback: execPolicyFallback,
+                options: matchOptions
+            ).decision == .allow
+        }
+        return approvesAllCommands ? ExecPolicyAmendment(command: prefixRule) : nil
+    }
+
+    private static func everyCommandSegmentMatchesAllowPolicy(
+        policy: ExecPolicy,
+        commands: [[String]],
+        matchOptions: ExecPolicyMatchOptions
+    ) -> Bool {
+        commands.allSatisfy { command in
+            policy.matchesForCommand(
+                command,
+                heuristicsFallback: nil,
+                options: matchOptions
+            )
+            .contains {
+                $0.isPolicyMatch && $0.decision == .allow
+            }
+        }
     }
 
     public static func derivePromptReason(_ evaluation: PolicyEvaluation) -> String? {
