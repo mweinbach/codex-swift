@@ -22086,6 +22086,15 @@ final class CodexAppServerTests: XCTestCase {
 
     func testMcpServerReloadQueuesRefreshForLoadedThreads() throws {
         let temp = try TemporaryDirectory()
+        let workspace = try TemporaryDirectory()
+        try FileManager.default.createDirectory(
+            at: workspace.url.appendingPathComponent(".git", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: workspace.url.appendingPathComponent(".codex", isDirectory: true),
+            withIntermediateDirectories: true
+        )
         try """
         mcp_oauth_credentials_store = "file"
 
@@ -22094,13 +22103,24 @@ final class CodexAppServerTests: XCTestCase {
         args = ["--stdio"]
         startup_timeout_sec = 12
         """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        try """
+        [mcp_servers.docs]
+        command = "project-docs-server"
+        args = ["--project"]
+        startup_timeout_sec = 5
+        """.write(
+            to: workspace.url.appendingPathComponent(".codex/config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
         let capture = AppServerCoreOpCapture()
         let processor = try initializedProcessor(
             configuration: testConfiguration(codexHome: temp.url),
             coreOpSubmitter: capture.submit
         )
+        let startPayload = #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider","cwd":"\#(workspace.url.path)"}}"#
         let start = try decodeMessages(processor.processLine(
-            Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)
+            Data(startPayload.utf8)
         ))
         let threadID = try XCTUnwrap(((start[0]["result"] as? [String: Any])?["thread"] as? [String: Any])?["id"] as? String)
 
@@ -22117,9 +22137,9 @@ final class CodexAppServerTests: XCTestCase {
         else {
             return XCTFail("expected docs MCP server refresh config")
         }
-        XCTAssertEqual(docs["command"], .string("docs-server"))
-        XCTAssertEqual(docs["args"], .array([.string("--stdio")]))
-        XCTAssertEqual(docs["startup_timeout_sec"], .double(12))
+        XCTAssertEqual(docs["command"], .string("project-docs-server"))
+        XCTAssertEqual(docs["args"], .array([.string("--project")]))
+        XCTAssertEqual(docs["startup_timeout_sec"], .double(5))
         XCTAssertEqual(capture.submissions, [
             SubmittedCoreOp(requestID: .integer(2), threadID: threadID, op: .refreshMcpServers(config: refresh))
         ])
@@ -24250,6 +24270,20 @@ final class CodexAppServerTests: XCTestCase {
 
     func testConfigBatchWriteReloadUserConfigQueuesRefreshForLoadedThreads() throws {
         let temp = try TemporaryDirectory()
+        let workspace = try TemporaryDirectory()
+        try FileManager.default.createDirectory(
+            at: workspace.url.appendingPathComponent(".git", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: workspace.url.appendingPathComponent(".codex", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try #"project_marker = "loaded-thread-cwd""#.write(
+            to: workspace.url.appendingPathComponent(".codex/config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
         let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
         try #"model = "gpt-old""#.write(to: configFile, atomically: true, encoding: .utf8)
         let capture = AppServerCoreOpCapture()
@@ -24257,8 +24291,9 @@ final class CodexAppServerTests: XCTestCase {
             configuration: testConfiguration(codexHome: temp.url),
             coreOpSubmitter: capture.submit
         )
+        let startPayload = #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider","cwd":"\#(workspace.url.path)"}}"#
         let start = try decodeMessages(processor.processLine(
-            Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)
+            Data(startPayload.utf8)
         ))
         let threadID = try XCTUnwrap(((start[0]["result"] as? [String: Any])?["thread"] as? [String: Any])?["id"] as? String)
 
@@ -24276,6 +24311,7 @@ final class CodexAppServerTests: XCTestCase {
             return XCTFail("expected queued user config refresh")
         }
         XCTAssertEqual(config["model"], .string("gpt-reloaded"))
+        XCTAssertEqual(config["project_marker"], .string("loaded-thread-cwd"))
         XCTAssertEqual(capture.submissions, [
             SubmittedCoreOp(requestID: .integer(3), threadID: threadID, op: .reloadUserConfig)
         ])

@@ -13042,6 +13042,7 @@ public enum CodexAppServer {
         rawParams: Any?,
         configuration: CodexAppServerConfiguration,
         loadedThreadIDs: () -> [String] = { [] },
+        refreshConfigForThreadID: (String) throws -> McpServerRefreshConfig? = { _ in nil },
         queueThreadRefresh: (String, McpServerRefreshConfig) throws -> Void = { _, _ in }
     ) throws -> [String: Any] {
         if let rawParams, !(rawParams is NSNull) {
@@ -13064,7 +13065,8 @@ public enum CodexAppServer {
         let refreshConfig = mcpServerRefreshConfig(runtimeConfig: runtimeConfig)
         for threadID in loadedThreadIDs() {
             do {
-                try queueThreadRefresh(threadID, refreshConfig)
+                let threadRefreshConfig = try refreshConfigForThreadID(threadID) ?? refreshConfig
+                try queueThreadRefresh(threadID, threadRefreshConfig)
             } catch {
                 throw AppServerError.internalError(
                     "failed to refresh MCP servers: failed to queue MCP refresh for thread \(threadID): \(error)"
@@ -16571,12 +16573,15 @@ public enum CodexAppServer {
 
     fileprivate static func effectiveConfigSnapshot(
         configuration: CodexAppServerConfiguration,
-        runtimeFeatureEnablement: [String: Bool] = [:]
+        runtimeFeatureEnablement: [String: Bool] = [:],
+        cwd: URL? = nil
     ) throws -> ConfigValue {
         do {
             let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
                 codexHome: configuration.codexHome,
+                cwd: cwd,
                 cliOverrides: configuration.cliConfigOverrides,
+                threadConfigSources: configuration.threadConfigSources,
                 overrides: configuration.configLayerOverrides,
                 environment: configuration.environment
             )
@@ -25302,9 +25307,38 @@ final class CodexAppServerMessageProcessor {
         }
     }
 
-    private func queueUserConfigRefresh(effectiveConfig: ConfigValue, requestID rawRequestID: Any?) throws {
+    private func mcpServerRefreshConfigForLoadedThread(threadID: String) throws -> McpServerRefreshConfig? {
+        guard let metadata = threadAnalyticsMetadata[threadID] else {
+            return nil
+        }
+        do {
+            let runtimeConfig = try CodexConfigLoader.load(
+                codexHome: configuration.codexHome,
+                cwd: metadata.cwd,
+                overrides: configuration.cliConfigOverrides,
+                threadConfigSources: configuration.threadConfigSources,
+                systemConfigFile: nil,
+                managedConfigOverrides: configuration.configLayerOverrides,
+                environment: configuration.environment
+            )
+            return CodexAppServer.mcpServerRefreshConfig(runtimeConfig: runtimeConfig)
+        } catch {
+            throw AppServerError.internalError("failed to reload config for thread \(threadID): \(error)")
+        }
+    }
+
+    private func queueUserConfigRefresh(
+        runtimeFeatureEnablement: [String: Bool],
+        requestID rawRequestID: Any?
+    ) throws {
         let requestID = rawRequestID.flatMap(AppServerRequestIDCodec.requestID(from:))
         for threadID in listLoadedThreadIDs() {
+            let cwd = threadAnalyticsMetadata[threadID]?.cwd ?? configuration.cwd
+            let effectiveConfig = try CodexAppServer.effectiveConfigSnapshot(
+                configuration: configuration,
+                runtimeFeatureEnablement: runtimeFeatureEnablement,
+                cwd: cwd
+            )
             let manager = threadStateManager
             let queued = try CodexAppServer.runAsyncBlocking {
                 await manager.queueUserConfigRefresh(threadID: threadID, effectiveConfig: effectiveConfig)
@@ -26745,6 +26779,9 @@ final class CodexAppServerMessageProcessor {
                             rawParams: object["params"],
                             configuration: configuration,
                             loadedThreadIDs: { self.listLoadedThreadIDs() },
+                            refreshConfigForThreadID: {
+                                try self.mcpServerRefreshConfigForLoadedThread(threadID: $0)
+                            },
                             queueThreadRefresh: { try self.queueMcpServerRefresh(threadID: $0, config: $1, requestID: id) }
                         )
                     )
@@ -26809,10 +26846,7 @@ final class CodexAppServerMessageProcessor {
                     )
                     if shouldReloadUserConfig {
                         try queueUserConfigRefresh(
-                            effectiveConfig: CodexAppServer.effectiveConfigSnapshot(
-                                configuration: configuration,
-                                runtimeFeatureEnablement: runtimeFeatureEnablement
-                            ),
+                            runtimeFeatureEnablement: runtimeFeatureEnablement,
                             requestID: id
                         )
                     }
@@ -26909,10 +26943,7 @@ final class CodexAppServerMessageProcessor {
                     )
                     if reloadUserConfig {
                         try queueUserConfigRefresh(
-                            effectiveConfig: CodexAppServer.effectiveConfigSnapshot(
-                                configuration: configuration,
-                                runtimeFeatureEnablement: runtimeFeatureEnablement
-                            ),
+                            runtimeFeatureEnablement: runtimeFeatureEnablement,
                             requestID: id
                         )
                     }
