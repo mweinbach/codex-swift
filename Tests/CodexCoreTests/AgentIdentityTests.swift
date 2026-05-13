@@ -258,6 +258,51 @@ final class AgentIdentityTests: XCTestCase {
         }
     }
 
+    func testRegisterAgentTaskDecryptsEncryptedTaskIDLikeRust() async throws {
+        let material = try AgentIdentity.generateAgentKeyMaterial(privateKeyBytes: Self.testEd25519Seed)
+        let key = AgentIdentityKey(agentRuntimeID: "agent-123", privateKeyPKCS8Base64: material.privateKeyPKCS8Base64)
+        let encryptedTaskID = "Xf7dO2vUf2+ijuFdlp1bsOpTd01Ii9r53xxuASSz7yJCL3mpdFWUqszNAxnMb1FaVvCLIgh2owXdPU1zKeAC+qJqxmgulDpXOA=="
+        let transport = RecordingAgentIdentityTransport(
+            result: .success(APIResponse(
+                statusCode: 200,
+                body: Data(#"{"encrypted_task_id":"\#(encryptedTaskID)"}"#.utf8)
+            ))
+        )
+
+        let taskID = try await AgentIdentity.registerAgentTask(
+            transport: transport,
+            chatGPTBaseURL: "https://chatgpt.com/backend-api",
+            key: key,
+            timestamp: "2026-05-13T12:00:00Z"
+        )
+
+        XCTAssertEqual(taskID, "task-from-rust-sealed-box")
+    }
+
+    func testRegisterAgentTaskRejectsDecryptedInvalidUTF8LikeRust() async throws {
+        let material = try AgentIdentity.generateAgentKeyMaterial(privateKeyBytes: Self.testEd25519Seed)
+        let key = AgentIdentityKey(agentRuntimeID: "agent-123", privateKeyPKCS8Base64: material.privateKeyPKCS8Base64)
+        let encryptedTaskID = "rAGyIJ6GNU+4UyN7XeD0+rE8f8v0M6YcAZNpYX/s8QvFgJBjXDLx4dZmzz3Sz1dSH1k="
+        let transport = RecordingAgentIdentityTransport(
+            result: .success(APIResponse(
+                statusCode: 200,
+                body: Data(#"{"encryptedTaskId":"\#(encryptedTaskID)"}"#.utf8)
+            ))
+        )
+
+        do {
+            _ = try await AgentIdentity.registerAgentTask(
+                transport: transport,
+                chatGPTBaseURL: "https://chatgpt.com/backend-api",
+                key: key,
+                timestamp: "2026-05-13T12:00:00Z"
+            )
+            XCTFail("expected invalid decrypted task id failure")
+        } catch {
+            XCTAssertEqual(String(describing: error), "decrypted task id is not valid UTF-8")
+        }
+    }
+
     func testAuthorizationHeaderForAgentTaskSerializesSignedAgentAssertionLikeRust() throws {
         let material = try AgentIdentity.generateAgentKeyMaterial(privateKeyBytes: Self.testEd25519Seed)
         let key = AgentIdentityKey(agentRuntimeID: "agent-123", privateKeyPKCS8Base64: material.privateKeyPKCS8Base64)

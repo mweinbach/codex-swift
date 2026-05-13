@@ -178,8 +178,8 @@ Source baseline inspected for this scaffold:
     with the 30-second timeout, preserves non-2xx body truncation/error context,
     decodes `task_id`/`taskId` responses, and preserves omitted-id/decode errors.
     The encrypted task-id path now preserves Rust's signing-key and base64 validation
-    errors before the decrypt step. Encrypted task-id sealed-box decryption remains
-    pending.
+    errors, decrypts Rust `crypto_box` sealed boxes through the Ed25519-derived
+    Curve25519 secret key, and preserves decrypt/invalid-UTF-8 error text.
 - `codex-rs/cli/src/main.rs` features command
   - `codex features list` sorted/aligned output with stage labels, default states, feature config tables, `-c features.*` overrides, and global `--enable`/`--disable`; `codex features enable <feature>` and `codex features disable <feature>` config mutation, including profile-scoped feature tables and under-development enable warnings
 - `codex-rs/cli/src/main.rs` debug command parser

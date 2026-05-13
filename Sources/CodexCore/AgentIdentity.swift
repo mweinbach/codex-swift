@@ -367,11 +367,21 @@ public enum AgentIdentity {
     }
 
     private static func decryptTaskIDResponse(key: AgentIdentityKey, encryptedTaskID: String) throws -> String {
-        _ = try signingPrivateKeyFromPKCS8Base64(key.privateKeyPKCS8Base64)
-        guard Data(base64Encoded: encryptedTaskID) != nil else {
+        let signingKey = try signingPrivateKeyFromPKCS8Base64(key.privateKeyPKCS8Base64)
+        guard let ciphertext = Data(base64Encoded: encryptedTaskID) else {
             throw AgentIdentityError.message("encrypted task id is not valid base64")
         }
-        throw AgentIdentityError.message("failed to decrypt encrypted task id")
+        let secretKey = curve25519SecretKey(from: signingKey)
+        let plaintext: Data
+        do {
+            plaintext = try NaClSealedBox.open(ciphertext: ciphertext, recipientSecretKey: secretKey)
+        } catch {
+            throw AgentIdentityError.message("failed to decrypt encrypted task id")
+        }
+        guard let taskID = String(data: plaintext, encoding: .utf8) else {
+            throw AgentIdentityError.message("decrypted task id is not valid UTF-8")
+        }
+        return taskID
     }
 
     private static func truncatedTaskRegistrationBody(_ body: String?) -> String {
@@ -426,6 +436,14 @@ public enum AgentIdentity {
             return nil
         }
         return der.suffix(agentPrivateKeyByteCount)
+    }
+
+    private static func curve25519SecretKey(from signingKey: Curve25519.Signing.PrivateKey) -> Data {
+        var digest = Array(SHA512.hash(data: signingKey.rawRepresentation))
+        digest[0] &= 248
+        digest[31] &= 127
+        digest[31] |= 64
+        return Data(digest.prefix(32))
     }
 
     private static func encodeSSHEd25519PublicKey(publicKey: Curve25519.Signing.PublicKey) -> String {
