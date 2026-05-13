@@ -23940,6 +23940,64 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(tools["view_image"] is NSNull)
     }
 
+    func testConfigReadProjectsProfileToolsLikeRustV2Config() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [profiles.research]
+        model = "gpt-profile"
+        web_search = "cached"
+
+        [profiles.research.tools]
+        view_image = true
+
+        [profiles.research.tools.web_search]
+        context_size = "medium"
+        allowed_domains = ["openai.com"]
+
+        [profiles.research.tools.web_search.location]
+        country = "US"
+        city = "Boston"
+
+        [profiles.legacy.tools]
+        web_search = true
+        """.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/read","params":{"includeLayers":true}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let config = try XCTUnwrap(result["config"] as? [String: Any])
+        let profiles = try XCTUnwrap(config["profiles"] as? [String: Any])
+
+        let research = try XCTUnwrap(profiles["research"] as? [String: Any])
+        XCTAssertEqual(research["model"] as? String, "gpt-profile")
+        XCTAssertEqual(research["web_search"] as? String, "cached")
+        let researchTools = try XCTUnwrap(research["tools"] as? [String: Any])
+        XCTAssertEqual(researchTools["view_image"] as? Bool, true)
+        let webSearch = try XCTUnwrap(researchTools["web_search"] as? [String: Any])
+        XCTAssertEqual(webSearch["context_size"] as? String, "medium")
+        XCTAssertEqual(webSearch["allowed_domains"] as? [String], ["openai.com"])
+        let location = try XCTUnwrap(webSearch["location"] as? [String: Any])
+        XCTAssertEqual(location["country"] as? String, "US")
+        XCTAssertTrue(location["region"] is NSNull)
+        XCTAssertEqual(location["city"] as? String, "Boston")
+        XCTAssertTrue(location["timezone"] is NSNull)
+
+        let legacy = try XCTUnwrap(profiles["legacy"] as? [String: Any])
+        let legacyTools = try XCTUnwrap(legacy["tools"] as? [String: Any])
+        XCTAssertTrue(legacyTools["web_search"] is NSNull)
+        XCTAssertTrue(legacyTools["view_image"] is NSNull)
+
+        let origins = try XCTUnwrap(result["origins"] as? [String: Any])
+        XCTAssertNotNil(origins["profiles.research.tools.web_search.context_size"] as? [String: Any])
+        XCTAssertNotNil(origins["profiles.research.tools.view_image"] as? [String: Any])
+    }
+
     func testConfigReadIncludesAppsLikeRust() throws {
         let temp = try TemporaryDirectory()
         try """

@@ -21400,8 +21400,34 @@ public enum CodexAppServer {
         if case let .table(toolsTable)? = table["tools"] {
             object["tools"] = configReadToolsObject(toolsTable)
         }
+        if case let .table(profilesTable)? = table["profiles"] {
+            object["profiles"] = configReadProfilesObject(profilesTable)
+        }
         if case let .table(appsTable)? = table["apps"] {
             object["apps"] = configReadAppsObject(appsTable)
+        }
+        return object
+    }
+
+    private static func configReadProfilesObject(_ table: [String: ConfigValue]) -> [String: Any] {
+        var object: [String: Any] = [:]
+        for key in table.keys.sorted() {
+            guard let value = table[key] else {
+                continue
+            }
+            guard case let .table(profileTable) = value else {
+                object[key] = configValueObject(value)
+                continue
+            }
+            object[key] = configReadProfileObject(profileTable)
+        }
+        return object
+    }
+
+    private static func configReadProfileObject(_ table: [String: ConfigValue]) -> [String: Any] {
+        var object = table.mapValues(configValueObject)
+        if case let .table(toolsTable)? = table["tools"] {
+            object["tools"] = configReadToolsObject(toolsTable)
         }
         return object
     }
