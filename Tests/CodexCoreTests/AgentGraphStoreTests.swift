@@ -705,6 +705,167 @@ final class AgentGraphStoreTests: XCTestCase {
         XCTAssertEqual(updatedMode, "disabled")
     }
 
+    func testSQLiteStoreListsStage1OutputsForGlobalLikeRust() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let olderThreadID = try threadID(810)
+        let newerThreadID = try threadID(811)
+        let emptyThreadID = try threadID(812)
+        let pollutedThreadID = try threadID(813)
+        let disabledThreadID = try threadID(814)
+        try insertRawSQLiteThread(
+            id: olderThreadID,
+            agentPath: try AgentPath(validating: "/root/memory/older"),
+            memoryMode: "enabled",
+            rolloutPath: "/tmp/older.jsonl",
+            cwd: "/tmp/workspace-older",
+            databaseURL: databaseURL
+        )
+        try insertRawSQLiteThread(
+            id: newerThreadID,
+            agentPath: try AgentPath(validating: "/root/memory/newer"),
+            memoryMode: "enabled",
+            rolloutPath: "/tmp/newer.jsonl",
+            cwd: "/tmp/workspace-newer",
+            gitInfo: ThreadGitInfo(branch: "feature/newer"),
+            databaseURL: databaseURL
+        )
+        try insertRawSQLiteThread(
+            id: emptyThreadID,
+            agentPath: try AgentPath(validating: "/root/memory/empty"),
+            memoryMode: "enabled",
+            rolloutPath: "/tmp/empty.jsonl",
+            cwd: "/tmp/workspace-empty",
+            databaseURL: databaseURL
+        )
+        try insertRawSQLiteThread(
+            id: pollutedThreadID,
+            agentPath: try AgentPath(validating: "/root/memory/polluted"),
+            memoryMode: "polluted",
+            rolloutPath: "/tmp/polluted.jsonl",
+            cwd: "/tmp/workspace-polluted",
+            databaseURL: databaseURL
+        )
+        try insertRawSQLiteThread(
+            id: disabledThreadID,
+            agentPath: try AgentPath(validating: "/root/memory/disabled"),
+            memoryMode: "disabled",
+            rolloutPath: "/tmp/disabled.jsonl",
+            cwd: "/tmp/workspace-disabled",
+            databaseURL: databaseURL
+        )
+        try insertRawStage1Output(
+            threadID: olderThreadID,
+            sourceUpdatedAt: 100,
+            rawMemory: "raw older",
+            rolloutSummary: "summary older",
+            generatedAt: 110,
+            databaseURL: databaseURL
+        )
+        try insertRawStage1Output(
+            threadID: newerThreadID,
+            sourceUpdatedAt: 101,
+            rawMemory: "raw newer",
+            rolloutSummary: "summary newer",
+            rolloutSlug: "newer-slug",
+            generatedAt: 111,
+            databaseURL: databaseURL
+        )
+        try insertRawStage1Output(
+            threadID: emptyThreadID,
+            sourceUpdatedAt: 102,
+            rawMemory: "  ",
+            rolloutSummary: "",
+            generatedAt: 112,
+            databaseURL: databaseURL
+        )
+        try insertRawStage1Output(
+            threadID: pollutedThreadID,
+            sourceUpdatedAt: 103,
+            rawMemory: "raw polluted",
+            rolloutSummary: "summary polluted",
+            generatedAt: 113,
+            databaseURL: databaseURL
+        )
+        try insertRawStage1Output(
+            threadID: disabledThreadID,
+            sourceUpdatedAt: 104,
+            rawMemory: "raw disabled",
+            rolloutSummary: "summary disabled",
+            generatedAt: 114,
+            databaseURL: databaseURL
+        )
+
+        let none = try await store.listStage1OutputsForGlobal(limit: 0)
+        let outputs = try await store.listStage1OutputsForGlobal(limit: 10)
+
+        XCTAssertEqual(none, [])
+        XCTAssertEqual(outputs, [
+            Stage1Output(
+                threadID: newerThreadID,
+                rolloutPath: "/tmp/newer.jsonl",
+                sourceUpdatedAt: Date(timeIntervalSince1970: 101),
+                rawMemory: "raw newer",
+                rolloutSummary: "summary newer",
+                rolloutSlug: "newer-slug",
+                cwd: "/tmp/workspace-newer",
+                gitBranch: "feature/newer",
+                generatedAt: Date(timeIntervalSince1970: 111)
+            ),
+            Stage1Output(
+                threadID: olderThreadID,
+                rolloutPath: "/tmp/older.jsonl",
+                sourceUpdatedAt: Date(timeIntervalSince1970: 100),
+                rawMemory: "raw older",
+                rolloutSummary: "summary older",
+                cwd: "/tmp/workspace-older",
+                generatedAt: Date(timeIntervalSince1970: 110)
+            )
+        ])
+    }
+
+    func testSQLiteStoreRecordsStage1OutputUsageLikeRust() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let firstThreadID = try threadID(820)
+        let secondThreadID = try threadID(821)
+        let missingThreadID = try threadID(822)
+        for (threadID, suffix) in [(firstThreadID, "first"), (secondThreadID, "second")] {
+            try insertRawSQLiteThread(
+                id: threadID,
+                agentPath: try AgentPath(validating: "/root/memory/\(suffix)"),
+                memoryMode: "enabled",
+                rolloutPath: "/tmp/\(suffix).jsonl",
+                cwd: "/tmp/workspace-\(suffix)",
+                databaseURL: databaseURL
+            )
+            try insertRawStage1Output(
+                threadID: threadID,
+                sourceUpdatedAt: 200,
+                rawMemory: "raw \(suffix)",
+                rolloutSummary: "summary \(suffix)",
+                generatedAt: 210,
+                databaseURL: databaseURL
+            )
+        }
+
+        let updatedRows = try await store.recordStage1OutputUsage(
+            threadIDs: [firstThreadID, firstThreadID, secondThreadID, missingThreadID]
+        )
+        let firstUsage = try stage1Usage(threadID: firstThreadID, databaseURL: databaseURL)
+        let secondUsage = try stage1Usage(threadID: secondThreadID, databaseURL: databaseURL)
+
+        XCTAssertEqual(updatedRows, 3)
+        XCTAssertEqual(firstUsage.usageCount, 2)
+        XCTAssertEqual(secondUsage.usageCount, 1)
+        XCTAssertEqual(firstUsage.lastUsage, secondUsage.lastUsage)
+        XCTAssertGreaterThan(firstUsage.lastUsage ?? 0, 0)
+    }
+
     func testSQLiteStoreFindsRolloutPathWithArchiveFilter() async throws {
         let temp = try AgentGraphStoreTemporaryDirectory()
         let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
@@ -2018,6 +2179,69 @@ final class AgentGraphStoreTests: XCTestCase {
         }
     }
 
+    private func insertRawStage1Output(
+        threadID: ThreadId,
+        sourceUpdatedAt: Int64,
+        rawMemory: String,
+        rolloutSummary: String,
+        rolloutSlug: String? = nil,
+        generatedAt: Int64,
+        databaseURL: URL
+    ) throws {
+        try withRawSQLiteDatabase(databaseURL: databaseURL) { database in
+            var statement: OpaquePointer?
+            let query = """
+                INSERT INTO stage1_outputs (
+                    thread_id,
+                    source_updated_at,
+                    raw_memory,
+                    rollout_summary,
+                    rollout_slug,
+                    generated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """
+            XCTAssertEqual(sqlite3_prepare_v2(database, query, -1, &statement, nil), SQLITE_OK)
+            let preparedStatement = try XCTUnwrap(statement)
+            defer {
+                sqlite3_finalize(preparedStatement)
+            }
+            XCTAssertEqual(
+                sqlite3_bind_text(preparedStatement, 1, threadID.description, -1, testSQLiteTransient),
+                SQLITE_OK
+            )
+            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 2, sourceUpdatedAt), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 3, rawMemory, -1, testSQLiteTransient), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 4, rolloutSummary, -1, testSQLiteTransient), SQLITE_OK)
+            bindOptionalText(rolloutSlug, to: preparedStatement, at: 5)
+            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 6, generatedAt), SQLITE_OK)
+            XCTAssertEqual(sqlite3_step(preparedStatement), SQLITE_DONE)
+        }
+    }
+
+    private func stage1Usage(
+        threadID: ThreadId,
+        databaseURL: URL
+    ) throws -> (usageCount: Int64?, lastUsage: Int64?) {
+        try withRawSQLiteDatabase(databaseURL: databaseURL) { database in
+            var statement: OpaquePointer?
+            let query = "SELECT usage_count, last_usage FROM stage1_outputs WHERE thread_id = ?"
+            XCTAssertEqual(sqlite3_prepare_v2(database, query, -1, &statement, nil), SQLITE_OK)
+            let preparedStatement = try XCTUnwrap(statement)
+            defer {
+                sqlite3_finalize(preparedStatement)
+            }
+            XCTAssertEqual(
+                sqlite3_bind_text(preparedStatement, 1, threadID.description, -1, testSQLiteTransient),
+                SQLITE_OK
+            )
+            XCTAssertEqual(sqlite3_step(preparedStatement), SQLITE_ROW)
+            return (
+                optionalIntColumn(preparedStatement, index: 0),
+                optionalIntColumn(preparedStatement, index: 1)
+            )
+        }
+    }
+
     private func readRawSQLiteThreadUpdatedAt(id: ThreadId, databaseURL: URL) throws -> ThreadUpdatedAt? {
         try withRawSQLiteDatabase(databaseURL: databaseURL) { database in
             var statement: OpaquePointer?
@@ -2105,6 +2329,10 @@ final class AgentGraphStoreTests: XCTestCase {
             return nil
         }
         return String(cString: rawValue)
+    }
+
+    private func optionalIntColumn(_ statement: OpaquePointer, index: Int32) -> Int64? {
+        sqlite3_column_type(statement, index) == SQLITE_NULL ? nil : sqlite3_column_int64(statement, index)
     }
 
     private func withRawSQLiteDatabase<T>(

@@ -84,10 +84,45 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
                     source_updated_at INTEGER NOT NULL,
                     raw_memory TEXT NOT NULL,
                     rollout_summary TEXT NOT NULL,
+                    rollout_slug TEXT,
                     generated_at INTEGER NOT NULL,
+                    usage_count INTEGER,
+                    last_usage INTEGER,
+                    selected_for_phase2 INTEGER NOT NULL DEFAULT 0,
+                    selected_for_phase2_source_updated_at INTEGER,
                     FOREIGN KEY(thread_id) REFERENCES threads(id) ON DELETE CASCADE
                 )
                 """,
+                database: openedDatabase
+            )
+            try Self.addColumnIfMissing(
+                table: "stage1_outputs",
+                column: "rollout_slug",
+                definition: "TEXT",
+                database: openedDatabase
+            )
+            try Self.addColumnIfMissing(
+                table: "stage1_outputs",
+                column: "usage_count",
+                definition: "INTEGER",
+                database: openedDatabase
+            )
+            try Self.addColumnIfMissing(
+                table: "stage1_outputs",
+                column: "last_usage",
+                definition: "INTEGER",
+                database: openedDatabase
+            )
+            try Self.addColumnIfMissing(
+                table: "stage1_outputs",
+                column: "selected_for_phase2",
+                definition: "INTEGER NOT NULL DEFAULT 0",
+                database: openedDatabase
+            )
+            try Self.addColumnIfMissing(
+                table: "stage1_outputs",
+                column: "selected_for_phase2_source_updated_at",
+                definition: "INTEGER",
                 database: openedDatabase
             )
             try Self.execute(
@@ -1111,6 +1146,82 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         }
     }
 
+    public func listStage1OutputsForGlobal(limit: Int) async throws -> [Stage1Output] {
+        guard limit > 0 else {
+            return []
+        }
+        let database = handle.database
+        return try Self.withStatement(
+            query: """
+                SELECT
+                    so.thread_id,
+                    COALESCE(t.rollout_path, '') AS rollout_path,
+                    so.source_updated_at,
+                    so.raw_memory,
+                    so.rollout_summary,
+                    so.rollout_slug,
+                    so.generated_at,
+                    COALESCE(t.cwd, '') AS cwd,
+                    t.git_branch AS git_branch
+                FROM stage1_outputs AS so
+                LEFT JOIN threads AS t
+                    ON t.id = so.thread_id
+                WHERE t.memory_mode = 'enabled'
+                  AND (length(trim(so.raw_memory)) > 0 OR length(trim(so.rollout_summary)) > 0)
+                ORDER BY so.source_updated_at DESC, so.thread_id DESC
+                LIMIT ?
+                """,
+            bindings: [.int(Int64(limit))],
+            database: database
+        ) { statement in
+            var outputs: [Stage1Output] = []
+            while true {
+                let result = sqlite3_step(statement)
+                if result == SQLITE_DONE {
+                    return outputs
+                }
+                guard result == SQLITE_ROW else {
+                    throw Self.sqliteError(database: database)
+                }
+                outputs.append(try Self.stage1Output(statement))
+            }
+        }
+    }
+
+    public func recordStage1OutputUsage(threadIDs: [ThreadId]) async throws -> Int {
+        guard !threadIDs.isEmpty else {
+            return 0
+        }
+        let database = handle.database
+        let now = Self.currentTimeSeconds()
+        var updatedRows = 0
+        try Self.execute("BEGIN IMMEDIATE TRANSACTION", bindings: [SQLiteBinding](), database: database)
+        do {
+            for threadID in threadIDs {
+                try Self.execute(
+                    """
+                    UPDATE stage1_outputs
+                    SET
+                        usage_count = COALESCE(usage_count, 0) + 1,
+                        last_usage = ?
+                    WHERE thread_id = ?
+                    """,
+                    bindings: [
+                        .int(now),
+                        .text(threadID.description)
+                    ],
+                    database: database
+                )
+                updatedRows += Int(sqlite3_changes(database))
+            }
+            try Self.execute("COMMIT", bindings: [SQLiteBinding](), database: database)
+        } catch {
+            try? Self.execute("ROLLBACK", bindings: [SQLiteBinding](), database: database)
+            throw error
+        }
+        return updatedRows
+    }
+
     public func setThreadSpawnEdgeStatus(
         childThreadID: ThreadId,
         status: ThreadSpawnEdgeStatus
@@ -1438,6 +1549,31 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
 
     private static func optionalIntColumn(_ statement: OpaquePointer, index: Int32) -> Int64? {
         sqlite3_column_type(statement, index) == SQLITE_NULL ? nil : sqlite3_column_int64(statement, index)
+    }
+
+    private static func addColumnIfMissing(
+        table: String,
+        column: String,
+        definition: String,
+        database: OpaquePointer
+    ) throws {
+        let columns = try withStatement(query: "PRAGMA table_info(\(table))", bindings: [], database: database) { statement in
+            var columns: [String] = []
+            while true {
+                let result = sqlite3_step(statement)
+                if result == SQLITE_DONE {
+                    return columns
+                }
+                guard result == SQLITE_ROW else {
+                    throw sqliteError(database: database)
+                }
+                columns.append(try requiredTextColumn(statement, index: 1, columnName: "name"))
+            }
+        }
+        guard !columns.contains(column) else {
+            return
+        }
+        try execute("ALTER TABLE \(table) ADD COLUMN \(column) \(definition)", database: database)
     }
 
     private static func epochMilliseconds(_ date: Date) -> Int64 {
@@ -1818,6 +1954,22 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
 
     private static func epochSecondsDate(_ seconds: Int64) -> Date {
         Date(timeIntervalSince1970: Double(seconds))
+    }
+
+    private static func stage1Output(_ statement: OpaquePointer) throws -> Stage1Output {
+        let threadIDValue = try requiredTextColumn(statement, index: 0, columnName: "thread_id")
+        let threadID = try ThreadId(string: threadIDValue)
+        return Stage1Output(
+            threadID: threadID,
+            rolloutPath: try requiredTextColumn(statement, index: 1, columnName: "rollout_path"),
+            sourceUpdatedAt: epochSecondsDate(sqlite3_column_int64(statement, 2)),
+            rawMemory: try requiredTextColumn(statement, index: 3, columnName: "raw_memory"),
+            rolloutSummary: try requiredTextColumn(statement, index: 4, columnName: "rollout_summary"),
+            rolloutSlug: optionalTextColumn(statement, index: 5),
+            cwd: try requiredTextColumn(statement, index: 7, columnName: "cwd"),
+            gitBranch: optionalTextColumn(statement, index: 8),
+            generatedAt: epochSecondsDate(sqlite3_column_int64(statement, 6))
+        )
     }
 
     private static func saturatingAdd(_ value: Int64, _ increment: Int64) -> Int64 {

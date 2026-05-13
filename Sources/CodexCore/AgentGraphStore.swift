@@ -27,6 +27,41 @@ public enum AgentGraphStoreError: Error, Equatable, CustomStringConvertible, Sen
     }
 }
 
+/// Stored stage-1 memory extraction output for a single thread.
+public struct Stage1Output: Equatable, Sendable {
+    public var threadID: ThreadId
+    public var rolloutPath: String
+    public var sourceUpdatedAt: Date
+    public var rawMemory: String
+    public var rolloutSummary: String
+    public var rolloutSlug: String?
+    public var cwd: String
+    public var gitBranch: String?
+    public var generatedAt: Date
+
+    public init(
+        threadID: ThreadId,
+        rolloutPath: String,
+        sourceUpdatedAt: Date,
+        rawMemory: String,
+        rolloutSummary: String,
+        rolloutSlug: String? = nil,
+        cwd: String,
+        gitBranch: String? = nil,
+        generatedAt: Date
+    ) {
+        self.threadID = threadID
+        self.rolloutPath = rolloutPath
+        self.sourceUpdatedAt = sourceUpdatedAt
+        self.rawMemory = rawMemory
+        self.rolloutSummary = rolloutSummary
+        self.rolloutSlug = rolloutSlug
+        self.cwd = cwd
+        self.gitBranch = gitBranch
+        self.generatedAt = generatedAt
+    }
+}
+
 /// Storage-neutral boundary for persisted thread-spawn parent/child topology.
 ///
 /// Implementations return stable ordering for list methods so callers can merge persisted graph
