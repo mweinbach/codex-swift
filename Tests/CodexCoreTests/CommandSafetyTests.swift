@@ -379,6 +379,34 @@ final class CommandSafetyTests: XCTestCase {
         ]))
     }
 
+    func testWindowsPowerShellWrapperParsingMatchesRustInvocationForms() {
+        for args in [
+            ["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Mta", "-Command", "Get-Location"],
+            ["powershell.exe", "-Sta", "-Command:Get-ChildItem -Path ."],
+            ["powershell.exe", "/Command:Get-Content Cargo.toml"],
+            ["powershell.exe", "/Command", "Test-Path Cargo.toml"],
+            ["pwsh.exe", "-NoLogo", "git", "status"],
+            ["pwsh.exe", "-NoLogo", "Get-Content", "foo bar.txt"]
+        ] {
+            XCTAssertTrue(CommandSafety.isKnownSafeCommand(args), "expected \(args) to be safe")
+        }
+
+        for args in [
+            ["powershell.exe"],
+            ["powershell.exe", "-NoLogo"],
+            ["powershell.exe", "-Command:Get-ChildItem", "Cargo.toml"],
+            ["powershell.exe", "/Command:Get-ChildItem", "Cargo.toml"],
+            ["powershell.exe", "-Command", "Get-Content", "Cargo.toml"],
+            ["powershell.exe", "-File", "script.ps1"],
+            ["powershell.exe", "/File", "script.ps1"],
+            ["powershell.exe", "-WindowStyle", "Hidden", "-Command", "Get-Location"],
+            ["powershell.exe", "-ExecutionPolicy", "Bypass", "-Command", "Get-Location"],
+            ["powershell.exe", "-WorkingDirectory", ".", "-Command", "Get-Location"]
+        ] {
+            XCTAssertFalse(CommandSafety.isKnownSafeCommand(args), "expected \(args) to be unsafe")
+        }
+    }
+
     func testWindowsPowerShellSafePipelinesAndGitUsage() {
         XCTAssertTrue(CommandSafety.isKnownSafeCommand([
             "pwsh.exe",

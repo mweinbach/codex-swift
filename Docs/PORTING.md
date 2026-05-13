@@ -1247,6 +1247,8 @@ Source baseline inspected for this scaffold:
   - added Swift regression coverage for Rust's `rg --files | head -n 50` parser simplification and image-generation response items that omit `revised_prompt`, preserving the existing Swift behavior while closing the upstream test-matrix gap.
 - `codex-rs/app-server/tests/suite/v2/plugin_read.rs` legacy plugin default prompt
   - matched Rust's local plugin manifest compatibility for legacy string `interface.defaultPrompt`, normalizing it to the one-item `defaultPrompt` array returned by `plugin/read`.
+- `codex-rs/shell-command/src/command_safety/windows_safe_commands.rs` PowerShell wrapper parsing
+  - pinned Swift command-safety coverage for Rust's safe PowerShell invocation parser, including `/Command`, `-Command:<script>` and `/Command:<script>` inline forms, tolerated no-arg flags (`-NonInteractive`, `-Mta`, `-Sta`), no-switch script rejoining with PowerShell quoting, empty/no-script rejection, forbidden opaque flags, and Rust's single-token script requirement.
 
 ## Known Gaps
 
