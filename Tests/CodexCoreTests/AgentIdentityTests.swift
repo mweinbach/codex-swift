@@ -226,6 +226,36 @@ final class AgentIdentityTests: XCTestCase {
         } catch {
             XCTAssertEqual(String(describing: error), "agent task registration response omitted task id")
         }
+
+        let invalidEncryptedIDTransport = RecordingAgentIdentityTransport(
+            result: .success(APIResponse(statusCode: 200, body: Data(#"{"encrypted_task_id":"not base64"}"#.utf8)))
+        )
+        do {
+            _ = try await AgentIdentity.registerAgentTask(
+                transport: invalidEncryptedIDTransport,
+                chatGPTBaseURL: "https://chatgpt.com/backend-api",
+                key: key,
+                timestamp: "2026-05-13T12:00:00Z"
+            )
+            XCTFail("expected invalid encrypted task id failure")
+        } catch {
+            XCTAssertEqual(String(describing: error), "encrypted task id is not valid base64")
+        }
+
+        let encryptedIDTransport = RecordingAgentIdentityTransport(
+            result: .success(APIResponse(statusCode: 200, body: Data(#"{"encryptedTaskId":"dmFsaWQtYmFzZTY0"}"#.utf8)))
+        )
+        do {
+            _ = try await AgentIdentity.registerAgentTask(
+                transport: encryptedIDTransport,
+                chatGPTBaseURL: "https://chatgpt.com/backend-api",
+                key: key,
+                timestamp: "2026-05-13T12:00:00Z"
+            )
+            XCTFail("expected encrypted task id decrypt failure")
+        } catch {
+            XCTAssertEqual(String(describing: error), "failed to decrypt encrypted task id")
+        }
     }
 
     func testAuthorizationHeaderForAgentTaskSerializesSignedAgentAssertionLikeRust() throws {

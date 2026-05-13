@@ -177,7 +177,9 @@ Source baseline inspected for this scaffold:
     Task registration now posts Rust's signed JSON body to the task-registration endpoint
     with the 30-second timeout, preserves non-2xx body truncation/error context,
     decodes `task_id`/`taskId` responses, and preserves omitted-id/decode errors.
-    Encrypted task-id decryption remains pending.
+    The encrypted task-id path now preserves Rust's signing-key and base64 validation
+    errors before the decrypt step. Encrypted task-id sealed-box decryption remains
+    pending.
 - `codex-rs/cli/src/main.rs` features command
   - `codex features list` sorted/aligned output with stage labels, default states, feature config tables, `-c features.*` overrides, and global `--enable`/`--disable`; `codex features enable <feature>` and `codex features disable <feature>` config mutation, including profile-scoped feature tables and under-development enable warnings
 - `codex-rs/cli/src/main.rs` debug command parser

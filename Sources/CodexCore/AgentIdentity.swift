@@ -135,7 +135,7 @@ public enum AgentIdentity {
         } catch {
             throw AgentIdentityError.message("failed to decode agent task registration response")
         }
-        return try taskID(from: decoded)
+        return try taskID(from: decoded, key: key)
     }
 
     public static func authorizationHeaderForAgentTask(
@@ -356,14 +356,22 @@ public enum AgentIdentity {
         return nil
     }
 
-    private static func taskID(from response: RegisterTaskResponse) throws -> String {
+    private static func taskID(from response: RegisterTaskResponse, key: AgentIdentityKey) throws -> String {
         if let taskID = response.taskID ?? response.taskIDCamel {
             return taskID
         }
-        if response.encryptedTaskID != nil || response.encryptedTaskIDCamel != nil {
-            throw AgentIdentityError.message("failed to decrypt encrypted task id")
+        if let encryptedTaskID = response.encryptedTaskID ?? response.encryptedTaskIDCamel {
+            return try decryptTaskIDResponse(key: key, encryptedTaskID: encryptedTaskID)
         }
         throw AgentIdentityError.message("agent task registration response omitted task id")
+    }
+
+    private static func decryptTaskIDResponse(key: AgentIdentityKey, encryptedTaskID: String) throws -> String {
+        _ = try signingPrivateKeyFromPKCS8Base64(key.privateKeyPKCS8Base64)
+        guard Data(base64Encoded: encryptedTaskID) != nil else {
+            throw AgentIdentityError.message("encrypted task id is not valid base64")
+        }
+        throw AgentIdentityError.message("failed to decrypt encrypted task id")
     }
 
     private static func truncatedTaskRegistrationBody(_ body: String?) -> String {
