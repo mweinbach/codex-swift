@@ -131,6 +131,71 @@ public enum Compact {
         return history
     }
 
+    public static func collectRemoteV2ContextCompactionOutput(
+        from events: [Result<ResponseEvent, APIError>]
+    ) -> Result<RemoteCompactionV2Output, APIError> {
+        var outputItemCount = 0
+        var contextCompactionCount = 0
+        var contextCompactionOutput: ResponseItem?
+        var completedResponseID: String?
+
+        for result in events {
+            switch result {
+            case let .success(event):
+                switch event {
+                case let .outputItemDone(item):
+                    outputItemCount += 1
+                    switch item {
+                    case let .contextCompaction(encryptedContent):
+                        guard encryptedContent != nil else {
+                            return .failure(.stream(
+                                "remote compaction v2 returned context_compaction without encrypted_content"
+                            ))
+                        }
+                        contextCompactionCount += 1
+                        contextCompactionOutput = contextCompactionOutput ?? item
+                    default:
+                        continue
+                    }
+                case let .completed(responseID, _, _):
+                    completedResponseID = responseID
+                    break
+                default:
+                    continue
+                }
+            case let .failure(error):
+                return .failure(error)
+            }
+
+            if completedResponseID != nil {
+                break
+            }
+        }
+
+        guard let responseID = completedResponseID else {
+            return .failure(.stream("remote compaction v2 stream closed before response.completed"))
+        }
+
+        guard contextCompactionCount == 1 else {
+            return .failure(.stream(
+                "remote compaction v2 expected exactly one context_compaction output item, got \(contextCompactionCount) from \(outputItemCount) output items"
+            ))
+        }
+
+        guard let contextCompactionOutput else {
+            preconditionFailure("context compaction output must exist when count is exactly one")
+        }
+
+        return .success(RemoteCompactionV2Output(item: contextCompactionOutput, responseID: responseID))
+    }
+
+    public static func buildRemoteV2CompactedHistory(
+        promptInput: [ResponseItem],
+        compactionOutput: ResponseItem
+    ) -> [ResponseItem] {
+        promptInput.filter(isRetainedForRemoteV2Compaction) + [compactionOutput]
+    }
+
     private static func shouldKeepUserMessage(_ content: [ContentItem]) -> Bool {
         if UserInstructions.isUserInstructions(message: content)
             || SkillInstructions.isSkillInstructions(message: content)
@@ -152,6 +217,13 @@ public enum Compact {
         return true
     }
 
+    private static func isRetainedForRemoteV2Compaction(_ item: ResponseItem) -> Bool {
+        guard case let .message(_, role, _, _) = item else {
+            return false
+        }
+        return role == "developer" || role == "system" || role == "user"
+    }
+
     private static func loadResource(_ name: String, subdirectory: String) -> String {
         let url = Bundle.module.url(forResource: name, withExtension: "md", subdirectory: subdirectory)
             ?? Bundle.module.url(forResource: name, withExtension: "md")
@@ -164,5 +236,15 @@ public enum Compact {
         } catch {
             preconditionFailure("Unable to load compact resource \(subdirectory)/\(name).md: \(error)")
         }
+    }
+}
+
+public struct RemoteCompactionV2Output: Equatable, Sendable {
+    public let item: ResponseItem
+    public let responseID: String
+
+    public init(item: ResponseItem, responseID: String) {
+        self.item = item
+        self.responseID = responseID
     }
 }
