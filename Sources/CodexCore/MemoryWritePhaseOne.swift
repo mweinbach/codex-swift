@@ -7,11 +7,15 @@ public let memoryStageOneJobLeaseSeconds: Int64 = 3_600
 public let memoryStageOneJobRetryDelaySeconds: Int64 = 3_600
 public let memoryStageOneThreadScanLimit = 5_000
 public let memoryStageOnePruneBatchSize = 200
+public let memoryStageOneSystemPrompt = loadMemoryStageOneResource(
+    name: "stage_one_system",
+    subdirectory: "MemoryWrite"
+)
 
 public struct MemoryStageOneOutput: Equatable, Decodable, Sendable {
-    public let rawMemory: String
-    public let rolloutSummary: String
-    public let rolloutSlug: String?
+    public var rawMemory: String
+    public var rolloutSummary: String
+    public var rolloutSlug: String?
 
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case rawMemory = "raw_memory"
@@ -62,11 +66,14 @@ private struct MemoryStageOneOutputDynamicCodingKey: CodingKey {
 
 public enum MemoryWritePhaseOneError: Error, Equatable, CustomStringConvertible, Sendable {
     case serializeRolloutMemory(String)
+    case streamStageOnePrompt(String)
 
     public var description: String {
         switch self {
         case let .serializeRolloutMemory(message):
             return "failed to serialize rollout memory: \(message)"
+        case let .streamStageOnePrompt(message):
+            return "failed to stream stage-1 memory prompt: \(message)"
         }
     }
 }
@@ -173,6 +180,69 @@ public func memoryStageOneOutputSchema() -> JSONValue {
         ]),
         "additionalProperties": .bool(false)
     ])
+}
+
+public func loadMemoryStageOneRolloutItems(rolloutPath: URL) throws -> [RolloutItem] {
+    try RolloutRecorder.getRolloutHistory(path: rolloutPath)
+        .rolloutItems
+        .map(memoryRolloutItem)
+}
+
+public func buildMemoryStageOnePrompt(
+    modelInfo: ModelInfo,
+    rolloutPath: URL,
+    rolloutCwd: URL,
+    rolloutItems: [RolloutItem]
+) throws -> Prompt {
+    let rolloutContents = try serializeFilteredRolloutResponseItemsForMemories(rolloutItems)
+    return Prompt(
+        input: [
+            .message(
+                role: "user",
+                content: [
+                    .inputText(text: buildStageOneInputMessage(
+                        modelInfo: modelInfo,
+                        rolloutPath: rolloutPath,
+                        rolloutCwd: rolloutCwd,
+                        rolloutContents: rolloutContents
+                    ))
+                ]
+            )
+        ],
+        baseInstructionsOverride: memoryStageOneSystemPrompt,
+        outputSchema: memoryStageOneOutputSchema()
+    )
+}
+
+public func sampleMemoryPhaseOneOutput(
+    modelInfo: ModelInfo,
+    rolloutPath: URL,
+    rolloutCwd: URL,
+    loadRolloutItems: @Sendable (URL) async throws -> [RolloutItem] = { url in
+        try loadMemoryStageOneRolloutItems(rolloutPath: url)
+    },
+    streamPrompt: @Sendable (Prompt) async throws -> (String, TokenUsage?)
+) async throws -> (MemoryStageOneOutput, TokenUsage?) {
+    let rolloutItems = try await loadRolloutItems(rolloutPath)
+    let prompt = try buildMemoryStageOnePrompt(
+        modelInfo: modelInfo,
+        rolloutPath: rolloutPath,
+        rolloutCwd: rolloutCwd,
+        rolloutItems: rolloutItems
+    )
+    let result: String
+    let tokenUsage: TokenUsage?
+    do {
+        (result, tokenUsage) = try await streamPrompt(prompt)
+    } catch {
+        throw MemoryWritePhaseOneError.streamStageOnePrompt(String(describing: error))
+    }
+
+    var output = try JSONDecoder().decode(MemoryStageOneOutput.self, from: Data(result.utf8))
+    output.rawMemory = redactSecretsForMemories(output.rawMemory)
+    output.rolloutSummary = redactSecretsForMemories(output.rolloutSummary)
+    output.rolloutSlug = output.rolloutSlug.map(redactSecretsForMemories)
+    return (output, tokenUsage)
 }
 
 public func claimMemoryPhaseOneStartupJobs(
@@ -397,4 +467,32 @@ private func redactSecretsForMemories(_ input: String) -> String {
         /sk-[A-Za-z0-9]{20,}/,
         with: "[REDACTED_SECRET]"
     )
+}
+
+private func memoryRolloutItem(_ item: RolloutRecordItem) -> RolloutItem {
+    switch item {
+    case .sessionMeta:
+        return .sessionMeta
+    case let .responseItem(responseItem):
+        return .responseItem(responseItem)
+    case .compacted:
+        return .compacted
+    case .turnContext:
+        return .turnContext
+    case let .eventMsg(event):
+        return .eventMessage(RolloutPolicy.eventKind(for: event))
+    }
+}
+
+private func loadMemoryStageOneResource(name: String, subdirectory: String) -> String {
+    let url = Bundle.module.url(forResource: name, withExtension: "md", subdirectory: subdirectory)
+        ?? Bundle.module.url(forResource: name, withExtension: "md")
+    guard let url else {
+        preconditionFailure("Missing bundled memory write resource \(subdirectory)/\(name).md")
+    }
+    do {
+        return try String(contentsOf: url, encoding: .utf8)
+    } catch {
+        preconditionFailure("Unable to read bundled memory write resource \(url.path): \(error)")
+    }
 }

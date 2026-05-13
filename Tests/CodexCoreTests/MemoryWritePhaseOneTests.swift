@@ -44,6 +44,123 @@ final class MemoryWritePhaseOneTests: XCTestCase {
         """#.utf8)))
     }
 
+    func testStageOneSystemPromptLoadsBundledRustTemplate() {
+        XCTAssertTrue(memoryStageOneSystemPrompt.hasPrefix("## Memory Writing Agent: Phase 1 (Single Rollout)"))
+        XCTAssertTrue(memoryStageOneSystemPrompt.contains("Return exactly one JSON object with required keys:"))
+        XCTAssertTrue(memoryStageOneSystemPrompt.contains("No prose outside JSON."))
+    }
+
+    func testBuildMemoryStageOnePromptWrapsFilteredRolloutWithSchemaAndSystemPrompt() throws {
+        let prompt = try buildMemoryStageOnePrompt(
+            modelInfo: minimalModelInfo(),
+            rolloutPath: URL(fileURLWithPath: "/tmp/rollout.jsonl"),
+            rolloutCwd: URL(fileURLWithPath: "/repo"),
+            rolloutItems: [
+                .sessionMeta,
+                .responseItem(.message(role: "developer", content: [.inputText(text: "drop")])),
+                .responseItem(.message(role: "user", content: [.inputText(text: "keep")]))
+            ]
+        )
+
+        XCTAssertEqual(prompt.baseInstructionsOverride, memoryStageOneSystemPrompt)
+        XCTAssertEqual(prompt.outputSchema, memoryStageOneOutputSchema())
+        XCTAssertEqual(prompt.tools, [])
+        XCTAssertFalse(prompt.parallelToolCalls)
+        XCTAssertEqual(prompt.input.count, 1)
+        guard case let .message(_, role, content, _) = prompt.input[0],
+              case let .inputText(text) = content.first else {
+            return XCTFail("expected single user text message")
+        }
+        XCTAssertEqual(role, "user")
+        XCTAssertTrue(text.contains("rollout_path: /tmp/rollout.jsonl"))
+        XCTAssertTrue(text.contains("rollout_cwd: /repo"))
+        XCTAssertTrue(text.contains(#""role":"user""#))
+        XCTAssertTrue(text.contains("keep"))
+        XCTAssertFalse(text.contains("drop"))
+    }
+
+    func testSampleMemoryPhaseOneOutputStreamsDecodesAndRedactsLikeRust() async throws {
+        let secret = "sk-" + String(repeating: "B", count: 20)
+        let usage = TokenUsage(inputTokens: 3, outputTokens: 4, totalTokens: 7)
+        let streamedPrompts = PromptRecorder()
+
+        let (output, tokenUsage) = try await sampleMemoryPhaseOneOutput(
+            modelInfo: minimalModelInfo(),
+            rolloutPath: URL(fileURLWithPath: "/tmp/rollout.jsonl"),
+            rolloutCwd: URL(fileURLWithPath: "/repo"),
+            loadRolloutItems: { path in
+                XCTAssertEqual(path.path, "/tmp/rollout.jsonl")
+                return [
+                    .responseItem(.message(role: "user", content: [.inputText(text: "please remember")]))
+                ]
+            },
+            streamPrompt: { prompt in
+                await streamedPrompts.append(prompt)
+                return (#"""
+                {
+                  "raw_memory": "raw \#(secret)",
+                  "rollout_summary": "summary \#(secret)",
+                  "rollout_slug": "slug-\#(secret)"
+                }
+                """#, usage)
+            }
+        )
+
+        XCTAssertEqual(output, MemoryStageOneOutput(
+            rawMemory: "raw [REDACTED_SECRET]",
+            rolloutSummary: "summary [REDACTED_SECRET]",
+            rolloutSlug: "slug-[REDACTED_SECRET]"
+        ))
+        XCTAssertEqual(tokenUsage, usage)
+        let prompts = await streamedPrompts.prompts
+        XCTAssertEqual(prompts.count, 1)
+        XCTAssertEqual(prompts.first?.baseInstructionsOverride, memoryStageOneSystemPrompt)
+    }
+
+    func testSampleMemoryPhaseOneOutputWrapsStreamErrorsWithRustContext() async throws {
+        do {
+            _ = try await sampleMemoryPhaseOneOutput(
+                modelInfo: minimalModelInfo(),
+                rolloutPath: URL(fileURLWithPath: "/tmp/rollout.jsonl"),
+                rolloutCwd: URL(fileURLWithPath: "/repo"),
+                loadRolloutItems: { _ in [] },
+                streamPrompt: { _ in throw TestError("network down") }
+            )
+            XCTFail("expected error")
+        } catch {
+            XCTAssertEqual(
+                String(describing: error),
+                "failed to stream stage-1 memory prompt: network down"
+            )
+        }
+    }
+
+    func testLoadMemoryStageOneRolloutItemsReadsRecorderHistoryForSampling() throws {
+        let temp = try temporaryDirectory()
+        let recorder = try RolloutRecorder.create(
+            codexHome: temp,
+            cwd: URL(fileURLWithPath: "/repo"),
+            conversationID: ConversationId(),
+            source: .default,
+            originator: "codex",
+            cliVersion: "0.1.0",
+            modelProvider: "openai"
+        )
+        try recorder.recordItems([
+            .responseItem(.message(role: "user", content: [.inputText(text: "persist me")])),
+            .responseItem(.message(role: "developer", content: [.inputText(text: "later filtered")]))
+        ])
+        try recorder.shutdown()
+
+        let items = try loadMemoryStageOneRolloutItems(rolloutPath: recorder.rolloutPath)
+
+        XCTAssertEqual(items, [
+            .sessionMeta,
+            .responseItem(.message(role: "user", content: [.inputText(text: "persist me")])),
+            .responseItem(.message(role: "developer", content: [.inputText(text: "later filtered")]))
+        ])
+    }
+
     func testClassifiesMemoryExcludedFragmentsLikeRust() {
         XCTAssertTrue(isMemoryExcludedContextualUserFragment(.inputText(text: """
         # AGENTS.md instructions for /repo
@@ -533,6 +650,45 @@ private struct TestError: Error, CustomStringConvertible {
     init(_ description: String) {
         self.description = description
     }
+}
+
+private actor PromptRecorder {
+    private(set) var prompts: [Prompt] = []
+
+    func append(_ prompt: Prompt) {
+        prompts.append(prompt)
+    }
+}
+
+private func minimalModelInfo(
+    contextWindow: Int64? = 10_000,
+    maxContextWindow: Int64? = nil,
+    effectiveContextWindowPercent: Int64 = 95
+) -> ModelInfo {
+    ModelInfo(
+        slug: "gpt-5.4-mini",
+        displayName: "GPT-5.4 Mini",
+        supportedReasoningLevels: [],
+        shellType: .default,
+        visibility: .list,
+        supportedInAPI: true,
+        priority: 0,
+        supportsReasoningSummaries: false,
+        supportVerbosity: false,
+        truncationPolicy: .tokens(10_000),
+        supportsParallelToolCalls: true,
+        contextWindow: contextWindow,
+        maxContextWindow: maxContextWindow,
+        effectiveContextWindowPercent: effectiveContextWindowPercent,
+        experimentalSupportedTools: []
+    )
+}
+
+private func temporaryDirectory() throws -> URL {
+    let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("memory-phase-one-tests-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    return url
 }
 
 private func stage1Claim(
