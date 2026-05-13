@@ -620,9 +620,48 @@ public enum SeatbeltSandbox {
     }
 
     private static func canonicalPath(_ path: String) -> String {
-        URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
+        if path == "/tmp" || path.hasPrefix("/tmp/") {
+            return URL(fileURLWithPath: path).standardizedFileURL.path
+        }
+        guard let absolutePath = try? AbsolutePath(absolutePath: path),
+              let canonicalPath = canonicalizeSymlinks(absolutePath)
+        else {
+            return URL(fileURLWithPath: path).standardizedFileURL.path
+        }
+        return canonicalPath.path
     }
 
+    private static func canonicalizeSymlinks(_ path: AbsolutePath) -> AbsolutePath? {
+        var current = "/"
+        for component in path.path.split(separator: "/", omittingEmptySubsequences: true).map(String.init) {
+            let candidate = current == "/" ? "/\(component)" : "\(current)/\(component)"
+            if isSymbolicLink(atPath: candidate),
+               let destination = try? FileManager.default.destinationOfSymbolicLink(atPath: candidate)
+            {
+                if destination.hasPrefix("/") {
+                    if let destinationPath = try? AbsolutePath(absolutePath: destination),
+                       destinationPath != path,
+                       let canonicalDestination = canonicalizeSymlinks(destinationPath)
+                    {
+                        current = canonicalDestination.path
+                    } else {
+                        current = (try? AbsolutePath(absolutePath: destination))?.path ?? destination
+                    }
+                } else {
+                    let parent = (candidate as NSString).deletingLastPathComponent
+                    let base = parent.isEmpty ? "/" : parent
+                    current = (try? AbsolutePath.resolve(destination, against: base))?.path ?? candidate
+                }
+            } else {
+                current = candidate
+            }
+        }
+        return try? AbsolutePath(absolutePath: current)
+    }
+
+    private static func isSymbolicLink(atPath path: String) -> Bool {
+        (try? FileManager.default.attributesOfItem(atPath: path)[.type] as? FileAttributeType) == .typeSymbolicLink
+    }
 }
 
 private let macOSSeatbeltBasePolicy = #"""

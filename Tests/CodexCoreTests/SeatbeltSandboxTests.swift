@@ -51,10 +51,10 @@ final class SeatbeltSandboxTests: XCTestCase {
         XCTAssertTrue(policyText.contains(#"(require-not (subpath (param "WRITABLE_ROOT_0_RO_0")))"#))
         XCTAssertTrue(policyText.contains(#"(require-not (subpath (param "WRITABLE_ROOT_0_RO_1")))"#))
         XCTAssertTrue(policyText.contains(#"(subpath (param "WRITABLE_ROOT_1"))"#))
-        XCTAssertTrue(args.contains("-DWRITABLE_ROOT_0=\(writableRoot.path)"))
-        XCTAssertTrue(args.contains("-DWRITABLE_ROOT_0_RO_0=\(writableRoot.appendingPathComponent(".git").path)"))
-        XCTAssertTrue(args.contains("-DWRITABLE_ROOT_0_RO_1=\(writableRoot.appendingPathComponent(".codex").path)"))
-        XCTAssertTrue(args.contains("-DWRITABLE_ROOT_1=\(cwd.path)"))
+        XCTAssertTrue(args.contains("-DWRITABLE_ROOT_0=\(Self.expectedSeatbeltParamPath(writableRoot.path))"))
+        XCTAssertTrue(args.contains("-DWRITABLE_ROOT_0_RO_0=\(Self.expectedSeatbeltParamPath(writableRoot.appendingPathComponent(".git").path))"))
+        XCTAssertTrue(args.contains("-DWRITABLE_ROOT_0_RO_1=\(Self.expectedSeatbeltParamPath(writableRoot.appendingPathComponent(".codex").path))"))
+        XCTAssertTrue(args.contains("-DWRITABLE_ROOT_1=\(Self.expectedSeatbeltParamPath(cwd.path))"))
         XCTAssertEqual(Array(args.suffix(3)), ["--", "touch", "file"])
     }
 
@@ -119,7 +119,7 @@ final class SeatbeltSandboxTests: XCTestCase {
             policyText.contains(#"(allow network-outbound (remote unix-socket (subpath (param "UNIX_SOCKET_PATH_0"))))"#)
         )
         XCTAssertFalse(policyText.contains("(allow network-outbound (remote unix-socket))"))
-        XCTAssertTrue(args.contains("-DUNIX_SOCKET_PATH_0=\(socketRoot.path)"))
+        XCTAssertTrue(args.contains("-DUNIX_SOCKET_PATH_0=\(Self.expectedSeatbeltParamPath(socketRoot.path))"))
     }
 
     func testAllowUnixSocketsUseStableSortedDeduplicatedParamNames() throws {
@@ -140,8 +140,8 @@ final class SeatbeltSandboxTests: XCTestCase {
 
         let unixSocketParams = args.filter { $0.hasPrefix("-DUNIX_SOCKET_PATH_") }
         XCTAssertEqual(unixSocketParams, [
-            "-DUNIX_SOCKET_PATH_0=\(aSocketRoot.path)",
-            "-DUNIX_SOCKET_PATH_1=\(bSocketRoot.path)"
+            "-DUNIX_SOCKET_PATH_0=\(Self.expectedSeatbeltParamPath(aSocketRoot.path))",
+            "-DUNIX_SOCKET_PATH_1=\(Self.expectedSeatbeltParamPath(bSocketRoot.path))"
         ])
     }
 
@@ -165,7 +165,7 @@ final class SeatbeltSandboxTests: XCTestCase {
         XCTAssertTrue(
             policyText.contains(#"(allow network-outbound (remote unix-socket (subpath (param "UNIX_SOCKET_PATH_0"))))"#)
         )
-        XCTAssertTrue(args.contains("-DUNIX_SOCKET_PATH_0=\(socketRoot.path)"))
+        XCTAssertTrue(args.contains("-DUNIX_SOCKET_PATH_0=\(Self.expectedSeatbeltParamPath(socketRoot.path))"))
     }
 
     func testDirectFileSystemPolicyExcludesUnreadableRootsFromReadAndWrite() throws {
@@ -317,6 +317,19 @@ final class SeatbeltSandboxTests: XCTestCase {
             denialSummary,
             "\n=== Sandbox denials ===\n(bash) file-read-data /private/etc/passwd\n(sh) file-write-create /tmp/nope\n"
         )
+    }
+
+    private static func expectedSeatbeltParamPath(_ path: String) -> String {
+        if path == "/tmp" || path.hasPrefix("/tmp/") {
+            return path
+        }
+        if path == "/var" || path.hasPrefix("/var/"),
+           let destination = try? FileManager.default.destinationOfSymbolicLink(atPath: "/var")
+        {
+            let resolvedDestination = destination.hasPrefix("/") ? destination : "/\(destination)"
+            return resolvedDestination + String(path.dropFirst("/var".count))
+        }
+        return URL(fileURLWithPath: path).standardizedFileURL.path
     }
 }
 

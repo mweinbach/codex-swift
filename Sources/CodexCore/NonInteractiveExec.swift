@@ -700,6 +700,7 @@ public enum NonInteractiveExec {
         turnEnvironmentSelections: [TurnEnvironmentSelection]? = nil,
         configuredEnvironmentSnapshot: ConfiguredEnvironmentSnapshot? = nil,
         remoteEnvironmentFileSystems: [String: ExecServerRemoteFileSystem] = [:],
+        features: FeatureStates = .withDefaults(),
         execPolicyManager: ExecPolicyManager = ExecPolicyManager()
     ) async -> ResponseItem {
         await executeFunctionCallWithApproval(
@@ -720,6 +721,7 @@ public enum NonInteractiveExec {
             turnEnvironmentSelections: turnEnvironmentSelections,
             configuredEnvironmentSnapshot: configuredEnvironmentSnapshot,
             remoteEnvironmentFileSystems: remoteEnvironmentFileSystems,
+            features: features,
             execPolicyManager: execPolicyManager,
             approvalGranted: false
         )
@@ -743,6 +745,7 @@ public enum NonInteractiveExec {
         turnEnvironmentSelections: [TurnEnvironmentSelection]? = nil,
         configuredEnvironmentSnapshot: ConfiguredEnvironmentSnapshot? = nil,
         remoteEnvironmentFileSystems: [String: ExecServerRemoteFileSystem] = [:],
+        features: FeatureStates,
         execPolicyManager: ExecPolicyManager,
         approvalGranted: Bool
     ) async -> ResponseItem {
@@ -767,6 +770,7 @@ public enum NonInteractiveExec {
                 turnEnvironmentSelections: turnEnvironmentSelections,
                 configuredEnvironmentSnapshot: configuredEnvironmentSnapshot,
                 remoteEnvironmentFileSystems: remoteEnvironmentFileSystems,
+                features: features,
                 execPolicyManager: execPolicyManager,
                 approvalGranted: approvalGranted
             )
@@ -803,6 +807,7 @@ public enum NonInteractiveExec {
                 cwd: cwd,
                 approvalPolicy: approvalPolicy,
                 sandboxPolicy: sandboxPolicy,
+                features: features,
                 execPolicyManager: execPolicyManager,
                 approvalGranted: approvalGranted,
                 truncationPolicy: truncationPolicy,
@@ -861,6 +866,7 @@ public enum NonInteractiveExec {
         turnEnvironmentSelections: [TurnEnvironmentSelection]? = nil,
         configuredEnvironmentSnapshot: ConfiguredEnvironmentSnapshot? = nil,
         remoteEnvironmentFileSystems: [String: ExecServerRemoteFileSystem] = [:],
+        features: FeatureStates = .withDefaults(),
         execPolicyManager: ExecPolicyManager = ExecPolicyManager()
     ) async -> FunctionCallExecutionResult {
         let hookPayload = toolHookPayload(for: item)
@@ -887,6 +893,7 @@ public enum NonInteractiveExec {
                 sandboxPolicy: sandboxPolicy,
                 shell: shell,
                 allowLoginShell: allowLoginShell,
+                features: features,
                 execPolicyManager: execPolicyManager
             )
             var approvalGranted = false
@@ -933,6 +940,7 @@ public enum NonInteractiveExec {
                 turnEnvironmentSelections: turnEnvironmentSelections,
                 configuredEnvironmentSnapshot: configuredEnvironmentSnapshot,
                 remoteEnvironmentFileSystems: remoteEnvironmentFileSystems,
+                features: features,
                 execPolicyManager: execPolicyManager,
                 approvalGranted: approvalGranted
             )
@@ -976,6 +984,7 @@ public enum NonInteractiveExec {
             turnEnvironmentSelections: turnEnvironmentSelections,
             configuredEnvironmentSnapshot: configuredEnvironmentSnapshot,
             remoteEnvironmentFileSystems: remoteEnvironmentFileSystems,
+            features: features,
             execPolicyManager: execPolicyManager,
             approvalGranted: false
         )
@@ -1155,10 +1164,11 @@ public enum NonInteractiveExec {
         sandboxPolicy: SandboxPolicy,
         sandboxPermissions: SandboxPermissions,
         prefixRule: [String]?,
+        features: FeatureStates,
         execPolicyManager: ExecPolicyManager
     ) -> ExecApprovalRequirement {
         execPolicyManager.createExecApprovalRequirementForCommand(
-            features: .withDefaults(),
+            features: features,
             command: command,
             approvalPolicy: approvalPolicy,
             sandboxPolicy: sandboxPolicy,
@@ -1224,6 +1234,7 @@ public enum NonInteractiveExec {
         sandboxPolicy: SandboxPolicy,
         shell: Shell,
         allowLoginShell: Bool,
+        features: FeatureStates,
         execPolicyManager: ExecPolicyManager
     ) -> ShellApprovalHookContext? {
         let decoder = JSONDecoder()
@@ -1293,6 +1304,7 @@ public enum NonInteractiveExec {
                 sandboxPolicy: sandboxPolicy,
                 sandboxPermissions: sandboxPermissions,
                 prefixRule: prefixRule,
+                features: features,
                 execPolicyManager: execPolicyManager
             ),
             sandboxPermissions: sandboxPermissions
@@ -1318,6 +1330,7 @@ public enum NonInteractiveExec {
         turnEnvironmentSelections: [TurnEnvironmentSelection]?,
         configuredEnvironmentSnapshot: ConfiguredEnvironmentSnapshot?,
         remoteEnvironmentFileSystems: [String: ExecServerRemoteFileSystem],
+        features: FeatureStates,
         execPolicyManager: ExecPolicyManager,
         approvalGranted: Bool
     ) async -> ResponseItem {
@@ -1344,6 +1357,7 @@ public enum NonInteractiveExec {
                     cwd: cwd,
                     approvalPolicy: approvalPolicy,
                     sandboxPolicy: sandboxPolicy,
+                    features: features,
                     execPolicyManager: execPolicyManager,
                     approvalGranted: approvalGranted,
                     truncationPolicy: params.maxOutputTokens.map { .tokens($0) } ?? truncationPolicy,
@@ -1371,6 +1385,7 @@ public enum NonInteractiveExec {
                     cwd: cwd,
                     approvalPolicy: approvalPolicy,
                     sandboxPolicy: sandboxPolicy,
+                    features: features,
                     execPolicyManager: execPolicyManager,
                     approvalGranted: approvalGranted,
                     truncationPolicy: truncationPolicy,
@@ -1395,6 +1410,7 @@ public enum NonInteractiveExec {
                     cwd: cwd,
                     approvalPolicy: approvalPolicy,
                     sandboxPolicy: sandboxPolicy,
+                    features: features,
                     execPolicyManager: execPolicyManager,
                     approvalGranted: approvalGranted,
                     truncationPolicy: truncationPolicy,
@@ -1669,6 +1685,176 @@ public enum NonInteractiveExec {
         return cwd.appendingPathComponent(path, isDirectory: false).standardizedFileURL
     }
 
+    private static func normalizeAndValidateAdditionalPermissions(
+        features: FeatureStates,
+        approvalPolicy: AskForApproval,
+        sandboxPermissions: SandboxPermissions,
+        additionalPermissions: RequestPermissionProfile?
+    ) throws -> RequestPermissionProfile? {
+        let usesAdditionalPermissions = sandboxPermissions.usesAdditionalPermissions
+        if !features.isEnabled(.execPermissionApprovals),
+           usesAdditionalPermissions || additionalPermissions != nil
+        {
+            throw FunctionCallError.respondToModel(
+                "additional permissions are disabled; enable `features.exec_permission_approvals` before using `with_additional_permissions`"
+            )
+        }
+
+        if usesAdditionalPermissions {
+            if approvalPolicy != .onRequest {
+                throw FunctionCallError.respondToModel(
+                    "approval policy is \(rustDebugApprovalPolicy(approvalPolicy)); reject command — you cannot request additional permissions unless the approval policy is OnRequest"
+                )
+            }
+            guard let additionalPermissions else {
+                throw FunctionCallError.respondToModel(
+                    "missing `additional_permissions`; provide at least one of `network` or `file_system` when using `with_additional_permissions`"
+                )
+            }
+            let normalized = try normalizeAdditionalPermissions(additionalPermissions)
+            guard !normalized.isEmpty else {
+                throw FunctionCallError.respondToModel(
+                    "`additional_permissions` must include at least one requested permission in `network` or `file_system`"
+                )
+            }
+            return normalized
+        }
+
+        if additionalPermissions != nil {
+            throw FunctionCallError.respondToModel(
+                "`additional_permissions` requires `sandbox_permissions` set to `with_additional_permissions`"
+            )
+        }
+        return nil
+    }
+
+    private static func rustDebugApprovalPolicy(_ approvalPolicy: AskForApproval) -> String {
+        switch approvalPolicy {
+        case .unlessTrusted:
+            return "UnlessTrusted"
+        case .onFailure:
+            return "OnFailure"
+        case .onRequest:
+            return "OnRequest"
+        case .granular:
+            return "Granular"
+        case .never:
+            return "Never"
+        }
+    }
+
+    private static func normalizeAdditionalPermissions(
+        _ additionalPermissions: RequestPermissionProfile
+    ) throws -> RequestPermissionProfile {
+        let network = additionalPermissions.network?.enabled == true
+            ? RequestPermissionNetworkPermissions(enabled: true)
+            : nil
+        let fileSystem = try normalizeAdditionalFileSystemPermissions(additionalPermissions.fileSystem)
+        return RequestPermissionProfile(network: network, fileSystem: fileSystem)
+    }
+
+    private static func normalizeAdditionalFileSystemPermissions(
+        _ fileSystem: FileSystemPermissions?
+    ) throws -> FileSystemPermissions? {
+        guard let fileSystem else {
+            return nil
+        }
+
+        var entries: [FileSystemSandboxEntry] = []
+        entries.reserveCapacity(fileSystem.entries.count)
+        for entry in fileSystem.entries {
+            if case .globPattern = entry.path, entry.access != .none {
+                throw FunctionCallError.respondToModel(
+                    "glob file system permissions only support deny-read entries"
+                )
+            }
+
+            let normalizedPath: FileSystemPath
+            switch entry.path {
+            case let .path(path):
+                normalizedPath = .path(canonicalizedAdditionalPermissionPath(path))
+            case let .globPattern(pattern):
+                normalizedPath = .globPattern(pattern)
+            case let .special(value):
+                normalizedPath = .special(value)
+            }
+
+            let normalizedEntry = FileSystemSandboxEntry(path: normalizedPath, access: entry.access)
+            if !entries.contains(normalizedEntry) {
+                entries.append(normalizedEntry)
+            }
+        }
+
+        let normalized = FileSystemPermissions(
+            entries: entries,
+            globScanMaxDepth: fileSystem.globScanMaxDepth
+        )
+        return normalized.isEmpty ? nil : normalized
+    }
+
+    private static func canonicalizedAdditionalPermissionPath(_ path: String) -> String {
+        guard (path as NSString).isAbsolutePath else {
+            return path
+        }
+        return URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
+    }
+
+    private static func effectiveSandboxPolicy(
+        base sandboxPolicy: SandboxPolicy,
+        cwd: URL,
+        additionalPermissions: RequestPermissionProfile?
+    ) throws -> SandboxPolicy {
+        guard let additionalPermissions, !additionalPermissions.isEmpty else {
+            return sandboxPolicy
+        }
+
+        let cwdPath = cwd.standardizedFileURL.path
+        let fileSystemPolicy = effectiveFileSystemSandboxPolicy(
+            base: FileSystemSandboxPolicy.fromLegacySandboxPolicyForCwd(sandboxPolicy, cwd: cwdPath),
+            additionalFileSystem: additionalPermissions.fileSystem
+        )
+        let networkPolicy = effectiveNetworkSandboxPolicy(
+            base: NetworkSandboxPolicy.fromLegacySandboxPolicy(sandboxPolicy),
+            additionalPermissions: additionalPermissions
+        )
+        do {
+            return try fileSystemPolicy.toLegacySandboxPolicy(networkPolicy: networkPolicy, cwd: cwdPath)
+        } catch {
+            throw FunctionCallError.respondToModel(
+                "unable to apply `additional_permissions`: \(String(describing: error))"
+            )
+        }
+    }
+
+    private static func effectiveFileSystemSandboxPolicy(
+        base fileSystemPolicy: FileSystemSandboxPolicy,
+        additionalFileSystem: FileSystemPermissions?
+    ) -> FileSystemSandboxPolicy {
+        guard let additionalFileSystem, !additionalFileSystem.isEmpty else {
+            return fileSystemPolicy
+        }
+
+        guard case let .restricted(entries, globScanMaxDepth) = fileSystemPolicy else {
+            return fileSystemPolicy
+        }
+
+        let merged = FileSystemPermissions.mergeAdditionalPermissions(
+            base: FileSystemPermissions(entries: entries, globScanMaxDepth: globScanMaxDepth),
+            permissions: additionalFileSystem
+        ) ?? FileSystemPermissions(entries: entries, globScanMaxDepth: globScanMaxDepth)
+        return .restricted(entries: merged.entries, globScanMaxDepth: merged.globScanMaxDepth)
+    }
+
+    private static func effectiveNetworkSandboxPolicy(
+        base networkPolicy: NetworkSandboxPolicy,
+        additionalPermissions: RequestPermissionProfile
+    ) -> NetworkSandboxPolicy {
+        if networkPolicy.isEnabled || additionalPermissions.network?.enabled == true {
+            return .enabled
+        }
+        return .restricted
+    }
+
     private static func executeShellCommand(
         toolName: String,
         command: [String],
@@ -1677,11 +1863,12 @@ public enum NonInteractiveExec {
         timeoutMS: UInt64?,
         sandboxPermissions: SandboxPermissions,
         prefixRule: [String]?,
-        additionalPermissions _: RequestPermissionProfile?,
+        additionalPermissions: RequestPermissionProfile?,
         callID: String,
         cwd: URL,
         approvalPolicy: AskForApproval,
         sandboxPolicy: SandboxPolicy,
+        features: FeatureStates,
         execPolicyManager: ExecPolicyManager,
         approvalGranted: Bool,
         truncationPolicy: TruncationPolicy,
@@ -1690,12 +1877,38 @@ public enum NonInteractiveExec {
         explicitEnvOverrides: [String: String],
         responseFormat: ShellResponseFormat
     ) async -> ResponseItem {
+        guard !command.isEmpty else {
+            return functionOutput(callID: callID, content: "\(toolName) command is empty", success: false)
+        }
+
+        let commandCwd = resolveWorkdir(workdir, relativeTo: cwd)
+        let normalizedAdditionalPermissions: RequestPermissionProfile?
+        let commandSandboxPolicy: SandboxPolicy
+        do {
+            normalizedAdditionalPermissions = try normalizeAndValidateAdditionalPermissions(
+                features: features,
+                approvalPolicy: approvalPolicy,
+                sandboxPermissions: sandboxPermissions,
+                additionalPermissions: additionalPermissions
+            )
+            commandSandboxPolicy = try effectiveSandboxPolicy(
+                base: sandboxPolicy,
+                cwd: commandCwd,
+                additionalPermissions: normalizedAdditionalPermissions
+            )
+        } catch let error as FunctionCallError {
+            return functionOutput(callID: callID, content: error.description, success: false)
+        } catch {
+            return functionOutput(callID: callID, content: String(describing: error), success: false)
+        }
+
         let approvalRequirement = shellApprovalRequirement(
             command: command,
             approvalPolicy: approvalPolicy,
             sandboxPolicy: sandboxPolicy,
             sandboxPermissions: sandboxPermissions,
             prefixRule: prefixRule,
+            features: features,
             execPolicyManager: execPolicyManager
         )
         if let rejection = shellApprovalRejection(
@@ -1711,11 +1924,6 @@ public enum NonInteractiveExec {
             )
         }
 
-        guard !command.isEmpty else {
-            return functionOutput(callID: callID, content: "\(toolName) command is empty", success: false)
-        }
-
-        let commandCwd = resolveWorkdir(workdir, relativeTo: cwd)
         let childEnvironment = ExecEnvironment.createEnv(policy: shellEnvironmentPolicy, environment: environment)
         switch maybeParseApplyPatchVerified(command, cwd: commandCwd) {
         case let .body(action):
@@ -1723,7 +1931,7 @@ public enum NonInteractiveExec {
                 patch: action.patch,
                 cwd: URL(fileURLWithPath: action.cwd, isDirectory: true),
                 approvalPolicy: approvalPolicy,
-                sandboxPolicy: sandboxPolicy,
+                sandboxPolicy: commandSandboxPolicy,
                 environment: environment
             )
             let output = ExecToolCallOutput(
@@ -1771,7 +1979,7 @@ public enum NonInteractiveExec {
                 sandboxPolicy: shouldBypassSandbox(
                     sandboxPermissions: sandboxPermissions,
                     approvalRequirement: approvalRequirement
-                ) ? .dangerFullAccess : sandboxPolicy,
+                ) ? .dangerFullAccess : commandSandboxPolicy,
                 timeoutMS: timeoutMS,
                 environment: childEnvironment
             )
@@ -1791,11 +1999,12 @@ public enum NonInteractiveExec {
         timeoutMS: UInt64?,
         sandboxPermissions: SandboxPermissions,
         prefixRule: [String]?,
-        additionalPermissions _: RequestPermissionProfile?,
+        additionalPermissions: RequestPermissionProfile?,
         callID: String,
         cwd: URL,
         approvalPolicy: AskForApproval,
         sandboxPolicy: SandboxPolicy,
+        features: FeatureStates,
         execPolicyManager: ExecPolicyManager,
         approvalGranted: Bool,
         truncationPolicy: TruncationPolicy,
@@ -1803,12 +2012,38 @@ public enum NonInteractiveExec {
         shellEnvironmentPolicy: ShellEnvironmentPolicy,
         explicitEnvOverrides: [String: String]
     ) async -> ResponseItem {
+        guard !command.isEmpty else {
+            return functionOutput(callID: callID, content: "exec_command command is empty", success: false)
+        }
+
+        let commandCwd = resolveWorkdir(workdir, relativeTo: cwd)
+        let normalizedAdditionalPermissions: RequestPermissionProfile?
+        let commandSandboxPolicy: SandboxPolicy
+        do {
+            normalizedAdditionalPermissions = try normalizeAndValidateAdditionalPermissions(
+                features: features,
+                approvalPolicy: approvalPolicy,
+                sandboxPermissions: sandboxPermissions,
+                additionalPermissions: additionalPermissions
+            )
+            commandSandboxPolicy = try effectiveSandboxPolicy(
+                base: sandboxPolicy,
+                cwd: commandCwd,
+                additionalPermissions: normalizedAdditionalPermissions
+            )
+        } catch let error as FunctionCallError {
+            return functionOutput(callID: callID, content: error.description, success: false)
+        } catch {
+            return functionOutput(callID: callID, content: String(describing: error), success: false)
+        }
+
         let approvalRequirement = shellApprovalRequirement(
             command: command,
             approvalPolicy: approvalPolicy,
             sandboxPolicy: sandboxPolicy,
             sandboxPermissions: sandboxPermissions,
             prefixRule: prefixRule,
+            features: features,
             execPolicyManager: execPolicyManager
         )
         if let rejection = shellApprovalRejection(
@@ -1824,11 +2059,6 @@ public enum NonInteractiveExec {
             )
         }
 
-        guard !command.isEmpty else {
-            return functionOutput(callID: callID, content: "exec_command command is empty", success: false)
-        }
-
-        let commandCwd = resolveWorkdir(workdir, relativeTo: cwd)
         let childEnvironment = ExecEnvironment.createEnv(policy: shellEnvironmentPolicy, environment: environment)
         let command = sessionShell.map {
             ShellSnapshotCommandWrapper.maybeWrapShellLCWithSnapshot(
@@ -1846,7 +2076,7 @@ public enum NonInteractiveExec {
                 sandboxPolicy: shouldBypassSandbox(
                     sandboxPermissions: sandboxPermissions,
                     approvalRequirement: approvalRequirement
-                ) ? .dangerFullAccess : sandboxPolicy,
+                ) ? .dangerFullAccess : commandSandboxPolicy,
                 yieldTimeMS: UnifiedExecTiming.clampInitialYieldTimeMS(timeoutMS ?? 10_000),
                 truncationPolicy: truncationPolicy,
                 environment: childEnvironment

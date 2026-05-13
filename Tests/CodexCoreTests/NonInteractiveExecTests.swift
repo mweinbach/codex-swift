@@ -1921,6 +1921,233 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertTrue(payload.content.contains("reject command"))
     }
 
+    func testAdditionalPermissionsDisabledRejectsWithRustMessage() async throws {
+        let item = ResponseItem.functionCall(
+            name: "shell_command",
+            arguments: #"{"command":"echo no","login":false,"sandbox_permissions":"with_additional_permissions","additional_permissions":{"network":{"enabled":true}}}"#,
+            callID: "call-additional-disabled"
+        )
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            item,
+            cwd: URL(fileURLWithPath: "/tmp", isDirectory: true),
+            approvalPolicy: .onRequest,
+            sandboxPolicy: .readOnly,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: ["PATH": "/bin:/usr/bin"]
+        )
+
+        guard case let .functionCallOutput(callID, payload) = output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-additional-disabled")
+        XCTAssertEqual(payload.success, false)
+        XCTAssertEqual(
+            payload.content,
+            "additional permissions are disabled; enable `features.exec_permission_approvals` before using `with_additional_permissions`"
+        )
+    }
+
+    func testAdditionalPermissionsRequireWithAdditionalSandboxPermissionLikeRust() async throws {
+        let item = ResponseItem.functionCall(
+            name: "exec_command",
+            arguments: #"{"cmd":"echo no","login":false,"yield_time_ms":1000,"additional_permissions":{"network":{"enabled":true}}}"#,
+            callID: "call-additional-requires-sandbox-permission"
+        )
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            item,
+            cwd: URL(fileURLWithPath: "/tmp", isDirectory: true),
+            approvalPolicy: .onRequest,
+            sandboxPolicy: .readOnly,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: ["PATH": "/bin:/usr/bin"],
+            features: Self.execPermissionApprovalFeatures()
+        )
+
+        guard case let .functionCallOutput(callID, payload) = output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-additional-requires-sandbox-permission")
+        XCTAssertEqual(payload.success, false)
+        XCTAssertEqual(
+            payload.content,
+            "`additional_permissions` requires `sandbox_permissions` set to `with_additional_permissions`"
+        )
+    }
+
+    func testAdditionalPermissionsRequireNonEmptyProfileLikeRust() async throws {
+        let item = ResponseItem.functionCall(
+            name: "shell_command",
+            arguments: #"{"command":"echo no","login":false,"sandbox_permissions":"with_additional_permissions","additional_permissions":{}}"#,
+            callID: "call-additional-empty"
+        )
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            item,
+            cwd: URL(fileURLWithPath: "/tmp", isDirectory: true),
+            approvalPolicy: .onRequest,
+            sandboxPolicy: .readOnly,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: ["PATH": "/bin:/usr/bin"],
+            features: Self.execPermissionApprovalFeatures()
+        )
+
+        guard case let .functionCallOutput(callID, payload) = output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-additional-empty")
+        XCTAssertEqual(payload.success, false)
+        XCTAssertEqual(
+            payload.content,
+            "`additional_permissions` must include at least one requested permission in `network` or `file_system`"
+        )
+    }
+
+    func testAdditionalPermissionsRejectNonDenyGlobGrantsLikeRust() async throws {
+        let pattern = try Self.jsonString("/tmp/**/*.secret")
+        let item = ResponseItem.functionCall(
+            name: "shell_command",
+            arguments: #"{"command":"echo no","login":false,"sandbox_permissions":"with_additional_permissions","additional_permissions":{"file_system":{"entries":[{"path":{"type":"glob_pattern","pattern":\#(pattern)},"access":"read"}]}}}"#,
+            callID: "call-additional-glob-grant"
+        )
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            item,
+            cwd: URL(fileURLWithPath: "/tmp", isDirectory: true),
+            approvalPolicy: .onRequest,
+            sandboxPolicy: .readOnly,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: ["PATH": "/bin:/usr/bin"],
+            features: Self.execPermissionApprovalFeatures()
+        )
+
+        guard case let .functionCallOutput(callID, payload) = output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-additional-glob-grant")
+        XCTAssertEqual(payload.success, false)
+        XCTAssertEqual(payload.content, "glob file system permissions only support deny-read entries")
+    }
+
+    func testAdditionalPermissionsWidenNetworkSandboxLikeRust() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let command = try Self.jsonString(#"printf '%s' "${CODEX_SANDBOX_NETWORK_DISABLED-unset}""#)
+        let item = ResponseItem.functionCall(
+            name: "shell_command",
+            arguments: #"{"command":\#(command),"login":false,"sandbox_permissions":"with_additional_permissions","additional_permissions":{"network":{"enabled":true}}}"#,
+            callID: "call-additional-network"
+        )
+
+        let result = await NonInteractiveExec.executeFunctionCallWithHooks(
+            item,
+            handlers: [try Self.allowPermissionRequestHook()],
+            conversationID: ConversationId(),
+            turnID: "turn-1",
+            cwd: temp.url,
+            model: "gpt-test",
+            approvalPolicy: .onRequest,
+            sandboxPolicy: .readOnly,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: ["PATH": "/bin:/usr/bin", "HOME": temp.url.path],
+            features: Self.execPermissionApprovalFeatures()
+        )
+
+        guard case let .functionCallOutput(callID, payload) = result.output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-additional-network")
+        XCTAssertEqual(payload.success, true, payload.content)
+        XCTAssertTrue(payload.content.contains("Output:\nunset"), payload.content)
+    }
+
+    func testAdditionalPermissionsWidenShellCommandSandboxLikeRust() async throws {
+        let workspace = try NonInteractiveExecTemporaryDirectory()
+        let outside = try NonInteractiveExecTemporaryDirectory()
+        let allowedFile = outside.url.appendingPathComponent("allowed-shell.txt")
+        let commandPath = allowedFile.resolvingSymlinksInPath().standardizedFileURL.path
+        let command = try Self.jsonString("printf shell-ok > '\(commandPath)'")
+        let outsidePath = try Self.jsonString(outside.url.path)
+        let item = ResponseItem.functionCall(
+            name: "shell_command",
+            arguments: #"{"command":\#(command),"login":false,"sandbox_permissions":"with_additional_permissions","additional_permissions":{"file_system":{"write":[\#(outsidePath)]}}}"#,
+            callID: "call-additional-shell-write"
+        )
+
+        let result = await NonInteractiveExec.executeFunctionCallWithHooks(
+            item,
+            handlers: [try Self.allowPermissionRequestHook()],
+            conversationID: ConversationId(),
+            turnID: "turn-1",
+            cwd: workspace.url,
+            model: "gpt-test",
+            approvalPolicy: .onRequest,
+            sandboxPolicy: .workspaceWrite(
+                writableRoots: [],
+                networkAccess: false,
+                excludeTmpdirEnvVar: true,
+                excludeSlashTmp: true
+            ),
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: ["PATH": "/bin:/usr/bin", "HOME": workspace.url.path],
+            features: Self.execPermissionApprovalFeatures()
+        )
+
+        guard case let .functionCallOutput(callID, payload) = result.output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-additional-shell-write")
+        XCTAssertEqual(payload.success, true, payload.content)
+        XCTAssertEqual(try String(contentsOf: allowedFile, encoding: .utf8), "shell-ok")
+    }
+
+    func testAdditionalPermissionsWidenUnifiedExecSandboxLikeRust() async throws {
+        let workspace = try NonInteractiveExecTemporaryDirectory()
+        let outside = try NonInteractiveExecTemporaryDirectory()
+        let allowedFile = outside.url.appendingPathComponent("allowed-exec.txt")
+        let commandPath = allowedFile.resolvingSymlinksInPath().standardizedFileURL.path
+        let command = try Self.jsonString("printf exec-ok > '\(commandPath)'")
+        let outsidePath = try Self.jsonString(outside.url.path)
+        let item = ResponseItem.functionCall(
+            name: "exec_command",
+            arguments: #"{"cmd":\#(command),"login":false,"yield_time_ms":1000,"sandbox_permissions":"with_additional_permissions","additional_permissions":{"file_system":{"write":[\#(outsidePath)]}}}"#,
+            callID: "call-additional-exec-write"
+        )
+
+        let result = await NonInteractiveExec.executeFunctionCallWithHooks(
+            item,
+            handlers: [try Self.allowPermissionRequestHook()],
+            conversationID: ConversationId(),
+            turnID: "turn-1",
+            cwd: workspace.url,
+            model: "gpt-test",
+            approvalPolicy: .onRequest,
+            sandboxPolicy: .workspaceWrite(
+                writableRoots: [],
+                networkAccess: false,
+                excludeTmpdirEnvVar: true,
+                excludeSlashTmp: true
+            ),
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: ["PATH": "/bin:/usr/bin", "HOME": workspace.url.path],
+            features: Self.execPermissionApprovalFeatures()
+        )
+
+        guard case let .functionCallOutput(callID, payload) = result.output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-additional-exec-write")
+        XCTAssertEqual(payload.success, true, payload.content)
+        XCTAssertEqual(try String(contentsOf: allowedFile, encoding: .utf8), "exec-ok")
+    }
+
     func testApplyPatchFunctionCallIsNoLongerExecutable() async throws {
         let temp = try NonInteractiveExecTemporaryDirectory()
         let patch = """
@@ -2752,6 +2979,23 @@ private extension NonInteractiveExecTests {
     static func jsonString(_ value: String) throws -> String {
         let data = try JSONEncoder().encode(value)
         return String(decoding: data, as: UTF8.self)
+    }
+
+    static func execPermissionApprovalFeatures() -> FeatureStates {
+        var features = FeatureStates.withDefaults()
+        features.set(.execPermissionApprovals, enabled: true)
+        return features
+    }
+
+    static func allowPermissionRequestHook() throws -> ConfiguredHookHandler {
+        ConfiguredHookHandler(
+            eventName: .permissionRequest,
+            matcher: "Bash",
+            command: #"printf %s '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}'"#,
+            timeoutSec: 5,
+            sourcePath: try AbsolutePath(absolutePath: "/tmp/hooks.json"),
+            displayOrder: 0
+        )
     }
 
     @discardableResult
