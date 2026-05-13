@@ -10060,6 +10060,31 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(summary["enabled"] as? Bool, false)
     }
 
+    func testPluginReadAcceptsLegacyStringDefaultPromptLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let sourceRoot = try makeLocalMarketplaceRootWithPlugin(named: "debug", pluginName: "weather", in: temp.url)
+        let marketplacePath = sourceRoot.appendingPathComponent(".agents/plugins/marketplace.json", isDirectory: false).path
+        let pluginManifest = sourceRoot.appendingPathComponent("plugins/weather/.codex-plugin/plugin.json", isDirectory: false)
+        try """
+        {
+          "name": "weather",
+          "interface": {
+            "defaultPrompt": "Starter prompt for trying a plugin"
+          }
+        }
+        """.write(to: pluginManifest, atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/read","params":{"marketplacePath":\#(jsonString(marketplacePath)),"pluginName":"weather"}}"#,
+            codexHome: temp.url
+        )
+
+        let plugin = try XCTUnwrap((response["result"] as? [String: Any])?["plugin"] as? [String: Any])
+        let summary = try XCTUnwrap(plugin["summary"] as? [String: Any])
+        let interface = try XCTUnwrap(summary["interface"] as? [String: Any])
+        XCTAssertEqual(interface["defaultPrompt"] as? [String], ["Starter prompt for trying a plugin"])
+    }
+
     func testPluginReadAppliesNamespacedSkillConfigRulesLikeRust() throws {
         let temp = try TemporaryDirectory()
         let sourceRoot = try makeLocalMarketplaceRootWithPlugin(named: "debug", pluginName: "weather", in: temp.url)

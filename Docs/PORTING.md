@@ -1221,6 +1221,8 @@ Source baseline inspected for this scaffold:
   - tightened Swift `thread/goal/set` optional field decoding to match Rust serde semantics for `objective`, `status`, and `tokenBudget`: explicit `status: null` now behaves like omission, malformed optional strings/enums/integers return Rust-shaped invalid-request errors, and explicit `tokenBudget: null` remains a budget clear rather than a preserve operation.
 - `codex-rs/shell-command/src/parse_command.rs` / `codex-rs/protocol/src/models.rs` parity pins
   - added Swift regression coverage for Rust's `rg --files | head -n 50` parser simplification and image-generation response items that omit `revised_prompt`, preserving the existing Swift behavior while closing the upstream test-matrix gap.
+- `codex-rs/app-server/tests/suite/v2/plugin_read.rs` legacy plugin default prompt
+  - matched Rust's local plugin manifest compatibility for legacy string `interface.defaultPrompt`, normalizing it to the one-item `defaultPrompt` array returned by `plugin/read`.
 
 ## Known Gaps
 

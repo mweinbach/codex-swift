@@ -7169,7 +7169,7 @@ public enum CodexAppServer {
             "websiteUrl": nullable(interface["websiteUrl"] as? String ?? interface["websiteURL"] as? String),
             "privacyPolicyUrl": nullable(interface["privacyPolicyUrl"] as? String ?? interface["privacyPolicyURL"] as? String),
             "termsOfServiceUrl": nullable(interface["termsOfServiceUrl"] as? String ?? interface["termsOfServiceURL"] as? String),
-            "defaultPrompt": nullable(interface["defaultPrompt"] as? [String]),
+            "defaultPrompt": nullable(pluginDefaultPrompt(interface["defaultPrompt"])),
             "brandColor": nullable(interface["brandColor"] as? String),
             "composerIcon": nullable((interface["composerIcon"] as? String).flatMap { pluginAssetPath($0, pluginRoot: pluginRoot) }),
             "composerIconUrl": NSNull(),
@@ -7178,6 +7178,16 @@ public enum CodexAppServer {
             "screenshots": screenshots,
             "screenshotUrls": []
         ].nullStripped()
+    }
+
+    private static func pluginDefaultPrompt(_ value: Any?) -> [String]? {
+        if let prompts = value as? [String] {
+            return prompts
+        }
+        if let prompt = value as? String {
+            return [prompt]
+        }
+        return nil
     }
 
     private static func pluginAssetPath(_ rawPath: String, pluginRoot: URL) -> String? {
