@@ -25,7 +25,17 @@ public enum MemoryPhaseTwoClaimError: String, Error, Equatable, CustomStringConv
     public var description: String { rawValue }
 }
 
+/// Storage boundary used by the Phase 2 memory consolidation runner.
+///
+/// `SQLiteAgentGraphStore` is the production implementation; tests can provide in-memory actors.
+/// Callers may rely on implementations preserving Rust's ownership-token semantics across
+/// claim, failure, success, and selected-output snapshot updates.
 public protocol MemoryPhaseTwoJobStore: Sendable {
+    func getPhase2InputSelection(
+        limit: Int,
+        maxUnusedDays: Int64
+    ) async throws -> [Stage1Output]
+
     func tryClaimGlobalPhase2Job(
         threadID: ThreadId,
         leaseSeconds: Int64
@@ -100,6 +110,38 @@ public typealias MemoryWriteCounterRecorder = @Sendable (
     _ increment: Int64,
     _ labels: [(String, String)]
 ) -> Void
+
+public struct MemoryPhaseTwoConsolidationRequest: Equatable, Sendable {
+    public let claim: MemoryPhaseTwoClaim
+    public let completionWatermark: Int64
+    public let selectedOutputs: [Stage1Output]
+    public let agentConfig: CodexRuntimeConfig
+    public let prompt: [UserInput]
+    public let workspaceDiff: MemoryWorkspaceDiff
+
+    public init(
+        claim: MemoryPhaseTwoClaim,
+        completionWatermark: Int64,
+        selectedOutputs: [Stage1Output],
+        agentConfig: CodexRuntimeConfig,
+        prompt: [UserInput],
+        workspaceDiff: MemoryWorkspaceDiff
+    ) {
+        self.claim = claim
+        self.completionWatermark = completionWatermark
+        self.selectedOutputs = selectedOutputs
+        self.agentConfig = agentConfig
+        self.prompt = prompt
+        self.workspaceDiff = workspaceDiff
+    }
+}
+
+public enum MemoryPhaseTwoPreparationOutcome: Equatable, Sendable {
+    case skipped(String)
+    case failed(String)
+    case succeededNoWorkspaceChanges
+    case readyToSpawn(MemoryPhaseTwoConsolidationRequest)
+}
 
 public func memoryRoot(codexHome: URL) -> URL {
     codexHome.appendingPathComponent("memories", isDirectory: true)
@@ -250,4 +292,157 @@ public func buildMemoryConsolidationAgentConfig(
 
 public func buildMemoryConsolidationAgentPrompt(memoryRoot root: URL) -> [UserInput] {
     [.text(buildConsolidationPrompt(memoryRoot: root))]
+}
+
+public func prepareMemoryPhaseTwoConsolidation(
+    threadID: ThreadId,
+    store: MemoryPhaseTwoJobStore,
+    config: CodexRuntimeConfig,
+    codexHome: URL,
+    now: Date = Date(),
+    recordCounter: MemoryWriteCounterRecorder? = nil
+) async -> MemoryPhaseTwoPreparationOutcome {
+    let root = memoryRoot(codexHome: codexHome)
+    let claim: MemoryPhaseTwoClaim
+    do {
+        claim = try await claimMemoryPhaseTwoJob(
+            threadID: threadID,
+            store: store,
+            recordCounter: recordCounter
+        )
+    } catch let error as MemoryPhaseTwoClaimError {
+        recordCounter?(MemoryWriteMetrics.phaseTwoJobs, 1, [("status", error.description)])
+        return .skipped(error.description)
+    } catch {
+        recordCounter?(MemoryWriteMetrics.phaseTwoJobs, 1, [("status", MemoryPhaseTwoClaimError.failedClaim.description)])
+        return .skipped(MemoryPhaseTwoClaimError.failedClaim.description)
+    }
+
+    do {
+        try prepareMemoryWorkspace(root: root)
+    } catch {
+        await recordMemoryPhaseTwoPreparationFailure(
+            store: store,
+            claim: claim,
+            reason: "failed_prepare_workspace",
+            recordCounter: recordCounter
+        )
+        return .failed("failed_prepare_workspace")
+    }
+
+    let agentConfig: CodexRuntimeConfig
+    do {
+        agentConfig = try buildMemoryConsolidationAgentConfig(from: config, codexHome: codexHome)
+    } catch {
+        await recordMemoryPhaseTwoPreparationFailure(
+            store: store,
+            claim: claim,
+            reason: "failed_sandbox_policy",
+            recordCounter: recordCounter
+        )
+        return .failed("failed_sandbox_policy")
+    }
+
+    let rawMemories: [Stage1Output]
+    do {
+        rawMemories = try await store.getPhase2InputSelection(
+            limit: config.memories.maxRawMemoriesForConsolidation,
+            maxUnusedDays: config.memories.maxUnusedDays
+        )
+    } catch {
+        await recordMemoryPhaseTwoPreparationFailure(
+            store: store,
+            claim: claim,
+            reason: "failed_load_stage1_outputs",
+            recordCounter: recordCounter
+        )
+        return .failed("failed_load_stage1_outputs")
+    }
+    let completionWatermark = phaseTwoWatermark(claimedWatermark: claim.watermark, latestMemories: rawMemories)
+
+    do {
+        try syncPhaseTwoWorkspaceInputs(root: root, rawMemories: rawMemories, now: now)
+    } catch {
+        await recordMemoryPhaseTwoPreparationFailure(
+            store: store,
+            claim: claim,
+            reason: "failed_sync_workspace_inputs",
+            recordCounter: recordCounter
+        )
+        return .failed("failed_sync_workspace_inputs")
+    }
+
+    let diff: MemoryWorkspaceDiff
+    do {
+        diff = try memoryWorkspaceDiff(root: root)
+    } catch {
+        await recordMemoryPhaseTwoPreparationFailure(
+            store: store,
+            claim: claim,
+            reason: "failed_workspace_status",
+            recordCounter: recordCounter
+        )
+        return .failed("failed_workspace_status")
+    }
+
+    guard diff.hasChanges else {
+        do {
+            _ = try await markMemoryPhaseTwoJobSucceeded(
+                store: store,
+                claim: claim,
+                completionWatermark: completionWatermark,
+                selectedOutputs: rawMemories,
+                reason: "succeeded_no_workspace_changes",
+                recordCounter: recordCounter
+            )
+        } catch {
+            return .failed("succeeded_no_workspace_changes")
+        }
+        return .succeededNoWorkspaceChanges
+    }
+
+    do {
+        try writeMemoryWorkspaceDiff(root: root, diff: diff)
+    } catch {
+        await recordMemoryPhaseTwoPreparationFailure(
+            store: store,
+            claim: claim,
+            reason: "failed_workspace_diff_file",
+            recordCounter: recordCounter
+        )
+        return .failed("failed_workspace_diff_file")
+    }
+
+    return .readyToSpawn(MemoryPhaseTwoConsolidationRequest(
+        claim: claim,
+        completionWatermark: completionWatermark,
+        selectedOutputs: rawMemories,
+        agentConfig: agentConfig,
+        prompt: buildMemoryConsolidationAgentPrompt(memoryRoot: root),
+        workspaceDiff: diff
+    ))
+}
+
+public func recordMemoryPhaseTwoAgentSpawned(
+    rawMemoryCount: Int,
+    recordCounter: MemoryWriteCounterRecorder? = nil
+) {
+    if rawMemoryCount > 0 {
+        recordCounter?(MemoryWriteMetrics.phaseTwoInput, Int64(rawMemoryCount), [])
+    }
+    recordCounter?(MemoryWriteMetrics.phaseTwoJobs, 1, [("status", "agent_spawned")])
+}
+
+private func recordMemoryPhaseTwoPreparationFailure(
+    store: MemoryPhaseTwoJobStore,
+    claim: MemoryPhaseTwoClaim,
+    reason: String,
+    recordCounter: MemoryWriteCounterRecorder?
+) async {
+    _ = try? await markMemoryPhaseTwoJobFailed(
+        store: store,
+        claim: claim,
+        reason: reason,
+        recordCounter: recordCounter
+    )
 }
