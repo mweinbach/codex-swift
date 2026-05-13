@@ -25418,6 +25418,30 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(error["message"] as? String, "command must not be empty")
     }
 
+    func testExecOneOffCommandUsesLegacyV1ParamShapeLikeRust() throws {
+        let temp = try TemporaryDirectory()
+
+        let negativeTimeout = try appServerResponse(
+            #"{"id":1,"method":"execOneOffCommand","params":{"command":["/bin/echo","hi"],"timeoutMs":-1}}"#,
+            codexHome: temp.url
+        )
+        let negativeTimeoutError = try XCTUnwrap(negativeTimeout["error"] as? [String: Any])
+        XCTAssertEqual(negativeTimeoutError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            negativeTimeoutError["message"] as? String,
+            "Invalid request: invalid value: integer `-1`, expected u64"
+        )
+
+        let v2OnlyFields = try appServerResponse(
+            #"{"id":2,"method":"execOneOffCommand","params":{"command":["/bin/echo","legacy"],"processId":"ignored","streamStdoutStderr":true,"permissionProfile":{"type":"disabled"},"env":{"CODEX_SHOULD_IGNORE":"1"}}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(v2OnlyFields["result"] as? [String: Any])
+        XCTAssertEqual(result["exitCode"] as? Int, 0)
+        XCTAssertEqual(result["stdout"] as? String, "legacy\n")
+        XCTAssertEqual(result["stderr"] as? String, "")
+    }
+
     func testCommandExecProcessIDSessionAcceptsStdinAndSendsDeferredResponse() async throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()

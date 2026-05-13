@@ -16523,6 +16523,21 @@ public enum CodexAppServer {
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
         let parsed = try commandExecParams(params: params)
+        return try commandExecResult(parsed: parsed, configuration: configuration)
+    }
+
+    fileprivate static func legacyExecOneOffCommandResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let parsed = try legacyExecOneOffCommandParams(params: params)
+        return try commandExecResult(parsed: parsed, configuration: configuration)
+    }
+
+    private static func commandExecResult(
+        parsed: AppServerCommandExecParams,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
         guard parsed.processID == nil,
               !parsed.tty,
               !parsed.streamStdin,
@@ -16619,6 +16634,28 @@ public enum CodexAppServer {
             environmentOverrides: try processEnvironmentOverrides(params?["env"]),
             sandboxPolicy: sandboxPolicy,
             permissionProfile: permissionProfile
+        )
+    }
+
+    fileprivate static func legacyExecOneOffCommandParams(params: [String: Any]?) throws -> AppServerCommandExecParams {
+        let command = try rustRequiredStringArrayParam(params?["command"], missingMessage: "missing command")
+        guard !command.isEmpty else {
+            throw AppServerError.invalidRequest("command must not be empty")
+        }
+        try validateRustIntegerParam(params?["timeoutMs"], expected: "u64")
+        return AppServerCommandExecParams(
+            command: command,
+            processID: nil,
+            cwd: try rustOptionalStringParam(params?["cwd"]),
+            tty: false,
+            streamStdin: false,
+            streamStdoutStderr: false,
+            timeoutMs: commandExecTimeoutMs(params?["timeoutMs"]),
+            outputBytesCap: commandExecOutputBytesCap(nil),
+            size: nil,
+            environmentOverrides: [:],
+            sandboxPolicy: try commandExecSandboxPolicy(params?["sandboxPolicy"]),
+            permissionProfile: nil
         )
     }
 
@@ -17149,7 +17186,7 @@ public enum CodexAppServer {
         guard let value, !(value is NSNull) else {
             return
         }
-        let unsignedIntegerTypes = ["u16", "u32", "usize"]
+        let unsignedIntegerTypes = ["u16", "u32", "u64", "usize"]
         if let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() {
             let bool = number.boolValue ? "true" : "false"
             throw AppServerError.invalidRequest("Invalid request: invalid type: boolean `\(bool)`, expected \(expected)")
@@ -26659,7 +26696,7 @@ final class CodexAppServerMessageProcessor {
                     } else {
                         response = CodexAppServer.responseObject(
                             id: id,
-                            result: try CodexAppServer.commandExecResult(
+                            result: try CodexAppServer.legacyExecOneOffCommandResult(
                                 params: params,
                                 configuration: configuration
                             )
