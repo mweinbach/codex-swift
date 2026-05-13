@@ -292,11 +292,57 @@ public struct CodexCLI: Sendable {
         }
     }
 
+    public struct InteractiveCommandOptions: Equatable, Sendable {
+        public let imagePaths: [String]
+        public let model: String?
+        public let useOSSProvider: Bool
+        public let localProvider: String?
+        public let configProfile: String?
+        public let sandboxMode: String?
+        public let dangerouslyBypassApprovalsAndSandbox: Bool
+        public let cwd: String?
+        public let additionalWritableRoots: [String]
+        public let approvalPolicy: String?
+        public let searchEnabled: Bool
+        public let noAltScreen: Bool
+
+        public init(
+            imagePaths: [String] = [],
+            model: String? = nil,
+            useOSSProvider: Bool = false,
+            localProvider: String? = nil,
+            configProfile: String? = nil,
+            sandboxMode: String? = nil,
+            dangerouslyBypassApprovalsAndSandbox: Bool = false,
+            cwd: String? = nil,
+            additionalWritableRoots: [String] = [],
+            approvalPolicy: String? = nil,
+            searchEnabled: Bool = false,
+            noAltScreen: Bool = false
+        ) {
+            self.imagePaths = imagePaths
+            self.model = model
+            self.useOSSProvider = useOSSProvider
+            self.localProvider = localProvider
+            self.configProfile = configProfile
+            self.sandboxMode = sandboxMode
+            self.dangerouslyBypassApprovalsAndSandbox = dangerouslyBypassApprovalsAndSandbox
+            self.cwd = cwd
+            self.additionalWritableRoots = additionalWritableRoots
+            self.approvalPolicy = approvalPolicy
+            self.searchEnabled = searchEnabled
+            self.noAltScreen = noAltScreen
+        }
+    }
+
     public struct ResumeCommandRequest: Equatable, Sendable {
         public let sessionID: String?
         public let last: Bool
         public let all: Bool
         public let includeNonInteractive: Bool
+        public let remote: String?
+        public let remoteAuthTokenEnv: String?
+        public let interactiveOptions: InteractiveCommandOptions
         public let configOverrides: CliConfigOverrides
 
         public init(
@@ -304,12 +350,18 @@ public struct CodexCLI: Sendable {
             last: Bool,
             all: Bool,
             includeNonInteractive: Bool = false,
+            remote: String? = nil,
+            remoteAuthTokenEnv: String? = nil,
+            interactiveOptions: InteractiveCommandOptions = InteractiveCommandOptions(),
             configOverrides: CliConfigOverrides = CliConfigOverrides()
         ) {
             self.sessionID = sessionID
             self.last = last
             self.all = all
             self.includeNonInteractive = includeNonInteractive
+            self.remote = remote
+            self.remoteAuthTokenEnv = remoteAuthTokenEnv
+            self.interactiveOptions = interactiveOptions
             self.configOverrides = configOverrides
         }
     }
@@ -320,6 +372,7 @@ public struct CodexCLI: Sendable {
         public let all: Bool
         public let remote: String?
         public let remoteAuthTokenEnv: String?
+        public let interactiveOptions: InteractiveCommandOptions
         public let configOverrides: CliConfigOverrides
 
         public init(
@@ -328,6 +381,7 @@ public struct CodexCLI: Sendable {
             all: Bool,
             remote: String? = nil,
             remoteAuthTokenEnv: String? = nil,
+            interactiveOptions: InteractiveCommandOptions = InteractiveCommandOptions(),
             configOverrides: CliConfigOverrides = CliConfigOverrides()
         ) {
             self.sessionID = sessionID
@@ -335,6 +389,7 @@ public struct CodexCLI: Sendable {
             self.all = all
             self.remote = remote
             self.remoteAuthTokenEnv = remoteAuthTokenEnv
+            self.interactiveOptions = interactiveOptions
             self.configOverrides = configOverrides
         }
     }
@@ -1559,6 +1614,266 @@ public struct CodexCLI: Sendable {
         }
     }
 
+    private struct ParsedInteractiveCommandOptions {
+        var imagePaths: [String] = []
+        var model: String?
+        var useOSSProvider = false
+        var localProvider: String?
+        var configProfile: String?
+        var sandboxMode: String?
+        var dangerouslyBypassApprovalsAndSandbox = false
+        var selectedSandboxMode = false
+        var cwd: String?
+        var additionalWritableRoots: [String] = []
+        var approvalPolicy: String?
+        var searchEnabled = false
+        var noAltScreen = false
+    }
+
+    private func parseRootInteractiveOptions(
+        beforeCommand commandName: String,
+        in arguments: [String]
+    ) -> ParseResult<ParsedInteractiveCommandOptions> {
+        var parsed = ParsedInteractiveCommandOptions()
+        var index = 0
+        while index < arguments.count {
+            let argument = arguments[index]
+            if argument == commandName {
+                return .success(parsed)
+            }
+            switch consumeInteractiveOption(
+                argument,
+                at: index,
+                in: arguments,
+                commandName: commandName,
+                parsed: &parsed
+            ) {
+            case let .success(nextIndex):
+                index = nextIndex ?? index + 1
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
+        }
+        return .success(parsed)
+    }
+
+    private func consumeInteractiveOption(
+        _ argument: String,
+        at index: Int,
+        in arguments: [String],
+        commandName: String,
+        parsed: inout ParsedInteractiveCommandOptions
+    ) -> ParseResult<Int?> {
+        func value(after option: String) -> ParseResult<String> {
+            guard index + 1 < arguments.count else {
+                return .failure("codex-swift: missing value for \(option)", 64)
+            }
+            return .success(arguments[index + 1])
+        }
+
+        func compactValue(prefix: String) -> String {
+            String(argument.dropFirst(prefix.count))
+        }
+
+        switch argument {
+        case "--image", "-i":
+            switch value(after: argument) {
+            case let .success(paths):
+                parsed.imagePaths.append(contentsOf: splitCommaDelimited(paths))
+                return .success(index + 2)
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
+        case "--model", "-m":
+            switch value(after: argument) {
+            case let .success(model):
+                parsed.model = model
+                return .success(index + 2)
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
+        case "--local-provider":
+            switch value(after: argument) {
+            case let .success(provider):
+                parsed.localProvider = provider
+                return .success(index + 2)
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
+        case "--profile", "-p":
+            switch value(after: argument) {
+            case let .success(profile):
+                parsed.configProfile = profile
+                return .success(index + 2)
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
+        case "--sandbox", "-s":
+            switch value(after: argument) {
+            case let .success(sandbox):
+                parsed.sandboxMode = sandbox
+                parsed.selectedSandboxMode = true
+                return .success(index + 2)
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
+        case "--ask-for-approval", "-a":
+            switch value(after: argument) {
+            case let .success(approval):
+                parsed.approvalPolicy = approval
+                return .success(index + 2)
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
+        case "--cd", "-C":
+            switch value(after: argument) {
+            case let .success(cwd):
+                parsed.cwd = cwd
+                return .success(index + 2)
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
+        case "--add-dir":
+            switch value(after: argument) {
+            case let .success(root):
+                parsed.additionalWritableRoots.append(root)
+                return .success(index + 2)
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
+        case "-c", "--config":
+            switch value(after: argument) {
+            case .success:
+                return .success(index + 2)
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
+        case "--remote", "--remote-auth-token-env", "--enable", "--disable", "--color":
+            switch value(after: argument) {
+            case .success:
+                return .success(index + 2)
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
+        case "--oss":
+            parsed.useOSSProvider = true
+            return .success(index + 1)
+        case "--dangerously-bypass-approvals-and-sandbox", "--yolo":
+            parsed.dangerouslyBypassApprovalsAndSandbox = true
+            parsed.selectedSandboxMode = true
+            return .success(index + 1)
+        case "--search":
+            parsed.searchEnabled = true
+            return .success(index + 1)
+        case "--no-alt-screen":
+            parsed.noAltScreen = true
+            return .success(index + 1)
+        default:
+            break
+        }
+
+        if argument.hasPrefix("--image=") {
+            parsed.imagePaths.append(contentsOf: splitCommaDelimited(compactValue(prefix: "--image=")))
+            return .success(index + 1)
+        }
+        if argument.hasPrefix("-i"), argument.count > 2, !argument.hasPrefix("--") {
+            parsed.imagePaths.append(contentsOf: splitCommaDelimited(compactValue(prefix: "-i")))
+            return .success(index + 1)
+        }
+        if argument.hasPrefix("--model=") {
+            parsed.model = compactValue(prefix: "--model=")
+            return .success(index + 1)
+        }
+        if argument.hasPrefix("-m"), argument.count > 2, !argument.hasPrefix("--") {
+            parsed.model = compactValue(prefix: "-m")
+            return .success(index + 1)
+        }
+        if argument.hasPrefix("--local-provider=") {
+            parsed.localProvider = compactValue(prefix: "--local-provider=")
+            return .success(index + 1)
+        }
+        if argument.hasPrefix("--profile=") {
+            parsed.configProfile = compactValue(prefix: "--profile=")
+            return .success(index + 1)
+        }
+        if argument.hasPrefix("-p"), argument.count > 2, !argument.hasPrefix("--") {
+            parsed.configProfile = compactValue(prefix: "-p")
+            return .success(index + 1)
+        }
+        if argument.hasPrefix("--sandbox=") {
+            parsed.sandboxMode = compactValue(prefix: "--sandbox=")
+            parsed.selectedSandboxMode = true
+            return .success(index + 1)
+        }
+        if argument.hasPrefix("-s"), argument.count > 2, !argument.hasPrefix("--") {
+            parsed.sandboxMode = compactValue(prefix: "-s")
+            parsed.selectedSandboxMode = true
+            return .success(index + 1)
+        }
+        if argument.hasPrefix("--ask-for-approval=") {
+            parsed.approvalPolicy = compactValue(prefix: "--ask-for-approval=")
+            return .success(index + 1)
+        }
+        if argument.hasPrefix("-a"), argument.count > 2, !argument.hasPrefix("--") {
+            parsed.approvalPolicy = compactValue(prefix: "-a")
+            return .success(index + 1)
+        }
+        if argument.hasPrefix("--cd=") {
+            parsed.cwd = compactValue(prefix: "--cd=")
+            return .success(index + 1)
+        }
+        if argument.hasPrefix("-C"), argument.count > 2, !argument.hasPrefix("--") {
+            parsed.cwd = compactValue(prefix: "-C")
+            return .success(index + 1)
+        }
+        if argument.hasPrefix("--add-dir=") {
+            parsed.additionalWritableRoots.append(compactValue(prefix: "--add-dir="))
+            return .success(index + 1)
+        }
+        if argument.hasPrefix("-c=") {
+            return .success(index + 1)
+        }
+        if argument.hasPrefix("--config=") {
+            return .success(index + 1)
+        }
+        if argument.hasPrefix("--remote=") || argument.hasPrefix("--remote-auth-token-env=") ||
+            argument.hasPrefix("--enable=") || argument.hasPrefix("--disable=") ||
+            argument.hasPrefix("--color=") {
+            return .success(index + 1)
+        }
+
+        return argument.hasPrefix("-")
+            ? .failure("codex-swift: unsupported option for command '\(commandName)': \(argument)", 64)
+            : .success(nil)
+    }
+
+    private func mergeInteractiveOptions(
+        root: ParsedInteractiveCommandOptions,
+        subcommand: ParsedInteractiveCommandOptions
+    ) -> InteractiveCommandOptions {
+        var sandboxMode = root.sandboxMode
+        var dangerouslyBypass = root.dangerouslyBypassApprovalsAndSandbox
+        if subcommand.selectedSandboxMode {
+            sandboxMode = subcommand.sandboxMode
+            dangerouslyBypass = subcommand.dangerouslyBypassApprovalsAndSandbox
+        }
+
+        return InteractiveCommandOptions(
+            imagePaths: subcommand.imagePaths.isEmpty ? root.imagePaths : subcommand.imagePaths,
+            model: subcommand.model ?? root.model,
+            useOSSProvider: root.useOSSProvider || subcommand.useOSSProvider,
+            localProvider: subcommand.localProvider ?? root.localProvider,
+            configProfile: subcommand.configProfile ?? root.configProfile,
+            sandboxMode: sandboxMode,
+            dangerouslyBypassApprovalsAndSandbox: dangerouslyBypass,
+            cwd: subcommand.cwd ?? root.cwd,
+            additionalWritableRoots: root.additionalWritableRoots + subcommand.additionalWritableRoots,
+            approvalPolicy: subcommand.approvalPolicy ?? root.approvalPolicy,
+            searchEnabled: root.searchEnabled || subcommand.searchEnabled,
+            noAltScreen: root.noAltScreen || subcommand.noAltScreen
+        )
+    }
+
     private func parseExecCommand(
         _ arguments: [String],
         rootArguments: [String]
@@ -2207,25 +2522,67 @@ public struct CodexCLI: Sendable {
         var last = false
         var all = false
         var includeNonInteractive = false
+        var remote: String?
+        var remoteAuthTokenEnv: String?
+        var subcommandOptions = ParsedInteractiveCommandOptions()
+        var index = 0
 
-        for argument in arguments {
+        while index < arguments.count {
+            let argument = arguments[index]
             if argument == "--last" {
                 guard sessionID == nil else {
                     return .failure("codex-swift: argument conflict for command 'resume': --last conflicts with SESSION_ID", 64)
                 }
                 last = true
+                index += 1
                 continue
             }
             if argument == "--all" {
                 all = true
+                index += 1
                 continue
             }
             if argument == "--include-non-interactive" {
                 includeNonInteractive = true
+                index += 1
                 continue
             }
-            if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'resume': \(argument)", 64)
+            if argument == "--remote" || argument == "--remote-auth-token-env" {
+                guard index + 1 < arguments.count else {
+                    return .failure("codex-swift: missing value for \(argument)", 64)
+                }
+                if argument == "--remote" {
+                    remote = arguments[index + 1]
+                } else {
+                    remoteAuthTokenEnv = arguments[index + 1]
+                }
+                index += 2
+                continue
+            }
+            if argument.hasPrefix("--remote=") {
+                remote = String(argument.dropFirst("--remote=".count))
+                index += 1
+                continue
+            }
+            if argument.hasPrefix("--remote-auth-token-env=") {
+                remoteAuthTokenEnv = String(argument.dropFirst("--remote-auth-token-env=".count))
+                index += 1
+                continue
+            }
+            switch consumeInteractiveOption(
+                argument,
+                at: index,
+                in: arguments,
+                commandName: "resume",
+                parsed: &subcommandOptions
+            ) {
+            case let .success(nextIndex):
+                if let nextIndex {
+                    index = nextIndex
+                    continue
+                }
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
             }
             guard sessionID == nil else {
                 return .failure("codex-swift: unexpected argument for command 'resume': \(argument)", 64)
@@ -2234,6 +2591,15 @@ public struct CodexCLI: Sendable {
                 return .failure("codex-swift: argument conflict for command 'resume': SESSION_ID conflicts with --last", 64)
             }
             sessionID = argument
+            index += 1
+        }
+
+        let rootOptions: ParsedInteractiveCommandOptions
+        switch parseRootInteractiveOptions(beforeCommand: "resume", in: rootArguments) {
+        case let .success(options):
+            rootOptions = options
+        case let .failure(message, exitCode):
+            return .failure(message, exitCode)
         }
 
         switch parseConfigOverrides(from: rootArguments) {
@@ -2243,6 +2609,13 @@ public struct CodexCLI: Sendable {
                 last: last,
                 all: all,
                 includeNonInteractive: includeNonInteractive,
+                remote: remote ?? rootRemoteFlagValue(named: "--remote", beforeCommand: "resume", in: rootArguments),
+                remoteAuthTokenEnv: remoteAuthTokenEnv ?? rootRemoteFlagValue(
+                    named: "--remote-auth-token-env",
+                    beforeCommand: "resume",
+                    in: rootArguments
+                ),
+                interactiveOptions: mergeInteractiveOptions(root: rootOptions, subcommand: subcommandOptions),
                 configOverrides: configOverrides
             ))
         case let .failure(message, exitCode):
@@ -2259,6 +2632,7 @@ public struct CodexCLI: Sendable {
         var all = false
         var remote: String?
         var remoteAuthTokenEnv: String?
+        var subcommandOptions = ParsedInteractiveCommandOptions()
         var index = 0
 
         while index < arguments.count {
@@ -2298,8 +2672,20 @@ public struct CodexCLI: Sendable {
                 index += 1
                 continue
             }
-            if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'fork': \(argument)", 64)
+            switch consumeInteractiveOption(
+                argument,
+                at: index,
+                in: arguments,
+                commandName: "fork",
+                parsed: &subcommandOptions
+            ) {
+            case let .success(nextIndex):
+                if let nextIndex {
+                    index = nextIndex
+                    continue
+                }
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
             }
             guard sessionID == nil else {
                 return .failure("codex-swift: unexpected argument for command 'fork': \(argument)", 64)
@@ -2309,6 +2695,14 @@ public struct CodexCLI: Sendable {
             }
             sessionID = argument
             index += 1
+        }
+
+        let rootOptions: ParsedInteractiveCommandOptions
+        switch parseRootInteractiveOptions(beforeCommand: "fork", in: rootArguments) {
+        case let .success(options):
+            rootOptions = options
+        case let .failure(message, exitCode):
+            return .failure(message, exitCode)
         }
 
         switch parseConfigOverrides(from: rootArguments) {
@@ -2323,6 +2717,7 @@ public struct CodexCLI: Sendable {
                     beforeCommand: "fork",
                     in: rootArguments
                 ),
+                interactiveOptions: mergeInteractiveOptions(root: rootOptions, subcommand: subcommandOptions),
                 configOverrides: configOverrides
             ))
         case let .failure(message, exitCode):

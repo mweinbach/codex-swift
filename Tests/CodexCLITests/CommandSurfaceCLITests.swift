@@ -534,6 +534,75 @@ final class CommandSurfaceCLITests: XCTestCase {
         ))
     }
 
+    func testRunAsyncResumeMergesInteractiveFlagsLikeRust() async {
+        var receivedRequest: CodexCLI.ResumeCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: [
+                "--remote",
+                "ws://root.example.test",
+                "--remote-auth-token-env",
+                "ROOT_TOKEN",
+                "--oss",
+                "--image",
+                "root.png",
+                "--add-dir",
+                "/root-extra",
+                "resume",
+                "123e4567-e89b-12d3-a456-426614174000",
+                "-m",
+                "gpt-5.1-test",
+                "--search",
+                "--sandbox",
+                "workspace-write",
+                "--ask-for-approval",
+                "on-request",
+                "-p",
+                "my-profile",
+                "-C",
+                "/tmp",
+                "-i",
+                "/tmp/a.png,/tmp/b.png",
+                "--add-dir",
+                "/resume-extra",
+                "--no-alt-screen",
+                "--remote=ws://resume.example.test",
+                "--remote-auth-token-env",
+                "RESUME_TOKEN"
+            ],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            resumeRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(receivedRequest, CodexCLI.ResumeCommandRequest(
+            sessionID: "123e4567-e89b-12d3-a456-426614174000",
+            last: false,
+            all: false,
+            remote: "ws://resume.example.test",
+            remoteAuthTokenEnv: "RESUME_TOKEN",
+            interactiveOptions: CodexCLI.InteractiveCommandOptions(
+                imagePaths: ["/tmp/a.png", "/tmp/b.png"],
+                model: "gpt-5.1-test",
+                useOSSProvider: true,
+                configProfile: "my-profile",
+                sandboxMode: "workspace-write",
+                cwd: "/tmp",
+                additionalWritableRoots: ["/root-extra", "/resume-extra"],
+                approvalPolicy: "on-request",
+                searchEnabled: true,
+                noAltScreen: true
+            ),
+            configOverrides: CliConfigOverrides(rawOverrides: [
+                #"profile="my-profile""#,
+                #"web_search="live""#
+            ])
+        ))
+    }
+
     func testRunAsyncResumeRejectsLastWithSessionIDBeforeRunner() async {
         var stderr: [String] = []
 
@@ -602,6 +671,48 @@ final class CommandSurfaceCLITests: XCTestCase {
                 remoteAuthTokenEnv: "FORK_TOKEN"
             )
         ])
+    }
+
+    func testRunAsyncForkMergesInteractiveFlagsWithSubcommandPrecedenceLikeRust() async {
+        var receivedRequest: CodexCLI.ForkCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: [
+                "--model",
+                "root-model",
+                "--image",
+                "root.png",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "fork",
+                "--last",
+                "--sandbox",
+                "read-only",
+                "--image",
+                "fork.png",
+                "--local-provider=ollama",
+                "--add-dir=/fork-extra"
+            ],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            forkRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(receivedRequest, CodexCLI.ForkCommandRequest(
+            sessionID: nil,
+            last: true,
+            all: false,
+            interactiveOptions: CodexCLI.InteractiveCommandOptions(
+                imagePaths: ["fork.png"],
+                model: "root-model",
+                localProvider: "ollama",
+                sandboxMode: "read-only",
+                dangerouslyBypassApprovalsAndSandbox: false,
+                additionalWritableRoots: ["/fork-extra"]
+            )
+        ))
     }
 
     func testRunAsyncForkRejectsInvalidFormsBeforeRunner() async {
