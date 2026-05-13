@@ -9,11 +9,18 @@ public struct WindowsSandboxSetupRequest: Equatable, Sendable {
     public let mode: WindowsSandboxSetupMode
     public let codexHome: URL
     public let commandCwd: URL
+    public let activeProfile: String?
 
-    public init(mode: WindowsSandboxSetupMode, codexHome: URL, commandCwd: URL) {
+    public init(
+        mode: WindowsSandboxSetupMode,
+        codexHome: URL,
+        commandCwd: URL,
+        activeProfile: String? = nil
+    ) {
         self.mode = mode
         self.codexHome = codexHome
         self.commandCwd = commandCwd
+        self.activeProfile = activeProfile
     }
 }
 
@@ -55,4 +62,17 @@ public func runWindowsSandboxSetup(_ request: WindowsSandboxSetupRequest) throws
         throw WindowsSandboxSetupError.legacySetupOnlySupportedOnWindows
     }
     #endif
+}
+
+public func persistWindowsSandboxSetupMode(
+    codexHome: URL,
+    activeProfile: String?,
+    mode: WindowsSandboxSetupMode,
+    fileManager: FileManager = .default
+) throws {
+    let configFile = codexHome.appendingPathComponent("config.toml", isDirectory: false)
+    var config = try CodexConfigLayerLoader.readConfig(from: configFile, fileManager: fileManager) ?? .table([:])
+    WindowsSandboxConfigEditor.setSandboxMode(mode, activeProfile: activeProfile, in: &config)
+    try fileManager.createDirectory(at: codexHome, withIntermediateDirectories: true)
+    try ConfigTomlRenderer.render(config).write(to: configFile, atomically: true, encoding: .utf8)
 }

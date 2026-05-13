@@ -243,6 +243,53 @@ public enum PluginConfigEditor {
     }
 }
 
+public enum WindowsSandboxConfigEditor {
+    public static func setSandboxMode(
+        _ mode: WindowsSandboxSetupMode,
+        activeProfile: String?,
+        in config: inout ConfigValue
+    ) {
+        var root = configTable(config) ?? [:]
+        if let activeProfile {
+            var profiles = root["profiles"].flatMap(configTable) ?? [:]
+            var profile = profiles[activeProfile].flatMap(configTable) ?? [:]
+            var windows = profile["windows"].flatMap(configTable) ?? [:]
+            windows["sandbox"] = .string(mode.rawValue)
+            profile["windows"] = .table(windows)
+            clearLegacyWindowsSandboxKeys(in: &profile)
+            profiles[activeProfile] = .table(profile)
+            root["profiles"] = .table(profiles)
+        } else {
+            var windows = root["windows"].flatMap(configTable) ?? [:]
+            windows["sandbox"] = .string(mode.rawValue)
+            root["windows"] = .table(windows)
+            clearLegacyWindowsSandboxKeys(in: &root)
+        }
+        config = .table(root)
+    }
+
+    private static func clearLegacyWindowsSandboxKeys(in table: inout [String: ConfigValue]) {
+        guard var features = table["features"].flatMap(configTable) else {
+            return
+        }
+        features.removeValue(forKey: "experimental_windows_sandbox")
+        features.removeValue(forKey: "enable_experimental_windows_sandbox")
+        features.removeValue(forKey: "elevated_windows_sandbox")
+        if features.isEmpty {
+            table.removeValue(forKey: "features")
+        } else {
+            table["features"] = .table(features)
+        }
+    }
+
+    private static func configTable(_ value: ConfigValue) -> [String: ConfigValue]? {
+        guard case let .table(table) = value else {
+            return nil
+        }
+        return table
+    }
+}
+
 extension ConfigValue: Codable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()

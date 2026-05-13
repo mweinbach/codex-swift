@@ -12485,11 +12485,17 @@ public enum CodexAppServer {
         let request = WindowsSandboxSetupRequest(
             mode: setupMode,
             codexHome: configuration.codexHome,
-            commandCwd: cwd.map { URL(fileURLWithPath: $0, isDirectory: true) } ?? configuration.cwd
+            commandCwd: cwd.map { URL(fileURLWithPath: $0, isDirectory: true) } ?? configuration.cwd,
+            activeProfile: configuration.activeProfile
         )
         let error: String? = {
             do {
                 try runWindowsSandboxSetup(request)
+                try persistWindowsSandboxSetupMode(
+                    codexHome: request.codexHome,
+                    activeProfile: request.activeProfile,
+                    mode: request.mode
+                )
                 return nil
             } catch let setupError as WindowsSandboxSetupError {
                 return setupError.description
