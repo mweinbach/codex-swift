@@ -1037,6 +1037,46 @@ final class ExecPolicyTests: XCTestCase {
         ])
     }
 
+    func testParserEvaluatesRustStarlarkAssignedLambdaFunctions() throws {
+        let policy = try parsePolicy("""
+        make_prefix = lambda tool, command: [tool, command]
+        choose = lambda command, fallback = "status": command if command.startswith("s") else fallback
+        join_host = lambda parts: ".".join(parts)
+        length = lambda value: len(value)
+
+        COMMANDS = ["log", "status", "diff"]
+        ORDERED = sorted(COMMANDS, key = length)
+
+        prefix_rule(
+            make_prefix("git", choose(ORDERED[1])),
+            "allow",
+            justification = "lambda " + join_host(["api", "github", "com"]),
+        )
+        network_rule(join_host(["api", "github", "com"]), "https", "allow")
+
+        for tool in ["jj"]:
+            loop_prefix = lambda command: [tool, command]
+            prefix_rule(loop_prefix("status"), "prompt")
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .allow,
+                justification: "lambda api.github.com"
+            )
+        ])
+        XCTAssertEqual(policy.rules(for: "jj"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "jj", rest: [.single("status")]),
+                decision: .prompt
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api.github.com", protocol: .https, decision: .allow)
+        ])
+    }
+
     func testParserEvaluatesRustStarlarkDictComprehensionsAndDirectIteration() throws {
         let policy = try parsePolicy("""
         BASE = {
