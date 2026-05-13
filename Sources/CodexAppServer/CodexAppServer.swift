@@ -3397,6 +3397,11 @@ public enum CodexAppServer {
         } catch {
             throw AppServerError.invalidRequest("invalid thread id: \(error)")
         }
+        if let rawGitInfo = params?["gitInfo"], !(rawGitInfo is NSNull), !(rawGitInfo is [String: Any]) {
+            throw AppServerError.invalidRequest(
+                "Invalid request: \(rustInvalidTypeDescription(rawGitInfo)), expected struct ThreadMetadataGitInfoUpdateParams"
+            )
+        }
         guard let gitInfo = params?["gitInfo"] as? [String: Any] else {
             throw AppServerError.invalidRequest("gitInfo must include at least one field")
         }
@@ -3411,6 +3416,12 @@ public enum CodexAppServer {
             includeArchived: true
         )
         let updatedPath = try updateRolloutSessionGitInfo(rolloutPath: rolloutPath, patch: patch)
+        try updateStateStoreThreadGitInfoIfConfigured(
+            threadID: threadID,
+            rolloutPath: updatedPath,
+            patch: patch,
+            configuration: configuration
+        )
         let item = ConversationItem(path: updatedPath, head: [], createdAt: nil, updatedAt: nil)
         return [
             "thread": try threadObject(
@@ -21376,6 +21387,48 @@ public enum CodexAppServer {
         }
     }
 
+    private static func updateStateStoreThreadGitInfoIfConfigured(
+        threadID: ConversationId,
+        rolloutPath: String,
+        patch: GitInfoPatch,
+        configuration: CodexAppServerConfiguration
+    ) throws {
+        guard let stateStore = configuration.stateStore else {
+            return
+        }
+        let item = ConversationItem(path: rolloutPath, head: [], createdAt: nil, updatedAt: nil)
+        let metadata = try threadMetadata(
+            for: item,
+            defaultProvider: configuration.defaultModelProvider,
+            archivedOnly: rolloutPathIsArchived(rolloutPath, codexHome: configuration.codexHome)
+        )
+        try runAsyncBlocking {
+            try await stateStore.upsertThread(metadata)
+            let updated = try await stateStore.updateThreadGitInfo(
+                threadID: metadata.id,
+                sha: patch.sha.threadGitInfoPatchValue,
+                branch: patch.branch.threadGitInfoPatchValue,
+                originURL: patch.originURL.threadGitInfoPatchValue
+            )
+            if !updated {
+                throw AppServerError.internalError(
+                    "thread metadata unavailable before git metadata update: \(threadID)"
+                )
+            }
+        }
+    }
+
+    private static func rolloutPathIsArchived(_ rolloutPath: String, codexHome: URL) -> Bool {
+        let archivedDirectory = codexHome
+            .appendingPathComponent(RolloutErrors.archivedSessionsSubdirectory, isDirectory: true)
+            .standardizedFileURL
+            .path
+        return URL(fileURLWithPath: rolloutPath, isDirectory: false)
+            .standardizedFileURL
+            .path
+            .hasPrefix(archivedDirectory + "/")
+    }
+
     private static func sessionIndexPath(codexHome: URL) -> URL {
         codexHome.appendingPathComponent("session_index.jsonl", isDirectory: false)
     }
@@ -27518,6 +27571,17 @@ private enum NullableStringPatch {
             return nil
         case let .set(value):
             return value
+        }
+    }
+
+    var threadGitInfoPatchValue: ThreadGitInfoPatchValue {
+        switch self {
+        case .absent:
+            return .preserve
+        case .clear:
+            return .clear
+        case let .set(value):
+            return .set(value)
         }
     }
 }

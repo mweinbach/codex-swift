@@ -6641,6 +6641,44 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNil(readGitInfo["originUrl"] as? String)
     }
 
+    func testThreadMetadataUpdateUpdatesStateDbGitInfoLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-15-00",
+            timestamp: "2025-01-05T12:15:00Z",
+            preview: "Saved user message",
+            provider: "openai",
+            gitInfo: GitInfo(commitHash: "old-sha", branch: "main", repositoryURL: "https://example.com/old.git"),
+            cwd: temp.url.path
+        )
+        let stateStore = try createAppServerStateStore(codexHome: temp.url)
+        let configuration = testConfiguration(codexHome: temp.url, stateStore: stateStore)
+        let processor = try initializedProcessor(configuration: configuration)
+
+        _ = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"thread/metadata/update","params":{"threadId":"\#(threadID)","gitInfo":{"sha":"new-sha","branch":null,"originUrl":"https://example.com/new.git"}}}"#.utf8
+        )))
+
+        let loadedMetadata = try await stateStore.getThread(threadID: ThreadId(string: threadID))
+        let metadata = try XCTUnwrap(loadedMetadata)
+        XCTAssertEqual(metadata.gitSHA, "new-sha")
+        XCTAssertNil(metadata.gitBranch)
+        XCTAssertEqual(metadata.gitOriginURL, "https://example.com/new.git")
+
+        let stateOnly = try appServerResponse(
+            #"{"id":2,"method":"thread/list","params":{"limit":10,"useStateDbOnly":true}}"#,
+            configuration: configuration
+        )
+        let result = try XCTUnwrap(stateOnly["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        let thread = try XCTUnwrap(data.first)
+        let gitInfo = try XCTUnwrap(thread["gitInfo"] as? [String: Any])
+        XCTAssertEqual(gitInfo["sha"] as? String, "new-sha")
+        XCTAssertNil(gitInfo["branch"] as? String)
+        XCTAssertEqual(gitInfo["originUrl"] as? String, "https://example.com/new.git")
+    }
+
     func testThreadMetadataUpdateCanClearAllGitInfo() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(
@@ -6738,6 +6776,17 @@ final class CodexAppServerTests: XCTestCase {
         let integerThreadIDError = try XCTUnwrap(integerThreadID["error"] as? [String: Any])
         XCTAssertEqual(integerThreadIDError["code"] as? Int, -32600)
         XCTAssertEqual(integerThreadIDError["message"] as? String, "Invalid request: invalid type: integer `1`, expected a string")
+
+        let integerGitInfo = try appServerResponse(
+            #"{"id":5,"method":"thread/metadata/update","params":{"threadId":"\#(threadID)","gitInfo":1}}"#,
+            codexHome: temp.url
+        )
+        let integerGitInfoError = try XCTUnwrap(integerGitInfo["error"] as? [String: Any])
+        XCTAssertEqual(integerGitInfoError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            integerGitInfoError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected struct ThreadMetadataGitInfoUpdateParams"
+        )
     }
 
     func testThreadCompactStartAndShellCommandReturnEmptyResults() throws {
