@@ -89,6 +89,104 @@ final class ResponsesAPITests: XCTestCase {
         XCTAssertEqual(metadata[CodexRequestHeaders.turnMetadataHeaderName], #"{"turn_id":"turn-123"}"#)
     }
 
+    func testResponseCreateWebSocketRequestMatchesRustWireShape() throws {
+        let request = ResponsesWebSocketRequest.responseCreate(ResponseCreateWebSocketRequest(
+            model: "gpt-test",
+            instructions: "inst",
+            previousResponseID: "resp-prev",
+            input: [.message(role: "user", content: [.inputText(text: "hi")])],
+            tools: [.object(["type": .string("web_search_preview")])],
+            parallelToolCalls: true,
+            reasoning: ResponsesAPIReasoning(effort: .medium, summary: .auto),
+            store: false,
+            include: ["reasoning.encrypted_content"],
+            serviceTier: "flex",
+            promptCacheKey: "cache-key",
+            text: ResponsesAPITextControls(verbosity: .high),
+            generate: true,
+            clientMetadata: ["traceparent": "00-abc"]
+        ))
+
+        let object = try JSONObject(request)
+        XCTAssertEqual(object["type"] as? String, "response.create")
+        XCTAssertEqual(object["model"] as? String, "gpt-test")
+        XCTAssertEqual(object["instructions"] as? String, "inst")
+        XCTAssertEqual(object["previous_response_id"] as? String, "resp-prev")
+        XCTAssertEqual(object["tool_choice"] as? String, "auto")
+        XCTAssertEqual(object["parallel_tool_calls"] as? Bool, true)
+        XCTAssertEqual(object["store"] as? Bool, false)
+        XCTAssertEqual(object["stream"] as? Bool, true)
+        XCTAssertEqual(object["include"] as? [String], ["reasoning.encrypted_content"])
+        XCTAssertEqual(object["service_tier"] as? String, "flex")
+        XCTAssertEqual(object["prompt_cache_key"] as? String, "cache-key")
+        XCTAssertEqual(object["generate"] as? Bool, true)
+        XCTAssertEqual((object["input"] as? [[String: Any]])?.first?["type"] as? String, "message")
+        XCTAssertEqual((object["tools"] as? [[String: Any]])?.first?["type"] as? String, "web_search_preview")
+        XCTAssertEqual((object["reasoning"] as? [String: Any])?["effort"] as? String, "medium")
+        XCTAssertEqual((object["text"] as? [String: Any])?["verbosity"] as? String, "high")
+        XCTAssertEqual((object["client_metadata"] as? [String: String])?["traceparent"], "00-abc")
+    }
+
+    func testResponseCreateWebSocketRequestSkipsEmptyAndNilFieldsLikeRust() throws {
+        let request = ResponsesWebSocketRequest.responseCreate(ResponseCreateWebSocketRequest(
+            model: "gpt-test",
+            instructions: "",
+            input: [],
+            tools: [],
+            store: true
+        ))
+
+        let object = try JSONObject(request)
+        XCTAssertEqual(object["type"] as? String, "response.create")
+        XCTAssertNil(object["instructions"])
+        XCTAssertNil(object["previous_response_id"])
+        XCTAssertNil(object["service_tier"])
+        XCTAssertNil(object["prompt_cache_key"])
+        XCTAssertNil(object["text"])
+        XCTAssertNil(object["generate"])
+        XCTAssertNil(object["client_metadata"])
+    }
+
+    func testResponseCreateWebSocketRequestCopiesResponsesAPIRequest() throws {
+        let httpRequest = ResponsesAPIRequest(
+            model: "gpt-test",
+            instructions: "inst",
+            input: [.message(role: "user", content: [.inputText(text: "hi")])],
+            tools: [.object(["type": .string("function")])],
+            parallelToolCalls: true,
+            reasoning: ResponsesAPIReasoning(effort: .low, summary: .concise),
+            store: true,
+            include: ["reasoning.encrypted_content"],
+            serviceTier: "priority",
+            promptCacheKey: "prompt-cache",
+            text: ResponsesAPITextControls(verbosity: .medium),
+            clientMetadata: ["turn": "turn-1"]
+        )
+
+        let websocketRequest = ResponseCreateWebSocketRequest(
+            httpRequest,
+            previousResponseID: "resp-prev",
+            generate: false
+        )
+
+        XCTAssertEqual(websocketRequest.model, httpRequest.model)
+        XCTAssertEqual(websocketRequest.instructions, httpRequest.instructions)
+        XCTAssertEqual(websocketRequest.previousResponseID, "resp-prev")
+        XCTAssertEqual(websocketRequest.input, httpRequest.input)
+        XCTAssertEqual(websocketRequest.tools, httpRequest.tools)
+        XCTAssertEqual(websocketRequest.toolChoice, httpRequest.toolChoice)
+        XCTAssertEqual(websocketRequest.parallelToolCalls, httpRequest.parallelToolCalls)
+        XCTAssertEqual(websocketRequest.reasoning, httpRequest.reasoning)
+        XCTAssertEqual(websocketRequest.store, httpRequest.store)
+        XCTAssertEqual(websocketRequest.stream, httpRequest.stream)
+        XCTAssertEqual(websocketRequest.include, httpRequest.include)
+        XCTAssertEqual(websocketRequest.serviceTier, httpRequest.serviceTier)
+        XCTAssertEqual(websocketRequest.promptCacheKey, httpRequest.promptCacheKey)
+        XCTAssertEqual(websocketRequest.text, httpRequest.text)
+        XCTAssertEqual(websocketRequest.generate, false)
+        XCTAssertEqual(websocketRequest.clientMetadata, httpRequest.clientMetadata)
+    }
+
     func testResponseProcessedWebSocketRequestMatchesRustWireShape() throws {
         let request = ResponsesWebSocketRequest.responseProcessed(
             ResponseProcessedWebSocketRequest(responseID: "resp-compact")

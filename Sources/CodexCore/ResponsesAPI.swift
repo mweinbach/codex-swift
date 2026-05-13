@@ -162,17 +162,171 @@ public struct ResponseProcessedWebSocketRequest: Equatable, Codable, Sendable {
     }
 }
 
+public struct ResponseCreateWebSocketRequest: Equatable, Encodable, Sendable {
+    public var model: String
+    public var instructions: String
+    public var previousResponseID: String?
+    public var input: [ResponseItem]
+    public var tools: [JSONValue]
+    public var toolChoice: String
+    public var parallelToolCalls: Bool
+    public var reasoning: ResponsesAPIReasoning?
+    public var store: Bool
+    public var stream: Bool
+    public var include: [String]
+    public var serviceTier: String?
+    public var promptCacheKey: String?
+    public var text: ResponsesAPITextControls?
+    public var generate: Bool?
+    public var clientMetadata: [String: String]?
+
+    private enum CodingKeys: String, CodingKey {
+        case model
+        case instructions
+        case previousResponseID = "previous_response_id"
+        case input
+        case tools
+        case toolChoice = "tool_choice"
+        case parallelToolCalls = "parallel_tool_calls"
+        case reasoning
+        case store
+        case stream
+        case include
+        case serviceTier = "service_tier"
+        case promptCacheKey = "prompt_cache_key"
+        case text
+        case generate
+        case clientMetadata = "client_metadata"
+    }
+
+    public init(
+        model: String,
+        instructions: String,
+        previousResponseID: String? = nil,
+        input: [ResponseItem],
+        tools: [JSONValue] = [],
+        toolChoice: String = "auto",
+        parallelToolCalls: Bool = false,
+        reasoning: ResponsesAPIReasoning? = nil,
+        store: Bool,
+        stream: Bool = true,
+        include: [String] = [],
+        serviceTier: String? = nil,
+        promptCacheKey: String? = nil,
+        text: ResponsesAPITextControls? = nil,
+        generate: Bool? = nil,
+        clientMetadata: [String: String]? = nil
+    ) {
+        self.model = model
+        self.instructions = instructions
+        self.previousResponseID = previousResponseID
+        self.input = input
+        self.tools = tools
+        self.toolChoice = toolChoice
+        self.parallelToolCalls = parallelToolCalls
+        self.reasoning = reasoning
+        self.store = store
+        self.stream = stream
+        self.include = include
+        self.serviceTier = serviceTier
+        self.promptCacheKey = promptCacheKey
+        self.text = text
+        self.generate = generate
+        self.clientMetadata = clientMetadata
+    }
+
+    public init(_ request: ResponsesAPIRequest, previousResponseID: String? = nil, generate: Bool? = nil) {
+        self.init(
+            model: request.model,
+            instructions: request.instructions,
+            previousResponseID: previousResponseID,
+            input: request.input,
+            tools: request.tools,
+            toolChoice: request.toolChoice,
+            parallelToolCalls: request.parallelToolCalls,
+            reasoning: request.reasoning,
+            store: request.store,
+            stream: request.stream,
+            include: request.include,
+            serviceTier: request.serviceTier,
+            promptCacheKey: request.promptCacheKey,
+            text: request.text,
+            generate: generate,
+            clientMetadata: request.clientMetadata
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(model, forKey: .model)
+        if !instructions.isEmpty {
+            try container.encode(instructions, forKey: .instructions)
+        }
+        try container.encodeIfPresent(previousResponseID, forKey: .previousResponseID)
+        try container.encode(input, forKey: .input)
+        try container.encode(tools, forKey: .tools)
+        try container.encode(toolChoice, forKey: .toolChoice)
+        try container.encode(parallelToolCalls, forKey: .parallelToolCalls)
+        try container.encodeIfPresent(reasoning, forKey: .reasoning)
+        try container.encode(store, forKey: .store)
+        try container.encode(stream, forKey: .stream)
+        try container.encode(include, forKey: .include)
+        try container.encodeIfPresent(serviceTier, forKey: .serviceTier)
+        try container.encodeIfPresent(promptCacheKey, forKey: .promptCacheKey)
+        try container.encodeIfPresent(text, forKey: .text)
+        try container.encodeIfPresent(generate, forKey: .generate)
+        try container.encodeIfPresent(clientMetadata, forKey: .clientMetadata)
+    }
+}
+
 public enum ResponsesWebSocketRequest: Equatable, Encodable, Sendable {
+    case responseCreate(ResponseCreateWebSocketRequest)
     case responseProcessed(ResponseProcessedWebSocketRequest)
 
     private enum CodingKeys: String, CodingKey {
         case type
+        case model
+        case instructions
+        case previousResponseID = "previous_response_id"
+        case input
+        case tools
+        case toolChoice = "tool_choice"
+        case parallelToolCalls = "parallel_tool_calls"
+        case reasoning
+        case store
+        case stream
+        case include
+        case serviceTier = "service_tier"
+        case promptCacheKey = "prompt_cache_key"
+        case text
+        case generate
+        case clientMetadata = "client_metadata"
         case responseID = "response_id"
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
+        case let .responseCreate(request):
+            try container.encode("response.create", forKey: .type)
+            try container.encode(request.model, forKey: .model)
+            if !request.instructions.isEmpty {
+                try container.encode(request.instructions, forKey: .instructions)
+            }
+            try container.encodeIfPresent(request.previousResponseID, forKey: .previousResponseID)
+            try container.encode(request.input, forKey: .input)
+            try container.encode(request.tools, forKey: .tools)
+            try container.encode(request.toolChoice, forKey: .toolChoice)
+            try container.encode(request.parallelToolCalls, forKey: .parallelToolCalls)
+            try container.encodeIfPresent(request.reasoning, forKey: .reasoning)
+            try container.encode(request.store, forKey: .store)
+            try container.encode(request.stream, forKey: .stream)
+            try container.encode(request.include, forKey: .include)
+            try container.encodeIfPresent(request.serviceTier, forKey: .serviceTier)
+            try container.encodeIfPresent(request.promptCacheKey, forKey: .promptCacheKey)
+            try container.encodeIfPresent(request.text, forKey: .text)
+            try container.encodeIfPresent(request.generate, forKey: .generate)
+            try container.encodeIfPresent(request.clientMetadata, forKey: .clientMetadata)
         case let .responseProcessed(request):
             try container.encode("response.processed", forKey: .type)
             try container.encode(request.responseID, forKey: .responseID)
