@@ -16613,6 +16613,46 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(newerData.map(turnUserText), ["third", "fourth"])
     }
 
+    func testThreadTurnsListRejectsCursorWhenAnchorTurnRolledBackLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "first",
+            provider: "mock_provider"
+        )
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        try appendRolloutEvents(to: rolloutPath, timestamp: "2025-01-05T12:00:01Z", events: [
+            .userMessage(UserMessageEvent(message: "second")),
+            .userMessage(UserMessageEvent(message: "third"))
+        ])
+
+        let firstPage = try appServerResponse(
+            #"{"id":1,"method":"thread/turns/list","params":{"threadId":"\#(threadID)","limit":2}}"#,
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
+        )
+        let firstResult = try XCTUnwrap(firstPage["result"] as? [String: Any])
+        let backwardsCursor = try XCTUnwrap(firstResult["backwardsCursor"] as? String)
+
+        try appendRolloutEvents(to: rolloutPath, timestamp: "2025-01-05T12:00:02Z", events: [
+            .threadRolledBack(ThreadRolledBackEvent(numTurns: 1))
+        ])
+
+        let response = try appServerResponse(
+            #"{"id":2,"method":"thread/turns/list","params":{"threadId":"\#(threadID)","cursor":\#(jsonString(backwardsCursor)),"sortDirection":"asc","limit":10}}"#,
+            codexHome: temp.url,
+            experimentalAPIEnabled: true
+        )
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "invalid cursor: anchor turn is no longer present")
+    }
+
     func testThreadTurnsListCanReturnArchivedThreadsByIDLikeRust() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(
