@@ -1603,15 +1603,13 @@ final class CommandSurfaceCLITests: XCTestCase {
         XCTAssertEqual(decoded, try ModelsManager.bundledModelsResponse())
     }
 
-    func testDebugRuntimeModelsOnlineUsesRawCatalogLoader() throws {
+    func testDebugRuntimeModelsOnlineUsesRawCatalogLoader() async throws {
         let expected = ModelsResponse(models: [])
-        let result = try waitForAsyncResult {
-            try await DebugCommandRuntime.run(CodexCLI.DebugCommandRequest(
-                action: .models(bundled: false)
-            ), dependencies: Self.debugModelDependencies(
-                loadRawModelCatalog: { _, _ in expected }
-            ))
-        }
+        let result = try await DebugCommandRuntime.run(CodexCLI.DebugCommandRequest(
+            action: .models(bundled: false)
+        ), dependencies: Self.debugModelDependencies(
+            loadRawModelCatalog: { _, _ in expected }
+        ))
 
         XCTAssertEqual(result.exitCode, 0)
         XCTAssertNil(result.stderrMessage)
@@ -1688,53 +1686,6 @@ final class CommandSurfaceCLITests: XCTestCase {
 
         init(_ description: String) {
             self.description = description
-        }
-    }
-
-    private func waitForAsyncResult<Success: Sendable>(
-        timeout: DispatchTimeInterval = .seconds(5),
-        _ operation: @escaping @Sendable () async throws -> Success
-    ) throws -> Success {
-        let semaphore = DispatchSemaphore(value: 0)
-        let resultBox = AsyncTestResultBox<Success>()
-
-        Task {
-            do {
-                resultBox.set(.success(try await operation()))
-            } catch {
-                resultBox.set(.failure(error))
-            }
-            semaphore.signal()
-        }
-
-        guard semaphore.wait(timeout: .now() + timeout) == .success else {
-            throw TestError("timed out waiting for async test operation")
-        }
-
-        switch resultBox.result {
-        case let .success(value):
-            return value
-        case let .failure(error):
-            throw error
-        case nil:
-            throw TestError("async test operation completed without a result")
-        }
-    }
-
-    private final class AsyncTestResultBox<Success>: @unchecked Sendable {
-        private let lock = NSLock()
-        private var stored: Result<Success, Error>?
-
-        var result: Result<Success, Error>? {
-            lock.lock()
-            defer { lock.unlock() }
-            return stored
-        }
-
-        func set(_ result: Result<Success, Error>) {
-            lock.lock()
-            stored = result
-            lock.unlock()
         }
     }
 

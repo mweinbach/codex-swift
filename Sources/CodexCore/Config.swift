@@ -199,6 +199,52 @@ public struct AgentRuntimeConfig: Equatable, Sendable {
     }
 }
 
+public struct MultiAgentV2Config: Equatable, Sendable {
+    public static let defaultMaxConcurrentThreadsPerSession = 4
+    public static let defaultMinWaitTimeoutMS: Int64 = 10_000
+    public static let maxWaitTimeoutMS: Int64 = 3_600_000
+
+    public var maxConcurrentThreadsPerSession: Int
+    public var minWaitTimeoutMS: Int64
+    public var usageHintEnabled: Bool
+    public var usageHintText: String?
+    public var rootAgentUsageHintText: String?
+    public var subagentUsageHintText: String?
+    public var hideSpawnAgentMetadata: Bool
+
+    public init(
+        maxConcurrentThreadsPerSession: Int = Self.defaultMaxConcurrentThreadsPerSession,
+        minWaitTimeoutMS: Int64 = Self.defaultMinWaitTimeoutMS,
+        usageHintEnabled: Bool = true,
+        usageHintText: String? = nil,
+        rootAgentUsageHintText: String? = nil,
+        subagentUsageHintText: String? = nil,
+        hideSpawnAgentMetadata: Bool = false
+    ) {
+        self.maxConcurrentThreadsPerSession = maxConcurrentThreadsPerSession
+        self.minWaitTimeoutMS = minWaitTimeoutMS
+        self.usageHintEnabled = usageHintEnabled
+        self.usageHintText = usageHintText
+        self.rootAgentUsageHintText = rootAgentUsageHintText
+        self.subagentUsageHintText = subagentUsageHintText
+        self.hideSpawnAgentMetadata = hideSpawnAgentMetadata
+    }
+
+    public func usageHintText(features: FeatureStates, sessionSource: SessionSource) -> String? {
+        guard features.isEnabled(.multiAgentV2) else {
+            return nil
+        }
+        switch sessionSource {
+        case .subagent(.threadSpawn):
+            return subagentUsageHintText
+        case .cli, .vscode, .exec, .mcp, .custom, .unknown:
+            return rootAgentUsageHintText
+        case .internal, .subagent:
+            return nil
+        }
+    }
+}
+
 public struct AgentRoleConfig: Equatable, Sendable {
     public var description: String?
     public var configFile: String?
@@ -326,6 +372,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var modelAutoCompactTokenLimit: Int64?
     public var history: HistoryConfig
     public var agents: AgentRuntimeConfig
+    public var multiAgentV2: MultiAgentV2Config
     public var agentRoles: [String: AgentRoleConfig]
     public var startupWarnings: [String]
     public var fileOpener: UriBasedFileOpener
@@ -514,6 +561,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.modelAutoCompactTokenLimit = nil
         self.history = HistoryConfig()
         self.agents = AgentRuntimeConfig()
+        self.multiAgentV2 = MultiAgentV2Config()
         self.agentRoles = [:]
         self.startupWarnings = []
         self.fileOpener = .vsCode
@@ -1909,6 +1957,8 @@ private struct ParsedCodexConfigToml {
     var profileFeatures: [String: [String: Bool]] = [:]
     var appsMcpPathOverride: [String: ConfigValue] = [:]
     var profileAppsMcpPathOverride: [String: [String: ConfigValue]] = [:]
+    var multiAgentV2: [String: ConfigValue] = [:]
+    var profileMultiAgentV2: [String: [String: ConfigValue]] = [:]
     var memories: [String: ConfigValue] = [:]
     var windows: [String: ConfigValue] = [:]
     var profileWindows: [String: [String: ConfigValue]] = [:]
@@ -1924,6 +1974,7 @@ private struct ParsedCodexConfigToml {
     var agents: [String: ConfigValue] = [:]
     var agentRoles: [String: [String: ConfigValue]] = [:]
     var agentRoleDiscoveryDirs: [URL] = []
+    var agentsMaxThreadsConfigured = false
     var ignoredDenylistedTables: Set<String> = []
     var startupWarnings: [String] = []
     var realtimeAudio: [String: ConfigValue] = [:]
@@ -1942,6 +1993,7 @@ private struct ParsedCodexConfigToml {
         let hasProfiles = !profiles.isEmpty
             || !profileFeatures.isEmpty
             || !profileAppsMcpPathOverride.isEmpty
+            || !profileMultiAgentV2.isEmpty
             || !profileAnalytics.isEmpty
             || !profileTui.isEmpty
         var ignoredKeys: [String] = []
@@ -1959,6 +2011,7 @@ private struct ParsedCodexConfigToml {
         profiles.removeAll()
         profileFeatures.removeAll()
         profileAppsMcpPathOverride.removeAll()
+        profileMultiAgentV2.removeAll()
         profileAnalytics.removeAll()
         profileTui.removeAll()
         otel.removeAll()
@@ -1992,6 +2045,11 @@ private struct ParsedCodexConfigToml {
                     }
                 }
                 if case let .profileFeatures(name) = section {
+                    if parsed.profiles[name] == nil {
+                        parsed.profiles[name] = [:]
+                    }
+                }
+                if case let .profileFeaturesMultiAgentV2(name) = section {
                     if parsed.profiles[name] == nil {
                         parsed.profiles[name] = [:]
                     }
@@ -2115,6 +2173,9 @@ private struct ParsedCodexConfigToml {
                     for (agentKey, agentValue) in table {
                         if Self.isRelevantAgentKey(agentKey) {
                             parsed.agents[agentKey] = agentValue
+                            if agentKey == "max_threads" {
+                                parsed.agentsMaxThreadsConfigured = true
+                            }
                             continue
                         }
                         if case let .table(roleTable) = agentValue {
@@ -2182,6 +2243,13 @@ private struct ParsedCodexConfigToml {
                     key: key,
                     value: ConfigValueParser.parseTomlLiteral(valueText),
                     path: "features.\(key)",
+                    profileName: nil
+                )
+            case .featuresMultiAgentV2:
+                try parsed.mergeMultiAgentV2Config(
+                    key: key,
+                    value: ConfigValueParser.parseTomlLiteral(valueText),
+                    path: "features.multi_agent_v2.\(key)",
                     profileName: nil
                 )
             case .featuresAppsMcpPathOverride:
@@ -2255,6 +2323,9 @@ private struct ParsedCodexConfigToml {
             case .agents:
                 if Self.isRelevantAgentKey(key) {
                     parsed.agents[key] = try ConfigValueParser.parseTomlLiteral(valueText)
+                    if key == "max_threads" {
+                        parsed.agentsMaxThreadsConfigured = true
+                    }
                 }
             case let .agentRole(name):
                 try parsed.mergeAgentRole(
@@ -2330,6 +2401,13 @@ private struct ParsedCodexConfigToml {
                     key: key,
                     value: ConfigValueParser.parseTomlLiteral(valueText),
                     path: "profiles.\(name).features.\(key)",
+                    profileName: name
+                )
+            case let .profileFeaturesMultiAgentV2(name):
+                try parsed.mergeMultiAgentV2Config(
+                    key: key,
+                    value: ConfigValueParser.parseTomlLiteral(valueText),
+                    path: "profiles.\(name).features.multi_agent_v2.\(key)",
                     profileName: name
                 )
             case let .profileFeaturesAppsMcpPathOverride(name):
@@ -2504,6 +2582,16 @@ private struct ParsedCodexConfigToml {
                 continue
             }
 
+            if parts.count == 3, parts[0] == "features", parts[1] == "multi_agent_v2" {
+                try mergeMultiAgentV2Config(
+                    key: parts[2],
+                    value: value,
+                    path: path,
+                    profileName: nil
+                )
+                continue
+            }
+
             if parts.count == 2, parts[0] == "memories" {
                 memories[Self.canonicalMemoriesConfigKey(parts[1])] = value
                 continue
@@ -2621,6 +2709,9 @@ private struct ParsedCodexConfigToml {
             if parts.count == 2, parts[0] == "agents" {
                 if Self.isRelevantAgentKey(parts[1]) {
                     agents[parts[1]] = value
+                    if parts[1] == "max_threads" {
+                        agentsMaxThreadsConfigured = true
+                    }
                 }
                 continue
             }
@@ -2709,6 +2800,16 @@ private struct ParsedCodexConfigToml {
                 continue
             }
 
+            if parts.count == 5, parts[0] == "profiles", parts[2] == "features", parts[3] == "multi_agent_v2" {
+                try mergeMultiAgentV2Config(
+                    key: parts[4],
+                    value: value,
+                    path: path,
+                    profileName: parts[1]
+                )
+                continue
+            }
+
             if parts.count == 5, parts[0] == "profiles", parts[2] == "tools", parts[3] == "web_search" {
                 Self.mergeWebSearchToolConfigField(key: parts[4], value: value, into: &profiles[parts[1], default: [:]])
                 continue
@@ -2748,6 +2849,10 @@ private struct ParsedCodexConfigToml {
 
         for (key, value) in overlay.appsMcpPathOverride {
             appsMcpPathOverride[key] = value
+        }
+
+        for (key, value) in overlay.multiAgentV2 {
+            multiAgentV2[key] = value
         }
 
         for (key, value) in overlay.mcpServers {
@@ -2801,6 +2906,7 @@ private struct ParsedCodexConfigToml {
         for (key, value) in overlay.agents {
             agents[key] = value
         }
+        agentsMaxThreadsConfigured = agentsMaxThreadsConfigured || overlay.agentsMaxThreadsConfigured
 
         for (roleName, roleValues) in overlay.agentRoles {
             var mergedRole = agentRoles[roleName] ?? [:]
@@ -2871,6 +2977,14 @@ private struct ParsedCodexConfigToml {
                 mergedProfile[key] = value
             }
             profileAppsMcpPathOverride[profileName] = mergedProfile
+        }
+
+        for (profileName, profileValues) in overlay.profileMultiAgentV2 {
+            var mergedProfile = profileMultiAgentV2[profileName] ?? [:]
+            for (key, value) in profileValues {
+                mergedProfile[key] = value
+            }
+            profileMultiAgentV2[profileName] = mergedProfile
         }
     }
 
@@ -2960,6 +3074,9 @@ private struct ParsedCodexConfigToml {
             for (key, value) in agentsTable {
                 if Self.isRelevantAgentKey(key) {
                     agents[key] = value
+                    if key == "max_threads" {
+                        agentsMaxThreadsConfigured = true
+                    }
                     continue
                 }
                 if case let .table(roleTable) = value {
@@ -3240,6 +3357,19 @@ private struct ParsedCodexConfigToml {
             config.serviceTier,
             features: featureStates
         )
+        config.multiAgentV2 = try Self.multiAgentV2ConfigValue(
+            base: multiAgentV2,
+            profile: config.activeProfile.flatMap { profileMultiAgentV2[$0] },
+            key: "features.multi_agent_v2"
+        )
+        if featureStates.isEnabled(.multiAgentV2) {
+            if agentsMaxThreadsConfigured {
+                throw CodexConfigLoadError.invalidConfig(
+                    "agents.max_threads cannot be set when multi_agent_v2 is enabled"
+                )
+            }
+            config.agents.maxThreads = max(config.multiAgentV2.maxConcurrentThreadsPerSession - 1, 0)
+        }
         config.windowsSandboxLevel = try Self.windowsSandboxLevelValue(
             base: windows,
             profile: config.activeProfile.flatMap { profileWindows[$0] },
@@ -3474,6 +3604,11 @@ private struct ParsedCodexConfigToml {
         path: String,
         profileName: String?
     ) throws {
+        if key == "multi_agent_v2", case let .table(table) = value {
+            try mergeMultiAgentV2FeatureConfig(table, path: path, profileName: profileName)
+            return
+        }
+
         if key == "apps_mcp_path_override", case let .table(table) = value {
             try mergeAppsMcpPathOverrideFeatureConfig(table, path: path, profileName: profileName)
             return
@@ -3484,6 +3619,52 @@ private struct ParsedCodexConfigToml {
             profileFeatures[profileName, default: [:]][key] = enabled
         } else {
             features[key] = enabled
+        }
+    }
+
+    private mutating func mergeMultiAgentV2Config(
+        key: String,
+        value: ConfigValue,
+        path: String,
+        profileName: String?
+    ) throws {
+        switch key {
+        case "enabled":
+            let enabled = try Self.boolValue(value, key: path)
+            if let profileName {
+                profileFeatures[profileName, default: [:]][FeatureKey.multiAgentV2.rawValue] = enabled
+            } else {
+                features[FeatureKey.multiAgentV2.rawValue] = enabled
+            }
+        case "max_concurrent_threads_per_session",
+             "min_wait_timeout_ms",
+             "usage_hint_enabled",
+             "usage_hint_text",
+             "root_agent_usage_hint_text",
+             "subagent_usage_hint_text",
+             "hide_spawn_agent_metadata":
+            if let profileName {
+                profileMultiAgentV2[profileName, default: [:]][key] = value
+            } else {
+                multiAgentV2[key] = value
+            }
+        default:
+            throw CodexConfigLoadError.invalidConfigLine(path)
+        }
+    }
+
+    private mutating func mergeMultiAgentV2FeatureConfig(
+        _ table: [String: ConfigValue],
+        path: String,
+        profileName: String?
+    ) throws {
+        for (key, value) in table {
+            try mergeMultiAgentV2Config(
+                key: key,
+                value: value,
+                path: "\(path).\(key)",
+                profileName: profileName
+            )
         }
     }
 
@@ -4870,6 +5051,85 @@ private struct ParsedCodexConfigToml {
         )
     }
 
+    private static func multiAgentV2ConfigValue(
+        base: [String: ConfigValue],
+        profile: [String: ConfigValue]?,
+        key: String
+    ) throws -> MultiAgentV2Config {
+        let defaults = MultiAgentV2Config()
+        let maxConcurrentThreads = try layeredConfigValue(
+            field: "max_concurrent_threads_per_session",
+            base: base,
+            profile: profile
+        ).map {
+            try positiveIntValue(
+                $0,
+                key: "\(key).max_concurrent_threads_per_session",
+                message: "features.multi_agent_v2.max_concurrent_threads_per_session must be at least 1"
+            )
+        } ?? defaults.maxConcurrentThreadsPerSession
+
+        let minWaitTimeoutMS = try layeredConfigValue(
+            field: "min_wait_timeout_ms",
+            base: base,
+            profile: profile
+        ).map {
+            let timeout = try int64Value($0, key: "\(key).min_wait_timeout_ms")
+            guard timeout >= 1 else {
+                throw CodexConfigLoadError.invalidConfig(
+                    "features.multi_agent_v2.min_wait_timeout_ms must be at least 1"
+                )
+            }
+            guard timeout <= MultiAgentV2Config.maxWaitTimeoutMS else {
+                throw CodexConfigLoadError.invalidConfig(
+                    "features.multi_agent_v2.min_wait_timeout_ms must be at most \(MultiAgentV2Config.maxWaitTimeoutMS)"
+                )
+            }
+            return timeout
+        } ?? defaults.minWaitTimeoutMS
+
+        return MultiAgentV2Config(
+            maxConcurrentThreadsPerSession: maxConcurrentThreads,
+            minWaitTimeoutMS: minWaitTimeoutMS,
+            usageHintEnabled: try layeredConfigValue(
+                field: "usage_hint_enabled",
+                base: base,
+                profile: profile
+            ).map { try boolValue($0, key: "\(key).usage_hint_enabled") } ?? defaults.usageHintEnabled,
+            usageHintText: try layeredConfigValue(
+                field: "usage_hint_text",
+                base: base,
+                profile: profile
+            ).map { try stringValue($0, key: "\(key).usage_hint_text") } ?? defaults.usageHintText,
+            rootAgentUsageHintText: try layeredConfigValue(
+                field: "root_agent_usage_hint_text",
+                base: base,
+                profile: profile
+            ).map { try stringValue($0, key: "\(key).root_agent_usage_hint_text") }
+                ?? defaults.rootAgentUsageHintText,
+            subagentUsageHintText: try layeredConfigValue(
+                field: "subagent_usage_hint_text",
+                base: base,
+                profile: profile
+            ).map { try stringValue($0, key: "\(key).subagent_usage_hint_text") }
+                ?? defaults.subagentUsageHintText,
+            hideSpawnAgentMetadata: try layeredConfigValue(
+                field: "hide_spawn_agent_metadata",
+                base: base,
+                profile: profile
+            ).map { try boolValue($0, key: "\(key).hide_spawn_agent_metadata") }
+                ?? defaults.hideSpawnAgentMetadata
+        )
+    }
+
+    private static func layeredConfigValue(
+        field: String,
+        base: [String: ConfigValue],
+        profile: [String: ConfigValue]?
+    ) -> ConfigValue? {
+        profile?[field] ?? base[field]
+    }
+
     private static func isRelevantAgentKey(_ key: String) -> Bool {
         key == "max_threads"
             || key == "max_depth"
@@ -5536,6 +5796,9 @@ private struct ParsedCodexConfigToml {
         if parts.count == 1, parts[0] == "features" {
             return .features
         }
+        if parts.count == 2, parts[0] == "features", parts[1] == "multi_agent_v2" {
+            return .featuresMultiAgentV2
+        }
         if parts.count == 2, parts[0] == "features", parts[1] == "apps_mcp_path_override" {
             return .featuresAppsMcpPathOverride
         }
@@ -5669,6 +5932,13 @@ private struct ParsedCodexConfigToml {
         }
         if parts.count == 3, parts[0] == "profiles", parts[2] == "features" {
             return .profileFeatures(parts[1])
+        }
+        if parts.count == 4,
+           parts[0] == "profiles",
+           parts[2] == "features",
+           parts[3] == "multi_agent_v2"
+        {
+            return .profileFeaturesMultiAgentV2(parts[1])
         }
         if parts.count == 4,
            parts[0] == "profiles",
@@ -5854,6 +6124,7 @@ private enum ConfigSection {
     case modelProvider(String)
     case modelProviderMap(String, String)
     case features
+    case featuresMultiAgentV2
     case featuresAppsMcpPathOverride
     case memories
     case sandboxWorkspaceWrite
@@ -5891,6 +6162,7 @@ private enum ConfigSection {
     case toolsWebSearch
     case toolsWebSearchLocation
     case profileFeatures(String)
+    case profileFeaturesMultiAgentV2(String)
     case profileFeaturesAppsMcpPathOverride(String)
     case profileToolsWebSearch(String)
     case profileToolsWebSearchLocation(String)

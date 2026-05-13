@@ -93,6 +93,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.notices, NoticeConfig())
         XCTAssertEqual(config.history, HistoryConfig())
         XCTAssertEqual(config.agents, AgentRuntimeConfig())
+        XCTAssertEqual(config.multiAgentV2, MultiAgentV2Config())
         XCTAssertEqual(config.agentRoles, [:])
         XCTAssertEqual(config.fileOpener, .vsCode)
         XCTAssertEqual(config.tui, TuiRuntimeConfig())
@@ -930,6 +931,155 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
             XCTAssertEqual(String(describing: error), "agents.job_max_runtime_seconds must be at least 1")
         }
+    }
+
+    func testMultiAgentV2ConfigFromFeatureTableMatchesRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [features.multi_agent_v2]
+        enabled = true
+        max_concurrent_threads_per_session = 5
+        min_wait_timeout_ms = 2500
+        usage_hint_enabled = false
+        usage_hint_text = "Custom delegation guidance."
+        root_agent_usage_hint_text = "Root guidance."
+        subagent_usage_hint_text = "Subagent guidance."
+        hide_spawn_agent_metadata = true
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertTrue(config.features.isEnabled(.multiAgentV2))
+        XCTAssertEqual(config.multiAgentV2, MultiAgentV2Config(
+            maxConcurrentThreadsPerSession: 5,
+            minWaitTimeoutMS: 2500,
+            usageHintEnabled: false,
+            usageHintText: "Custom delegation guidance.",
+            rootAgentUsageHintText: "Root guidance.",
+            subagentUsageHintText: "Subagent guidance.",
+            hideSpawnAgentMetadata: true
+        ))
+        XCTAssertEqual(config.agents.maxThreads, 4)
+    }
+
+    func testProfileMultiAgentV2ConfigOverridesBaseLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        profile = "no_hint"
+
+        [features.multi_agent_v2]
+        max_concurrent_threads_per_session = 4
+        min_wait_timeout_ms = 3000
+        usage_hint_enabled = true
+        usage_hint_text = "base hint"
+        root_agent_usage_hint_text = "base root hint"
+        subagent_usage_hint_text = "base subagent hint"
+        hide_spawn_agent_metadata = true
+
+        [profiles.no_hint.features.multi_agent_v2]
+        max_concurrent_threads_per_session = 6
+        min_wait_timeout_ms = 1500
+        usage_hint_enabled = false
+        usage_hint_text = "profile hint"
+        root_agent_usage_hint_text = "profile root hint"
+        subagent_usage_hint_text = "profile subagent hint"
+        hide_spawn_agent_metadata = false
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.multiAgentV2, MultiAgentV2Config(
+            maxConcurrentThreadsPerSession: 6,
+            minWaitTimeoutMS: 1500,
+            usageHintEnabled: false,
+            usageHintText: "profile hint",
+            rootAgentUsageHintText: "profile root hint",
+            subagentUsageHintText: "profile subagent hint",
+            hideSpawnAgentMetadata: false
+        ))
+    }
+
+    func testMultiAgentV2DerivesAgentThreadCapAndRejectsAgentsMaxThreads() throws {
+        let defaultDir = try CoreTemporaryDirectory()
+        try """
+        [features.multi_agent_v2]
+        enabled = true
+        """.write(to: defaultDir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let defaultConfig = try CodexConfigLoader.load(codexHome: defaultDir.url, systemConfigFile: nil)
+        XCTAssertEqual(defaultConfig.agents.maxThreads, 3)
+
+        let singleDir = try CoreTemporaryDirectory()
+        try """
+        [features.multi_agent_v2]
+        enabled = true
+        max_concurrent_threads_per_session = 1
+        """.write(to: singleDir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let singleConfig = try CodexConfigLoader.load(codexHome: singleDir.url, systemConfigFile: nil)
+        XCTAssertEqual(singleConfig.agents.maxThreads, 0)
+
+        let conflictDir = try CoreTemporaryDirectory()
+        try """
+        [features.multi_agent_v2]
+        enabled = true
+
+        [agents]
+        max_threads = 3
+        """.write(to: conflictDir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: conflictDir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual(String(describing: error), "agents.max_threads cannot be set when multi_agent_v2 is enabled")
+        }
+    }
+
+    func testMultiAgentV2RejectsInvalidWaitTimeoutLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [features.multi_agent_v2]
+        enabled = true
+        min_wait_timeout_ms = 0
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "features.multi_agent_v2.min_wait_timeout_ms must be at least 1"
+            )
+        }
+
+        try """
+        [features.multi_agent_v2]
+        enabled = true
+        min_wait_timeout_ms = 3600001
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "features.multi_agent_v2.min_wait_timeout_ms must be at most 3600000"
+            )
+        }
+    }
+
+    func testMultiAgentV2UsageHintSelectionMatchesRustSessionSources() throws {
+        var features = FeatureStates.withDefaults()
+        let config = MultiAgentV2Config(
+            rootAgentUsageHintText: "Root guidance.",
+            subagentUsageHintText: "Subagent guidance."
+        )
+        let parentThreadID = try ThreadId(string: "00000000-0000-4000-8000-000000000071")
+
+        XCTAssertNil(config.usageHintText(features: features, sessionSource: .cli))
+
+        features.set(.multiAgentV2, enabled: true)
+        XCTAssertEqual(config.usageHintText(features: features, sessionSource: .cli), "Root guidance.")
+        XCTAssertEqual(
+            config.usageHintText(
+                features: features,
+                sessionSource: .subagent(.threadSpawn(parentThreadID: parentThreadID, depth: 1))
+            ),
+            "Subagent guidance."
+        )
+        XCTAssertNil(config.usageHintText(features: features, sessionSource: .subagent(.review)))
+        XCTAssertNil(config.usageHintText(features: features, sessionSource: .internal(.memoryConsolidation)))
     }
 
     func testAgentRoleConfigFileMetadataOverridesConfigTomlLikeRust() throws {
