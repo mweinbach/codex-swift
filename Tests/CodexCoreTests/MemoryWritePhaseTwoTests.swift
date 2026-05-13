@@ -470,6 +470,151 @@ final class MemoryWritePhaseTwoTests: XCTestCase {
         ])
     }
 
+    func testRunMemoryPhaseTwoConsolidationSpawnsLoopsCompletesAndShutsDown() async throws {
+        let codexHome = try temporaryDirectory()
+        let threadID = try phaseTwoThreadID(suffix: 507)
+        let spawnedThreadID = try phaseTwoThreadID(suffix: 508)
+        let memory = stage1Output(
+            suffix: 507,
+            sourceUpdatedAt: Date(timeIntervalSince1970: 900),
+            rawMemory: "spawned memory",
+            rolloutSummary: "spawned summary"
+        )
+        let store = RecordingPhaseTwoJobStore(
+            claimOutcome: .claimed(ownershipToken: "token-run", inputWatermark: 850),
+            phase2InputSelection: [memory],
+            heartbeatResults: [.success(true)]
+        )
+        let counter = CounterRecorder()
+        let histograms = HistogramRecorder()
+        let resetRecorder = ResetRecorder()
+        let spawnRecorder = SpawnRequestRecorder()
+        let shutdownRecorder = ShutdownRecorder()
+        let statuses = AgentStatusSequence([.running, .completed("done")])
+        let events = AgentLoopEventSequence([.statusPoll])
+        let usage = TokenUsage(
+            inputTokens: 20,
+            cachedInputTokens: 5,
+            outputTokens: 7,
+            reasoningOutputTokens: 3,
+            totalTokens: 27
+        )
+
+        let outcome = await runMemoryPhaseTwoConsolidation(
+            threadID: threadID,
+            store: store,
+            config: CodexRuntimeConfig(),
+            codexHome: codexHome,
+            now: Date(timeIntervalSince1970: 950),
+            spawnAgent: { request in
+                await spawnRecorder.append(request)
+                return MemoryPhaseTwoSpawnedConsolidationAgent(
+                    threadID: spawnedThreadID,
+                    status: { await statuses.next() },
+                    tokenUsage: { usage },
+                    nextEvent: { await events.next() },
+                    shutdown: { await shutdownRecorder.append(spawnedThreadID) }
+                )
+            },
+            resetBaseline: { try resetRecorder.reset(root: $0) },
+            recordCounter: counter.record,
+            recordHistogram: histograms.record
+        )
+
+        XCTAssertEqual(outcome, .completed(.succeeded))
+        let spawnRequests = await spawnRecorder.recordedRequests
+        XCTAssertEqual(spawnRequests.count, 1)
+        XCTAssertEqual(spawnRequests.first?.claim, MemoryPhaseTwoClaim(token: "token-run", watermark: 850))
+        XCTAssertEqual(spawnRequests.first?.completionWatermark, 900)
+        XCTAssertEqual(spawnRequests.first?.selectedOutputs, [memory])
+        XCTAssertEqual(resetRecorder.roots, [memoryRoot(codexHome: codexHome)])
+        let heartbeatRequests = await store.recordedHeartbeatRequests
+        XCTAssertEqual(heartbeatRequests, [
+            RecordingPhaseTwoJobStore.HeartbeatRequest(
+                ownershipToken: "token-run",
+                leaseSeconds: memoryStageTwoJobLeaseSeconds
+            )
+        ])
+        let succeededRequests = await store.recordedSucceededRequests
+        XCTAssertEqual(succeededRequests, [
+            RecordingPhaseTwoJobStore.SucceededRequest(
+                ownershipToken: "token-run",
+                completionWatermark: 900,
+                selectedOutputs: [memory]
+            )
+        ])
+        let shutdownThreads = await shutdownRecorder.recordedThreadIDs
+        XCTAssertEqual(shutdownThreads, [spawnedThreadID])
+        XCTAssertEqual(counter.events, [
+            CounterEvent(
+                name: MemoryWriteMetrics.phaseTwoJobs,
+                increment: 1,
+                labels: [CounterLabel(name: "status", value: "claimed")]
+            ),
+            CounterEvent(name: MemoryWriteMetrics.phaseTwoInput, increment: 1, labels: []),
+            CounterEvent(
+                name: MemoryWriteMetrics.phaseTwoJobs,
+                increment: 1,
+                labels: [CounterLabel(name: "status", value: "agent_spawned")]
+            ),
+            CounterEvent(
+                name: MemoryWriteMetrics.phaseTwoJobs,
+                increment: 1,
+                labels: [CounterLabel(name: "status", value: "succeeded")]
+            )
+        ])
+        XCTAssertEqual(histograms.events.map(\.value), [27, 20, 5, 7, 3])
+    }
+
+    func testRunMemoryPhaseTwoConsolidationMarksFailedSpawnLikeRust() async throws {
+        let codexHome = try temporaryDirectory()
+        let threadID = try phaseTwoThreadID(suffix: 509)
+        let memory = stage1Output(
+            suffix: 509,
+            sourceUpdatedAt: Date(timeIntervalSince1970: 1_000),
+            rawMemory: "spawn failure memory",
+            rolloutSummary: "spawn failure summary"
+        )
+        let store = RecordingPhaseTwoJobStore(
+            claimOutcome: .claimed(ownershipToken: "token-spawn-failure", inputWatermark: 950),
+            phase2InputSelection: [memory]
+        )
+        let counter = CounterRecorder()
+
+        let outcome = await runMemoryPhaseTwoConsolidation(
+            threadID: threadID,
+            store: store,
+            config: CodexRuntimeConfig(),
+            codexHome: codexHome,
+            now: Date(timeIntervalSince1970: 1_050),
+            spawnAgent: { _ in throw StoreError.failed },
+            recordCounter: counter.record
+        )
+
+        XCTAssertEqual(outcome, .failed("failed_spawn_agent"))
+        let failedRequests = await store.recordedFailedRequests
+        XCTAssertEqual(failedRequests, [
+            RecordingPhaseTwoJobStore.FailedRequest(
+                ownershipToken: "token-spawn-failure",
+                reason: "failed_spawn_agent",
+                retryDelaySeconds: memoryStageTwoJobRetryDelaySeconds,
+                unownedFallback: false
+            )
+        ])
+        XCTAssertEqual(counter.events, [
+            CounterEvent(
+                name: MemoryWriteMetrics.phaseTwoJobs,
+                increment: 1,
+                labels: [CounterLabel(name: "status", value: "claimed")]
+            ),
+            CounterEvent(
+                name: MemoryWriteMetrics.phaseTwoJobs,
+                increment: 1,
+                labels: [CounterLabel(name: "status", value: "failed_spawn_agent")]
+            )
+        ])
+    }
+
     func testPrepareMemoryPhaseTwoConsolidationMarksLoadFailureLikeRust() async throws {
         let codexHome = try temporaryDirectory()
         let threadID = try ThreadId(string: "00000000-0000-4000-8000-000000000203")
@@ -888,6 +1033,26 @@ private actor AgentLoopEventSequence {
             return .statusPoll
         }
         return events.removeFirst()
+    }
+}
+
+private actor SpawnRequestRecorder {
+    private var requests: [MemoryPhaseTwoConsolidationRequest] = []
+
+    var recordedRequests: [MemoryPhaseTwoConsolidationRequest] { requests }
+
+    func append(_ request: MemoryPhaseTwoConsolidationRequest) {
+        requests.append(request)
+    }
+}
+
+private actor ShutdownRecorder {
+    private var threadIDs: [ThreadId] = []
+
+    var recordedThreadIDs: [ThreadId] { threadIDs }
+
+    func append(_ threadID: ThreadId) {
+        threadIDs.append(threadID)
     }
 }
 

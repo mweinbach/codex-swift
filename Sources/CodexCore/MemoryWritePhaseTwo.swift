@@ -162,10 +162,39 @@ public enum MemoryPhaseTwoCompletionOutcome: Equatable, Sendable {
     case successRecordLost
 }
 
+public enum MemoryPhaseTwoRunOutcome: Equatable, Sendable {
+    case skipped(String)
+    case failed(String)
+    case succeededNoWorkspaceChanges
+    case completed(MemoryPhaseTwoCompletionOutcome)
+}
+
 public enum MemoryPhaseTwoAgentLoopEvent: Equatable, Sendable {
     case statusPoll
     case heartbeat
     case sessionTerminated
+}
+
+public struct MemoryPhaseTwoSpawnedConsolidationAgent: Sendable {
+    public let threadID: ThreadId
+    public let status: @Sendable () async -> AgentStatus
+    public let tokenUsage: @Sendable () async -> TokenUsage?
+    public let nextEvent: @Sendable () async -> MemoryPhaseTwoAgentLoopEvent
+    public let shutdown: @Sendable () async throws -> Void
+
+    public init(
+        threadID: ThreadId,
+        status: @escaping @Sendable () async -> AgentStatus,
+        tokenUsage: @escaping @Sendable () async -> TokenUsage? = { nil },
+        nextEvent: @escaping @Sendable () async -> MemoryPhaseTwoAgentLoopEvent,
+        shutdown: @escaping @Sendable () async throws -> Void = {}
+    ) {
+        self.threadID = threadID
+        self.status = status
+        self.tokenUsage = tokenUsage
+        self.nextEvent = nextEvent
+        self.shutdown = shutdown
+    }
 }
 
 public func memoryRoot(codexHome: URL) -> URL {
@@ -456,6 +485,86 @@ public func recordMemoryPhaseTwoAgentSpawned(
         recordCounter?(MemoryWriteMetrics.phaseTwoInput, Int64(rawMemoryCount), [])
     }
     recordCounter?(MemoryWriteMetrics.phaseTwoJobs, 1, [("status", "agent_spawned")])
+}
+
+public func runMemoryPhaseTwoConsolidation(
+    threadID: ThreadId,
+    store: MemoryPhaseTwoJobStore,
+    config: CodexRuntimeConfig,
+    codexHome: URL,
+    now: Date = Date(),
+    spawnAgent: @escaping @Sendable (
+        _ request: MemoryPhaseTwoConsolidationRequest
+    ) async throws -> MemoryPhaseTwoSpawnedConsolidationAgent,
+    resetBaseline: @Sendable (URL) throws -> Void = { root in
+        try resetMemoryWorkspaceBaseline(root: root)
+    },
+    recordCounter: MemoryWriteCounterRecorder? = nil,
+    recordHistogram: MemoryWriteHistogramRecorder? = nil
+) async -> MemoryPhaseTwoRunOutcome {
+    let preparation = await prepareMemoryPhaseTwoConsolidation(
+        threadID: threadID,
+        store: store,
+        config: config,
+        codexHome: codexHome,
+        now: now,
+        recordCounter: recordCounter
+    )
+
+    let request: MemoryPhaseTwoConsolidationRequest
+    switch preparation {
+    case let .skipped(reason):
+        return .skipped(reason)
+    case let .failed(reason):
+        return .failed(reason)
+    case .succeededNoWorkspaceChanges:
+        return .succeededNoWorkspaceChanges
+    case let .readyToSpawn(spawnRequest):
+        request = spawnRequest
+    }
+
+    let spawnedAgent: MemoryPhaseTwoSpawnedConsolidationAgent
+    do {
+        spawnedAgent = try await spawnAgent(request)
+    } catch {
+        await recordMemoryPhaseTwoPreparationFailure(
+            store: store,
+            claim: request.claim,
+            reason: "failed_spawn_agent",
+            recordCounter: recordCounter
+        )
+        return .failed("failed_spawn_agent")
+    }
+
+    recordMemoryPhaseTwoAgentSpawned(
+        rawMemoryCount: request.selectedOutputs.count,
+        recordCounter: recordCounter
+    )
+
+    let finalStatus = await loopMemoryPhaseTwoConsolidationAgent(
+        threadID: spawnedAgent.threadID,
+        claim: request.claim,
+        store: store,
+        status: spawnedAgent.status,
+        nextEvent: spawnedAgent.nextEvent
+    )
+    let tokenUsage: TokenUsage? = if case .completed = finalStatus {
+        await spawnedAgent.tokenUsage()
+    } else {
+        nil
+    }
+    let completion = await completeMemoryPhaseTwoConsolidation(
+        finalStatus: finalStatus,
+        request: request,
+        store: store,
+        memoryRoot: memoryRoot(codexHome: codexHome),
+        tokenUsage: tokenUsage,
+        resetBaseline: resetBaseline,
+        recordCounter: recordCounter,
+        recordHistogram: recordHistogram
+    )
+    try? await spawnedAgent.shutdown()
+    return .completed(completion)
 }
 
 public func loopMemoryPhaseTwoConsolidationAgent(
