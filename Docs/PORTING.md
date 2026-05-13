@@ -164,6 +164,13 @@ Source baseline inspected for this scaffold:
 - `codex-rs/cli/src/login.rs`, `codex-rs/login`, and auth/config support from `codex-rs/core`
   - browser ChatGPT login server flow including connector OAuth scopes, device-code login flow with experimental issuer/client-id options, forced workspace validation, token exchange/persistence, and Rust-shaped login success/error messages
   - `codex login --with-api-key` stdin handling, file/keyring/auto API-key auth storage, `codex login status`, API-key masking, deprecated `--api-key` guidance, `forced_login_method` login-command restrictions, and `codex logout`
+- `codex-rs/agent-identity/src/lib.rs`
+  - Agent registration, task registration, biscuit, and JWKS URL builders now match Rust's
+    trailing-slash handling and `/backend-api` JWKS routing. Swift also ports the
+    `codex-agent-identity-` request-id format, ABOM harness/location construction, and
+    payload-only Agent Identity JWT claim decoding with Rust error strings and plan aliases.
+    Ed25519 key generation/signing, task registration/decryption, and JWKS-backed JWT
+    verification remain pending.
 - `codex-rs/cli/src/main.rs` features command
   - `codex features list` sorted/aligned output with stage labels, default states, feature config tables, `-c features.*` overrides, and global `--enable`/`--disable`; `codex features enable <feature>` and `codex features disable <feature>` config mutation, including profile-scoped feature tables and under-development enable warnings
 - `codex-rs/cli/src/main.rs` debug command parser
