@@ -88,6 +88,56 @@ public enum AgentIdentity {
         return signature.base64EncodedString()
     }
 
+    public static func registerAgentTask<Transport: APITransport>(
+        transport: Transport,
+        chatGPTBaseURL: String,
+        key: AgentIdentityKey
+    ) async throws -> String {
+        try await registerAgentTask(
+            transport: transport,
+            chatGPTBaseURL: chatGPTBaseURL,
+            key: key,
+            timestamp: currentTimestamp()
+        )
+    }
+
+    static func registerAgentTask<Transport: APITransport>(
+        transport: Transport,
+        chatGPTBaseURL: String,
+        key: AgentIdentityKey,
+        timestamp: String
+    ) async throws -> String {
+        let request = APIRequest(
+            method: .post,
+            url: agentTaskRegistrationURL(chatGPTBaseURL: chatGPTBaseURL, agentRuntimeID: key.agentRuntimeID),
+            body: .object([
+                "signature": .string(try signTaskRegistrationPayload(key: key, timestamp: timestamp)),
+                "timestamp": .string(timestamp),
+            ]),
+            timeoutMilliseconds: 30_000
+        )
+
+        let response: APIResponse
+        switch await transport.execute(request) {
+        case let .success(success):
+            response = success
+        case let .failure(.http(statusCode, _, body)):
+            throw AgentIdentityError.message(
+                "failed to register agent task with status \(HTTPStatus.description(for: statusCode)): \(truncatedTaskRegistrationBody(body))"
+            )
+        case .failure:
+            throw AgentIdentityError.message("failed to register agent task")
+        }
+
+        let decoded: RegisterTaskResponse
+        do {
+            decoded = try JSONDecoder().decode(RegisterTaskResponse.self, from: response.body)
+        } catch {
+            throw AgentIdentityError.message("failed to decode agent task registration response")
+        }
+        return try taskID(from: decoded)
+    }
+
     public static func authorizationHeaderForAgentTask(
         key: AgentIdentityKey,
         target: AgentTaskAuthorizationTarget
@@ -304,6 +354,26 @@ public enum AgentIdentity {
             return value.int64Value
         }
         return nil
+    }
+
+    private static func taskID(from response: RegisterTaskResponse) throws -> String {
+        if let taskID = response.taskID ?? response.taskIDCamel {
+            return taskID
+        }
+        if response.encryptedTaskID != nil || response.encryptedTaskIDCamel != nil {
+            throw AgentIdentityError.message("failed to decrypt encrypted task id")
+        }
+        throw AgentIdentityError.message("agent task registration response omitted task id")
+    }
+
+    private static func truncatedTaskRegistrationBody(_ body: String?) -> String {
+        guard let body else {
+            return ""
+        }
+        guard body.count > 512 else {
+            return body
+        }
+        return "\(String(body.prefix(512)))..."
     }
 
     private static func signingPrivateKeyFromPKCS8Base64(_ privateKeyPKCS8Base64: String) throws -> Curve25519.Signing.PrivateKey {
@@ -603,6 +673,20 @@ public struct AgentIdentityJWK: Decodable, Equatable, Sendable {
 private struct AgentIdentityJWTHeader: Decodable {
     let alg: String?
     let kid: String?
+}
+
+private struct RegisterTaskResponse: Decodable {
+    let taskID: String?
+    let taskIDCamel: String?
+    let encryptedTaskID: String?
+    let encryptedTaskIDCamel: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case taskID = "task_id"
+        case taskIDCamel = "taskId"
+        case encryptedTaskID = "encrypted_task_id"
+        case encryptedTaskIDCamel = "encryptedTaskId"
+    }
 }
 
 private struct AgentAssertionEnvelope: Encodable {

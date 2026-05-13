@@ -174,7 +174,10 @@ Source baseline inspected for this scaffold:
     Ed25519 key generation/signing now preserves Rust's PKCS#8 private-key storage,
     OpenSSH public-key encoding, task-registration payload signing, AgentAssertion
     authorization header payload/signature shape, and runtime mismatch error text.
-    Task registration networking and encrypted task-id decryption remain pending.
+    Task registration now posts Rust's signed JSON body to the task-registration endpoint
+    with the 30-second timeout, preserves non-2xx body truncation/error context,
+    decodes `task_id`/`taskId` responses, and preserves omitted-id/decode errors.
+    Encrypted task-id decryption remains pending.
 - `codex-rs/cli/src/main.rs` features command
   - `codex features list` sorted/aligned output with stage labels, default states, feature config tables, `-c features.*` overrides, and global `--enable`/`--disable`; `codex features enable <feature>` and `codex features disable <feature>` config mutation, including profile-scoped feature tables and under-development enable warnings
 - `codex-rs/cli/src/main.rs` debug command parser

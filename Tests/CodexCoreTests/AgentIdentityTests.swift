@@ -123,6 +123,111 @@ final class AgentIdentityTests: XCTestCase {
         )
     }
 
+    func testRegisterAgentTaskPostsSignedRequestAndReadsSnakeTaskID() async throws {
+        let material = try AgentIdentity.generateAgentKeyMaterial(privateKeyBytes: Self.testEd25519Seed)
+        let key = AgentIdentityKey(agentRuntimeID: "agent-123", privateKeyPKCS8Base64: material.privateKeyPKCS8Base64)
+        let transport = RecordingAgentIdentityTransport(
+            result: .success(APIResponse(statusCode: 200, body: Data(#"{"task_id":"task-123"}"#.utf8)))
+        )
+
+        let taskID = try await AgentIdentity.registerAgentTask(
+            transport: transport,
+            chatGPTBaseURL: "https://chatgpt.com/backend-api/",
+            key: key,
+            timestamp: "2026-05-13T12:00:00Z"
+        )
+
+        XCTAssertEqual(taskID, "task-123")
+        let requests = await transport.recordedRequests()
+        let request = try XCTUnwrap(requests.first)
+        XCTAssertEqual(request.method, .post)
+        XCTAssertEqual(request.url, "https://chatgpt.com/backend-api/v1/agent/agent-123/task/register")
+        XCTAssertEqual(request.timeoutMilliseconds, 30_000)
+        let body = try XCTUnwrap(request.body)
+        let object = try XCTUnwrap(body.objectValue)
+        XCTAssertEqual(object["timestamp"], .string("2026-05-13T12:00:00Z"))
+
+        let signature = try XCTUnwrap(object["signature"]?.stringValue.flatMap { Data(base64Encoded: $0) })
+        let privateKey = try Curve25519.Signing.PrivateKey(rawRepresentation: Data(Self.testEd25519Seed))
+        XCTAssertTrue(
+            privateKey.publicKey.isValidSignature(
+                signature,
+                for: Data("agent-123:2026-05-13T12:00:00Z".utf8)
+            )
+        )
+    }
+
+    func testRegisterAgentTaskReadsCamelTaskID() async throws {
+        let material = try AgentIdentity.generateAgentKeyMaterial(privateKeyBytes: Self.testEd25519Seed)
+        let key = AgentIdentityKey(agentRuntimeID: "agent-123", privateKeyPKCS8Base64: material.privateKeyPKCS8Base64)
+        let transport = RecordingAgentIdentityTransport(
+            result: .success(APIResponse(statusCode: 200, body: Data(#"{"taskId":"task-camel"}"#.utf8)))
+        )
+
+        let taskID = try await AgentIdentity.registerAgentTask(
+            transport: transport,
+            chatGPTBaseURL: "https://chatgpt.com/backend-api",
+            key: key,
+            timestamp: "2026-05-13T12:00:00Z"
+        )
+
+        XCTAssertEqual(taskID, "task-camel")
+    }
+
+    func testRegisterAgentTaskErrorsMatchRust() async throws {
+        let material = try AgentIdentity.generateAgentKeyMaterial(privateKeyBytes: Self.testEd25519Seed)
+        let key = AgentIdentityKey(agentRuntimeID: "agent-123", privateKeyPKCS8Base64: material.privateKeyPKCS8Base64)
+        let longBody = String(repeating: "x", count: 520)
+        let failingTransport = RecordingAgentIdentityTransport(
+            result: .failure(.http(statusCode: 500, headers: [:], body: longBody))
+        )
+
+        do {
+            _ = try await AgentIdentity.registerAgentTask(
+                transport: failingTransport,
+                chatGPTBaseURL: "https://chatgpt.com/backend-api",
+                key: key,
+                timestamp: "2026-05-13T12:00:00Z"
+            )
+            XCTFail("expected registration failure")
+        } catch {
+            XCTAssertEqual(
+                String(describing: error),
+                "failed to register agent task with status 500 Internal Server Error: \(String(longBody.prefix(512)))..."
+            )
+        }
+
+        let malformedTransport = RecordingAgentIdentityTransport(
+            result: .success(APIResponse(statusCode: 200, body: Data("not json".utf8)))
+        )
+        do {
+            _ = try await AgentIdentity.registerAgentTask(
+                transport: malformedTransport,
+                chatGPTBaseURL: "https://chatgpt.com/backend-api",
+                key: key,
+                timestamp: "2026-05-13T12:00:00Z"
+            )
+            XCTFail("expected decode failure")
+        } catch {
+            XCTAssertEqual(String(describing: error), "failed to decode agent task registration response")
+        }
+
+        let omittedIDTransport = RecordingAgentIdentityTransport(
+            result: .success(APIResponse(statusCode: 200, body: Data(#"{}"#.utf8)))
+        )
+        do {
+            _ = try await AgentIdentity.registerAgentTask(
+                transport: omittedIDTransport,
+                chatGPTBaseURL: "https://chatgpt.com/backend-api",
+                key: key,
+                timestamp: "2026-05-13T12:00:00Z"
+            )
+            XCTFail("expected omitted task id failure")
+        } catch {
+            XCTAssertEqual(String(describing: error), "agent task registration response omitted task id")
+        }
+    }
+
     func testAuthorizationHeaderForAgentTaskSerializesSignedAgentAssertionLikeRust() throws {
         let material = try AgentIdentity.generateAgentKeyMaterial(privateKeyBytes: Self.testEd25519Seed)
         let key = AgentIdentityKey(agentRuntimeID: "agent-123", privateKeyPKCS8Base64: material.privateKeyPKCS8Base64)
@@ -361,4 +466,43 @@ final class AgentIdentityTests: XCTestCase {
     """
 
     private static let testEd25519Seed = [UInt8](repeating: 7, count: 32)
+}
+
+private extension JSONValue {
+    var objectValue: [String: JSONValue]? {
+        guard case let .object(value) = self else {
+            return nil
+        }
+        return value
+    }
+
+    var stringValue: String? {
+        guard case let .string(value) = self else {
+            return nil
+        }
+        return value
+    }
+}
+
+private actor RecordingAgentIdentityTransport: APITransport {
+    private var requests: [APIRequest] = []
+    private let result: Result<APIResponse, TransportError>
+
+    init(result: Result<APIResponse, TransportError>) {
+        self.result = result
+    }
+
+    func execute(_ request: APIRequest) async -> Result<APIResponse, TransportError> {
+        requests.append(request)
+        return result
+    }
+
+    func stream(_ request: APIRequest) async -> Result<APIStreamResponse, TransportError> {
+        requests.append(request)
+        return .failure(.network("stream is not supported"))
+    }
+
+    func recordedRequests() -> [APIRequest] {
+        requests
+    }
 }
