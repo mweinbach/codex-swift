@@ -2939,6 +2939,112 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(networkProxy.constraints.allowlistExpansionEnabled, true)
     }
 
+    func testRequirementsTomlDisablesMcpServersThatDoNotMatchAllowlistLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let requirementsPath = dir.url.appendingPathComponent("requirements.toml")
+        try """
+        [mcp_servers.matched_command.identity]
+        command = "allowed-command"
+
+        [mcp_servers.matched_url.identity]
+        url = "https://example.com/allowed"
+
+        [mcp_servers.mismatched_command.identity]
+        command = "other-command"
+
+        [mcp_servers.mismatched_url.identity]
+        url = "https://example.com/other"
+        """.write(to: requirementsPath, atomically: true, encoding: .utf8)
+        try """
+        [mcp_servers.matched_command]
+        command = "allowed-command"
+
+        [mcp_servers.matched_url]
+        url = "https://example.com/allowed"
+
+        [mcp_servers.mismatched_command]
+        command = "configured-command"
+
+        [mcp_servers.mismatched_url]
+        url = "https://example.com/configured"
+
+        [mcp_servers.unlisted]
+        command = "not-allowlisted"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(
+            codexHome: dir.url,
+            systemConfigFile: nil,
+            managedConfigOverrides: ConfigLayerLoaderOverrides(
+                managedConfigPath: dir.url.appendingPathComponent("missing-managed.toml"),
+                requirementsPath: requirementsPath
+            )
+        )
+
+        let disabledReason = "requirements (\(requirementsPath.standardizedFileURL.path))"
+        XCTAssertEqual(config.mcpServers["matched_command"]?.enabled, true)
+        XCTAssertNil(config.mcpServers["matched_command"]?.disabledReason)
+        XCTAssertEqual(config.mcpServers["matched_url"]?.enabled, true)
+        XCTAssertNil(config.mcpServers["matched_url"]?.disabledReason)
+        XCTAssertEqual(config.mcpServers["mismatched_command"]?.enabled, false)
+        XCTAssertEqual(config.mcpServers["mismatched_command"]?.disabledReason, disabledReason)
+        XCTAssertEqual(config.mcpServers["mismatched_url"]?.enabled, false)
+        XCTAssertEqual(config.mcpServers["mismatched_url"]?.disabledReason, disabledReason)
+        XCTAssertEqual(config.mcpServers["unlisted"]?.enabled, false)
+        XCTAssertEqual(config.mcpServers["unlisted"]?.disabledReason, disabledReason)
+    }
+
+    func testRuntimeMcpServersStayEnabledWhenRequirementsHaveNoAllowlistLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let requirementsPath = dir.url.appendingPathComponent("requirements.toml")
+        try """
+        allowed_sandbox_modes = ["read-only", "workspace-write"]
+        """.write(to: requirementsPath, atomically: true, encoding: .utf8)
+        try """
+        [mcp_servers.docs]
+        command = "docs-mcp"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(
+            codexHome: dir.url,
+            systemConfigFile: nil,
+            managedConfigOverrides: ConfigLayerLoaderOverrides(
+                managedConfigPath: dir.url.appendingPathComponent("missing-managed.toml"),
+                requirementsPath: requirementsPath
+            )
+        )
+
+        XCTAssertEqual(config.mcpServers["docs"]?.enabled, true)
+        XCTAssertNil(config.mcpServers["docs"]?.disabledReason)
+    }
+
+    func testRequirementsTomlEmptyMcpAllowlistDisablesEveryConfiguredServerLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let requirementsPath = dir.url.appendingPathComponent("requirements.toml")
+        try """
+        [mcp_servers]
+        """.write(to: requirementsPath, atomically: true, encoding: .utf8)
+        try """
+        [mcp_servers.docs]
+        command = "docs-mcp"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(
+            codexHome: dir.url,
+            systemConfigFile: nil,
+            managedConfigOverrides: ConfigLayerLoaderOverrides(
+                managedConfigPath: dir.url.appendingPathComponent("missing-managed.toml"),
+                requirementsPath: requirementsPath
+            )
+        )
+
+        XCTAssertEqual(config.mcpServers["docs"]?.enabled, false)
+        XCTAssertEqual(
+            config.mcpServers["docs"]?.disabledReason,
+            "requirements (\(requirementsPath.standardizedFileURL.path))"
+        )
+    }
+
     func testProjectLayerStopsAtDetectedGitRoot() throws {
         let dir = try CoreTemporaryDirectory()
         let home = dir.url.appendingPathComponent("home", isDirectory: true)

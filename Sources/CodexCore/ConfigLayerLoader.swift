@@ -339,6 +339,9 @@ public enum CodexConfigLayerLoader {
                 parsed.hooksSource = .system
                 parsed.hooksSourceDescription = url.standardizedFileURL.path
             }
+            if parsed.mcpServers != nil {
+                parsed.mcpServersSourceDescription = url.standardizedFileURL.path
+            }
             requirementsToml.mergeUnsetFields(from: parsed)
         } catch {
             throw ConfigLayerLoadError.parseFailed(path: url.path, message: String(describing: error))

@@ -53,6 +53,7 @@ public struct ConfigRequirements: Equatable, Sendable {
     public var sandboxPolicy: Constrained<SandboxPolicy>
     public var managedHooks: ManagedHooksRequirement?
     public var mcpServers: [String: McpServerRequirement]?
+    public var mcpServersSourceDescription: String?
     public var plugins: [String: PluginRequirementsToml]?
     public var execPolicy: ExecPolicy?
     public var network: NetworkRequirementsToml?
@@ -64,6 +65,7 @@ public struct ConfigRequirements: Equatable, Sendable {
         sandboxPolicy: Constrained<SandboxPolicy> = .allowAny(.readOnly),
         managedHooks: ManagedHooksRequirement? = nil,
         mcpServers: [String: McpServerRequirement]? = nil,
+        mcpServersSourceDescription: String? = nil,
         plugins: [String: PluginRequirementsToml]? = nil,
         execPolicy: ExecPolicy? = nil,
         network: NetworkRequirementsToml? = nil,
@@ -74,6 +76,7 @@ public struct ConfigRequirements: Equatable, Sendable {
         self.sandboxPolicy = sandboxPolicy
         self.managedHooks = managedHooks
         self.mcpServers = mcpServers
+        self.mcpServersSourceDescription = mcpServersSourceDescription
         self.plugins = plugins
         self.execPolicy = execPolicy
         self.network = network
@@ -484,6 +487,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
     public var hooksSource: HookSource
     public var hooksSourceDescription: String
     public var mcpServers: [String: McpServerRequirement]?
+    public var mcpServersSourceDescription: String
     public var plugins: [String: PluginRequirementsToml]?
     public var apps: AppsRequirementsToml?
     public var rules: RequirementsExecPolicyToml?
@@ -503,6 +507,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         hooksSource: HookSource = .unknown,
         hooksSourceDescription: String = "managed requirements",
         mcpServers: [String: McpServerRequirement]? = nil,
+        mcpServersSourceDescription: String = "managed requirements",
         plugins: [String: PluginRequirementsToml]? = nil,
         apps: AppsRequirementsToml? = nil,
         rules: RequirementsExecPolicyToml? = nil,
@@ -521,6 +526,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         self.hooksSource = hooksSource
         self.hooksSourceDescription = hooksSourceDescription
         self.mcpServers = mcpServers
+        self.mcpServersSourceDescription = mcpServersSourceDescription
         self.plugins = plugins
         self.apps = apps
         self.rules = rules
@@ -574,6 +580,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         }
         if mcpServers == nil, let value = other.mcpServers {
             mcpServers = value
+            mcpServersSourceDescription = other.mcpServersSourceDescription
         }
         if plugins == nil, let value = other.plugins {
             plugins = value
@@ -681,6 +688,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
             sandboxPolicy: sandboxPolicy,
             managedHooks: managedHooks,
             mcpServers: mcpServers,
+            mcpServersSourceDescription: mcpServers.map { _ in mcpServersSourceDescription },
             plugins: plugins,
             execPolicy: execPolicy,
             network: network,

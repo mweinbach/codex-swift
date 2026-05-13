@@ -1262,6 +1262,45 @@ public enum CodexConfigLoader {
 
         let sandboxPolicy = config.legacySandboxPolicy()
         try requirements.sandboxPolicy.canSet(sandboxPolicy).get()
+        applyMcpServerRequirements(requirements, to: &config)
+    }
+
+    private static func applyMcpServerRequirements(
+        _ requirements: ConfigRequirements,
+        to config: inout CodexRuntimeConfig
+    ) {
+        guard let allowlist = requirements.mcpServers else {
+            return
+        }
+
+        let disabledReason = "requirements (\(requirements.mcpServersSourceDescription ?? "<unspecified>"))"
+        for name in config.mcpServers.keys.sorted() {
+            guard let server = config.mcpServers[name] else {
+                continue
+            }
+            if let requirement = allowlist[name],
+               mcpServer(server, matches: requirement)
+            {
+                config.mcpServers[name]?.disabledReason = nil
+            } else {
+                config.mcpServers[name]?.enabled = false
+                config.mcpServers[name]?.disabledReason = disabledReason
+            }
+        }
+    }
+
+    private static func mcpServer(
+        _ server: McpServerConfig,
+        matches requirement: McpServerRequirement
+    ) -> Bool {
+        switch (requirement.identity, server.transport) {
+        case let (.command(requiredCommand), .stdio(command, _, _, _, _)):
+            return requiredCommand == command
+        case let (.url(requiredURL), .streamableHttp(url, _, _, _)):
+            return requiredURL == url
+        default:
+            return false
+        }
     }
 
     private static func applyPermissionRequirements(
