@@ -3145,6 +3145,91 @@ final class ConfigLoaderTests: XCTestCase {
         }
     }
 
+    func testOtelMetricsExporterDefaultsToStatsigLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.otel.metricsExporter, .statsig)
+        XCTAssertEqual(config.otel.traceExporter, .none)
+        XCTAssertEqual(config.otel.exporter, .none)
+    }
+
+    func testOtelTraceMetadataLoadsFromConfigTomlLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [otel]
+        log_user_prompt = true
+        environment = "test"
+        metrics_exporter = "none"
+
+        [otel.span_attributes]
+        "example.trace_attr" = "enabled"
+
+        [otel.tracestate.example]
+        alpha = "one"
+        beta = "two"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertTrue(config.otel.logUserPrompt)
+        XCTAssertEqual(config.otel.environment, "test")
+        XCTAssertEqual(config.otel.metricsExporter, .none)
+        XCTAssertEqual(config.otel.spanAttributes, [
+            "example.trace_attr": "enabled"
+        ])
+        XCTAssertEqual(config.otel.tracestate, [
+            "example": [
+                "alpha": "one",
+                "beta": "two"
+            ]
+        ])
+    }
+
+    func testInvalidOtelTraceMetadataEntriesWarnAndDropLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [otel]
+        environment = "test"
+
+        [otel.span_attributes]
+        "" = "missing-key"
+        "example.trace_attr" = "enabled"
+
+        [otel.tracestate.example]
+        alpha = "one"
+        beta = "two\\ntoo"
+
+        [otel.tracestate.bad]
+        alpha = "one\\ntwo"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.otel.environment, "test")
+        XCTAssertEqual(config.otel.spanAttributes, [
+            "example.trace_attr": "enabled"
+        ])
+        XCTAssertEqual(config.otel.tracestate, [
+            "example": [
+                "alpha": "one"
+            ]
+        ])
+        XCTAssertTrue(config.startupWarnings.contains {
+            $0.contains("Ignoring invalid `otel.span_attributes` config")
+                && $0.contains("configured span attribute key must not be empty")
+        })
+        XCTAssertTrue(config.startupWarnings.contains {
+            $0.contains("Ignoring invalid `otel.tracestate` config")
+                && $0.contains("invalid configured tracestate value for example.beta")
+        })
+        XCTAssertTrue(config.startupWarnings.contains {
+            $0.contains("Ignoring invalid `otel.tracestate` config")
+                && $0.contains("invalid configured tracestate value for bad.alpha")
+        })
+    }
+
     func testToolSuggestDiscoverablesLoadFromConfigTomlLikeRust() throws {
         let dir = try CoreTemporaryDirectory()
         try """

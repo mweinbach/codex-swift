@@ -320,6 +320,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var disablePasteBurst: Bool
     public var analyticsEnabled: Bool?
     public var feedbackEnabled: Bool
+    public var otel: OtelConfig
     public var notices: NoticeConfig
     public var modelContextWindow: Int64?
     public var modelAutoCompactTokenLimit: Int64?
@@ -507,6 +508,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.disablePasteBurst = false
         self.analyticsEnabled = nil
         self.feedbackEnabled = true
+        self.otel = OtelConfig()
         self.notices = NoticeConfig()
         self.modelContextWindow = nil
         self.modelAutoCompactTokenLimit = nil
@@ -1917,6 +1919,7 @@ private struct ParsedCodexConfigToml {
     var notice: [String: ConfigValue] = [:]
     var analytics: [String: ConfigValue] = [:]
     var feedback: [String: ConfigValue] = [:]
+    var otel: [String: ConfigValue] = [:]
     var profileAnalytics: [String: [String: ConfigValue]] = [:]
     var agents: [String: ConfigValue] = [:]
     var agentRoles: [String: [String: ConfigValue]] = [:]
@@ -1946,6 +1949,7 @@ private struct ParsedCodexConfigToml {
             let removedTopLevel = topLevel.removeValue(forKey: key) != nil
             let removedNested = (key == "model_providers" && hasModelProviders)
                 || (key == "profiles" && hasProfiles)
+                || (key == "otel" && !otel.isEmpty)
                 || ignoredDenylistedTables.contains(key)
             if removedTopLevel || removedNested {
                 ignoredKeys.append(key)
@@ -1957,6 +1961,7 @@ private struct ParsedCodexConfigToml {
         profileAppsMcpPathOverride.removeAll()
         profileAnalytics.removeAll()
         profileTui.removeAll()
+        otel.removeAll()
         ignoredDenylistedTables.removeAll()
         return ignoredKeys
     }
@@ -2094,6 +2099,14 @@ private struct ParsedCodexConfigToml {
                     }
                     continue
                 }
+                if key == "otel" {
+                    let value = try ConfigValueParser.parseTomlLiteral(valueText)
+                    guard case let .table(table) = value else {
+                        throw CodexConfigLoadError.invalidConfigLine(key)
+                    }
+                    parsed.mergeOtelTable(table)
+                    continue
+                }
                 if key == "agents" {
                     let value = try ConfigValueParser.parseTomlLiteral(valueText)
                     guard case let .table(table) = value else {
@@ -2217,6 +2230,24 @@ private struct ParsedCodexConfigToml {
                 parsed.analytics[key] = try ConfigValueParser.parseTomlLiteral(valueText)
             case .feedback:
                 parsed.feedback[key] = try ConfigValueParser.parseTomlLiteral(valueText)
+            case .otel:
+                parsed.otel[key] = try ConfigValueParser.parseTomlLiteral(valueText)
+            case .otelSpanAttributes:
+                parsed.mergeOtelSpanAttribute(
+                    key: try parseDottedKey(key).joined(separator: "."),
+                    value: try ConfigValueParser.parseTomlLiteral(valueText)
+                )
+            case .otelTracestate:
+                parsed.mergeOtelTracestateMember(
+                    key: try parseDottedKey(key).joined(separator: "."),
+                    value: try ConfigValueParser.parseTomlLiteral(valueText)
+                )
+            case let .otelTracestateMember(member):
+                parsed.mergeOtelTracestateField(
+                    member: member,
+                    key: try parseDottedKey(key).joined(separator: "."),
+                    value: try ConfigValueParser.parseTomlLiteral(valueText)
+                )
             case let .profileAnalytics(name):
                 parsed.profileAnalytics[name, default: [:]][key] = try ConfigValueParser.parseTomlLiteral(valueText)
             case let .profileWindows(name):
@@ -2432,6 +2463,32 @@ private struct ParsedCodexConfigToml {
         return .string(baseURL.appendingPathComponent(path).standardizedFileURL.path)
     }
 
+    mutating func mergeOtelTable(_ table: [String: ConfigValue]) {
+        for (key, value) in table {
+            var existing = otel[key] ?? .table([:])
+            existing.merge(overlay: value)
+            otel[key] = existing
+        }
+    }
+
+    mutating func mergeOtelSpanAttribute(key: String, value: ConfigValue) {
+        var spanAttributes = otel["span_attributes"] ?? .table([:])
+        spanAttributes.merge(overlay: .table([key: value]))
+        otel["span_attributes"] = spanAttributes
+    }
+
+    mutating func mergeOtelTracestateMember(key: String, value: ConfigValue) {
+        var tracestate = otel["tracestate"] ?? .table([:])
+        tracestate.merge(overlay: .table([key: value]))
+        otel["tracestate"] = tracestate
+    }
+
+    mutating func mergeOtelTracestateField(member: String, key: String, value: ConfigValue) {
+        var tracestate = otel["tracestate"] ?? .table([:])
+        tracestate.merge(overlay: .table([member: .table([key: value])]))
+        otel["tracestate"] = tracestate
+    }
+
     mutating func apply(overrides: CliConfigOverrides) throws {
         for (path, value) in try overrides.parseOverrides() {
             let parts = try Self.parseDottedKey(path)
@@ -2497,6 +2554,21 @@ private struct ParsedCodexConfigToml {
 
             if parts.count == 2, parts[0] == "feedback" {
                 feedback[parts[1]] = value
+                continue
+            }
+
+            if parts.count == 2, parts[0] == "otel" {
+                otel[parts[1]] = value
+                continue
+            }
+
+            if parts.count == 3, parts[0] == "otel", parts[1] == "span_attributes" {
+                mergeOtelSpanAttribute(key: parts[2], value: value)
+                continue
+            }
+
+            if parts.count == 4, parts[0] == "otel", parts[1] == "tracestate" {
+                mergeOtelTracestateField(member: parts[2], key: parts[3], value: value)
                 continue
             }
 
@@ -2708,6 +2780,8 @@ private struct ParsedCodexConfigToml {
             feedback[key] = value
         }
 
+        mergeOtelTable(overlay.otel)
+
         for (profileName, profileValue) in overlay.profileAnalytics {
             var mergedProfile = profileAnalytics[profileName] ?? [:]
             for (key, value) in profileValue {
@@ -2911,6 +2985,10 @@ private struct ParsedCodexConfigToml {
             }
         }
 
+        if case let .table(otelTable) = table["otel"] {
+            mergeOtelTable(otelTable)
+        }
+
         if case let .table(shellEnvironmentPolicyTable) = table["shell_environment_policy"] {
             for (key, value) in shellEnvironmentPolicyTable {
                 shellEnvironmentPolicy[key] = value
@@ -3023,6 +3101,7 @@ private struct ParsedCodexConfigToml {
         config.feedbackEnabled = try Self.enabledConfigValue(feedback, key: "feedback") ?? true
         config.agents = try Self.agentRuntimeConfigValue(agents, key: "agents")
         var startupWarnings = startupWarnings
+        config.otel = try Self.otelConfigValue(otel, key: "otel", startupWarnings: &startupWarnings)
         config.agentRoles = try Self.agentRoleConfigsValue(
             declaredRoles: agentRoles,
             discoveryDirs: agentRoleDiscoveryDirs,
@@ -4418,6 +4497,326 @@ private struct ParsedCodexConfigToml {
         return try table["enabled"].map { try boolValue($0, key: "\(key).enabled") }
     }
 
+    private static func otelConfigValue(
+        _ table: [String: ConfigValue],
+        key: String,
+        startupWarnings: inout [String]
+    ) throws -> OtelConfig {
+        guard !table.isEmpty else {
+            return OtelConfig()
+        }
+        let knownFields = Set([
+            "log_user_prompt",
+            "environment",
+            "exporter",
+            "trace_exporter",
+            "metrics_exporter",
+            "span_attributes",
+            "tracestate"
+        ])
+        for field in table.keys where !knownFields.contains(field) {
+            throw CodexConfigLoadError.invalidConfigLine("\(key).\(field)")
+        }
+
+        return OtelConfig(
+            logUserPrompt: try table["log_user_prompt"].map {
+                try boolValue($0, key: "\(key).log_user_prompt")
+            } ?? false,
+            environment: try table["environment"].map {
+                try stringValue($0, key: "\(key).environment")
+            } ?? OtelConfig.defaultEnvironment,
+            exporter: try table["exporter"].map {
+                try otelExporterValue($0, key: "\(key).exporter")
+            } ?? .none,
+            traceExporter: try table["trace_exporter"].map {
+                try otelExporterValue($0, key: "\(key).trace_exporter")
+            } ?? .none,
+            metricsExporter: try table["metrics_exporter"].map {
+                try otelExporterValue($0, key: "\(key).metrics_exporter")
+            } ?? .statsig,
+            spanAttributes: try table["span_attributes"].map {
+                try otelSpanAttributesValue($0, key: "\(key).span_attributes", startupWarnings: &startupWarnings)
+            } ?? [:],
+            tracestate: try table["tracestate"].map {
+                try otelTracestateValue($0, key: "\(key).tracestate", startupWarnings: &startupWarnings)
+            } ?? [:]
+        )
+    }
+
+    private static func otelExporterValue(_ value: ConfigValue, key: String) throws -> OtelExporterKind {
+        if case let .string(raw) = value {
+            switch raw {
+            case "none":
+                return .none
+            case "statsig":
+                return .statsig
+            default:
+                throw CodexConfigLoadError.invalidStringValue(key)
+            }
+        }
+
+        guard case let .table(table) = value else {
+            throw CodexConfigLoadError.invalidStringValue(key)
+        }
+        guard table.count == 1, let entry = table.first else {
+            throw CodexConfigLoadError.invalidConfigLine(key)
+        }
+
+        switch entry.key {
+        case "otlp-http":
+            guard case let .table(exporter) = entry.value else {
+                throw CodexConfigLoadError.invalidConfigLine("\(key).otlp-http")
+            }
+            for field in exporter.keys where !["endpoint", "headers", "protocol", "tls"].contains(field) {
+                throw CodexConfigLoadError.invalidConfigLine("\(key).otlp-http.\(field)")
+            }
+            let protocolValue = try stringValue(exporter["protocol"] ?? .none, key: "\(key).otlp-http.protocol")
+            guard let protocolKind = OtelHttpProtocol(rawValue: protocolValue) else {
+                throw CodexConfigLoadError.invalidStringValue("\(key).otlp-http.protocol")
+            }
+            return .otlpHttp(
+                endpoint: try stringValue(exporter["endpoint"] ?? .none, key: "\(key).otlp-http.endpoint"),
+                headers: try exporter["headers"].map {
+                    try stringMapValue($0, key: "\(key).otlp-http.headers")
+                } ?? [:],
+                httpProtocol: protocolKind,
+                tls: try exporter["tls"].flatMap {
+                    try otelTlsConfigValue($0, key: "\(key).otlp-http.tls")
+                }
+            )
+        case "otlp-grpc":
+            guard case let .table(exporter) = entry.value else {
+                throw CodexConfigLoadError.invalidConfigLine("\(key).otlp-grpc")
+            }
+            for field in exporter.keys where !["endpoint", "headers", "tls"].contains(field) {
+                throw CodexConfigLoadError.invalidConfigLine("\(key).otlp-grpc.\(field)")
+            }
+            return .otlpGrpc(
+                endpoint: try stringValue(exporter["endpoint"] ?? .none, key: "\(key).otlp-grpc.endpoint"),
+                headers: try exporter["headers"].map {
+                    try stringMapValue($0, key: "\(key).otlp-grpc.headers")
+                } ?? [:],
+                tls: try exporter["tls"].flatMap {
+                    try otelTlsConfigValue($0, key: "\(key).otlp-grpc.tls")
+                }
+            )
+        default:
+            throw CodexConfigLoadError.invalidConfigLine("\(key).\(entry.key)")
+        }
+    }
+
+    private static func otelTlsConfigValue(_ value: ConfigValue, key: String) throws -> OtelTlsConfig? {
+        if case .none = value {
+            return nil
+        }
+        guard case let .table(table) = value else {
+            throw CodexConfigLoadError.invalidConfigLine(key)
+        }
+        for field in table.keys where !["ca_certificate", "client_certificate", "client_private_key"].contains(field) {
+            throw CodexConfigLoadError.invalidConfigLine("\(key).\(field)")
+        }
+        return OtelTlsConfig(
+            caCertificate: try table["ca_certificate"].map {
+                try stringValue($0, key: "\(key).ca_certificate")
+            },
+            clientCertificate: try table["client_certificate"].map {
+                try stringValue($0, key: "\(key).client_certificate")
+            },
+            clientPrivateKey: try table["client_private_key"].map {
+                try stringValue($0, key: "\(key).client_private_key")
+            }
+        )
+    }
+
+    private static func otelSpanAttributesValue(
+        _ value: ConfigValue,
+        key: String,
+        startupWarnings: inout [String]
+    ) throws -> [String: String] {
+        guard case let .table(table) = value else {
+            throw CodexConfigLoadError.invalidStringValue(key)
+        }
+        var attributes: [String: String] = [:]
+        for attributeKey in table.keys.sorted() {
+            let attributeValue = try stringValue(table[attributeKey] ?? .none, key: "\(key).\(attributeKey)")
+            if attributeKey.isEmpty {
+                pushInvalidOtelConfigWarning(
+                    "otel.span_attributes",
+                    message: "configured span attribute key must not be empty",
+                    startupWarnings: &startupWarnings
+                )
+                continue
+            }
+            attributes[attributeKey] = attributeValue
+        }
+        return attributes
+    }
+
+    private static func otelTracestateValue(
+        _ value: ConfigValue,
+        key: String,
+        startupWarnings: inout [String]
+    ) throws -> [String: [String: String]] {
+        guard case let .table(table) = value else {
+            throw CodexConfigLoadError.invalidConfigLine(key)
+        }
+        var tracestate: [String: [String: String]] = [:]
+        for memberKey in table.keys.sorted() {
+            guard case let .table(fieldsTable) = table[memberKey] else {
+                throw CodexConfigLoadError.invalidConfigLine("\(key).\(memberKey)")
+            }
+            let fields = try otelTracestateMemberFieldsValue(
+                fieldsTable,
+                memberKey: memberKey,
+                key: "\(key).\(memberKey)",
+                startupWarnings: &startupWarnings
+            )
+            guard !fields.isEmpty else {
+                continue
+            }
+            if let message = invalidConfiguredTracestateMemberMessage(memberKey: memberKey, fields: fields) {
+                pushInvalidOtelConfigWarning(
+                    "otel.tracestate",
+                    message: message,
+                    startupWarnings: &startupWarnings
+                )
+                continue
+            }
+            tracestate[memberKey] = fields
+        }
+        if let message = invalidConfiguredTracestateEntriesMessage(tracestate) {
+            pushInvalidOtelConfigWarning(
+                "otel.tracestate",
+                message: message,
+                startupWarnings: &startupWarnings
+            )
+            return [:]
+        }
+        return tracestate
+    }
+
+    private static func otelTracestateMemberFieldsValue(
+        _ table: [String: ConfigValue],
+        memberKey: String,
+        key: String,
+        startupWarnings: inout [String]
+    ) throws -> [String: String] {
+        var fields: [String: String] = [:]
+        for fieldKey in table.keys.sorted() {
+            let fieldValue = try stringValue(table[fieldKey] ?? .none, key: "\(key).\(fieldKey)")
+            if let message = invalidConfiguredTracestateFieldMessage(
+                memberKey: memberKey,
+                fieldKey: fieldKey,
+                value: fieldValue
+            ) {
+                pushInvalidOtelConfigWarning(
+                    "otel.tracestate",
+                    message: message,
+                    startupWarnings: &startupWarnings
+                )
+                continue
+            }
+            fields[fieldKey] = fieldValue
+        }
+        return fields
+    }
+
+    private static func invalidConfiguredTracestateFieldMessage(
+        memberKey: String,
+        fieldKey: String,
+        value: String
+    ) -> String? {
+        if !isConfiguredTracestateFieldKey(fieldKey) {
+            return "invalid configured tracestate field key \(memberKey).\(fieldKey)"
+        }
+        if !isConfiguredTracestateFieldValue(value) {
+            return "invalid configured tracestate value for \(memberKey).\(fieldKey)"
+        }
+        return nil
+    }
+
+    private static func invalidConfiguredTracestateMemberMessage(
+        memberKey: String,
+        fields: [String: String]
+    ) -> String? {
+        guard isTracestateMemberKey(memberKey) else {
+            return "invalid configured tracestate: invalid member key \(memberKey)"
+        }
+        let encoded = fields.keys.sorted().map { "\($0):\(fields[$0] ?? "")" }.joined(separator: ";")
+        if !isHeaderSafeTracestateMemberValue(encoded) {
+            return "invalid configured tracestate value for \(memberKey)"
+        }
+        return nil
+    }
+
+    private static func invalidConfiguredTracestateEntriesMessage(_ entries: [String: [String: String]]) -> String? {
+        guard entries.count <= 32 else {
+            return "invalid configured tracestate: list contains more than 32 members"
+        }
+        return nil
+    }
+
+    private static func pushInvalidOtelConfigWarning(
+        _ configKey: String,
+        message: String,
+        startupWarnings: inout [String]
+    ) {
+        startupWarnings.append("Ignoring invalid `\(configKey)` config: \(message)")
+    }
+
+    private static func isConfiguredTracestateFieldKey(_ fieldKey: String) -> Bool {
+        guard !fieldKey.isEmpty else {
+            return false
+        }
+        return fieldKey.utf8.allSatisfy { byte in
+            (33...126).contains(byte) && byte != 58 && byte != 59 && byte != 44 && byte != 61
+        }
+    }
+
+    private static func isConfiguredTracestateFieldValue(_ value: String) -> Bool {
+        value.utf8.allSatisfy { byte in
+            isTracestateMemberValueByte(byte) && byte != 59
+        }
+    }
+
+    private static func isHeaderSafeTracestateMemberValue(_ value: String) -> Bool {
+        guard !value.isEmpty else {
+            return true
+        }
+        return value.utf8.allSatisfy(isTracestateMemberValueByte) && value.utf8.last != 32
+    }
+
+    private static func isTracestateMemberValueByte(_ byte: UInt8) -> Bool {
+        (32...126).contains(byte) && byte != 44 && byte != 61
+    }
+
+    private static func isTracestateMemberKey(_ key: String) -> Bool {
+        let parts = key.split(separator: "@", omittingEmptySubsequences: false)
+        if parts.count == 1 {
+            return isTracestateKeyPart(String(parts[0]), maxBytes: 256)
+        }
+        if parts.count == 2 {
+            return isTracestateKeyPart(String(parts[0]), maxBytes: 241)
+                && isTracestateKeyPart(String(parts[1]), maxBytes: 14)
+        }
+        return false
+    }
+
+    private static func isTracestateKeyPart(_ key: String, maxBytes: Int) -> Bool {
+        let bytes = Array(key.utf8)
+        guard !bytes.isEmpty, bytes.count <= maxBytes else {
+            return false
+        }
+        return bytes.allSatisfy { byte in
+            (97...122).contains(byte)
+                || (48...57).contains(byte)
+                || byte == 95
+                || byte == 45
+                || byte == 42
+                || byte == 47
+        }
+    }
+
     private static func agentRuntimeConfigValue(
         _ table: [String: ConfigValue],
         key: String
@@ -5182,6 +5581,18 @@ private struct ParsedCodexConfigToml {
             return .feedback
         }
         if parts.count == 1, parts[0] == "otel" {
+            return .otel
+        }
+        if parts.count == 2, parts[0] == "otel", parts[1] == "span_attributes" {
+            return .otelSpanAttributes
+        }
+        if parts.count == 2, parts[0] == "otel", parts[1] == "tracestate" {
+            return .otelTracestate
+        }
+        if parts.count == 3, parts[0] == "otel", parts[1] == "tracestate" {
+            return .otelTracestateMember(parts[2])
+        }
+        if parts.first == "otel" {
             return .ignoredDenylistedTable("otel")
         }
         if parts.count == 1, parts[0] == "agents" {
@@ -5455,6 +5866,10 @@ private enum ConfigSection {
     case windows
     case analytics
     case feedback
+    case otel
+    case otelSpanAttributes
+    case otelTracestate
+    case otelTracestateMember(String)
     case profileAnalytics(String)
     case profileWindows(String)
     case agents
