@@ -410,18 +410,25 @@ extension SubAgentSource: Codable {
 public enum CodexRequestHeaders {
     public static let turnMetadataHeaderName = "x-codex-turn-metadata"
 
-    public static func conversationHeaders(conversationID: String?) -> [String: String] {
-        guard let conversationID else {
-            return [:]
+    public static func sessionHeaders(sessionID: String?, threadID: String?) -> [String: String] {
+        var headers: [String: String] = [:]
+        if let sessionID {
+            headers["session_id"] = sessionID
+            headers["session-id"] = sessionID
         }
+        if let threadID {
+            headers["thread_id"] = threadID
+            headers["thread-id"] = threadID
+        }
+        return headers
+    }
 
-        return [
-            "conversation_id": conversationID,
-            "thread_id": conversationID,
-            "thread-id": conversationID,
-            "session_id": conversationID,
-            "session-id": conversationID
-        ]
+    public static func conversationHeaders(conversationID: String?) -> [String: String] {
+        var headers = sessionHeaders(sessionID: conversationID, threadID: conversationID)
+        if let conversationID {
+            headers["conversation_id"] = conversationID
+        }
+        return headers
     }
 
     public static func subagentHeader(for source: SessionSource?) -> String? {

@@ -817,6 +817,11 @@ private enum AttestationRequestHeaders {
     }
 }
 
+private enum ResponsesWebSocketHeaders {
+    static let betaHeaderValue = "responses_websockets=2026-02-06"
+    static let timingMetricsHeaderName = "x-responsesapi-include-timing-metrics"
+}
+
 public struct ResponsesClient<Transport: APITransport, Auth: APIAuthProvider> {
     public let streaming: StreamingAPIClient<Transport, Auth>
     public let attestationProvider: (any AttestationProvider)?
@@ -930,6 +935,42 @@ public struct ResponsesClient<Transport: APITransport, Auth: APIAuthProvider> {
         )
     }
 
+    public func websocketHandshakeHeaders(
+        sessionID: String,
+        threadID: String,
+        turnMetadataHeader: String? = nil,
+        turnStateHeader: String? = nil,
+        betaFeaturesHeader: String? = nil,
+        includeTimingMetrics: Bool = false
+    ) async -> [String: String] {
+        var headers: [String: String] = [:]
+        if let betaFeaturesHeader,
+           !betaFeaturesHeader.isEmpty,
+           Self.validHeaderValue(betaFeaturesHeader) {
+            headers["x-codex-beta-features"] = betaFeaturesHeader
+        }
+        if let turnStateHeader,
+           Self.validHeaderValue(turnStateHeader) {
+            headers["x-codex-turn-state"] = turnStateHeader
+        }
+        if let turnMetadataHeader,
+           Self.validHeaderValue(turnMetadataHeader) {
+            headers[CodexRequestHeaders.turnMetadataHeaderName] = turnMetadataHeader
+        }
+        if Self.validHeaderValue(threadID) {
+            headers["x-client-request-id"] = threadID
+        }
+        for (name, value) in CodexRequestHeaders.sessionHeaders(sessionID: sessionID, threadID: threadID) {
+            headers[name] = value
+        }
+        headers = await headersWithAttestation(headers)
+        headers["OpenAI-Beta"] = ResponsesWebSocketHeaders.betaHeaderValue
+        if includeTimingMetrics {
+            headers[ResponsesWebSocketHeaders.timingMetricsHeaderName] = "true"
+        }
+        return headers
+    }
+
     public static func path(for wireAPI: WireAPI) -> String {
         switch wireAPI {
         case .responses,
@@ -943,6 +984,12 @@ public struct ResponsesClient<Transport: APITransport, Auth: APIAuthProvider> {
     private static func toolsJSONValues(_ tools: [Any]) throws -> [JSONValue] {
         let data = try JSONSerialization.data(withJSONObject: tools)
         return try JSONDecoder().decode([JSONValue].self, from: data)
+    }
+
+    private static func validHeaderValue(_ value: String) -> Bool {
+        value.unicodeScalars.allSatisfy { scalar in
+            scalar.value == 0x09 || (0x20...0x7E).contains(scalar.value)
+        }
     }
 
     private func headersWithAttestation(_ headers: [String: String]) async -> [String: String] {

@@ -793,6 +793,62 @@ final class EndpointClientsTests: XCTestCase {
         XCTAssertEqual(calls, [])
     }
 
+    func testResponsesWebSocketHandshakeHeadersIncludeAttestationForChatGPTAccountLikeRust() async {
+        let attestation = CountingAttestationProvider()
+        let client = ResponsesClient(
+            transport: CapturingTransport(),
+            provider: provider(),
+            auth: StaticAPIAuthProvider(bearerToken: "chatgpt-token", accountID: "acct"),
+            attestationProvider: attestation
+        )
+
+        let headers = await client.websocketHandshakeHeaders(
+            sessionID: "session-123",
+            threadID: "thread-123",
+            turnMetadataHeader: #"{"turn_id":"turn-123"}"#,
+            turnStateHeader: "state-123",
+            betaFeaturesHeader: "feature-a"
+        )
+
+        XCTAssertEqual(headers["x-client-request-id"], "thread-123")
+        XCTAssertEqual(headers["session_id"], "session-123")
+        XCTAssertEqual(headers["session-id"], "session-123")
+        XCTAssertEqual(headers["thread_id"], "thread-123")
+        XCTAssertEqual(headers["thread-id"], "thread-123")
+        XCTAssertEqual(headers["x-codex-turn-metadata"], #"{"turn_id":"turn-123"}"#)
+        XCTAssertEqual(headers["x-codex-turn-state"], "state-123")
+        XCTAssertEqual(headers["x-codex-beta-features"], "feature-a")
+        XCTAssertEqual(headers["OpenAI-Beta"], "responses_websockets=2026-02-06")
+        XCTAssertEqual(headers[Attestation.headerName], "v1.thread-123.1")
+        let calls = await attestation.recordedCalls()
+        XCTAssertEqual(calls, [Attestation.Context(threadID: "thread-123")])
+    }
+
+    func testResponsesWebSocketHandshakeHeadersSkipAttestationWithoutChatGPTAccountLikeRust() async {
+        let attestation = CountingAttestationProvider()
+        let client = ResponsesClient(
+            transport: CapturingTransport(),
+            provider: provider(),
+            auth: StaticAPIAuthProvider(bearerToken: "api-key"),
+            attestationProvider: attestation
+        )
+
+        let headers = await client.websocketHandshakeHeaders(
+            sessionID: "session-123",
+            threadID: "thread-123",
+            turnMetadataHeader: "東京",
+            turnStateHeader: "state-123",
+            includeTimingMetrics: true
+        )
+
+        XCTAssertNil(headers["x-codex-turn-metadata"])
+        XCTAssertNil(headers[Attestation.headerName])
+        XCTAssertEqual(headers["OpenAI-Beta"], "responses_websockets=2026-02-06")
+        XCTAssertEqual(headers["x-responsesapi-include-timing-metrics"], "true")
+        let calls = await attestation.recordedCalls()
+        XCTAssertEqual(calls, [])
+    }
+
     func testCompactClientAddsAttestationHeaderForChatGPTAuthAndThread() async throws {
         let output: [ResponseItem] = [
             .message(role: "assistant", content: [.outputText(text: "summary")])
