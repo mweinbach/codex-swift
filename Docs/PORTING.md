@@ -430,7 +430,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/core/src/tools/handlers/agent_jobs/report_agent_job_result.rs`
   - added Swift `report_agent_job_result` argument decoding, object-only result validation, store-backed thread-scoped acceptance, Rust-shaped `{ "accepted": bool }` responses, accepted `stop: true` cancellation with the Rust error message, and shared function-tool execution that preserves Rust's worker-only registration semantics by rejecting direct dispatch unless the session source is an `agent_job:<job_id>` subagent. The actual app-server tool-handler registration remains pending.
 - `codex-rs/tui/src/additional_dirs.rs`
-  - read-only sandbox warning for ignored `--add-dir` writable roots
+  - permission-profile-aware warning for ignored `--add-dir` writable roots, including Rust's effective-cwd write check and current warning text
 - `codex-rs/core/src/rollout/policy.rs` and `codex-rs/core/src/rollout/error.rs`
   - rollout response-item, memories response-item, and event-message persistence buckets including completed plan-item replay, executive marker persistence, session storage directory constants, and Rust-matching session I/O error hints
 - `codex-rs/core/src/rollout/recorder.rs`
