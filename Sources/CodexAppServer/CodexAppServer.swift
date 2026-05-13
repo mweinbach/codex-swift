@@ -14342,6 +14342,12 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func notLoadedThreadStatus() -> [String: Any] {
+        [
+            "type": "notLoaded"
+        ]
+    }
+
     fileprivate static func turnDiffUpdatedNotification(threadID: String, turnID: String, diff: String) -> [String: Any] {
         [
             "method": "turn/diff/updated",
@@ -24936,6 +24942,10 @@ final class CodexAppServerMessageProcessor {
         case .threadRolledBack:
             pendingRollbackRequests[threadID] = nil
             notifications = []
+        case .shutdownComplete:
+            notifications = [
+                markRuntimeThreadShutdown(threadID: threadID)
+            ].compactMap(\.self)
         case let .dynamicToolCallRequest(event):
             notifications = [
                 CodexAppServer.dynamicToolCallStartedNotification(threadID: threadID, event: event)
@@ -25287,6 +25297,42 @@ final class CodexAppServerMessageProcessor {
     private func clearRuntimePendingActiveFlags(threadID: String) {
         runtimePendingApprovalCounts.removeValue(forKey: threadID)
         runtimePendingUserInputCounts.removeValue(forKey: threadID)
+    }
+
+    private func markRuntimeThreadShutdown(threadID: String) -> [String: Any]? {
+        let hadRuntimeState = activeTurnIDs[threadID] != nil
+            || runtimePendingApprovalCounts[threadID] != nil
+            || runtimePendingUserInputCounts[threadID] != nil
+            || runtimeSystemErrorThreadIDs.contains(threadID)
+            || runtimeCommandExecutionStarted[threadID] != nil
+            || runtimeTurnStartedAt[threadID] != nil
+            || runtimeTurnErrors[threadID] != nil
+            || pendingRollbackRequests[threadID] != nil
+        let manager = threadStateManager
+        let wasLoaded = (try? CodexAppServer.runAsyncBlocking {
+            await manager.markThreadUnloaded(threadID)
+        }) ?? false
+
+        activeTurnIDs.removeValue(forKey: threadID)
+        clearRuntimePendingActiveFlags(threadID: threadID)
+        runtimeSystemErrorThreadIDs.remove(threadID)
+        runtimeCommandExecutionStarted.removeValue(forKey: threadID)
+        runtimeTurnStartedAt.removeValue(forKey: threadID)
+        runtimeTurnErrors.removeValue(forKey: threadID)
+        pendingRollbackRequests.removeValue(forKey: threadID)
+        pendingSessionStartSources.removeValue(forKey: threadID)
+        loadedThreadAppsFeatureEnabled.removeValue(forKey: threadID)
+        threadAnalyticsMetadata.removeValue(forKey: threadID)
+        ephemeralThreadIDs.remove(threadID)
+        ephemeralThreadSnapshots.removeValue(forKey: threadID)
+
+        guard wasLoaded || hadRuntimeState else {
+            return nil
+        }
+        return threadStatusChangedNotification(
+            threadID: threadID,
+            status: CodexAppServer.notLoadedThreadStatus()
+        )
     }
 
     private func sendNotification(_ notification: [String: Any]) async {

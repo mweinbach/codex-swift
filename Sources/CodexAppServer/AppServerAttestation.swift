@@ -82,6 +82,22 @@ actor AppServerThreadStateManager {
     }
 
     @discardableResult
+    func markThreadUnloaded(_ threadID: String) -> Bool {
+        let wasLoaded = loadedThreadIDs.remove(threadID) != nil
+        let subscribedConnectionIDs = threadConnectionIDs.removeValue(forKey: threadID) ?? []
+        for connectionID in subscribedConnectionIDs {
+            threadIDsByConnection[connectionID]?.remove(threadID)
+            if threadIDsByConnection[connectionID]?.isEmpty == true {
+                threadIDsByConnection.removeValue(forKey: connectionID)
+            }
+        }
+        let hadElicitationCount = outOfBandElicitationCounts.removeValue(forKey: threadID) != nil
+        let hadMcpRefresh = pendingMcpServerRefreshConfigs.removeValue(forKey: threadID) != nil
+        let hadUserConfigRefresh = pendingUserConfigRefreshes.removeValue(forKey: threadID) != nil
+        return wasLoaded || !subscribedConnectionIDs.isEmpty || hadElicitationCount || hadMcpRefresh || hadUserConfigRefresh
+    }
+
+    @discardableResult
     func queueMcpServerRefresh(threadID: String, config: McpServerRefreshConfig) -> Bool {
         guard loadedThreadIDs.contains(threadID) else {
             return false

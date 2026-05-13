@@ -5497,6 +5497,57 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(completedTurn["durationMs"] as? Int, 5_000)
     }
 
+    func testRuntimeShutdownCompleteMarksThreadNotLoadedLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let threadStateManager = AppServerThreadStateManager()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) },
+            threadStateManager: threadStateManager
+        )
+        let startMessages = try decodeMessages(processor.processLine(
+            Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)
+        ))
+        let threadID = try XCTUnwrap(
+            ((startMessages[0]["result"] as? [String: Any])?["thread"] as? [String: Any])?["id"] as? String
+        )
+        let loadedBeforeShutdown = await threadStateManager.listLoadedThreadIDs()
+        XCTAssertEqual(loadedBeforeShutdown, [threadID])
+
+        await processor.handleRuntimeEvent(
+            threadID: threadID,
+            turnID: "turn-1",
+            event: EventMessage.taskStarted(TaskStartedEvent(
+                turnID: "turn-1",
+                modelContextWindow: nil
+            ))
+        )
+        let active = try await nextNotificationMessages(notificationCapture, method: "thread/status/changed")
+        let activeParams = try XCTUnwrap(active[0]["params"] as? [String: Any])
+        let activeStatus = try XCTUnwrap(activeParams["status"] as? [String: Any])
+        XCTAssertEqual(activeStatus["type"] as? String, "active")
+
+        await processor.handleRuntimeEvent(
+            threadID: threadID,
+            turnID: "turn-1",
+            event: EventMessage.shutdownComplete
+        )
+        let notLoaded = try await nextNotificationMessages(notificationCapture, method: "thread/status/changed")
+        let notLoadedParams = try XCTUnwrap(notLoaded[0]["params"] as? [String: Any])
+        XCTAssertEqual(notLoadedParams["threadId"] as? String, threadID)
+        let notLoadedStatus = try XCTUnwrap(notLoadedParams["status"] as? [String: Any])
+        XCTAssertEqual(notLoadedStatus["type"] as? String, "notLoaded")
+        let loadedAfterShutdown = await threadStateManager.listLoadedThreadIDs()
+        XCTAssertEqual(loadedAfterShutdown, [])
+
+        let read = try decode(processor.processLine(
+            Data(#"{"id":2,"method":"thread/read","params":{"threadId":"\#(threadID)"}}"#.utf8)
+        ))
+        let thread = try XCTUnwrap((read["result"] as? [String: Any])?["thread"] as? [String: Any])
+        XCTAssertEqual((thread["status"] as? [String: Any])?["type"] as? String, "notLoaded")
+    }
+
     func testRuntimeNoticeAndModelEventsEmitRustNotifications() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()
