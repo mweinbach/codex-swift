@@ -4,6 +4,24 @@ public let requestPluginInstallApprovalKindValue = "tool_suggestion"
 public let requestPluginInstallPersistKey = "persist"
 public let requestPluginInstallPersistAlwaysValue = "always"
 public let requestPluginInstallToolName = "request_plugin_install"
+public let toolSuggestDiscoverablePluginAllowlist: Set<String> = [
+    "github@openai-curated",
+    "notion@openai-curated",
+    "slack@openai-curated",
+    "gmail@openai-curated",
+    "google-calendar@openai-curated",
+    "google-drive@openai-curated",
+    "openai-developers@openai-curated",
+    "canva@openai-curated",
+    "teams@openai-curated",
+    "sharepoint@openai-curated",
+    "outlook-email@openai-curated",
+    "outlook-calendar@openai-curated",
+    "linear@openai-curated",
+    "figma@openai-curated",
+    "chrome@openai-bundled",
+    "computer-use@openai-bundled"
+]
 public let codexAppsMCPServerName = "codex_apps"
 public let disallowedConnectorIDPrefix = "connector_openai_"
 public let firstPartyChatOriginators: Set<String> = ["codex_atlas", "codex_chatgpt_desktop"]

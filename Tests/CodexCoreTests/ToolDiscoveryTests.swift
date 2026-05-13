@@ -318,6 +318,14 @@ final class ToolDiscoveryTests: XCTestCase {
                 appConnectorIDs: []
             ),
             DiscoverablePluginInfo(
+                id: "openai-developers@openai-curated",
+                name: "OpenAI Developers",
+                description: "Allowlisted developer plugin",
+                hasSkills: true,
+                mcpServerNames: ["openai-developers"],
+                appConnectorIDs: []
+            ),
+            DiscoverablePluginInfo(
                 id: "installed@openai-curated",
                 name: "Installed",
                 description: nil,
@@ -338,7 +346,7 @@ final class ToolDiscoveryTests: XCTestCase {
         let filtered = filterToolSuggestDiscoverablePlugins(
             candidates: candidates,
             installedPluginIDs: ["installed@openai-curated"],
-            allowlistedPluginIDs: ["slack@openai-curated"],
+            allowlistedPluginIDs: toolSuggestDiscoverablePluginAllowlist,
             toolSuggest: ToolSuggestConfig(
                 discoverables: [
                     ToolSuggestDiscoverable(type: .plugin, id: "sample@openai-curated")
@@ -350,7 +358,14 @@ final class ToolDiscoveryTests: XCTestCase {
             pluginsEnabled: true
         )
 
-        XCTAssertEqual(filtered.map(\.id), ["sample@openai-curated", "slack@openai-curated"])
+        XCTAssertEqual(
+            filtered.map(\.id),
+            [
+                "openai-developers@openai-curated",
+                "sample@openai-curated",
+                "slack@openai-curated"
+            ]
+        )
     }
 
     func testFilterToolSuggestDiscoverablePluginsOmitsDisabledAndFeatureDisabled() {
