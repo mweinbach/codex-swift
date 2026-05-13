@@ -334,6 +334,124 @@ public enum ResponsesWebSocketRequest: Equatable, Encodable, Sendable {
     }
 }
 
+public enum ResponsesWebSocketErrorMapper {
+    public static let connectionLimitReachedCode = "websocket_connection_limit_reached"
+    public static let connectionLimitReachedMessage =
+        "Responses websocket connection limit reached (60 minutes). Create a new websocket connection to continue."
+
+    public static func mapErrorEvent(payload: String) -> APIError? {
+        guard let data = payload.data(using: .utf8),
+              let event = try? JSONDecoder().decode(WrappedResponsesWebSocketErrorEvent.self, from: data),
+              event.kind == "error"
+        else {
+            return nil
+        }
+
+        if event.error?.code == connectionLimitReachedCode {
+            return .retryable(
+                message: event.error?.message ?? connectionLimitReachedMessage,
+                delay: nil
+            )
+        }
+
+        guard let status = event.status,
+              (100..<1000).contains(status),
+              !(200..<300).contains(status)
+        else {
+            return nil
+        }
+
+        return .transport(.http(
+            statusCode: status,
+            headers: event.headers.flatMap(headersFromJSON),
+            body: payload
+        ))
+    }
+
+    private static func headersFromJSON(_ headers: [String: JSONValue]) -> [String: String]? {
+        var mapped: [String: String] = [:]
+        for (name, value) in headers {
+            guard isValidHeaderName(name),
+                  let headerValue = headerValue(value),
+                  isValidHeaderValue(headerValue)
+            else {
+                continue
+            }
+            mapped[name] = headerValue
+        }
+        return mapped.isEmpty ? nil : mapped
+    }
+
+    private static func headerValue(_ value: JSONValue) -> String? {
+        switch value {
+        case let .string(value):
+            return value
+        case let .integer(value):
+            return String(value)
+        case let .double(value):
+            return String(value)
+        case let .bool(value):
+            return String(value)
+        case .null, .array, .object:
+            return nil
+        }
+    }
+
+    private static func isValidHeaderName(_ name: String) -> Bool {
+        guard !name.isEmpty else {
+            return false
+        }
+        return name.utf8.allSatisfy { byte in
+            byte == 33
+                || (35...39).contains(byte)
+                || byte == 42
+                || byte == 43
+                || byte == 45
+                || byte == 46
+                || (48...57).contains(byte)
+                || (65...90).contains(byte)
+                || (94...122).contains(byte)
+                || byte == 124
+                || byte == 126
+        }
+    }
+
+    private static func isValidHeaderValue(_ value: String) -> Bool {
+        value.utf8.allSatisfy { byte in
+            byte == 9 || (32...126).contains(byte) || byte >= 128
+        }
+    }
+}
+
+private struct WrappedResponsesWebSocketErrorEvent: Decodable {
+    let kind: String
+    let status: Int?
+    let error: WrappedResponsesWebSocketError?
+    let headers: [String: JSONValue]?
+
+    private enum CodingKeys: String, CodingKey {
+        case kind = "type"
+        case status
+        case statusCode = "status_code"
+        case error
+        case headers
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try container.decode(String.self, forKey: .kind)
+        status = try container.decodeIfPresent(Int.self, forKey: .status)
+            ?? container.decodeIfPresent(Int.self, forKey: .statusCode)
+        error = try container.decodeIfPresent(WrappedResponsesWebSocketError.self, forKey: .error)
+        headers = try container.decodeIfPresent([String: JSONValue].self, forKey: .headers)
+    }
+}
+
+private struct WrappedResponsesWebSocketError: Decodable {
+    let code: String?
+    let message: String?
+}
+
 public struct ResponsesRequest: Equatable, Sendable {
     public var body: JSONValue
     public var headers: [String: String]

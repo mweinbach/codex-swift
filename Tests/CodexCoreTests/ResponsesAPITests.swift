@@ -198,6 +198,92 @@ final class ResponsesAPITests: XCTestCase {
         ])
     }
 
+    func testWrappedWebSocketErrorEventMapsToTransportHTTP() throws {
+        let payload = #"""
+        {
+          "type": "error",
+          "status": 429,
+          "error": {
+            "type": "usage_limit_reached",
+            "message": "The usage limit has been reached",
+            "plan_type": "pro",
+            "resets_at": 1738888888
+          },
+          "headers": {
+            "x-codex-primary-used-percent": "100.0",
+            "x-codex-primary-window-minutes": 15,
+            "x-codex-cache-hit": true,
+            "bad header": "dropped",
+            "x-codex-array": ["dropped"]
+          }
+        }
+        """#
+
+        let error = try XCTUnwrap(ResponsesWebSocketErrorMapper.mapErrorEvent(payload: payload))
+        guard case let .transport(.http(statusCode, headers, body)) = error else {
+            return XCTFail("expected transport HTTP error, got \(error)")
+        }
+
+        XCTAssertEqual(statusCode, 429)
+        XCTAssertEqual(headers?["x-codex-primary-used-percent"], "100.0")
+        XCTAssertEqual(headers?["x-codex-primary-window-minutes"], "15")
+        XCTAssertEqual(headers?["x-codex-cache-hit"], "true")
+        XCTAssertNil(headers?["bad header"])
+        XCTAssertNil(headers?["x-codex-array"])
+        XCTAssertEqual(body, payload)
+    }
+
+    func testWrappedWebSocketErrorEventIgnoresNonErrorsAndUnmappedStatusesLikeRust() {
+        XCTAssertNil(ResponsesWebSocketErrorMapper.mapErrorEvent(payload: #"{ "type": "response.created" }"#))
+        XCTAssertNil(ResponsesWebSocketErrorMapper.mapErrorEvent(payload: #"{ "type": "error" }"#))
+        XCTAssertNil(ResponsesWebSocketErrorMapper.mapErrorEvent(payload: #"{ "type": "error", "status": 200 }"#))
+        XCTAssertNil(ResponsesWebSocketErrorMapper.mapErrorEvent(payload: #"{ "type": "error", "status": 99 }"#))
+        XCTAssertNil(ResponsesWebSocketErrorMapper.mapErrorEvent(payload: "{"))
+    }
+
+    func testWrappedWebSocketErrorEventAcceptsStatusCodeAlias() throws {
+        let payload = #"""
+        {
+          "type": "error",
+          "status_code": 400,
+          "error": {
+            "type": "invalid_request_error",
+            "message": "Model does not support image inputs"
+          }
+        }
+        """#
+
+        let error = try XCTUnwrap(ResponsesWebSocketErrorMapper.mapErrorEvent(payload: payload))
+        guard case let .transport(.http(statusCode, headers, body)) = error else {
+            return XCTFail("expected transport HTTP error, got \(error)")
+        }
+
+        XCTAssertEqual(statusCode, 400)
+        XCTAssertNil(headers)
+        XCTAssertEqual(body, payload)
+    }
+
+    func testWrappedWebSocketConnectionLimitMapsToRetryableLikeRust() throws {
+        let payload = #"""
+        {
+          "type": "error",
+          "status": 400,
+          "error": {
+            "type": "invalid_request_error",
+            "code": "websocket_connection_limit_reached"
+          }
+        }
+        """#
+
+        let error = try XCTUnwrap(ResponsesWebSocketErrorMapper.mapErrorEvent(payload: payload))
+        guard case let .retryable(message, delay) = error else {
+            return XCTFail("expected retryable error, got \(error)")
+        }
+
+        XCTAssertEqual(message, ResponsesWebSocketErrorMapper.connectionLimitReachedMessage)
+        XCTAssertNil(delay)
+    }
+
     func testBuilderCanFilterUnsupportedServiceTierWithModelInfo() throws {
         let provider = apiProvider(name: "openai", baseURL: "https://api.openai.com/v1")
         let modelInfo = ModelInfo(
