@@ -95,7 +95,8 @@ final class ContextNormalizationTests: XCTestCase {
             ),
             .toolSearchOutput(callID: "search-1", status: "completed", execution: "client", tools: []),
             .toolSearchOutput(callID: "orphan", status: "completed", execution: "client", tools: []),
-            .toolSearchOutput(callID: nil, status: "completed", execution: "server", tools: [])
+            .toolSearchOutput(callID: nil, status: "completed", execution: "server", tools: []),
+            .toolSearchOutput(callID: "server-search", status: "completed", execution: "server", tools: [])
         ]
 
         ContextNormalization.removeOrphanOutputs(&items)
@@ -107,7 +108,8 @@ final class ContextNormalizationTests: XCTestCase {
                 arguments: .object(["query": .string("calendar")])
             ),
             .toolSearchOutput(callID: "search-1", status: "completed", execution: "client", tools: []),
-            .toolSearchOutput(callID: nil, status: "completed", execution: "server", tools: [])
+            .toolSearchOutput(callID: nil, status: "completed", execution: "server", tools: []),
+            .toolSearchOutput(callID: "server-search", status: "completed", execution: "server", tools: [])
         ])
     }
 
