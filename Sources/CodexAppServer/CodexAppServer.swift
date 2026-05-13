@@ -1927,6 +1927,7 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration,
         loadedEphemeralThread: (String) -> [String: Any]? = { _ in nil },
+        isThreadLoaded: (String) -> Bool = { _ in false },
         loadedThreadStatus: (String) -> [String: Any]? = { _ in nil }
     ) throws -> [String: Any] {
         let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
@@ -1953,6 +1954,11 @@ public enum CodexAppServer {
                     thread["status"] = status
                 }
                 return ["thread": thread]
+            }
+            if includeTurns, isThreadLoaded(conversationID.description) {
+                throw AppServerError.invalidRequest(
+                    "thread \(conversationID) is not materialized yet; includeTurns is unavailable before first user message"
+                )
             }
             throw AppServerError.invalidRequest("thread not loaded: \(conversationID)")
         }
@@ -25875,6 +25881,7 @@ final class CodexAppServerMessageProcessor {
                             params: params,
                             configuration: configuration,
                             loadedEphemeralThread: { self.loadedEphemeralThreadSnapshot(threadID: $0) },
+                            isThreadLoaded: { self.isThreadLoaded($0) },
                             loadedThreadStatus: { self.loadedThreadStatus(threadID: $0) }
                         )
                     )

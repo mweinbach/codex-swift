@@ -16473,6 +16473,27 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
+    func testThreadReadIncludeTurnsRejectsUnmaterializedLoadedThreadLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let threadStateManager = AppServerThreadStateManager()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            threadStateManager: threadStateManager
+        )
+        let threadID = UUID().uuidString.lowercased()
+        await threadStateManager.tryAddConnectionToThread(threadID: threadID, connectionID: 0)
+
+        let response = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"thread/read","params":{"threadId":"\#(threadID)","includeTurns":true}}"#.utf8
+        )))
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(
+            error["message"] as? String,
+            "thread \(threadID) is not materialized yet; includeTurns is unavailable before first user message"
+        )
+    }
+
     func testThreadRollbackPersistsMarkerAndReturnsPrunedThread() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(
