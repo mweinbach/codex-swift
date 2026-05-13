@@ -25264,10 +25264,35 @@ final class CodexAppServerMessageProcessor {
     }
 
     private func queueBestEffortMcpServerRefresh() {
-        Self.queueBestEffortMcpServerRefresh(
-            configuration: configuration,
-            threadStateManager: threadStateManager
+        let threadIDs = listLoadedThreadIDs()
+        guard !threadIDs.isEmpty else {
+            return
+        }
+        let fallbackRuntimeConfig = try? CodexConfigLoader.load(
+            codexHome: configuration.codexHome,
+            cwd: configuration.cwd,
+            overrides: configuration.cliConfigOverrides,
+            threadConfigSources: configuration.threadConfigSources,
+            systemConfigFile: nil,
+            managedConfigOverrides: configuration.configLayerOverrides,
+            environment: configuration.environment
         )
+        let fallbackRefreshConfig = fallbackRuntimeConfig.map(CodexAppServer.mcpServerRefreshConfig(runtimeConfig:))
+        let manager = threadStateManager
+        for threadID in threadIDs {
+            let refreshConfig: McpServerRefreshConfig?
+            do {
+                refreshConfig = try mcpServerRefreshConfigForLoadedThread(threadID: threadID) ?? fallbackRefreshConfig
+            } catch {
+                continue
+            }
+            guard let refreshConfig else {
+                continue
+            }
+            _ = try? CodexAppServer.runAsyncBlocking {
+                await manager.queueMcpServerRefresh(threadID: threadID, config: refreshConfig)
+            }
+        }
     }
 
     private static func queueBestEffortMcpServerRefresh(
@@ -25286,6 +25311,7 @@ final class CodexAppServerMessageProcessor {
                 codexHome: configuration.codexHome,
                 cwd: configuration.cwd,
                 overrides: configuration.cliConfigOverrides,
+                threadConfigSources: configuration.threadConfigSources,
                 managedConfigOverrides: configuration.configLayerOverrides,
                 environment: configuration.environment
             )

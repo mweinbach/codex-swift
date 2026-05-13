@@ -13360,16 +13360,31 @@ final class CodexAppServerTests: XCTestCase {
 
     func testPluginInstallAndUninstallQueueMcpRefreshForLoadedThreads() throws {
         let temp = try TemporaryDirectory()
+        let workspace = try TemporaryDirectory()
+        try FileManager.default.createDirectory(
+            at: workspace.url.appendingPathComponent(".git", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: workspace.url.appendingPathComponent(".codex", isDirectory: true),
+            withIntermediateDirectories: true
+        )
         let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
         try """
         [mcp_servers.docs]
         command = "docs-install"
         """.write(to: configFile, atomically: true, encoding: .utf8)
+        let projectConfigFile = workspace.url.appendingPathComponent(".codex/config.toml", isDirectory: false)
+        try """
+        [mcp_servers.docs]
+        command = "project-docs-install"
+        """.write(to: projectConfigFile, atomically: true, encoding: .utf8)
         let sourceRoot = try makeLocalMarketplaceRootWithPlugin(named: "debug", pluginName: "weather", in: temp.url)
         let marketplacePath = sourceRoot.appendingPathComponent(".agents/plugins/marketplace.json", isDirectory: false).path
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let startPayload = #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider","cwd":"\#(workspace.url.path)"}}"#
         let start = try decodeMessages(processor.processLine(
-            Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)
+            Data(startPayload.utf8)
         ))
         let threadID = try XCTUnwrap(((start[0]["result"] as? [String: Any])?["thread"] as? [String: Any])?["id"] as? String)
 
@@ -13383,7 +13398,7 @@ final class CodexAppServerTests: XCTestCase {
         else {
             return XCTFail("expected install MCP refresh config")
         }
-        XCTAssertEqual(installDocs["command"], .string("docs-install"))
+        XCTAssertEqual(installDocs["command"], .string("project-docs-install"))
 
         try """
         [mcp_servers.docs]
@@ -13392,6 +13407,10 @@ final class CodexAppServerTests: XCTestCase {
         [plugins."weather@debug"]
         enabled = true
         """.write(to: configFile, atomically: true, encoding: .utf8)
+        try """
+        [mcp_servers.docs]
+        command = "project-docs-uninstall"
+        """.write(to: projectConfigFile, atomically: true, encoding: .utf8)
         _ = try decode(processor.processLine(Data(
             #"{"id":3,"method":"plugin/uninstall","params":{"pluginId":"weather@debug"}}"#.utf8
         )))
@@ -13402,7 +13421,7 @@ final class CodexAppServerTests: XCTestCase {
         else {
             return XCTFail("expected uninstall MCP refresh config")
         }
-        XCTAssertEqual(uninstallDocs["command"], .string("docs-uninstall"))
+        XCTAssertEqual(uninstallDocs["command"], .string("project-docs-uninstall"))
     }
 
     func testPluginInstallReturnsDirectoryAppsNeedingAuth() throws {
@@ -19031,14 +19050,29 @@ final class CodexAppServerTests: XCTestCase {
 
     func testAccountLoginAndLogoutQueueMcpRefreshForLoadedThreads() throws {
         let temp = try TemporaryDirectory()
+        let workspace = try TemporaryDirectory()
+        try FileManager.default.createDirectory(
+            at: workspace.url.appendingPathComponent(".git", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: workspace.url.appendingPathComponent(".codex", isDirectory: true),
+            withIntermediateDirectories: true
+        )
         let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
         try """
         [mcp_servers.docs]
         command = "docs-login"
         """.write(to: configFile, atomically: true, encoding: .utf8)
+        let projectConfigFile = workspace.url.appendingPathComponent(".codex/config.toml", isDirectory: false)
+        try """
+        [mcp_servers.docs]
+        command = "project-docs-login"
+        """.write(to: projectConfigFile, atomically: true, encoding: .utf8)
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let startPayload = #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider","cwd":"\#(workspace.url.path)"}}"#
         let start = try decodeMessages(processor.processLine(
-            Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)
+            Data(startPayload.utf8)
         ))
         let threadID = try XCTUnwrap(((start[0]["result"] as? [String: Any])?["thread"] as? [String: Any])?["id"] as? String)
 
@@ -19052,12 +19086,16 @@ final class CodexAppServerTests: XCTestCase {
         else {
             return XCTFail("expected login MCP refresh config")
         }
-        XCTAssertEqual(loginDocs["command"], .string("docs-login"))
+        XCTAssertEqual(loginDocs["command"], .string("project-docs-login"))
 
         try """
         [mcp_servers.docs]
         command = "docs-logout"
         """.write(to: configFile, atomically: true, encoding: .utf8)
+        try """
+        [mcp_servers.docs]
+        command = "project-docs-logout"
+        """.write(to: projectConfigFile, atomically: true, encoding: .utf8)
         _ = try decodeMessages(processor.processLine(
             Data(#"{"id":3,"method":"account/logout"}"#.utf8)
         ))
@@ -19068,7 +19106,7 @@ final class CodexAppServerTests: XCTestCase {
         else {
             return XCTFail("expected logout MCP refresh config")
         }
-        XCTAssertEqual(logoutDocs["command"], .string("docs-logout"))
+        XCTAssertEqual(logoutDocs["command"], .string("project-docs-logout"))
     }
 
     func testAccountLoginAPIKeyRejectedWhenForcedChatGPT() throws {
