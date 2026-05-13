@@ -39,11 +39,20 @@ public struct CodexMCPToolCall: Equatable, Sendable {
 }
 
 public struct CodexMCPToolReply: Equatable, Sendable {
-    public let conversationID: String
+    public let threadID: String
     public let prompt: String
 
+    public var conversationID: String {
+        threadID
+    }
+
+    public init(threadID: String, prompt: String) {
+        self.threadID = threadID
+        self.prompt = prompt
+    }
+
     public init(conversationID: String, prompt: String) {
-        self.conversationID = conversationID
+        self.threadID = conversationID
         self.prompt = prompt
     }
 }
@@ -278,15 +287,42 @@ public enum CodexMCPServer {
     }
 
     private static func decodeCodexReply(_ arguments: [String: Any]?) throws -> CodexMCPToolReply {
-        guard let arguments,
-              let conversationID = arguments["conversationId"] as? String,
-              let prompt = arguments["prompt"] as? String
-        else {
+        guard let arguments else {
             throw CodexMCPServerError.invalidToolArguments(
-                "Missing arguments for codex-reply tool-call; the `conversation_id` and `prompt` fields are required."
+                "Missing arguments for codex-reply tool-call; the `thread_id` and `prompt` fields are required."
             )
         }
-        return CodexMCPToolReply(conversationID: conversationID, prompt: prompt)
+        guard let prompt = arguments["prompt"] as? String else {
+            throw CodexMCPServerError.invalidToolArguments(
+                "Failed to parse configuration for Codex tool: missing field `prompt`"
+            )
+        }
+        let rawThreadID = arguments["threadId"] as? String ?? arguments["conversationId"] as? String
+        guard let rawThreadID else {
+            throw CodexMCPServerError.invalidToolArguments(
+                "Failed to parse thread_id: either threadId or conversationId must be provided"
+            )
+        }
+        do {
+            return CodexMCPToolReply(threadID: try ThreadId(string: rawThreadID).description, prompt: prompt)
+        } catch {
+            throw CodexMCPServerError.invalidToolArguments("Failed to parse thread_id: \(error)")
+        }
+    }
+
+    private static func codexToolOutputSchema() -> [String: Any] {
+        [
+            "type": "object",
+            "properties": [
+                "threadId": [
+                    "type": "string"
+                ],
+                "content": [
+                    "type": "string"
+                ]
+            ],
+            "required": ["threadId", "content"]
+        ]
     }
 
     private static func toolsListResult() -> [String: Any] {
@@ -296,6 +332,7 @@ public enum CodexMCPServer {
                     "name": "codex",
                     "title": "Codex",
                     "description": "Run a Codex session. Accepts configuration parameters matching the Codex Config struct.",
+                    "outputSchema": codexToolOutputSchema(),
                     "inputSchema": [
                         "type": "object",
                         "required": ["prompt"],
@@ -349,14 +386,19 @@ public enum CodexMCPServer {
                 [
                     "name": "codex-reply",
                     "title": "Codex Reply",
-                    "description": "Continue a Codex conversation by providing the conversation id and prompt.",
+                    "description": "Continue a Codex conversation by providing the thread id and prompt.",
+                    "outputSchema": codexToolOutputSchema(),
                     "inputSchema": [
                         "type": "object",
-                        "required": ["conversationId", "prompt"],
+                        "required": ["prompt"],
                         "properties": [
                             "conversationId": [
                                 "type": "string",
-                                "description": "The conversation id for this Codex session."
+                                "description": "DEPRECATED: use threadId instead."
+                            ],
+                            "threadId": [
+                                "type": "string",
+                                "description": "The thread id for this Codex session. This field is required, but we keep it optional here for backward compatibility for clients that still use conversationId."
                             ],
                             "prompt": [
                                 "type": "string",

@@ -59,12 +59,19 @@ final class CodexMCPServerTests: XCTestCase {
         )
 
         let replyTool = toolRows[1]
+        XCTAssertEqual(replyTool["description"] as? String, "Continue a Codex conversation by providing the thread id and prompt.")
         let replySchema = try XCTUnwrap(replyTool["inputSchema"] as? [String: Any])
-        XCTAssertEqual(replySchema["required"] as? [String], ["conversationId", "prompt"])
+        XCTAssertEqual(replySchema["required"] as? [String], ["prompt"])
+        let outputSchema = try XCTUnwrap(replyTool["outputSchema"] as? [String: Any])
+        XCTAssertEqual(outputSchema["required"] as? [String], ["threadId", "content"])
         let replyProperties = try XCTUnwrap(replySchema["properties"] as? [String: [String: Any]])
         XCTAssertEqual(
             replyProperties["conversationId"]?["description"] as? String,
-            "The conversation id for this Codex session."
+            "DEPRECATED: use threadId instead."
+        )
+        XCTAssertEqual(
+            replyProperties["threadId"]?["description"] as? String,
+            "The thread id for this Codex session. This field is required, but we keep it optional here for backward compatibility for clients that still use conversationId."
         )
         XCTAssertEqual(
             replyProperties["prompt"]?["description"] as? String,
@@ -128,7 +135,7 @@ final class CodexMCPServerTests: XCTestCase {
         let receivedReply = ReplyCapture()
 
         let result = try await response(
-            for: #"{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"codex-reply","arguments":{"conversationId":"123e4567-e89b-12d3-a456-426614174000","prompt":"continue"}}}"#,
+            for: #"{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"codex-reply","arguments":{"threadId":"123e4567-e89b-12d3-a456-426614174000","prompt":"continue"}}}"#,
             state: &state,
             codexReplyRunner: { reply in
                 await receivedReply.set(reply)
@@ -138,12 +145,30 @@ final class CodexMCPServerTests: XCTestCase {
 
         let capturedReply = await receivedReply.value
         XCTAssertEqual(capturedReply, CodexMCPToolReply(
-            conversationID: "123e4567-e89b-12d3-a456-426614174000",
+            threadID: "123e4567-e89b-12d3-a456-426614174000",
             prompt: "continue"
         ))
         let content = try textContent(from: result)
         XCTAssertEqual(content.text, "continued")
         XCTAssertFalse(content.isError)
+    }
+
+    func testCodexReplyToolStillAcceptsDeprecatedConversationId() async throws {
+        var state = CodexMCPServerState()
+        let receivedReply = ReplyCapture()
+
+        _ = try await response(
+            for: #"{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"codex-reply","arguments":{"conversationId":"123e4567-e89b-12d3-a456-426614174000","prompt":"continue"}}}"#,
+            state: &state,
+            codexReplyRunner: { reply in
+                await receivedReply.set(reply)
+                return CodexMCPToolResult(text: "continued")
+            }
+        )
+
+        let capturedReply = await receivedReply.value
+        XCTAssertEqual(capturedReply?.threadID, "123e4567-e89b-12d3-a456-426614174000")
+        XCTAssertEqual(capturedReply?.conversationID, "123e4567-e89b-12d3-a456-426614174000")
     }
 
     func testCodexReplyToolReportsMissingArgumentsAsToolError() async throws {
@@ -153,13 +178,30 @@ final class CodexMCPServerTests: XCTestCase {
             for: #"{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"codex-reply","arguments":{"prompt":"continue"}}}"#,
             state: &state,
             codexReplyRunner: { _ in
-                XCTFail("reply runner should not be called when conversationId is missing")
+                XCTFail("reply runner should not be called when threadId is missing")
                 return CodexMCPToolResult(text: "unused")
             }
         )
 
         let content = try textContent(from: result)
-        XCTAssertEqual(content.text, "Missing arguments for codex-reply tool-call; the `conversation_id` and `prompt` fields are required.")
+        XCTAssertEqual(content.text, "Failed to parse thread_id: either threadId or conversationId must be provided")
+        XCTAssertTrue(content.isError)
+    }
+
+    func testCodexReplyToolReportsMissingArgumentsLikeRust() async throws {
+        var state = CodexMCPServerState()
+
+        let result = try await response(
+            for: #"{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"codex-reply"}}"#,
+            state: &state,
+            codexReplyRunner: { _ in
+                XCTFail("reply runner should not be called when arguments are missing")
+                return CodexMCPToolResult(text: "unused")
+            }
+        )
+
+        let content = try textContent(from: result)
+        XCTAssertEqual(content.text, "Missing arguments for codex-reply tool-call; the `thread_id` and `prompt` fields are required.")
         XCTAssertTrue(content.isError)
     }
 
