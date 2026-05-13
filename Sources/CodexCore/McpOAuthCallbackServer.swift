@@ -231,9 +231,7 @@ public final class McpOAuthLocalCallbackServer: McpOAuthCallbackServing, @unchec
     }
 
     private func handleConnection(fileDescriptor: Int32) -> Bool {
-        guard let path = readRequestPath(fileDescriptor: fileDescriptor),
-              let callback = McpOAuthCallbackParser.parse(path: path, callbackPath: callbackPath)
-        else {
+        guard let path = readRequestPath(fileDescriptor: fileDescriptor) else {
             writeHTTPResponse(
                 fileDescriptor: fileDescriptor,
                 statusCode: 400,
@@ -243,14 +241,36 @@ public final class McpOAuthLocalCallbackServer: McpOAuthCallbackServing, @unchec
             return false
         }
 
-        writeHTTPResponse(
-            fileDescriptor: fileDescriptor,
-            statusCode: 200,
-            reason: "OK",
-            body: "Authentication complete. You may close this window."
-        )
-        finish(result: callback)
-        return true
+        switch McpOAuthCallbackParser.parseOutcome(path: path, callbackPath: callbackPath) {
+        case let .success(callback):
+            writeHTTPResponse(
+                fileDescriptor: fileDescriptor,
+                statusCode: 200,
+                reason: "OK",
+                body: "Authentication complete. You may close this window."
+            )
+            finish(result: callback)
+            return true
+
+        case let .providerError(error):
+            writeHTTPResponse(
+                fileDescriptor: fileDescriptor,
+                statusCode: 400,
+                reason: "Bad Request",
+                body: error.description
+            )
+            finish(error: error)
+            return true
+
+        case .invalid:
+            writeHTTPResponse(
+                fileDescriptor: fileDescriptor,
+                statusCode: 400,
+                reason: "Bad Request",
+                body: "Invalid OAuth callback"
+            )
+            return false
+        }
     }
 
     private func readRequestPath(fileDescriptor: Int32) -> String? {

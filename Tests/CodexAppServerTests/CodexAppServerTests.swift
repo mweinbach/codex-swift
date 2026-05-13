@@ -22374,6 +22374,42 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(requests[0].oauthResource, "https://api.github.test")
     }
 
+    func testMcpServerOAuthLoginUsesDiscoveredScopesWhenUnconfigured() async throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [mcp_servers.github]
+        url = "https://mcp.github.test/mcp"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let discoveryCapture = AppServerMcpOAuthScopeDiscoveryCapture()
+        let loginCapture = AppServerMcpOAuthLoginCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            mcpOAuthLoginStarter: { request, completion in
+                await loginCapture.append(request)
+                await completion(true, nil)
+                return AppServerMcpOAuthLoginStarted(authorizationURL: "https://auth.github.test/authorize")
+            },
+            mcpOAuthScopeDiscoverer: { url, httpHeaders, envHttpHeaders, environment in
+                await discoveryCapture.append(.init(
+                    url: url,
+                    httpHeaders: httpHeaders,
+                    envHttpHeaders: envHttpHeaders,
+                    environment: environment
+                ))
+                return ["profile", "email"]
+            }
+        )
+        let processor = try initializedProcessor(configuration: configuration)
+
+        _ = try decode(processor.processLine(Data(#"{"id":1,"method":"mcpServer/oauth/login","params":{"name":"github"}}"#.utf8)))
+
+        let discoveryRequests = await discoveryCapture.requests
+        XCTAssertEqual(discoveryRequests.map(\.url), ["https://mcp.github.test/mcp"])
+        let requests = await loginCapture.requests
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests[0].scopes, ["profile", "email"])
+    }
+
     func testSkillsListReturnsRepoUserAndSystemSkillsWithPriorityDedupe() throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
@@ -27804,6 +27840,7 @@ final class CodexAppServerTests: XCTestCase {
         pluginHTTPTransport: @escaping AppServerPluginHTTPTransport = CodexAppServer.defaultPluginHTTPTransport,
         accessibleConnectorProvider: @escaping AppServerAccessibleConnectorProvider = CodexAppServer.defaultAccessibleConnectorProvider,
         mcpOAuthLoginStarter: @escaping AppServerMcpOAuthLoginStarter = CodexAppServer.defaultMcpOAuthLoginStarter,
+        mcpOAuthScopeDiscoverer: @escaping AppServerMcpOAuthScopeDiscoverer = { _, _, _, _ in nil },
         cliConfigOverrides: CliConfigOverrides = CliConfigOverrides(),
         threadConfigSources: [ThreadConfigSource] = [],
         configLayerOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides(),
@@ -27837,6 +27874,7 @@ final class CodexAppServerTests: XCTestCase {
             pluginHTTPTransport: pluginHTTPTransport,
             accessibleConnectorProvider: accessibleConnectorProvider,
             mcpOAuthLoginStarter: mcpOAuthLoginStarter,
+            mcpOAuthScopeDiscoverer: mcpOAuthScopeDiscoverer,
             cliConfigOverrides: cliConfigOverrides,
             threadConfigSources: threadConfigSources,
             configLayerOverrides: configLayerOverrides,
@@ -29218,6 +29256,21 @@ private actor AppServerMcpOAuthLoginCapture {
     private(set) var requests: [AppServerMcpOAuthLoginStartRequest] = []
 
     func append(_ request: AppServerMcpOAuthLoginStartRequest) {
+        requests.append(request)
+    }
+}
+
+private struct AppServerMcpOAuthScopeDiscoveryRequest: Equatable, Sendable {
+    let url: String
+    let httpHeaders: [String: String]?
+    let envHttpHeaders: [String: String]?
+    let environment: [String: String]
+}
+
+private actor AppServerMcpOAuthScopeDiscoveryCapture {
+    private(set) var requests: [AppServerMcpOAuthScopeDiscoveryRequest] = []
+
+    func append(_ request: AppServerMcpOAuthScopeDiscoveryRequest) {
         requests.append(request)
     }
 }

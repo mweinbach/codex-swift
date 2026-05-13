@@ -23,6 +23,14 @@ public struct McpOAuthDiscoveryHTTPResponse: Equatable, Sendable {
 
 public typealias McpOAuthDiscoveryTransport = @Sendable (URLRequest) async throws -> McpOAuthDiscoveryHTTPResponse
 
+public struct McpOAuthLoginDiscovery: Equatable, Sendable {
+    public let scopesSupported: [String]?
+
+    public init(scopesSupported: [String]? = nil) {
+        self.scopesSupported = scopesSupported
+    }
+}
+
 public enum McpOAuthDiscovery {
     public static let discoveryHeader = "MCP-Protocol-Version"
     public static let discoveryVersion = "2024-11-05"
@@ -35,6 +43,38 @@ public enum McpOAuthDiscovery {
         environment: [String: String] = ProcessInfo.processInfo.environment,
         transport: McpOAuthDiscoveryTransport? = nil
     ) async throws -> Bool {
+        try await discoverOAuthLogin(
+            url: url,
+            httpHeaders: httpHeaders,
+            envHttpHeaders: envHttpHeaders,
+            environment: environment,
+            transport: transport
+        ) != nil
+    }
+
+    public static func discoverSupportedScopes(
+        url: String,
+        httpHeaders: [String: String]? = nil,
+        envHttpHeaders: [String: String]? = nil,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        transport: McpOAuthDiscoveryTransport? = nil
+    ) async throws -> [String]? {
+        try await discoverOAuthLogin(
+            url: url,
+            httpHeaders: httpHeaders,
+            envHttpHeaders: envHttpHeaders,
+            environment: environment,
+            transport: transport
+        )?.scopesSupported
+    }
+
+    public static func discoverOAuthLogin(
+        url: String,
+        httpHeaders: [String: String]? = nil,
+        envHttpHeaders: [String: String]? = nil,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        transport: McpOAuthDiscoveryTransport? = nil
+    ) async throws -> McpOAuthLoginDiscovery? {
         guard let baseURL = URL(string: url),
               let components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false),
               components.scheme != nil,
@@ -76,10 +116,10 @@ public enum McpOAuthDiscovery {
             else {
                 continue
             }
-            return true
+            return McpOAuthLoginDiscovery(scopesSupported: normalizeScopes(metadata.scopesSupported))
         }
 
-        return false
+        return nil
     }
 
     public static func discoveryPaths(basePath: String) -> [String] {
@@ -175,6 +215,18 @@ public enum McpOAuthDiscovery {
         }
         return McpOAuthDiscoveryHTTPResponse(statusCode: httpResponse.statusCode, body: data, headers: headers)
     }
+
+    static func normalizeScopes(_ scopesSupported: [String]?) -> [String]? {
+        var normalized: [String] = []
+        for scope in scopesSupported ?? [] {
+            let trimmed = scope.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, !normalized.contains(trimmed) else {
+                continue
+            }
+            normalized.append(trimmed)
+        }
+        return normalized.isEmpty ? nil : normalized
+    }
 }
 
 public enum McpOAuthDiscoveryError: Error, Equatable, CustomStringConvertible, Sendable {
@@ -194,9 +246,11 @@ public enum McpOAuthDiscoveryError: Error, Equatable, CustomStringConvertible, S
 private struct OAuthDiscoveryMetadata: Decodable {
     let authorizationEndpoint: String?
     let tokenEndpoint: String?
+    let scopesSupported: [String]?
 
     private enum CodingKeys: String, CodingKey {
         case authorizationEndpoint = "authorization_endpoint"
         case tokenEndpoint = "token_endpoint"
+        case scopesSupported = "scopes_supported"
     }
 }

@@ -8,7 +8,8 @@ public enum McpCommandRuntime {
         public var loadGlobalMcpServers: @Sendable (URL) throws -> [String: McpServerConfig]
         public var replaceGlobalMcpServers: @Sendable (URL, [String: McpServerConfig]) throws -> Void
         public var authStatuses: @Sendable ([String: McpServerConfig], URL, OAuthCredentialsStoreMode, [String: String]) async -> [String: McpAuthStatus]
-        public var supportsOAuthLogin: @Sendable (String, [String: String]?, [String: String]?, [String: String]) async throws -> Bool
+        public var oauthLoginDiscovery: @Sendable (String, [String: String]?, [String: String]?, [String: String]) async throws -> McpOAuthLoginDiscovery?
+        public var discoverSupportedScopes: @Sendable (String, [String: String]?, [String: String]?, [String: String]) async -> [String]?
         public var performOAuthLogin: @Sendable (McpOAuthLoginRequest, @escaping McpOAuthLoginMessageSink) async throws -> Void
         public var deleteOAuthTokens: @Sendable (String, String, URL, OAuthCredentialsStoreMode) throws -> Bool
         public var environment: @Sendable () -> [String: String]
@@ -38,8 +39,16 @@ public enum McpCommandRuntime {
                     environment: environment
                 )
             },
-            supportsOAuthLogin: @escaping @Sendable (String, [String: String]?, [String: String]?, [String: String]) async throws -> Bool = { url, httpHeaders, envHttpHeaders, environment in
-                try await McpOAuthDiscovery.supportsOAuthLogin(
+            oauthLoginDiscovery: @escaping @Sendable (String, [String: String]?, [String: String]?, [String: String]) async throws -> McpOAuthLoginDiscovery? = { url, httpHeaders, envHttpHeaders, environment in
+                try await McpOAuthDiscovery.discoverOAuthLogin(
+                    url: url,
+                    httpHeaders: httpHeaders,
+                    envHttpHeaders: envHttpHeaders,
+                    environment: environment
+                )
+            },
+            discoverSupportedScopes: @escaping @Sendable (String, [String: String]?, [String: String]?, [String: String]) async -> [String]? = { url, httpHeaders, envHttpHeaders, environment in
+                try? await McpOAuthDiscovery.discoverSupportedScopes(
                     url: url,
                     httpHeaders: httpHeaders,
                     envHttpHeaders: envHttpHeaders,
@@ -73,7 +82,8 @@ public enum McpCommandRuntime {
             self.loadGlobalMcpServers = loadGlobalMcpServers
             self.replaceGlobalMcpServers = replaceGlobalMcpServers
             self.authStatuses = authStatuses
-            self.supportsOAuthLogin = supportsOAuthLogin
+            self.oauthLoginDiscovery = oauthLoginDiscovery
+            self.discoverSupportedScopes = discoverSupportedScopes
             self.performOAuthLogin = performOAuthLogin
             self.deleteOAuthTokens = deleteOAuthTokens
             self.environment = environment
@@ -130,35 +140,42 @@ public enum McpCommandRuntime {
 
             let addedMessage = "Added global MCP server '\(name)'."
             if case let .streamableHttp(url, nil, httpHeaders, envHttpHeaders) = serverTransport {
+                let oauthDiscovery: McpOAuthLoginDiscovery?
                 do {
-                    if try await dependencies.supportsOAuthLogin(
+                    oauthDiscovery = try await dependencies.oauthLoginDiscovery(
                         url,
                         httpHeaders,
                         envHttpHeaders,
                         dependencies.environment()
-                    ) {
-                        dependencies.stdout(addedMessage)
-                        dependencies.stdout("Detected OAuth support. Starting OAuth flow…")
-                        try await performOAuthLogin(
-                            serverName: name,
-                            serverURL: url,
-                            codexHome: codexHome,
-                            settings: settings,
-                            httpHeaders: httpHeaders,
-                            envHttpHeaders: envHttpHeaders,
-                            scopes: nil,
-                            oauthResource: nil,
-                            dependencies: dependencies
-                        )
-                        return CodexCLI.CommandExecutionResult(
-                            exitCode: 0,
-                            stdoutMessage: "Successfully logged in."
-                        )
-                    }
+                    )
                 } catch {
                     return CodexCLI.CommandExecutionResult(
                         exitCode: 0,
                         stdoutMessage: "\(addedMessage)\nMCP server may or may not require login. Run `codex mcp login \(name)` to login."
+                    )
+                }
+                if let oauthDiscovery {
+                    dependencies.stdout(addedMessage)
+                    dependencies.stdout("Detected OAuth support. Starting OAuth flow…")
+                    let resolvedScopes = McpOAuthScopes.resolve(
+                        explicitScopes: nil,
+                        configuredScopes: nil,
+                        discoveredScopes: oauthDiscovery.scopesSupported
+                    )
+                    try await performOAuthLogin(
+                        serverName: name,
+                        serverURL: url,
+                        codexHome: codexHome,
+                        settings: settings,
+                        httpHeaders: httpHeaders,
+                        envHttpHeaders: envHttpHeaders,
+                        resolvedScopes: resolvedScopes,
+                        oauthResource: nil,
+                        dependencies: dependencies
+                    )
+                    return CodexCLI.CommandExecutionResult(
+                        exitCode: 0,
+                        stdoutMessage: "Successfully logged in."
                     )
                 }
             }
@@ -197,6 +214,22 @@ public enum McpCommandRuntime {
                     stderrMessage: "OAuth login is only supported for streamable HTTP servers."
                 )
             }
+            let explicitScopes = scopes.isEmpty ? nil : scopes
+            let discoveredScopes: [String]? = if explicitScopes == nil && server.scopes == nil {
+                await dependencies.discoverSupportedScopes(
+                    url,
+                    httpHeaders,
+                    envHttpHeaders,
+                    dependencies.environment()
+                )
+            } else {
+                nil
+            }
+            let resolvedScopes = McpOAuthScopes.resolve(
+                explicitScopes: explicitScopes,
+                configuredScopes: server.scopes,
+                discoveredScopes: discoveredScopes
+            )
             try await performOAuthLogin(
                 serverName: name,
                 serverURL: url,
@@ -204,7 +237,7 @@ public enum McpCommandRuntime {
                 settings: settings,
                 httpHeaders: httpHeaders,
                 envHttpHeaders: envHttpHeaders,
-                scopes: scopes.isEmpty ? server.scopes : scopes,
+                resolvedScopes: resolvedScopes,
                 oauthResource: server.oauthResource,
                 dependencies: dependencies
             )
@@ -281,7 +314,49 @@ public enum McpCommandRuntime {
         settings: CodexRuntimeConfig,
         httpHeaders: [String: String]?,
         envHttpHeaders: [String: String]?,
-        scopes: [String]?,
+        resolvedScopes: ResolvedMcpOAuthScopes,
+        oauthResource: String?,
+        dependencies: Dependencies
+    ) async throws {
+        do {
+            try await performOAuthLoginAttempt(
+                serverName: serverName,
+                serverURL: serverURL,
+                codexHome: codexHome,
+                settings: settings,
+                httpHeaders: httpHeaders,
+                envHttpHeaders: envHttpHeaders,
+                scopes: resolvedScopes.scopes,
+                oauthResource: oauthResource,
+                dependencies: dependencies
+            )
+        } catch {
+            guard McpOAuthScopes.shouldRetryWithoutScopes(resolvedScopes, error: error) else {
+                throw error
+            }
+            dependencies.stdout("OAuth provider rejected discovered scopes. Retrying without scopes…")
+            try await performOAuthLoginAttempt(
+                serverName: serverName,
+                serverURL: serverURL,
+                codexHome: codexHome,
+                settings: settings,
+                httpHeaders: httpHeaders,
+                envHttpHeaders: envHttpHeaders,
+                scopes: [],
+                oauthResource: oauthResource,
+                dependencies: dependencies
+            )
+        }
+    }
+
+    private static func performOAuthLoginAttempt(
+        serverName: String,
+        serverURL: String,
+        codexHome: URL,
+        settings: CodexRuntimeConfig,
+        httpHeaders: [String: String]?,
+        envHttpHeaders: [String: String]?,
+        scopes: [String],
         oauthResource: String?,
         dependencies: Dependencies
     ) async throws {

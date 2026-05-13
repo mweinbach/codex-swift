@@ -24,6 +24,12 @@ public typealias AppServerMcpOAuthLoginStarter = @Sendable (
     AppServerMcpOAuthLoginStartRequest,
     @escaping AppServerMcpOAuthLoginCompletion
 ) async throws -> AppServerMcpOAuthLoginStarted
+public typealias AppServerMcpOAuthScopeDiscoverer = @Sendable (
+    _ url: String,
+    _ httpHeaders: [String: String]?,
+    _ envHttpHeaders: [String: String]?,
+    _ environment: [String: String]
+) async -> [String]?
 
 public struct AppServerMcpOAuthLoginStartRequest: Sendable {
     public let name: String
@@ -203,6 +209,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let pluginHTTPTransport: AppServerPluginHTTPTransport
     public let accessibleConnectorProvider: AppServerAccessibleConnectorProvider
     public let mcpOAuthLoginStarter: AppServerMcpOAuthLoginStarter
+    public let mcpOAuthScopeDiscoverer: AppServerMcpOAuthScopeDiscoverer
     public let cliConfigOverrides: CliConfigOverrides
     public let threadConfigSources: [ThreadConfigSource]
     public let configLayerOverrides: ConfigLayerLoaderOverrides
@@ -237,6 +244,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         pluginHTTPTransport: @escaping AppServerPluginHTTPTransport = CodexAppServer.defaultPluginHTTPTransport,
         accessibleConnectorProvider: @escaping AppServerAccessibleConnectorProvider = CodexAppServer.defaultAccessibleConnectorProvider,
         mcpOAuthLoginStarter: @escaping AppServerMcpOAuthLoginStarter = CodexAppServer.defaultMcpOAuthLoginStarter,
+        mcpOAuthScopeDiscoverer: @escaping AppServerMcpOAuthScopeDiscoverer = CodexAppServer.defaultMcpOAuthScopeDiscoverer,
         cliConfigOverrides: CliConfigOverrides = CliConfigOverrides(),
         threadConfigSources: [ThreadConfigSource] = [],
         configLayerOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides(),
@@ -276,6 +284,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         self.pluginHTTPTransport = pluginHTTPTransport
         self.accessibleConnectorProvider = accessibleConnectorProvider
         self.mcpOAuthLoginStarter = mcpOAuthLoginStarter
+        self.mcpOAuthScopeDiscoverer = mcpOAuthScopeDiscoverer
         self.cliConfigOverrides = cliConfigOverrides
         self.threadConfigSources = threadConfigSources
         self.configLayerOverrides = configLayerOverrides
@@ -913,6 +922,20 @@ public enum CodexAppServer {
             }
         }
         return AppServerMcpOAuthLoginStarted(authorizationURL: try await capture.wait())
+    }
+
+    public static func defaultMcpOAuthScopeDiscoverer(
+        url: String,
+        httpHeaders: [String: String]?,
+        envHttpHeaders: [String: String]?,
+        environment: [String: String]
+    ) async -> [String]? {
+        try? await McpOAuthDiscovery.discoverSupportedScopes(
+            url: url,
+            httpHeaders: httpHeaders,
+            envHttpHeaders: envHttpHeaders,
+            environment: environment
+        )
     }
 
     public static func defaultMcpHTTPTransport(_ request: URLRequest) async throws -> URLSessionTransportResponse {
@@ -13948,6 +13971,23 @@ public enum CodexAppServer {
         }
 
         do {
+            let discoveredScopes: [String]? = if explicitScopes == nil && server.scopes == nil {
+                try runAsyncBlocking {
+                    await configuration.mcpOAuthScopeDiscoverer(
+                        serverURL,
+                        httpHeaders,
+                        envHttpHeaders,
+                        configuration.environment
+                    )
+                }
+            } else {
+                nil
+            }
+            let resolvedScopes = McpOAuthScopes.resolve(
+                explicitScopes: explicitScopes,
+                configuredScopes: server.scopes,
+                discoveredScopes: discoveredScopes
+            )
             let started = try runAsyncBlocking {
                 try await configuration.mcpOAuthLoginStarter(
                     AppServerMcpOAuthLoginStartRequest(
@@ -13958,7 +13998,7 @@ public enum CodexAppServer {
                         httpHeaders: httpHeaders,
                         envHttpHeaders: envHttpHeaders,
                         environment: configuration.environment,
-                        scopes: explicitScopes ?? server.scopes,
+                        scopes: resolvedScopes.scopes,
                         oauthResource: server.oauthResource,
                         timeoutSeconds: timeoutSeconds,
                         callbackPort: runtimeConfig.mcpOAuthCallbackPort,

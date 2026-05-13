@@ -42,6 +42,25 @@ final class McpOAuthCallbackTests: XCTestCase {
         XCTAssertNil(McpOAuthCallbackParser.parse(path: "/callback?code=%ZZ&state=xyz"))
     }
 
+    func testParseCallbackReturnsProviderErrorLikeRust() {
+        XCTAssertEqual(
+            McpOAuthCallbackParser.parseOutcome(
+                path: "/callback?error=invalid_scope&error_description=scope%20rejected"
+            ),
+            .providerError(McpOAuthProviderError(
+                oauthError: "invalid_scope",
+                errorDescription: "scope rejected"
+            ))
+        )
+        XCTAssertEqual(
+            String(describing: McpOAuthProviderError(
+                oauthError: "invalid_scope",
+                errorDescription: "scope rejected"
+            )),
+            "OAuth provider returned `invalid_scope`: scope rejected"
+        )
+    }
+
     func testLocalCallbackServerRejectsInvalidCallbacksThenCompletesOnValidCallback() async throws {
         let server = try McpOAuthLocalCallbackServer.start()
         defer { server.stop() }
@@ -62,6 +81,33 @@ final class McpOAuthCallbackTests: XCTestCase {
         )
         let callbackResult = try await callback
         XCTAssertEqual(callbackResult, McpOAuthCallbackResult(code: "auth code", state: "csrf/state"))
+    }
+
+    func testLocalCallbackServerCompletesWithProviderError() async throws {
+        let server = try McpOAuthLocalCallbackServer.start()
+        defer { server.stop() }
+
+        async let callback = server.waitForCallback(timeout: 2)
+        let baseURL = server.redirectURI.replacingOccurrences(of: "/callback", with: "")
+        let errorURL = try XCTUnwrap(
+            URL(string: "\(baseURL)/callback?error=invalid_scope&error_description=scope%20rejected")
+        )
+        let (body, response) = try await URLSession.shared.data(from: errorURL)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 400)
+        XCTAssertEqual(
+            String(data: body, encoding: .utf8),
+            "OAuth provider returned `invalid_scope`: scope rejected"
+        )
+
+        do {
+            _ = try await callback
+            XCTFail("provider errors should complete the callback wait by throwing")
+        } catch {
+            XCTAssertEqual(
+                error as? McpOAuthProviderError,
+                McpOAuthProviderError(oauthError: "invalid_scope", errorDescription: "scope rejected")
+            )
+        }
     }
 
     func testLocalCallbackServerUsesConfiguredRedirectURLAndPath() async throws {

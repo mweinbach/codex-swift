@@ -92,6 +92,48 @@ final class McpOAuthDiscoveryTests: XCTestCase {
         XCTAssertEqual(paths, ["/.well-known/oauth-authorization-server"])
     }
 
+    func testDiscoverSupportedScopesReturnsNormalizedRustScopes() async throws {
+        let probe = OAuthDiscoveryProbe(responses: [
+            "/.well-known/oauth-authorization-server": McpOAuthDiscoveryHTTPResponse(
+                statusCode: 200,
+                body: Data(
+                    #"{"authorization_endpoint":"https://auth.example/authorize","token_endpoint":"https://auth.example/token","scopes_supported":["profile"," email ","profile","","   "]}"#.utf8
+                )
+            )
+        ])
+
+        let scopes = try await McpOAuthDiscovery.discoverSupportedScopes(
+            url: "https://example.test",
+            environment: [:],
+            transport: { request in
+                await probe.handle(request)
+            }
+        )
+
+        XCTAssertEqual(scopes, ["profile", "email"])
+    }
+
+    func testDiscoverSupportedScopesIgnoresEmptyRustScopes() async throws {
+        let probe = OAuthDiscoveryProbe(responses: [
+            "/.well-known/oauth-authorization-server": McpOAuthDiscoveryHTTPResponse(
+                statusCode: 200,
+                body: Data(
+                    #"{"authorization_endpoint":"https://auth.example/authorize","token_endpoint":"https://auth.example/token","scopes_supported":["","   "]}"#.utf8
+                )
+            )
+        ])
+
+        let scopes = try await McpOAuthDiscovery.discoverSupportedScopes(
+            url: "https://example.test",
+            environment: [:],
+            transport: { request in
+                await probe.handle(request)
+            }
+        )
+
+        XCTAssertNil(scopes)
+    }
+
     func testAsyncAuthStatusResolverReportsNotLoggedInWhenDiscoverySucceeds() async throws {
         let temp = try OAuthDiscoveryTemporaryDirectory()
         let probe = OAuthDiscoveryProbe(responses: [

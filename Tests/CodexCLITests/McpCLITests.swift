@@ -266,9 +266,133 @@ final class McpCLITests: XCTestCase {
         XCTAssertNil(try McpConfigStore.loadGlobalMcpServers(codexHome: temp.url)["docs"])
     }
 
+    func testMcpCommandRuntimeLoginUsesDiscoveredScopesWhenUnconfigured() async throws {
+        let temp = try TemporaryMcpRuntimeDirectory()
+        try McpConfigStore.replaceGlobalMcpServers(codexHome: temp.url, servers: [
+            "github": McpServerConfig(transport: .streamableHttp(
+                url: "https://mcp.github.test/mcp",
+                bearerTokenEnvVar: nil,
+                httpHeaders: nil,
+                envHttpHeaders: nil
+            ))
+        ])
+        let loginCapture = McpRuntimeOAuthLoginCapture()
+        nonisolated(unsafe) var discoveredURLs: [String] = []
+        let result = try await McpCommandRuntime.run(
+            CodexCLI.McpCommandRequest(action: .login(name: "github", scopes: [])),
+            dependencies: runtimeDependencies(
+                codexHome: temp.url,
+                discoverSupportedScopes: { url, _, _, _ in
+                    discoveredURLs.append(url)
+                    return ["profile", "email"]
+                },
+                performOAuthLogin: { request, _ in
+                    await loginCapture.append(request)
+                }
+            )
+        )
+
+        XCTAssertEqual(result.stdoutMessage, "Successfully logged in to MCP server 'github'.")
+        XCTAssertEqual(discoveredURLs, ["https://mcp.github.test/mcp"])
+        let requests = await loginCapture.requests()
+        XCTAssertEqual(requests.map(\.scopes), [["profile", "email"]])
+    }
+
+    func testMcpCommandRuntimeAddRetriesDiscoveredScopeProviderErrorWithoutScopes() async throws {
+        let temp = try TemporaryMcpRuntimeDirectory()
+        let loginCapture = McpRuntimeOAuthLoginCapture(
+            firstError: McpOAuthProviderError(
+                oauthError: "invalid_scope",
+                errorDescription: "scope rejected"
+            )
+        )
+        let stdoutCapture = McpRuntimeStdoutCapture()
+
+        let result = try await McpCommandRuntime.run(
+            CodexCLI.McpCommandRequest(action: .add(
+                name: "github",
+                transport: .streamableHttp(
+                    url: "https://mcp.github.test/mcp",
+                    bearerTokenEnvVar: nil
+                )
+            )),
+            dependencies: runtimeDependencies(
+                codexHome: temp.url,
+                oauthLoginDiscovery: { _, _, _, _ in
+                    McpOAuthLoginDiscovery(scopesSupported: ["bad.scope"])
+                },
+                performOAuthLogin: { request, _ in
+                    try await loginCapture.perform(request)
+                },
+                stdout: { line in
+                    stdoutCapture.append(line)
+                }
+            )
+        )
+
+        XCTAssertEqual(result.stdoutMessage, "Successfully logged in.")
+        let requests = await loginCapture.requests()
+        XCTAssertEqual(requests.map(\.scopes), [["bad.scope"], []])
+        XCTAssertEqual(stdoutCapture.lines(), [
+            "Added global MCP server 'github'.",
+            "Detected OAuth support. Starting OAuth flow…",
+            "OAuth provider rejected discovered scopes. Retrying without scopes…"
+        ])
+    }
+
+    func testMcpCommandRuntimeAddPropagatesProviderErrorAfterDiscoveredScopeRetryFails() async throws {
+        let temp = try TemporaryMcpRuntimeDirectory()
+        let providerError = McpOAuthProviderError(
+            oauthError: "invalid_scope",
+            errorDescription: "scope rejected"
+        )
+        let loginCapture = McpRuntimeOAuthLoginCapture()
+        let stdoutCapture = McpRuntimeStdoutCapture()
+
+        do {
+            _ = try await McpCommandRuntime.run(
+                CodexCLI.McpCommandRequest(action: .add(
+                    name: "github",
+                    transport: .streamableHttp(
+                        url: "https://mcp.github.test/mcp",
+                        bearerTokenEnvVar: nil
+                    )
+                )),
+                dependencies: runtimeDependencies(
+                    codexHome: temp.url,
+                    oauthLoginDiscovery: { _, _, _, _ in
+                        McpOAuthLoginDiscovery(scopesSupported: ["bad.scope"])
+                    },
+                    performOAuthLogin: { request, _ in
+                        await loginCapture.append(request)
+                        throw providerError
+                    },
+                    stdout: { line in
+                        stdoutCapture.append(line)
+                    }
+                )
+            )
+            XCTFail("mcp add should propagate OAuth login failure after the discovered-scope retry")
+        } catch {
+            XCTAssertEqual(error as? McpOAuthProviderError, providerError)
+        }
+
+        let requests = await loginCapture.requests()
+        XCTAssertEqual(requests.map(\.scopes), [["bad.scope"], []])
+        XCTAssertEqual(stdoutCapture.lines(), [
+            "Added global MCP server 'github'.",
+            "Detected OAuth support. Starting OAuth flow…",
+            "OAuth provider rejected discovered scopes. Retrying without scopes…"
+        ])
+    }
+
     private func runtimeDependencies(
         codexHome: URL,
-        deleteOAuthTokens: @escaping @Sendable (String, String, URL, OAuthCredentialsStoreMode) throws -> Bool = { _, _, _, _ in false }
+        oauthLoginDiscovery: @escaping @Sendable (String, [String: String]?, [String: String]?, [String: String]) async throws -> McpOAuthLoginDiscovery? = { _, _, _, _ in nil },
+        discoverSupportedScopes: @escaping @Sendable (String, [String: String]?, [String: String]?, [String: String]) async -> [String]? = { _, _, _, _ in nil },
+        performOAuthLogin: @escaping @Sendable (McpOAuthLoginRequest, @escaping McpOAuthLoginMessageSink) async throws -> Void = { _, _ in },
+        deleteOAuthTokens: @escaping @Sendable (String, String, URL, OAuthCredentialsStoreMode) throws -> Bool = { _, _, _, _ in false },
+        stdout: @escaping @Sendable (String) -> Void = { _ in }
     ) -> McpCommandRuntime.Dependencies {
         McpCommandRuntime.Dependencies(
             findCodexHome: { codexHome },
@@ -282,12 +406,55 @@ final class McpCLITests: XCTestCase {
             authStatuses: { servers, _, _, _ in
                 McpAuthStatusResolver.authStatuses(for: servers)
             },
-            supportsOAuthLogin: { _, _, _, _ in false },
-            performOAuthLogin: { _, _ in },
+            oauthLoginDiscovery: oauthLoginDiscovery,
+            discoverSupportedScopes: discoverSupportedScopes,
+            performOAuthLogin: performOAuthLogin,
             deleteOAuthTokens: deleteOAuthTokens,
             environment: { [:] },
+            stdout: stdout,
             messageSink: { _ in }
         )
+    }
+}
+
+private actor McpRuntimeOAuthLoginCapture {
+    private var recordedRequests: [McpOAuthLoginRequest] = []
+    private let firstError: Error?
+
+    init(firstError: Error? = nil) {
+        self.firstError = firstError
+    }
+
+    func append(_ request: McpOAuthLoginRequest) {
+        recordedRequests.append(request)
+    }
+
+    func perform(_ request: McpOAuthLoginRequest) async throws {
+        recordedRequests.append(request)
+        if recordedRequests.count == 1, let firstError {
+            throw firstError
+        }
+    }
+
+    func requests() -> [McpOAuthLoginRequest] {
+        recordedRequests
+    }
+}
+
+private final class McpRuntimeStdoutCapture: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedLines: [String] = []
+
+    func append(_ line: String) {
+        lock.withLock {
+            recordedLines.append(line)
+        }
+    }
+
+    func lines() -> [String] {
+        lock.withLock {
+            recordedLines
+        }
     }
 }
 
