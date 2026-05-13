@@ -29,7 +29,7 @@ Source baseline inspected for this scaffold:
   - absolute path normalization and relative path resolution
   - Codable base-path decode support through `JSONDecoder.userInfo`
 - `codex-rs/tui/src/slash_command.rs`
-  - slash command names, presentation order, descriptions, and task availability
+  - slash command names, presentation order, descriptions, and task availability; Swift also mirrors Rust's model-catalog service-tier command items by inserting advertised tiers immediately after `/model`, resolving service-tier commands by catalog `name`, preserving catalog `id` as the request value, and preferring built-ins on name collisions.
 - `codex-rs/cli/src/main.rs`
   - top-level command registry, visible aliases, hidden command marking, version, and shell completion generation for bash, elvish, fish, PowerShell, and zsh
   - root `--remote` / `--remote-auth-token-env` mode now follows Rust's command dispatch guard: non-interactive subcommands reject those flags with subcommand-specific error text before runner startup, while `resume` and `fork` retain their interactive remote forwarding path.
