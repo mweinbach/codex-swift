@@ -5875,18 +5875,50 @@ public enum CodexAppServer {
         process.executableURL = URL(fileURLWithPath: executablePath)
         process.arguments = arguments
         process.environment = environment
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
+        let outputDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-archive-tool-\(UUID().uuidString)", isDirectory: true)
+        let stdoutURL = outputDirectory.appendingPathComponent("stdout.txt", isDirectory: false)
+        let stderrURL = outputDirectory.appendingPathComponent("stderr.txt", isDirectory: false)
+        do {
+            try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+            FileManager.default.createFile(atPath: stdoutURL.path, contents: nil)
+            FileManager.default.createFile(atPath: stderrURL.path, contents: nil)
+        } catch {
+            throw AppServerError.internalError("failed to prepare \(context) output files: \(error)")
+        }
+        defer {
+            try? FileManager.default.removeItem(at: outputDirectory)
+        }
+        let stdoutHandle: FileHandle
+        let stderrHandle: FileHandle
+        do {
+            stdoutHandle = try FileHandle(forWritingTo: stdoutURL)
+            stderrHandle = try FileHandle(forWritingTo: stderrURL)
+        } catch {
+            throw AppServerError.internalError("failed to open \(context) output files: \(error)")
+        }
+        defer {
+            try? stdoutHandle.close()
+            try? stderrHandle.close()
+        }
+        process.standardOutput = stdoutHandle
+        process.standardError = stderrHandle
         do {
             try process.run()
         } catch {
             throw AppServerError.internalError("failed to run \(context): \(error)")
         }
         process.waitUntilExit()
-        let stdout = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        try? stdoutHandle.close()
+        try? stderrHandle.close()
+        let stdout: String
+        let stderr: String
+        do {
+            stdout = String(data: try Data(contentsOf: stdoutURL), encoding: .utf8) ?? ""
+            stderr = String(data: try Data(contentsOf: stderrURL), encoding: .utf8) ?? ""
+        } catch {
+            throw AppServerError.internalError("failed to read \(context) output: \(error)")
+        }
         guard process.terminationStatus == 0 else {
             let message = [stderr, stdout]
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
