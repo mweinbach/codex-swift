@@ -1377,6 +1377,92 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         }
     }
 
+    public func claimStage1JobsForStartup(
+        currentThreadID: ThreadId,
+        params: Stage1StartupClaimParams
+    ) async throws -> [Stage1JobClaim] {
+        guard params.scanLimit > 0, params.maxClaimed > 0 else {
+            return []
+        }
+
+        let database = handle.database
+        let nowMilliseconds = Self.currentTimeMilliseconds()
+        let maxAgeCutoff = Self.saturatingAdd(
+            nowMilliseconds,
+            -Self.saturatingMultiply(max(params.maxAgeDays, 0), 86_400_000)
+        )
+        let idleCutoff = Self.saturatingAdd(
+            nowMilliseconds,
+            -Self.saturatingMultiply(max(params.minRolloutIdleHours, 0), 3_600_000)
+        )
+        var query = Self.threadSelectColumns
+        query +=
+            """
+             FROM threads
+            LEFT JOIN stage1_outputs
+                ON stage1_outputs.thread_id = threads.id
+            LEFT JOIN jobs
+                ON jobs.kind = ?
+               AND jobs.job_key = threads.id
+            WHERE 1 = 1
+              AND threads.archived = 0
+              AND threads.first_user_message <> ''
+            """
+        var bindings: [SQLiteBinding] = [.text(Self.memoryStage1JobKind)]
+        if !params.allowedSources.isEmpty {
+            query += " AND threads.source IN (\(Self.placeholders(count: params.allowedSources.count)))"
+            bindings.append(contentsOf: params.allowedSources.map(SQLiteBinding.text))
+        }
+        query +=
+            """
+              AND threads.memory_mode = 'enabled'
+              AND threads.id != ?
+              AND threads.updated_at_ms >= ?
+              AND threads.updated_at_ms <= ?
+              AND ((COALESCE(stage1_outputs.source_updated_at, -1) + 1) * 1000) <= threads.updated_at_ms
+              AND ((COALESCE(jobs.last_success_watermark, -1) + 1) * 1000) <= threads.updated_at_ms
+            ORDER BY threads.updated_at_ms DESC
+            LIMIT ?
+            """
+        bindings.append(.text(currentThreadID.description))
+        bindings.append(.int(maxAgeCutoff))
+        bindings.append(.int(idleCutoff))
+        bindings.append(.int(Int64(params.scanLimit)))
+
+        let candidates = try Self.withStatement(query: query, bindings: bindings, database: database) { statement in
+            var items: [ThreadMetadata] = []
+            while true {
+                let result = sqlite3_step(statement)
+                if result == SQLITE_DONE {
+                    return items
+                }
+                guard result == SQLITE_ROW else {
+                    throw Self.sqliteError(database: database)
+                }
+                items.append(try Self.threadMetadata(from: statement))
+            }
+        }
+
+        var claims: [Stage1JobClaim] = []
+        for candidate in candidates {
+            if claims.count >= params.maxClaimed {
+                break
+            }
+            let sourceUpdatedAt = Self.epochSeconds(candidate.updatedAt)
+            let outcome = try await tryClaimStage1Job(
+                threadID: candidate.id,
+                workerID: currentThreadID,
+                sourceUpdatedAt: sourceUpdatedAt,
+                leaseSeconds: params.leaseSeconds,
+                maxRunningJobs: params.maxClaimed
+            )
+            if case let .claimed(ownershipToken) = outcome {
+                claims.append(Stage1JobClaim(thread: candidate, ownershipToken: ownershipToken))
+            }
+        }
+        return claims
+    }
+
     public func tryClaimStage1Job(
         threadID: ThreadId,
         workerID: ThreadId,

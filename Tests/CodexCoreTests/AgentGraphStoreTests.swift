@@ -1616,6 +1616,224 @@ final class AgentGraphStoreTests: XCTestCase {
         XCTAssertNotNil(globalAfterSelected?.inputWatermark)
     }
 
+    func testSQLiteStoreClaimsStage1StartupJobsWithRustFilters() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let nowMilliseconds = (Int64(Date().timeIntervalSince1970) * 1_000)
+        let currentThreadID = try threadID(888)
+        let eligibleThreadID = try threadID(889)
+        let freshThreadID = try threadID(890)
+        let oldThreadID = try threadID(891)
+        let disabledThreadID = try threadID(892)
+        let wrongSourceThreadID = try threadID(893)
+        let cachedThreadID = try threadID(894)
+        let succeededThreadID = try threadID(895)
+        let emptyMessageThreadID = try threadID(896)
+
+        func insertStartupThread(
+            _ threadID: ThreadId,
+            updatedMillisecondsAgo: Int64,
+            source: String = "cli",
+            memoryMode: String = "enabled",
+            firstUserMessage: String = "hello"
+        ) throws {
+            let updatedAtMilliseconds = nowMilliseconds - updatedMillisecondsAgo
+            try insertRawSQLiteThread(
+                id: threadID,
+                agentPath: try AgentPath(validating: "/root/startup/\(threadID.description.suffix(4))"),
+                memoryMode: memoryMode,
+                rolloutPath: "/tmp/startup-\(threadID.description).jsonl",
+                source: source,
+                cwd: "/tmp/startup",
+                firstUserMessage: firstUserMessage,
+                title: "startup \(threadID.description)",
+                updatedAt: ThreadUpdatedAt(
+                    seconds: updatedAtMilliseconds / 1_000,
+                    milliseconds: updatedAtMilliseconds
+                ),
+                databaseURL: databaseURL
+            )
+        }
+
+        let eligibleAge: Int64 = 13 * 3_600_000
+        try insertStartupThread(currentThreadID, updatedMillisecondsAgo: eligibleAge)
+        try insertStartupThread(eligibleThreadID, updatedMillisecondsAgo: eligibleAge)
+        try insertStartupThread(freshThreadID, updatedMillisecondsAgo: 6 * 3_600_000)
+        try insertStartupThread(oldThreadID, updatedMillisecondsAgo: 31 * 86_400_000)
+        try insertStartupThread(disabledThreadID, updatedMillisecondsAgo: eligibleAge, memoryMode: "disabled")
+        try insertStartupThread(wrongSourceThreadID, updatedMillisecondsAgo: eligibleAge, source: "app_server")
+        try insertStartupThread(cachedThreadID, updatedMillisecondsAgo: eligibleAge)
+        try insertStartupThread(succeededThreadID, updatedMillisecondsAgo: eligibleAge)
+        try insertStartupThread(emptyMessageThreadID, updatedMillisecondsAgo: eligibleAge, firstUserMessage: "")
+        let cachedSourceUpdatedAt = (nowMilliseconds - eligibleAge) / 1_000
+        try insertRawStage1Output(
+            threadID: cachedThreadID,
+            sourceUpdatedAt: cachedSourceUpdatedAt,
+            rawMemory: "cached",
+            rolloutSummary: "cached",
+            generatedAt: cachedSourceUpdatedAt,
+            databaseURL: databaseURL
+        )
+        try insertRawMemoryJob(
+            kind: "memory_stage1",
+            jobKey: succeededThreadID.description,
+            status: "done",
+            inputWatermark: cachedSourceUpdatedAt,
+            lastSuccessWatermark: cachedSourceUpdatedAt,
+            databaseURL: databaseURL
+        )
+
+        let claims = try await store.claimStage1JobsForStartup(
+            currentThreadID: currentThreadID,
+            params: Stage1StartupClaimParams(
+                scanLimit: 20,
+                maxClaimed: 5,
+                maxAgeDays: 30,
+                minRolloutIdleHours: 12,
+                allowedSources: ["cli"],
+                leaseSeconds: 3_600
+            )
+        )
+        let job = try readRawMemoryJob(
+            kind: "memory_stage1",
+            jobKey: eligibleThreadID.description,
+            databaseURL: databaseURL
+        )
+
+        XCTAssertEqual(claims.map(\.thread.id), [eligibleThreadID])
+        XCTAssertFalse(claims[0].ownershipToken.isEmpty)
+        XCTAssertEqual(job?.status, "running")
+        XCTAssertEqual(job?.workerID, currentThreadID.description)
+        XCTAssertEqual(job?.inputWatermark, cachedSourceUpdatedAt)
+    }
+
+    func testSQLiteStoreClaimsStage1StartupJobsRespectScanAndClaimCaps() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let nowMilliseconds = (Int64(Date().timeIntervalSince1970) * 1_000)
+        let currentThreadID = try threadID(897)
+        let candidateThreadIDs = try (898..<903).map(threadID)
+        try insertRawSQLiteThread(
+            id: currentThreadID,
+            agentPath: try AgentPath(validating: "/root/startup/current"),
+            memoryMode: "enabled",
+            rolloutPath: "/tmp/startup-current.jsonl",
+            title: "current",
+            updatedAt: ThreadUpdatedAt(seconds: nowMilliseconds / 1_000, milliseconds: nowMilliseconds),
+            databaseURL: databaseURL
+        )
+
+        for (index, threadID) in candidateThreadIDs.enumerated() {
+            let updatedAtMilliseconds = nowMilliseconds - (13 * 3_600_000) - Int64(index * 1_000)
+            try insertRawSQLiteThread(
+                id: threadID,
+                agentPath: try AgentPath(validating: "/root/startup/candidate_\(index)"),
+                memoryMode: "enabled",
+                rolloutPath: "/tmp/startup-\(index).jsonl",
+                cwd: "/tmp/startup",
+                title: "candidate \(index)",
+                updatedAt: ThreadUpdatedAt(
+                    seconds: updatedAtMilliseconds / 1_000,
+                    milliseconds: updatedAtMilliseconds
+                ),
+                databaseURL: databaseURL
+            )
+        }
+
+        let claims = try await store.claimStage1JobsForStartup(
+            currentThreadID: currentThreadID,
+            params: Stage1StartupClaimParams(
+                scanLimit: 3,
+                maxClaimed: 2,
+                maxAgeDays: 30,
+                minRolloutIdleHours: 12,
+                allowedSources: ["cli"],
+                leaseSeconds: 3_600
+            )
+        )
+        let unscannedJob = try readRawMemoryJob(
+            kind: "memory_stage1",
+            jobKey: candidateThreadIDs[3].description,
+            databaseURL: databaseURL
+        )
+
+        XCTAssertEqual(claims.map(\.thread.id), Array(candidateThreadIDs.prefix(2)))
+        XCTAssertNil(unscannedJob)
+    }
+
+    func testSQLiteStoreClaimsStage1StartupJobsProcessesNextBatchAfterSuccessLikeRust() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let nowMilliseconds = (Int64(Date().timeIntervalSince1970) * 1_000)
+        let currentThreadID = try threadID(903)
+        let candidateThreadIDs = try (904..<908).map(threadID)
+        try insertRawSQLiteThread(
+            id: currentThreadID,
+            agentPath: try AgentPath(validating: "/root/startup/current_batch"),
+            memoryMode: "enabled",
+            rolloutPath: "/tmp/startup-current-batch.jsonl",
+            title: "current batch",
+            updatedAt: ThreadUpdatedAt(seconds: nowMilliseconds / 1_000, milliseconds: nowMilliseconds),
+            databaseURL: databaseURL
+        )
+        var sourceUpdatedAtByThreadID: [ThreadId: Int64] = [:]
+        for (index, threadID) in candidateThreadIDs.enumerated() {
+            let updatedAtMilliseconds = nowMilliseconds - (13 * 3_600_000) - Int64(index * 1_000)
+            sourceUpdatedAtByThreadID[threadID] = updatedAtMilliseconds / 1_000
+            try insertRawSQLiteThread(
+                id: threadID,
+                agentPath: try AgentPath(validating: "/root/startup/batch_\(index)"),
+                memoryMode: "enabled",
+                rolloutPath: "/tmp/startup-batch-\(index).jsonl",
+                cwd: "/tmp/startup",
+                title: "batch \(index)",
+                updatedAt: ThreadUpdatedAt(
+                    seconds: updatedAtMilliseconds / 1_000,
+                    milliseconds: updatedAtMilliseconds
+                ),
+                databaseURL: databaseURL
+            )
+        }
+        let params = Stage1StartupClaimParams(
+            scanLimit: 10,
+            maxClaimed: 2,
+            maxAgeDays: 30,
+            minRolloutIdleHours: 12,
+            allowedSources: ["cli"],
+            leaseSeconds: 3_600
+        )
+
+        let firstBatch = try await store.claimStage1JobsForStartup(
+            currentThreadID: currentThreadID,
+            params: params
+        )
+        for claim in firstBatch {
+            let sourceUpdatedAt = try XCTUnwrap(sourceUpdatedAtByThreadID[claim.thread.id])
+            let succeeded = try await store.markStage1JobSucceeded(
+                threadID: claim.thread.id,
+                ownershipToken: claim.ownershipToken,
+                sourceUpdatedAt: sourceUpdatedAt,
+                rawMemory: "raw \(claim.thread.id)",
+                rolloutSummary: "summary \(claim.thread.id)",
+                rolloutSlug: nil
+            )
+            XCTAssertTrue(succeeded)
+        }
+        let secondBatch = try await store.claimStage1JobsForStartup(
+            currentThreadID: currentThreadID,
+            params: params
+        )
+
+        XCTAssertEqual(firstBatch.map(\.thread.id), Array(candidateThreadIDs.prefix(2)))
+        XCTAssertEqual(secondBatch.map(\.thread.id), Array(candidateThreadIDs.dropFirst(2).prefix(2)))
+    }
+
     func testSQLiteStoreFindsRolloutPathWithArchiveFilter() async throws {
         let temp = try AgentGraphStoreTemporaryDirectory()
         let databaseURL = temp.url.appendingPathComponent("state.sqlite3")

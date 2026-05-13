@@ -80,6 +80,43 @@ public enum Stage1JobClaimOutcome: Equatable, Sendable {
     case skippedRetryExhausted
 }
 
+/// Claimed stage-1 memory extraction job with thread metadata.
+public struct Stage1JobClaim: Equatable, Sendable {
+    public var thread: ThreadMetadata
+    public var ownershipToken: String
+
+    public init(thread: ThreadMetadata, ownershipToken: String) {
+        self.thread = thread
+        self.ownershipToken = ownershipToken
+    }
+}
+
+/// Selection and lease parameters for startup stage-1 memory extraction claims.
+public struct Stage1StartupClaimParams: Equatable, Sendable {
+    public var scanLimit: Int
+    public var maxClaimed: Int
+    public var maxAgeDays: Int64
+    public var minRolloutIdleHours: Int64
+    public var allowedSources: [String]
+    public var leaseSeconds: Int64
+
+    public init(
+        scanLimit: Int,
+        maxClaimed: Int,
+        maxAgeDays: Int64,
+        minRolloutIdleHours: Int64,
+        allowedSources: [String],
+        leaseSeconds: Int64
+    ) {
+        self.scanLimit = scanLimit
+        self.maxClaimed = maxClaimed
+        self.maxAgeDays = maxAgeDays
+        self.minRolloutIdleHours = minRolloutIdleHours
+        self.allowedSources = allowedSources
+        self.leaseSeconds = leaseSeconds
+    }
+}
+
 /// Result of trying to claim a phase-2 memory consolidation job.
 public enum Phase2JobClaimOutcome: Equatable, Sendable {
     /// The caller owns the global lock and may inspect the memory workspace.
