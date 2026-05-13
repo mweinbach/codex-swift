@@ -40,6 +40,12 @@ final class SSEDataFrameDecoderTests: XCTestCase {
         XCTAssertEqual(finished, [])
     }
 
+    func testDataFieldsWithoutColonMatchRustEventsourceStream() {
+        let frames = SSEDataFrameDecoder.dataFrames(from: "data\n\ndata\ndata\n\ndata:\n\n")
+
+        XCTAssertEqual(frames, ["", "\n", ""])
+    }
+
     func testResponsesSSEParserUsesIncrementalFrameDecoder() {
         let text = """
         : ignored

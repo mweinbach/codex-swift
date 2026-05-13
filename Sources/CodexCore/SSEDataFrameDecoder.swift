@@ -40,13 +40,16 @@ public struct SSEDataFrameDecoder: Sendable {
             return
         }
 
-        guard line.hasPrefix("data:") else {
+        guard line == "data" || line.hasPrefix("data:") else {
             return
         }
 
-        var data = String(line.dropFirst("data:".count))
-        if data.first == " " {
-            data.removeFirst()
+        var data = ""
+        if line.hasPrefix("data:") {
+            data = String(line.dropFirst("data:".count))
+            if data.first == " " {
+                data.removeFirst()
+            }
         }
         dataLines.append(data)
     }
