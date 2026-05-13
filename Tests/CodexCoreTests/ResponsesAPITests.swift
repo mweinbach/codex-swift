@@ -245,6 +245,31 @@ final class ResponsesAPITests: XCTestCase {
         XCTAssertNil(try JSONObject(request.body)["client_metadata"])
     }
 
+    func testBuilderStripsSnakeCaseHeadersForAmazonBedrockMantleLikeRustSigV4Auth() throws {
+        let provider = apiProvider(
+            name: ModelProviderInfo.amazonBedrockProviderName,
+            baseURL: ModelProviderInfo.amazonBedrockDefaultBaseURL
+        )
+
+        let request = try ResponsesRequestBuilder(model: "gpt-test", instructions: "inst", input: [])
+            .conversation("conv-1")
+            .turnMetadataHeader(#"{"turn_id":"turn-123"}"#)
+            .extraHeaders([
+                "future_identity_header": "future",
+                "x-client-request-id": "request-1"
+            ])
+            .build(provider: provider)
+
+        XCTAssertNil(request.headers["conversation_id"])
+        XCTAssertNil(request.headers["thread_id"])
+        XCTAssertNil(request.headers["session_id"])
+        XCTAssertNil(request.headers["future_identity_header"])
+        XCTAssertEqual(request.headers["thread-id"], "conv-1")
+        XCTAssertEqual(request.headers["session-id"], "conv-1")
+        XCTAssertEqual(request.headers["x-client-request-id"], "request-1")
+        XCTAssertEqual(request.headers[CodexRequestHeaders.turnMetadataHeaderName], #"{"turn_id":"turn-123"}"#)
+    }
+
     private func apiProvider(name: String, baseURL: String) -> APIProvider {
         APIProvider(
             name: name,

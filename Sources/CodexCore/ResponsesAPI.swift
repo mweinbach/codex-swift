@@ -327,6 +327,9 @@ public struct ResponsesRequestBuilder: Equatable, Sendable {
         if let sanitizedTurnMetadataHeader {
             headers[CodexRequestHeaders.turnMetadataHeaderName] = sanitizedTurnMetadataHeader
         }
+        if provider.name == ModelProviderInfo.amazonBedrockProviderName {
+            headers = headers.filter { name, _ in !name.contains("_") }
+        }
 
         return ResponsesRequest(body: body, headers: headers)
     }
