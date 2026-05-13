@@ -903,6 +903,62 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(rollout.contains(#""instructions":"dev notes""#))
     }
 
+    func testThreadStartPersistsThreadSourceInResponseNotificationAndMetadataLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider","threadSource":"user"}}"#.utf8
+        )))
+
+        XCTAssertEqual(messages.count, 2)
+        let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+        XCTAssertEqual(thread["threadSource"] as? String, "user")
+
+        XCTAssertEqual(messages[1]["method"] as? String, "thread/started")
+        let notificationParams = try XCTUnwrap(messages[1]["params"] as? [String: Any])
+        let notificationThread = try XCTUnwrap(notificationParams["thread"] as? [String: Any])
+        XCTAssertEqual(notificationThread["id"] as? String, threadID)
+        XCTAssertEqual(notificationThread["threadSource"] as? String, "user")
+
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        let meta = try firstSessionMetaPayload(at: rolloutPath)
+        XCTAssertEqual(meta["thread_source"] as? String, "user")
+
+        let readMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"thread/read","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        let readResult = try XCTUnwrap(readMessages[0]["result"] as? [String: Any])
+        let readThread = try XCTUnwrap(readResult["thread"] as? [String: Any])
+        XCTAssertEqual(readThread["threadSource"] as? String, "user")
+    }
+
+    func testThreadStartEphemeralPreservesThreadSourceLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider","threadSource":"subagent","ephemeral":true}}"#.utf8
+        )))
+
+        XCTAssertEqual(messages.count, 2)
+        let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+        XCTAssertEqual(thread["path"] as? NSNull, NSNull())
+        XCTAssertEqual(thread["threadSource"] as? String, "subagent")
+
+        let notificationParams = try XCTUnwrap(messages[1]["params"] as? [String: Any])
+        let notificationThread = try XCTUnwrap(notificationParams["thread"] as? [String: Any])
+        XCTAssertEqual(notificationThread["id"] as? String, threadID)
+        XCTAssertEqual(notificationThread["threadSource"] as? String, "subagent")
+    }
+
     func testThreadStartResponseIncludesActivePermissionProfileLikeRust() throws {
         let temp = try TemporaryDirectory()
         let docs = temp.url.appendingPathComponent("docs", isDirectory: true)
@@ -1720,6 +1776,33 @@ final class CodexAppServerTests: XCTestCase {
         let error = try XCTUnwrap(response["error"] as? [String: Any])
         XCTAssertEqual(error["code"] as? Int, -32600)
         XCTAssertEqual(error["message"] as? String, "`permissions` cannot be combined with `sandbox`")
+    }
+
+    func testThreadStartAndForkRejectUnknownThreadSourceLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let sourceID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-45-00",
+            timestamp: "2025-01-05T12:45:00Z",
+            preview: "Saved user message",
+            provider: "mock_provider"
+        )
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let expectedMessage = "unknown variant `automation`, expected one of `user`, `subagent`, `memory_consolidation`"
+
+        let startResponse = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"threadSource":"automation"}}"#.utf8
+        )))
+        let startError = try XCTUnwrap(startResponse["error"] as? [String: Any])
+        XCTAssertEqual(startError["code"] as? Int, -32600)
+        XCTAssertEqual(startError["message"] as? String, expectedMessage)
+
+        let forkResponse = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"thread/fork","params":{"threadId":"\#(sourceID)","threadSource":"automation"}}"#.utf8
+        )))
+        let forkError = try XCTUnwrap(forkResponse["error"] as? [String: Any])
+        XCTAssertEqual(forkError["code"] as? Int, -32600)
+        XCTAssertEqual(forkError["message"] as? String, expectedMessage)
     }
 
     func testAppServerAttestationProviderRequestsCapableSubscribedClient() async throws {

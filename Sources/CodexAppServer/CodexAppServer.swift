@@ -1235,6 +1235,7 @@ public enum CodexAppServer {
         let sessionStartSource = try sessionStartSourceParam(
             params?["sessionStartSource"] ?? params?["session_start_source"]
         )
+        let threadSource = try threadSourceParam(params?["threadSource"])
         do {
             try DynamicToolSpec.validate(dynamicTools)
         } catch let error as DynamicToolValidationError {
@@ -1271,6 +1272,7 @@ public enum CodexAppServer {
                 activePermissionProfile: runtimeConfig.activePermissionProfile,
                 reasoningEffort: runtimeConfig.modelReasoningEffort?.rawValue,
                 sessionStartSource: sessionStartSource,
+                threadSource: threadSource,
                 instructionSources: instructionSources,
                 ephemeral: true
             )
@@ -1284,6 +1286,7 @@ public enum CodexAppServer {
                 ?? stringParam(params?["baseInstructions"])
                 ?? stringParam(params?["base_instructions"]),
             source: configuration.sessionSource,
+            threadSource: threadSource,
             originator: "codex_app_server",
             cliVersion: configuration.version,
             modelProvider: modelProvider,
@@ -1309,6 +1312,7 @@ public enum CodexAppServer {
             activePermissionProfile: runtimeConfig.activePermissionProfile,
             reasoningEffort: runtimeConfig.modelReasoningEffort?.rawValue,
             sessionStartSource: sessionStartSource,
+            threadSource: threadSource,
             instructionSources: instructionSources,
             ephemeral: false
         )
@@ -1946,7 +1950,7 @@ public enum CodexAppServer {
             cwd: cwd.path,
             fallback: baseSandbox
         )
-        let threadSource = threadSourceParam(params?["threadSource"])
+        let threadSource = try threadSourceParam(params?["threadSource"])
         let dynamicTools = try dynamicToolsForResumedOrForkedHistory(
             sourceConversationID: sourceConversationID,
             history: history,
@@ -18367,7 +18371,7 @@ public enum CodexAppServer {
             "cwd": started.cwd.path,
             "cliVersion": "0.0.0",
             "source": "appServer",
-            "threadSource": NSNull(),
+            "threadSource": started.threadSource?.description ?? NSNull(),
             "agentNickname": NSNull(),
             "agentRole": NSNull(),
             "gitInfo": NSNull(),
@@ -19892,8 +19896,14 @@ public enum CodexAppServer {
         }
     }
 
-    private static func threadSourceParam(_ value: Any?) -> ThreadSource? {
-        stringParam(value).flatMap(ThreadSource.init(rawValue:))
+    private static func threadSourceParam(_ value: Any?) throws -> ThreadSource? {
+        guard let rawValue = try strictStringParam(value, fieldName: "threadSource") else {
+            return nil
+        }
+        guard let source = ThreadSource(rawValue: rawValue) else {
+            throw unknownVariant(rawValue, expected: ["user", "subagent", "memory_consolidation"])
+        }
+        return source
     }
 
     private static func sandboxModeParam(_ value: Any?) -> SandboxMode? {
@@ -23073,6 +23083,7 @@ private struct AppServerStartedConversation {
     let activePermissionProfile: ActivePermissionProfile?
     let reasoningEffort: String?
     let sessionStartSource: HookSessionStartSource
+    let threadSource: ThreadSource?
     let instructionSources: [String]
     let ephemeral: Bool
 }
