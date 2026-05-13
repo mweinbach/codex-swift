@@ -301,6 +301,8 @@ Source baseline inspected for this scaffold:
   - reasoning-related config now loads Rust's top-level `hide_agent_reasoning`, `show_raw_agent_reasoning`, `model_supports_reasoning_summaries`, and top-level/profile `plan_mode_reasoning_effort`; the model reasoning-summary support override feeds Swift's model-family config override path.
 - `codex-rs/exec/src/event_processor_with_jsonl_output.rs` and `exec_events.rs`
   - exec JSONL output now maps completed reasoning items from Rust's summary-only text projection, skips empty reasoning summaries, and emits `reasoning_output_tokens` in turn usage with Rust's zero default.
+- `codex-rs/exec/src/event_processor_with_human_output.rs` final-message recovery
+  - added Swift `TurnItem.finalMessage(from:)` parity for Rust's completed-turn final-message projection: the latest agent message wins over any plan item, and turns with no agent message fall back to the latest plan text.
 - `codex-rs/core/src/environment_context.rs`
   - environment context sandbox/network derivation, shell-insensitive comparison, turn-context diffing, XML serialization, and user response-item projection
 - `codex-rs/core/src/event_mapping.rs`

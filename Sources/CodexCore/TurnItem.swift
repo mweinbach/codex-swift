@@ -151,6 +151,27 @@ public enum TurnItem: Equatable, Codable, Sendable {
             return [item.asLegacyEvent()]
         }
     }
+
+    public static func finalMessage(from items: [TurnItem]) -> String? {
+        if let agentMessage = items.reversed().compactMap(\.agentMessageText).first {
+            return agentMessage
+        }
+        return items.reversed().compactMap(\.planText).first
+    }
+
+    private var agentMessageText: String? {
+        if case let .agentMessage(item) = self {
+            return item.text
+        }
+        return nil
+    }
+
+    private var planText: String? {
+        if case let .plan(item) = self {
+            return item.text
+        }
+        return nil
+    }
 }
 
 public struct HookPromptItem: Equatable, Codable, Sendable {
@@ -337,6 +358,15 @@ public struct AgentMessageItem: Equatable, Codable, Sendable {
                 return .agentMessage(AgentMessageEvent(message: text))
             }
         }
+    }
+
+    public var text: String {
+        content.map { content in
+            switch content {
+            case let .text(text):
+                return text
+            }
+        }.joined()
     }
 }
 

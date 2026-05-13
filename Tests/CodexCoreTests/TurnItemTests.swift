@@ -66,6 +66,44 @@ final class TurnItemTests: XCTestCase {
             .agentMessage(AgentMessageEvent(message: "one")),
             .agentMessage(AgentMessageEvent(message: "two"))
         ])
+        XCTAssertEqual(item.text, "onetwo")
+    }
+
+    func testFinalMessageFromTurnItemsUsesLatestAgentMessageLikeRustExec() {
+        let message = TurnItem.finalMessage(from: [
+            .agentMessage(AgentMessageItem(id: "msg-1", content: [.text("first")])),
+            .plan(PlanItem(id: "plan-1", text: "later plan")),
+            .agentMessage(AgentMessageItem(id: "msg-2", content: [.text("second")]))
+        ])
+
+        XCTAssertEqual(message, "second")
+    }
+
+    func testFinalMessageFromTurnItemsPrefersAgentMessageOverLaterPlanLikeRustExec() {
+        let message = TurnItem.finalMessage(from: [
+            .agentMessage(AgentMessageItem(id: "msg-1", content: [.text("answer")])),
+            .plan(PlanItem(id: "plan-1", text: "later plan"))
+        ])
+
+        XCTAssertEqual(message, "answer")
+    }
+
+    func testFinalMessageFromTurnItemsFallsBackToLatestPlanLikeRustExec() {
+        let message = TurnItem.finalMessage(from: [
+            .reasoning(ReasoningItem(id: "reasoning-1", summaryText: ["inspect"])),
+            .plan(PlanItem(id: "plan-1", text: "first plan")),
+            .plan(PlanItem(id: "plan-2", text: "final plan"))
+        ])
+
+        XCTAssertEqual(message, "final plan")
+    }
+
+    func testFinalMessageFromTurnItemsReturnsNilWithoutAgentMessageOrPlan() {
+        let message = TurnItem.finalMessage(from: [
+            .reasoning(ReasoningItem(id: "reasoning-1", summaryText: ["inspect"]))
+        ])
+
+        XCTAssertNil(message)
     }
 
     func testAgentMessageItemPreservesPhaseAndMemoryCitationWireShape() throws {
