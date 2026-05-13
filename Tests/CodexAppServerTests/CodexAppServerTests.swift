@@ -24841,6 +24841,20 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(result["stderr"] as? String, "err\n")
     }
 
+    func testCommandExecWithoutStreamStdinReadsEOFLikeRust() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/cat"],"cwd":"\#(cwd.url.path)","timeoutMs":1000}}"#,
+            codexHome: codexHome.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["exitCode"] as? Int, 0)
+        XCTAssertEqual(result["stdout"] as? String, "")
+        XCTAssertEqual(result["stderr"] as? String, "")
+    }
+
     func testCommandExecUsesConfiguredReadOnlySandboxLikeRust() throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
@@ -26311,6 +26325,33 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(nullTimeoutParams["processHandle"] as? String, "proc-null-timeout")
         XCTAssertEqual(nullTimeoutParams["exitCode"] as? Int, 0)
         XCTAssertEqual(nullTimeoutParams["stdout"] as? String, "hi\n")
+    }
+
+    func testProcessSpawnWithoutStreamStdinReadsEOFLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in
+                await notificationCapture.append(data)
+            },
+            experimentalAPIEnabled: true
+        )
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"process/spawn","params":{"command":["/bin/cat"],"processHandle":"proc-no-stdin-eof","cwd":"\#(cwd.url.path)","timeoutMs":1000}}"#.utf8
+        )))
+        XCTAssertEqual((messages[0]["result"] as? [String: Any])?.isEmpty, true)
+
+        let notificationData = try await nextNotificationPayload(notificationCapture)
+        let notification = try XCTUnwrap(decodeMessages(notificationData).first)
+        XCTAssertEqual(notification["method"] as? String, "process/exited")
+        let params = try XCTUnwrap(notification["params"] as? [String: Any])
+        XCTAssertEqual(params["processHandle"] as? String, "proc-no-stdin-eof")
+        XCTAssertEqual(params["exitCode"] as? Int, 0)
+        XCTAssertEqual(params["stdout"] as? String, "")
+        XCTAssertEqual(params["stderr"] as? String, "")
     }
 
     func testProcessSpawnBufferedOutputCapReportsCapReachedLikeRust() async throws {

@@ -23082,6 +23082,7 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
     private let process = Process()
     private let exitSignal = AppServerProcessExitSignal()
     private var stdinPipe: Pipe?
+    private var nullStdin: FileHandle?
     private var pseudoTerminal: AppServerPseudoTerminal?
     private var stdinClosed = false
     private var terminated = false
@@ -23145,6 +23146,10 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
         if params.streamStdin {
             let stdin = Pipe()
             stdinPipe = stdin
+            process.standardInput = stdin
+        } else {
+            let stdin = FileHandle(forReadingAtPath: "/dev/null")
+            nullStdin = stdin
             process.standardInput = stdin
         }
         process.standardOutput = stdout
@@ -23261,6 +23266,7 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
             }
         }
         await exitSignal.wait()
+        try? nullStdin?.close()
         pseudoTerminal?.closeSlaveHandles()
         let stdoutCapture = await stdoutTask.value
         let stderrCapture = await stderrTask?.value ?? AppServerProcessOutputCapture(text: "", capReached: false)
@@ -23399,6 +23405,7 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
     private let process = Process()
     private let exitSignal = AppServerProcessExitSignal()
     private var stdinPipe: Pipe?
+    private var nullStdin: FileHandle?
     private var pseudoTerminal: AppServerPseudoTerminal?
     private var stdinClosed = false
     private var terminated = false
@@ -23452,6 +23459,10 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
         if params.streamStdin {
             let stdin = Pipe()
             stdinPipe = stdin
+            process.standardInput = stdin
+        } else {
+            let stdin = FileHandle(forReadingAtPath: "/dev/null")
+            nullStdin = stdin
             process.standardInput = stdin
         }
         process.standardOutput = stdout
@@ -23568,6 +23579,7 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
             }
         }
         await exitSignal.wait()
+        try? nullStdin?.close()
         pseudoTerminal?.closeSlaveHandles()
         let stdoutCapture = await stdoutTask.value
         let stderrCapture = await stderrTask?.value ?? AppServerProcessOutputCapture(text: "", capReached: false)
