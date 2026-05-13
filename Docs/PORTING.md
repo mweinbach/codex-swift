@@ -134,6 +134,8 @@ Source baseline inspected for this scaffold:
   - tagged file-change payloads, patch-apply begin/end events with defaulted legacy fields, and turn-diff wire shape
 - `codex-rs/core/src/turn_diff_tracker.rs`
   - operation-backed turn diff aggregation from committed `apply_patch` deltas, including exact-delta invalidation, empty-delta preservation, Git blob object IDs, add/update/delete coalescing, move diff rendering, pure rename suppression, and overwrite-move ordering
+- `codex-rs/core/src/tools/events.rs` apply-patch turn-diff emission
+  - reusable Swift event emitter for apply-patch item-started/item-completed events, verified patch-change metadata conversion, and Rust's tracker update rule that emits a `turn_diff` when a committed delta creates, changes, or clears the visible turn diff
 - `codex-rs/protocol/src/parse_command.rs`
   - tagged parsed-command model
 - `codex-rs/core/src/parse_command.rs`
