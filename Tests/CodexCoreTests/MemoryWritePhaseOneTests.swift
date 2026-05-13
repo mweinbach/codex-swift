@@ -135,6 +135,116 @@ final class MemoryWritePhaseOneTests: XCTestCase {
         }
     }
 
+    func testMemoryStageOneResponsesOptionsCarryRustRequestContext() {
+        let modelInfo = minimalModelInfo(
+            defaultReasoningSummary: .auto,
+            defaultVerbosity: .high,
+            inputModalities: [.text]
+        )
+        let context = MemoryStageOneRequestContext(
+            modelInfo: modelInfo,
+            reasoningEffort: .low,
+            reasoningSummary: .detailed,
+            serviceTier: "flex",
+            turnMetadataHeader: #"{"turn_id":"turn-123"}"#
+        )
+        let prompt = Prompt(
+            baseInstructionsOverride: "memory instructions",
+            outputSchema: memoryStageOneOutputSchema()
+        )
+
+        let options = memoryStageOneResponsesOptions(context: context, prompt: prompt)
+
+        XCTAssertEqual(memoryStageOneInstructions(prompt: prompt, context: context), "memory instructions")
+        XCTAssertEqual(options.reasoning, ResponsesAPIReasoning(effort: .low, summary: .detailed))
+        XCTAssertEqual(options.serviceTier, "flex")
+        XCTAssertEqual(options.turnMetadataHeader, #"{"turn_id":"turn-123"}"#)
+        XCTAssertEqual(options.inputModalities, [.text])
+        XCTAssertEqual(options.text, ResponsesAPITextControls(
+            verbosity: .high,
+            format: ResponsesAPITextFormat(
+                strict: true,
+                schema: memoryStageOneOutputSchema(),
+                name: "codex_output_schema"
+            )
+        ))
+    }
+
+    func testCollectMemoryStageOneStreamResultConcatenatesDeltasUntilCompleted() throws {
+        let usage = TokenUsage(inputTokens: 2, outputTokens: 3, totalTokens: 5)
+
+        let result = try collectMemoryStageOneStreamResult([
+            .success(.created),
+            .success(.outputTextDelta("{")),
+            .success(.outputTextDelta(#""raw_memory":"value"}"#)),
+            .success(.completed(responseID: "resp_1", tokenUsage: usage)),
+            .success(.outputTextDelta("not observed"))
+        ])
+
+        XCTAssertEqual(result, MemoryStageOneStreamResult(
+            output: #"{"raw_memory":"value"}"#,
+            tokenUsage: usage
+        ))
+    }
+
+    func testCollectMemoryStageOneStreamResultFallsBackToOutputItemDoneOnlyWhenNoDeltasArrived() throws {
+        let fallback = try collectMemoryStageOneStreamResult([
+            .success(.outputItemDone(.message(role: "assistant", content: [
+                .outputText(text: "from message"),
+                .outputText(text: "second piece")
+            ]))),
+            .success(.completed(responseID: "resp_1", tokenUsage: nil))
+        ])
+
+        XCTAssertEqual(fallback.output, "from message\nsecond piece")
+
+        let withDelta = try collectMemoryStageOneStreamResult([
+            .success(.outputTextDelta("from delta")),
+            .success(.outputItemDone(.message(role: "assistant", content: [
+                .outputText(text: "ignored fallback")
+            ]))),
+            .success(.completed(responseID: "resp_2", tokenUsage: nil))
+        ])
+
+        XCTAssertEqual(withDelta.output, "from delta")
+    }
+
+    func testStreamMemoryStageOnePromptPassesContextToStreamerAndCollectsEvents() async throws {
+        let modelInfo = minimalModelInfo(defaultReasoningSummary: .concise)
+        let context = MemoryStageOneRequestContext(
+            modelInfo: modelInfo,
+            reasoningEffort: memoryStageOneReasoningEffort,
+            reasoningSummary: modelInfo.defaultReasoningSummary,
+            serviceTier: "priority",
+            turnMetadataHeader: "{}"
+        )
+        let prompt = Prompt(
+            input: [.message(role: "user", content: [.inputText(text: "summarize")])],
+            baseInstructionsOverride: memoryStageOneSystemPrompt,
+            outputSchema: memoryStageOneOutputSchema()
+        )
+
+        let (output, usage) = try await streamMemoryStageOnePrompt(
+            prompt: prompt,
+            context: context,
+            streamPrompt: { model, instructions, receivedPrompt, options in
+                XCTAssertEqual(model, "gpt-5.4-mini")
+                XCTAssertEqual(instructions, memoryStageOneSystemPrompt)
+                XCTAssertEqual(receivedPrompt, prompt)
+                XCTAssertEqual(options.reasoning, ResponsesAPIReasoning(effort: .low, summary: .concise))
+                XCTAssertEqual(options.serviceTier, "priority")
+                XCTAssertEqual(options.turnMetadataHeader, "{}")
+                return .success([
+                    .success(.outputTextDelta("streamed")),
+                    .success(.completed(responseID: "resp_1", tokenUsage: TokenUsage(totalTokens: 9)))
+                ])
+            }
+        )
+
+        XCTAssertEqual(output, "streamed")
+        XCTAssertEqual(usage, TokenUsage(totalTokens: 9))
+    }
+
     func testLoadMemoryStageOneRolloutItemsReadsRecorderHistoryForSampling() throws {
         let temp = try temporaryDirectory()
         let recorder = try RolloutRecorder.create(
@@ -831,7 +941,10 @@ private actor PromptRecorder {
 private func minimalModelInfo(
     contextWindow: Int64? = 10_000,
     maxContextWindow: Int64? = nil,
-    effectiveContextWindowPercent: Int64 = 95
+    effectiveContextWindowPercent: Int64 = 95,
+    defaultReasoningSummary: ReasoningSummary = .auto,
+    defaultVerbosity: Verbosity? = nil,
+    inputModalities: [InputModality] = InputModality.defaultInputModalities
 ) -> ModelInfo {
     ModelInfo(
         slug: "gpt-5.4-mini",
@@ -842,13 +955,16 @@ private func minimalModelInfo(
         supportedInAPI: true,
         priority: 0,
         supportsReasoningSummaries: false,
+        defaultReasoningSummary: defaultReasoningSummary,
         supportVerbosity: false,
+        defaultVerbosity: defaultVerbosity,
         truncationPolicy: .tokens(10_000),
         supportsParallelToolCalls: true,
         contextWindow: contextWindow,
         maxContextWindow: maxContextWindow,
         effectiveContextWindowPercent: effectiveContextWindowPercent,
-        experimentalSupportedTools: []
+        experimentalSupportedTools: [],
+        inputModalities: inputModalities
     )
 }
 

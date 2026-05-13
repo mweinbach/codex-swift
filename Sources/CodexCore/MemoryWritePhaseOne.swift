@@ -49,6 +49,38 @@ public struct MemoryStageOneOutput: Equatable, Decodable, Sendable {
     }
 }
 
+public struct MemoryStageOneRequestContext: Equatable, Sendable {
+    public var modelInfo: ModelInfo
+    public var reasoningEffort: ReasoningEffort?
+    public var reasoningSummary: ReasoningSummary
+    public var serviceTier: String?
+    public var turnMetadataHeader: String?
+
+    public init(
+        modelInfo: ModelInfo,
+        reasoningEffort: ReasoningEffort? = memoryStageOneReasoningEffort,
+        reasoningSummary: ReasoningSummary,
+        serviceTier: String? = nil,
+        turnMetadataHeader: String? = nil
+    ) {
+        self.modelInfo = modelInfo
+        self.reasoningEffort = reasoningEffort
+        self.reasoningSummary = reasoningSummary
+        self.serviceTier = serviceTier
+        self.turnMetadataHeader = turnMetadataHeader
+    }
+}
+
+public struct MemoryStageOneStreamResult: Equatable, Sendable {
+    public var output: String
+    public var tokenUsage: TokenUsage?
+
+    public init(output: String, tokenUsage: TokenUsage?) {
+        self.output = output
+        self.tokenUsage = tokenUsage
+    }
+}
+
 private struct MemoryStageOneOutputDynamicCodingKey: CodingKey {
     let stringValue: String
     let intValue: Int?
@@ -222,6 +254,88 @@ public func buildMemoryStageOnePrompt(
         baseInstructionsOverride: memoryStageOneSystemPrompt,
         outputSchema: memoryStageOneOutputSchema()
     )
+}
+
+public func memoryStageOneInstructions(
+    prompt: Prompt,
+    context: MemoryStageOneRequestContext
+) -> String {
+    prompt.baseInstructionsOverride ?? context.modelInfo.modelInstructions(personality: nil)
+}
+
+public func memoryStageOneResponsesOptions(
+    context: MemoryStageOneRequestContext,
+    prompt: Prompt,
+    verbosity: Verbosity? = nil
+) -> ResponsesOptions {
+    ResponsesOptions(
+        reasoning: ResponsesAPIReasoning(
+            effort: context.reasoningEffort,
+            summary: context.reasoningSummary
+        ),
+        serviceTier: context.serviceTier,
+        text: ResponsesAPITextControls.createForRequest(
+            verbosity: verbosity ?? context.modelInfo.defaultVerbosity,
+            outputSchema: prompt.outputSchema
+        ),
+        inputModalities: context.modelInfo.inputModalities,
+        turnMetadataHeader: context.turnMetadataHeader
+    )
+}
+
+public func collectMemoryStageOneStreamResult(
+    _ results: ResponseEventResults
+) throws -> MemoryStageOneStreamResult {
+    var output = ""
+    var tokenUsage: TokenUsage?
+
+    for result in results {
+        let event = try result.get()
+        switch event {
+        case let .outputTextDelta(delta):
+            output.append(delta)
+        case let .outputItemDone(item):
+            guard output.isEmpty,
+                  case let .message(_, _, content, _) = item,
+                  let text = Compact.contentItemsToText(content)
+            else {
+                continue
+            }
+            output.append(text)
+        case let .completed(_, usage, _):
+            tokenUsage = usage
+            return MemoryStageOneStreamResult(output: output, tokenUsage: tokenUsage)
+        default:
+            continue
+        }
+    }
+
+    return MemoryStageOneStreamResult(output: output, tokenUsage: tokenUsage)
+}
+
+public typealias MemoryStageOnePromptStreamer = @Sendable (
+    _ model: String,
+    _ instructions: String,
+    _ prompt: Prompt,
+    _ options: ResponsesOptions
+) async -> Result<ResponseEventResults, APIError>
+
+public func streamMemoryStageOnePrompt(
+    prompt: Prompt,
+    context: MemoryStageOneRequestContext,
+    verbosity: Verbosity? = nil,
+    streamPrompt: MemoryStageOnePromptStreamer
+) async throws -> (String, TokenUsage?) {
+    let result = await streamPrompt(
+        context.modelInfo.slug,
+        memoryStageOneInstructions(prompt: prompt, context: context),
+        prompt,
+        memoryStageOneResponsesOptions(context: context, prompt: prompt, verbosity: verbosity)
+    )
+
+    let events = try result.get()
+    let streamResult = try collectMemoryStageOneStreamResult(events)
+    return (streamResult.output, streamResult.tokenUsage)
 }
 
 public func sampleMemoryPhaseOneOutput(
