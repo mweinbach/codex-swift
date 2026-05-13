@@ -3111,6 +3111,118 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(metadata, ["fiber_run_id": "fiber-live-123"])
     }
 
+    func testTurnStartStartsMemoryStartupTaskAfterRuntimeSubmitWithInputLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let capture = AppServerCoreOpCapture()
+        let memoryStartup = AppServerMemoryStartupCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                memoryStartupTaskStarter: memoryStartup.start
+            ),
+            coreOpSubmitter: capture.submit,
+            experimentalAPIEnabled: true
+        )
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Remember this"}]}}"#.utf8
+        )))
+
+        XCTAssertNotNil(messages[0]["result"])
+        XCTAssertEqual(capture.submissions.count, 1)
+        XCTAssertEqual(memoryStartup.requests, [
+            AppServerMemoryStartupTaskRequest(threadID: threadID, sessionSource: .mcp, isEphemeral: false)
+        ])
+    }
+
+    func testTurnStartDoesNotStartMemoryStartupTaskForEmptyRuntimeInputLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let capture = AppServerCoreOpCapture()
+        let memoryStartup = AppServerMemoryStartupCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                memoryStartupTaskStarter: memoryStartup.start
+            ),
+            coreOpSubmitter: capture.submit,
+            experimentalAPIEnabled: true
+        )
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[]}}"#.utf8
+        )))
+
+        XCTAssertNotNil(messages[0]["result"])
+        XCTAssertEqual(capture.submissions.count, 1)
+        XCTAssertTrue(memoryStartup.requests.isEmpty)
+    }
+
+    func testTurnStartDoesNotStartMemoryStartupTaskWhenRuntimeSubmitFailsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let memoryStartup = AppServerMemoryStartupCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                memoryStartupTaskStarter: memoryStartup.start
+            ),
+            coreOpSubmitter: { _, _, _ in
+                throw AppServerCoreOpCaptureError(message: "channel closed")
+            },
+            experimentalAPIEnabled: true
+        )
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let response = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Remember this"}]}}"#.utf8
+        )))
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32603)
+        XCTAssertEqual(error["message"] as? String, "failed to start turn: channel closed")
+        XCTAssertTrue(memoryStartup.requests.isEmpty)
+    }
+
+    func testTurnStartStartsMemoryStartupTaskAfterRolloutPersistenceWithInputLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let memoryStartup = AppServerMemoryStartupCapture()
+        let processor = try initializedProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            memoryStartupTaskStarter: memoryStartup.start
+        ))
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Remember this"}]}}"#.utf8
+        )))
+
+        XCTAssertNotNil(messages[0]["result"])
+        XCTAssertEqual(memoryStartup.requests, [
+            AppServerMemoryStartupTaskRequest(threadID: threadID, sessionSource: .mcp, isEphemeral: false)
+        ])
+    }
+
     func testTurnStartRuntimeSubmitterPreservesContextOverridesLikeRust() throws {
         let temp = try TemporaryDirectory()
         let capture = AppServerCoreOpCapture()
@@ -27616,7 +27728,8 @@ final class CodexAppServerTests: XCTestCase {
         configWarnings: [CodexAppServerConfiguration.ConfigWarning] = [],
         remoteControlStatusSnapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot? = nil,
         pluginStartupTasksEnabled: Bool = false,
-        curatedPluginStartupSyncEnabled: Bool = false
+        curatedPluginStartupSyncEnabled: Bool = false,
+        memoryStartupTaskStarter: AppServerMemoryStartupTaskStarter? = nil
     ) -> CodexAppServerConfiguration {
         var mergedEnvironment = [
             CodexConfigLayerLoader.managedConfigEnvironmentVariable: codexHome
@@ -27648,7 +27761,8 @@ final class CodexAppServerTests: XCTestCase {
             configWarnings: configWarnings,
             remoteControlStatusSnapshot: remoteControlStatusSnapshot,
             pluginStartupTasksEnabled: pluginStartupTasksEnabled,
-            curatedPluginStartupSyncEnabled: curatedPluginStartupSyncEnabled
+            curatedPluginStartupSyncEnabled: curatedPluginStartupSyncEnabled,
+            memoryStartupTaskStarter: memoryStartupTaskStarter
         )
     }
 
@@ -29322,6 +29436,23 @@ private final class AppServerCoreOpCapture: @unchecked Sendable {
             return "turn-\(value)"
         case let .string(value):
             return "turn-\(value)"
+        }
+    }
+}
+
+private final class AppServerMemoryStartupCapture: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedRequests: [AppServerMemoryStartupTaskRequest] = []
+
+    var requests: [AppServerMemoryStartupTaskRequest] {
+        lock.withLock {
+            recordedRequests
+        }
+    }
+
+    func start(_ request: AppServerMemoryStartupTaskRequest) {
+        lock.withLock {
+            recordedRequests.append(request)
         }
     }
 }

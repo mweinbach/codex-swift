@@ -14,6 +14,7 @@ public typealias AppServerCoreOpSubmitter = @Sendable (
     _ threadID: String,
     _ op: Op
 ) throws -> String
+public typealias AppServerMemoryStartupTaskStarter = @Sendable (_ request: AppServerMemoryStartupTaskRequest) -> Void
 public typealias AppServerAccessibleConnectorProvider = @Sendable (
     _ runtimeConfig: CodexRuntimeConfig,
     _ usesChatGPTBackend: Bool
@@ -72,6 +73,18 @@ public struct AppServerMcpOAuthLoginStarted: Sendable {
 
     public init(authorizationURL: String) {
         self.authorizationURL = authorizationURL
+    }
+}
+
+public struct AppServerMemoryStartupTaskRequest: Equatable, Sendable {
+    public let threadID: String
+    public let sessionSource: SessionSource
+    public let isEphemeral: Bool
+
+    public init(threadID: String, sessionSource: SessionSource, isEphemeral: Bool) {
+        self.threadID = threadID
+        self.sessionSource = sessionSource
+        self.isEphemeral = isEphemeral
     }
 }
 
@@ -199,6 +212,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let remoteControlStatusBroadcaster: AppServerRemoteControlStatusBroadcaster?
     public let pluginStartupTasksEnabled: Bool
     public let curatedPluginStartupSyncEnabled: Bool
+    public let memoryStartupTaskStarter: AppServerMemoryStartupTaskStarter?
 
     public init(
         codexHome: URL,
@@ -231,7 +245,8 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         remoteControlStatusSnapshot: RemoteControlStatusSnapshot? = nil,
         remoteControlStatusBroadcaster: AppServerRemoteControlStatusBroadcaster? = nil,
         pluginStartupTasksEnabled: Bool = true,
-        curatedPluginStartupSyncEnabled: Bool = true
+        curatedPluginStartupSyncEnabled: Bool = true,
+        memoryStartupTaskStarter: AppServerMemoryStartupTaskStarter? = nil
     ) {
         self.codexHome = codexHome
         self.cwd = cwd
@@ -271,6 +286,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
             ?? remoteControlStatusSnapshot.map(AppServerRemoteControlStatusBroadcaster.init(snapshot:))
         self.pluginStartupTasksEnabled = pluginStartupTasksEnabled
         self.curatedPluginStartupSyncEnabled = curatedPluginStartupSyncEnabled
+        self.memoryStartupTaskStarter = memoryStartupTaskStarter
     }
 
     public static func == (lhs: CodexAppServerConfiguration, rhs: CodexAppServerConfiguration) -> Bool {
@@ -2328,7 +2344,8 @@ public enum CodexAppServer {
     ) throws -> (
         result: [String: Any],
         hookStartedEvents: [HookStartedEvent],
-        hookCompletedEvents: [HookCompletedEvent]
+        hookCompletedEvents: [HookCompletedEvent],
+        hasInput: Bool
     ) {
         let input = v2UserInputs(params?["input"])
         try validateV2UserInputLimit(input)
@@ -2470,7 +2487,8 @@ public enum CodexAppServer {
         return (
             result: ["turn": inProgressTurnObject(id: turnID)],
             hookStartedEvents: hookStartedEvents,
-            hookCompletedEvents: hookCompletedEvents
+            hookCompletedEvents: hookCompletedEvents,
+            hasInput: !input.text.isEmpty || !(input.images?.isEmpty ?? true)
         )
     }
 
@@ -2939,7 +2957,7 @@ public enum CodexAppServer {
     fileprivate static func turnStartCoreOp(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
-    ) throws -> (threadID: String, op: Op) {
+    ) throws -> (threadID: String, op: Op, hasInput: Bool) {
         let input = v2UserInput(params?["input"])
         try validateV2UserInputLimit((text: input.text, images: input.images))
         _ = try approvalsReviewerParam(params?["approvalsReviewer"])
@@ -3034,7 +3052,7 @@ public enum CodexAppServer {
                 responsesAPIClientMetadata: metadata
             )
         }
-        return (threadID, op)
+        return (threadID, op, !input.items.isEmpty)
     }
 
     private static func validatedTurnSteer(
@@ -25889,6 +25907,17 @@ final class CodexAppServerMessageProcessor {
         }
     }
 
+    private func maybeStartMemoryStartupTask(threadID: String, hasInput: Bool) {
+        guard hasInput, let memoryStartupTaskStarter = configuration.memoryStartupTaskStarter else {
+            return
+        }
+        memoryStartupTaskStarter(AppServerMemoryStartupTaskRequest(
+            threadID: threadID,
+            sessionSource: configuration.sessionSource,
+            isEphemeral: ephemeralThreadIDs.contains(threadID)
+        ))
+    }
+
     func processLine(_ data: Data) -> Data? {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
@@ -26139,6 +26168,7 @@ final class CodexAppServerMessageProcessor {
                         if activeTurnIDs[coreOp.threadID] == nil {
                             activeTurnIDs[coreOp.threadID] = turnID
                         }
+                        maybeStartMemoryStartupTask(threadID: coreOp.threadID, hasInput: coreOp.hasInput)
                         let turn = CodexAppServer.inProgressTurnObject(id: turnID)
                         response = CodexAppServer.responseObject(id: id, result: ["turn": turn])
                         break
@@ -26162,6 +26192,7 @@ final class CodexAppServerMessageProcessor {
                         if let turnID = turn["id"] as? String {
                             activeTurnIDs[threadID] = turnID
                         }
+                        maybeStartMemoryStartupTask(threadID: threadID, hasInput: outcome.hasInput)
                         trackResolvedTurnForAnalytics(threadID: threadID, turn: turn)
                         notifications.append(contentsOf: outcome.hookStartedEvents.map {
                             CodexAppServer.hookStartedNotification(threadID: threadID, event: $0)
