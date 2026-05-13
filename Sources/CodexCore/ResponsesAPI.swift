@@ -150,6 +150,36 @@ public struct ResponsesAPIRequest: Equatable, Codable, Sendable {
     }
 }
 
+public struct ResponseProcessedWebSocketRequest: Equatable, Codable, Sendable {
+    public var responseID: String
+
+    private enum CodingKeys: String, CodingKey {
+        case responseID = "response_id"
+    }
+
+    public init(responseID: String) {
+        self.responseID = responseID
+    }
+}
+
+public enum ResponsesWebSocketRequest: Equatable, Encodable, Sendable {
+    case responseProcessed(ResponseProcessedWebSocketRequest)
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case responseID = "response_id"
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .responseProcessed(request):
+            try container.encode("response.processed", forKey: .type)
+            try container.encode(request.responseID, forKey: .responseID)
+        }
+    }
+}
+
 public struct ResponsesRequest: Equatable, Sendable {
     public var body: JSONValue
     public var headers: [String: String]

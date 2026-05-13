@@ -89,6 +89,17 @@ final class ResponsesAPITests: XCTestCase {
         XCTAssertEqual(metadata[CodexRequestHeaders.turnMetadataHeaderName], #"{"turn_id":"turn-123"}"#)
     }
 
+    func testResponseProcessedWebSocketRequestMatchesRustWireShape() throws {
+        let request = ResponsesWebSocketRequest.responseProcessed(
+            ResponseProcessedWebSocketRequest(responseID: "resp-compact")
+        )
+
+        try XCTAssertJSONObjectEqual(request, [
+            "type": "response.processed",
+            "response_id": "resp-compact",
+        ])
+    }
+
     func testBuilderCanFilterUnsupportedServiceTierWithModelInfo() throws {
         let provider = apiProvider(name: "openai", baseURL: "https://api.openai.com/v1")
         let modelInfo = ModelInfo(
