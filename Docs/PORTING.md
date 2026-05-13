@@ -82,7 +82,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/codex-api/src/requests/chat.rs`
   - Chat Completions request body/header assembly, response-item to chat-message conversion, image/tool output mapping, assistant reasoning attachment, and duplicate assistant text suppression
 - Pure compaction endpoint helpers from `codex-rs/codex-api/src/common.rs` and `codex-rs/codex-api/src/endpoint/compact.rs`
-  - compact wire API value, compaction input body shape, `responses/compact` path selection, chat-wire rejection message, and compact-history response decoding
+  - compact wire API value, compaction input body shape, `responses/compact` path selection, chat-wire rejection message, compact-history response decoding, and classic remote-compaction request settings that omit `service_tier` under API-key auth while preserving it for ChatGPT or unknown auth modes
 - `codex-rs/codex-api/src/provider.rs` plus `codex-rs/codex-client/src/request.rs` and `retry.rs`
   - provider URL/path rendering, low-level API request envelope construction, JSON body attachment, and retry-policy conversion shape
 - Pure retry/error helpers from `codex-rs/codex-client/src/error.rs` and `retry.rs`

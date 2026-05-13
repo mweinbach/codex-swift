@@ -94,6 +94,73 @@ final class CompactAPITests: XCTestCase {
         ]))
     }
 
+    func testRemoteCompactionSettingsOmitServiceTierForAPIKeyAuthLikeRust() throws {
+        let input = CompactionInput(
+            model: "gpt-test",
+            input: [],
+            instructions: "compact",
+            settings: CompactConversationRequestSettings(
+                effort: .low,
+                summary: .concise,
+                configuredServiceTier: "priority",
+                authMode: .apiKey
+            )
+        )
+
+        let body = try CompactAPI.body(for: input)
+
+        XCTAssertEqual(body, .object([
+            "model": .string("gpt-test"),
+            "input": .array([]),
+            "instructions": .string("compact"),
+            "tools": .array([]),
+            "parallel_tool_calls": .bool(false),
+            "reasoning": .object([
+                "effort": .string("low"),
+                "summary": .string("concise")
+            ])
+        ]))
+    }
+
+    func testRemoteCompactionSettingsKeepServiceTierForChatGPTAuthLikeRust() throws {
+        let input = CompactionInput(
+            model: "gpt-test",
+            input: [],
+            instructions: "compact",
+            settings: CompactConversationRequestSettings(
+                effort: .medium,
+                summary: .detailed,
+                configuredServiceTier: "priority",
+                authMode: .chatGPTAuthTokens
+            )
+        )
+
+        let body = try CompactAPI.body(for: input)
+
+        XCTAssertEqual(body, .object([
+            "model": .string("gpt-test"),
+            "input": .array([]),
+            "instructions": .string("compact"),
+            "tools": .array([]),
+            "parallel_tool_calls": .bool(false),
+            "reasoning": .object([
+                "effort": .string("medium"),
+                "summary": .string("detailed")
+            ]),
+            "service_tier": .string("priority")
+        ]))
+    }
+
+    func testRemoteCompactionSettingsKeepServiceTierWhenAuthModeIsUnknownLikeRust() throws {
+        let settings = CompactConversationRequestSettings(
+            configuredServiceTier: "priority",
+            authMode: nil
+        )
+
+        XCTAssertEqual(settings.serviceTier, "priority")
+        XCTAssertNil(settings.reasoning)
+    }
+
     func testCompactHistoryResponseDecodesOutputItems() throws {
         let data = Data(#"""
         {

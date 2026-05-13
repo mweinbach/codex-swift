@@ -1,5 +1,39 @@
 import Foundation
 
+public struct CompactConversationRequestSettings: Equatable, Sendable {
+    public var effort: ReasoningEffort?
+    public var summary: ReasoningSummary?
+    public var serviceTier: String?
+
+    public init(
+        effort: ReasoningEffort? = nil,
+        summary: ReasoningSummary? = nil,
+        serviceTier: String? = nil
+    ) {
+        self.effort = effort
+        self.summary = summary
+        self.serviceTier = serviceTier
+    }
+
+    public init(
+        effort: ReasoningEffort? = nil,
+        summary: ReasoningSummary? = nil,
+        configuredServiceTier: String?,
+        authMode: AuthMode?
+    ) {
+        self.effort = effort
+        self.summary = summary
+        self.serviceTier = authMode == .apiKey ? nil : configuredServiceTier
+    }
+
+    public var reasoning: ResponsesAPIReasoning? {
+        guard effort != nil || summary != nil else {
+            return nil
+        }
+        return ResponsesAPIReasoning(effort: effort, summary: summary)
+    }
+}
+
 public struct CompactionInput: Equatable, Codable, Sendable {
     public var model: String
     public var input: [ResponseItem]
@@ -43,6 +77,29 @@ public struct CompactionInput: Equatable, Codable, Sendable {
         self.serviceTier = serviceTier
         self.promptCacheKey = promptCacheKey
         self.text = text
+    }
+
+    public init(
+        model: String,
+        input: [ResponseItem],
+        instructions: String,
+        settings: CompactConversationRequestSettings,
+        tools: [JSONValue] = [],
+        parallelToolCalls: Bool = false,
+        promptCacheKey: String? = nil,
+        text: ResponsesAPITextControls? = nil
+    ) {
+        self.init(
+            model: model,
+            input: input,
+            instructions: instructions,
+            tools: tools,
+            parallelToolCalls: parallelToolCalls,
+            reasoning: settings.reasoning,
+            serviceTier: settings.serviceTier,
+            promptCacheKey: promptCacheKey,
+            text: text
+        )
     }
 
     public init(from decoder: Decoder) throws {
