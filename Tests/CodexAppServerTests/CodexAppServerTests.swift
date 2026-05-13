@@ -941,6 +941,43 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual((activePermissionProfile["modifications"] as? [[String: Any]])?.count, 0)
     }
 
+    func testThreadLifecycleResponsesIncludeLoadedInstructionSourcesLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let workspace = try TemporaryDirectory()
+        retainedTemporaryDirectories.append(workspace)
+        let globalAgents = temp.url.appendingPathComponent("AGENTS.md", isDirectory: false)
+        let projectAgents = workspace.url.appendingPathComponent("AGENTS.md", isDirectory: false)
+        try "global instructions".write(to: globalAgents, atomically: true, encoding: .utf8)
+        try "project instructions".write(to: projectAgents, atomically: true, encoding: .utf8)
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider","cwd":"\#(workspace.url.path)"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        XCTAssertEqual(
+            startResult["instructionSources"] as? [String],
+            [
+                globalAgents.standardizedFileURL.resolvingSymlinksInPath().path,
+                projectAgents.standardizedFileURL.resolvingSymlinksInPath().path
+            ]
+        )
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let resumeMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"thread/resume","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        let resumeResult = try XCTUnwrap(resumeMessages[0]["result"] as? [String: Any])
+        XCTAssertEqual(resumeResult["instructionSources"] as? [String], startResult["instructionSources"] as? [String])
+
+        let forkMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":3,"method":"thread/fork","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        let forkResult = try XCTUnwrap(forkMessages[0]["result"] as? [String: Any])
+        XCTAssertEqual(forkResult["instructionSources"] as? [String], startResult["instructionSources"] as? [String])
+    }
+
     func testThreadStartUsesSessionThreadConfigModelProviderLikeRust() throws {
         let temp = try TemporaryDirectory()
         let requestProvider = ModelProviderInfo(

@@ -1130,7 +1130,7 @@ public enum CodexAppServer {
             "modelProvider": started.modelProvider,
             "serviceTier": nullable(started.serviceTier),
             "cwd": started.cwd.path,
-            "instructionSources": [],
+            "instructionSources": started.instructionSources,
             "approvalPolicy": started.approvalPolicy.rawValue,
             "approvalsReviewer": started.approvalsReviewer.appServerRawValue,
             "sandbox": try jsonObject(started.sandbox),
@@ -1184,6 +1184,11 @@ public enum CodexAppServer {
             serviceTierParam(params?["serviceTier"]),
             fallback: runtimeConfig.serviceTier
         )
+        let instructionSources = instructionSourcePaths(
+            codexHome: configuration.codexHome,
+            runtimeConfig: runtimeConfig,
+            cwd: cwd
+        )
         let baseSandbox = sandboxModeParam(params?["sandbox"])
             .map(sandboxPolicy(for:))
             ?? runtimeConfig.legacySandboxPolicy()
@@ -1227,6 +1232,7 @@ public enum CodexAppServer {
                 activePermissionProfile: runtimeConfig.activePermissionProfile,
                 reasoningEffort: runtimeConfig.modelReasoningEffort?.rawValue,
                 sessionStartSource: sessionStartSource,
+                instructionSources: instructionSources,
                 ephemeral: true
             )
         }
@@ -1264,8 +1270,40 @@ public enum CodexAppServer {
             activePermissionProfile: runtimeConfig.activePermissionProfile,
             reasoningEffort: runtimeConfig.modelReasoningEffort?.rawValue,
             sessionStartSource: sessionStartSource,
+            instructionSources: instructionSources,
             ephemeral: false
         )
+    }
+
+    private static func instructionSourcePaths(
+        codexHome: URL,
+        runtimeConfig: CodexRuntimeConfig,
+        cwd: URL
+    ) -> [String] {
+        var paths: [String] = []
+        if let globalPath = globalInstructionSourcePath(codexHome: codexHome) {
+            paths.append(globalPath.path)
+        }
+        let projectConfig = ProjectDocConfig(runtimeConfig: runtimeConfig, cwd: cwd)
+        if let projectPaths = try? ProjectDoc.discoverProjectDocPaths(config: projectConfig) {
+            paths.append(contentsOf: projectPaths.map(\.path))
+        }
+        return paths
+    }
+
+    private static func globalInstructionSourcePath(codexHome: URL) -> URL? {
+        let fileManager = FileManager.default
+        for filename in [ProjectDoc.localOverrideFilename, ProjectDoc.defaultFilename] {
+            let path = codexHome.appendingPathComponent(filename, isDirectory: false)
+            guard let data = try? Data(contentsOf: path),
+                  !String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  (try? fileManager.attributesOfItem(atPath: path.path)[.type] as? FileAttributeType) == .typeRegular
+            else {
+                continue
+            }
+            return path.standardizedFileURL.resolvingSymlinksInPath()
+        }
+        return nil
     }
 
     private struct DynamicToolsPayload: Decodable {
@@ -1759,7 +1797,11 @@ public enum CodexAppServer {
             "modelProvider": modelProvider,
             "serviceTier": nullable(serviceTier),
             "cwd": resumeCwd.path,
-            "instructionSources": [],
+            "instructionSources": instructionSourcePaths(
+                codexHome: configuration.codexHome,
+                runtimeConfig: runtimeConfig,
+                cwd: resumeCwd
+            ),
             "approvalPolicy": approvalPolicy.rawValue,
             "approvalsReviewer": approvalsReviewer.appServerRawValue,
             "sandbox": try jsonObject(sandbox),
@@ -1913,7 +1955,11 @@ public enum CodexAppServer {
             "modelProvider": modelProvider,
             "serviceTier": nullable(serviceTier),
             "cwd": cwd.path,
-            "instructionSources": [],
+            "instructionSources": instructionSourcePaths(
+                codexHome: configuration.codexHome,
+                runtimeConfig: runtimeConfig,
+                cwd: cwd
+            ),
             "approvalPolicy": approvalPolicy.rawValue,
             "approvalsReviewer": approvalsReviewer.appServerRawValue,
             "sandbox": try jsonObject(sandbox),
@@ -22879,6 +22925,7 @@ private struct AppServerStartedConversation {
     let activePermissionProfile: ActivePermissionProfile?
     let reasoningEffort: String?
     let sessionStartSource: HookSessionStartSource
+    let instructionSources: [String]
     let ephemeral: Bool
 }
 
