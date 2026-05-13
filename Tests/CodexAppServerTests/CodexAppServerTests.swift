@@ -3061,6 +3061,41 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(steerItems, [.text("Steer active")])
     }
 
+    func testRuntimeCompletionClearsActiveTurnForSteerLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let capture = AppServerCoreOpCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            coreOpSubmitter: capture.submit,
+            experimentalAPIEnabled: true
+        )
+        let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let turnMessages = try decodeMessages(processor.processLine(Data(#"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Start"}]}}"#.utf8)))
+        let turnResult = try XCTUnwrap(turnMessages[0]["result"] as? [String: Any])
+        let turn = try XCTUnwrap(turnResult["turn"] as? [String: Any])
+        let turnID = try XCTUnwrap(turn["id"] as? String)
+
+        await processor.handleRuntimeEvent(
+            threadID: threadID,
+            turnID: "fallback-turn",
+            event: .taskComplete(TaskCompleteEvent(
+                turnID: turnID,
+                lastAgentMessage: nil
+            ))
+        )
+
+        let response = try decode(processor.processLine(Data(#"{"id":3,"method":"turn/steer","params":{"threadId":"\#(threadID)","expectedTurnId":"\#(turnID)","input":[{"type":"text","text":"after complete"}]}}"#.utf8)))
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "no active turn to steer")
+        XCTAssertEqual(capture.submissions.map(\.requestID), [.integer(2)])
+    }
+
     func testTurnStartSubmitsCoreUserInputWhenRuntimeSubmitterIsAvailable() throws {
         let temp = try TemporaryDirectory()
         let capture = AppServerCoreOpCapture()
