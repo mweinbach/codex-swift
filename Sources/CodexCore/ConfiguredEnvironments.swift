@@ -478,7 +478,8 @@ private extension ConfiguredEnvironmentLoader {
         }
         guard let components = URLComponents(string: url),
               (components.scheme == "ws" || components.scheme == "wss"),
-              components.host?.isEmpty == false
+              components.host?.isEmpty == false,
+              components.port.map({ (0...65_535).contains($0) }) ?? true
         else {
             throw ConfiguredEnvironmentLoadError.protocolError("environment url `\(url)` is invalid")
         }
