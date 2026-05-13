@@ -1209,6 +1209,37 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertEqual(params.justification, "inspect repo")
     }
 
+    func testExecCommandToolCallParamsDecodeApprovalHintsLikeRust() throws {
+        let json = #"""
+        {
+            "cmd": "git push origin main",
+            "workdir": "/repo",
+            "login": false,
+            "yield_time_ms": 750,
+            "max_output_tokens": 1200,
+            "sandbox_permissions": "require_escalated",
+            "prefix_rule": ["git", "push"],
+            "additional_permissions": {
+                "network": {
+                    "enabled": true
+                }
+            },
+            "justification": "publish branch"
+        }
+        """#
+
+        let params = try JSONDecoder().decode(ExecCommandToolCallParams.self, from: Data(json.utf8))
+        XCTAssertEqual(params.cmd, "git push origin main")
+        XCTAssertEqual(params.workdir, "/repo")
+        XCTAssertEqual(params.requestedLogin, false)
+        XCTAssertEqual(params.yieldTimeMS, 750)
+        XCTAssertEqual(params.maxOutputTokens, 1200)
+        XCTAssertEqual(params.sandboxPermissions, .requireEscalated)
+        XCTAssertEqual(params.prefixRule, ["git", "push"])
+        XCTAssertEqual(params.additionalPermissions?.network, RequestPermissionNetworkPermissions(enabled: true))
+        XCTAssertEqual(params.justification, "publish branch")
+    }
+
     func testSandboxPermissionsAdditionalPermissionsWireValueLikeRust() throws {
         let json = #"""
         {

@@ -826,6 +826,7 @@ private func runNonInteractiveExec(
         overrides: loaderOverrides,
         environment: environment
     )
+    let execPolicyManager = try ExecPolicyManager.load(features: settings.features, configStack: configStack)
     let hookHandlers = HookConfig.configuredHandlers(from: configStack, codexHome: codexHome, environment: environment)
     try await CodexAuthStorage.enforceLoginRestrictions(
         codexHome: codexHome,
@@ -1091,7 +1092,8 @@ private func runNonInteractiveExec(
                 explicitEnvOverrides: settings.shellEnvironmentPolicy.set,
                 allowLoginShell: settings.allowLoginShell,
                 canRequestOriginalImageDetail: modelFamily.supportsImageDetailOriginal,
-                backgroundTerminalMaxTimeoutMS: settings.backgroundTerminalMaxTimeoutMS
+                backgroundTerminalMaxTimeoutMS: settings.backgroundTerminalMaxTimeoutMS,
+                execPolicyManager: execPolicyManager
             )
         }
     )

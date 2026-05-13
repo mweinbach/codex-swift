@@ -1300,6 +1300,114 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertTrue(payload.content.contains("Output:\nhello"))
     }
 
+    func testShellCommandPromptRequirementRejectsWithoutApprovalLikeRust() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let item = ResponseItem.functionCall(
+            name: "shell_command",
+            arguments: #"{"command":"touch denied-by-policy.txt","login":false}"#,
+            callID: "call-shell-policy"
+        )
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            item,
+            cwd: temp.url,
+            approvalPolicy: .unlessTrusted,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: ["PATH": "/bin:/usr/bin", "HOME": temp.url.path]
+        )
+
+        guard case let .functionCallOutput(callID, payload) = output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-shell-policy")
+        XCTAssertEqual(payload.success, false)
+        XCTAssertEqual(payload.content, "command requires approval")
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: temp.url.appendingPathComponent("denied-by-policy.txt").path
+        ))
+    }
+
+    func testPermissionRequestHookAllowsPolicyPromptedShellCommandLikeRust() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let hookInputLog = temp.url.appendingPathComponent("permission-hook-input.json")
+        let item = ResponseItem.functionCall(
+            name: "shell_command",
+            arguments: #"{"command":"touch allowed-by-hook.txt","login":false,"justification":"create marker"}"#,
+            callID: "call-shell-policy-hook"
+        )
+
+        let result = await NonInteractiveExec.executeFunctionCallWithHooks(
+            item,
+            handlers: [
+                ConfiguredHookHandler(
+                    eventName: .permissionRequest,
+                    matcher: "Bash",
+                    command: #"cat > '\#(hookInputLog.path)'; printf %s '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}'"#,
+                    timeoutSec: 5,
+                    sourcePath: try AbsolutePath(absolutePath: "/tmp/hooks.json"),
+                    displayOrder: 0
+                )
+            ],
+            conversationID: ConversationId(),
+            turnID: "turn-1",
+            cwd: temp.url,
+            model: "gpt-test",
+            approvalPolicy: .unlessTrusted,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: ["PATH": "/bin:/usr/bin", "HOME": temp.url.path]
+        )
+
+        guard case let .functionCallOutput(callID, payload) = result.output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-shell-policy-hook")
+        XCTAssertEqual(payload.success, true)
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: temp.url.appendingPathComponent("allowed-by-hook.txt").path
+        ))
+
+        let hookInput = try Data(contentsOf: hookInputLog)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: hookInput) as? [String: Any])
+        let toolInput = try XCTUnwrap(object["tool_input"] as? [String: Any])
+        XCTAssertEqual(toolInput["command"] as? String, "touch allowed-by-hook.txt")
+        XCTAssertEqual(toolInput["description"] as? String, "create marker")
+    }
+
+    func testExecPolicyAllowPrefixBypassesReadOnlySandboxLikeRust() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        var policy = ExecPolicy()
+        try policy.addPrefixRule(["touch"], decision: .allow)
+        let item = ResponseItem.functionCall(
+            name: "shell_command",
+            arguments: #"{"command":"touch allow-prefix.txt","login":false}"#,
+            callID: "call-shell-allow-prefix"
+        )
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            item,
+            cwd: temp.url,
+            approvalPolicy: .onRequest,
+            sandboxPolicy: .readOnly,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: ["PATH": "/bin:/usr/bin", "HOME": temp.url.path],
+            execPolicyManager: ExecPolicyManager(policy: policy)
+        )
+
+        guard case let .functionCallOutput(callID, payload) = output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-shell-allow-prefix")
+        XCTAssertEqual(payload.success, true)
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: temp.url.appendingPathComponent("allow-prefix.txt").path
+        ))
+    }
+
     func testViewImageRoutesThroughSelectedEnvironmentLikeRust() async throws {
         let primary = try NonInteractiveExecTemporaryDirectory()
         let selected = try NonInteractiveExecTemporaryDirectory()
@@ -2284,6 +2392,54 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(payload.success, true)
         XCTAssertTrue(payload.content.contains("Process exited with code 0"))
         XCTAssertTrue(payload.content.contains("got:hello"))
+    }
+
+    func testPermissionRequestHookAllowsPolicyPromptedExecCommandLikeRust() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let hookInputLog = temp.url.appendingPathComponent("exec-permission-hook-input.json")
+        let item = ResponseItem.functionCall(
+            name: "exec_command",
+            arguments: #"{"cmd":"touch unified-by-hook.txt","login":false,"justification":"create marker","prefix_rule":["touch"]}"#,
+            callID: "call-exec-policy-hook"
+        )
+
+        let result = await NonInteractiveExec.executeFunctionCallWithHooks(
+            item,
+            handlers: [
+                ConfiguredHookHandler(
+                    eventName: .permissionRequest,
+                    matcher: "Bash",
+                    command: #"cat > '\#(hookInputLog.path)'; printf %s '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}'"#,
+                    timeoutSec: 5,
+                    sourcePath: try AbsolutePath(absolutePath: "/tmp/hooks.json"),
+                    displayOrder: 0
+                )
+            ],
+            conversationID: ConversationId(),
+            turnID: "turn-1",
+            cwd: temp.url,
+            model: "gpt-test",
+            approvalPolicy: .unlessTrusted,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: ["PATH": "/bin:/usr/bin", "HOME": temp.url.path]
+        )
+
+        guard case let .functionCallOutput(callID, payload) = result.output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-exec-policy-hook")
+        XCTAssertEqual(payload.success, true)
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: temp.url.appendingPathComponent("unified-by-hook.txt").path
+        ))
+
+        let hookInput = try Data(contentsOf: hookInputLog)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: hookInput) as? [String: Any])
+        let toolInput = try XCTUnwrap(object["tool_input"] as? [String: Any])
+        XCTAssertEqual(toolInput["command"] as? String, "touch unified-by-hook.txt")
+        XCTAssertEqual(toolInput["description"] as? String, "create marker")
     }
 
     func testHumanOutputReturnsFinalAssistantMessageAndWritesLastMessage() throws {

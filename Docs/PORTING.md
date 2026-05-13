@@ -823,6 +823,7 @@ Source baseline inspected for this scaffold:
   - `ResponseItem` now decodes legacy `ghost_snapshot` payloads as Rust's `Other` variant while rollout loading still recognizes and drops old snapshot records before they pollute reconstructed history.
 - `codex-rs/protocol/src/models.rs` shell tool approval hints
   - `ShellToolCallParams` and `ShellCommandToolCallParams` now decode Rust's `prefix_rule` and `additional_permissions` fields alongside timeout aliases, sandbox permissions, and justifications, preserving model-provided approval hints for later approval/runtime plumbing.
+  - `ExecCommandToolCallParams` now decodes Rust's `prefix_rule` and `additional_permissions` approval hints too. Non-interactive shell-like execution now consults the configured exec-policy manager for `shell`, `shell_command`, `local_shell`, and `exec_command`; trusted `PermissionRequest` hooks can approve policy-prompted commands, denied or unapproved prompt requirements reject before spawning, and allow-prefix rules can bypass the first sandbox attempt like Rust. Full additional-permission sandbox widening remains pending with the broader live runtime sandbox orchestration.
 - `codex-rs/protocol/src/models.rs` tool-search call params
   - Added public `SearchToolCallParams` with Rust's `query` and optional `limit` wire shape, and routed `ToolSearchIndex` argument decoding through it so deferred-tool search uses the shared protocol model.
 - `codex-rs/protocol/src/models.rs` content image detail

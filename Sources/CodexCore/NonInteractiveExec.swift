@@ -699,7 +699,52 @@ public enum NonInteractiveExec {
         agentJobContext: AgentJobToolContext? = nil,
         turnEnvironmentSelections: [TurnEnvironmentSelection]? = nil,
         configuredEnvironmentSnapshot: ConfiguredEnvironmentSnapshot? = nil,
-        remoteEnvironmentFileSystems: [String: ExecServerRemoteFileSystem] = [:]
+        remoteEnvironmentFileSystems: [String: ExecServerRemoteFileSystem] = [:],
+        execPolicyManager: ExecPolicyManager = ExecPolicyManager()
+    ) async -> ResponseItem {
+        await executeFunctionCallWithApproval(
+            item,
+            cwd: cwd,
+            approvalPolicy: approvalPolicy,
+            sandboxPolicy: sandboxPolicy,
+            shell: shell,
+            truncationPolicy: truncationPolicy,
+            environment: environment,
+            shellEnvironmentPolicy: shellEnvironmentPolicy,
+            explicitEnvOverrides: explicitEnvOverrides,
+            allowLoginShell: allowLoginShell,
+            canRequestOriginalImageDetail: canRequestOriginalImageDetail,
+            backgroundTerminalMaxTimeoutMS: backgroundTerminalMaxTimeoutMS,
+            toolSearchIndex: toolSearchIndex,
+            agentJobContext: agentJobContext,
+            turnEnvironmentSelections: turnEnvironmentSelections,
+            configuredEnvironmentSnapshot: configuredEnvironmentSnapshot,
+            remoteEnvironmentFileSystems: remoteEnvironmentFileSystems,
+            execPolicyManager: execPolicyManager,
+            approvalGranted: false
+        )
+    }
+
+    private static func executeFunctionCallWithApproval(
+        _ item: ResponseItem,
+        cwd: URL,
+        approvalPolicy: AskForApproval,
+        sandboxPolicy: SandboxPolicy,
+        shell: Shell,
+        truncationPolicy: TruncationPolicy,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        shellEnvironmentPolicy: ShellEnvironmentPolicy = ShellEnvironmentPolicy(),
+        explicitEnvOverrides: [String: String] = [:],
+        allowLoginShell: Bool = true,
+        canRequestOriginalImageDetail: Bool = false,
+        backgroundTerminalMaxTimeoutMS: UInt64 = CodexConfigDefaults.backgroundTerminalMaxTimeoutMS,
+        toolSearchIndex: ToolSearchIndex? = nil,
+        agentJobContext: AgentJobToolContext? = nil,
+        turnEnvironmentSelections: [TurnEnvironmentSelection]? = nil,
+        configuredEnvironmentSnapshot: ConfiguredEnvironmentSnapshot? = nil,
+        remoteEnvironmentFileSystems: [String: ExecServerRemoteFileSystem] = [:],
+        execPolicyManager: ExecPolicyManager,
+        approvalGranted: Bool
     ) async -> ResponseItem {
         switch item {
         case let .functionCall(_, name, _, arguments, callID):
@@ -721,7 +766,9 @@ public enum NonInteractiveExec {
                 agentJobContext: agentJobContext,
                 turnEnvironmentSelections: turnEnvironmentSelections,
                 configuredEnvironmentSnapshot: configuredEnvironmentSnapshot,
-                remoteEnvironmentFileSystems: remoteEnvironmentFileSystems
+                remoteEnvironmentFileSystems: remoteEnvironmentFileSystems,
+                execPolicyManager: execPolicyManager,
+                approvalGranted: approvalGranted
             )
 
         case let .customToolCall(_, _, callID, name, input):
@@ -750,10 +797,14 @@ public enum NonInteractiveExec {
                 workdir: params.workingDirectory,
                 timeoutMS: params.timeoutMS,
                 sandboxPermissions: .useDefault,
+                prefixRule: nil,
+                additionalPermissions: nil,
                 callID: callID ?? id ?? "local_shell",
                 cwd: cwd,
                 approvalPolicy: approvalPolicy,
                 sandboxPolicy: sandboxPolicy,
+                execPolicyManager: execPolicyManager,
+                approvalGranted: approvalGranted,
                 truncationPolicy: truncationPolicy,
                 environment: environment,
                 shellEnvironmentPolicy: shellEnvironmentPolicy,
@@ -809,7 +860,8 @@ public enum NonInteractiveExec {
         agentJobContext: AgentJobToolContext? = nil,
         turnEnvironmentSelections: [TurnEnvironmentSelection]? = nil,
         configuredEnvironmentSnapshot: ConfiguredEnvironmentSnapshot? = nil,
-        remoteEnvironmentFileSystems: [String: ExecServerRemoteFileSystem] = [:]
+        remoteEnvironmentFileSystems: [String: ExecServerRemoteFileSystem] = [:],
+        execPolicyManager: ExecPolicyManager = ExecPolicyManager()
     ) async -> FunctionCallExecutionResult {
         let hookPayload = toolHookPayload(for: item)
         if let hookPayload {
@@ -829,7 +881,19 @@ public enum NonInteractiveExec {
                     additionalContextItems: additionalItems
                 )
             }
-            if hookPayload.sandboxPermissions.requiresEscalatedPermissions,
+            let approvalContext = shellApprovalHookContext(
+                for: item,
+                approvalPolicy: approvalPolicy,
+                sandboxPolicy: sandboxPolicy,
+                shell: shell,
+                allowLoginShell: allowLoginShell,
+                execPolicyManager: execPolicyManager
+            )
+            var approvalGranted = false
+            if shouldRunPermissionRequestHooks(
+                approvalContext: approvalContext,
+                approvalPolicy: approvalPolicy
+            ),
                let permissionDecision = await runPermissionRequestHooks(
                    handlers: handlers,
                    hookPayload: hookPayload,
@@ -842,7 +906,7 @@ public enum NonInteractiveExec {
             {
                 switch permissionDecision {
                 case .allow:
-                    break
+                    approvalGranted = true
                 case let .deny(message):
                     return FunctionCallExecutionResult(
                         output: deniedPermissionOutput(for: item, hookPayload: hookPayload, message: message),
@@ -851,7 +915,7 @@ public enum NonInteractiveExec {
                 }
             }
 
-            let output = await executeFunctionCall(
+            let output = await executeFunctionCallWithApproval(
                 item,
                 cwd: cwd,
                 approvalPolicy: approvalPolicy,
@@ -868,7 +932,9 @@ public enum NonInteractiveExec {
                 agentJobContext: agentJobContext,
                 turnEnvironmentSelections: turnEnvironmentSelections,
                 configuredEnvironmentSnapshot: configuredEnvironmentSnapshot,
-                remoteEnvironmentFileSystems: remoteEnvironmentFileSystems
+                remoteEnvironmentFileSystems: remoteEnvironmentFileSystems,
+                execPolicyManager: execPolicyManager,
+                approvalGranted: approvalGranted
             )
             guard toolOutputSucceeded(output),
                   let postPayload = postToolHookPayload(for: item, output: output, prePayload: hookPayload)
@@ -892,7 +958,7 @@ public enum NonInteractiveExec {
             )
         }
 
-        let output = await executeFunctionCall(
+        let output = await executeFunctionCallWithApproval(
             item,
             cwd: cwd,
             approvalPolicy: approvalPolicy,
@@ -909,7 +975,9 @@ public enum NonInteractiveExec {
             agentJobContext: agentJobContext,
             turnEnvironmentSelections: turnEnvironmentSelections,
             configuredEnvironmentSnapshot: configuredEnvironmentSnapshot,
-            remoteEnvironmentFileSystems: remoteEnvironmentFileSystems
+            remoteEnvironmentFileSystems: remoteEnvironmentFileSystems,
+            execPolicyManager: execPolicyManager,
+            approvalGranted: false
         )
         return FunctionCallExecutionResult(output: output)
     }
@@ -1076,6 +1144,161 @@ public enum NonInteractiveExec {
         case unifiedExec
     }
 
+    private struct ShellApprovalHookContext: Equatable, Sendable {
+        var requirement: ExecApprovalRequirement
+        var sandboxPermissions: SandboxPermissions
+    }
+
+    private static func shellApprovalRequirement(
+        command: [String],
+        approvalPolicy: AskForApproval,
+        sandboxPolicy: SandboxPolicy,
+        sandboxPermissions: SandboxPermissions,
+        prefixRule: [String]?,
+        execPolicyManager: ExecPolicyManager
+    ) -> ExecApprovalRequirement {
+        execPolicyManager.createExecApprovalRequirementForCommand(
+            features: .withDefaults(),
+            command: command,
+            approvalPolicy: approvalPolicy,
+            sandboxPolicy: sandboxPolicy,
+            sandboxPermissions: sandboxPermissions,
+            prefixRule: prefixRule
+        )
+    }
+
+    private static func shellApprovalRejection(
+        approvalRequirement: ExecApprovalRequirement,
+        sandboxPermissions: SandboxPermissions,
+        approvalPolicy: AskForApproval,
+        approvalGranted: Bool
+    ) -> String? {
+        if sandboxPermissions.requestsSandboxOverride, approvalPolicy != .onRequest {
+            return "approval policy is \(approvalPolicy); reject command — you cannot ask for escalated permissions if the approval policy is \(approvalPolicy)"
+        }
+
+        switch approvalRequirement {
+        case let .forbidden(reason):
+            return reason
+        case let .needsApproval(reason, _) where !approvalGranted:
+            return reason ?? "command requires approval"
+        case .needsApproval, .skip:
+            return nil
+        }
+    }
+
+    private static func shouldBypassSandbox(
+        sandboxPermissions: SandboxPermissions,
+        approvalRequirement: ExecApprovalRequirement
+    ) -> Bool {
+        if sandboxPermissions.requiresEscalatedPermissions {
+            return true
+        }
+        if case let .skip(bypassSandbox, _) = approvalRequirement {
+            return bypassSandbox
+        }
+        return false
+    }
+
+    private static func shouldRunPermissionRequestHooks(
+        approvalContext: ShellApprovalHookContext?,
+        approvalPolicy: AskForApproval
+    ) -> Bool {
+        guard let approvalContext else {
+            return false
+        }
+        if approvalContext.sandboxPermissions.requestsSandboxOverride,
+           approvalPolicy == .onRequest
+        {
+            return true
+        }
+        if case .needsApproval = approvalContext.requirement {
+            return true
+        }
+        return false
+    }
+
+    private static func shellApprovalHookContext(
+        for item: ResponseItem,
+        approvalPolicy: AskForApproval,
+        sandboxPolicy: SandboxPolicy,
+        shell: Shell,
+        allowLoginShell: Bool,
+        execPolicyManager: ExecPolicyManager
+    ) -> ShellApprovalHookContext? {
+        let decoder = JSONDecoder()
+        let command: [String]
+        let sandboxPermissions: SandboxPermissions
+        let prefixRule: [String]?
+
+        switch item {
+        case let .functionCall(_, name, _, arguments, _):
+            switch name {
+            case "exec_command":
+                guard let params = try? decoder.decode(ExecCommandToolCallParams.self, from: Data(arguments.utf8)),
+                      let useLoginShell = try? resolveUseLoginShell(
+                          params.requestedLogin,
+                          allowLoginShell: allowLoginShell
+                      )
+                else {
+                    return nil
+                }
+                let requestedShell = params.shell.map(ShellResolver.getShellByModelProvidedPath) ?? shell
+                command = ShellResolver.prefixPowerShellScriptWithUTF8(
+                    requestedShell.deriveExecArgs(command: params.cmd, useLoginShell: useLoginShell)
+                )
+                sandboxPermissions = params.sandboxPermissions
+                prefixRule = params.prefixRule
+
+            case "shell_command":
+                guard let params = try? decoder.decode(ShellCommandToolCallParams.self, from: Data(arguments.utf8)),
+                      let useLoginShell = try? resolveUseLoginShell(params.login, allowLoginShell: allowLoginShell)
+                else {
+                    return nil
+                }
+                command = ShellResolver.prefixPowerShellScriptWithUTF8(
+                    shell.deriveExecArgs(command: params.command, useLoginShell: useLoginShell)
+                )
+                sandboxPermissions = params.sandboxPermissions ?? .useDefault
+                prefixRule = params.prefixRule
+
+            case "shell", "container.exec":
+                guard let params = try? decoder.decode(ShellToolCallParams.self, from: Data(arguments.utf8)) else {
+                    return nil
+                }
+                command = params.command
+                sandboxPermissions = params.sandboxPermissions ?? .useDefault
+                prefixRule = params.prefixRule
+
+            default:
+                return nil
+            }
+
+        case let .localShellCall(_, _, _, action):
+            guard case let .exec(params) = action else {
+                return nil
+            }
+            command = params.command
+            sandboxPermissions = .useDefault
+            prefixRule = nil
+
+        default:
+            return nil
+        }
+
+        return ShellApprovalHookContext(
+            requirement: shellApprovalRequirement(
+                command: command,
+                approvalPolicy: approvalPolicy,
+                sandboxPolicy: sandboxPolicy,
+                sandboxPermissions: sandboxPermissions,
+                prefixRule: prefixRule,
+                execPolicyManager: execPolicyManager
+            ),
+            sandboxPermissions: sandboxPermissions
+        )
+    }
+
     private static func executeFunctionCall(
         name: String,
         arguments: String,
@@ -1094,7 +1317,9 @@ public enum NonInteractiveExec {
         agentJobContext: AgentJobToolContext?,
         turnEnvironmentSelections: [TurnEnvironmentSelection]?,
         configuredEnvironmentSnapshot: ConfiguredEnvironmentSnapshot?,
-        remoteEnvironmentFileSystems: [String: ExecServerRemoteFileSystem]
+        remoteEnvironmentFileSystems: [String: ExecServerRemoteFileSystem],
+        execPolicyManager: ExecPolicyManager,
+        approvalGranted: Bool
     ) async -> ResponseItem {
         let decoder = JSONDecoder()
         do {
@@ -1113,10 +1338,14 @@ public enum NonInteractiveExec {
                     workdir: params.workdir,
                     timeoutMS: params.yieldTimeMS,
                     sandboxPermissions: params.sandboxPermissions,
+                    prefixRule: params.prefixRule,
+                    additionalPermissions: params.additionalPermissions,
                     callID: callID,
                     cwd: cwd,
                     approvalPolicy: approvalPolicy,
                     sandboxPolicy: sandboxPolicy,
+                    execPolicyManager: execPolicyManager,
+                    approvalGranted: approvalGranted,
                     truncationPolicy: params.maxOutputTokens.map { .tokens($0) } ?? truncationPolicy,
                     environment: environment,
                     shellEnvironmentPolicy: shellEnvironmentPolicy,
@@ -1136,10 +1365,14 @@ public enum NonInteractiveExec {
                     workdir: params.workdir,
                     timeoutMS: params.timeoutMS,
                     sandboxPermissions: params.sandboxPermissions ?? .useDefault,
+                    prefixRule: params.prefixRule,
+                    additionalPermissions: params.additionalPermissions,
                     callID: callID,
                     cwd: cwd,
                     approvalPolicy: approvalPolicy,
                     sandboxPolicy: sandboxPolicy,
+                    execPolicyManager: execPolicyManager,
+                    approvalGranted: approvalGranted,
                     truncationPolicy: truncationPolicy,
                     environment: environment,
                     shellEnvironmentPolicy: shellEnvironmentPolicy,
@@ -1156,10 +1389,14 @@ public enum NonInteractiveExec {
                     workdir: params.workdir,
                     timeoutMS: params.timeoutMS,
                     sandboxPermissions: params.sandboxPermissions ?? .useDefault,
+                    prefixRule: params.prefixRule,
+                    additionalPermissions: params.additionalPermissions,
                     callID: callID,
                     cwd: cwd,
                     approvalPolicy: approvalPolicy,
                     sandboxPolicy: sandboxPolicy,
+                    execPolicyManager: execPolicyManager,
+                    approvalGranted: approvalGranted,
                     truncationPolicy: truncationPolicy,
                     environment: environment,
                     shellEnvironmentPolicy: shellEnvironmentPolicy,
@@ -1439,20 +1676,37 @@ public enum NonInteractiveExec {
         workdir: String?,
         timeoutMS: UInt64?,
         sandboxPermissions: SandboxPermissions,
+        prefixRule: [String]?,
+        additionalPermissions _: RequestPermissionProfile?,
         callID: String,
         cwd: URL,
         approvalPolicy: AskForApproval,
         sandboxPolicy: SandboxPolicy,
+        execPolicyManager: ExecPolicyManager,
+        approvalGranted: Bool,
         truncationPolicy: TruncationPolicy,
         environment: [String: String],
         shellEnvironmentPolicy: ShellEnvironmentPolicy,
         explicitEnvOverrides: [String: String],
         responseFormat: ShellResponseFormat
     ) async -> ResponseItem {
-        if sandboxPermissions.requiresEscalatedPermissions, approvalPolicy != .onRequest {
+        let approvalRequirement = shellApprovalRequirement(
+            command: command,
+            approvalPolicy: approvalPolicy,
+            sandboxPolicy: sandboxPolicy,
+            sandboxPermissions: sandboxPermissions,
+            prefixRule: prefixRule,
+            execPolicyManager: execPolicyManager
+        )
+        if let rejection = shellApprovalRejection(
+            approvalRequirement: approvalRequirement,
+            sandboxPermissions: sandboxPermissions,
+            approvalPolicy: approvalPolicy,
+            approvalGranted: approvalGranted
+        ) {
             return functionOutput(
                 callID: callID,
-                content: "approval policy is \(approvalPolicy); reject command — you cannot ask for escalated permissions if the approval policy is \(approvalPolicy)",
+                content: rejection,
                 success: false
             )
         }
@@ -1514,7 +1768,10 @@ public enum NonInteractiveExec {
             runCommandSync(
                 command: command,
                 cwd: commandCwd,
-                sandboxPolicy: sandboxPermissions.requiresEscalatedPermissions ? .dangerFullAccess : sandboxPolicy,
+                sandboxPolicy: shouldBypassSandbox(
+                    sandboxPermissions: sandboxPermissions,
+                    approvalRequirement: approvalRequirement
+                ) ? .dangerFullAccess : sandboxPolicy,
                 timeoutMS: timeoutMS,
                 environment: childEnvironment
             )
@@ -1533,19 +1790,36 @@ public enum NonInteractiveExec {
         workdir: String?,
         timeoutMS: UInt64?,
         sandboxPermissions: SandboxPermissions,
+        prefixRule: [String]?,
+        additionalPermissions _: RequestPermissionProfile?,
         callID: String,
         cwd: URL,
         approvalPolicy: AskForApproval,
         sandboxPolicy: SandboxPolicy,
+        execPolicyManager: ExecPolicyManager,
+        approvalGranted: Bool,
         truncationPolicy: TruncationPolicy,
         environment: [String: String],
         shellEnvironmentPolicy: ShellEnvironmentPolicy,
         explicitEnvOverrides: [String: String]
     ) async -> ResponseItem {
-        if sandboxPermissions.requiresEscalatedPermissions, approvalPolicy != .onRequest {
+        let approvalRequirement = shellApprovalRequirement(
+            command: command,
+            approvalPolicy: approvalPolicy,
+            sandboxPolicy: sandboxPolicy,
+            sandboxPermissions: sandboxPermissions,
+            prefixRule: prefixRule,
+            execPolicyManager: execPolicyManager
+        )
+        if let rejection = shellApprovalRejection(
+            approvalRequirement: approvalRequirement,
+            sandboxPermissions: sandboxPermissions,
+            approvalPolicy: approvalPolicy,
+            approvalGranted: approvalGranted
+        ) {
             return functionOutput(
                 callID: callID,
-                content: "approval policy is \(approvalPolicy); reject command — you cannot ask for escalated permissions if the approval policy is \(approvalPolicy)",
+                content: rejection,
                 success: false
             )
         }
@@ -1569,7 +1843,10 @@ public enum NonInteractiveExec {
             let output = try await unifiedExecSessions.start(
                 command: command,
                 cwd: commandCwd,
-                sandboxPolicy: sandboxPermissions.requiresEscalatedPermissions ? .dangerFullAccess : sandboxPolicy,
+                sandboxPolicy: shouldBypassSandbox(
+                    sandboxPermissions: sandboxPermissions,
+                    approvalRequirement: approvalRequirement
+                ) ? .dangerFullAccess : sandboxPolicy,
                 yieldTimeMS: UnifiedExecTiming.clampInitialYieldTimeMS(timeoutMS ?? 10_000),
                 truncationPolicy: truncationPolicy,
                 environment: childEnvironment

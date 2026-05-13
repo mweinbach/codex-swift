@@ -820,6 +820,8 @@ public struct ExecCommandToolCallParams: Equatable, Decodable, Sendable {
     public let yieldTimeMS: UInt64
     public let maxOutputTokens: Int?
     public let sandboxPermissions: SandboxPermissions
+    public let prefixRule: [String]?
+    public let additionalPermissions: RequestPermissionProfile?
     public let justification: String?
 
     private enum CodingKeys: String, CodingKey {
@@ -830,6 +832,8 @@ public struct ExecCommandToolCallParams: Equatable, Decodable, Sendable {
         case yieldTimeMS = "yield_time_ms"
         case maxOutputTokens = "max_output_tokens"
         case sandboxPermissions = "sandbox_permissions"
+        case prefixRule = "prefix_rule"
+        case additionalPermissions = "additional_permissions"
         case justification
     }
 
@@ -846,6 +850,11 @@ public struct ExecCommandToolCallParams: Equatable, Decodable, Sendable {
             SandboxPermissions.self,
             forKey: .sandboxPermissions
         ) ?? .useDefault
+        self.prefixRule = try container.decodeIfPresent([String].self, forKey: .prefixRule)
+        self.additionalPermissions = try container.decodeIfPresent(
+            RequestPermissionProfile.self,
+            forKey: .additionalPermissions
+        )
         self.justification = try container.decodeIfPresent(String.self, forKey: .justification)
     }
 }
