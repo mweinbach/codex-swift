@@ -246,6 +246,23 @@ final class CompactTests: XCTestCase {
         )
     }
 
+    func testRemoteV2ResponseProcessedRequestIsFeatureGatedLikeRust() throws {
+        let output = RemoteCompactionV2Output(
+            item: .contextCompaction(encryptedContent: "encrypted"),
+            responseID: "resp-compact"
+        )
+        var features = FeatureStates.withDefaults()
+
+        XCTAssertNil(Compact.remoteV2ResponseProcessedRequest(output: output, features: features))
+
+        features.set(.responsesWebsocketResponseProcessed, enabled: true)
+        let request = try XCTUnwrap(Compact.remoteV2ResponseProcessedRequest(output: output, features: features))
+        XCTAssertEqual(
+            request,
+            .responseProcessed(ResponseProcessedWebSocketRequest(responseID: "resp-compact"))
+        )
+    }
+
     func testCollectRemoteV2ContextCompactionOutputRejectsMissingEncryptedContent() {
         let result = Compact.collectRemoteV2ContextCompactionOutput(from: [
             .success(.outputItemDone(.contextCompaction())),

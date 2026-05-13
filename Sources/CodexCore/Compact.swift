@@ -196,6 +196,16 @@ public enum Compact {
         promptInput.filter(isRetainedForRemoteV2Compaction) + [compactionOutput]
     }
 
+    public static func remoteV2ResponseProcessedRequest(
+        output: RemoteCompactionV2Output,
+        features: FeatureStates
+    ) -> ResponsesWebSocketRequest? {
+        guard features.isEnabled(.responsesWebsocketResponseProcessed) else {
+            return nil
+        }
+        return .responseProcessed(ResponseProcessedWebSocketRequest(responseID: output.responseID))
+    }
+
     private static func shouldKeepUserMessage(_ content: [ContentItem]) -> Bool {
         if UserInstructions.isUserInstructions(message: content)
             || SkillInstructions.isSkillInstructions(message: content)
