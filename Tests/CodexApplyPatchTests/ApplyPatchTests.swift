@@ -139,9 +139,112 @@ final class ApplyPatchTests: XCTestCase {
 
         let result = ApplyPatch.apply(patch, cwd: dir.url)
         XCTAssertEqual(result.stderr, "")
-        XCTAssertEqual(result.stdout, "Success. Updated the following files:\nM renamed/dir/name.txt\n")
+        XCTAssertEqual(result.stdout, "Success. Updated the following files:\nM old/name.txt\n")
+        XCTAssertEqual(
+            result.delta,
+            AppliedPatchDelta(
+                changes: [
+                    AppliedPatchChange(
+                        path: original.path,
+                        change: .update(
+                            movePath: moved.path,
+                            originalContent: "old content\n",
+                            overwrittenMoveContent: nil,
+                            newContent: "new content\n"
+                        )
+                    )
+                ],
+                exact: true
+            )
+        )
         XCTAssertFalse(FileManager.default.fileExists(atPath: original.path))
         XCTAssertEqual(try String(contentsOf: moved), "new content\n")
+    }
+
+    func testApplyPatchFailedMovePreservesCommittedDestinationDelta() throws {
+        let dir = try TemporaryDirectory()
+        let locked = dir.url.appendingPathComponent("locked", isDirectory: true)
+        let output = dir.url.appendingPathComponent("out", isDirectory: true)
+        let original = locked.appendingPathComponent("source.txt")
+        let moved = output.appendingPathComponent("dest.txt")
+        try FileManager.default.createDirectory(at: locked, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        try "line\n".write(to: original, atomically: true, encoding: .utf8)
+        try setPosixPermissions(0o555, at: locked)
+        defer {
+            try? setPosixPermissions(0o755, at: locked)
+        }
+
+        let patch = """
+        *** Begin Patch
+        *** Update File: locked/source.txt
+        *** Move to: out/dest.txt
+        @@
+        -line
+        +line2
+        *** End Patch
+        """
+
+        let result = ApplyPatch.apply(patch, cwd: dir.url)
+        XCTAssertEqual(result.stdout, "")
+        XCTAssertTrue(result.stderr.contains("Failed to remove original \(original.path)"))
+        XCTAssertEqual(
+            result.delta,
+            AppliedPatchDelta(
+                changes: [
+                    AppliedPatchChange(
+                        path: moved.path,
+                        change: .add(content: "line2\n", overwrittenContent: nil)
+                    )
+                ],
+                exact: true
+            )
+        )
+        XCTAssertEqual(try String(contentsOf: original), "line\n")
+        XCTAssertEqual(try String(contentsOf: moved), "line2\n")
+    }
+
+    func testApplyPatchWriteFailureMarksCommittedDeltaInexact() throws {
+        let dir = try TemporaryDirectory()
+        let locked = dir.url.appendingPathComponent("locked", isDirectory: true)
+        try FileManager.default.createDirectory(at: locked, withIntermediateDirectories: true)
+        try setPosixPermissions(0o555, at: locked)
+        defer {
+            try? setPosixPermissions(0o755, at: locked)
+        }
+
+        let patch = """
+        *** Begin Patch
+        *** Add File: locked/new.txt
+        +after
+        *** End Patch
+        """
+
+        let result = ApplyPatch.apply(patch, cwd: dir.url)
+        XCTAssertEqual(result.stdout, "")
+        XCTAssertTrue(result.stderr.contains("Failed to write file"))
+        XCTAssertEqual(result.delta, AppliedPatchDelta(changes: [], exact: false))
+    }
+
+    func testApplyPatchDeleteSymlinkReturnsInexactDeltaLikeRust() throws {
+        let dir = try TemporaryDirectory()
+        let target = dir.url.appendingPathComponent("target.txt")
+        let link = dir.url.appendingPathComponent("link.txt")
+        try "target\n".write(to: target, atomically: true, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+
+        let patch = """
+        *** Begin Patch
+        *** Delete File: link.txt
+        *** End Patch
+        """
+
+        let result = ApplyPatch.apply(patch, cwd: dir.url)
+        XCTAssertEqual(result.stderr, "")
+        XCTAssertEqual(result.stdout, "Success. Updated the following files:\nD link.txt\n")
+        XCTAssertFalse(result.delta.isExact)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: link.path))
+        XCTAssertEqual(try String(contentsOf: target), "target\n")
     }
 
     func testApplyPatchReportsMissingContext() throws {
@@ -167,6 +270,10 @@ final class ApplyPatchTests: XCTestCase {
     func testApplyPatchRejectsEmptyUpdateHunk() {
         let result = ApplyPatch.apply("*** Begin Patch\n*** Update File: foo.txt\n*** End Patch")
         XCTAssertEqual(result.stderr, "Invalid patch hunk on line 2: Update file hunk for path 'foo.txt' is empty\n")
+    }
+
+    private func setPosixPermissions(_ permissions: Int, at url: URL) throws {
+        try FileManager.default.setAttributes([.posixPermissions: permissions], ofItemAtPath: url.path)
     }
 }
 

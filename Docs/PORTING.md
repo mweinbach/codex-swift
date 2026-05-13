@@ -141,7 +141,7 @@ Source baseline inspected for this scaffold:
   - Unicode-aware case-insensitive subsequence matching, original-character highlight indices, scoring, and empty-needle behavior
 - `codex-rs/apply-patch`
   - initial native `CodexApplyPatch` target and `apply_patch` executable
-  - parser support for add/delete/update/move hunks, lenient heredoc patch arguments, missing context errors, multiple chunks, parent directory creation, and summary output
+  - parser support for add/delete/update/move hunks, lenient heredoc patch arguments, missing context errors, multiple chunks, parent directory creation, Rust move-summary paths, and committed-delta reporting for partial failures including exact destination writes from failed moves and inexact write-failure deltas
 - `codex-rs/apply-patch/src/invocation.rs`
   - direct `apply_patch`/`applypatch` argv detection, Unix/PowerShell/Cmd shell heredoc extraction, Rust `file_stem` shell classification, shell heredoc `applypatch` alias detection, optional `cd <path> &&` workdir capture, implicit raw-patch rejection, verified action path/new-content/diff metadata, and conservative rejection of extra shell statements
 - `codex-rs/arg0/src/lib.rs` apply-patch dispatch path

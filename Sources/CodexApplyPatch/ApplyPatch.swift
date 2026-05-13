@@ -84,9 +84,78 @@ public struct ApplyPatchAction: Equatable, Sendable {
     }
 }
 
+public enum AppliedPatchFileChange: Equatable, Sendable {
+    case add(content: String, overwrittenContent: String?)
+    case delete(content: String)
+    case update(
+        movePath: String?,
+        originalContent: String,
+        overwrittenMoveContent: String?,
+        newContent: String
+    )
+}
+
+public struct AppliedPatchChange: Equatable, Sendable {
+    public let path: String
+    public let change: AppliedPatchFileChange
+
+    public init(path: String, change: AppliedPatchFileChange) {
+        self.path = path
+        self.change = change
+    }
+}
+
+public struct AppliedPatchDelta: Equatable, Sendable {
+    public var changes: [AppliedPatchChange]
+    public var exact: Bool
+
+    public init(changes: [AppliedPatchChange] = [], exact: Bool = true) {
+        self.changes = changes
+        self.exact = exact
+    }
+
+    public static var empty: AppliedPatchDelta {
+        AppliedPatchDelta()
+    }
+
+    public var isEmpty: Bool {
+        changes.isEmpty
+    }
+
+    public var isExact: Bool {
+        exact
+    }
+
+    public mutating func append(_ other: AppliedPatchDelta) {
+        changes.append(contentsOf: other.changes)
+        exact = exact && other.exact
+    }
+}
+
+public struct ApplyPatchFailure: Error, Equatable, CustomStringConvertible, Sendable {
+    public let error: ApplyPatchError
+    public let delta: AppliedPatchDelta
+
+    public init(error: ApplyPatchError, delta: AppliedPatchDelta = .empty) {
+        self.error = error
+        self.delta = delta
+    }
+
+    public var description: String {
+        error.description
+    }
+}
+
 public struct ApplyPatchResult: Equatable, Sendable {
     public var stdout: String
     public var stderr: String
+    public var delta: AppliedPatchDelta
+
+    public init(stdout: String, stderr: String, delta: AppliedPatchDelta = .empty) {
+        self.stdout = stdout
+        self.stderr = stderr
+        self.delta = delta
+    }
 }
 
 public enum ExtractHeredocError: Error, Equatable, Sendable {
@@ -454,8 +523,10 @@ public enum ApplyPatch {
     public static func apply(_ patch: String, cwd: URL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)) -> ApplyPatchResult {
         do {
             let args = try parsePatch(patch)
-            let affected = try applyHunks(args.hunks, cwd: cwd)
-            return ApplyPatchResult(stdout: printSummary(affected), stderr: "")
+            let applied = try applyHunks(args.hunks, cwd: cwd)
+            return ApplyPatchResult(stdout: printSummary(applied.affected), stderr: "", delta: applied.delta)
+        } catch let failure as ApplyPatchFailure {
+            return ApplyPatchResult(stdout: "", stderr: failure.description + "\n", delta: failure.delta)
         } catch let error as ApplyPatchError {
             return ApplyPatchResult(stdout: "", stderr: error.description + "\n")
         } catch {
@@ -661,49 +732,176 @@ public enum ApplyPatch {
         )
     }
 
-    private static func applyHunks(_ hunks: [Hunk], cwd: URL) throws -> AffectedPaths {
+    private static func applyHunks(_ hunks: [Hunk], cwd: URL) throws -> (affected: AffectedPaths, delta: AppliedPatchDelta) {
         guard !hunks.isEmpty else {
-            throw ApplyPatchError.io("No files were modified.")
+            throw ApplyPatchFailure(error: .io("No files were modified."))
         }
 
         var affected = AffectedPaths()
+        var delta = AppliedPatchDelta.empty
         for hunk in hunks {
             switch hunk {
             case let .addFile(path, contents):
                 let url = resolve(path, cwd: cwd)
-                try createParentDirectory(for: url, contextPath: path)
-                try contents.write(to: url, atomically: true, encoding: .utf8)
+                let overwrittenContent = readOptionalFileTextForDelta(at: url, exact: &delta.exact)
+                do {
+                    try createParentDirectory(for: url, contextPath: path)
+                } catch let error as ApplyPatchError {
+                    throw ApplyPatchFailure(error: error, delta: delta)
+                }
+                do {
+                    try contents.write(to: url, atomically: true, encoding: .utf8)
+                } catch {
+                    delta.exact = false
+                    throw ApplyPatchFailure(error: .io("Failed to write file \(url.path)"), delta: delta)
+                }
+                delta.changes.append(AppliedPatchChange(
+                    path: url.path,
+                    change: .add(content: contents, overwrittenContent: overwrittenContent)
+                ))
                 affected.added.append(path)
 
             case let .deleteFile(path):
                 let url = resolve(path, cwd: cwd)
+                noteExistingPathDeltaSupport(at: url, exact: &delta.exact)
+                let deletedContent = readOptionalFileTextForDelta(at: url, exact: &delta.exact)
                 do {
+                    try ensureNotDirectory(url)
                     try FileManager.default.removeItem(at: url)
                 } catch {
-                    throw ApplyPatchError.io("Failed to delete file \(path)")
+                    delta.exact = delta.exact && removeFailureWasSideEffectFree(at: url, expectedContent: deletedContent)
+                    throw ApplyPatchFailure(error: .io("Failed to delete file \(url.path)"), delta: delta)
+                }
+                if let deletedContent {
+                    delta.changes.append(AppliedPatchChange(
+                        path: url.path,
+                        change: .delete(content: deletedContent)
+                    ))
                 }
                 affected.deleted.append(path)
 
             case let .updateFile(path, movePath, chunks):
                 let sourceURL = resolve(path, cwd: cwd)
-                let newContents = try deriveNewContents(path: path, sourceURL: sourceURL, chunks: chunks)
+                noteExistingPathDeltaSupport(at: sourceURL, exact: &delta.exact)
+                let originalContents: String
+                do {
+                    originalContents = try String(contentsOf: sourceURL, encoding: .utf8)
+                } catch {
+                    delta.exact = false
+                    throw ApplyPatchFailure(
+                        error: .io("Failed to read file to update \(path): \(error.localizedDescription)"),
+                        delta: delta
+                    )
+                }
+                let newContents: String
+                do {
+                    newContents = try deriveNewContents(
+                        path: path,
+                        originalContents: originalContents,
+                        chunks: chunks
+                    )
+                } catch let error as ApplyPatchError {
+                    throw ApplyPatchFailure(error: error, delta: delta)
+                }
                 if let movePath {
                     let destinationURL = resolve(movePath, cwd: cwd)
-                    try createParentDirectory(for: destinationURL, contextPath: movePath)
-                    try newContents.write(to: destinationURL, atomically: true, encoding: .utf8)
+                    let overwrittenMoveContent = readOptionalFileTextForDelta(at: destinationURL, exact: &delta.exact)
                     do {
+                        try createParentDirectory(for: destinationURL, contextPath: movePath)
+                    } catch let error as ApplyPatchError {
+                        throw ApplyPatchFailure(error: error, delta: delta)
+                    }
+                    do {
+                        try newContents.write(to: destinationURL, atomically: true, encoding: .utf8)
+                    } catch {
+                        delta.exact = false
+                        throw ApplyPatchFailure(error: .io("Failed to write file \(destinationURL.path)"), delta: delta)
+                    }
+                    let destinationChangeIndex = delta.changes.count
+                    delta.changes.append(AppliedPatchChange(
+                        path: destinationURL.path,
+                        change: .add(content: newContents, overwrittenContent: overwrittenMoveContent)
+                    ))
+                    do {
+                        try ensureNotDirectory(sourceURL)
                         try FileManager.default.removeItem(at: sourceURL)
                     } catch {
-                        throw ApplyPatchError.io("Failed to remove original \(path)")
+                        delta.exact = delta.exact && removeFailureWasSideEffectFree(
+                            at: sourceURL,
+                            expectedContent: originalContents
+                        )
+                        throw ApplyPatchFailure(error: .io("Failed to remove original \(sourceURL.path)"), delta: delta)
                     }
-                    affected.modified.append(movePath)
+                    delta.changes[destinationChangeIndex] = AppliedPatchChange(
+                        path: sourceURL.path,
+                        change: .update(
+                            movePath: destinationURL.path,
+                            originalContent: originalContents,
+                            overwrittenMoveContent: overwrittenMoveContent,
+                            newContent: newContents
+                        )
+                    )
+                    affected.modified.append(path)
                 } else {
-                    try newContents.write(to: sourceURL, atomically: true, encoding: .utf8)
+                    do {
+                        try newContents.write(to: sourceURL, atomically: true, encoding: .utf8)
+                    } catch {
+                        delta.exact = false
+                        throw ApplyPatchFailure(error: .io("Failed to write file \(sourceURL.path)"), delta: delta)
+                    }
+                    delta.changes.append(AppliedPatchChange(
+                        path: sourceURL.path,
+                        change: .update(
+                            movePath: nil,
+                            originalContent: originalContents,
+                            overwrittenMoveContent: nil,
+                            newContent: newContents
+                        )
+                    ))
                     affected.modified.append(path)
                 }
             }
         }
-        return affected
+        return (affected, delta)
+    }
+
+    private static func noteExistingPathDeltaSupport(at url: URL, exact: inout Bool) {
+        var isDirectory = ObjCBool(false)
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            return
+        }
+        if isDirectory.boolValue || (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) != nil {
+            exact = false
+        }
+    }
+
+    private static func readOptionalFileTextForDelta(at url: URL, exact: inout Bool) -> String? {
+        noteExistingPathDeltaSupport(at: url, exact: &exact)
+        var isDirectory = ObjCBool(false)
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            return nil
+        }
+        do {
+            return try String(contentsOf: url, encoding: .utf8)
+        } catch {
+            exact = false
+            return nil
+        }
+    }
+
+    private static func ensureNotDirectory(_ url: URL) throws {
+        var isDirectory = ObjCBool(false)
+        if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+           isDirectory.boolValue {
+            throw ApplyPatchError.io("path is a directory")
+        }
+    }
+
+    private static func removeFailureWasSideEffectFree(at url: URL, expectedContent: String?) -> Bool {
+        guard let expectedContent else {
+            return false
+        }
+        return (try? String(contentsOf: url, encoding: .utf8)) == expectedContent
     }
 
     fileprivate static func unifiedDiffFromChunks(
