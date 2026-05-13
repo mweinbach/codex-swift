@@ -49,6 +49,35 @@ final class MemoryWritePromptsTests: XCTestCase {
         XCTAssertTrue(message.contains(expectedTruncated))
     }
 
+    func testBuildConsolidationPromptPointsToWorkspaceDiffAndExtensions() throws {
+        let root = try temporaryDirectory().appendingPathComponent("memories", isDirectory: true)
+        let extensionsRoot = memoryExtensionsRoot(root: root)
+        try FileManager.default.createDirectory(at: extensionsRoot, withIntermediateDirectories: true)
+
+        let prompt = buildConsolidationPrompt(memoryRoot: root)
+
+        XCTAssertTrue(prompt.hasPrefix("## Memory Writing Agent: Phase 2 (Consolidation)"))
+        XCTAssertTrue(prompt.contains("Folder structure (under \(root.path)/):"))
+        XCTAssertTrue(prompt.contains("Memory workspace diff:"))
+        XCTAssertTrue(prompt.contains("phase2_workspace_diff.md"))
+        XCTAssertTrue(prompt.contains("Memory extensions (under \(extensionsRoot.path)/):"))
+        XCTAssertTrue(prompt.contains("Optional source-specific inputs:"))
+        XCTAssertTrue(prompt.contains("workspace diff shows deleted extension resource files"))
+        XCTAssertFalse(prompt.contains("{{ memory_root }}"))
+        XCTAssertFalse(prompt.contains("{{ phase2_workspace_diff_file }}"))
+    }
+
+    func testBuildConsolidationPromptOmitsExtensionBlocksWhenMissing() throws {
+        let root = try temporaryDirectory().appendingPathComponent("memories", isDirectory: true)
+
+        let prompt = buildConsolidationPrompt(memoryRoot: root)
+
+        XCTAssertTrue(prompt.contains("Folder structure (under \(root.path)/):"))
+        XCTAssertTrue(prompt.contains("phase2_workspace_diff.md"))
+        XCTAssertFalse(prompt.contains("Memory extensions (under"))
+        XCTAssertFalse(prompt.contains("Optional source-specific inputs:"))
+    }
+
     func testStageOneInputMessageFallsBackForZeroContextWindow() {
         let modelInfo = minimalModelInfo(contextWindow: 0, maxContextWindow: 2_000)
 
@@ -100,6 +129,13 @@ final class MemoryWritePromptsTests: XCTestCase {
         let boundary = previousCharacterBoundary(text, maxBytes: 2)
 
         XCTAssertEqual(String(text[..<boundary]), "a")
+    }
+
+    private func temporaryDirectory() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-swift-memory-prompts-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
     }
 
     private func minimalModelInfo(
