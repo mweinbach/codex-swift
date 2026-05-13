@@ -1740,10 +1740,12 @@ public enum CodexAppServer {
         }
 
         let item = ConversationItem(path: rolloutPath, head: [], createdAt: nil, updatedAt: nil)
+        let excludeTurns = try rustDefaultBoolParam(params?["excludeTurns"], defaultValue: false)
+        let includeTurns = !excludeTurns
         let thread = try threadObject(
             for: item,
             defaultProvider: configuration.defaultModelProvider,
-            turns: buildTurnsFromRolloutEvents(at: rolloutPath)
+            turns: includeTurns ? buildTurnsFromRolloutEvents(at: rolloutPath) : []
         )
         let summary = try RolloutSummary(path: rolloutPath, defaultProvider: configuration.defaultModelProvider)
         let resumeCwd = URL(
@@ -18519,6 +18521,88 @@ public enum CodexAppServer {
         return builder.finish()
     }
 
+    fileprivate static func restoredTokenUsageNotification(thread: [String: Any]) throws -> [String: Any]? {
+        guard let threadID = thread["id"] as? String,
+              let rolloutPath = thread["path"] as? String,
+              let turns = thread["turns"] as? [[String: Any]],
+              !turns.isEmpty
+        else {
+            return nil
+        }
+        guard let replay = try restoredTokenUsageReplay(at: rolloutPath, turns: turns) else {
+            return nil
+        }
+        return [
+            "method": "thread/tokenUsage/updated",
+            "params": [
+                "threadId": threadID,
+                "turnId": replay.turnID,
+                "tokenUsage": tokenUsageInfoObject(replay.info)
+            ]
+        ]
+    }
+
+    private static func restoredTokenUsageReplay(
+        at path: String,
+        turns: [[String: Any]]
+    ) throws -> (info: TokenUsageInfo, turnID: String)? {
+        let text = try String(contentsOf: URL(fileURLWithPath: path), encoding: .utf8)
+        let decoder = JSONDecoder()
+        var builder = AppServerThreadHistoryBuilder()
+        var latestInfo: TokenUsageInfo?
+        var latestOwner: AppServerTokenUsageTurnOwner?
+
+        for rawLine in text.split(whereSeparator: \.isNewline) {
+            guard let data = rawLine.data(using: .utf8),
+                  let line = try? decoder.decode(RolloutLine.self, from: data),
+                  case let .eventMsg(event) = line.item
+            else {
+                continue
+            }
+            if case let .tokenCount(tokenCount) = event, let info = tokenCount.info {
+                latestInfo = info
+                latestOwner = builder.activeTurnSnapshot()
+            }
+            builder.handle(event)
+        }
+
+        guard let latestInfo else {
+            return nil
+        }
+        return (
+            info: latestInfo,
+            turnID: restoredTokenUsageTurnID(owner: latestOwner, turns: turns)
+        )
+    }
+
+    private static func restoredTokenUsageTurnID(
+        owner: AppServerTokenUsageTurnOwner?,
+        turns: [[String: Any]]
+    ) -> String {
+        if let owner {
+            if turns.contains(where: { $0["id"] as? String == owner.id }) {
+                return owner.id
+            }
+            if turns.indices.contains(owner.position),
+               let id = turns[owner.position]["id"] as? String {
+                return id
+            }
+        }
+        return latestTokenUsageTurnID(turns)
+    }
+
+    private static func latestTokenUsageTurnID(_ turns: [[String: Any]]) -> String {
+        if let turn = turns.reversed().first(where: { turn in
+            guard let status = turn["status"] as? String else {
+                return false
+            }
+            return status == "completed" || status == "failed"
+        }), let id = turn["id"] as? String {
+            return id
+        }
+        return turns.last?["id"] as? String ?? ""
+    }
+
     private static func rolloutPathForConversation(
         _ conversationID: ConversationId,
         configuration: CodexAppServerConfiguration,
@@ -25999,6 +26083,9 @@ final class CodexAppServerMessageProcessor {
                         pendingSessionStartSources[threadID] = .resume
                         rememberThreadAnalyticsMetadata(threadID: threadID, result: result)
                         subscribeCurrentConnection(toThreadID: threadID)
+                        if let notification = try CodexAppServer.restoredTokenUsageNotification(thread: thread) {
+                            notifications.append(notification)
+                        }
                         if let notification = CodexAppServer.threadGoalResumeSnapshotNotification(
                             threadID: threadID,
                             configuration: configuration
@@ -26022,6 +26109,9 @@ final class CodexAppServerMessageProcessor {
                             pendingSessionStartSources[threadID] = .startup
                             rememberThreadAnalyticsMetadata(threadID: threadID, result: result)
                             subscribeCurrentConnection(toThreadID: threadID)
+                        }
+                        if let notification = try CodexAppServer.restoredTokenUsageNotification(thread: thread) {
+                            notifications.append(notification)
                         }
                         var notificationThread = thread
                         notificationThread["turns"] = []
@@ -27072,6 +27162,15 @@ private struct AppServerThreadHistoryBuilder {
         }
     }
 
+    func activeTurnSnapshot() -> AppServerTokenUsageTurnOwner? {
+        guard !currentItems.isEmpty,
+              let id = currentTurn?["id"] as? String
+        else {
+            return nil
+        }
+        return AppServerTokenUsageTurnOwner(id: id, position: turns.count)
+    }
+
     mutating func finish() -> [[String: Any]] {
         finishCurrentTurn()
         return turns
@@ -27185,6 +27284,11 @@ private struct AppServerThreadHistoryBuilder {
         }
         return "item-\(nextItemIndex)"
     }
+}
+
+private struct AppServerTokenUsageTurnOwner {
+    let id: String
+    let position: Int
 }
 
 private struct AppServerThreadTurnsPage {

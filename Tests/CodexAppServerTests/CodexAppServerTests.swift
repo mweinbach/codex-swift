@@ -3733,6 +3733,100 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(credits["balance"] as? String, "12.50")
     }
 
+    func testThreadResumeAndForkReplayRestoredTokenUsageLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let sourceID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T12-00-00",
+            timestamp: "2025-01-06T12:00:00Z",
+            preview: "Count these tokens",
+            provider: "mock_provider"
+        )
+        let sourcePath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: sourceID
+        ))
+        try appendRolloutEvents(to: sourcePath, timestamp: "2025-01-06T12:00:01Z", events: [
+            .tokenCount(TokenCountEvent(info: restoredTokenUsageFixture(), rateLimits: nil))
+        ])
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let resumeMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/resume","params":{"threadId":"\#(sourceID)"}}"#.utf8
+        )))
+
+        XCTAssertEqual(resumeMessages.count, 2)
+        let resumeResult = try XCTUnwrap(resumeMessages[0]["result"] as? [String: Any])
+        let resumeThread = try XCTUnwrap(resumeResult["thread"] as? [String: Any])
+        let resumeTurns = try XCTUnwrap(resumeThread["turns"] as? [[String: Any]])
+        XCTAssertEqual(resumeTurns.count, 1)
+        assertRestoredTokenUsageNotification(
+            resumeMessages[1],
+            threadID: sourceID,
+            turnID: try XCTUnwrap(resumeTurns[0]["id"] as? String)
+        )
+
+        let forkMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"thread/fork","params":{"threadId":"\#(sourceID)"}}"#.utf8
+        )))
+
+        XCTAssertEqual(forkMessages.count, 3)
+        let forkResult = try XCTUnwrap(forkMessages[0]["result"] as? [String: Any])
+        let forkThread = try XCTUnwrap(forkResult["thread"] as? [String: Any])
+        let forkID = try XCTUnwrap(forkThread["id"] as? String)
+        let forkTurns = try XCTUnwrap(forkThread["turns"] as? [[String: Any]])
+        XCTAssertEqual(forkTurns.count, 1)
+        assertRestoredTokenUsageNotification(
+            forkMessages[1],
+            threadID: forkID,
+            turnID: try XCTUnwrap(forkTurns[0]["id"] as? String)
+        )
+        XCTAssertEqual(forkMessages[2]["method"] as? String, "thread/started")
+    }
+
+    func testThreadResumeAndForkSkipRestoredTokenUsageWhenTurnsExcludedLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let sourceID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-07T12-00-00",
+            timestamp: "2025-01-07T12:00:00Z",
+            preview: "Skip token replay",
+            provider: "mock_provider"
+        )
+        let sourcePath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: sourceID
+        ))
+        try appendRolloutEvents(to: sourcePath, timestamp: "2025-01-07T12:00:01Z", events: [
+            .tokenCount(TokenCountEvent(info: restoredTokenUsageFixture(), rateLimits: nil))
+        ])
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
+        )
+
+        let resumeMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/resume","params":{"threadId":"\#(sourceID)","excludeTurns":true}}"#.utf8
+        )))
+
+        XCTAssertEqual(resumeMessages.count, 1)
+        XCTAssertFalse(resumeMessages.contains { $0["method"] as? String == "thread/tokenUsage/updated" })
+        let resumeResult = try XCTUnwrap(resumeMessages[0]["result"] as? [String: Any])
+        let resumeThread = try XCTUnwrap(resumeResult["thread"] as? [String: Any])
+        XCTAssertEqual((resumeThread["turns"] as? [Any])?.count, 0)
+
+        let forkMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"thread/fork","params":{"threadId":"\#(sourceID)","excludeTurns":true}}"#.utf8
+        )))
+
+        XCTAssertEqual(forkMessages.count, 2)
+        XCTAssertFalse(forkMessages.contains { $0["method"] as? String == "thread/tokenUsage/updated" })
+        let forkResult = try XCTUnwrap(forkMessages[0]["result"] as? [String: Any])
+        let forkThread = try XCTUnwrap(forkResult["thread"] as? [String: Any])
+        XCTAssertEqual((forkThread["turns"] as? [Any])?.count, 0)
+        XCTAssertEqual(forkMessages[1]["method"] as? String, "thread/started")
+    }
+
     func testRuntimeItemDeltaEventsEmitRustProgressNotifications() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()
@@ -27858,6 +27952,53 @@ final class CodexAppServerTests: XCTestCase {
     private func jsonString(_ value: String) -> String {
         let data = try! JSONEncoder().encode(value)
         return String(data: data, encoding: .utf8)!
+    }
+
+    private func restoredTokenUsageFixture() -> TokenUsageInfo {
+        TokenUsageInfo(
+            totalTokenUsage: TokenUsage(
+                inputTokens: 120,
+                cachedInputTokens: 20,
+                outputTokens: 30,
+                reasoningOutputTokens: 10,
+                totalTokens: 150
+            ),
+            lastTokenUsage: TokenUsage(
+                inputTokens: 70,
+                cachedInputTokens: 15,
+                outputTokens: 20,
+                reasoningOutputTokens: 5,
+                totalTokens: 90
+            ),
+            modelContextWindow: 200_000
+        )
+    }
+
+    private func assertRestoredTokenUsageNotification(
+        _ message: [String: Any],
+        threadID: String,
+        turnID: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertEqual(message["method"] as? String, "thread/tokenUsage/updated", file: file, line: line)
+        guard let params = message["params"] as? [String: Any],
+              let tokenUsage = params["tokenUsage"] as? [String: Any],
+              let total = tokenUsage["total"] as? [String: Any],
+              let last = tokenUsage["last"] as? [String: Any]
+        else {
+            XCTFail("missing token usage notification payload", file: file, line: line)
+            return
+        }
+        XCTAssertEqual(params["threadId"] as? String, threadID, file: file, line: line)
+        XCTAssertEqual(params["turnId"] as? String, turnID, file: file, line: line)
+        XCTAssertEqual(tokenUsage["modelContextWindow"] as? Int, 200_000, file: file, line: line)
+        XCTAssertEqual(total["totalTokens"] as? Int, 150, file: file, line: line)
+        XCTAssertEqual(total["inputTokens"] as? Int, 120, file: file, line: line)
+        XCTAssertEqual(total["cachedInputTokens"] as? Int, 20, file: file, line: line)
+        XCTAssertEqual(total["outputTokens"] as? Int, 30, file: file, line: line)
+        XCTAssertEqual(total["reasoningOutputTokens"] as? Int, 10, file: file, line: line)
+        XCTAssertEqual(last["totalTokens"] as? Int, 90, file: file, line: line)
     }
 
     @discardableResult

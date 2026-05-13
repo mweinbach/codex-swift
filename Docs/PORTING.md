@@ -601,6 +601,8 @@ Source baseline inspected for this scaffold:
   - `thread/unarchive` now updates the restored rollout file's modification time before returning the restored thread, so the response `updatedAt` advances like Rust.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` thread fork
   - `thread/fork` now creates a new rollout from a source thread/path, preserves copied history without mutating the source rollout, records fork metadata/thread source in session meta, returns the forked thread, subscribes the connection, and emits a `thread/started` notification without hydrated turns.
+- `codex-rs/app-server/src/request_processors/token_usage_replay.rs` restored token usage replay
+  - `thread/resume` and `thread/fork` now replay restored `thread/tokenUsage/updated` notifications after lifecycle responses when hydrated turns are included, attribute the usage to the active persisted turn like Rust, skip replay for `excludeTurns`, and keep `thread/fork` ordering before `thread/started`.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` thread name updates
   - `thread/name/set` now validates Rust-shaped typed `threadId` and `name` params, trims names, rejects empty names and missing rollouts, updates configured SQLite thread metadata titles, appends Rust-compatible `session_index.jsonl` entries, emits `thread/name/updated`, and projects distinct stored titles back onto state-backed thread objects.
 - `codex-rs/app-server/src/request_processors/thread_processor.rs` thread read and turns pagination
