@@ -196,6 +196,82 @@ public enum MemoryPhaseTwoAgentLoopEvent: Equatable, Sendable {
     case sessionTerminated
 }
 
+public enum MemoryPhaseTwoAgentLoopWaitResult: Equatable, Sendable {
+    case timerElapsed
+    case sessionTerminated
+}
+
+public typealias MemoryPhaseTwoAgentLoopWait = @Sendable (
+    _ seconds: UInt64,
+    _ waitForSessionTermination: @escaping @Sendable () async -> Void,
+    _ sleep: @escaping MemoryPhaseTwoSleep
+) async -> MemoryPhaseTwoAgentLoopWaitResult
+
+public func waitForMemoryPhaseTwoAgentLoopEvent(
+    seconds: UInt64,
+    waitForSessionTermination: @escaping @Sendable () async -> Void,
+    sleep: @escaping MemoryPhaseTwoSleep = memoryPhaseTwoSleep
+) async -> MemoryPhaseTwoAgentLoopWaitResult {
+    await withTaskGroup(of: MemoryPhaseTwoAgentLoopWaitResult.self) { group in
+        group.addTask {
+            await waitForSessionTermination()
+            return .sessionTerminated
+        }
+        group.addTask {
+            await sleep(seconds)
+            return .timerElapsed
+        }
+
+        let result = await group.next() ?? .timerElapsed
+        group.cancelAll()
+        return result
+    }
+}
+
+public actor MemoryPhaseTwoAgentLoopEventSource {
+    private let statusPollSeconds: UInt64
+    private let heartbeatSeconds: UInt64
+    private let waitForSessionTermination: @Sendable () async -> Void
+    private let wait: MemoryPhaseTwoAgentLoopWait
+    private let sleep: MemoryPhaseTwoSleep
+    private var secondsUntilHeartbeat: UInt64
+
+    public init(
+        statusPollSeconds: UInt64 = memoryStageTwoAgentStatusPollSeconds,
+        heartbeatSeconds: UInt64 = memoryStageTwoJobHeartbeatSeconds,
+        waitForSessionTermination: @escaping @Sendable () async -> Void,
+        wait: @escaping MemoryPhaseTwoAgentLoopWait = waitForMemoryPhaseTwoAgentLoopEvent,
+        sleep: @escaping MemoryPhaseTwoSleep = memoryPhaseTwoSleep
+    ) {
+        self.statusPollSeconds = max(1, statusPollSeconds)
+        self.heartbeatSeconds = max(1, heartbeatSeconds)
+        self.waitForSessionTermination = waitForSessionTermination
+        self.wait = wait
+        self.sleep = sleep
+        self.secondsUntilHeartbeat = max(1, heartbeatSeconds)
+    }
+
+    public func next() async -> MemoryPhaseTwoAgentLoopEvent {
+        let waitSeconds = min(statusPollSeconds, secondsUntilHeartbeat)
+        let result = await wait(waitSeconds, waitForSessionTermination, sleep)
+        if result == .sessionTerminated {
+            return .sessionTerminated
+        }
+
+        if secondsUntilHeartbeat <= statusPollSeconds {
+            secondsUntilHeartbeat = heartbeatSeconds
+            return .heartbeat
+        }
+
+        secondsUntilHeartbeat -= waitSeconds
+        return .statusPoll
+    }
+
+    public nonisolated var nextEvent: @Sendable () async -> MemoryPhaseTwoAgentLoopEvent {
+        { await self.next() }
+    }
+}
+
 public struct MemoryPhaseTwoConsolidationThreadStartOptions: Equatable, Sendable {
     public let config: CodexRuntimeConfig
     public let initialHistory: InitialHistory

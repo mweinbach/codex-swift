@@ -141,6 +141,90 @@ final class MemoryWritePhaseTwoTests: XCTestCase {
         XCTAssertEqual(memoryStageTwoJobHeartbeatSeconds, 90)
     }
 
+    func testPhaseTwoAgentLoopEventSourcePollsUntilHeartbeatLikeRustTimers() async {
+        let recorder = AgentLoopWaitRecorder(results: [
+            .timerElapsed,
+            .timerElapsed,
+            .timerElapsed,
+            .timerElapsed
+        ])
+        let source = MemoryPhaseTwoAgentLoopEventSource(
+            statusPollSeconds: 2,
+            heartbeatSeconds: 6,
+            waitForSessionTermination: {},
+            wait: { seconds, waitForSessionTermination, sleep in
+                await recorder.wait(
+                    seconds: seconds,
+                    waitForSessionTermination: waitForSessionTermination,
+                    sleep: sleep
+                )
+            },
+            sleep: { _ in }
+        )
+
+        let events = await [
+            source.next(),
+            source.next(),
+            source.next(),
+            source.next()
+        ]
+
+        XCTAssertEqual(events, [.statusPoll, .statusPoll, .heartbeat, .statusPoll])
+        let waitRequests = await recorder.recordedRequests
+        XCTAssertEqual(waitRequests.map(\.seconds), [2, 2, 2, 2])
+    }
+
+    func testPhaseTwoAgentLoopEventSourceReturnsSessionTerminationBeforeTimer() async {
+        let recorder = AgentLoopWaitRecorder(results: [.sessionTerminated])
+        let source = MemoryPhaseTwoAgentLoopEventSource(
+            statusPollSeconds: 5,
+            heartbeatSeconds: 90,
+            waitForSessionTermination: {},
+            wait: { seconds, waitForSessionTermination, sleep in
+                await recorder.wait(
+                    seconds: seconds,
+                    waitForSessionTermination: waitForSessionTermination,
+                    sleep: sleep
+                )
+            },
+            sleep: { _ in }
+        )
+
+        let event = await source.next()
+
+        XCTAssertEqual(event, .sessionTerminated)
+        let waitRequests = await recorder.recordedRequests
+        XCTAssertEqual(waitRequests.map(\.seconds), [5])
+    }
+
+    func testWaitForMemoryPhaseTwoAgentLoopEventReturnsSessionTerminationWhenItWins() async {
+        let result = await waitForMemoryPhaseTwoAgentLoopEvent(
+            seconds: 5,
+            waitForSessionTermination: {},
+            sleep: { _ in
+                while !Task.isCancelled {
+                    await Task.yield()
+                }
+            }
+        )
+
+        XCTAssertEqual(result, .sessionTerminated)
+    }
+
+    func testWaitForMemoryPhaseTwoAgentLoopEventReturnsTimerWhenSleepWins() async {
+        let result = await waitForMemoryPhaseTwoAgentLoopEvent(
+            seconds: 5,
+            waitForSessionTermination: {
+                while !Task.isCancelled {
+                    await Task.yield()
+                }
+            },
+            sleep: { _ in }
+        )
+
+        XCTAssertEqual(result, .timerElapsed)
+    }
+
     func testPhaseTwoAgentShutdownTimeoutConstantMatchesRust() {
         XCTAssertEqual(memoryStageTwoAgentShutdownTimeoutSeconds, 10)
     }
@@ -1202,6 +1286,35 @@ private actor AgentLoopEventSequence {
             return .statusPoll
         }
         return events.removeFirst()
+    }
+}
+
+private actor AgentLoopWaitRecorder {
+    struct Request: Equatable, Sendable {
+        var seconds: UInt64
+    }
+
+    private var results: [MemoryPhaseTwoAgentLoopWaitResult]
+    private var requests: [Request] = []
+
+    init(results: [MemoryPhaseTwoAgentLoopWaitResult]) {
+        self.results = results
+    }
+
+    var recordedRequests: [Request] { requests }
+
+    func wait(
+        seconds: UInt64,
+        waitForSessionTermination: @escaping @Sendable () async -> Void,
+        sleep: @escaping MemoryPhaseTwoSleep
+    ) async -> MemoryPhaseTwoAgentLoopWaitResult {
+        _ = waitForSessionTermination
+        _ = sleep
+        requests.append(Request(seconds: seconds))
+        guard !results.isEmpty else {
+            return .timerElapsed
+        }
+        return results.removeFirst()
     }
 }
 
