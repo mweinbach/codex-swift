@@ -6796,6 +6796,34 @@ final class CodexAppServerTests: XCTestCase {
         }
     }
 
+    func testThreadListRejectsUnknownEnumValuesLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cases: [(String, String)] = [
+            (
+                #""sortKey":"updated_at""#,
+                "Invalid request: unknown variant `updated_at`, expected `createdAt` or `updatedAt`"
+            ),
+            (
+                #""sortDirection":"sideways""#,
+                "Invalid request: unknown variant `sideways`, expected `asc` or `desc`"
+            ),
+            (
+                #""sourceKinds":["sub_agent"]"#,
+                "Invalid request: unknown variant `sub_agent`, expected one of `cli`, `vscode`, `exec`, `appServer`, `subAgent`, `subAgentReview`, `subAgentCompact`, `subAgentThreadSpawn`, `subAgentOther`, `unknown`"
+            )
+        ]
+
+        for (index, testCase) in cases.enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 1),"method":"thread/list","params":{\#(testCase.0)}}"#,
+                codexHome: temp.url
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, testCase.1)
+        }
+    }
+
     func testThreadLifecycleRejectsMalformedBooleanParamsLikeRust() throws {
         let temp = try TemporaryDirectory()
         let cases: [(String, String, String)] = [
@@ -17754,7 +17782,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(secondResult["backwardsCursor"] as? String, "2025-01-03T12:00:00.001Z")
 
         let updatedResponse = try appServerResponse(
-            #"{"id":3,"method":"thread/list","params":{"sortKey":"updated_at"}}"#,
+            #"{"id":3,"method":"thread/list","params":{"sortKey":"updatedAt"}}"#,
             codexHome: temp.url
         )
         let updatedResult = try XCTUnwrap(updatedResponse["result"] as? [String: Any])
@@ -17986,7 +18014,7 @@ final class CodexAppServerTests: XCTestCase {
         let configuration = testConfiguration(codexHome: temp.url, stateStore: stateStore)
 
         let response = try appServerResponse(
-            #"{"id":1,"method":"thread/list","params":{"limit":1,"sortKey":"updated_at"}}"#,
+            #"{"id":1,"method":"thread/list","params":{"limit":1,"sortKey":"updatedAt"}}"#,
             configuration: configuration
         )
         let result = try XCTUnwrap(response["result"] as? [String: Any])

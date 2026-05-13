@@ -20310,12 +20310,14 @@ public enum CodexAppServer {
             return .createdAt
         }
         switch value {
-        case "created_at":
+        case "createdAt":
             return .createdAt
-        case "updated_at":
+        case "updatedAt":
             return .updatedAt
         default:
-            throw AppServerError.invalidParams("invalid thread/list sortKey `\(value)`")
+            throw AppServerError.invalidRequest(
+                "Invalid request: unknown variant `\(value)`, expected `createdAt` or `updatedAt`"
+            )
         }
     }
 
@@ -20329,7 +20331,9 @@ public enum CodexAppServer {
         case "desc":
             return .descending
         default:
-            throw AppServerError.invalidParams("invalid thread/list sortDirection `\(value)`")
+            throw AppServerError.invalidRequest(
+                "Invalid request: unknown variant `\(value)`, expected `asc` or `desc`"
+            )
         }
     }
 
@@ -20342,7 +20346,9 @@ public enum CodexAppServer {
 
         let kinds = try values.map { value in
             guard let kind = SessionSourceMatcher.SourceKind(rawValue: value) else {
-                throw AppServerError.invalidParams("invalid thread/list sourceKind `\(value)`")
+                throw AppServerError.invalidRequest(
+                    "Invalid request: unknown variant `\(value)`, expected one of `cli`, `vscode`, `exec`, `appServer`, `subAgent`, `subAgentReview`, `subAgentCompact`, `subAgentThreadSpawn`, `subAgentOther`, `unknown`"
+                )
             }
             return kind
         }
