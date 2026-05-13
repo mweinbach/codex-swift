@@ -21696,6 +21696,51 @@ final class CodexAppServerTests: XCTestCase {
         ])
     }
 
+    func testMcpServerReloadUsesManagedConfigLayerLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let managedConfigFile = temp.url.appendingPathComponent("managed_config.toml", isDirectory: false)
+        try """
+        mcp_oauth_credentials_store = "file"
+
+        [mcp_servers.managed_docs]
+        command = "managed-docs-server"
+        args = ["--managed"]
+        startup_timeout_sec = 9
+        """.write(to: managedConfigFile, atomically: true, encoding: .utf8)
+        let capture = AppServerCoreOpCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                configLayerOverrides: ConfigLayerLoaderOverrides(managedConfigPath: managedConfigFile)
+            ),
+            coreOpSubmitter: capture.submit
+        )
+        let start = try decodeMessages(processor.processLine(
+            Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)
+        ))
+        let threadID = try XCTUnwrap(((start[0]["result"] as? [String: Any])?["thread"] as? [String: Any])?["id"] as? String)
+
+        let response = try decode(processor.processLine(
+            Data(#"{"id":2,"method":"config/mcpServer/reload"}"#.utf8)
+        ))
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertTrue(result.isEmpty)
+        let refresh = try XCTUnwrap(processor.pendingMcpServerRefreshConfig(threadID: threadID))
+        XCTAssertEqual(refresh.mcpOAuthCredentialsStoreMode, .string("file"))
+        guard case let .object(servers) = refresh.mcpServers,
+              case let .object(docs)? = servers["managed_docs"]
+        else {
+            return XCTFail("expected managed_docs MCP server refresh config")
+        }
+        XCTAssertEqual(docs["command"], .string("managed-docs-server"))
+        XCTAssertEqual(docs["args"], .array([.string("--managed")]))
+        XCTAssertEqual(docs["startup_timeout_sec"], .double(9))
+        XCTAssertEqual(capture.submissions, [
+            SubmittedCoreOp(requestID: .integer(2), threadID: threadID, op: .refreshMcpServers(config: refresh))
+        ])
+    }
+
     func testMcpServerReloadReportsLiveSubmitterFailures() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(

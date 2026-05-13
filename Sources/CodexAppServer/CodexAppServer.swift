@@ -12933,7 +12933,11 @@ public enum CodexAppServer {
         do {
             runtimeConfig = try CodexConfigLoader.load(
                 codexHome: configuration.codexHome,
+                cwd: configuration.cwd,
+                overrides: configuration.cliConfigOverrides,
+                threadConfigSources: configuration.threadConfigSources,
                 systemConfigFile: nil,
+                managedConfigOverrides: configuration.configLayerOverrides,
                 environment: configuration.environment
             )
         } catch {
