@@ -389,7 +389,8 @@ private func runMcpServerCommand(_ request: CodexCLI.McpServerCommandRequest) as
             let result = try await runExecCommand(execRequest, baseInstructionsOverride: toolCall.baseInstructions)
             return CodexMCPToolResult(
                 text: mcpToolText(for: result),
-                isError: result.exitCode != 0
+                isError: result.exitCode != 0,
+                threadID: result.threadID
             )
         },
         codexReplyRunner: { reply in
@@ -406,7 +407,8 @@ private func runMcpServerCommand(_ request: CodexCLI.McpServerCommandRequest) as
             let result = try await runExecCommand(execRequest, baseInstructionsOverride: nil)
             return CodexMCPToolResult(
                 text: mcpToolText(for: result),
-                isError: result.exitCode != 0
+                isError: result.exitCode != 0,
+                threadID: reply.threadID
             )
         }
     )
@@ -835,12 +837,17 @@ private func runNonInteractiveExec(
         mcpServers: settings.mcpServers,
         environment: environment
     ) {
-        return CodexCLI.CommandExecutionResult(exitCode: 1, stderrMessage: message)
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 1,
+            stderrMessage: message,
+            threadID: conversationID.description
+        )
     }
     guard providerResolution.info.wireAPI == .responses else {
         return CodexCLI.CommandExecutionResult(
             exitCode: 78,
-            stderrMessage: "codex-swift: exec currently supports Responses API model providers only."
+            stderrMessage: "codex-swift: exec currently supports Responses API model providers only.",
+            threadID: conversationID.description
         )
     }
     let cliModel = execOptionValue(short: "-m", long: "--model", in: arguments)
@@ -1001,14 +1008,16 @@ private func runNonInteractiveExec(
         return CodexCLI.CommandExecutionResult(
             exitCode: 0,
             stdoutMessage: sessionStartOutcome.stopReason,
-            stderrMessage: nil
+            stderrMessage: nil,
+            threadID: conversationID.description
         )
     }
     if userPromptSubmitOutcome.shouldStop {
         return CodexCLI.CommandExecutionResult(
             exitCode: 0,
             stdoutMessage: userPromptSubmitOutcome.stopReason,
-            stderrMessage: nil
+            stderrMessage: nil,
+            threadID: conversationID.description
         )
     }
 
@@ -1085,7 +1094,8 @@ private func runNonInteractiveExec(
     return CodexCLI.CommandExecutionResult(
         exitCode: result.exitCode,
         stdoutMessage: result.stdoutMessage,
-        stderrMessage: stderrMessages.isEmpty ? nil : stderrMessages.joined(separator: "\n")
+        stderrMessage: stderrMessages.isEmpty ? nil : stderrMessages.joined(separator: "\n"),
+        threadID: conversationID.description
     )
 }
 

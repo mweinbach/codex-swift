@@ -586,11 +586,13 @@ public struct CodexCLI: Sendable {
         public let exitCode: Int32
         public let stdoutMessage: String?
         public let stderrMessage: String?
+        public let threadID: String?
 
-        public init(exitCode: Int32, stdoutMessage: String? = nil, stderrMessage: String? = nil) {
+        public init(exitCode: Int32, stdoutMessage: String? = nil, stderrMessage: String? = nil, threadID: String? = nil) {
             self.exitCode = exitCode
             self.stdoutMessage = stdoutMessage
             self.stderrMessage = stderrMessage
+            self.threadID = threadID
         }
     }
 

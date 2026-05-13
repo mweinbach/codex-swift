@@ -60,10 +60,12 @@ public struct CodexMCPToolReply: Equatable, Sendable {
 public struct CodexMCPToolResult: Equatable, Sendable {
     public let text: String
     public let isError: Bool
+    public let threadID: String?
 
-    public init(text: String, isError: Bool = false) {
+    public init(text: String, isError: Bool = false, threadID: String? = nil) {
         self.text = text
         self.isError = isError
+        self.threadID = threadID
     }
 }
 
@@ -246,14 +248,14 @@ public enum CodexMCPServer {
             case "codex":
                 let call = try decodeCodexToolCall(arguments)
                 let result = try await codexToolRunner(call)
-                return toolResponse(id: id, text: result.text, isError: result.isError)
+                return toolResponse(id: id, text: result.text, isError: result.isError, threadID: result.threadID)
             case "codex-reply":
                 guard let codexReplyRunner else {
                     return toolResponse(id: id, text: "codex-reply is not available in this server.", isError: true)
                 }
                 let reply = try decodeCodexReply(arguments)
                 let result = try await codexReplyRunner(reply)
-                return toolResponse(id: id, text: result.text, isError: result.isError)
+                return toolResponse(id: id, text: result.text, isError: result.isError, threadID: result.threadID)
             default:
                 return toolResponse(id: id, text: "Unknown tool '\(name)'", isError: true)
             }
@@ -411,7 +413,7 @@ public enum CodexMCPServer {
         ]
     }
 
-    private static func toolResponse(id: Any, text: String, isError: Bool) -> [String: Any] {
+    private static func toolResponse(id: Any, text: String, isError: Bool, threadID: String? = nil) -> [String: Any] {
         var result: [String: Any] = [
             "content": [
                 [
@@ -420,6 +422,12 @@ public enum CodexMCPServer {
                 ]
             ]
         ]
+        if let threadID {
+            result["structuredContent"] = [
+                "threadId": threadID,
+                "content": text
+            ]
+        }
         if isError {
             result["isError"] = true
         }

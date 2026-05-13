@@ -91,7 +91,7 @@ final class CodexMCPServerTests: XCTestCase {
             state: &state,
             codexToolRunner: { call in
                 await receivedCall.set(call)
-                return CodexMCPToolResult(text: "done")
+                return CodexMCPToolResult(text: "done", threadID: "123e4567-e89b-12d3-a456-426614174001")
             }
         )
 
@@ -111,6 +111,9 @@ final class CodexMCPServerTests: XCTestCase {
         let content = try textContent(from: result)
         XCTAssertEqual(content.text, "done")
         XCTAssertFalse(content.isError)
+        let structuredContent = try structuredContent(from: result)
+        XCTAssertEqual(structuredContent["threadId"] as? String, "123e4567-e89b-12d3-a456-426614174001")
+        XCTAssertEqual(structuredContent["content"] as? String, "done")
     }
 
     func testCodexToolCallReportsMissingPromptAsToolError() async throws {
@@ -139,7 +142,7 @@ final class CodexMCPServerTests: XCTestCase {
             state: &state,
             codexReplyRunner: { reply in
                 await receivedReply.set(reply)
-                return CodexMCPToolResult(text: "continued")
+                return CodexMCPToolResult(text: "continued", threadID: reply.threadID)
             }
         )
 
@@ -151,6 +154,9 @@ final class CodexMCPServerTests: XCTestCase {
         let content = try textContent(from: result)
         XCTAssertEqual(content.text, "continued")
         XCTAssertFalse(content.isError)
+        let structuredContent = try structuredContent(from: result)
+        XCTAssertEqual(structuredContent["threadId"] as? String, "123e4567-e89b-12d3-a456-426614174000")
+        XCTAssertEqual(structuredContent["content"] as? String, "continued")
     }
 
     func testCodexReplyToolStillAcceptsDeprecatedConversationId() async throws {
@@ -226,6 +232,11 @@ final class CodexMCPServerTests: XCTestCase {
         let content = try XCTUnwrap(result["content"] as? [[String: Any]])
         let text = try XCTUnwrap(content.first?["text"] as? String)
         return (text, result["isError"] as? Bool ?? false)
+    }
+
+    private func structuredContent(from response: [String: Any]) throws -> [String: Any] {
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        return try XCTUnwrap(result["structuredContent"] as? [String: Any])
     }
 }
 
