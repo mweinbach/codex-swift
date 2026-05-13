@@ -17,8 +17,11 @@ explicitly records an intentional Swift limitation.
 - Prefer existing Swift targets and helper APIs over inventing new abstractions.
 - Do not overwrite unrelated local changes. Work with any user edits already in
   the tree.
-- Do not add product claims to docs unless the Swift implementation actually
-  supports the behavior or the doc clearly marks it as pending.
+- Do not add general product or user-facing documentation under `Docs/`.
+  Official Codex docs live elsewhere, and this repository's docs should not
+  become a stale shadow of them. Exceptions are Swift porting docs, copied
+  upstream docs rewritten for this Swift package, and app-server API/examples
+  documentation when the Swift app-server surface changes.
 
 ## Swift API Style
 

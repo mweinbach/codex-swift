@@ -21,6 +21,10 @@ commit.
   omitted/null modeling.
 - Do not present unported behavior as complete. Point readers to
   `Docs/PORTING.md` for current Swift status.
+- Do not add general product or user-facing Codex documentation here. The
+  official docs live elsewhere; keep this directory limited to Swift-port
+  guidance, copied upstream docs that have been rewritten for the Swift package,
+  and app-server API/examples documentation when that API surface changes.
 
 ## Call-Site Clarity
 
