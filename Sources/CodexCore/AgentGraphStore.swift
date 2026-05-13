@@ -62,6 +62,24 @@ public struct Stage1Output: Equatable, Sendable {
     }
 }
 
+/// Result of trying to claim a stage-1 memory extraction job.
+public enum Stage1JobClaimOutcome: Equatable, Sendable {
+    /// The caller owns the job and should continue with extraction.
+    case claimed(ownershipToken: String)
+
+    /// Existing output or job success state is already newer than or equal to the source rollout.
+    case skippedUpToDate
+
+    /// Another worker currently owns a fresh lease for this job.
+    case skippedRunning
+
+    /// The job is in backoff and should not be retried yet.
+    case skippedRetryBackoff
+
+    /// The job has exhausted retries and should not be retried automatically.
+    case skippedRetryExhausted
+}
+
 /// Storage-neutral boundary for persisted thread-spawn parent/child topology.
 ///
 /// Implementations return stable ordering for list methods so callers can merge persisted graph

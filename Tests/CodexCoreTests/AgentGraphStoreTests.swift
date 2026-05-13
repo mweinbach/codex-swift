@@ -866,6 +866,299 @@ final class AgentGraphStoreTests: XCTestCase {
         XCTAssertGreaterThan(firstUsage.lastUsage ?? 0, 0)
     }
 
+    func testSQLiteStoreClaimsStage1JobWithRustSkipStates() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let cachedThreadID = try threadID(830)
+        let secondThreadID = try threadID(831)
+        let workerID = try threadID(832)
+        try insertRawSQLiteThread(
+            id: cachedThreadID,
+            agentPath: try AgentPath(validating: "/root/memory/claim"),
+            memoryMode: "enabled",
+            databaseURL: databaseURL
+        )
+        try insertRawSQLiteThread(
+            id: secondThreadID,
+            agentPath: try AgentPath(validating: "/root/memory/claim_second"),
+            memoryMode: "enabled",
+            databaseURL: databaseURL
+        )
+        try insertRawStage1Output(
+            threadID: cachedThreadID,
+            sourceUpdatedAt: 100,
+            rawMemory: "cached",
+            rolloutSummary: "cached summary",
+            generatedAt: 110,
+            databaseURL: databaseURL
+        )
+
+        let cachedOutputSkip = try await store.tryClaimStage1Job(
+            threadID: cachedThreadID,
+            workerID: workerID,
+            sourceUpdatedAt: 99,
+            leaseSeconds: 60,
+            maxRunningJobs: 2
+        )
+        let firstClaim = try await store.tryClaimStage1Job(
+            threadID: secondThreadID,
+            workerID: workerID,
+            sourceUpdatedAt: 200,
+            leaseSeconds: 60,
+            maxRunningJobs: 2
+        )
+        let runningSkip = try await store.tryClaimStage1Job(
+            threadID: secondThreadID,
+            workerID: workerID,
+            sourceUpdatedAt: 200,
+            leaseSeconds: 60,
+            maxRunningJobs: 2
+        )
+
+        XCTAssertEqual(cachedOutputSkip, Stage1JobClaimOutcome.skippedUpToDate)
+        let firstToken = try claimedToken(firstClaim)
+        XCTAssertEqual(runningSkip, Stage1JobClaimOutcome.skippedRunning)
+
+        let failed = try await store.markStage1JobFailed(
+            threadID: secondThreadID,
+            ownershipToken: firstToken,
+            failureReason: "boom",
+            retryDelaySeconds: 60
+        )
+        XCTAssertTrue(failed)
+        let backoffSkip = try await store.tryClaimStage1Job(
+            threadID: secondThreadID,
+            workerID: workerID,
+            sourceUpdatedAt: 200,
+            leaseSeconds: 60,
+            maxRunningJobs: 2
+        )
+        let advancedClaim = try await store.tryClaimStage1Job(
+            threadID: secondThreadID,
+            workerID: workerID,
+            sourceUpdatedAt: 201,
+            leaseSeconds: 60,
+            maxRunningJobs: 2
+        )
+
+        XCTAssertEqual(backoffSkip, Stage1JobClaimOutcome.skippedRetryBackoff)
+        _ = try claimedToken(advancedClaim)
+        let advancedJob = try readRawMemoryJob(kind: "memory_stage1", jobKey: secondThreadID.description, databaseURL: databaseURL)
+        XCTAssertEqual(advancedJob?.retryRemaining, 3)
+        XCTAssertEqual(advancedJob?.lastError, nil)
+    }
+
+    func testSQLiteStoreClaimsStage1JobRespectsRunningCapAndRetryExhaustion() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let firstThreadID = try threadID(840)
+        let cappedThreadID = try threadID(841)
+        let exhaustedThreadID = try threadID(842)
+        let workerID = try threadID(843)
+        for (threadID, suffix) in [
+            (firstThreadID, "first"),
+            (cappedThreadID, "capped"),
+            (exhaustedThreadID, "exhausted")
+        ] {
+            try insertRawSQLiteThread(
+                id: threadID,
+                agentPath: try AgentPath(validating: "/root/memory/\(suffix)"),
+                memoryMode: "enabled",
+                databaseURL: databaseURL
+            )
+        }
+
+        let firstClaim = try await store.tryClaimStage1Job(
+            threadID: firstThreadID,
+            workerID: workerID,
+            sourceUpdatedAt: 300,
+            leaseSeconds: 60,
+            maxRunningJobs: 1
+        )
+        let cappedClaim = try await store.tryClaimStage1Job(
+            threadID: cappedThreadID,
+            workerID: workerID,
+            sourceUpdatedAt: 300,
+            leaseSeconds: 60,
+            maxRunningJobs: 1
+        )
+        try insertRawMemoryJob(
+            kind: "memory_stage1",
+            jobKey: exhaustedThreadID.description,
+            status: "error",
+            retryRemaining: 0,
+            inputWatermark: 300,
+            databaseURL: databaseURL
+        )
+        let exhaustedClaim = try await store.tryClaimStage1Job(
+            threadID: exhaustedThreadID,
+            workerID: workerID,
+            sourceUpdatedAt: 300,
+            leaseSeconds: 60,
+            maxRunningJobs: 2
+        )
+        let newerClaim = try await store.tryClaimStage1Job(
+            threadID: exhaustedThreadID,
+            workerID: workerID,
+            sourceUpdatedAt: 301,
+            leaseSeconds: 60,
+            maxRunningJobs: 2
+        )
+
+        _ = try claimedToken(firstClaim)
+        XCTAssertEqual(cappedClaim, Stage1JobClaimOutcome.skippedRunning)
+        XCTAssertEqual(exhaustedClaim, Stage1JobClaimOutcome.skippedRetryExhausted)
+        _ = try claimedToken(newerClaim)
+    }
+
+    func testSQLiteStoreMarksStage1JobSucceededAndEnqueuesGlobalConsolidationLikeRust() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let successThreadID = try threadID(850)
+        let workerID = try threadID(851)
+        try insertRawSQLiteThread(
+            id: successThreadID,
+            agentPath: try AgentPath(validating: "/root/memory/success"),
+            memoryMode: "enabled",
+            rolloutPath: "/tmp/success.jsonl",
+            cwd: "/tmp/workspace-success",
+            databaseURL: databaseURL
+        )
+
+        let claim = try await store.tryClaimStage1Job(
+            threadID: successThreadID,
+            workerID: workerID,
+            sourceUpdatedAt: 400,
+            leaseSeconds: 60,
+            maxRunningJobs: 2
+        )
+        let token = try claimedToken(claim)
+        let wrongTokenResult = try await store.markStage1JobSucceeded(
+            threadID: successThreadID,
+            ownershipToken: "wrong",
+            sourceUpdatedAt: 400,
+            rawMemory: "ignored",
+            rolloutSummary: "ignored",
+            rolloutSlug: nil
+        )
+        let success = try await store.markStage1JobSucceeded(
+            threadID: successThreadID,
+            ownershipToken: token,
+            sourceUpdatedAt: 400,
+            rawMemory: "raw memory",
+            rolloutSummary: "rollout summary",
+            rolloutSlug: "success-slug"
+        )
+        let outputs = try await store.listStage1OutputsForGlobal(limit: 10)
+        let stage1Job = try readRawMemoryJob(
+            kind: "memory_stage1",
+            jobKey: successThreadID.description,
+            databaseURL: databaseURL
+        )
+        let globalJob = try readRawMemoryJob(kind: "memory_consolidate_global", jobKey: "global", databaseURL: databaseURL)
+        let upToDateSkip = try await store.tryClaimStage1Job(
+            threadID: successThreadID,
+            workerID: workerID,
+            sourceUpdatedAt: 400,
+            leaseSeconds: 60,
+            maxRunningJobs: 2
+        )
+
+        XCTAssertFalse(wrongTokenResult)
+        XCTAssertTrue(success)
+        XCTAssertEqual(outputs.map(\.rawMemory), ["raw memory"])
+        XCTAssertEqual(outputs.map(\.rolloutSummary), ["rollout summary"])
+        XCTAssertEqual(outputs.map(\.rolloutSlug), ["success-slug"])
+        XCTAssertEqual(stage1Job?.status, "done")
+        XCTAssertEqual(stage1Job?.lastSuccessWatermark, 400)
+        XCTAssertEqual(globalJob?.status, "pending")
+        XCTAssertEqual(globalJob?.inputWatermark, 400)
+        XCTAssertEqual(upToDateSkip, Stage1JobClaimOutcome.skippedUpToDate)
+    }
+
+    func testSQLiteStoreMarksStage1JobSucceededNoOutputLikeRust() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let emptyThreadID = try threadID(860)
+        let deletingThreadID = try threadID(861)
+        let workerID = try threadID(862)
+        for (threadID, suffix) in [
+            (emptyThreadID, "empty"),
+            (deletingThreadID, "deleting")
+        ] {
+            try insertRawSQLiteThread(
+                id: threadID,
+                agentPath: try AgentPath(validating: "/root/memory/\(suffix)"),
+                memoryMode: "enabled",
+                rolloutPath: "/tmp/\(suffix).jsonl",
+                databaseURL: databaseURL
+            )
+        }
+        try insertRawStage1Output(
+            threadID: deletingThreadID,
+            sourceUpdatedAt: 499,
+            rawMemory: "old raw",
+            rolloutSummary: "old summary",
+            generatedAt: 500,
+            databaseURL: databaseURL
+        )
+
+        let emptyToken = try claimedToken(try await store.tryClaimStage1Job(
+            threadID: emptyThreadID,
+            workerID: workerID,
+            sourceUpdatedAt: 500,
+            leaseSeconds: 60,
+            maxRunningJobs: 2
+        ))
+        let emptySucceeded = try await store.markStage1JobSucceededNoOutput(
+            threadID: emptyThreadID,
+            ownershipToken: emptyToken
+        )
+        XCTAssertTrue(emptySucceeded)
+        let noGlobalAfterEmpty = try readRawMemoryJob(
+            kind: "memory_consolidate_global",
+            jobKey: "global",
+            databaseURL: databaseURL
+        )
+
+        let deletingToken = try claimedToken(try await store.tryClaimStage1Job(
+            threadID: deletingThreadID,
+            workerID: workerID,
+            sourceUpdatedAt: 501,
+            leaseSeconds: 60,
+            maxRunningJobs: 2
+        ))
+        let wrongNoOutputTokenResult = try await store.markStage1JobSucceededNoOutput(
+            threadID: deletingThreadID,
+            ownershipToken: "wrong"
+        )
+        let deletingSucceeded = try await store.markStage1JobSucceededNoOutput(
+            threadID: deletingThreadID,
+            ownershipToken: deletingToken
+        )
+        XCTAssertFalse(wrongNoOutputTokenResult)
+        XCTAssertTrue(deletingSucceeded)
+        let outputs = try await store.listStage1OutputsForGlobal(limit: 10)
+        let globalAfterDelete = try readRawMemoryJob(
+            kind: "memory_consolidate_global",
+            jobKey: "global",
+            databaseURL: databaseURL
+        )
+
+        XCTAssertNil(noGlobalAfterEmpty)
+        XCTAssertEqual(outputs, [])
+        XCTAssertEqual(globalAfterDelete?.status, "pending")
+        XCTAssertEqual(globalAfterDelete?.inputWatermark, 501)
+    }
+
     func testSQLiteStoreFindsRolloutPathWithArchiveFilter() async throws {
         let temp = try AgentGraphStoreTemporaryDirectory()
         let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
@@ -2218,6 +2511,136 @@ final class AgentGraphStoreTests: XCTestCase {
         }
     }
 
+    private func insertRawMemoryJob(
+        kind: String,
+        jobKey: String,
+        status: String,
+        workerID: String? = nil,
+        ownershipToken: String? = nil,
+        startedAt: Int64? = nil,
+        finishedAt: Int64? = nil,
+        leaseUntil: Int64? = nil,
+        retryAt: Int64? = nil,
+        retryRemaining: Int64 = 3,
+        lastError: String? = nil,
+        inputWatermark: Int64? = nil,
+        lastSuccessWatermark: Int64? = nil,
+        databaseURL: URL
+    ) throws {
+        try withRawSQLiteDatabase(databaseURL: databaseURL) { database in
+            var statement: OpaquePointer?
+            let query = """
+                INSERT INTO jobs (
+                    kind,
+                    job_key,
+                    status,
+                    worker_id,
+                    ownership_token,
+                    started_at,
+                    finished_at,
+                    lease_until,
+                    retry_at,
+                    retry_remaining,
+                    last_error,
+                    input_watermark,
+                    last_success_watermark
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """
+            XCTAssertEqual(sqlite3_prepare_v2(database, query, -1, &statement, nil), SQLITE_OK)
+            let preparedStatement = try XCTUnwrap(statement)
+            defer {
+                sqlite3_finalize(preparedStatement)
+            }
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 1, kind, -1, testSQLiteTransient), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 2, jobKey, -1, testSQLiteTransient), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 3, status, -1, testSQLiteTransient), SQLITE_OK)
+            bindOptionalText(workerID, to: preparedStatement, at: 4)
+            bindOptionalText(ownershipToken, to: preparedStatement, at: 5)
+            bindOptionalInt(startedAt, to: preparedStatement, at: 6)
+            bindOptionalInt(finishedAt, to: preparedStatement, at: 7)
+            bindOptionalInt(leaseUntil, to: preparedStatement, at: 8)
+            bindOptionalInt(retryAt, to: preparedStatement, at: 9)
+            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 10, retryRemaining), SQLITE_OK)
+            bindOptionalText(lastError, to: preparedStatement, at: 11)
+            bindOptionalInt(inputWatermark, to: preparedStatement, at: 12)
+            bindOptionalInt(lastSuccessWatermark, to: preparedStatement, at: 13)
+            XCTAssertEqual(sqlite3_step(preparedStatement), SQLITE_DONE)
+        }
+    }
+
+    private struct RawMemoryJob: Equatable {
+        var status: String
+        var workerID: String?
+        var ownershipToken: String?
+        var startedAt: Int64?
+        var finishedAt: Int64?
+        var leaseUntil: Int64?
+        var retryAt: Int64?
+        var retryRemaining: Int64
+        var lastError: String?
+        var inputWatermark: Int64?
+        var lastSuccessWatermark: Int64?
+    }
+
+    private func readRawMemoryJob(
+        kind: String,
+        jobKey: String,
+        databaseURL: URL
+    ) throws -> RawMemoryJob? {
+        try withRawSQLiteDatabase(databaseURL: databaseURL) { database in
+            var statement: OpaquePointer?
+            let query = """
+                SELECT
+                    status,
+                    worker_id,
+                    ownership_token,
+                    started_at,
+                    finished_at,
+                    lease_until,
+                    retry_at,
+                    retry_remaining,
+                    last_error,
+                    input_watermark,
+                    last_success_watermark
+                FROM jobs
+                WHERE kind = ? AND job_key = ?
+                """
+            XCTAssertEqual(sqlite3_prepare_v2(database, query, -1, &statement, nil), SQLITE_OK)
+            let preparedStatement = try XCTUnwrap(statement)
+            defer {
+                sqlite3_finalize(preparedStatement)
+            }
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 1, kind, -1, testSQLiteTransient), SQLITE_OK)
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 2, jobKey, -1, testSQLiteTransient), SQLITE_OK)
+            let result = sqlite3_step(preparedStatement)
+            if result == SQLITE_DONE {
+                return nil
+            }
+            XCTAssertEqual(result, SQLITE_ROW)
+            return RawMemoryJob(
+                status: try requiredTextColumn(preparedStatement, index: 0),
+                workerID: optionalTextColumn(preparedStatement, index: 1),
+                ownershipToken: optionalTextColumn(preparedStatement, index: 2),
+                startedAt: optionalIntColumn(preparedStatement, index: 3),
+                finishedAt: optionalIntColumn(preparedStatement, index: 4),
+                leaseUntil: optionalIntColumn(preparedStatement, index: 5),
+                retryAt: optionalIntColumn(preparedStatement, index: 6),
+                retryRemaining: sqlite3_column_int64(preparedStatement, 7),
+                lastError: optionalTextColumn(preparedStatement, index: 8),
+                inputWatermark: optionalIntColumn(preparedStatement, index: 9),
+                lastSuccessWatermark: optionalIntColumn(preparedStatement, index: 10)
+            )
+        }
+    }
+
+    private func claimedToken(_ outcome: Stage1JobClaimOutcome) throws -> String {
+        guard case let .claimed(ownershipToken) = outcome else {
+            XCTFail("expected claimed outcome, got \(outcome)")
+            throw AgentGraphStoreTestError.unexpectedClaimOutcome
+        }
+        return ownershipToken
+    }
+
     private func stage1Usage(
         threadID: ThreadId,
         databaseURL: URL
@@ -2324,9 +2747,24 @@ final class AgentGraphStoreTests: XCTestCase {
         }
     }
 
+    private func bindOptionalInt(_ value: Int64?, to statement: OpaquePointer, at index: Int32) {
+        if let value {
+            XCTAssertEqual(sqlite3_bind_int64(statement, index, value), SQLITE_OK)
+        } else {
+            XCTAssertEqual(sqlite3_bind_null(statement, index), SQLITE_OK)
+        }
+    }
+
     private func optionalTextColumn(_ statement: OpaquePointer, index: Int32) -> String? {
         guard let rawValue = sqlite3_column_text(statement, index) else {
             return nil
+        }
+        return String(cString: rawValue)
+    }
+
+    private func requiredTextColumn(_ statement: OpaquePointer, index: Int32) throws -> String {
+        guard let rawValue = sqlite3_column_text(statement, index) else {
+            throw AgentGraphStoreTestError.nullTextColumn
         }
         return String(cString: rawValue)
     }
@@ -2347,6 +2785,11 @@ final class AgentGraphStoreTests: XCTestCase {
         }
         return try body(openedDatabase)
     }
+}
+
+private enum AgentGraphStoreTestError: Error {
+    case nullTextColumn
+    case unexpectedClaimOutcome
 }
 
 private final class AgentGraphStoreTemporaryDirectory {
