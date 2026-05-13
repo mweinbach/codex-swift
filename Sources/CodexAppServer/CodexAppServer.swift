@@ -8230,6 +8230,11 @@ public enum CodexAppServer {
     ) throws -> RemotePluginBundleMetadata {
         let pluginName = detail["name"] as? String ?? ""
         let marketplaceName = remotePluginMarketplaceName(forScope: detail["scope"] as? String ?? "GLOBAL")
+        if let message = pluginSegmentValidationMessage(pluginName, kind: "plugin name") {
+            throw AppServerError.internalError(
+                "install remote plugin bundle: backend returned an invalid local plugin id for remote plugin `\(remotePluginID)`: \(message)"
+            )
+        }
         let release = detail["release"] as? [String: Any]
         let version = (release?["version"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !version.isEmpty else {
@@ -18669,14 +18674,21 @@ public enum CodexAppServer {
     }
 
     private static func validatePluginSegment(_ segment: String, kind: String) throws {
+        if let message = pluginSegmentValidationMessage(segment, kind: kind) {
+            throw AppServerError.invalidRequest(message)
+        }
+    }
+
+    private static func pluginSegmentValidationMessage(_ segment: String, kind: String) -> String? {
         guard !segment.isEmpty else {
-            throw AppServerError.invalidRequest("invalid \(kind): must not be empty")
+            return "invalid \(kind): must not be empty"
         }
         guard segment.allSatisfy({ character in
             character.isASCII && (character.isLetter || character.isNumber || character == "_" || character == "-")
         }) else {
-            throw AppServerError.invalidRequest("invalid \(kind): only ASCII letters, digits, `_`, and `-` are allowed")
+            return "invalid \(kind): only ASCII letters, digits, `_`, and `-` are allowed"
         }
+        return nil
     }
 
     private static func removeMarketplaceConfig(named marketplaceName: String, from config: inout ConfigValue) throws -> Bool {
