@@ -1034,6 +1034,7 @@ private func runNonInteractiveExec(
     let requestTrace = W3CTraceContext.fromEnvironment()
     let loopResult = await NonInteractiveExec.runResponsesLoopWithTranscript(
         initialPrompt: prompt,
+        features: settings.features,
         streamPrompt: { nextPrompt in
             await client.streamPromptRetryingProviderCommandAuth(
                 model: resolvedModel,

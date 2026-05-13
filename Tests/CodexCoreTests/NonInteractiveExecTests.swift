@@ -2407,6 +2407,8 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(item["id"], .string("item_0"))
         XCTAssertEqual(item["type"], .string("web_search"))
         XCTAssertEqual(item["query"], .string("rust async await"))
+        XCTAssertEqual(item["action"]?["type"], .string("search"))
+        XCTAssertEqual(item["action"]?["query"], .string("rust async await"))
         guard case let .object(usage)? = objects[3]["usage"] else {
             return XCTFail("expected default usage")
         }
@@ -2415,6 +2417,55 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(usage["output_tokens"], .integer(0))
         XCTAssertEqual(usage["reasoning_output_tokens"], .integer(0))
         XCTAssertNil(result.lastAgentMessage)
+    }
+
+    func testJSONLinesOutputEmitsWebSearchStartedAndCompletedItemsLikeRust() throws {
+        let id = try ConversationId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
+        let result = NonInteractiveExec.finish(
+            responseEvents: [
+                .success(.outputItemAdded(.webSearchCall(
+                    id: "ws_1",
+                    status: "in_progress",
+                    action: nil
+                ))),
+                .success(.outputItemDone(.webSearchCall(
+                    id: "ws_1",
+                    status: "completed",
+                    action: .findInPage(url: "https://example.com", pattern: "needle")
+                ))),
+                .success(.completed(responseID: "resp_1", tokenUsage: nil))
+            ],
+            outputMode: .jsonLines,
+            conversationID: id,
+            lastMessageFile: nil
+        )
+
+        XCTAssertEqual(result.exitCode, 0)
+        let lines = try XCTUnwrap(result.stdoutMessage?.split(separator: "\n").map(String.init))
+        XCTAssertEqual(lines.count, 5)
+        let objects = try lines.map(jsonObject)
+        XCTAssertEqual(objects.map { $0["type"] }, [
+            .string("thread.started"),
+            .string("turn.started"),
+            .string("item.started"),
+            .string("item.completed"),
+            .string("turn.completed")
+        ])
+        guard case let .object(startedItem)? = objects[2]["item"],
+              case let .object(completedItem)? = objects[3]["item"]
+        else {
+            return XCTFail("expected web search items")
+        }
+        XCTAssertEqual(startedItem["id"], .string("item_0"))
+        XCTAssertEqual(startedItem["type"], .string("web_search"))
+        XCTAssertEqual(startedItem["query"], .string(""))
+        XCTAssertEqual(startedItem["action"]?["type"], .string("other"))
+        XCTAssertEqual(completedItem["id"], .string("item_0"))
+        XCTAssertEqual(completedItem["type"], .string("web_search"))
+        XCTAssertEqual(completedItem["query"], .string("'needle' in https://example.com"))
+        XCTAssertEqual(completedItem["action"]?["type"], .string("find_in_page"))
+        XCTAssertEqual(completedItem["action"]?["url"], .string("https://example.com"))
+        XCTAssertEqual(completedItem["action"]?["pattern"], .string("needle"))
     }
 
     func testFailureOutputReturnsExitOneAndWritesEmptyLastMessage() throws {

@@ -913,7 +913,7 @@ public enum NonInteractiveExec {
             jsonLines.append(encodeJSONLine(TurnStartedEvent(), using: jsonEncoder))
         }
 
-        var itemIndex = 0
+        var itemIDs = ExecJSONItemIDMapper()
         for result in events {
             switch result {
             case let .failure(error):
@@ -925,18 +925,27 @@ public enum NonInteractiveExec {
 
             case let .success(event):
                 switch event {
+                case let .outputItemAdded(item):
+                    if outputMode == .jsonLines,
+                       let startedItem = execJSONStartedItem(from: item, itemIDs: &itemIDs)
+                    {
+                        jsonLines.append(encodeJSONLine(
+                            ExecJSONItemStartedEvent(item: startedItem),
+                            using: jsonEncoder
+                        ))
+                    }
+
                 case let .outputItemDone(item):
                     if let message = StreamEventUtils.lastAssistantMessage(from: item) {
                         lastAgentMessage = message
                     }
                     if outputMode == .jsonLines,
-                       let completedItem = execJSONCompletedItem(from: item, itemIndex: itemIndex)
+                       let completedItem = execJSONCompletedItem(from: item, itemIDs: &itemIDs)
                     {
                         jsonLines.append(encodeJSONLine(
                             ExecJSONItemCompletedEvent(item: completedItem),
                             using: jsonEncoder
                         ))
-                        itemIndex += 1
                     }
 
                 case let .completed(_, usage, _):
@@ -944,7 +953,6 @@ public enum NonInteractiveExec {
                     tokenUsage = usage
 
                 case .created,
-                     .outputItemAdded,
                      .outputTextDelta,
                      .reasoningSummaryDelta,
                      .reasoningContentDelta,
@@ -1002,16 +1010,40 @@ public enum NonInteractiveExec {
         )
     }
 
-    private static func execJSONCompletedItem(from item: ResponseItem, itemIndex: Int) -> CompletedItem? {
-        let id = "item_\(itemIndex)"
+    private static func execJSONStartedItem(
+        from item: ResponseItem,
+        itemIDs: inout ExecJSONItemIDMapper
+    ) -> CompletedItem? {
+        if case let .webSearchCall(rawID, _, action) = item {
+            let resolvedAction = action ?? .other
+            return CompletedItem(
+                id: itemIDs.startedID(rawID: rawID),
+                type: "web_search",
+                query: resolvedAction.detail,
+                action: resolvedAction
+            )
+        }
+        return nil
+    }
+
+    private static func execJSONCompletedItem(
+        from item: ResponseItem,
+        itemIDs: inout ExecJSONItemIDMapper
+    ) -> CompletedItem? {
         if let message = StreamEventUtils.lastAssistantMessage(from: item) {
-            return CompletedItem(id: id, type: "agent_message", text: message)
+            return CompletedItem(id: itemIDs.nextID(), type: "agent_message", text: message)
         }
         if let reasoningText = reasoningSummaryText(from: item) {
-            return CompletedItem(id: id, type: "reasoning", text: reasoningText)
+            return CompletedItem(id: itemIDs.nextID(), type: "reasoning", text: reasoningText)
         }
-        if case let .webSearchCall(_, _, action) = item {
-            return CompletedItem(id: id, type: "web_search", query: action?.detail ?? "")
+        if case let .webSearchCall(rawID, _, action) = item {
+            let resolvedAction = action ?? .other
+            return CompletedItem(
+                id: itemIDs.completedID(rawID: rawID),
+                type: "web_search",
+                query: resolvedAction.detail,
+                action: resolvedAction
+            )
         }
         return nil
     }
@@ -2561,13 +2593,50 @@ private struct CompletedItem: Encodable {
     let type: String
     let text: String?
     let query: String?
+    let action: WebSearchAction?
 
-    init(id: String, type: String, text: String? = nil, query: String? = nil) {
+    init(id: String, type: String, text: String? = nil, query: String? = nil, action: WebSearchAction? = nil) {
         self.id = id
         self.type = type
         self.text = text
         self.query = query
+        self.action = action
     }
+}
+
+private struct ExecJSONItemIDMapper {
+    private var nextItemIndex = 0
+    private var rawToExecID: [String: String] = [:]
+
+    mutating func nextID() -> String {
+        let id = "item_\(nextItemIndex)"
+        nextItemIndex += 1
+        return id
+    }
+
+    mutating func startedID(rawID: String?) -> String {
+        guard let rawID else {
+            return nextID()
+        }
+        if let existing = rawToExecID[rawID] {
+            return existing
+        }
+        let id = nextID()
+        rawToExecID[rawID] = id
+        return id
+    }
+
+    mutating func completedID(rawID: String?) -> String {
+        guard let rawID else {
+            return nextID()
+        }
+        return rawToExecID.removeValue(forKey: rawID) ?? nextID()
+    }
+}
+
+private struct ExecJSONItemStartedEvent: Encodable {
+    let type = "item.started"
+    let item: CompletedItem
 }
 
 private struct ExecJSONItemCompletedEvent: Encodable {
