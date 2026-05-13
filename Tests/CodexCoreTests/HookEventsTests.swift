@@ -55,6 +55,15 @@ final class HookEventsTests: XCTestCase {
         )
     }
 
+    func testLegacyAfterToolUseHookEventIsNotSupportedLikeRust() {
+        XCTAssertFalse(HooksProtocol.eventNames.contains("AfterToolUse"))
+        XCTAssertFalse(HooksProtocol.eventNamesWithMatchers.contains("AfterToolUse"))
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            HookEventName.self,
+            from: Data(#""after_tool_use""#.utf8)
+        ))
+    }
+
     func testHookRunSummaryEncodesRustSnakeCaseShapeWithExplicitNullOptionals() throws {
         let run = try HookRunSummary(
             id: "run-1",
