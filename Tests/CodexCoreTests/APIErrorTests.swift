@@ -198,6 +198,73 @@ final class APIErrorTests: XCTestCase {
         )
     }
 
+    func testCodexErrorProtocolMappingMatchesRust() {
+        XCTAssertEqual(CodexError.contextWindowExceeded.toCodexProtocolError(), .contextWindowExceeded)
+        XCTAssertEqual(
+            CodexError.usageLimitReached(UsageLimitReachedError()).toCodexProtocolError(),
+            .usageLimitExceeded
+        )
+        XCTAssertEqual(CodexError.quotaExceeded.toCodexProtocolError(), .usageLimitExceeded)
+        XCTAssertEqual(CodexError.usageNotIncluded.toCodexProtocolError(), .usageLimitExceeded)
+        XCTAssertEqual(CodexError.serverOverloaded.toCodexProtocolError(), .serverOverloaded)
+        XCTAssertEqual(
+            CodexError.cyberPolicy(message: "blocked").toCodexProtocolError(),
+            .cyberPolicy
+        )
+        XCTAssertEqual(
+            CodexError.retryLimit(RetryLimitReachedError(statusCode: 429)).toCodexProtocolError(),
+            .responseTooManyFailedAttempts(httpStatusCode: 429)
+        )
+        XCTAssertEqual(
+            CodexError.connectionFailed(ConnectionFailedError(statusCode: 503, url: "http://example.com/"))
+                .toCodexProtocolError(),
+            .httpConnectionFailed(httpStatusCode: 503)
+        )
+        XCTAssertEqual(
+            CodexError.responseStreamFailed(ResponseStreamFailedError(statusCode: 502, url: "http://example.com/"))
+                .toCodexProtocolError(),
+            .responseStreamConnectionFailed(httpStatusCode: 502)
+        )
+        XCTAssertEqual(CodexError.internalServerError.toCodexProtocolError(), .internalServerError)
+        XCTAssertEqual(CodexError.invalidRequest("bad prompt").toCodexProtocolError(), .other)
+        XCTAssertEqual(CodexError.timeout.toCodexProtocolError(), .other)
+    }
+
+    func testCodexErrorToErrorEventHandlesResponseStreamFailedLikeRust() {
+        let event = CodexError.responseStreamFailed(ResponseStreamFailedError(
+            statusCode: 429,
+            url: "http://example.com/",
+            requestID: "req-123"
+        )).toErrorEvent(messagePrefix: "prefix")
+
+        XCTAssertEqual(
+            event.message,
+            "prefix: Error while reading the server response: HTTP status client error (429 Too Many Requests) for url (http://example.com/), request id: req-123"
+        )
+        XCTAssertEqual(
+            event.codexErrorInfo,
+            .responseStreamConnectionFailed(httpStatusCode: 429)
+        )
+    }
+
+    func testCodexErrorToErrorEventUsesRustMessagePrefixAndDefaultInfo() {
+        XCTAssertEqual(
+            CodexError.invalidRequest("bad prompt").toErrorEvent(),
+            ErrorEvent(message: "bad prompt", codexErrorInfo: .other)
+        )
+        XCTAssertEqual(
+            CodexError.retryLimit(RetryLimitReachedError(statusCode: 700)).toErrorEvent(messagePrefix: "turn failed"),
+            ErrorEvent(
+                message: "turn failed: exceeded retry limit, last status: 700 <unknown status code>",
+                codexErrorInfo: .responseTooManyFailedAttempts(httpStatusCode: 700)
+            )
+        )
+        XCTAssertEqual(
+            CodexError.retryLimit(RetryLimitReachedError(statusCode: 70_000)).toCodexProtocolError(),
+            .responseTooManyFailedAttempts(httpStatusCode: nil)
+        )
+    }
+
     func testUnexpectedResponseErrorDisplayMatchesRustStatusAndMetadata() {
         let error = UnexpectedResponseError(
             statusCode: 500,

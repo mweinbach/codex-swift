@@ -54,6 +54,8 @@ public enum CodexError: Error, Equatable, CustomStringConvertible, Sendable {
     case unexpectedStatus(UnexpectedResponseError)
     case invalidRequest(String)
     case cyberPolicy(message: String)
+    case responseStreamFailed(ResponseStreamFailedError)
+    case connectionFailed(ConnectionFailedError)
     case usageLimitReached(UsageLimitReachedError)
     case invalidImageRequest
     case internalServerError
@@ -82,6 +84,10 @@ public enum CodexError: Error, Equatable, CustomStringConvertible, Sendable {
             return message
         case let .cyberPolicy(message):
             return "cyber policy: \(message)"
+        case let .responseStreamFailed(error):
+            return String(describing: error)
+        case let .connectionFailed(error):
+            return String(describing: error)
         case let .usageLimitReached(error):
             return String(describing: error)
         case .invalidImageRequest:
@@ -120,6 +126,42 @@ public enum CodexError: Error, Equatable, CustomStringConvertible, Sendable {
         case let .rateLimit(message):
             return .stream(message: message, delay: nil)
         }
+    }
+
+    public func toCodexProtocolError() -> CodexErrorInfo {
+        switch self {
+        case .contextWindowExceeded:
+            return .contextWindowExceeded
+        case .usageLimitReached, .quotaExceeded, .usageNotIncluded:
+            return .usageLimitExceeded
+        case .serverOverloaded:
+            return .serverOverloaded
+        case .cyberPolicy:
+            return .cyberPolicy
+        case let .retryLimit(error):
+            return .responseTooManyFailedAttempts(httpStatusCode: Self.httpStatusCodeValue(error.statusCode))
+        case let .connectionFailed(error):
+            return .httpConnectionFailed(httpStatusCode: Self.httpStatusCodeValue(error.statusCode))
+        case let .responseStreamFailed(error):
+            return .responseStreamConnectionFailed(httpStatusCode: Self.httpStatusCodeValue(error.statusCode))
+        case .internalServerError:
+            return .internalServerError
+        default:
+            return .other
+        }
+    }
+
+    public func toErrorEvent(messagePrefix: String? = nil) -> ErrorEvent {
+        let errorMessage = String(describing: self)
+        let message = messagePrefix.map { "\($0): \(errorMessage)" } ?? errorMessage
+        return ErrorEvent(message: message, codexErrorInfo: toCodexProtocolError())
+    }
+
+    private static func httpStatusCodeValue(_ statusCode: Int?) -> UInt16? {
+        guard let statusCode, (0...Int(UInt16.max)).contains(statusCode) else {
+            return nil
+        }
+        return UInt16(statusCode)
     }
 
     private static func mapTransportError(_ error: TransportError) -> CodexError {
@@ -410,6 +452,66 @@ public struct RetryLimitReachedError: Error, Equatable, CustomStringConvertible,
             message += ", request id: \(requestID)"
         }
         return message
+    }
+}
+
+public struct ConnectionFailedError: Error, Equatable, CustomStringConvertible, Sendable {
+    public let sourceDescription: String
+    public let statusCode: Int?
+
+    public init(sourceDescription: String, statusCode: Int? = nil) {
+        self.sourceDescription = sourceDescription
+        self.statusCode = statusCode
+    }
+
+    public init(statusCode: Int, url: String) {
+        self.sourceDescription = Self.statusErrorDescription(statusCode: statusCode, url: url)
+        self.statusCode = statusCode
+    }
+
+    public var description: String {
+        "Connection failed: \(sourceDescription)"
+    }
+}
+
+public struct ResponseStreamFailedError: Error, Equatable, CustomStringConvertible, Sendable {
+    public let sourceDescription: String
+    public let statusCode: Int?
+    public let requestID: String?
+
+    public init(sourceDescription: String, statusCode: Int? = nil, requestID: String? = nil) {
+        self.sourceDescription = sourceDescription
+        self.statusCode = statusCode
+        self.requestID = requestID
+    }
+
+    public init(statusCode: Int, url: String, requestID: String? = nil) {
+        self.sourceDescription = ConnectionFailedError.statusErrorDescription(statusCode: statusCode, url: url)
+        self.statusCode = statusCode
+        self.requestID = requestID
+    }
+
+    public var description: String {
+        var message = "Error while reading the server response: \(sourceDescription)"
+        if let requestID {
+            message += ", request id: \(requestID)"
+        }
+        return message
+    }
+}
+
+private extension ConnectionFailedError {
+    static func statusErrorDescription(statusCode: Int, url: String) -> String {
+        let statusClass: String
+        switch statusCode {
+        case 400...499:
+            statusClass = "client"
+        case 500...599:
+            statusClass = "server"
+        default:
+            statusClass = "status"
+        }
+        return "HTTP status \(statusClass) error (\(HTTPStatus.description(for: statusCode))) for url (\(url))"
     }
 }
 

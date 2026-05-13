@@ -92,6 +92,8 @@ Source baseline inspected for this scaffold:
   - API error display strings, transparent transport error wrapping, retryable delay payload preservation, rate-limit error conversion, shared HTTP status text rendering, unexpected-response display formatting, retry-limit/env-var display strings, and usage-limit messages
 - `codex-rs/codex-api/src/api_bridge.rs`
   - low-level API errors now bridge into Rust-shaped Codex errors for server-overloaded 503 bodies, 400 cyber-policy bodies including wrapped websocket payloads, 429 usage-limit metadata with active-limit headers, retry-limit tracking ids, identity/auth error headers, invalid-image bodies, and transport timeout/network/build fallbacks
+- `codex-rs/protocol/src/error.rs`
+  - Codex error protocol projection now mirrors Rust's `to_codex_protocol_error`/`to_error_event` helpers for context-window, usage-limit/quota/not-included, server-overloaded, cyber-policy, retry-limit, connection-failed, response-stream-failed, internal-server, and default `other` classifications, including prefixed error-event messages and HTTP-status payload truncation to the protocol `u16` range
 - Pure `/models` endpoint helpers from `codex-rs/codex-api/src/endpoint/models.rs`
   - models request path construction, `client_version` query appending, extra-header merging, response decoding, and ETag header precedence
 - `codex-rs/codex-api/src/auth.rs`
