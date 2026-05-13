@@ -94,6 +94,57 @@ final class EndpointClientsTests: XCTestCase {
         XCTAssertTrue(transport.executeRequests.isEmpty)
     }
 
+    func testMemoriesClientPostsTraceSummarizeBodyWithAuthAndDecodesOutput() async throws {
+        let output = [
+            MemorySummarizeOutput(rawMemory: "raw summary", memorySummary: "memory summary")
+        ]
+        let transport = CapturingTransport(
+            executeResults: [
+                .success(APIResponse(
+                    statusCode: 200,
+                    body: try JSONEncoder().encode(MemorySummarizeResponse(output: output))
+                ))
+            ]
+        )
+        let input = MemorySummarizeInput(
+            model: "gpt-test",
+            rawMemories: [
+                RawMemory(
+                    id: "trace-1",
+                    metadata: RawMemoryMetadata(sourcePath: "/tmp/trace.json"),
+                    items: [
+                        .object([
+                            "type": .string("message"),
+                            "role": .string("user"),
+                            "content": .array([])
+                        ])
+                    ]
+                )
+            ]
+        )
+        let client = MemoriesClient(
+            transport: transport,
+            provider: provider(
+                baseURL: "https://example.com/api/codex",
+                headers: ["x-provider": "provider"]
+            ),
+            auth: StaticAPIAuthProvider(bearerToken: "tok", accountID: "acct")
+        )
+
+        let result = await client.summarizeInput(input, extraHeaders: ["x-extra": "extra"])
+
+        XCTAssertEqual(result, .success(output))
+        XCTAssertEqual(transport.executeRequests.count, 1)
+        let request = try XCTUnwrap(transport.executeRequests.first)
+        XCTAssertEqual(request.method, .post)
+        XCTAssertEqual(request.url, "https://example.com/api/codex/memories/trace_summarize")
+        XCTAssertEqual(request.body, try MemorySummarizeAPI.body(for: input))
+        XCTAssertEqual(request.headers["x-provider"], "provider")
+        XCTAssertEqual(request.headers["x-extra"], "extra")
+        XCTAssertEqual(request.headers["authorization"], "Bearer tok")
+        XCTAssertEqual(request.headers["ChatGPT-Account-ID"], "acct")
+    }
+
     func testResponsesClientStreamsWithAcceptAuthAndResponseParser() async {
         let transport = CapturingTransport(
             streamResults: [

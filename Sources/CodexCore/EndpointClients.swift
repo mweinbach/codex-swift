@@ -672,6 +672,73 @@ public struct CompactClient<Transport: APITransport, Auth: APIAuthProvider> {
     }
 }
 
+public struct MemoriesClient<Transport: APITransport, Auth: APIAuthProvider> {
+    public let transport: Transport
+    public let provider: APIProvider
+    public let auth: Auth
+    public var requestTelemetry: RequestTelemetry?
+
+    public init(
+        transport: Transport,
+        provider: APIProvider,
+        auth: Auth,
+        requestTelemetry: RequestTelemetry? = nil
+    ) {
+        self.transport = transport
+        self.provider = provider
+        self.auth = auth
+        self.requestTelemetry = requestTelemetry
+    }
+
+    public func withTelemetry(_ telemetry: RequestTelemetry?) -> MemoriesClient {
+        var copy = self
+        copy.requestTelemetry = telemetry
+        return copy
+    }
+
+    public func summarizeInput(
+        _ input: MemorySummarizeInput,
+        extraHeaders: [String: String] = [:]
+    ) async -> Result<[MemorySummarizeOutput], APIError> {
+        do {
+            return await summarize(body: try MemorySummarizeAPI.body(for: input), extraHeaders: extraHeaders)
+        } catch {
+            return .failure(.stream(String(describing: error)))
+        }
+    }
+
+    public func summarize(
+        body: JSONValue,
+        extraHeaders: [String: String] = [:]
+    ) async -> Result<[MemorySummarizeOutput], APIError> {
+        let result: Result<APIResponse, TransportError> = await TransportRetry.runWithRequestTelemetry(
+            policy: provider.retry.toPolicy(),
+            telemetry: requestTelemetry,
+            makeRequest: {
+                var request = provider.buildRequest(method: .post, path: MemorySummarizeAPI.path).withJSON(body)
+                for (name, value) in extraHeaders {
+                    request.headers[name] = value
+                }
+                return request.addingAuthHeaders(from: auth)
+            },
+            send: { request in
+                await transport.execute(request)
+            }
+        )
+
+        switch result {
+        case let .success(response):
+            do {
+                return .success(try JSONDecoder().decode(MemorySummarizeResponse.self, from: response.body).output)
+            } catch {
+                return .failure(.stream(String(describing: error)))
+            }
+        case let .failure(error):
+            return .failure(.transport(error))
+        }
+    }
+}
+
 public struct ResponsesOptions: Equatable, Sendable {
     public var reasoning: ResponsesAPIReasoning?
     public var include: [String]
