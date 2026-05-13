@@ -273,9 +273,12 @@ public enum NonInteractiveExec {
             ? nil
             : ResponsesAPIReasoning(effort: effort, summary: summary)
 
+        let supportedServiceTierIDs = modelFamily.serviceTiers.map(\.id)
+
         return ResponsesOptions(
             reasoning: reasoning,
             serviceTier: serviceTier,
+            supportedServiceTierIDs: supportedServiceTierIDs.isEmpty ? nil : supportedServiceTierIDs,
             text: ResponsesAPITextControls.createForRequest(
                 verbosity: verbosity ?? modelFamily.defaultVerbosity,
                 outputSchema: outputSchema

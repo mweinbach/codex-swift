@@ -287,12 +287,15 @@ public func memoryStageOneResponsesOptions(
     prompt: Prompt,
     verbosity: Verbosity? = nil
 ) -> ResponsesOptions {
-    ResponsesOptions(
+    let supportedServiceTierIDs = context.modelInfo.serviceTiers.map(\.id)
+
+    return ResponsesOptions(
         reasoning: ResponsesAPIReasoning(
             effort: context.reasoningEffort,
             summary: context.reasoningSummary
         ),
         serviceTier: context.serviceTier,
+        supportedServiceTierIDs: supportedServiceTierIDs.isEmpty ? nil : supportedServiceTierIDs,
         text: ResponsesAPITextControls.createForRequest(
             verbosity: verbosity ?? context.modelInfo.defaultVerbosity,
             outputSchema: prompt.outputSchema

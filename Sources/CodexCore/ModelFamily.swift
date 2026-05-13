@@ -39,6 +39,7 @@ public struct ModelFamily: Equatable, Sendable {
     public var inputModalities: [InputModality]
     public var supportsImageDetailOriginal: Bool
     public var maxContextWindow: Int64?
+    public var serviceTiers: [ModelServiceTier]
 
     private var configuredAutoCompactTokenLimit: Int64?
 
@@ -62,7 +63,8 @@ public struct ModelFamily: Equatable, Sendable {
         truncationPolicy: TruncationPolicy = .bytes(10_000),
         inputModalities: [InputModality] = InputModality.defaultInputModalities,
         supportsImageDetailOriginal: Bool = false,
-        maxContextWindow: Int64? = nil
+        maxContextWindow: Int64? = nil,
+        serviceTiers: [ModelServiceTier] = []
     ) {
         self.slug = slug
         self.family = family
@@ -84,6 +86,7 @@ public struct ModelFamily: Equatable, Sendable {
         self.inputModalities = inputModalities
         self.supportsImageDetailOriginal = supportsImageDetailOriginal
         self.maxContextWindow = maxContextWindow
+        self.serviceTiers = serviceTiers
     }
 
     public func withConfigOverrides(_ overrides: ModelFamilyConfigOverrides) -> ModelFamily {
@@ -130,6 +133,7 @@ public struct ModelFamily: Equatable, Sendable {
         truncationPolicy = model.truncationPolicy.runtimePolicy
         inputModalities = model.inputModalities
         supportsImageDetailOriginal = model.supportsImageDetailOriginal
+        serviceTiers = model.serviceTiers
         supportsParallelToolCalls = model.supportsParallelToolCalls
         contextWindow = model.resolvedContextWindow
         maxContextWindow = model.maxContextWindow
@@ -184,7 +188,9 @@ extension ModelsManager {
         model: String,
         configOverrides: ModelFamilyConfigOverrides = ModelFamilyConfigOverrides()
     ) -> ModelFamily {
-        findFamilyForModel(model).withConfigOverrides(configOverrides)
+        findFamilyForModel(model)
+            .withRemoteOverrides(bundledModels)
+            .withConfigOverrides(configOverrides)
     }
 
     public static func findFamilyForModel(_ slug: String) -> ModelFamily {

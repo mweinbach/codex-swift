@@ -633,6 +633,51 @@ final class EndpointClientsTests: XCTestCase {
         XCTAssertEqual(metadata[CodexRequestHeaders.turnMetadataHeaderName], turnMetadata)
     }
 
+    func testResponsesClientOmitsUnsupportedServiceTierLikeRust() async throws {
+        let transport = CapturingTransport(
+            streamResults: [
+                .success(APIStreamResponse(statusCode: 200, sseText: """
+                data: {"type":"response.completed","response":{"id":"resp_1","usage":null}}
+
+                """)),
+                .success(APIStreamResponse(statusCode: 200, sseText: """
+                data: {"type":"response.completed","response":{"id":"resp_2","usage":null}}
+
+                """))
+            ]
+        )
+        let client = ResponsesClient(
+            transport: transport,
+            provider: provider(),
+            auth: StaticAPIAuthProvider(bearerToken: "api-key")
+        )
+        let prompt = Prompt(input: [.message(role: "user", content: [.inputText(text: "hi")])])
+
+        _ = await client.streamPrompt(
+            model: "gpt-test",
+            instructions: "inst",
+            prompt: prompt,
+            options: ResponsesOptions(
+                serviceTier: "priority",
+                supportedServiceTierIDs: ["flex"]
+            )
+        )
+        _ = await client.streamPrompt(
+            model: "gpt-test",
+            instructions: "inst",
+            prompt: prompt,
+            options: ResponsesOptions(
+                serviceTier: "priority",
+                supportedServiceTierIDs: ["priority"]
+            )
+        )
+
+        let firstBody = try JSONObject(try XCTUnwrap(transport.streamRequests.first?.body))
+        XCTAssertNil(firstBody["service_tier"])
+        let secondBody = try JSONObject(try XCTUnwrap(transport.streamRequests.dropFirst().first?.body))
+        XCTAssertEqual(secondBody["service_tier"] as? String, "priority")
+    }
+
     func testResponsesClientNormalizesPromptInputForTextOnlyModels() async throws {
         let transport = CapturingTransport(
             streamResults: [

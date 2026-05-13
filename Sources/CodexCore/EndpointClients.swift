@@ -743,6 +743,7 @@ public struct ResponsesOptions: Equatable, Sendable {
     public var reasoning: ResponsesAPIReasoning?
     public var include: [String]
     public var serviceTier: String?
+    public var supportedServiceTierIDs: [String]?
     public var promptCacheKey: String?
     public var text: ResponsesAPITextControls?
     public var inputModalities: [InputModality]
@@ -757,6 +758,7 @@ public struct ResponsesOptions: Equatable, Sendable {
         reasoning: ResponsesAPIReasoning? = nil,
         include: [String] = [],
         serviceTier: String? = nil,
+        supportedServiceTierIDs: [String]? = nil,
         promptCacheKey: String? = nil,
         text: ResponsesAPITextControls? = nil,
         inputModalities: [InputModality] = InputModality.defaultInputModalities,
@@ -770,6 +772,7 @@ public struct ResponsesOptions: Equatable, Sendable {
         self.reasoning = reasoning
         self.include = include
         self.serviceTier = serviceTier
+        self.supportedServiceTierIDs = supportedServiceTierIDs
         self.promptCacheKey = promptCacheKey
         self.text = text
         self.inputModalities = inputModalities
@@ -868,13 +871,16 @@ public struct ResponsesClient<Transport: APITransport, Auth: APIAuthProvider> {
             var input = prompt.input
             ContextNormalization.normalizeHistory(&input)
             ContextNormalization.stripImagesWhenUnsupported(inputModalities: options.inputModalities, items: &input)
+            let serviceTier = options.supportedServiceTierIDs.map { supportedIDs in
+                options.serviceTier.flatMap { supportedIDs.contains($0) ? $0 : nil }
+            } ?? options.serviceTier
 
             let request = try ResponsesRequestBuilder(model: model, instructions: instructions, input: input)
                 .tools(tools)
                 .parallelToolCalls(prompt.parallelToolCalls)
                 .reasoning(options.reasoning)
                 .include(options.include)
-                .serviceTier(options.serviceTier)
+                .serviceTier(serviceTier)
                 .promptCacheKey(options.promptCacheKey)
                 .text(options.text)
                 .conversation(options.conversationID)

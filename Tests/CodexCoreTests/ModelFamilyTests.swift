@@ -176,6 +176,9 @@ final class ModelFamilyTests: XCTestCase {
                 visibility: .list,
                 supportedInAPI: true,
                 priority: 10,
+                serviceTiers: [
+                    ModelServiceTier(id: "priority", name: "fast", description: "Fastest inference.")
+                ],
                 baseInstructions: "Remote instructions",
                 supportsReasoningSummaries: true,
                 supportVerbosity: true,
@@ -200,7 +203,14 @@ final class ModelFamilyTests: XCTestCase {
         XCTAssertEqual(updated.contextWindow, 400_000)
         XCTAssertEqual(updated.experimentalSupportedTools, ["alpha", "beta"])
         XCTAssertEqual(updated.inputModalities, [.text])
+        XCTAssertEqual(updated.serviceTiers.map(\.id), ["priority"])
         XCTAssertEqual(updated.baseInstructions, "Remote instructions")
+    }
+
+    func testConstructModelFamilyOfflineUsesBundledServiceTiersLikeRust() {
+        let family = ModelsManager.constructModelFamilyOffline(model: "gpt-5.5")
+
+        XCTAssertEqual(family.serviceTiers.map(\.id), ["priority"])
     }
 
     func testConstructModelFamilyAppliesConfigAfterRemoteOverrides() {
