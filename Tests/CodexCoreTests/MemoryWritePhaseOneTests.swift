@@ -251,6 +251,150 @@ final class MemoryWritePhaseOneTests: XCTestCase {
         XCTAssertNil(claims)
     }
 
+    func testPrunePhaseOneOutputsUsesRustRetentionBatchAndFailsOpen() async throws {
+        let store = RecordingPhaseOneRetentionStore(result: 3)
+
+        let pruned = await pruneMemoryPhaseOneOutputsForStartup(store: store, maxUnusedDays: 45)
+
+        XCTAssertEqual(pruned, 3)
+        let requests = await store.requests
+        XCTAssertEqual(requests, [
+            PhaseOneRetentionRequest(maxUnusedDays: 45, limit: memoryStageOnePruneBatchSize)
+        ])
+
+        let failingStore = RecordingPhaseOneRetentionStore(error: TestError("sqlite unavailable"))
+        let failed = await pruneMemoryPhaseOneOutputsForStartup(store: failingStore, maxUnusedDays: 30)
+        XCTAssertNil(failed)
+    }
+
+    func testRunPhaseOneExtractionClaimsSamplesAggregatesAndEmitsMetrics() async throws {
+        let currentThreadID = ThreadId()
+        let claims = [stage1Claim(suffix: 10), stage1Claim(suffix: 11), stage1Claim(suffix: 12)]
+        let store = RecordingPhaseOneJobStore(claims: claims)
+        let counter = CounterRecorder()
+        let histogram = HistogramRecorder()
+
+        let stats = await runMemoryPhaseOneExtraction(
+            currentThreadID: currentThreadID,
+            memoriesConfig: MemoriesConfig(
+                maxRolloutAgeDays: 20,
+                maxRolloutsPerStartup: 3,
+                minRolloutIdleHours: 4
+            ),
+            allowedSources: ["cli", "vscode"],
+            store: store,
+            sample: { claim in
+                if claim.thread.id == claims[1].thread.id {
+                    return (
+                        MemoryStageOneOutput(rawMemory: "raw", rolloutSummary: "", rolloutSlug: nil),
+                        TokenUsage(totalTokens: 2)
+                    )
+                }
+                if claim.thread.id == claims[2].thread.id {
+                    throw TestError("sample failed")
+                }
+                return (
+                    MemoryStageOneOutput(rawMemory: "raw", rolloutSummary: "summary", rolloutSlug: nil),
+                    TokenUsage(inputTokens: 1, outputTokens: 2, totalTokens: 3)
+                )
+            },
+            recordCounter: counter.record,
+            recordHistogram: histogram.record
+        )
+
+        XCTAssertEqual(stats, MemoryPhaseOneStats(
+            claimed: 3,
+            succeededWithOutput: 1,
+            succeededNoOutput: 1,
+            failed: 1,
+            totalTokenUsage: TokenUsage(inputTokens: 1, outputTokens: 2, totalTokens: 5)
+        ))
+        let claimRequests = await store.claimRequests
+        XCTAssertEqual(claimRequests, [
+            PhaseOneClaimRequest(
+                currentThreadID: currentThreadID,
+                params: Stage1StartupClaimParams(
+                    scanLimit: memoryStageOneThreadScanLimit,
+                    maxClaimed: 3,
+                    maxAgeDays: 20,
+                    minRolloutIdleHours: 4,
+                    allowedSources: ["cli", "vscode"],
+                    leaseSeconds: memoryStageOneJobLeaseSeconds
+                )
+            )
+        ])
+        let successes = await store.successes
+        let noOutputSuccesses = await store.noOutputSuccesses
+        let failures = await store.failures
+        XCTAssertEqual(successes.count, 1)
+        XCTAssertEqual(noOutputSuccesses.count, 1)
+        XCTAssertEqual(failures.count, 1)
+        XCTAssertEqual(Set(counter.events), Set([
+            CounterEvent(
+                name: MemoryWriteMetrics.phaseOneJobs,
+                increment: 3,
+                labels: [CounterLabel(name: "status", value: "claimed")]
+            ),
+            CounterEvent(
+                name: MemoryWriteMetrics.phaseOneJobs,
+                increment: 1,
+                labels: [CounterLabel(name: "status", value: "succeeded")]
+            ),
+            CounterEvent(name: MemoryWriteMetrics.phaseOneOutput, increment: 1, labels: []),
+            CounterEvent(
+                name: MemoryWriteMetrics.phaseOneJobs,
+                increment: 1,
+                labels: [CounterLabel(name: "status", value: "succeeded_no_output")]
+            ),
+            CounterEvent(
+                name: MemoryWriteMetrics.phaseOneJobs,
+                increment: 1,
+                labels: [CounterLabel(name: "status", value: "failed")]
+            )
+        ]))
+        XCTAssertEqual(
+            Set(histogram.events.map(\.labels.first?.value)),
+            Set(["total", "input", "cached_input", "output", "reasoning_output"])
+        )
+    }
+
+    func testRunPhaseOneExtractionStopsWhenClaimFailsAndReturnsEmptyStatsForNoCandidates() async throws {
+        let failingStore = RecordingPhaseOneJobStore(claimError: TestError("db unavailable"))
+        let failed = await runMemoryPhaseOneExtraction(
+            currentThreadID: ThreadId(),
+            memoriesConfig: MemoriesConfig(),
+            allowedSources: ["cli"],
+            store: failingStore,
+            sample: { _ in XCTFail("sampling should not run"); throw TestError("unexpected") }
+        )
+        XCTAssertNil(failed)
+
+        let emptyStore = RecordingPhaseOneJobStore(claims: [])
+        let counter = CounterRecorder()
+        let empty = await runMemoryPhaseOneExtraction(
+            currentThreadID: ThreadId(),
+            memoriesConfig: MemoriesConfig(),
+            allowedSources: ["cli"],
+            store: emptyStore,
+            sample: { _ in XCTFail("sampling should not run"); throw TestError("unexpected") },
+            recordCounter: counter.record
+        )
+        XCTAssertEqual(empty, MemoryPhaseOneStats(
+            claimed: 0,
+            succeededWithOutput: 0,
+            succeededNoOutput: 0,
+            failed: 0,
+            totalTokenUsage: nil
+        ))
+        XCTAssertEqual(counter.events, [
+            CounterEvent(
+                name: MemoryWriteMetrics.phaseOneJobs,
+                increment: 1,
+                labels: [CounterLabel(name: "status", value: "skipped_no_candidates")]
+            )
+        ])
+    }
+
     func testRunPhaseOneJobMarksSuccessWithOutputUsingSourceUpdatedAt() async throws {
         let claim = stage1Claim(suffix: 2, updatedAt: Date(timeIntervalSince1970: 456.9))
         let store = RecordingPhaseOneJobStore()
@@ -476,18 +620,18 @@ final class MemoryWritePhaseOneTests: XCTestCase {
     }
 }
 
-private struct CounterLabel: Equatable, Sendable {
+private struct CounterLabel: Hashable, Sendable {
     let name: String
     let value: String
 }
 
-private struct CounterEvent: Equatable, Sendable {
+private struct CounterEvent: Hashable, Sendable {
     let name: String
     let increment: Int64
     let labels: [CounterLabel]
 }
 
-private struct HistogramEvent: Equatable, Sendable {
+private struct HistogramEvent: Hashable, Sendable {
     let name: String
     let value: Int64
     let labels: [CounterLabel]
@@ -559,6 +703,11 @@ private struct PhaseOneFailureRequest: Equatable {
     let ownershipToken: String
     let reason: String
     let retryDelaySeconds: Int64
+}
+
+private struct PhaseOneRetentionRequest: Equatable {
+    let maxUnusedDays: Int64
+    let limit: Int
 }
 
 private actor RecordingPhaseOneJobStore: MemoryPhaseOneJobStore {
@@ -641,6 +790,25 @@ private actor RecordingPhaseOneJobStore: MemoryPhaseOneJobStore {
             retryDelaySeconds: retryDelaySeconds
         ))
         return markFailureResult
+    }
+}
+
+private actor RecordingPhaseOneRetentionStore: MemoryPhaseOneRetentionStore {
+    private(set) var requests: [PhaseOneRetentionRequest] = []
+    private let result: Int
+    private let error: Error?
+
+    init(result: Int = 0, error: Error? = nil) {
+        self.result = result
+        self.error = error
+    }
+
+    func pruneStage1OutputsForRetention(maxUnusedDays: Int64, limit: Int) async throws -> Int {
+        requests.append(PhaseOneRetentionRequest(maxUnusedDays: maxUnusedDays, limit: limit))
+        if let error {
+            throw error
+        }
+        return result
     }
 }
 

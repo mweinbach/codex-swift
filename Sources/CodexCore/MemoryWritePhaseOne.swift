@@ -149,6 +149,14 @@ public protocol MemoryPhaseOneJobStore: Sendable {
     ) async throws -> Bool
 }
 
+/// Storage boundary for Phase 1 output retention pruning during memory startup.
+///
+/// Production storage removes stale, unused stage-1 outputs in bounded batches before
+/// any model-backed memory extraction runs.
+public protocol MemoryPhaseOneRetentionStore: Sendable {
+    func pruneStage1OutputsForRetention(maxUnusedDays: Int64, limit: Int) async throws -> Int
+}
+
 extension SQLiteAgentGraphStore: MemoryPhaseOneJobStore {
     public func markStage1JobFailed(
         threadID: ThreadId,
@@ -164,6 +172,8 @@ extension SQLiteAgentGraphStore: MemoryPhaseOneJobStore {
         )
     }
 }
+
+extension SQLiteAgentGraphStore: MemoryPhaseOneRetentionStore {}
 
 public func memoryStageOneOutputSchema() -> JSONValue {
     .object([
@@ -275,6 +285,59 @@ public func claimMemoryPhaseOneStartupJobs(
     }
 }
 
+public func pruneMemoryPhaseOneOutputsForStartup(
+    store: MemoryPhaseOneRetentionStore,
+    maxUnusedDays: Int64
+) async -> Int? {
+    do {
+        return try await store.pruneStage1OutputsForRetention(
+            maxUnusedDays: maxUnusedDays,
+            limit: memoryStageOnePruneBatchSize
+        )
+    } catch {
+        return nil
+    }
+}
+
+public func runMemoryPhaseOneExtraction(
+    currentThreadID: ThreadId,
+    memoriesConfig: MemoriesConfig,
+    allowedSources: [String],
+    store: MemoryPhaseOneJobStore,
+    sample: @Sendable @escaping (Stage1JobClaim) async throws -> (MemoryStageOneOutput, TokenUsage?),
+    recordCounter: MemoryWriteCounterRecorder? = nil,
+    recordHistogram: MemoryWriteHistogramRecorder? = nil
+) async -> MemoryPhaseOneStats? {
+    guard let claims = await claimMemoryPhaseOneStartupJobs(
+        currentThreadID: currentThreadID,
+        maxRolloutsPerStartup: memoriesConfig.maxRolloutsPerStartup,
+        maxRolloutAgeDays: memoriesConfig.maxRolloutAgeDays,
+        minRolloutIdleHours: memoriesConfig.minRolloutIdleHours,
+        allowedSources: allowedSources,
+        store: store,
+        recordCounter: recordCounter
+    ) else {
+        return nil
+    }
+
+    guard !claims.isEmpty else {
+        let stats = MemoryPhaseOneStats(
+            claimed: 0,
+            succeededWithOutput: 0,
+            succeededNoOutput: 0,
+            failed: 0,
+            totalTokenUsage: nil
+        )
+        emitMemoryPhaseOneMetrics(stats, recordCounter: recordCounter, recordHistogram: recordHistogram)
+        return stats
+    }
+
+    let results = await runMemoryPhaseOneJobs(claims: claims, store: store, sample: sample)
+    let stats = aggregateMemoryPhaseOneStats(results)
+    emitMemoryPhaseOneMetrics(stats, recordCounter: recordCounter, recordHistogram: recordHistogram)
+    return stats
+}
+
 public func runMemoryPhaseOneJob(
     claim: Stage1JobClaim,
     store: MemoryPhaseOneJobStore,
@@ -317,6 +380,37 @@ public func runMemoryPhaseOneJob(
         outcome: succeeded ? .succeededWithOutput : .failed,
         tokenUsage: tokenUsage
     )
+}
+
+private func runMemoryPhaseOneJobs(
+    claims: [Stage1JobClaim],
+    store: MemoryPhaseOneJobStore,
+    sample: @Sendable @escaping (Stage1JobClaim) async throws -> (MemoryStageOneOutput, TokenUsage?)
+) async -> [MemoryPhaseOneJobResult] {
+    await withTaskGroup(of: MemoryPhaseOneJobResult.self) { group in
+        var iterator = claims.makeIterator()
+        var submitted = 0
+        let limit = max(1, memoryStageOneConcurrencyLimit)
+
+        while submitted < limit, let claim = iterator.next() {
+            submitted += 1
+            group.addTask {
+                await runMemoryPhaseOneJob(claim: claim, store: store, sample: sample)
+            }
+        }
+
+        var results: [MemoryPhaseOneJobResult] = []
+        while let result = await group.next() {
+            results.append(result)
+            if let claim = iterator.next() {
+                group.addTask {
+                    await runMemoryPhaseOneJob(claim: claim, store: store, sample: sample)
+                }
+            }
+        }
+
+        return results
+    }
 }
 
 public func aggregateMemoryPhaseOneStats(_ results: [MemoryPhaseOneJobResult]) -> MemoryPhaseOneStats {

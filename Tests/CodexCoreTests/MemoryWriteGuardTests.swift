@@ -108,6 +108,125 @@ final class MemoryWriteGuardTests: XCTestCase {
         XCTAssertEqual(MemoryWriteMetrics.phaseTwoTokenUsage, "codex.memory.phase2.token_usage")
     }
 
+    func testStartupPipelineEligibilityMatchesRustSkips() {
+        let enabled = memoryFeatureStates(enabled: true)
+        let disabled = memoryFeatureStates(enabled: false)
+
+        XCTAssertTrue(memoryStartupPipelineIsEligible(
+            isEphemeral: false,
+            source: .cli,
+            features: enabled
+        ))
+        XCTAssertFalse(memoryStartupPipelineIsEligible(
+            isEphemeral: true,
+            source: .cli,
+            features: enabled
+        ))
+        XCTAssertFalse(memoryStartupPipelineIsEligible(
+            isEphemeral: false,
+            source: .cli,
+            features: disabled
+        ))
+        XCTAssertFalse(memoryStartupPipelineIsEligible(
+            isEphemeral: false,
+            source: .subagent(.memoryConsolidation),
+            features: enabled
+        ))
+    }
+
+    func testStartupPipelineSkipsBeforeSideEffectsWhenIneligibleOrMissingStateDB() async {
+        let events = StartupEventLog()
+
+        let ineligible = await runMemoryStartupPipeline(
+            options: MemoryStartupPipelineOptions(
+                isEphemeral: true,
+                source: .cli,
+                features: memoryFeatureStates(enabled: true),
+                hasStateDatabase: true
+            ),
+            seedExtensionInstructions: { await events.append("seed") },
+            prunePhaseOneOutputs: { await events.append("prune") },
+            rateLimitsAllowStartup: { await events.append("guard"); return true },
+            runPhaseOne: { await events.append("phase1") },
+            runPhaseTwo: { await events.append("phase2") }
+        )
+
+        XCTAssertEqual(ineligible, .skippedIneligible)
+        let afterIneligible = await events.values
+        XCTAssertEqual(afterIneligible, [])
+
+        let missingState = await runMemoryStartupPipeline(
+            options: MemoryStartupPipelineOptions(
+                isEphemeral: false,
+                source: .cli,
+                features: memoryFeatureStates(enabled: true),
+                hasStateDatabase: false
+            ),
+            seedExtensionInstructions: { await events.append("seed") },
+            prunePhaseOneOutputs: { await events.append("prune") },
+            rateLimitsAllowStartup: { await events.append("guard"); return true },
+            runPhaseOne: { await events.append("phase1") },
+            runPhaseTwo: { await events.append("phase2") }
+        )
+
+        XCTAssertEqual(missingState, .skippedMissingStateDatabase)
+        let afterMissingState = await events.values
+        XCTAssertEqual(afterMissingState, [])
+    }
+
+    func testStartupPipelineOrdersSeedPruneGuardPhaseOneAndPhaseTwo() async {
+        let events = StartupEventLog()
+
+        let outcome = await runMemoryStartupPipeline(
+            options: MemoryStartupPipelineOptions(
+                isEphemeral: false,
+                source: .vscode,
+                features: memoryFeatureStates(enabled: true),
+                hasStateDatabase: true
+            ),
+            seedExtensionInstructions: { await events.append("seed") },
+            prunePhaseOneOutputs: { await events.append("prune") },
+            rateLimitsAllowStartup: { await events.append("guard"); return true },
+            runPhaseOne: { await events.append("phase1") },
+            runPhaseTwo: { await events.append("phase2") }
+        )
+
+        XCTAssertEqual(outcome, .completed)
+        let values = await events.values
+        XCTAssertEqual(values, ["seed", "prune", "guard", "phase1", "phase2"])
+    }
+
+    func testStartupPipelineRecordsRateLimitSkipAfterSeedAndPrune() async {
+        let events = StartupEventLog()
+        let recorder = CounterRecorder()
+
+        let outcome = await runMemoryStartupPipeline(
+            options: MemoryStartupPipelineOptions(
+                isEphemeral: false,
+                source: .mcp,
+                features: memoryFeatureStates(enabled: true),
+                hasStateDatabase: true
+            ),
+            seedExtensionInstructions: { await events.append("seed") },
+            prunePhaseOneOutputs: { await events.append("prune") },
+            rateLimitsAllowStartup: { await events.append("guard"); return false },
+            runPhaseOne: { await events.append("phase1") },
+            runPhaseTwo: { await events.append("phase2") },
+            recordCounter: recorder.record
+        )
+
+        XCTAssertEqual(outcome, .skippedRateLimit)
+        let values = await events.values
+        XCTAssertEqual(values, ["seed", "prune", "guard"])
+        XCTAssertEqual(recorder.events, [
+            CounterEvent(
+                name: MemoryWriteMetrics.startup,
+                increment: 1,
+                labels: [CounterLabel(name: "status", value: "skipped_rate_limit")]
+            )
+        ])
+    }
+
     private func rateLimitSnapshot(
         limitID: String? = memoryRateLimitID,
         primaryUsedPercent: Double?,
@@ -124,5 +243,51 @@ final class MemoryWriteGuardTests: XCTestCase {
 
     private func rateLimitWindow(usedPercent: Double) -> RateLimitWindow {
         RateLimitWindow(usedPercent: usedPercent, windowMinutes: nil, resetsAt: nil)
+    }
+
+    private func memoryFeatureStates(enabled: Bool) -> FeatureStates {
+        var features = FeatureStates()
+        features.set(.memoryTool, enabled: enabled)
+        return features
+    }
+}
+
+private actor StartupEventLog {
+    private(set) var values: [String] = []
+
+    func append(_ value: String) {
+        values.append(value)
+    }
+}
+
+private struct CounterLabel: Hashable, Sendable {
+    let name: String
+    let value: String
+}
+
+private struct CounterEvent: Hashable, Sendable {
+    let name: String
+    let increment: Int64
+    let labels: [CounterLabel]
+}
+
+private final class CounterRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [CounterEvent] = []
+
+    var events: [CounterEvent] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func record(_ name: String, _ increment: Int64, _ labels: [(String, String)]) {
+        lock.lock()
+        storage.append(CounterEvent(
+            name: name,
+            increment: increment,
+            labels: labels.map { CounterLabel(name: $0.0, value: $0.1) }
+        ))
+        lock.unlock()
     }
 }
