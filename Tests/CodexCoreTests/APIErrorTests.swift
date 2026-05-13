@@ -49,6 +49,155 @@ final class APIErrorTests: XCTestCase {
         )
     }
 
+    func testCodexErrorBridgeMapsServerOverloadedFrom503BodyLikeRust() {
+        let body = #"{"error":{"code":"server_is_overloaded"}}"#
+
+        XCTAssertEqual(
+            CodexError(apiError: .transport(.http(statusCode: 503, headers: nil, body: body))),
+            .serverOverloaded
+        )
+
+        let slowDownBody = #"{"error":{"code":"slow_down"}}"#
+        XCTAssertEqual(
+            CodexError(apiError: .transport(.http(statusCode: 503, headers: nil, body: slowDownBody))),
+            .serverOverloaded
+        )
+    }
+
+    func testCodexErrorBridgeMapsCyberPolicyBodiesLikeRust() {
+        let body = #"""
+        {
+          "error": {
+            "message": "This request has been flagged for potentially high-risk cyber activity.",
+            "type": "invalid_request",
+            "param": null,
+            "code": "cyber_policy"
+          }
+        }
+        """#
+
+        XCTAssertEqual(
+            CodexError(apiError: .transport(.http(statusCode: 400, headers: nil, body: body))),
+            .cyberPolicy(message: "This request has been flagged for potentially high-risk cyber activity.")
+        )
+    }
+
+    func testCodexErrorBridgeMapsWrappedWebSocketCyberPolicyBodyLikeRust() {
+        let body = #"""
+        {
+          "type": "error",
+          "status": 400,
+          "error": {
+            "message": "This websocket request was flagged.",
+            "type": "invalid_request",
+            "code": "cyber_policy"
+          }
+        }
+        """#
+
+        XCTAssertEqual(
+            CodexError(apiError: .transport(.http(statusCode: 400, headers: nil, body: body))),
+            .cyberPolicy(message: "This websocket request was flagged.")
+        )
+    }
+
+    func testCodexErrorBridgeUsesCyberPolicyFallbackAndKeepsUnknown400GenericLikeRust() {
+        let cyberBody = #"{"error":{"code":"cyber_policy","message":"   "}}"#
+        XCTAssertEqual(
+            CodexError(apiError: .transport(.http(statusCode: 400, headers: nil, body: cyberBody))),
+            .cyberPolicy(message: "This request has been flagged for possible cybersecurity risk.")
+        )
+
+        let unknownBody = #"{"error":{"message":"Some other bad request.","code":"some_other_policy"}}"#
+        XCTAssertEqual(
+            CodexError(apiError: .transport(.http(statusCode: 400, headers: nil, body: unknownBody))),
+            .invalidRequest(unknownBody)
+        )
+    }
+
+    func testCodexErrorBridgeMapsUsageLimitHeadersLikeRust() throws {
+        let body = #"{"error":{"type":"usage_limit_reached","plan_type":"pro","resets_at":1738888888}}"#
+        let error = CodexError(apiError: .transport(.http(
+            statusCode: 429,
+            headers: [
+                "x-codex-active-limit": "codex_other",
+                "x-codex-other-limit-name": " codex_other ",
+                "x-codex-promo-message": " Visit the usage page ",
+                "x-codex-other-primary-used-percent": "100",
+                "x-codex-other-primary-window-minutes": "15"
+            ],
+            body: body
+        )))
+
+        guard case let .usageLimitReached(usageLimit) = error else {
+            return XCTFail("expected usage limit, got \(error)")
+        }
+        XCTAssertEqual(usageLimit.planType, .pro)
+        XCTAssertEqual(usageLimit.resetsAt, Date(timeIntervalSince1970: 1_738_888_888))
+        XCTAssertEqual(usageLimit.rateLimits?.limitID, "codex_other")
+        XCTAssertEqual(usageLimit.rateLimits?.limitName, "codex_other")
+        XCTAssertEqual(usageLimit.rateLimits?.primary?.usedPercent, 100)
+        XCTAssertEqual(usageLimit.rateLimits?.primary?.windowMinutes, 15)
+        XCTAssertEqual(usageLimit.promoMessage, "Visit the usage page")
+    }
+
+    func testCodexErrorBridgeDoesNotFallbackLimitNameToLimitIDLikeRust() throws {
+        let body = #"{"error":{"type":"usage_limit_reached","plan_type":"pro"}}"#
+        let error = CodexError(apiError: .transport(.http(
+            statusCode: 429,
+            headers: ["x-codex-active-limit": "codex_other"],
+            body: body
+        )))
+
+        guard case let .usageLimitReached(usageLimit) = error else {
+            return XCTFail("expected usage limit, got \(error)")
+        }
+        XCTAssertEqual(usageLimit.rateLimits?.limitID, "codex_other")
+        XCTAssertNil(usageLimit.rateLimits?.limitName)
+    }
+
+    func testCodexErrorBridgeExtractsTrackingAndIdentityHeadersLikeRust() {
+        let xErrorJSON = Data(#"{"error":{"code":"token_expired"}}"#.utf8).base64EncodedString()
+        let error = CodexError(apiError: .transport(.http(
+            statusCode: 401,
+            headers: [
+                "x-request-id": "req-401",
+                "cf-ray": "ray-401",
+                "x-openai-authorization-error": "missing_authorization_header",
+                "x-error-json": xErrorJSON
+            ],
+            body: #"{"detail":"Unauthorized"}"#
+        )))
+
+        guard case let .unexpectedStatus(unexpected) = error else {
+            return XCTFail("expected unexpected status, got \(error)")
+        }
+        XCTAssertEqual(unexpected.requestID, "req-401")
+        XCTAssertEqual(unexpected.cfRay, "ray-401")
+        XCTAssertEqual(unexpected.identityAuthorizationError, "missing_authorization_header")
+        XCTAssertEqual(unexpected.identityErrorCode, "token_expired")
+    }
+
+    func testCodexErrorBridgeMaps429FallbackAndTransportErrorsLikeRust() {
+        XCTAssertEqual(
+            CodexError(apiError: .transport(.http(
+                statusCode: 429,
+                headers: ["cf-ray": "ray-429"],
+                body: #"{"error":{"type":"other"}}"#
+            ))),
+            .retryLimit(RetryLimitReachedError(statusCode: 429, requestID: "ray-429"))
+        )
+        XCTAssertEqual(CodexError(apiError: .transport(.timeout)), .timeout)
+        XCTAssertEqual(
+            CodexError(apiError: .transport(.network("dns failed"))),
+            .stream(message: "dns failed", delay: nil)
+        )
+        XCTAssertEqual(
+            CodexError(apiError: .rateLimit("credits exhausted")),
+            .stream(message: "credits exhausted", delay: nil)
+        )
+    }
+
     func testUnexpectedResponseErrorDisplayMatchesRustStatusAndMetadata() {
         let error = UnexpectedResponseError(
             statusCode: 500,

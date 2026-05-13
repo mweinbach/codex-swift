@@ -45,6 +45,227 @@ public enum APIError: Error, Equatable, CustomStringConvertible, Sendable {
     }
 }
 
+public enum CodexError: Error, Equatable, CustomStringConvertible, Sendable {
+    case contextWindowExceeded
+    case quotaExceeded
+    case usageNotIncluded
+    case stream(message: String, delay: Duration?)
+    case serverOverloaded
+    case unexpectedStatus(UnexpectedResponseError)
+    case invalidRequest(String)
+    case cyberPolicy(message: String)
+    case usageLimitReached(UsageLimitReachedError)
+    case invalidImageRequest
+    case internalServerError
+    case retryLimit(RetryLimitReachedError)
+    case timeout
+
+    public init(apiError: APIError) {
+        self = Self.map(apiError)
+    }
+
+    public var description: String {
+        switch self {
+        case .contextWindowExceeded:
+            return "context window exceeded"
+        case .quotaExceeded:
+            return "quota exceeded"
+        case .usageNotIncluded:
+            return "usage not included"
+        case let .stream(message, _):
+            return message
+        case .serverOverloaded:
+            return "server overloaded"
+        case let .unexpectedStatus(error):
+            return String(describing: error)
+        case let .invalidRequest(message):
+            return message
+        case let .cyberPolicy(message):
+            return "cyber policy: \(message)"
+        case let .usageLimitReached(error):
+            return String(describing: error)
+        case .invalidImageRequest:
+            return "invalid image request"
+        case .internalServerError:
+            return "internal server error"
+        case let .retryLimit(error):
+            return String(describing: error)
+        case .timeout:
+            return "timeout"
+        }
+    }
+
+    public static func map(_ error: APIError) -> CodexError {
+        switch error {
+        case .contextWindowExceeded:
+            return .contextWindowExceeded
+        case .quotaExceeded:
+            return .quotaExceeded
+        case .usageNotIncluded:
+            return .usageNotIncluded
+        case let .retryable(message, delay):
+            return .stream(message: message, delay: delay)
+        case let .stream(message):
+            return .stream(message: message, delay: nil)
+        case .serverOverloaded:
+            return .serverOverloaded
+        case let .api(statusCode, message):
+            return .unexpectedStatus(UnexpectedResponseError(statusCode: statusCode, body: message))
+        case let .invalidRequest(message):
+            return .invalidRequest(message)
+        case let .cyberPolicy(message):
+            return .cyberPolicy(message: message)
+        case let .transport(transport):
+            return mapTransportError(transport)
+        case let .rateLimit(message):
+            return .stream(message: message, delay: nil)
+        }
+    }
+
+    private static func mapTransportError(_ error: TransportError) -> CodexError {
+        switch error {
+        case let .http(statusCode, headers, body):
+            return mapHTTPError(statusCode: statusCode, headers: headers, body: body ?? "")
+        case .retryLimit:
+            return .retryLimit(RetryLimitReachedError(statusCode: 500))
+        case .timeout:
+            return .timeout
+        case let .network(message), let .build(message):
+            return .stream(message: message, delay: nil)
+        }
+    }
+
+    private static func mapHTTPError(statusCode: Int, headers: [String: String]?, body: String) -> CodexError {
+        if statusCode == 503,
+           let value = decodeJSONObject(body),
+           let code = (value["error"] as? [String: Any])?["code"] as? String,
+           code == "server_is_overloaded" || code == "slow_down" {
+            return .serverOverloaded
+        }
+
+        if statusCode == 400 {
+            if let value = decodeJSONObject(body),
+               let error = value["error"] as? [String: Any],
+               error["code"] as? String == cyberPolicyErrorCode {
+                return .cyberPolicy(message: cyberPolicyMessage(error["message"] as? String))
+            }
+            if body.contains("The image data you provided does not represent a valid image") {
+                return .invalidImageRequest
+            }
+            return .invalidRequest(body)
+        }
+
+        if statusCode == 500 {
+            return .internalServerError
+        }
+
+        if statusCode == 429 {
+            if let usageError = try? JSONDecoder().decode(UsageErrorResponse.self, from: Data(body.utf8)) {
+                if usageError.error.errorType == "usage_limit_reached" {
+                    let limitID = header(headers, activeLimitHeader)
+                    return .usageLimitReached(UsageLimitReachedError(
+                        planType: usageError.error.planType,
+                        resetsAt: usageError.error.resetsAt.map(Date.init(timeIntervalSince1970:)),
+                        rateLimits: headers.flatMap { RateLimitSnapshot.parseRateLimit(headers: $0, limitID: limitID) },
+                        promoMessage: promoMessage(headers)
+                    ))
+                }
+                if usageError.error.errorType == "usage_not_included" {
+                    return .usageNotIncluded
+                }
+            }
+            return .retryLimit(RetryLimitReachedError(
+                statusCode: statusCode,
+                requestID: requestTrackingID(headers)
+            ))
+        }
+
+        return .unexpectedStatus(UnexpectedResponseError(
+            statusCode: statusCode,
+            body: body,
+            cfRay: header(headers, cfRayHeader),
+            requestID: requestID(headers),
+            identityAuthorizationError: header(headers, openAIAuthorizationErrorHeader),
+            identityErrorCode: errorJSONCode(headers)
+        ))
+    }
+
+    private static let activeLimitHeader = "x-codex-active-limit"
+    private static let requestIDHeader = "x-request-id"
+    private static let openAIRequestIDHeader = "x-oai-request-id"
+    private static let cfRayHeader = "cf-ray"
+    private static let openAIAuthorizationErrorHeader = "x-openai-authorization-error"
+    private static let errorJSONHeader = "x-error-json"
+    private static let promoMessageHeader = "x-codex-promo-message"
+    private static let cyberPolicyErrorCode = "cyber_policy"
+    private static let cyberPolicyFallbackMessage =
+        "This request has been flagged for possible cybersecurity risk."
+
+    private static func cyberPolicyMessage(_ message: String?) -> String {
+        guard let message = message?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !message.isEmpty
+        else {
+            return cyberPolicyFallbackMessage
+        }
+        return message
+    }
+
+    private static func promoMessage(_ headers: [String: String]?) -> String? {
+        guard let promo = header(headers, promoMessageHeader)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !promo.isEmpty
+        else {
+            return nil
+        }
+        return promo
+    }
+
+    private static func requestTrackingID(_ headers: [String: String]?) -> String? {
+        requestID(headers) ?? header(headers, cfRayHeader)
+    }
+
+    private static func requestID(_ headers: [String: String]?) -> String? {
+        header(headers, requestIDHeader) ?? header(headers, openAIRequestIDHeader)
+    }
+
+    private static func header(_ headers: [String: String]?, _ name: String) -> String? {
+        headers?.first { key, _ in key.caseInsensitiveCompare(name) == .orderedSame }?.value
+    }
+
+    private static func errorJSONCode(_ headers: [String: String]?) -> String? {
+        guard let encoded = header(headers, errorJSONHeader),
+              let decoded = Data(base64Encoded: encoded),
+              let value = try? JSONSerialization.jsonObject(with: decoded) as? [String: Any]
+        else {
+            return nil
+        }
+        return (value["error"] as? [String: Any])?["code"] as? String
+    }
+
+    private static func decodeJSONObject(_ body: String) -> [String: Any]? {
+        guard let data = body.data(using: .utf8) else {
+            return nil
+        }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+}
+
+private struct UsageErrorResponse: Decodable {
+    let error: UsageErrorBody
+}
+
+private struct UsageErrorBody: Decodable {
+    let errorType: String?
+    let planType: PlanType?
+    let resetsAt: Double?
+
+    private enum CodingKeys: String, CodingKey {
+        case errorType = "type"
+        case planType = "plan_type"
+        case resetsAt = "resets_at"
+    }
+}
+
 public struct RateLimitError: Error, Equatable, CustomStringConvertible, Sendable {
     public let message: String
 
