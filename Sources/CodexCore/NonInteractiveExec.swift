@@ -215,6 +215,7 @@ public enum NonInteractiveExec {
             webSearchMode: webSearchMode(for: config),
             webSearchConfig: config.webSearchConfig,
             includeViewImageTool: config.toolsViewImage ?? true,
+            canRequestOriginalImageDetail: modelFamily.supportsImageDetailOriginal,
             includeComputerUseTools: config.features.isEnabled(.computerUse),
             experimentalSupportedTools: modelFamily.experimentalSupportedTools,
             toolSearch: config.features.isEnabled(.toolSearch),
@@ -571,9 +572,11 @@ public enum NonInteractiveExec {
         shellEnvironmentPolicy: ShellEnvironmentPolicy = ShellEnvironmentPolicy(),
         explicitEnvOverrides: [String: String] = [:],
         allowLoginShell: Bool = true,
+        canRequestOriginalImageDetail: Bool = false,
         backgroundTerminalMaxTimeoutMS: UInt64 = CodexConfigDefaults.backgroundTerminalMaxTimeoutMS,
         toolSearchIndex: ToolSearchIndex? = nil,
-        agentJobContext: AgentJobToolContext? = nil
+        agentJobContext: AgentJobToolContext? = nil,
+        turnEnvironmentSelections: [TurnEnvironmentSelection]? = nil
     ) async -> ResponseItem {
         switch item {
         case let .functionCall(_, name, _, arguments, callID):
@@ -590,8 +593,10 @@ public enum NonInteractiveExec {
                 shellEnvironmentPolicy: shellEnvironmentPolicy,
                 explicitEnvOverrides: explicitEnvOverrides,
                 allowLoginShell: allowLoginShell,
+                canRequestOriginalImageDetail: canRequestOriginalImageDetail,
                 backgroundTerminalMaxTimeoutMS: backgroundTerminalMaxTimeoutMS,
-                agentJobContext: agentJobContext
+                agentJobContext: agentJobContext,
+                turnEnvironmentSelections: turnEnvironmentSelections
             )
 
         case let .customToolCall(_, _, callID, name, input):
@@ -673,9 +678,11 @@ public enum NonInteractiveExec {
         shellEnvironmentPolicy: ShellEnvironmentPolicy = ShellEnvironmentPolicy(),
         explicitEnvOverrides: [String: String] = [:],
         allowLoginShell: Bool = true,
+        canRequestOriginalImageDetail: Bool = false,
         backgroundTerminalMaxTimeoutMS: UInt64 = CodexConfigDefaults.backgroundTerminalMaxTimeoutMS,
         toolSearchIndex: ToolSearchIndex? = nil,
-        agentJobContext: AgentJobToolContext? = nil
+        agentJobContext: AgentJobToolContext? = nil,
+        turnEnvironmentSelections: [TurnEnvironmentSelection]? = nil
     ) async -> FunctionCallExecutionResult {
         let hookPayload = toolHookPayload(for: item)
         if let hookPayload {
@@ -728,9 +735,11 @@ public enum NonInteractiveExec {
                 shellEnvironmentPolicy: shellEnvironmentPolicy,
                 explicitEnvOverrides: explicitEnvOverrides,
                 allowLoginShell: allowLoginShell,
+                canRequestOriginalImageDetail: canRequestOriginalImageDetail,
                 backgroundTerminalMaxTimeoutMS: backgroundTerminalMaxTimeoutMS,
                 toolSearchIndex: toolSearchIndex,
-                agentJobContext: agentJobContext
+                agentJobContext: agentJobContext,
+                turnEnvironmentSelections: turnEnvironmentSelections
             )
             guard toolOutputSucceeded(output),
                   let postPayload = postToolHookPayload(for: item, output: output, prePayload: hookPayload)
@@ -765,9 +774,11 @@ public enum NonInteractiveExec {
             shellEnvironmentPolicy: shellEnvironmentPolicy,
             explicitEnvOverrides: explicitEnvOverrides,
             allowLoginShell: allowLoginShell,
+            canRequestOriginalImageDetail: canRequestOriginalImageDetail,
             backgroundTerminalMaxTimeoutMS: backgroundTerminalMaxTimeoutMS,
             toolSearchIndex: toolSearchIndex,
-            agentJobContext: agentJobContext
+            agentJobContext: agentJobContext,
+            turnEnvironmentSelections: turnEnvironmentSelections
         )
         return FunctionCallExecutionResult(output: output)
     }
@@ -915,8 +926,10 @@ public enum NonInteractiveExec {
         shellEnvironmentPolicy: ShellEnvironmentPolicy,
         explicitEnvOverrides: [String: String],
         allowLoginShell: Bool,
+        canRequestOriginalImageDetail: Bool,
         backgroundTerminalMaxTimeoutMS: UInt64,
-        agentJobContext: AgentJobToolContext?
+        agentJobContext: AgentJobToolContext?,
+        turnEnvironmentSelections: [TurnEnvironmentSelection]?
     ) async -> ResponseItem {
         let decoder = JSONDecoder()
         do {
@@ -1012,6 +1025,16 @@ public enum NonInteractiveExec {
                     )
                 }
 
+            case "view_image":
+                let params = try decoder.decode(ViewImageToolCallParams.self, from: Data(arguments.utf8))
+                return try executeViewImageTool(
+                    params: params,
+                    callID: callID,
+                    cwd: cwd,
+                    canRequestOriginalImageDetail: canRequestOriginalImageDetail,
+                    turnEnvironmentSelections: turnEnvironmentSelections
+                )
+
             default:
                 if let agentJobOutput = await AgentJobToolExecutor.execute(
                     name: name,
@@ -1049,6 +1072,103 @@ public enum NonInteractiveExec {
             )
         }
         return login ?? allowLoginShell
+    }
+
+    private struct ViewImageToolCallParams: Decodable {
+        let path: String
+        let environmentID: String?
+        let detail: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case path
+            case environmentID = "environment_id"
+            case detail
+        }
+    }
+
+    private static func executeViewImageTool(
+        params: ViewImageToolCallParams,
+        callID: String,
+        cwd: URL,
+        canRequestOriginalImageDetail: Bool,
+        turnEnvironmentSelections: [TurnEnvironmentSelection]?
+    ) throws -> ResponseItem {
+        let requestedOriginalDetail: Bool
+        switch params.detail {
+        case nil:
+            requestedOriginalDetail = false
+        case "original":
+            requestedOriginalDetail = true
+        case let detail?:
+            throw FunctionCallError.respondToModel(
+                "view_image.detail only supports `original`; omit `detail` for default resized behavior, got `\(detail)`"
+            )
+        }
+
+        let resolvedCwd = try resolveViewImageCwd(
+            environmentID: params.environmentID,
+            cwd: cwd,
+            turnEnvironmentSelections: turnEnvironmentSelections
+        )
+        let imageURL = resolveViewImagePath(params.path, relativeTo: resolvedCwd)
+        var isDirectory = ObjCBool(false)
+        guard FileManager.default.fileExists(atPath: imageURL.path, isDirectory: &isDirectory) else {
+            throw FunctionCallError.respondToModel("unable to locate image at `\(imageURL.path)`: No such file")
+        }
+        guard !isDirectory.boolValue else {
+            throw FunctionCallError.respondToModel("image path `\(imageURL.path)` is not a file")
+        }
+
+        let useOriginal = canRequestOriginalImageDetail && requestedOriginalDetail
+        let image: EncodedImage
+        do {
+            image = try useOriginal
+                ? LocalImageProcessor.loadOriginal(path: imageURL)
+                : LocalImageProcessor.loadAndResizeToFit(path: imageURL)
+        } catch {
+            throw FunctionCallError.respondToModel(
+                "unable to process image at `\(imageURL.path)`: \(String(describing: error))"
+            )
+        }
+
+        return .functionCallOutput(
+            callID: callID,
+            output: FunctionCallOutputPayload(
+                content: "",
+                contentItems: [
+                    .inputImage(
+                        imageURL: image.dataURL,
+                        detail: useOriginal ? .original : defaultImageDetail
+                    )
+                ],
+                success: true
+            )
+        )
+    }
+
+    private static func resolveViewImageCwd(
+        environmentID: String?,
+        cwd: URL,
+        turnEnvironmentSelections: [TurnEnvironmentSelection]?
+    ) throws -> URL {
+        guard let environmentID else {
+            if let primary = turnEnvironmentSelections?.first {
+                return URL(fileURLWithPath: primary.cwd, isDirectory: true)
+            }
+            return cwd
+        }
+
+        guard let selection = turnEnvironmentSelections?.first(where: { $0.environmentID == environmentID }) else {
+            throw FunctionCallError.respondToModel("unknown turn environment id `\(environmentID)`")
+        }
+        return URL(fileURLWithPath: selection.cwd, isDirectory: true)
+    }
+
+    private static func resolveViewImagePath(_ path: String, relativeTo cwd: URL) -> URL {
+        if (path as NSString).isAbsolutePath {
+            return URL(fileURLWithPath: path, isDirectory: false).standardizedFileURL
+        }
+        return cwd.appendingPathComponent(path, isDirectory: false).standardizedFileURL
     }
 
     private static func executeShellCommand(

@@ -12,6 +12,11 @@ public enum ApplyPatchToolType: String, Codable, CaseIterable, Equatable, Sendab
     case freeform
 }
 
+public enum ToolEnvironmentMode: Equatable, Sendable {
+    case single
+    case multiple
+}
+
 public enum WebSearchToolType: String, Codable, CaseIterable, Equatable, Sendable {
     case text
     case textAndImage = "text_and_image"
@@ -767,6 +772,8 @@ public struct ToolsConfig: Equatable, Sendable {
     public let webSearchConfig: WebSearchConfig?
     public let webSearchRequest: Bool
     public let includeViewImageTool: Bool
+    public let canRequestOriginalImageDetail: Bool
+    public let environmentMode: ToolEnvironmentMode
     public let includeComputerUseTools: Bool
     public let experimentalSupportedTools: [String]
     public let namespaceTools: Bool
@@ -783,6 +790,8 @@ public struct ToolsConfig: Equatable, Sendable {
         webSearchConfig: WebSearchConfig? = nil,
         webSearchRequest: Bool = false,
         includeViewImageTool: Bool = true,
+        canRequestOriginalImageDetail: Bool = false,
+        environmentMode: ToolEnvironmentMode = .single,
         includeComputerUseTools: Bool = false,
         experimentalSupportedTools: [String] = [],
         namespaceTools: Bool = true,
@@ -798,6 +807,8 @@ public struct ToolsConfig: Equatable, Sendable {
         self.webSearchConfig = webSearchConfig
         self.webSearchRequest = webSearchRequest
         self.includeViewImageTool = includeViewImageTool
+        self.canRequestOriginalImageDetail = canRequestOriginalImageDetail
+        self.environmentMode = environmentMode
         self.includeComputerUseTools = includeComputerUseTools
         self.experimentalSupportedTools = experimentalSupportedTools
         self.namespaceTools = namespaceTools
@@ -922,7 +933,13 @@ public enum ToolSpecFactory {
         }
 
         if config.includeViewImageTool {
-            specs.append(ConfiguredToolSpec(spec: createViewImageTool(), supportsParallelToolCalls: true))
+            specs.append(ConfiguredToolSpec(
+                spec: createViewImageTool(
+                    canRequestOriginalImageDetail: config.canRequestOriginalImageDetail,
+                    includeEnvironmentID: config.environmentMode == .multiple
+                ),
+                supportsParallelToolCalls: true
+            ))
         }
 
         if config.includeComputerUseTools {
@@ -1285,14 +1302,40 @@ public enum ToolSpecFactory {
         )
     }
 
-    public static func createViewImageTool() -> ToolSpec {
-        functionTool(
+    public static func createViewImageTool(
+        canRequestOriginalImageDetail: Bool = false,
+        includeEnvironmentID: Bool = false
+    ) -> ToolSpec {
+        var properties: [String: JSONSchema] = [
+            "path": .string(description: "Local filesystem path to an image file")
+        ]
+        if canRequestOriginalImageDetail {
+            properties["detail"] = .string(description: "Optional detail override. The only supported value is `original`; omit this field for default resized behavior. Use `original` to preserve the file's original resolution instead of resizing to fit. This is important when high-fidelity image perception or precise localization is needed, especially for CUA agents.")
+        }
+        if includeEnvironmentID {
+            properties["environment_id"] = .string(description: "Optional selected environment id to target. Omit this to use the primary environment.")
+        }
+
+        return functionTool(
             name: "view_image",
-            description: "Attach a local image (by filesystem path) to the conversation context for this turn.",
-            properties: [
-                "path": .string(description: "Local filesystem path to an image file")
-            ],
-            required: ["path"]
+            description: "View a local image from the filesystem (only use if given a full filepath by the user, and the image isn't already attached to the thread context within <image ...> tags).",
+            properties: properties,
+            required: ["path"],
+            outputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "image_url": .object([
+                        "type": .string("string"),
+                        "description": .string("Data URL for the loaded image.")
+                    ]),
+                    "detail": .object([
+                        "type": .array([.string("string"), .string("null")]),
+                        "description": .string("Image detail hint returned by view_image. Returns `original` when original resolution is preserved, otherwise `null`.")
+                    ])
+                ]),
+                "required": .array([.string("image_url"), .string("detail")]),
+                "additionalProperties": .bool(false)
+            ])
         )
     }
 
@@ -1518,7 +1561,8 @@ public enum ToolSpecFactory {
         name: String,
         description: String,
         properties: [String: JSONSchema],
-        required: [String]?
+        required: [String]?,
+        outputSchema: JSONValue? = nil
     ) -> ToolSpec {
         .function(
             ResponsesAPITool(
@@ -1529,7 +1573,8 @@ public enum ToolSpecFactory {
                     properties: properties,
                     required: required,
                     additionalProperties: .boolean(false)
-                )
+                ),
+                outputSchema: outputSchema
             )
         )
     }

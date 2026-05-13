@@ -37,6 +37,7 @@ public struct ModelFamily: Equatable, Sendable {
     public var shellType: ConfigShellToolType
     public var truncationPolicy: TruncationPolicy
     public var inputModalities: [InputModality]
+    public var supportsImageDetailOriginal: Bool
     public var maxContextWindow: Int64?
 
     private var configuredAutoCompactTokenLimit: Int64?
@@ -60,6 +61,7 @@ public struct ModelFamily: Equatable, Sendable {
         shellType: ConfigShellToolType = .default,
         truncationPolicy: TruncationPolicy = .bytes(10_000),
         inputModalities: [InputModality] = InputModality.defaultInputModalities,
+        supportsImageDetailOriginal: Bool = false,
         maxContextWindow: Int64? = nil
     ) {
         self.slug = slug
@@ -80,6 +82,7 @@ public struct ModelFamily: Equatable, Sendable {
         self.shellType = shellType
         self.truncationPolicy = truncationPolicy
         self.inputModalities = inputModalities
+        self.supportsImageDetailOriginal = supportsImageDetailOriginal
         self.maxContextWindow = maxContextWindow
     }
 
@@ -126,6 +129,7 @@ public struct ModelFamily: Equatable, Sendable {
         applyPatchToolType = model.applyPatchToolType
         truncationPolicy = model.truncationPolicy.runtimePolicy
         inputModalities = model.inputModalities
+        supportsImageDetailOriginal = model.supportsImageDetailOriginal
         supportsParallelToolCalls = model.supportsParallelToolCalls
         contextWindow = model.resolvedContextWindow
         maxContextWindow = model.maxContextWindow

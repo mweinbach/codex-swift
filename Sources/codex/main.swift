@@ -1063,6 +1063,7 @@ private func runNonInteractiveExec(
                 shellEnvironmentPolicy: settings.shellEnvironmentPolicy,
                 explicitEnvOverrides: settings.shellEnvironmentPolicy.set,
                 allowLoginShell: settings.allowLoginShell,
+                canRequestOriginalImageDetail: modelFamily.supportsImageDetailOriginal,
                 backgroundTerminalMaxTimeoutMS: settings.backgroundTerminalMaxTimeoutMS
             )
         }

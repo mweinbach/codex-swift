@@ -285,6 +285,49 @@ final class ToolSpecTests: XCTestCase {
         XCTAssertEqual(parameters["additionalProperties"] as? Bool, false)
     }
 
+    func testViewImageSpecIncludesDetailAndEnvironmentOnlyWhenConfiguredLikeRust() throws {
+        let single = try JSONObject(ToolSpecFactory.createViewImageTool())
+        let singleParameters = try XCTUnwrap(single["parameters"] as? [String: Any])
+        let singleProperties = try XCTUnwrap(singleParameters["properties"] as? [String: Any])
+        XCTAssertNotNil(singleProperties["path"])
+        XCTAssertNil(singleProperties["detail"])
+        XCTAssertNil(singleProperties["environment_id"])
+
+        let multiple = try JSONObject(ToolSpecFactory.createViewImageTool(
+            canRequestOriginalImageDetail: true,
+            includeEnvironmentID: true
+        ))
+        let multipleParameters = try XCTUnwrap(multiple["parameters"] as? [String: Any])
+        let multipleProperties = try XCTUnwrap(multipleParameters["properties"] as? [String: Any])
+        XCTAssertNotNil(multipleProperties["detail"])
+        XCTAssertNotNil(multipleProperties["environment_id"])
+        XCTAssertEqual(multipleParameters["required"] as? [String], ["path"])
+    }
+
+    func testBuildSpecsAddsViewImageEnvironmentIDOnlyForMultipleEnvironments() throws {
+        let single = ToolSpecFactory.buildSpecs(config: ToolsConfig(
+            shellType: .disabled,
+            includeViewImageTool: true,
+            environmentMode: .single
+        ))
+        let singleTool = try XCTUnwrap(single.first { $0.spec.name == "view_image" }?.spec)
+        let singleObject = try JSONObject(singleTool)
+        let singleParameters = try XCTUnwrap(singleObject["parameters"] as? [String: Any])
+        let singleProperties = try XCTUnwrap(singleParameters["properties"] as? [String: Any])
+        XCTAssertNil(singleProperties["environment_id"])
+
+        let multiple = ToolSpecFactory.buildSpecs(config: ToolsConfig(
+            shellType: .disabled,
+            includeViewImageTool: true,
+            environmentMode: .multiple
+        ))
+        let multipleTool = try XCTUnwrap(multiple.first { $0.spec.name == "view_image" }?.spec)
+        let multipleObject = try JSONObject(multipleTool)
+        let multipleParameters = try XCTUnwrap(multipleObject["parameters"] as? [String: Any])
+        let multipleProperties = try XCTUnwrap(multipleParameters["properties"] as? [String: Any])
+        XCTAssertNotNil(multipleProperties["environment_id"])
+    }
+
     func testNamespaceToolSpecSerializesExpectedWireShape() throws {
         let spec = ToolSpec.namespace(
             ResponsesAPINamespace(

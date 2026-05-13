@@ -1201,6 +1201,101 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertTrue(payload.content.contains("Output:\nhello"))
     }
 
+    func testViewImageRoutesThroughSelectedEnvironmentLikeRust() async throws {
+        let primary = try NonInteractiveExecTemporaryDirectory()
+        let selected = try NonInteractiveExecTemporaryDirectory()
+        try Self.writeTinyPNG(to: selected.url.appendingPathComponent("selected.png"))
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            .functionCall(
+                name: "view_image",
+                arguments: #"{"path":"selected.png","environment_id":"remote-dev"}"#,
+                callID: "call-view"
+            ),
+            cwd: primary.url,
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: [:],
+            turnEnvironmentSelections: [
+                TurnEnvironmentSelection(environmentID: "local", cwd: primary.url.path),
+                TurnEnvironmentSelection(environmentID: "remote-dev", cwd: selected.url.path)
+            ]
+        )
+
+        guard case let .functionCallOutput(callID, payload) = output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-view")
+        XCTAssertEqual(payload.success, true)
+        XCTAssertEqual(payload.contentItems?.count, 1)
+        guard case let .inputImage(imageURL, detail)? = payload.contentItems?.first else {
+            return XCTFail("expected image output")
+        }
+        XCTAssertTrue(imageURL.starts(with: "data:image/png;base64,"))
+        XCTAssertEqual(detail, defaultImageDetail)
+    }
+
+    func testViewImageOriginalDetailPreservesSourceWhenAllowedLikeRust() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let imagePath = temp.url.appendingPathComponent("original.png")
+        let original = try Self.writeTinyPNG(to: imagePath)
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            .functionCall(
+                name: "view_image",
+                arguments: #"{"path":"original.png","detail":"original"}"#,
+                callID: "call-original"
+            ),
+            cwd: temp.url,
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: [:],
+            canRequestOriginalImageDetail: true
+        )
+
+        guard case let .functionCallOutput(_, payload) = output,
+              case let .inputImage(imageURL, detail)? = payload.contentItems?.first
+        else {
+            return XCTFail("expected image output")
+        }
+        XCTAssertEqual(detail, .original)
+        let prefix = "data:image/png;base64,"
+        XCTAssertTrue(imageURL.starts(with: prefix))
+        XCTAssertEqual(Data(base64Encoded: String(imageURL.dropFirst(prefix.count))), original)
+    }
+
+    func testViewImageRejectsUnknownDetailLikeRust() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        try Self.writeTinyPNG(to: temp.url.appendingPathComponent("image.png"))
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            .functionCall(
+                name: "view_image",
+                arguments: #"{"path":"image.png","detail":"full"}"#,
+                callID: "call-invalid-detail"
+            ),
+            cwd: temp.url,
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: [:]
+        )
+
+        guard case let .functionCallOutput(_, payload) = output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(payload.success, false)
+        XCTAssertEqual(
+            payload.content,
+            "view_image.detail only supports `original`; omit `detail` for default resized behavior, got `full`"
+        )
+    }
+
     func testShellCommandAppliesConfiguredShellEnvironmentPolicyLikeRust() async throws {
         let temp = try NonInteractiveExecTemporaryDirectory()
         let command = try Self.jsonString(
@@ -2270,6 +2365,13 @@ private extension NonInteractiveExecTests {
     static func jsonString(_ value: String) throws -> String {
         let data = try JSONEncoder().encode(value)
         return String(decoding: data, as: UTF8.self)
+    }
+
+    @discardableResult
+    static func writeTinyPNG(to url: URL) throws -> Data {
+        let bytes = try XCTUnwrap(Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="))
+        try bytes.write(to: url)
+        return bytes
     }
 }
 

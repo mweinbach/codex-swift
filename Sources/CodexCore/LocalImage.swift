@@ -50,6 +50,7 @@ public enum LocalImageProcessor {
     public static let maxHeight = 2_048
 
     private static let imageCache = BlockingLruCache<Data, EncodedImage>(capacity: 32)
+    private static let originalImageCache = BlockingLruCache<Data, EncodedImage>(capacity: 32)
 
     public static func loadAndResizeToFit(path: URL) throws -> EncodedImage {
         let fileBytes: Data
@@ -61,6 +62,19 @@ public enum LocalImageProcessor {
 
         return try imageCache.getOrTryInsertWith(CacheUtils.sha1Digest(fileBytes)) {
             try loadAndResizeToFit(fileBytes: fileBytes, path: path)
+        }
+    }
+
+    public static func loadOriginal(path: URL) throws -> EncodedImage {
+        let fileBytes: Data
+        do {
+            fileBytes = try Data(contentsOf: path)
+        } catch {
+            throw ImageProcessingError.read(path: path.path, source: String(describing: error))
+        }
+
+        return try originalImageCache.getOrTryInsertWith(CacheUtils.sha1Digest(fileBytes)) {
+            try loadOriginal(fileBytes: fileBytes, path: path)
         }
     }
 
@@ -104,6 +118,34 @@ public enum LocalImageProcessor {
             mime: inputFormat.promptOutputFormat.mime,
             width: resized.width,
             height: resized.height
+        )
+    }
+
+    private static func loadOriginal(fileBytes: Data, path: URL) throws -> EncodedImage {
+        guard let inputFormat = ImageFileFormat(fileBytes: fileBytes) else {
+            throw ImageProcessingError.decode(
+                path: path.path,
+                source: "unsupported image format",
+                invalidImage: false
+            )
+        }
+
+        let image = try decodeImage(fileBytes, path: path, invalidImage: true)
+        if inputFormat.canPreserveSourceBytes {
+            return EncodedImage(
+                bytes: fileBytes,
+                mime: inputFormat.mime,
+                width: image.width,
+                height: image.height
+            )
+        }
+
+        let encoded = try encode(image, format: inputFormat.promptOutputFormat)
+        return EncodedImage(
+            bytes: encoded,
+            mime: inputFormat.promptOutputFormat.mime,
+            width: image.width,
+            height: image.height
         )
     }
 
