@@ -190,6 +190,99 @@ final class MemoryWriteGuardTests: XCTestCase {
         XCTAssertEqual(emptyRequests.count, 1)
     }
 
+    func testRateLimitSnapshotsClientBuildsRustUsageEndpoints() {
+        XCTAssertEqual(
+            MemoryRateLimitSnapshotsClient<RecordingAPITransport>.usageEndpoint(for: "https://chatgpt.com/"),
+            "https://chatgpt.com/backend-api/wham/usage"
+        )
+        XCTAssertEqual(
+            MemoryRateLimitSnapshotsClient<RecordingAPITransport>.usageEndpoint(
+                for: "https://chat.openai.com/backend-api/"
+            ),
+            "https://chat.openai.com/backend-api/wham/usage"
+        )
+        XCTAssertEqual(
+            MemoryRateLimitSnapshotsClient<RecordingAPITransport>.usageEndpoint(for: "https://api.example.test/"),
+            "https://api.example.test/api/codex/usage"
+        )
+    }
+
+    func testRateLimitSnapshotsClientMapsRustUsagePayloadAndAuthHeaders() async throws {
+        let capture = APIRequestCapture()
+        let client = MemoryRateLimitSnapshotsClient(transport: RecordingAPITransport(
+            capture: capture,
+            response: APIResponse(statusCode: 200, body: Data(rateLimitsUsageJSON.utf8))
+        ))
+
+        let snapshots = try await client.fetchSnapshots(
+            baseURL: "https://chatgpt.example/backend-api/",
+            accessToken: "access-token",
+            accountID: "account-id"
+        )
+
+        let requests = await capture.requests
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.first?.method, .get)
+        XCTAssertEqual(requests.first?.url, "https://chatgpt.example/backend-api/wham/usage")
+        XCTAssertEqual(requests.first?.headers[APIAuthHeaders.authorization], "Bearer access-token")
+        XCTAssertEqual(requests.first?.headers[APIAuthHeaders.chatGPTAccountID], "account-id")
+        XCTAssertEqual(requests.first?.body, nil)
+
+        XCTAssertEqual(snapshots.count, 2)
+        XCTAssertEqual(snapshots[0].limitID, memoryRateLimitID)
+        XCTAssertNil(snapshots[0].limitName)
+        XCTAssertEqual(
+            snapshots[0].primary,
+            RateLimitWindow(usedPercent: 42, windowMinutes: 2, resetsAt: 1_737_000_000)
+        )
+        XCTAssertEqual(
+            snapshots[0].secondary,
+            RateLimitWindow(usedPercent: 5, windowMinutes: nil, resetsAt: 1_737_043_200)
+        )
+        XCTAssertEqual(
+            snapshots[0].credits,
+            CreditsSnapshot(hasCredits: true, unlimited: false, balance: "9.99")
+        )
+        XCTAssertEqual(snapshots[0].planType, .pro)
+        XCTAssertEqual(snapshots[0].rateLimitReachedType, .workspaceMemberUsageLimitReached)
+
+        XCTAssertEqual(snapshots[1].limitID, "codex_other")
+        XCTAssertEqual(snapshots[1].limitName, "Other Codex")
+        XCTAssertEqual(
+            snapshots[1].primary,
+            RateLimitWindow(usedPercent: 88, windowMinutes: 30, resetsAt: 1_735_693_200)
+        )
+        XCTAssertNil(snapshots[1].secondary)
+        XCTAssertNil(snapshots[1].credits)
+        XCTAssertEqual(snapshots[1].planType, .pro)
+        XCTAssertNil(snapshots[1].rateLimitReachedType)
+    }
+
+    func testStartupCheckCanUseMemoryRateLimitSnapshotsClientFetcher() async {
+        let capture = APIRequestCapture()
+        let client = MemoryRateLimitSnapshotsClient(transport: RecordingAPITransport(
+            capture: capture,
+            response: APIResponse(statusCode: 200, body: Data(rateLimitsUsageJSON.utf8))
+        ))
+        let auth = AuthDotJSON(
+            authMode: .chatGPTAuthTokens,
+            openAIAPIKey: nil,
+            tokens: authTokens(accessToken: "access-token", accountID: "account-id"),
+            lastRefresh: nil
+        )
+
+        let allowed = await memoryRateLimitsAllowStartup(
+            auth: auth,
+            chatGPTBaseURL: "https://api.example.test/",
+            minRemainingPercent: 25,
+            fetchSnapshots: client.fetcher
+        )
+
+        XCTAssertFalse(allowed)
+        let requests = await capture.requests
+        XCTAssertEqual(requests.map(\.url), ["https://api.example.test/api/codex/usage"])
+    }
+
     func testMetricNamesMatchRustMemoryWriteConstants() {
         XCTAssertEqual(MemoryWriteMetrics.startup, "codex.memory.startup")
         XCTAssertEqual(MemoryWriteMetrics.phaseOneJobs, "codex.memory.phase1")
@@ -492,6 +585,51 @@ final class MemoryWriteGuardTests: XCTestCase {
             ownershipToken: "token-\(suffix)"
         )
     }
+
+    private var rateLimitsUsageJSON: String {
+        """
+        {
+          "plan_type": "pro",
+          "rate_limit": {
+            "allowed": true,
+            "limit_reached": false,
+            "primary_window": {
+              "used_percent": 42,
+              "limit_window_seconds": 61,
+              "reset_at": 1737000000
+            },
+            "secondary_window": {
+              "used_percent": 5,
+              "limit_window_seconds": 0,
+              "reset_at": 1737043200
+            }
+          },
+          "credits": {
+            "has_credits": true,
+            "unlimited": false,
+            "balance": "9.99"
+          },
+          "rate_limit_reached_type": {
+            "type": "workspace_member_usage_limit_reached"
+          },
+          "additional_rate_limits": [
+            {
+              "limit_name": "Other Codex",
+              "metered_feature": "codex_other",
+              "rate_limit": {
+                "allowed": true,
+                "limit_reached": false,
+                "primary_window": {
+                  "used_percent": 88,
+                  "limit_window_seconds": 1800,
+                  "reset_at": 1735693200
+                }
+              }
+            }
+          ]
+        }
+        """
+    }
 }
 
 private actor StartupEventLog {
@@ -524,6 +662,29 @@ private actor RateLimitFetchRecorder {
             throw error
         }
         return snapshots
+    }
+}
+
+private actor APIRequestCapture {
+    private(set) var requests: [APIRequest] = []
+
+    func append(_ request: APIRequest) {
+        requests.append(request)
+    }
+}
+
+private struct RecordingAPITransport: APITransport {
+    let capture: APIRequestCapture
+    let response: APIResponse
+
+    func execute(_ request: APIRequest) async -> Result<APIResponse, TransportError> {
+        await capture.append(request)
+        return .success(response)
+    }
+
+    func stream(_ request: APIRequest) async -> Result<APIStreamResponse, TransportError> {
+        await capture.append(request)
+        return .success(APIStreamResponse(statusCode: response.statusCode, sseText: ""))
     }
 }
 
