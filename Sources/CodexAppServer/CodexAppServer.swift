@@ -15661,10 +15661,13 @@ public enum CodexAppServer {
     fileprivate static func skillsListResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration,
-        remoteInstalledPlugins: [RemoteInstalledPluginReference] = []
+        remoteInstalledPlugins: [RemoteInstalledPluginReference] = [],
+        cachedOutcome: ((String) -> SkillLoadOutcome?)? = nil,
+        cacheOutcome: ((String, SkillLoadOutcome) -> Void)? = nil
     ) -> [String: Any] {
         let rawCwds = stringArrayParam(params?["cwds"]) ?? []
         let cwds = rawCwds.isEmpty ? [configuration.cwd.standardizedFileURL.path] : rawCwds
+        let forceReload = boolParam(params?["forceReload"], defaultValue: false)
         let configLayerStack = try? CodexConfigLayerLoader.loadConfigLayerStack(
             codexHome: configuration.codexHome,
             cliOverrides: configuration.cliConfigOverrides,
@@ -15674,12 +15677,23 @@ public enum CodexAppServer {
         let configRules = configLayerStack.map { skillConfigRules(from: $0.effectiveConfig()) } ?? []
         return [
             "data": cwds.map { cwd in
-                var outcome = loadSkills(
-                    cwd: URL(fileURLWithPath: cwd, isDirectory: true),
+                let cacheKey = skillsListCacheKey(
+                    cwd: cwd,
                     codexHome: configuration.codexHome,
-                    configLayerStack: configLayerStack,
                     remoteInstalledPlugins: remoteInstalledPlugins
                 )
+                var outcome: SkillLoadOutcome
+                if !forceReload, let cached = cachedOutcome?(cacheKey) {
+                    outcome = cached
+                } else {
+                    outcome = loadSkills(
+                        cwd: URL(fileURLWithPath: cwd, isDirectory: true),
+                        codexHome: configuration.codexHome,
+                        configLayerStack: configLayerStack,
+                        remoteInstalledPlugins: remoteInstalledPlugins
+                    )
+                    cacheOutcome?(cacheKey, outcome)
+                }
                 outcome.skills = outcome.skills.filter { isSkillEnabled($0, rules: configRules) }
                 return [
                     "cwd": cwd,
@@ -15688,6 +15702,22 @@ public enum CodexAppServer {
                 ]
             }
         ]
+    }
+
+    private static func skillsListCacheKey(
+        cwd: String,
+        codexHome: URL,
+        remoteInstalledPlugins: [RemoteInstalledPluginReference]
+    ) -> String {
+        let pluginKey = remoteInstalledPlugins
+            .map { "\($0.marketplaceName)/\($0.pluginName)/\($0.enabled)" }
+            .sorted()
+            .joined(separator: "|")
+        return [
+            URL(fileURLWithPath: cwd, isDirectory: true).standardizedFileURL.path,
+            codexHome.standardizedFileURL.path,
+            pluginKey
+        ].joined(separator: "\u{1f}")
     }
 
     fileprivate static func skillsConfigWriteResult(
@@ -23719,6 +23749,7 @@ final class CodexAppServerMessageProcessor {
     private var lastGlobalAppListRefreshFailed = false
     private var featuredPluginIDsCache: FeaturedPluginIDsCache?
     private var remoteInstalledPluginsCache: [RemoteInstalledPluginReference] = []
+    private var skillsListCache: [String: SkillLoadOutcome] = [:]
     private var fsWatches: [String: AppServerFSWatch] = [:]
     private var fuzzyFileSearchSessions: [String: [String]] = [:]
     private var activeTurnIDs: [String: String] = [:]
@@ -24149,13 +24180,16 @@ final class CodexAppServerMessageProcessor {
 
     private func clearPluginRelatedCaches() {
         remoteInstalledPluginsCache = []
+        skillsListCache = [:]
     }
 
     private func skillsListResult(params: [String: Any]?) -> [String: Any] {
         CodexAppServer.skillsListResult(
             params: params,
             configuration: configuration,
-            remoteInstalledPlugins: remoteInstalledPluginsCache
+            remoteInstalledPlugins: remoteInstalledPluginsCache,
+            cachedOutcome: { self.skillsListCache[$0] },
+            cacheOutcome: { self.skillsListCache[$0] = $1 }
         )
     }
 

@@ -22416,6 +22416,67 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(data[0]["cwd"] as? String, cwd.url.standardizedFileURL.path)
     }
 
+    func testSkillsListAcceptsRelativeCwdsLikeRust() throws {
+        let codexHome = try TemporaryDirectory()
+        let relativeCwd = "relative-cwd"
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"skills/list","params":{"cwds":["\#(relativeCwd)"],"forceReload":true}}"#,
+            codexHome: codexHome.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        XCTAssertEqual(data.count, 1)
+        XCTAssertEqual(data[0]["cwd"] as? String, relativeCwd)
+        XCTAssertEqual((data[0]["errors"] as? [Any])?.count, 0)
+    }
+
+    func testSkillsListPreservesRequestedCwdOrderLikeRust() throws {
+        let codexHome = try TemporaryDirectory()
+        let first = try TemporaryDirectory()
+        let second = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"skills/list","params":{"cwds":["\#(first.url.path)","\#(second.url.path)"],"forceReload":true}}"#,
+            codexHome: codexHome.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        XCTAssertEqual(data.map { $0["cwd"] as? String }, [first.url.path, second.url.path])
+    }
+
+    func testSkillsListUsesCachedResultUntilForceReloadLikeRust() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: codexHome.url))
+
+        let first = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"skills/list","params":{"cwds":["\#(cwd.url.path)"],"forceReload":false}}"#.utf8
+        )))
+        let firstData = try XCTUnwrap((first["result"] as? [String: Any])?["data"] as? [[String: Any]])
+        XCTAssertEqual((firstData[0]["skills"] as? [[String: Any]])?.map { $0["name"] as? String }, [])
+
+        let skill = cwd.url.appendingPathComponent(".codex/skills/late-extra-skill/SKILL.md", isDirectory: false)
+        try FileManager.default.createDirectory(at: skill.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try skillContents(name: "late-extra-skill", description: "late skill")
+            .write(to: skill, atomically: true, encoding: .utf8)
+
+        let cached = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"skills/list","params":{"cwds":["\#(cwd.url.path)"],"forceReload":false}}"#.utf8
+        )))
+        let cachedData = try XCTUnwrap((cached["result"] as? [String: Any])?["data"] as? [[String: Any]])
+        XCTAssertEqual((cachedData[0]["skills"] as? [[String: Any]])?.map { $0["name"] as? String }, [])
+
+        let reloaded = try decode(processor.processLine(Data(
+            #"{"id":3,"method":"skills/list","params":{"cwds":["\#(cwd.url.path)"],"forceReload":true}}"#.utf8
+        )))
+        let reloadedData = try XCTUnwrap((reloaded["result"] as? [String: Any])?["data"] as? [[String: Any]])
+        XCTAssertEqual(
+            (reloadedData[0]["skills"] as? [[String: Any]])?.map { $0["name"] as? String },
+            ["late-extra-skill"]
+        )
+    }
+
     func testSkillsConfigWriteTogglesPathSelectorAndAffectsSkillsList() throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
