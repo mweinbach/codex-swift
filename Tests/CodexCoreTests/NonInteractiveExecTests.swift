@@ -426,23 +426,23 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(options.serviceTier, "flex")
     }
 
-    func testResponsesOptionsHonorsConfigReasoningSummarySupportOverrideLikeRust() {
-        let disabledFamily = ModelFamily(
-            slug: "forced-disabled",
+    func testResponsesOptionsHonorsReasoningSummarySupportOverrideLikeRust() {
+        let stillEnabledFamily = ModelFamily(
+            slug: "still-enabled",
             family: "test",
             supportsReasoningSummaries: true,
             defaultReasoningSummary: .auto
         )
         .withConfigOverrides(ModelFamilyConfigOverrides(supportsReasoningSummaries: false))
-        let disabledOptions = NonInteractiveExec.responsesOptions(
+        let stillEnabledOptions = NonInteractiveExec.responsesOptions(
             conversationID: ConversationId(),
-            modelFamily: disabledFamily,
+            modelFamily: stillEnabledFamily,
             reasoningEffort: nil,
             reasoningSummary: nil,
             verbosity: nil,
             outputSchema: nil
         )
-        XCTAssertNil(disabledOptions.reasoning?.summary)
+        XCTAssertEqual(stillEnabledOptions.reasoning?.summary, .auto)
 
         let enabledFamily = ModelFamily(
             slug: "forced-enabled",

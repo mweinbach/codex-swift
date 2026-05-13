@@ -794,7 +794,8 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.modelFamilyConfigOverrides, ModelFamilyConfigOverrides(
             supportsReasoningSummaries: false,
             contextWindow: 123_456,
-            autoCompactTokenLimit: 120_000
+            autoCompactTokenLimit: 120_000,
+            toolOutputTokenLimit: 12_000
         ))
         XCTAssertEqual(config.serviceTier, "priority")
         XCTAssertEqual(config.chatgptBaseURL, "https://example.test/backend-api/")

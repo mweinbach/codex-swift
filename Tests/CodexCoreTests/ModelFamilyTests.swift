@@ -252,6 +252,26 @@ final class ModelFamilyTests: XCTestCase {
         XCTAssertEqual(updated.truncationPolicy, .tokens(4_000))
     }
 
+    func testReasoningSummariesOverrideFalseDoesNotDisableSupportLikeRust() {
+        let enabled = ModelFamily(
+            slug: "enabled-model",
+            family: "test",
+            supportsReasoningSummaries: true
+        )
+        .withConfigOverrides(ModelFamilyConfigOverrides(supportsReasoningSummaries: false))
+
+        XCTAssertTrue(enabled.supportsReasoningSummaries)
+
+        let disabled = ModelFamily(
+            slug: "disabled-model",
+            family: "test",
+            supportsReasoningSummaries: false
+        )
+        .withConfigOverrides(ModelFamilyConfigOverrides(supportsReasoningSummaries: false))
+
+        XCTAssertFalse(disabled.supportsReasoningSummaries)
+    }
+
     func testConfigContextWindowOverrideClampsToRemoteMaximumLikeRust() {
         let updated = ModelsManager.constructModelFamily(
             model: "gpt-5.1",
@@ -278,6 +298,51 @@ final class ModelFamilyTests: XCTestCase {
 
         XCTAssertEqual(updated.contextWindow, 400_000)
         XCTAssertEqual(updated.maxContextWindow, 400_000)
+    }
+
+    func testToolOutputTokenLimitOverridePreservesRustPolicyMode() {
+        let bytesFamily = ModelFamily(
+            slug: "bytes-model",
+            family: "test",
+            truncationPolicy: .bytes(10_000)
+        )
+        .withConfigOverrides(ModelFamilyConfigOverrides(toolOutputTokenLimit: 123))
+
+        XCTAssertEqual(bytesFamily.truncationPolicy, .bytes(Truncation.approxBytesForTokens(123)))
+
+        let tokensFamily = ModelFamily(
+            slug: "tokens-model",
+            family: "test",
+            truncationPolicy: .tokens(10_000)
+        )
+        .withConfigOverrides(ModelFamilyConfigOverrides(toolOutputTokenLimit: 123))
+
+        XCTAssertEqual(tokensFamily.truncationPolicy, .tokens(123))
+    }
+
+    func testConstructModelFamilyAppliesToolOutputTokenLimitAfterRemoteOverridesLikeRust() {
+        let updated = ModelsManager.constructModelFamily(
+            model: "gpt-5.4",
+            remoteModels: [
+                ModelInfo(
+                    slug: "gpt-5.4",
+                    displayName: "gpt-5.4",
+                    supportedReasoningLevels: [],
+                    shellType: .default,
+                    visibility: .list,
+                    supportedInAPI: true,
+                    priority: 1,
+                    supportsReasoningSummaries: false,
+                    supportVerbosity: false,
+                    truncationPolicy: .tokens(10_000),
+                    supportsParallelToolCalls: false,
+                    experimentalSupportedTools: []
+                )
+            ],
+            configOverrides: ModelFamilyConfigOverrides(toolOutputTokenLimit: 123)
+        )
+
+        XCTAssertEqual(updated.truncationPolicy, .tokens(123))
     }
 
     func testTruncationPolicyConfigConvertsToRuntimePolicy() {

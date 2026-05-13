@@ -4,15 +4,18 @@ public struct ModelFamilyConfigOverrides: Equatable, Sendable {
     public var supportsReasoningSummaries: Bool?
     public var contextWindow: Int64?
     public var autoCompactTokenLimit: Int64?
+    public var toolOutputTokenLimit: Int?
 
     public init(
         supportsReasoningSummaries: Bool? = nil,
         contextWindow: Int64? = nil,
-        autoCompactTokenLimit: Int64? = nil
+        autoCompactTokenLimit: Int64? = nil,
+        toolOutputTokenLimit: Int? = nil
     ) {
         self.supportsReasoningSummaries = supportsReasoningSummaries
         self.contextWindow = contextWindow
         self.autoCompactTokenLimit = autoCompactTokenLimit
+        self.toolOutputTokenLimit = toolOutputTokenLimit
     }
 }
 
@@ -91,14 +94,22 @@ public struct ModelFamily: Equatable, Sendable {
 
     public func withConfigOverrides(_ overrides: ModelFamilyConfigOverrides) -> ModelFamily {
         var family = self
-        if let supportsReasoningSummaries = overrides.supportsReasoningSummaries {
-            family.supportsReasoningSummaries = supportsReasoningSummaries
+        if overrides.supportsReasoningSummaries == true {
+            family.supportsReasoningSummaries = true
         }
         if let contextWindow = overrides.contextWindow {
             family.contextWindow = family.maxContextWindow.map { min(contextWindow, $0) } ?? contextWindow
         }
         if let autoCompactTokenLimit = overrides.autoCompactTokenLimit {
             family.configuredAutoCompactTokenLimit = autoCompactTokenLimit
+        }
+        if let toolOutputTokenLimit = overrides.toolOutputTokenLimit {
+            switch family.truncationPolicy {
+            case .bytes:
+                family.truncationPolicy = .bytes(Truncation.approxBytesForTokens(toolOutputTokenLimit))
+            case .tokens:
+                family.truncationPolicy = .tokens(toolOutputTokenLimit)
+            }
         }
         return family
     }

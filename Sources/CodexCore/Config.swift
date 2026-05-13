@@ -966,7 +966,8 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         ModelFamilyConfigOverrides(
             supportsReasoningSummaries: modelSupportsReasoningSummaries,
             contextWindow: modelContextWindow,
-            autoCompactTokenLimit: modelAutoCompactTokenLimit
+            autoCompactTokenLimit: modelAutoCompactTokenLimit,
+            toolOutputTokenLimit: toolOutputTokenLimit
         )
     }
 }
