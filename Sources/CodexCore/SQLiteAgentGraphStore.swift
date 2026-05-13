@@ -1227,6 +1227,156 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         return updatedRows
     }
 
+    public func pruneStage1OutputsForRetention(
+        maxUnusedDays: Int64,
+        limit: Int
+    ) async throws -> Int {
+        guard limit > 0 else {
+            return 0
+        }
+        let database = handle.database
+        let cutoff = Self.saturatingAdd(
+            Self.currentTimeSeconds(),
+            -Self.saturatingMultiply(max(maxUnusedDays, 0), 86_400)
+        )
+        try Self.execute(
+            """
+            DELETE FROM stage1_outputs
+            WHERE thread_id IN (
+                SELECT thread_id
+                FROM stage1_outputs
+                WHERE selected_for_phase2 = 0
+                  AND COALESCE(last_usage, source_updated_at) < ?
+                ORDER BY
+                  COALESCE(last_usage, source_updated_at) ASC,
+                  source_updated_at ASC,
+                  thread_id ASC
+                LIMIT ?
+            )
+            """,
+            bindings: [
+                .int(cutoff),
+                .int(Int64(limit))
+            ],
+            database: database
+        )
+        return Int(sqlite3_changes(database))
+    }
+
+    public func getPhase2InputSelection(
+        limit: Int,
+        maxUnusedDays: Int64
+    ) async throws -> [Stage1Output] {
+        guard limit > 0 else {
+            return []
+        }
+        let database = handle.database
+        let cutoff = Self.saturatingAdd(
+            Self.currentTimeSeconds(),
+            -Self.saturatingMultiply(max(maxUnusedDays, 0), 86_400)
+        )
+        return try Self.withStatement(
+            query: """
+                SELECT
+                    selected.thread_id,
+                    selected.rollout_path,
+                    selected.source_updated_at,
+                    selected.raw_memory,
+                    selected.rollout_summary,
+                    selected.rollout_slug,
+                    selected.generated_at,
+                    selected.cwd,
+                    selected.git_branch
+                FROM (
+                    SELECT
+                        so.thread_id,
+                        COALESCE(t.rollout_path, '') AS rollout_path,
+                        so.source_updated_at,
+                        so.raw_memory,
+                        so.rollout_summary,
+                        so.rollout_slug,
+                        so.generated_at,
+                        COALESCE(t.cwd, '') AS cwd,
+                        t.git_branch AS git_branch
+                    FROM stage1_outputs AS so
+                    LEFT JOIN threads AS t
+                        ON t.id = so.thread_id
+                    WHERE t.memory_mode = 'enabled'
+                      AND (length(trim(so.raw_memory)) > 0 OR length(trim(so.rollout_summary)) > 0)
+                      AND (
+                            (so.last_usage IS NOT NULL AND so.last_usage >= ?)
+                            OR (so.last_usage IS NULL AND so.source_updated_at >= ?)
+                      )
+                    ORDER BY
+                        COALESCE(so.usage_count, 0) DESC,
+                        COALESCE(so.last_usage, so.source_updated_at) DESC,
+                        so.source_updated_at DESC,
+                        so.thread_id DESC
+                    LIMIT ?
+                ) AS selected
+                ORDER BY selected.thread_id ASC
+                """,
+            bindings: [
+                .int(cutoff),
+                .int(cutoff),
+                .int(Int64(limit))
+            ],
+            database: database
+        ) { statement in
+            var outputs: [Stage1Output] = []
+            while true {
+                let result = sqlite3_step(statement)
+                if result == SQLITE_DONE {
+                    return outputs
+                }
+                guard result == SQLITE_ROW else {
+                    throw Self.sqliteError(database: database)
+                }
+                outputs.append(try Self.stage1Output(statement))
+            }
+        }
+    }
+
+    public func markThreadMemoryModePolluted(threadID: ThreadId) async throws -> Bool {
+        let database = handle.database
+        let now = Self.currentTimeSeconds()
+        try Self.execute("BEGIN TRANSACTION", bindings: [SQLiteBinding](), database: database)
+        do {
+            try Self.execute(
+                """
+                UPDATE threads
+                SET memory_mode = 'polluted'
+                WHERE id = ? AND memory_mode != 'polluted'
+                """,
+                bindings: [.text(threadID.description)],
+                database: database
+            )
+            guard sqlite3_changes(database) > 0 else {
+                try Self.execute("COMMIT", bindings: [SQLiteBinding](), database: database)
+                return false
+            }
+
+            let selectedForPhase2 = try Self.optionalIntValue(
+                query: """
+                    SELECT selected_for_phase2
+                    FROM stage1_outputs
+                    WHERE thread_id = ?
+                    """,
+                bindings: [.text(threadID.description)],
+                database: database
+            ) ?? 0
+            if selectedForPhase2 != 0 {
+                try Self.enqueueGlobalConsolidation(inputWatermark: now, database: database)
+            }
+
+            try Self.execute("COMMIT", bindings: [SQLiteBinding](), database: database)
+            return true
+        } catch {
+            try? Self.execute("ROLLBACK", bindings: [SQLiteBinding](), database: database)
+            throw error
+        }
+    }
+
     public func tryClaimStage1Job(
         threadID: ThreadId,
         workerID: ThreadId,

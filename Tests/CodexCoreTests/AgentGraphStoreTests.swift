@@ -1400,6 +1400,222 @@ final class AgentGraphStoreTests: XCTestCase {
         XCTAssertEqual(phase2Job?.lastSuccessWatermark, 101)
     }
 
+    func testSQLiteStoreGetsPhase2InputSelectionLikeRust() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let now = Int64(Date().timeIntervalSince1970.rounded(.down))
+        let highRecentThreadID = try threadID(877)
+        let highStaleThreadID = try threadID(878)
+        let lowRecentThreadID = try threadID(879)
+        let pollutedThreadID = try threadID(880)
+        let freshNeverUsedThreadID = try threadID(881)
+
+        for (threadID, memoryMode) in [
+            (highRecentThreadID, "enabled"),
+            (highStaleThreadID, "enabled"),
+            (lowRecentThreadID, "enabled"),
+            (pollutedThreadID, "polluted"),
+            (freshNeverUsedThreadID, "enabled")
+        ] {
+            try insertRawSQLiteThread(
+                id: threadID,
+                agentPath: try AgentPath(validating: "/root/memory/select_\(threadID.description.suffix(4))"),
+                memoryMode: memoryMode,
+                rolloutPath: "/tmp/\(threadID.description).jsonl",
+                cwd: "/tmp/phase2-select",
+                databaseURL: databaseURL
+            )
+        }
+
+        try insertRawStage1Output(
+            threadID: highRecentThreadID,
+            sourceUpdatedAt: now - 10 * 86_400,
+            rawMemory: "high recent raw",
+            rolloutSummary: "high recent summary",
+            generatedAt: now - 10 * 86_400,
+            databaseURL: databaseURL
+        )
+        try updateRawStage1Usage(
+            threadID: highRecentThreadID,
+            usageCount: 5,
+            lastUsage: now - 1 * 86_400,
+            databaseURL: databaseURL
+        )
+        try insertRawStage1Output(
+            threadID: highStaleThreadID,
+            sourceUpdatedAt: now - 40 * 86_400,
+            rawMemory: "high stale raw",
+            rolloutSummary: "high stale summary",
+            generatedAt: now - 40 * 86_400,
+            databaseURL: databaseURL
+        )
+        try updateRawStage1Usage(
+            threadID: highStaleThreadID,
+            usageCount: 5,
+            lastUsage: now - 31 * 86_400,
+            databaseURL: databaseURL
+        )
+        try insertRawStage1Output(
+            threadID: lowRecentThreadID,
+            sourceUpdatedAt: now - 3 * 86_400,
+            rawMemory: "low recent raw",
+            rolloutSummary: "low recent summary",
+            generatedAt: now - 3 * 86_400,
+            databaseURL: databaseURL
+        )
+        try updateRawStage1Usage(
+            threadID: lowRecentThreadID,
+            usageCount: 1,
+            lastUsage: now - 3_600,
+            databaseURL: databaseURL
+        )
+        try insertRawStage1Output(
+            threadID: pollutedThreadID,
+            sourceUpdatedAt: now - 1_800,
+            rawMemory: "polluted raw",
+            rolloutSummary: "polluted summary",
+            generatedAt: now - 1_800,
+            databaseURL: databaseURL
+        )
+        try updateRawStage1Usage(
+            threadID: pollutedThreadID,
+            usageCount: 99,
+            lastUsage: now - 60,
+            databaseURL: databaseURL
+        )
+        try insertRawStage1Output(
+            threadID: freshNeverUsedThreadID,
+            sourceUpdatedAt: now - 2 * 86_400,
+            rawMemory: "fresh raw",
+            rolloutSummary: "fresh summary",
+            generatedAt: now - 2 * 86_400,
+            databaseURL: databaseURL
+        )
+
+        let none = try await store.getPhase2InputSelection(limit: 0, maxUnusedDays: 30)
+        let selection = try await store.getPhase2InputSelection(limit: 3, maxUnusedDays: 30)
+
+        XCTAssertEqual(none, [])
+        XCTAssertEqual(
+            selection.map(\.threadID),
+            [highRecentThreadID, lowRecentThreadID, freshNeverUsedThreadID]
+        )
+        XCTAssertEqual(selection.first?.rolloutPath, "/tmp/\(highRecentThreadID.description).jsonl")
+    }
+
+    func testSQLiteStorePrunesStage1OutputsForRetentionLikeRust() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let now = Int64(Date().timeIntervalSince1970.rounded(.down))
+        let staleUnusedThreadID = try threadID(882)
+        let staleUsedThreadID = try threadID(883)
+        let staleSelectedThreadID = try threadID(884)
+        let freshUsedThreadID = try threadID(885)
+
+        for threadID in [staleUnusedThreadID, staleUsedThreadID, staleSelectedThreadID, freshUsedThreadID] {
+            try insertRawSQLiteThread(
+                id: threadID,
+                agentPath: try AgentPath(validating: "/root/memory/prune_\(threadID.description.suffix(4))"),
+                memoryMode: "enabled",
+                rolloutPath: "/tmp/\(threadID.description).jsonl",
+                databaseURL: databaseURL
+            )
+            try insertRawStage1Output(
+                threadID: threadID,
+                sourceUpdatedAt: now - 45 * 86_400,
+                rawMemory: "raw \(threadID.description)",
+                rolloutSummary: "summary \(threadID.description)",
+                generatedAt: now - 45 * 86_400,
+                databaseURL: databaseURL
+            )
+        }
+        try updateRawStage1Usage(
+            threadID: staleUsedThreadID,
+            usageCount: 3,
+            lastUsage: now - 40 * 86_400,
+            databaseURL: databaseURL
+        )
+        try markRawStage1Selection(
+            threadID: staleSelectedThreadID,
+            selectedForPhase2: 1,
+            selectedSourceUpdatedAt: now - 45 * 86_400,
+            databaseURL: databaseURL
+        )
+        try updateRawStage1Usage(
+            threadID: freshUsedThreadID,
+            usageCount: 8,
+            lastUsage: now - 2 * 86_400,
+            databaseURL: databaseURL
+        )
+
+        let noPrune = try await store.pruneStage1OutputsForRetention(maxUnusedDays: 30, limit: 0)
+        let pruned = try await store.pruneStage1OutputsForRetention(maxUnusedDays: 30, limit: 100)
+        let remaining = try readRawStage1OutputThreadIDs(databaseURL: databaseURL)
+
+        XCTAssertEqual(noPrune, 0)
+        XCTAssertEqual(pruned, 2)
+        XCTAssertEqual(remaining, [freshUsedThreadID, staleSelectedThreadID].map(\.description).sorted())
+    }
+
+    func testSQLiteStoreMarksThreadMemoryModePollutedAndEnqueuesPhase2LikeRust() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        try createMinimalThreadsTable(databaseURL: databaseURL)
+        let selectedThreadID = try threadID(886)
+        let unselectedThreadID = try threadID(887)
+        for threadID in [selectedThreadID, unselectedThreadID] {
+            try insertRawSQLiteThread(
+                id: threadID,
+                agentPath: try AgentPath(validating: "/root/memory/pollute_\(threadID.description.suffix(4))"),
+                memoryMode: "enabled",
+                rolloutPath: "/tmp/\(threadID.description).jsonl",
+                databaseURL: databaseURL
+            )
+            try insertRawStage1Output(
+                threadID: threadID,
+                sourceUpdatedAt: 100,
+                rawMemory: "raw",
+                rolloutSummary: "summary",
+                generatedAt: 101,
+                databaseURL: databaseURL
+            )
+        }
+        try markRawStage1Selection(
+            threadID: selectedThreadID,
+            selectedForPhase2: 1,
+            selectedSourceUpdatedAt: 100,
+            databaseURL: databaseURL
+        )
+
+        let unselectedPolluted = try await store.markThreadMemoryModePolluted(threadID: unselectedThreadID)
+        let noGlobalAfterUnselected = try readRawMemoryJob(
+            kind: "memory_consolidate_global",
+            jobKey: "global",
+            databaseURL: databaseURL
+        )
+        let selectedPolluted = try await store.markThreadMemoryModePolluted(threadID: selectedThreadID)
+        let selectedPollutedAgain = try await store.markThreadMemoryModePolluted(threadID: selectedThreadID)
+        let selectedMode = try await store.getThreadMemoryMode(threadID: selectedThreadID)
+        let globalAfterSelected = try readRawMemoryJob(
+            kind: "memory_consolidate_global",
+            jobKey: "global",
+            databaseURL: databaseURL
+        )
+
+        XCTAssertTrue(unselectedPolluted)
+        XCTAssertNil(noGlobalAfterUnselected)
+        XCTAssertTrue(selectedPolluted)
+        XCTAssertFalse(selectedPollutedAgain)
+        XCTAssertEqual(selectedMode, "polluted")
+        XCTAssertEqual(globalAfterSelected?.status, "pending")
+        XCTAssertNotNil(globalAfterSelected?.inputWatermark)
+    }
+
     func testSQLiteStoreFindsRolloutPathWithArchiveFilter() async throws {
         let temp = try AgentGraphStoreTemporaryDirectory()
         let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
@@ -2977,6 +3193,53 @@ final class AgentGraphStoreTests: XCTestCase {
             bindOptionalInt(selectedSourceUpdatedAt, to: preparedStatement, at: 2)
             XCTAssertEqual(sqlite3_bind_text(preparedStatement, 3, threadID.description, -1, testSQLiteTransient), SQLITE_OK)
             XCTAssertEqual(sqlite3_step(preparedStatement), SQLITE_DONE)
+        }
+    }
+
+    private func updateRawStage1Usage(
+        threadID: ThreadId,
+        usageCount: Int64,
+        lastUsage: Int64?,
+        databaseURL: URL
+    ) throws {
+        try withRawSQLiteDatabase(databaseURL: databaseURL) { database in
+            var statement: OpaquePointer?
+            let query = """
+                UPDATE stage1_outputs
+                SET usage_count = ?, last_usage = ?
+                WHERE thread_id = ?
+                """
+            XCTAssertEqual(sqlite3_prepare_v2(database, query, -1, &statement, nil), SQLITE_OK)
+            let preparedStatement = try XCTUnwrap(statement)
+            defer {
+                sqlite3_finalize(preparedStatement)
+            }
+            XCTAssertEqual(sqlite3_bind_int64(preparedStatement, 1, usageCount), SQLITE_OK)
+            bindOptionalInt(lastUsage, to: preparedStatement, at: 2)
+            XCTAssertEqual(sqlite3_bind_text(preparedStatement, 3, threadID.description, -1, testSQLiteTransient), SQLITE_OK)
+            XCTAssertEqual(sqlite3_step(preparedStatement), SQLITE_DONE)
+        }
+    }
+
+    private func readRawStage1OutputThreadIDs(databaseURL: URL) throws -> [String] {
+        try withRawSQLiteDatabase(databaseURL: databaseURL) { database in
+            var statement: OpaquePointer?
+            let query = "SELECT thread_id FROM stage1_outputs ORDER BY thread_id"
+            XCTAssertEqual(sqlite3_prepare_v2(database, query, -1, &statement, nil), SQLITE_OK)
+            let preparedStatement = try XCTUnwrap(statement)
+            defer {
+                sqlite3_finalize(preparedStatement)
+            }
+
+            var threadIDs: [String] = []
+            while true {
+                let result = sqlite3_step(preparedStatement)
+                if result == SQLITE_DONE {
+                    return threadIDs
+                }
+                XCTAssertEqual(result, SQLITE_ROW)
+                threadIDs.append(try requiredTextColumn(preparedStatement, index: 0))
+            }
         }
     }
 
