@@ -96,6 +96,100 @@ final class MemoryWriteGuardTests: XCTestCase {
         XCTAssertTrue(memoryRateLimitsAllowStartup(snapshots: [], minRemainingPercent: 25))
     }
 
+    func testStartupCheckFetchesLiveLimitsOnlyForChatGPTBackendAuth() async {
+        let fetcher = RateLimitFetchRecorder(snapshots: [
+            rateLimitSnapshot(limitID: memoryRateLimitID, primaryUsedPercent: 90, secondaryUsedPercent: nil)
+        ])
+        let auth = AuthDotJSON(
+            authMode: .chatGPTAuthTokens,
+            openAIAPIKey: nil,
+            tokens: authTokens(accessToken: "access-token", accountID: "account-id"),
+            lastRefresh: nil
+        )
+
+        let allowed = await memoryRateLimitsAllowStartup(
+            auth: auth,
+            chatGPTBaseURL: "https://chatgpt.example/backend-api/",
+            minRemainingPercent: 25,
+            fetchSnapshots: fetcher.fetch
+        )
+
+        XCTAssertFalse(allowed)
+        let requests = await fetcher.requests
+        XCTAssertEqual(requests, [
+            RateLimitFetchRequest(
+                baseURL: "https://chatgpt.example/backend-api/",
+                accessToken: "access-token",
+                accountID: "account-id"
+            )
+        ])
+    }
+
+    func testStartupCheckSkipsLiveFetchWithoutBackendAuth() async {
+        let fetcher = RateLimitFetchRecorder(snapshots: [
+            rateLimitSnapshot(limitID: memoryRateLimitID, primaryUsedPercent: 100, secondaryUsedPercent: nil)
+        ])
+
+        for auth in [
+            Optional<AuthDotJSON>.none,
+            AuthDotJSON(authMode: .apiKey, openAIAPIKey: "sk-test", tokens: nil, lastRefresh: nil),
+            AuthDotJSON(
+                authMode: .apiKey,
+                openAIAPIKey: nil,
+                tokens: authTokens(accessToken: "token", accountID: "account-id"),
+                lastRefresh: nil
+            ),
+            AuthDotJSON(
+                authMode: .chatGPTAuthTokens,
+                openAIAPIKey: nil,
+                tokens: authTokens(accessToken: "token", accountID: nil),
+                lastRefresh: nil
+            )
+        ] {
+            let allowed = await memoryRateLimitsAllowStartup(
+                auth: auth,
+                chatGPTBaseURL: "https://chatgpt.example/backend-api/",
+                minRemainingPercent: 25,
+                fetchSnapshots: fetcher.fetch
+            )
+            XCTAssertTrue(allowed)
+        }
+
+        let requests = await fetcher.requests
+        XCTAssertEqual(requests, [])
+    }
+
+    func testStartupCheckFailsOpenWhenLiveFetchFailsOrReturnsNoSnapshots() async {
+        let failingFetcher = RateLimitFetchRecorder(error: TestError("backend unavailable"))
+        let emptyFetcher = RateLimitFetchRecorder(snapshots: [])
+        let auth = AuthDotJSON(
+            authMode: .chatGPTAuthTokens,
+            openAIAPIKey: nil,
+            tokens: authTokens(accessToken: "access-token", accountID: "account-id"),
+            lastRefresh: nil
+        )
+
+        let failedOpenAfterError = await memoryRateLimitsAllowStartup(
+            auth: auth,
+            chatGPTBaseURL: "https://chatgpt.example/backend-api/",
+            minRemainingPercent: 25,
+            fetchSnapshots: failingFetcher.fetch
+        )
+        let failedOpenAfterEmptyResponse = await memoryRateLimitsAllowStartup(
+            auth: auth,
+            chatGPTBaseURL: "https://chatgpt.example/backend-api/",
+            minRemainingPercent: 25,
+            fetchSnapshots: emptyFetcher.fetch
+        )
+        let failingRequests = await failingFetcher.requests
+        let emptyRequests = await emptyFetcher.requests
+
+        XCTAssertTrue(failedOpenAfterError)
+        XCTAssertTrue(failedOpenAfterEmptyResponse)
+        XCTAssertEqual(failingRequests.count, 1)
+        XCTAssertEqual(emptyRequests.count, 1)
+    }
+
     func testMetricNamesMatchRustMemoryWriteConstants() {
         XCTAssertEqual(MemoryWriteMetrics.startup, "codex.memory.startup")
         XCTAssertEqual(MemoryWriteMetrics.phaseOneJobs, "codex.memory.phase1")
@@ -250,6 +344,15 @@ final class MemoryWriteGuardTests: XCTestCase {
         features.set(.memoryTool, enabled: enabled)
         return features
     }
+
+    private func authTokens(accessToken: String, accountID: String?) -> AuthTokenData {
+        AuthTokenData(
+            idToken: IdTokenInfo(rawJWT: "id-token"),
+            accessToken: accessToken,
+            refreshToken: "refresh-token",
+            accountID: accountID
+        )
+    }
 }
 
 private actor StartupEventLog {
@@ -257,6 +360,39 @@ private actor StartupEventLog {
 
     func append(_ value: String) {
         values.append(value)
+    }
+}
+
+private struct RateLimitFetchRequest: Equatable {
+    let baseURL: String
+    let accessToken: String
+    let accountID: String
+}
+
+private actor RateLimitFetchRecorder {
+    private(set) var requests: [RateLimitFetchRequest] = []
+    private let snapshots: [RateLimitSnapshot]
+    private let error: Error?
+
+    init(snapshots: [RateLimitSnapshot] = [], error: Error? = nil) {
+        self.snapshots = snapshots
+        self.error = error
+    }
+
+    func fetch(baseURL: String, accessToken: String, accountID: String) async throws -> [RateLimitSnapshot] {
+        requests.append(RateLimitFetchRequest(baseURL: baseURL, accessToken: accessToken, accountID: accountID))
+        if let error {
+            throw error
+        }
+        return snapshots
+    }
+}
+
+private struct TestError: Error, CustomStringConvertible {
+    let description: String
+
+    init(_ description: String) {
+        self.description = description
     }
 }
 

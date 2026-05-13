@@ -29,6 +29,46 @@ public func memoryRateLimitsAllowStartup(
     )
 }
 
+public typealias MemoryRateLimitSnapshotsFetcher = @Sendable (
+    _ baseURL: String,
+    _ accessToken: String,
+    _ accountID: String
+) async throws -> [RateLimitSnapshot]
+
+public func memoryRateLimitsAllowStartup(
+    auth: AuthDotJSON?,
+    chatGPTBaseURL: String,
+    minRemainingPercent: Int64,
+    fetchSnapshots: MemoryRateLimitSnapshotsFetcher
+) async -> Bool {
+    guard memoryAuthUsesCodexBackend(auth),
+          let tokens = auth?.tokens,
+          let accountID = tokens.accountID
+    else {
+        return true
+    }
+
+    do {
+        return memoryRateLimitsAllowStartup(
+            snapshots: try await fetchSnapshots(chatGPTBaseURL, tokens.accessToken, accountID),
+            minRemainingPercent: minRemainingPercent
+        )
+    } catch {
+        return true
+    }
+}
+
+public func memoryAuthUsesCodexBackend(_ auth: AuthDotJSON?) -> Bool {
+    guard let auth,
+          auth.openAIAPIKey == nil,
+          auth.tokens != nil,
+          auth.authMode != .apiKey
+    else {
+        return false
+    }
+    return true
+}
+
 public func memoryStartupRateLimitSnapshot(from snapshots: [RateLimitSnapshot]) -> RateLimitSnapshot? {
     snapshots.first { $0.limitID == memoryRateLimitID } ?? snapshots.first
 }
