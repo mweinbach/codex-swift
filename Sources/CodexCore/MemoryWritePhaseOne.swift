@@ -1,5 +1,13 @@
 import Foundation
 
+public let memoryStageOneModel = "gpt-5.4-mini"
+public let memoryStageOneReasoningEffort: ReasoningEffort = .low
+public let memoryStageOneConcurrencyLimit = 8
+public let memoryStageOneJobLeaseSeconds: Int64 = 3_600
+public let memoryStageOneJobRetryDelaySeconds: Int64 = 3_600
+public let memoryStageOneThreadScanLimit = 5_000
+public let memoryStageOnePruneBatchSize = 200
+
 public struct MemoryStageOneOutput: Equatable, Decodable, Sendable {
     public let rawMemory: String
     public let rolloutSummary: String
@@ -63,6 +71,93 @@ public enum MemoryWritePhaseOneError: Error, Equatable, CustomStringConvertible,
     }
 }
 
+public enum MemoryPhaseOneJobOutcome: Equatable, Sendable {
+    case succeededWithOutput
+    case succeededNoOutput
+    case failed
+}
+
+public struct MemoryPhaseOneJobResult: Equatable, Sendable {
+    public let outcome: MemoryPhaseOneJobOutcome
+    public let tokenUsage: TokenUsage?
+
+    public init(outcome: MemoryPhaseOneJobOutcome, tokenUsage: TokenUsage?) {
+        self.outcome = outcome
+        self.tokenUsage = tokenUsage
+    }
+}
+
+public struct MemoryPhaseOneStats: Equatable, Sendable {
+    public let claimed: Int
+    public let succeededWithOutput: Int
+    public let succeededNoOutput: Int
+    public let failed: Int
+    public let totalTokenUsage: TokenUsage?
+
+    public init(
+        claimed: Int,
+        succeededWithOutput: Int,
+        succeededNoOutput: Int,
+        failed: Int,
+        totalTokenUsage: TokenUsage?
+    ) {
+        self.claimed = claimed
+        self.succeededWithOutput = succeededWithOutput
+        self.succeededNoOutput = succeededNoOutput
+        self.failed = failed
+        self.totalTokenUsage = totalTokenUsage
+    }
+}
+
+/// Storage boundary used by the Phase 1 memory extraction runner.
+///
+/// `SQLiteAgentGraphStore` is the production implementation. Callers may rely on
+/// implementations preserving Rust's ownership-token checks for startup claims,
+/// success, no-output success, and retryable failure transitions.
+public protocol MemoryPhaseOneJobStore: Sendable {
+    func claimStage1JobsForStartup(
+        currentThreadID: ThreadId,
+        params: Stage1StartupClaimParams
+    ) async throws -> [Stage1JobClaim]
+
+    func markStage1JobSucceeded(
+        threadID: ThreadId,
+        ownershipToken: String,
+        sourceUpdatedAt: Int64,
+        rawMemory: String,
+        rolloutSummary: String,
+        rolloutSlug: String?
+    ) async throws -> Bool
+
+    func markStage1JobSucceededNoOutput(
+        threadID: ThreadId,
+        ownershipToken: String
+    ) async throws -> Bool
+
+    func markStage1JobFailed(
+        threadID: ThreadId,
+        ownershipToken: String,
+        reason: String,
+        retryDelaySeconds: Int64
+    ) async throws -> Bool
+}
+
+extension SQLiteAgentGraphStore: MemoryPhaseOneJobStore {
+    public func markStage1JobFailed(
+        threadID: ThreadId,
+        ownershipToken: String,
+        reason: String,
+        retryDelaySeconds: Int64
+    ) async throws -> Bool {
+        try await markStage1JobFailed(
+            threadID: threadID,
+            ownershipToken: ownershipToken,
+            failureReason: reason,
+            retryDelaySeconds: retryDelaySeconds
+        )
+    }
+}
+
 public func memoryStageOneOutputSchema() -> JSONValue {
     .object([
         "type": .string("object"),
@@ -78,6 +173,170 @@ public func memoryStageOneOutputSchema() -> JSONValue {
         ]),
         "additionalProperties": .bool(false)
     ])
+}
+
+public func claimMemoryPhaseOneStartupJobs(
+    currentThreadID: ThreadId,
+    maxRolloutsPerStartup: Int,
+    maxRolloutAgeDays: Int64,
+    minRolloutIdleHours: Int64,
+    allowedSources: [String],
+    store: MemoryPhaseOneJobStore,
+    recordCounter: MemoryWriteCounterRecorder? = nil
+) async -> [Stage1JobClaim]? {
+    do {
+        let claims = try await store.claimStage1JobsForStartup(
+            currentThreadID: currentThreadID,
+            params: Stage1StartupClaimParams(
+                scanLimit: memoryStageOneThreadScanLimit,
+                maxClaimed: maxRolloutsPerStartup,
+                maxAgeDays: maxRolloutAgeDays,
+                minRolloutIdleHours: minRolloutIdleHours,
+                allowedSources: allowedSources,
+                leaseSeconds: memoryStageOneJobLeaseSeconds
+            )
+        )
+        if claims.isEmpty {
+            recordCounter?(MemoryWriteMetrics.phaseOneJobs, 1, [("status", "skipped_no_candidates")])
+        }
+        return claims
+    } catch {
+        return nil
+    }
+}
+
+public func runMemoryPhaseOneJob(
+    claim: Stage1JobClaim,
+    store: MemoryPhaseOneJobStore,
+    sample: @Sendable (Stage1JobClaim) async throws -> (MemoryStageOneOutput, TokenUsage?)
+) async -> MemoryPhaseOneJobResult {
+    let stageOneOutput: MemoryStageOneOutput
+    let tokenUsage: TokenUsage?
+    do {
+        (stageOneOutput, tokenUsage) = try await sample(claim)
+    } catch {
+        _ = try? await store.markStage1JobFailed(
+            threadID: claim.thread.id,
+            ownershipToken: claim.ownershipToken,
+            reason: String(describing: error),
+            retryDelaySeconds: memoryStageOneJobRetryDelaySeconds
+        )
+        return MemoryPhaseOneJobResult(outcome: .failed, tokenUsage: nil)
+    }
+
+    if stageOneOutput.rawMemory.isEmpty || stageOneOutput.rolloutSummary.isEmpty {
+        let succeeded = (try? await store.markStage1JobSucceededNoOutput(
+            threadID: claim.thread.id,
+            ownershipToken: claim.ownershipToken
+        )) ?? false
+        return MemoryPhaseOneJobResult(
+            outcome: succeeded ? .succeededNoOutput : .failed,
+            tokenUsage: tokenUsage
+        )
+    }
+
+    let succeeded = (try? await store.markStage1JobSucceeded(
+        threadID: claim.thread.id,
+        ownershipToken: claim.ownershipToken,
+        sourceUpdatedAt: Int64(claim.thread.updatedAt.timeIntervalSince1970),
+        rawMemory: stageOneOutput.rawMemory,
+        rolloutSummary: stageOneOutput.rolloutSummary,
+        rolloutSlug: stageOneOutput.rolloutSlug
+    )) ?? false
+    return MemoryPhaseOneJobResult(
+        outcome: succeeded ? .succeededWithOutput : .failed,
+        tokenUsage: tokenUsage
+    )
+}
+
+public func aggregateMemoryPhaseOneStats(_ results: [MemoryPhaseOneJobResult]) -> MemoryPhaseOneStats {
+    var succeededWithOutput = 0
+    var succeededNoOutput = 0
+    var failed = 0
+    var totalTokenUsage = TokenUsage()
+    var hasTokenUsage = false
+
+    for result in results {
+        switch result.outcome {
+        case .succeededWithOutput:
+            succeededWithOutput += 1
+        case .succeededNoOutput:
+            succeededNoOutput += 1
+        case .failed:
+            failed += 1
+        }
+
+        if let tokenUsage = result.tokenUsage {
+            totalTokenUsage.addAssign(tokenUsage)
+            hasTokenUsage = true
+        }
+    }
+
+    return MemoryPhaseOneStats(
+        claimed: results.count,
+        succeededWithOutput: succeededWithOutput,
+        succeededNoOutput: succeededNoOutput,
+        failed: failed,
+        totalTokenUsage: hasTokenUsage ? totalTokenUsage : nil
+    )
+}
+
+public func emitMemoryPhaseOneMetrics(
+    _ stats: MemoryPhaseOneStats,
+    recordCounter: MemoryWriteCounterRecorder? = nil,
+    recordHistogram: MemoryWriteHistogramRecorder? = nil
+) {
+    if stats.claimed > 0 {
+        recordCounter?(MemoryWriteMetrics.phaseOneJobs, Int64(stats.claimed), [("status", "claimed")])
+    }
+    if stats.succeededWithOutput > 0 {
+        recordCounter?(MemoryWriteMetrics.phaseOneJobs, Int64(stats.succeededWithOutput), [("status", "succeeded")])
+        recordCounter?(MemoryWriteMetrics.phaseOneOutput, Int64(stats.succeededWithOutput), [])
+    }
+    if stats.succeededNoOutput > 0 {
+        recordCounter?(
+            MemoryWriteMetrics.phaseOneJobs,
+            Int64(stats.succeededNoOutput),
+            [("status", "succeeded_no_output")]
+        )
+    }
+    if stats.failed > 0 {
+        recordCounter?(MemoryWriteMetrics.phaseOneJobs, Int64(stats.failed), [("status", "failed")])
+    }
+    if let tokenUsage = stats.totalTokenUsage {
+        recordMemoryPhaseOneTokenUsage(tokenUsage, recordHistogram: recordHistogram)
+    }
+}
+
+public func recordMemoryPhaseOneTokenUsage(
+    _ tokenUsage: TokenUsage,
+    recordHistogram: MemoryWriteHistogramRecorder? = nil
+) {
+    recordHistogram?(
+        MemoryWriteMetrics.phaseOneTokenUsage,
+        max(tokenUsage.totalTokens, 0),
+        [("token_type", "total")]
+    )
+    recordHistogram?(
+        MemoryWriteMetrics.phaseOneTokenUsage,
+        max(tokenUsage.inputTokens, 0),
+        [("token_type", "input")]
+    )
+    recordHistogram?(
+        MemoryWriteMetrics.phaseOneTokenUsage,
+        tokenUsage.cachedInput,
+        [("token_type", "cached_input")]
+    )
+    recordHistogram?(
+        MemoryWriteMetrics.phaseOneTokenUsage,
+        max(tokenUsage.outputTokens, 0),
+        [("token_type", "output")]
+    )
+    recordHistogram?(
+        MemoryWriteMetrics.phaseOneTokenUsage,
+        max(tokenUsage.reasoningOutputTokens, 0),
+        [("token_type", "reasoning_output")]
+    )
 }
 
 public func serializeFilteredRolloutResponseItemsForMemories(_ items: [RolloutItem]) throws -> String {
