@@ -141,6 +141,68 @@ final class MemoryWritePhaseTwoTests: XCTestCase {
         XCTAssertEqual(memoryStageTwoJobHeartbeatSeconds, 90)
     }
 
+    func testPhaseTwoAgentShutdownTimeoutConstantMatchesRust() {
+        XCTAssertEqual(memoryStageTwoAgentShutdownTimeoutSeconds, 10)
+    }
+
+    func testShutdownMemoryPhaseTwoConsolidationAgentReturnsWhenShutdownCompletesFirst() async throws {
+        let threadID = try phaseTwoThreadID(suffix: 507)
+        let recorder = ShutdownTimeoutRaceRecorder()
+
+        try await shutdownMemoryPhaseTwoConsolidationAgent(
+            threadID: threadID,
+            shutdownAndWait: {
+                await recorder.recordShutdownStart(threadID)
+            },
+            sleep: { seconds in
+                await recorder.recordSleep(seconds)
+                while !Task.isCancelled {
+                    await Task.yield()
+                }
+            }
+        )
+
+        let shutdownThreadIDs = await recorder.recordedShutdownThreadIDs
+        let sleeps = await recorder.recordedSleeps
+        XCTAssertEqual(shutdownThreadIDs, [threadID])
+        XCTAssertEqual(sleeps, [memoryStageTwoAgentShutdownTimeoutSeconds])
+    }
+
+    func testShutdownMemoryPhaseTwoConsolidationAgentErrorsWhenTimeoutWins() async throws {
+        let threadID = try phaseTwoThreadID(suffix: 508)
+        let recorder = ShutdownTimeoutRaceRecorder()
+
+        do {
+            try await shutdownMemoryPhaseTwoConsolidationAgent(
+                threadID: threadID,
+                shutdownAndWait: {
+                    await recorder.recordShutdownStart(threadID)
+                    while !Task.isCancelled {
+                        await Task.yield()
+                    }
+                },
+                sleep: { seconds in
+                    await recorder.recordSleep(seconds)
+                    while !(await recorder.hasStartedShutdown) {
+                        await Task.yield()
+                    }
+                }
+            )
+            XCTFail("Expected shutdown timeout")
+        } catch let error as MemoryPhaseTwoConsolidationAgentShutdownTimeoutError {
+            XCTAssertEqual(error.threadID, threadID)
+            XCTAssertEqual(
+                error.description,
+                "memory consolidation agent \(threadID) shutdown timed out"
+            )
+        }
+
+        let shutdownThreadIDs = await recorder.recordedShutdownThreadIDs
+        let sleeps = await recorder.recordedSleeps
+        XCTAssertEqual(shutdownThreadIDs, [threadID])
+        XCTAssertEqual(sleeps, [memoryStageTwoAgentShutdownTimeoutSeconds])
+    }
+
     func testLoopMemoryPhaseTwoConsolidationAgentPollsUntilFinalLikeRust() async throws {
         let threadID = try phaseTwoThreadID(suffix: 501)
         let store = RecordingPhaseTwoJobStore(claimOutcome: .skippedRunning)
@@ -1160,6 +1222,23 @@ private actor ShutdownRecorder {
 
     func append(_ threadID: ThreadId) {
         threadIDs.append(threadID)
+    }
+}
+
+private actor ShutdownTimeoutRaceRecorder {
+    private var sleeps: [UInt64] = []
+    private var shutdownThreadIDs: [ThreadId] = []
+
+    var recordedSleeps: [UInt64] { sleeps }
+    var recordedShutdownThreadIDs: [ThreadId] { shutdownThreadIDs }
+    var hasStartedShutdown: Bool { !shutdownThreadIDs.isEmpty }
+
+    func recordSleep(_ seconds: UInt64) {
+        sleeps.append(seconds)
+    }
+
+    func recordShutdownStart(_ threadID: ThreadId) {
+        shutdownThreadIDs.append(threadID)
     }
 }
 

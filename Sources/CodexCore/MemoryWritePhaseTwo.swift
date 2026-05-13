@@ -6,6 +6,13 @@ public let memoryStageTwoJobLeaseSeconds: Int64 = 3_600
 public let memoryStageTwoJobRetryDelaySeconds: Int64 = 3_600
 public let memoryStageTwoJobHeartbeatSeconds: UInt64 = 90
 public let memoryStageTwoAgentStatusPollSeconds: UInt64 = 1
+public let memoryStageTwoAgentShutdownTimeoutSeconds: UInt64 = 10
+
+public typealias MemoryPhaseTwoSleep = @Sendable (_ seconds: UInt64) async -> Void
+
+public func memoryPhaseTwoSleep(seconds: UInt64) async {
+    try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
+}
 
 public struct MemoryPhaseTwoClaim: Equatable, Sendable {
     public let token: String
@@ -160,6 +167,20 @@ public enum MemoryPhaseTwoCompletionOutcome: Equatable, Sendable {
     case failed(String)
     case lostOwnership
     case successRecordLost
+}
+
+public struct MemoryPhaseTwoConsolidationAgentShutdownTimeoutError: Error, Equatable,
+    CustomStringConvertible, Sendable
+{
+    public let threadID: ThreadId
+
+    public init(threadID: ThreadId) {
+        self.threadID = threadID
+    }
+
+    public var description: String {
+        "memory consolidation agent \(threadID) shutdown timed out"
+    }
 }
 
 public enum MemoryPhaseTwoRunOutcome: Equatable, Sendable {
@@ -342,6 +363,42 @@ public func isFinalMemoryConsolidationAgentStatus(_ status: AgentStatus) -> Bool
         return false
     case .completed, .errored, .shutdown, .notFound:
         return true
+    }
+}
+
+private enum MemoryPhaseTwoConsolidationAgentShutdownRaceResult: Sendable {
+    case shutdownCompleted
+    case timedOut
+}
+
+public func shutdownMemoryPhaseTwoConsolidationAgent(
+    threadID: ThreadId,
+    timeoutSeconds: UInt64 = memoryStageTwoAgentShutdownTimeoutSeconds,
+    shutdownAndWait: @escaping @Sendable () async throws -> Void,
+    sleep: @escaping MemoryPhaseTwoSleep = memoryPhaseTwoSleep
+) async throws {
+    try await withThrowingTaskGroup(
+        of: MemoryPhaseTwoConsolidationAgentShutdownRaceResult.self
+    ) { group in
+        group.addTask {
+            try await shutdownAndWait()
+            return .shutdownCompleted
+        }
+        group.addTask {
+            await sleep(timeoutSeconds)
+            return .timedOut
+        }
+
+        defer { group.cancelAll() }
+
+        switch try await group.next() {
+        case .shutdownCompleted?:
+            return
+        case .timedOut?:
+            throw MemoryPhaseTwoConsolidationAgentShutdownTimeoutError(threadID: threadID)
+        case nil:
+            return
+        }
     }
 }
 
