@@ -359,6 +359,113 @@ final class MemoryWritePhaseTwoTests: XCTestCase {
         XCTAssertEqual(prompt.first, .text(buildConsolidationPrompt(memoryRoot: root)))
     }
 
+    func testMemoryPhaseTwoConsolidationStartOptionsAndSubmitOperationMatchRust() {
+        let prompt: [UserInput] = [.text("consolidate")]
+        let config = CodexRuntimeConfig(model: "consolidator")
+        let request = MemoryPhaseTwoConsolidationRequest(
+            claim: MemoryPhaseTwoClaim(token: "token-options", watermark: 1),
+            completionWatermark: 2,
+            selectedOutputs: [],
+            agentConfig: config,
+            prompt: prompt,
+            workspaceDiff: MemoryWorkspaceDiff(changes: [], unifiedDiff: "")
+        )
+
+        let options = memoryPhaseTwoConsolidationStartOptions(for: request)
+        let submitOperation = memoryPhaseTwoConsolidationSubmitOperation(prompt: prompt)
+
+        XCTAssertEqual(options.config, config)
+        XCTAssertEqual(options.initialHistory, .new)
+        XCTAssertEqual(options.sessionSource, .internal(.memoryConsolidation))
+        XCTAssertEqual(options.threadSource, .memoryConsolidation)
+        XCTAssertEqual(options.dynamicTools, [])
+        XCTAssertFalse(options.persistExtendedHistory)
+        XCTAssertNil(options.metricsServiceName)
+        XCTAssertEqual(submitOperation, .userInput(
+            items: prompt,
+            environments: nil,
+            finalOutputJSONSchema: nil,
+            responsesAPIClientMetadata: nil
+        ))
+    }
+
+    func testSpawnMemoryPhaseTwoConsolidationAgentStartsSubmitsAndWrapsStartedAgent() async throws {
+        let threadID = try phaseTwoThreadID(suffix: 510)
+        let usage = TokenUsage(totalTokens: 12)
+        let prompt: [UserInput] = [.text("consolidate")]
+        let request = MemoryPhaseTwoConsolidationRequest(
+            claim: MemoryPhaseTwoClaim(token: "token-start", watermark: 1),
+            completionWatermark: 2,
+            selectedOutputs: [],
+            agentConfig: CodexRuntimeConfig(model: "consolidator"),
+            prompt: prompt,
+            workspaceDiff: MemoryWorkspaceDiff(changes: [], unifiedDiff: "")
+        )
+        let lifecycle = StartedAgentLifecycleRecorder()
+
+        let spawned = try await spawnMemoryPhaseTwoConsolidationAgent(
+            request: request,
+            startAgent: { options in
+                await lifecycle.recordStart(options)
+                return MemoryPhaseTwoStartedConsolidationAgent(
+                    threadID: threadID,
+                    status: { .completed("done") },
+                    tokenUsage: { usage },
+                    nextEvent: { .statusPoll },
+                    submit: { op in await lifecycle.recordSubmit(op) },
+                    shutdown: { await lifecycle.recordShutdown(threadID) }
+                )
+            }
+        )
+
+        XCTAssertEqual(spawned.threadID, threadID)
+        let spawnedStatus = await spawned.status()
+        let spawnedTokenUsage = await spawned.tokenUsage()
+        let spawnedNextEvent = await spawned.nextEvent()
+        XCTAssertEqual(spawnedStatus, .completed("done"))
+        XCTAssertEqual(spawnedTokenUsage, usage)
+        XCTAssertEqual(spawnedNextEvent, .statusPoll)
+        try await spawned.shutdown()
+        let startedOptions = await lifecycle.startedOptions
+        let submittedOps = await lifecycle.submittedOps
+        let shutdownThreadIDs = await lifecycle.shutdownThreadIDs
+        XCTAssertEqual(startedOptions, [memoryPhaseTwoConsolidationStartOptions(for: request)])
+        XCTAssertEqual(submittedOps, [memoryPhaseTwoConsolidationSubmitOperation(prompt: prompt)])
+        XCTAssertEqual(shutdownThreadIDs, [threadID])
+    }
+
+    func testSpawnMemoryPhaseTwoConsolidationAgentShutsDownStartedAgentWhenSubmitFails() async throws {
+        let threadID = try phaseTwoThreadID(suffix: 511)
+        let request = phaseTwoRequest(claim: MemoryPhaseTwoClaim(token: "token-submit-fail", watermark: 1))
+        let lifecycle = StartedAgentLifecycleRecorder()
+
+        do {
+            _ = try await spawnMemoryPhaseTwoConsolidationAgent(
+                request: request,
+                startAgent: { options in
+                    await lifecycle.recordStart(options)
+                    return MemoryPhaseTwoStartedConsolidationAgent(
+                        threadID: threadID,
+                        status: { .running },
+                        nextEvent: { .statusPoll },
+                        submit: { _ in throw StoreError.failed },
+                        shutdown: { await lifecycle.recordShutdown(threadID) }
+                    )
+                }
+            )
+            XCTFail("expected submit failure")
+        } catch let error as StoreError {
+            XCTAssertEqual(error, .failed)
+        }
+
+        let startedOptions = await lifecycle.startedOptions
+        let submittedOps = await lifecycle.submittedOps
+        let shutdownThreadIDs = await lifecycle.shutdownThreadIDs
+        XCTAssertEqual(startedOptions, [memoryPhaseTwoConsolidationStartOptions(for: request)])
+        XCTAssertEqual(submittedOps, [])
+        XCTAssertEqual(shutdownThreadIDs, [threadID])
+    }
+
     func testPrepareMemoryPhaseTwoConsolidationReturnsSpawnRequestAfterWritingDiff() async throws {
         let codexHome = try temporaryDirectory()
         let threadID = try ThreadId(string: "00000000-0000-4000-8000-000000000201")
@@ -1053,6 +1160,28 @@ private actor ShutdownRecorder {
 
     func append(_ threadID: ThreadId) {
         threadIDs.append(threadID)
+    }
+}
+
+private actor StartedAgentLifecycleRecorder {
+    private var options: [MemoryPhaseTwoConsolidationThreadStartOptions] = []
+    private var ops: [Op] = []
+    private var shutdowns: [ThreadId] = []
+
+    var startedOptions: [MemoryPhaseTwoConsolidationThreadStartOptions] { options }
+    var submittedOps: [Op] { ops }
+    var shutdownThreadIDs: [ThreadId] { shutdowns }
+
+    func recordStart(_ options: MemoryPhaseTwoConsolidationThreadStartOptions) {
+        self.options.append(options)
+    }
+
+    func recordSubmit(_ op: Op) {
+        ops.append(op)
+    }
+
+    func recordShutdown(_ threadID: ThreadId) {
+        shutdowns.append(threadID)
     }
 }
 

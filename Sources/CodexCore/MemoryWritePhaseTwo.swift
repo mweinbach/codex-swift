@@ -175,6 +175,34 @@ public enum MemoryPhaseTwoAgentLoopEvent: Equatable, Sendable {
     case sessionTerminated
 }
 
+public struct MemoryPhaseTwoConsolidationThreadStartOptions: Equatable, Sendable {
+    public let config: CodexRuntimeConfig
+    public let initialHistory: InitialHistory
+    public let sessionSource: SessionSource
+    public let threadSource: ThreadSource
+    public let dynamicTools: [DynamicToolSpec]
+    public let persistExtendedHistory: Bool
+    public let metricsServiceName: String?
+
+    public init(
+        config: CodexRuntimeConfig,
+        initialHistory: InitialHistory = .new,
+        sessionSource: SessionSource = .internal(.memoryConsolidation),
+        threadSource: ThreadSource = .memoryConsolidation,
+        dynamicTools: [DynamicToolSpec] = [],
+        persistExtendedHistory: Bool = false,
+        metricsServiceName: String? = nil
+    ) {
+        self.config = config
+        self.initialHistory = initialHistory
+        self.sessionSource = sessionSource
+        self.threadSource = threadSource
+        self.dynamicTools = dynamicTools
+        self.persistExtendedHistory = persistExtendedHistory
+        self.metricsServiceName = metricsServiceName
+    }
+}
+
 public struct MemoryPhaseTwoSpawnedConsolidationAgent: Sendable {
     public let threadID: ThreadId
     public let status: @Sendable () async -> AgentStatus
@@ -196,6 +224,35 @@ public struct MemoryPhaseTwoSpawnedConsolidationAgent: Sendable {
         self.shutdown = shutdown
     }
 }
+
+public struct MemoryPhaseTwoStartedConsolidationAgent: Sendable {
+    public let threadID: ThreadId
+    public let status: @Sendable () async -> AgentStatus
+    public let tokenUsage: @Sendable () async -> TokenUsage?
+    public let nextEvent: @Sendable () async -> MemoryPhaseTwoAgentLoopEvent
+    public let submit: @Sendable (Op) async throws -> Void
+    public let shutdown: @Sendable () async throws -> Void
+
+    public init(
+        threadID: ThreadId,
+        status: @escaping @Sendable () async -> AgentStatus,
+        tokenUsage: @escaping @Sendable () async -> TokenUsage? = { nil },
+        nextEvent: @escaping @Sendable () async -> MemoryPhaseTwoAgentLoopEvent,
+        submit: @escaping @Sendable (Op) async throws -> Void,
+        shutdown: @escaping @Sendable () async throws -> Void = {}
+    ) {
+        self.threadID = threadID
+        self.status = status
+        self.tokenUsage = tokenUsage
+        self.nextEvent = nextEvent
+        self.submit = submit
+        self.shutdown = shutdown
+    }
+}
+
+public typealias MemoryPhaseTwoConsolidationAgentStarter = @Sendable (
+    _ options: MemoryPhaseTwoConsolidationThreadStartOptions
+) async throws -> MemoryPhaseTwoStartedConsolidationAgent
 
 public func memoryRoot(codexHome: URL) -> URL {
     codexHome.appendingPathComponent("memories", isDirectory: true)
@@ -346,6 +403,42 @@ public func buildMemoryConsolidationAgentConfig(
 
 public func buildMemoryConsolidationAgentPrompt(memoryRoot root: URL) -> [UserInput] {
     [.text(buildConsolidationPrompt(memoryRoot: root))]
+}
+
+public func memoryPhaseTwoConsolidationStartOptions(
+    for request: MemoryPhaseTwoConsolidationRequest
+) -> MemoryPhaseTwoConsolidationThreadStartOptions {
+    MemoryPhaseTwoConsolidationThreadStartOptions(config: request.agentConfig)
+}
+
+public func memoryPhaseTwoConsolidationSubmitOperation(prompt: [UserInput]) -> Op {
+    .userInput(
+        items: prompt,
+        environments: nil,
+        finalOutputJSONSchema: nil,
+        responsesAPIClientMetadata: nil
+    )
+}
+
+public func spawnMemoryPhaseTwoConsolidationAgent(
+    request: MemoryPhaseTwoConsolidationRequest,
+    startAgent: MemoryPhaseTwoConsolidationAgentStarter
+) async throws -> MemoryPhaseTwoSpawnedConsolidationAgent {
+    let startedAgent = try await startAgent(memoryPhaseTwoConsolidationStartOptions(for: request))
+    do {
+        try await startedAgent.submit(memoryPhaseTwoConsolidationSubmitOperation(prompt: request.prompt))
+    } catch {
+        try? await startedAgent.shutdown()
+        throw error
+    }
+
+    return MemoryPhaseTwoSpawnedConsolidationAgent(
+        threadID: startedAgent.threadID,
+        status: startedAgent.status,
+        tokenUsage: startedAgent.tokenUsage,
+        nextEvent: startedAgent.nextEvent,
+        shutdown: startedAgent.shutdown
+    )
 }
 
 public func prepareMemoryPhaseTwoConsolidation(
@@ -565,6 +658,34 @@ public func runMemoryPhaseTwoConsolidation(
     )
     try? await spawnedAgent.shutdown()
     return .completed(completion)
+}
+
+public func runMemoryPhaseTwoConsolidation(
+    threadID: ThreadId,
+    store: MemoryPhaseTwoJobStore,
+    config: CodexRuntimeConfig,
+    codexHome: URL,
+    now: Date = Date(),
+    startAgent: @escaping MemoryPhaseTwoConsolidationAgentStarter,
+    resetBaseline: @Sendable (URL) throws -> Void = { root in
+        try resetMemoryWorkspaceBaseline(root: root)
+    },
+    recordCounter: MemoryWriteCounterRecorder? = nil,
+    recordHistogram: MemoryWriteHistogramRecorder? = nil
+) async -> MemoryPhaseTwoRunOutcome {
+    await runMemoryPhaseTwoConsolidation(
+        threadID: threadID,
+        store: store,
+        config: config,
+        codexHome: codexHome,
+        now: now,
+        spawnAgent: { request in
+            try await spawnMemoryPhaseTwoConsolidationAgent(request: request, startAgent: startAgent)
+        },
+        resetBaseline: resetBaseline,
+        recordCounter: recordCounter,
+        recordHistogram: recordHistogram
+    )
 }
 
 public func loopMemoryPhaseTwoConsolidationAgent(
