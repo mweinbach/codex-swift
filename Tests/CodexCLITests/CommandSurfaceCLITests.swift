@@ -603,6 +603,64 @@ final class CommandSurfaceCLITests: XCTestCase {
         ))
     }
 
+    func testRunAsyncResumeAllowsRootDangerWithSubcommandApprovalLikeRust() async {
+        var receivedRequest: CodexCLI.ResumeCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: [
+                "--dangerously-bypass-approvals-and-sandbox",
+                "resume",
+                "--ask-for-approval",
+                "on-request"
+            ],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            resumeRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(receivedRequest, CodexCLI.ResumeCommandRequest(
+            sessionID: nil,
+            last: false,
+            all: false,
+            interactiveOptions: CodexCLI.InteractiveCommandOptions(
+                dangerouslyBypassApprovalsAndSandbox: true,
+                approvalPolicy: "on-request"
+            )
+        ))
+    }
+
+    func testRunAsyncResumeRejectsSubcommandInteractivePermissionConflictLikeRust() async {
+        let cases: [([String], String)] = [
+            (
+                ["resume", "--dangerously-bypass-approvals-and-sandbox", "--ask-for-approval", "on-request"],
+                "codex-swift: argument conflict: the argument '--ask-for-approval <APPROVAL_POLICY>' cannot be used with '--dangerously-bypass-approvals-and-sandbox'"
+            ),
+            (
+                ["resume", "--ask-for-approval", "on-request", "--dangerously-bypass-approvals-and-sandbox"],
+                "codex-swift: argument conflict: the argument '--dangerously-bypass-approvals-and-sandbox' cannot be used with '--ask-for-approval <APPROVAL_POLICY>'"
+            )
+        ]
+
+        for (arguments, expectedMessage) in cases {
+            var stderr: [String] = []
+            let exitCode = await CodexCLI().runAsync(
+                arguments: arguments,
+                stdout: { _ in XCTFail("stdout should not be written for \(arguments)") },
+                stderr: { stderr.append($0) },
+                resumeRunner: { _ in
+                    XCTFail("runner should not be called for \(arguments)")
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                }
+            )
+
+            XCTAssertEqual(exitCode, 64, "\(arguments)")
+            XCTAssertEqual(stderr, [expectedMessage], "\(arguments)")
+        }
+    }
+
     func testRunAsyncResumeRejectsLastWithSessionIDBeforeRunner() async {
         var stderr: [String] = []
 
@@ -713,6 +771,25 @@ final class CommandSurfaceCLITests: XCTestCase {
                 additionalWritableRoots: ["/fork-extra"]
             )
         ))
+    }
+
+    func testRunAsyncForkRejectsSubcommandInteractivePermissionConflictLikeRust() async {
+        var stderr: [String] = []
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["fork", "--yolo", "--ask-for-approval", "on-request"],
+            stdout: { _ in XCTFail("stdout should not be written") },
+            stderr: { stderr.append($0) },
+            forkRunner: { _ in
+                XCTFail("runner should not be called with conflicting interactive flags")
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 64)
+        XCTAssertEqual(stderr, [
+            "codex-swift: argument conflict: the argument '--ask-for-approval <APPROVAL_POLICY>' cannot be used with '--dangerously-bypass-approvals-and-sandbox'"
+        ])
     }
 
     func testRunAsyncForkRejectsInvalidFormsBeforeRunner() async {

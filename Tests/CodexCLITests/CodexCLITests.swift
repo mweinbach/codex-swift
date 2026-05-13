@@ -118,6 +118,31 @@ final class CodexCLITests: XCTestCase {
         }
     }
 
+    func testRunAsyncRejectsRootInteractivePermissionConflictLikeRust() async {
+        let cases: [([String], String)] = [
+            (
+                ["--dangerously-bypass-approvals-and-sandbox", "--ask-for-approval", "on-request"],
+                "codex-swift: argument conflict: the argument '--ask-for-approval <APPROVAL_POLICY>' cannot be used with '--dangerously-bypass-approvals-and-sandbox'"
+            ),
+            (
+                ["--ask-for-approval=on-request", "--yolo"],
+                "codex-swift: argument conflict: the argument '--dangerously-bypass-approvals-and-sandbox' cannot be used with '--ask-for-approval <APPROVAL_POLICY>'"
+            )
+        ]
+
+        for (arguments, expectedMessage) in cases {
+            var stderr: [String] = []
+            let exitCode = await CodexCLI().runAsync(
+                arguments: arguments,
+                stdout: { _ in XCTFail("stdout should not be written for \(arguments)") },
+                stderr: { stderr.append($0) }
+            )
+
+            XCTAssertEqual(exitCode, 64, "\(arguments)")
+            XCTAssertEqual(stderr, [expectedMessage], "\(arguments)")
+        }
+    }
+
     func testRunAsyncCompletionRejectsUnknownShell() async {
         var stderr: [String] = []
 

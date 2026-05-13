@@ -4,6 +4,8 @@ import Foundation
 
 public struct CodexCLI: Sendable {
     public static let version = "0.0.0"
+    private static let approvalPolicyOptionDisplay = "--ask-for-approval <APPROVAL_POLICY>"
+    private static let dangerouslyBypassOptionDisplay = "--dangerously-bypass-approvals-and-sandbox"
 
     public init() {}
 
@@ -807,6 +809,13 @@ public struct CodexCLI: Sendable {
     ) async -> Int32 {
         let invocation = parseInvocation(arguments: arguments)
         if let message = rootRemovedFullAutoRejectionMessage(invocation: invocation, arguments: arguments) {
+            stderr(message)
+            return 64
+        }
+        if let message = rootInteractivePermissionConflictRejectionMessage(
+            invocation: invocation,
+            arguments: arguments
+        ) {
             stderr(message)
             return 64
         }
@@ -1626,8 +1635,10 @@ public struct CodexCLI: Sendable {
         var cwd: String?
         var additionalWritableRoots: [String] = []
         var approvalPolicy: String?
+        var approvalPolicyOption: String?
         var searchEnabled = false
         var noAltScreen = false
+        var dangerouslyBypassOption: String?
     }
 
     private func parseRootInteractiveOptions(
@@ -1675,6 +1686,31 @@ public struct CodexCLI: Sendable {
             String(argument.dropFirst(prefix.count))
         }
 
+        func setApprovalPolicy(_ approval: String) -> ParseResult<Void> {
+            if let dangerouslyBypassOption = parsed.dangerouslyBypassOption {
+                return .failure(interactivePermissionConflictMessage(
+                    newOption: Self.approvalPolicyOptionDisplay,
+                    existingOption: dangerouslyBypassOption
+                ), 64)
+            }
+            parsed.approvalPolicy = approval
+            parsed.approvalPolicyOption = Self.approvalPolicyOptionDisplay
+            return .success(())
+        }
+
+        func setDangerouslyBypassApprovalsAndSandbox() -> ParseResult<Void> {
+            if let approvalPolicyOption = parsed.approvalPolicyOption {
+                return .failure(interactivePermissionConflictMessage(
+                    newOption: Self.dangerouslyBypassOptionDisplay,
+                    existingOption: approvalPolicyOption
+                ), 64)
+            }
+            parsed.dangerouslyBypassApprovalsAndSandbox = true
+            parsed.selectedSandboxMode = true
+            parsed.dangerouslyBypassOption = Self.dangerouslyBypassOptionDisplay
+            return .success(())
+        }
+
         switch argument {
         case "--image", "-i":
             switch value(after: argument) {
@@ -1720,7 +1756,12 @@ public struct CodexCLI: Sendable {
         case "--ask-for-approval", "-a":
             switch value(after: argument) {
             case let .success(approval):
-                parsed.approvalPolicy = approval
+                switch setApprovalPolicy(approval) {
+                case .success:
+                    break
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
                 return .success(index + 2)
             case let .failure(message, exitCode):
                 return .failure(message, exitCode)
@@ -1759,8 +1800,12 @@ public struct CodexCLI: Sendable {
             parsed.useOSSProvider = true
             return .success(index + 1)
         case "--dangerously-bypass-approvals-and-sandbox", "--yolo":
-            parsed.dangerouslyBypassApprovalsAndSandbox = true
-            parsed.selectedSandboxMode = true
+            switch setDangerouslyBypassApprovalsAndSandbox() {
+            case .success:
+                break
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
             return .success(index + 1)
         case "--search":
             parsed.searchEnabled = true
@@ -1811,11 +1856,21 @@ public struct CodexCLI: Sendable {
             return .success(index + 1)
         }
         if argument.hasPrefix("--ask-for-approval=") {
-            parsed.approvalPolicy = compactValue(prefix: "--ask-for-approval=")
+            switch setApprovalPolicy(compactValue(prefix: "--ask-for-approval=")) {
+            case .success:
+                break
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
             return .success(index + 1)
         }
         if argument.hasPrefix("-a"), argument.count > 2, !argument.hasPrefix("--") {
-            parsed.approvalPolicy = compactValue(prefix: "-a")
+            switch setApprovalPolicy(compactValue(prefix: "-a")) {
+            case .success:
+                break
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
             return .success(index + 1)
         }
         if argument.hasPrefix("--cd=") {
@@ -3000,6 +3055,77 @@ public struct CodexCLI: Sendable {
                 ? "codex-swift: unsupported option at top level: --full-auto"
                 : nil
         }
+    }
+
+    private func rootInteractivePermissionConflictRejectionMessage(
+        invocation: Invocation,
+        arguments: [String]
+    ) -> String? {
+        switch invocation {
+        case .version, .help:
+            return nil
+        case let .command(spec, _):
+            return rootInteractivePermissionConflictMessage(
+                beforeCommands: [spec.name] + spec.aliases,
+                in: arguments
+            )
+        case .interactive, .unknown:
+            return rootInteractivePermissionConflictMessage(beforeCommands: [], in: arguments)
+        }
+    }
+
+    private func rootInteractivePermissionConflictMessage(
+        beforeCommands commands: [String],
+        in arguments: [String]
+    ) -> String? {
+        var approvalPolicyOption: String?
+        var dangerouslyBypassOption: String?
+        var index = 0
+
+        while index < arguments.count {
+            let argument = arguments[index]
+            if argument == "--" || commands.contains(argument) {
+                return nil
+            }
+
+            if argument == "--ask-for-approval" || argument == "-a" ||
+                argument.hasPrefix("--ask-for-approval=") ||
+                argument.hasPrefix("-a") && argument.count > 2 && !argument.hasPrefix("--") {
+                if let dangerouslyBypassOption {
+                    return interactivePermissionConflictMessage(
+                        newOption: Self.approvalPolicyOptionDisplay,
+                        existingOption: dangerouslyBypassOption
+                    )
+                }
+                approvalPolicyOption = Self.approvalPolicyOptionDisplay
+                index += (argument == "--ask-for-approval" || argument == "-a") ? 2 : 1
+                continue
+            }
+
+            if argument == "--dangerously-bypass-approvals-and-sandbox" || argument == "--yolo" {
+                if let approvalPolicyOption {
+                    return interactivePermissionConflictMessage(
+                        newOption: Self.dangerouslyBypassOptionDisplay,
+                        existingOption: approvalPolicyOption
+                    )
+                }
+                dangerouslyBypassOption = Self.dangerouslyBypassOptionDisplay
+                index += 1
+                continue
+            }
+
+            if optionConsumesValue(argument) {
+                index += 2
+            } else {
+                index += 1
+            }
+        }
+
+        return nil
+    }
+
+    private func interactivePermissionConflictMessage(newOption: String, existingOption: String) -> String {
+        "codex-swift: argument conflict: the argument '\(newOption)' cannot be used with '\(existingOption)'"
     }
 
     private func rootDangerouslyBypassBeforeExec(in arguments: [String]) -> Bool {
