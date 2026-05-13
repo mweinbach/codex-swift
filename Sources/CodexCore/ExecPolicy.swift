@@ -733,8 +733,16 @@ private extension String {
 
 public final class PolicyParser {
     private struct StarlarkFunctionParameter {
+        enum Kind {
+            case positionalOrKeyword
+            case keywordOnly
+            case varargs
+            case kwargs
+        }
+
         let name: String
         let defaultValueExpression: String?
+        let kind: Kind
     }
 
     private struct StarlarkFunction {
@@ -2670,35 +2678,82 @@ public final class PolicyParser {
         expression: String
     ) throws -> [StarlarkFunctionParameter] {
         var sawDefault = false
+        var sawStarMarker = false
+        var sawVarargs = false
+        var sawKwargs = false
         let parameters = try splitTopLevel(parametersText, separator: ",").compactMap { rawParameter -> StarlarkFunctionParameter? in
             let parameterText = rawParameter.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !parameterText.isEmpty else {
                 return nil
             }
+
+            if parameterText == "*" {
+                guard !sawStarMarker, !sawVarargs, !sawKwargs else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                sawStarMarker = true
+                sawDefault = false
+                return nil
+            }
+
             let name: String
             let defaultValueExpression: String?
-            if let equalsIndex = topLevelEqualsIndex(in: parameterText) {
-                sawDefault = true
-                name = String(parameterText[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-                let valueStart = parameterText.index(after: equalsIndex)
-                let defaultText = String(parameterText[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !defaultText.isEmpty else {
+            let kind: StarlarkFunctionParameter.Kind
+            if parameterText.hasPrefix("**") {
+                guard !sawKwargs else {
                     throw ConfigOverrideError.invalidLiteral(expression)
                 }
-                defaultValueExpression = defaultText
-            } else {
-                guard !sawDefault else {
-                    throw ConfigOverrideError.invalidLiteral(expression)
-                }
-                name = parameterText
+                let nameStart = parameterText.index(parameterText.startIndex, offsetBy: 2)
+                name = String(parameterText[nameStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
                 defaultValueExpression = nil
+                kind = .kwargs
+                sawKwargs = true
+            } else if parameterText.hasPrefix("*") {
+                guard !sawStarMarker, !sawVarargs, !sawKwargs else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                let nameStart = parameterText.index(after: parameterText.startIndex)
+                name = String(parameterText[nameStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                defaultValueExpression = nil
+                kind = .varargs
+                sawVarargs = true
+                sawStarMarker = true
+                sawDefault = false
+            } else {
+                guard !sawKwargs else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                kind = sawStarMarker ? .keywordOnly : .positionalOrKeyword
+                if kind == .positionalOrKeyword,
+                   sawDefault,
+                   topLevelEqualsIndex(in: parameterText) == nil {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+
+                if let equalsIndex = topLevelEqualsIndex(in: parameterText) {
+                    sawDefault = kind == .positionalOrKeyword
+                    name = String(parameterText[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+                    let valueStart = parameterText.index(after: equalsIndex)
+                    let defaultText = String(parameterText[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !defaultText.isEmpty else {
+                        throw ConfigOverrideError.invalidLiteral(expression)
+                    }
+                    defaultValueExpression = defaultText
+                } else {
+                    name = parameterText
+                    defaultValueExpression = nil
+                }
             }
             guard isStarlarkIdentifier(name) else {
                 throw ConfigOverrideError.invalidLiteral(expression)
             }
-            return StarlarkFunctionParameter(name: name, defaultValueExpression: defaultValueExpression)
+            return StarlarkFunctionParameter(name: name, defaultValueExpression: defaultValueExpression, kind: kind)
         }
         guard Set(parameters.map(\.name)).count == parameters.count else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        if let kwargsIndex = parameters.lastIndex(where: { $0.kind == .kwargs }),
+           kwargsIndex != parameters.indices.last {
             throw ConfigOverrideError.invalidLiteral(expression)
         }
         return parameters
@@ -5205,10 +5260,11 @@ public final class PolicyParser {
         functions: [String: StarlarkFunction],
         expression: String
     ) throws {
-        var rawArgumentsByName: [String: String] = [:]
-        var positionalIndex = 0
+        var positionalArguments: [ConfigValue] = []
+        var argumentsByName: [String: ConfigValue] = [:]
         var sawNamedArgument = false
-        let parametersByName = Dictionary(uniqueKeysWithValues: function.parameters.map { ($0.name, $0) })
+        var sawArgsExpansion = false
+        var sawKwargsExpansion = false
 
         for piece in splitTopLevel(body, separator: ",") {
             let trimmed = piece.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -5216,38 +5272,77 @@ public final class PolicyParser {
                 continue
             }
 
-            let name: String
-            let valueText: String
-            if let equalsIndex = topLevelEqualsIndex(in: trimmed) {
+            if trimmed.hasPrefix("**") {
+                guard !sawKwargsExpansion else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
                 sawNamedArgument = true
-                name = String(trimmed[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-                let valueStart = trimmed.index(after: equalsIndex)
-                valueText = String(trimmed[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
-                guard parametersByName[name] != nil, !valueText.isEmpty else {
+                sawKwargsExpansion = true
+                let valueStart = trimmed.index(trimmed.startIndex, offsetBy: 2)
+                let valueText = String(trimmed[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let value = try parsePolicyLiteral(valueText, constants: constants, functions: functions)
+                guard case let .table(items) = value else {
                     throw ConfigOverrideError.invalidLiteral(expression)
                 }
-            } else {
-                guard !sawNamedArgument, positionalIndex < function.parameters.count else {
-                    throw ConfigOverrideError.invalidLiteral(expression)
+                for (name, item) in items {
+                    guard argumentsByName[name] == nil else {
+                        throw ConfigOverrideError.invalidLiteral(expression)
+                    }
+                    argumentsByName[name] = item
                 }
-                name = function.parameters[positionalIndex].name
-                valueText = trimmed
-                positionalIndex += 1
+                continue
             }
 
-            guard rawArgumentsByName[name] == nil else {
-                throw ConfigOverrideError.invalidLiteral(expression)
+            if trimmed.hasPrefix("*") {
+                guard !sawArgsExpansion, !sawKwargsExpansion else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                sawArgsExpansion = true
+                let valueStart = trimmed.index(after: trimmed.startIndex)
+                let valueText = String(trimmed[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let value = try parsePolicyLiteral(valueText, constants: constants, functions: functions)
+                positionalArguments.append(contentsOf: try starlarkIterableItems(value, expression: expression))
+                continue
             }
-            rawArgumentsByName[name] = valueText
+
+            if let equalsIndex = topLevelEqualsIndex(in: trimmed) {
+                guard !sawArgsExpansion, !sawKwargsExpansion else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                sawNamedArgument = true
+                let name = String(trimmed[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let valueStart = trimmed.index(after: equalsIndex)
+                let valueText = String(trimmed[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard isStarlarkIdentifier(name), !valueText.isEmpty, argumentsByName[name] == nil else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                argumentsByName[name] = try parsePolicyLiteral(valueText, constants: constants, functions: functions)
+            } else {
+                guard !sawNamedArgument, !sawArgsExpansion, !sawKwargsExpansion else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                positionalArguments.append(try parsePolicyLiteral(trimmed, constants: constants, functions: functions))
+            }
         }
 
-        for parameter in function.parameters {
-            if let rawArgument = rawArgumentsByName[parameter.name] {
-                scopedConstants[parameter.name] = try parsePolicyLiteral(
-                    rawArgument,
-                    constants: constants,
-                    functions: functions
-                )
+        let positionalOrKeywordParameters = function.parameters.filter { $0.kind == .positionalOrKeyword }
+        let keywordOnlyParameters = function.parameters.filter { $0.kind == .keywordOnly }
+        let varargsParameter = function.parameters.first { $0.kind == .varargs }
+        let kwargsParameter = function.parameters.first { $0.kind == .kwargs }
+        var positionalIndex = 0
+
+        for parameter in positionalOrKeywordParameters {
+            if positionalIndex < positionalArguments.count {
+                guard argumentsByName[parameter.name] == nil else {
+                    throw ConfigOverrideError.invalidLiteral(expression)
+                }
+                scopedConstants[parameter.name] = positionalArguments[positionalIndex]
+                positionalIndex += 1
+                continue
+            }
+
+            if let namedArgument = argumentsByName.removeValue(forKey: parameter.name) {
+                scopedConstants[parameter.name] = namedArgument
             } else if let defaultValueExpression = parameter.defaultValueExpression {
                 scopedConstants[parameter.name] = try parsePolicyLiteral(
                     defaultValueExpression,
@@ -5257,6 +5352,33 @@ public final class PolicyParser {
             } else {
                 throw ConfigOverrideError.invalidLiteral(expression)
             }
+        }
+
+        let remainingPositionalArguments = Array(positionalArguments.dropFirst(positionalIndex))
+        if let varargsParameter {
+            scopedConstants[varargsParameter.name] = .array(remainingPositionalArguments)
+        } else if !remainingPositionalArguments.isEmpty {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+
+        for parameter in keywordOnlyParameters {
+            if let namedArgument = argumentsByName.removeValue(forKey: parameter.name) {
+                scopedConstants[parameter.name] = namedArgument
+            } else if let defaultValueExpression = parameter.defaultValueExpression {
+                scopedConstants[parameter.name] = try parsePolicyLiteral(
+                    defaultValueExpression,
+                    constants: constants,
+                    functions: functions
+                )
+            } else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+        }
+
+        if let kwargsParameter {
+            scopedConstants[kwargsParameter.name] = .table(argumentsByName)
+        } else if !argumentsByName.isEmpty {
+            throw ConfigOverrideError.invalidLiteral(expression)
         }
     }
 
