@@ -321,6 +321,101 @@ final class MemoryWriteGuardTests: XCTestCase {
         ])
     }
 
+    func testLiveStartupPipelineAssemblesRustStartupPhases() async throws {
+        let threadID = try ThreadId(string: "00000000-0000-4000-8000-000000000301")
+        let claim = stage1Claim(suffix: 302)
+        let store = RecordingMemoryStartupStore(
+            recorder: StartupPipelineRecorder(),
+            claims: [claim],
+            phaseTwoClaimOutcome: .skippedRetryUnavailable
+        )
+        let recorder = store.recorder
+        let counters = CounterRecorder()
+        var config = CodexRuntimeConfig()
+        config.memories.maxRolloutsPerStartup = 3
+        config.memories.maxRolloutAgeDays = 11
+        config.memories.minRolloutIdleHours = 7
+        config.memories.maxUnusedDays = 45
+        config.chatgptBaseURL = "https://chatgpt.example/backend-api/"
+        let auth = AuthDotJSON(
+            authMode: .chatGPTAuthTokens,
+            openAIAPIKey: nil,
+            tokens: authTokens(accessToken: "access-token", accountID: "account-id"),
+            lastRefresh: nil
+        )
+
+        let result = await runMemoryStartupPipeline(
+            options: MemoryStartupPipelineOptions(
+                isEphemeral: false,
+                source: .cli,
+                features: memoryFeatureStates(enabled: true),
+                hasStateDatabase: true
+            ),
+            threadID: threadID,
+            config: config,
+            codexHome: URL(fileURLWithPath: "/tmp/codex-home", isDirectory: true),
+            auth: auth,
+            allowedSources: ["cli"],
+            stageOneModelInfo: startupModelInfo(),
+            stageOneServiceTier: "flex",
+            stageOneTurnMetadataHeader: "turn-meta",
+            stateStore: store,
+            fetchRateLimitSnapshots: { baseURL, accessToken, accountID in
+                recorder.record("quota:\(baseURL):\(accessToken):\(accountID)")
+                return [
+                    RateLimitSnapshot(
+                        limitID: memoryRateLimitID,
+                        primary: RateLimitWindow(usedPercent: 1, windowMinutes: nil, resetsAt: nil),
+                        secondary: nil,
+                        credits: nil,
+                        planType: nil
+                    )
+                ]
+            },
+            sampleStageOneOutput: { sampledClaim, context in
+                recorder.record(
+                    "sample:\(sampledClaim.thread.id):\(context.modelInfo.slug):"
+                        + "\(context.serviceTier ?? "nil"):\(context.turnMetadataHeader ?? "nil")"
+                )
+                return (
+                    MemoryStageOneOutput(
+                        rawMemory: "remember this",
+                        rolloutSummary: "summary",
+                        rolloutSlug: "slug"
+                    ),
+                    TokenUsage(
+                        inputTokens: 2,
+                        cachedInputTokens: 1,
+                        outputTokens: 3,
+                        reasoningOutputTokens: 0,
+                        totalTokens: 5
+                    )
+                )
+            },
+            startPhaseTwoAgent: { _ in
+                XCTFail("phase two should not spawn when the store reports skipped_retry_unavailable")
+                throw TestError("unexpected spawn")
+            },
+            seedExtensionInstructions: { _ in recorder.record("seed") },
+            resetBaseline: { _ in recorder.record("reset") },
+            recordCounter: counters.record
+        )
+
+        XCTAssertEqual(result.outcome, .completed)
+        XCTAssertEqual(result.phaseOneStats?.claimed, 1)
+        XCTAssertEqual(result.phaseOneStats?.succeededWithOutput, 1)
+        XCTAssertEqual(result.phaseTwoOutcome, .skipped("skipped_retry_unavailable"))
+        XCTAssertEqual(recorder.events, [
+            "seed",
+            "prune:45:200",
+            "quota:https://chatgpt.example/backend-api/:access-token:account-id",
+            "claim:\(threadID):5000:3:11:7:cli:3600",
+            "sample:\(claim.thread.id):gpt-5.4-mini:flex:turn-meta",
+            "stage1-success:\(claim.thread.id):token-302:123:remember this:summary:slug",
+            "phase2-claim:\(threadID):3600"
+        ])
+    }
+
     private func rateLimitSnapshot(
         limitID: String? = memoryRateLimitID,
         primaryUsedPercent: Double?,
@@ -351,6 +446,50 @@ final class MemoryWriteGuardTests: XCTestCase {
             accessToken: accessToken,
             refreshToken: "refresh-token",
             accountID: accountID
+        )
+    }
+
+    private func startupModelInfo() -> ModelInfo {
+        ModelInfo(
+            slug: "gpt-5.4-mini",
+            displayName: "GPT-5.4 Mini",
+            supportedReasoningLevels: [],
+            shellType: .default,
+            visibility: .list,
+            supportedInAPI: true,
+            priority: 0,
+            supportsReasoningSummaries: false,
+            defaultReasoningSummary: .auto,
+            supportVerbosity: false,
+            defaultVerbosity: nil,
+            truncationPolicy: .tokens(10_000),
+            supportsParallelToolCalls: true,
+            contextWindow: 10_000,
+            experimentalSupportedTools: [],
+            inputModalities: [.text]
+        )
+    }
+
+    private func stage1Claim(suffix: Int) -> Stage1JobClaim {
+        Stage1JobClaim(
+            thread: ThreadMetadata(
+                id: ThreadId(uuid: UUID(uuidString: "00000000-0000-7000-8000-\(String(format: "%012d", suffix))")!),
+                rolloutPath: "/tmp/rollout-\(suffix).jsonl",
+                createdAt: Date(timeIntervalSince1970: 1),
+                updatedAt: Date(timeIntervalSince1970: 123),
+                source: "cli",
+                modelProvider: "openai",
+                model: "gpt-5.4",
+                cwd: "/repo",
+                cliVersion: "0.1.0",
+                title: "thread \(suffix)",
+                sandboxPolicy: "workspace-write",
+                approvalMode: "on-request",
+                tokensUsed: 0,
+                firstUserMessage: "hello",
+                gitBranch: "main"
+            ),
+            ownershipToken: "token-\(suffix)"
         )
     }
 }
@@ -385,6 +524,128 @@ private actor RateLimitFetchRecorder {
             throw error
         }
         return snapshots
+    }
+}
+
+private final class StartupPipelineRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [String] = []
+
+    var events: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func record(_ event: String) {
+        lock.lock()
+        storage.append(event)
+        lock.unlock()
+    }
+}
+
+private actor RecordingMemoryStartupStore: MemoryPhaseOneJobStore, MemoryPhaseOneRetentionStore, MemoryPhaseTwoJobStore {
+    let recorder: StartupPipelineRecorder
+    private let claims: [Stage1JobClaim]
+    private let phaseTwoClaimOutcome: Phase2JobClaimOutcome
+
+    init(
+        recorder: StartupPipelineRecorder,
+        claims: [Stage1JobClaim] = [],
+        phaseTwoClaimOutcome: Phase2JobClaimOutcome = .skippedRunning
+    ) {
+        self.recorder = recorder
+        self.claims = claims
+        self.phaseTwoClaimOutcome = phaseTwoClaimOutcome
+    }
+
+    func pruneStage1OutputsForRetention(maxUnusedDays: Int64, limit: Int) async throws -> Int {
+        recorder.record("prune:\(maxUnusedDays):\(limit)")
+        return 0
+    }
+
+    func claimStage1JobsForStartup(
+        currentThreadID: ThreadId,
+        params: Stage1StartupClaimParams
+    ) async throws -> [Stage1JobClaim] {
+        recorder.record(
+            "claim:\(currentThreadID):\(params.scanLimit):\(params.maxClaimed):"
+                + "\(params.maxAgeDays):\(params.minRolloutIdleHours):"
+                + "\(params.allowedSources.joined(separator: ",")):\(params.leaseSeconds)"
+        )
+        return claims
+    }
+
+    func markStage1JobSucceeded(
+        threadID: ThreadId,
+        ownershipToken: String,
+        sourceUpdatedAt: Int64,
+        rawMemory: String,
+        rolloutSummary: String,
+        rolloutSlug: String?
+    ) async throws -> Bool {
+        recorder.record(
+            "stage1-success:\(threadID):\(ownershipToken):\(sourceUpdatedAt):"
+                + "\(rawMemory):\(rolloutSummary):\(rolloutSlug ?? "nil")"
+        )
+        return true
+    }
+
+    func markStage1JobSucceededNoOutput(threadID: ThreadId, ownershipToken: String) async throws -> Bool {
+        recorder.record("stage1-no-output:\(threadID):\(ownershipToken)")
+        return true
+    }
+
+    func markStage1JobFailed(
+        threadID: ThreadId,
+        ownershipToken: String,
+        reason: String,
+        retryDelaySeconds: Int64
+    ) async throws -> Bool {
+        recorder.record("stage1-failed:\(threadID):\(ownershipToken):\(reason):\(retryDelaySeconds)")
+        return true
+    }
+
+    func getPhase2InputSelection(limit: Int, maxUnusedDays: Int64) async throws -> [Stage1Output] {
+        recorder.record("phase2-selection:\(limit):\(maxUnusedDays)")
+        return []
+    }
+
+    func tryClaimGlobalPhase2Job(threadID: ThreadId, leaseSeconds: Int64) async throws -> Phase2JobClaimOutcome {
+        recorder.record("phase2-claim:\(threadID):\(leaseSeconds)")
+        return phaseTwoClaimOutcome
+    }
+
+    func markGlobalPhase2JobFailed(
+        ownershipToken: String,
+        reason: String,
+        retryDelaySeconds: Int64
+    ) async throws -> Bool {
+        recorder.record("phase2-failed:\(ownershipToken):\(reason):\(retryDelaySeconds)")
+        return true
+    }
+
+    func markGlobalPhase2JobFailedIfUnowned(
+        ownershipToken: String,
+        reason: String,
+        retryDelaySeconds: Int64
+    ) async throws -> Bool {
+        recorder.record("phase2-unowned-failed:\(ownershipToken):\(reason):\(retryDelaySeconds)")
+        return true
+    }
+
+    func heartbeatGlobalPhase2Job(ownershipToken: String, leaseSeconds: Int64) async throws -> Bool {
+        recorder.record("phase2-heartbeat:\(ownershipToken):\(leaseSeconds)")
+        return true
+    }
+
+    func markGlobalPhase2JobSucceeded(
+        ownershipToken: String,
+        completionWatermark: Int64,
+        selectedOutputs: [Stage1Output]
+    ) async throws -> Bool {
+        recorder.record("phase2-success:\(ownershipToken):\(completionWatermark):\(selectedOutputs.count)")
+        return true
     }
 }
 
