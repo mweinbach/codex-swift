@@ -448,6 +448,93 @@ public enum OllamaPullEvent: Equatable, Sendable {
     case error(String)
 }
 
+struct OllamaCLIProgressReporter {
+    typealias Clock = () -> TimeInterval
+    typealias Writer = (String) throws -> Void
+
+    private let now: Clock
+    private let write: Writer
+    private var printedHeader = false
+    private var lastLineLength = 0
+    private var lastCompletedSum: UInt64 = 0
+    private var lastInstant: TimeInterval
+    private var totalsByDigest: [String: (total: UInt64, completed: UInt64)] = [:]
+
+    init(
+        now: @escaping Clock = { Date().timeIntervalSinceReferenceDate },
+        write: @escaping Writer = OllamaCLIProgressReporter.writeStandardError
+    ) {
+        self.now = now
+        self.write = write
+        self.lastInstant = now()
+    }
+
+    mutating func onEvent(_ event: OllamaPullEvent) throws {
+        switch event {
+        case let .status(status):
+            guard status.caseInsensitiveCompare("pulling manifest") != .orderedSame else {
+                return
+            }
+            let pad = max(lastLineLength - status.count, 0)
+            lastLineLength = status.count
+            try write("\r\(status)\(String(repeating: " ", count: pad))")
+
+        case let .chunkProgress(digest, total, completed):
+            var totals = totalsByDigest[digest] ?? (total: 0, completed: 0)
+            if let total {
+                totals.total = total
+            }
+            if let completed {
+                totals.completed = completed
+            }
+            totalsByDigest[digest] = totals
+
+            let sums = totalsByDigest.values.reduce(into: (total: UInt64(0), completed: UInt64(0))) { partial, value in
+                partial.total += value.total
+                partial.completed += value.completed
+            }
+            guard sums.total > 0 else {
+                return
+            }
+
+            if !printedHeader {
+                let totalGB = Double(sums.total) / (1024.0 * 1024.0 * 1024.0)
+                try write("\r\u{1B}[2KDownloading model: total \(Self.fixed(totalGB, digits: 2)) GB\n")
+                printedHeader = true
+            }
+
+            let currentInstant = now()
+            let elapsed = max(currentInstant - lastInstant, 0.001)
+            let completedDelta = sums.completed >= lastCompletedSum ? sums.completed - lastCompletedSum : 0
+            lastCompletedSum = sums.completed
+            lastInstant = currentInstant
+
+            let completedGB = Double(sums.completed) / (1024.0 * 1024.0 * 1024.0)
+            let totalGB = Double(sums.total) / (1024.0 * 1024.0 * 1024.0)
+            let percent = Double(sums.completed) * 100.0 / Double(sums.total)
+            let speedMBPerSecond = Double(completedDelta) / (1024.0 * 1024.0) / elapsed
+            let text = "\(Self.fixed(completedGB, digits: 2))/\(Self.fixed(totalGB, digits: 2)) GB (\(Self.fixed(percent, digits: 1))%) \(Self.fixed(speedMBPerSecond, digits: 1)) MB/s"
+            let pad = max(lastLineLength - text.count, 0)
+            lastLineLength = text.count
+            try write("\r\(text)\(String(repeating: " ", count: pad))")
+
+        case .error:
+            return
+
+        case .success:
+            try write("\n")
+        }
+    }
+
+    private static func writeStandardError(_ text: String) {
+        FileHandle.standardError.write(Data(text.utf8))
+    }
+
+    private static func fixed(_ value: Double, digits: Int) -> String {
+        String(format: "%.\(digits)f", locale: Locale(identifier: "en_US_POSIX"), value)
+    }
+}
+
 extension OllamaHelpers {
     public static func pullEvents(fromJSONObject value: [String: Any]) -> [OllamaPullEvent] {
         var events: [OllamaPullEvent] = []

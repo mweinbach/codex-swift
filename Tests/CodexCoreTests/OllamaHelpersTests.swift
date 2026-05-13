@@ -86,6 +86,69 @@ final class OllamaHelpersTests: XCTestCase {
         )
     }
 
+    func testCLIProgressReporterFiltersManifestPadsStatusAndFinishesLikeRust() throws {
+        var output = ""
+        var reporter = OllamaCLIProgressReporter(
+            now: { 0 },
+            write: { output += $0 }
+        )
+        let longStatus = "downloading layer"
+        let shortStatus = "done"
+
+        try reporter.onEvent(.status(longStatus))
+        try reporter.onEvent(.status("pulling manifest"))
+        try reporter.onEvent(.status(shortStatus))
+        try reporter.onEvent(.success)
+
+        XCTAssertEqual(
+            output,
+            "\r\(longStatus)\r\(shortStatus)\(String(repeating: " ", count: longStatus.count - shortStatus.count))\n"
+        )
+    }
+
+    func testCLIProgressReporterFormatsProgressLikeRust() throws {
+        var currentTime = 0.0
+        var output = ""
+        var reporter = OllamaCLIProgressReporter(
+            now: { currentTime },
+            write: { output += $0 }
+        )
+        let gibibyte = UInt64(1024 * 1024 * 1024)
+
+        currentTime = 2.0
+        try reporter.onEvent(.chunkProgress(
+            digest: "sha256:first",
+            total: gibibyte,
+            completed: gibibyte / 4
+        ))
+        currentTime = 3.0
+        try reporter.onEvent(.chunkProgress(
+            digest: "sha256:second",
+            total: gibibyte,
+            completed: gibibyte / 2
+        ))
+
+        XCTAssertEqual(
+            output,
+            "\r\u{1B}[2KDownloading model: total 1.00 GB\n"
+                + "\r0.25/1.00 GB (25.0%) 128.0 MB/s"
+                + "\r0.75/2.00 GB (37.5%) 512.0 MB/s"
+        )
+    }
+
+    func testCLIProgressReporterIgnoresErrorsAndProgressWithoutTotalsLikeRust() throws {
+        var output = ""
+        var reporter = OllamaCLIProgressReporter(
+            now: { 0 },
+            write: { output += $0 }
+        )
+
+        try reporter.onEvent(.chunkProgress(digest: "sha256:first", total: nil, completed: 10))
+        try reporter.onEvent(.error("pull failed"))
+
+        XCTAssertEqual(output, "")
+    }
+
     func testVersionParserTrimsPrefixAndBuildMetadataLikeRustSemver() {
         XCTAssertEqual(OllamaHelpers.parseVersion("0.13.4"), OllamaVersion(major: 0, minor: 13, patch: 4))
         XCTAssertEqual(

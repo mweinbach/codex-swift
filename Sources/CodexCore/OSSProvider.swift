@@ -126,10 +126,9 @@ public enum OSSProvider {
         }
 
         if let models, !models.contains(model) {
+            var reporter = OllamaCLIProgressReporter()
             try await client.pullModel(model) { event in
-                if let line = event.cliLine {
-                    FileHandle.standardError.write(Data((line + "\n").utf8))
-                }
+                try reporter.onEvent(event)
             }
         }
     }
@@ -155,22 +154,5 @@ public struct OSSProviderReadinessError: Error, Equatable, CustomStringConvertib
             return description
         }
         return String(describing: error)
-    }
-}
-
-private extension OllamaPullEvent {
-    var cliLine: String? {
-        switch self {
-        case let .status(message):
-            return message
-        case let .chunkProgress(digest, total, completed):
-            let totalText = total.map { "/\($0)" } ?? ""
-            let completedText = completed.map(String.init) ?? "0"
-            return "\(digest) \(completedText)\(totalText)"
-        case let .error(message):
-            return message
-        case .success:
-            return "Model pull complete."
-        }
     }
 }
