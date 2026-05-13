@@ -1533,7 +1533,9 @@ public struct RemoteControlWebsocketWriterCore: Equatable, Sendable {
 
     private func textFrame(for envelope: RemoteControlServerEnvelope) throws -> RemoteControlWebsocketWriterFrame {
         do {
-            return .text(String(decoding: try JSONEncoder().encode(envelope), as: UTF8.self))
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            return .text(String(decoding: try encoder.encode(envelope), as: UTF8.self))
         } catch {
             throw RemoteControlWebsocketWriterError.serializationFailed(Self.errorDescription(error))
         }

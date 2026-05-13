@@ -1115,7 +1115,9 @@ public extension ResponseItem {
 
 private extension JSONEncoder {
     static var codexCompact: JSONEncoder {
-        JSONEncoder()
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return encoder
     }
 }
 

@@ -132,6 +132,8 @@ Source baseline inspected for this scaffold:
   - token-count event payloads, rate-limit windows, credits snapshots, limit identity/name, named rate-limit header families, rate-limit-reached type, explicit null optional serialization, preservation of omitted credits/plan fields across rate-limit updates, default `codex` bucket assignment, and multi-snapshot SSE prelude emission
 - `codex-rs/protocol/src/protocol.rs` patch-apply event models
   - tagged file-change payloads, patch-apply begin/end events with defaulted legacy fields, and turn-diff wire shape
+- `codex-rs/core/src/turn_diff_tracker.rs`
+  - operation-backed turn diff aggregation from committed `apply_patch` deltas, including exact-delta invalidation, empty-delta preservation, Git blob object IDs, add/update/delete coalescing, move diff rendering, pure rename suppression, and overwrite-move ordering
 - `codex-rs/protocol/src/parse_command.rs`
   - tagged parsed-command model
 - `codex-rs/core/src/parse_command.rs`
