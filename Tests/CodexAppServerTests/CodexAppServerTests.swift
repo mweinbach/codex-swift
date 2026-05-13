@@ -18494,6 +18494,39 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNotNil(valid["result"])
     }
 
+    func testInitializeRejectsMalformedCapabilitiesLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cases: [(String, String)] = [
+            (
+                #"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"test","version":"0"},"capabilities":"yes"}}"#,
+                #"Invalid request: invalid type: string "yes", expected struct InitializeCapabilities"#
+            ),
+            (
+                #"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"test","version":"0"},"capabilities":{"experimentalApi":"true"}}}"#,
+                #"Invalid request: invalid type: string "true", expected a boolean"#
+            ),
+            (
+                #"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"test","version":"0"},"capabilities":{"requestAttestation":null}}}"#,
+                "Invalid request: invalid type: null, expected a boolean"
+            ),
+            (
+                #"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"test","version":"0"},"capabilities":{"optOutNotificationMethods":[1]}}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            )
+        ]
+
+        for (payload, expectedMessage) in cases {
+            let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(codexHome: temp.url))
+            let invalid = try decode(processor.processLine(Data(payload.utf8)))
+            let error = try XCTUnwrap(invalid["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, expectedMessage)
+
+            let valid = try decode(processor.processLine(Data(#"{"id":2,"method":"initialize","params":{"clientInfo":{"name":"test","version":"0"},"capabilities":{"requestAttestation":false,"optOutNotificationMethods":null}}}"#.utf8)))
+            XCTAssertNotNil(valid["result"])
+        }
+    }
+
     func testGetUserAgentReturnsInitializedUserAgent() throws {
         let temp = try TemporaryDirectory()
         let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(codexHome: temp.url))

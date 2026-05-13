@@ -426,6 +426,12 @@ private struct AppServerCommandExecParams {
     let permissionProfile: PermissionProfile?
 }
 
+private struct AppServerInitializeCapabilities {
+    let experimentalAPI: Bool
+    let requestAttestation: Bool
+    let optOutNotificationMethods: [String]
+}
+
 private struct AppServerSandboxLaunch {
     let command: [String]
     let environment: [String: String]
@@ -16346,6 +16352,26 @@ public enum CodexAppServer {
         return response
     }
 
+    fileprivate static func initializeCapabilities(_ value: Any?) throws -> AppServerInitializeCapabilities {
+        guard let value, !(value is NSNull) else {
+            return AppServerInitializeCapabilities(
+                experimentalAPI: false,
+                requestAttestation: false,
+                optOutNotificationMethods: []
+            )
+        }
+        guard let capabilities = value as? [String: Any] else {
+            throw AppServerError.invalidRequest(
+                "Invalid request: \(rustInvalidTypeDescription(value)), expected struct InitializeCapabilities"
+            )
+        }
+        return AppServerInitializeCapabilities(
+            experimentalAPI: try rustDefaultedBoolParam(capabilities["experimentalApi"], defaultValue: false),
+            requestAttestation: try rustDefaultedBoolParam(capabilities["requestAttestation"], defaultValue: false),
+            optOutNotificationMethods: try rustStringArrayParam(capabilities["optOutNotificationMethods"]) ?? []
+        )
+    }
+
     fileprivate static func configRequirementsReadResult(
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
@@ -25655,11 +25681,25 @@ final class CodexAppServerMessageProcessor {
                     )
                     return CodexAppServer.encodeMessages(response.map { [$0] } ?? [])
                 }
+                let capabilities: AppServerInitializeCapabilities
+                do {
+                    capabilities = try CodexAppServer.initializeCapabilities(params?["capabilities"])
+                } catch let error as AppServerError {
+                    response = CodexAppServer.errorObject(
+                        id: id,
+                        code: -32600,
+                        message: error.description,
+                        data: error.data
+                    )
+                    return CodexAppServer.encodeMessages(response.map { [$0] } ?? [])
+                } catch {
+                    response = CodexAppServer.errorObject(id: id, code: -32603, message: String(describing: error))
+                    return CodexAppServer.encodeMessages(response.map { [$0] } ?? [])
+                }
                 initialized = true
-                let capabilities = params?["capabilities"] as? [String: Any]
-                requestAttestation = (capabilities?["requestAttestation"] as? Bool) ?? false
-                experimentalAPIEnabled = (capabilities?["experimentalApi"] as? Bool) ?? false
-                optOutNotificationMethods = Set((capabilities?["optOutNotificationMethods"] as? [String]) ?? [])
+                requestAttestation = capabilities.requestAttestation
+                experimentalAPIEnabled = capabilities.experimentalAPI
+                optOutNotificationMethods = Set(capabilities.optOutNotificationMethods)
                 markCurrentConnectionInitialized(
                     requestAttestation: requestAttestation,
                     optOutNotificationMethods: optOutNotificationMethods
