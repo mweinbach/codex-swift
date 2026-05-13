@@ -141,6 +141,33 @@ final class ShellSnapshotTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: refreshedPath.path))
     }
 
+    func testSnapshotShellDoesNotInheritStdin() throws {
+        let stdinGuard = try BlockingStdinPipe.install()
+        defer { _ = stdinGuard }
+        let directory = try temporaryDirectory()
+        let readStatusPath = directory.appendingPathComponent("stdin-read-status")
+        let bashrc = """
+        read -t 1 -r ignored
+        printf '%s' "$?" > "\(readStatusPath.path)"
+        """
+        try bashrc.write(to: directory.appendingPathComponent(".bashrc"), atomically: true, encoding: .utf8)
+
+        let output = try withSanitizedShellHome(directory, bashEnv: nil) {
+            try ShellSnapshot.captureSnapshot(
+                shell: Shell(shellType: .bash, shellPath: "/bin/bash"),
+                cwd: directory
+            )
+        }
+        let readStatus = try String(contentsOf: readStatusPath, encoding: .utf8)
+
+        XCTAssertEqual(
+            readStatus,
+            "1",
+            "expected shell startup read to see EOF on stdin; status=\(readStatus)"
+        )
+        XCTAssertTrue(output.contains("# Snapshot file"))
+    }
+
     func testAttachSnapshotIfEnabledCreatesSnapshotForDefaultFeature() throws {
         let directory = try temporaryDirectory()
         let shell = Shell(shellType: .bash, shellPath: "/bin/bash")
@@ -224,6 +251,55 @@ final class ShellSnapshotTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: liveSnapshot.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: orphanSnapshot.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: invalidSnapshot.path))
+    }
+
+    func testCleanupStaleSnapshotsRemovesStaleRollouts() throws {
+        let directory = try temporaryDirectory()
+        let snapshotDirectory = directory.appendingPathComponent(ShellSnapshot.directoryName, isDirectory: true)
+        try FileManager.default.createDirectory(at: snapshotDirectory, withIntermediateDirectories: true)
+
+        let staleSession = ThreadId()
+        let staleSnapshot = snapshotDirectory.appendingPathComponent("\(staleSession).123.sh")
+        let rolloutPath = try writeRolloutStub(codexHome: directory, sessionID: staleSession)
+        try "stale".write(to: staleSnapshot, atomically: true, encoding: .utf8)
+
+        try setModificationDate(Date().addingTimeInterval(-(ShellSnapshot.retention + 60)), for: rolloutPath)
+        try ShellSnapshot.cleanupStaleSnapshots(codexHome: directory, activeSessionID: ThreadId())
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staleSnapshot.path))
+    }
+
+    func testCleanupStaleSnapshotsUsesStateStoreRolloutPath() async throws {
+        let directory = try temporaryDirectory()
+        let snapshotDirectory = directory.appendingPathComponent(ShellSnapshot.directoryName, isDirectory: true)
+        try FileManager.default.createDirectory(at: snapshotDirectory, withIntermediateDirectories: true)
+
+        let session = ThreadId()
+        let snapshot = snapshotDirectory.appendingPathComponent("\(session).123.sh")
+        try "state".write(to: snapshot, atomically: true, encoding: .utf8)
+
+        let rolloutDirectory = directory.appendingPathComponent("state-rollouts", isDirectory: true)
+        try FileManager.default.createDirectory(at: rolloutDirectory, withIntermediateDirectories: true)
+        let rolloutPath = rolloutDirectory.appendingPathComponent("rollout-\(session).jsonl")
+        try "".write(to: rolloutPath, atomically: true, encoding: .utf8)
+
+        let store = try SQLiteAgentGraphStore(databaseURL: directory.appendingPathComponent("state.sqlite3"))
+        try await store.upsertThread(threadMetadata(id: session, rolloutPath: rolloutPath))
+
+        try await ShellSnapshot.cleanupStaleSnapshots(
+            codexHome: directory,
+            activeSessionID: ThreadId(),
+            threadLookup: store
+        )
+        XCTAssertTrue(FileManager.default.fileExists(atPath: snapshot.path))
+
+        try setModificationDate(Date().addingTimeInterval(-(ShellSnapshot.retention + 60)), for: rolloutPath)
+        try await ShellSnapshot.cleanupStaleSnapshots(
+            codexHome: directory,
+            activeSessionID: ThreadId(),
+            threadLookup: store
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: snapshot.path))
     }
 
     func testCleanupStaleSnapshotsSkipsActiveSession() throws {
@@ -671,7 +747,8 @@ final class ShellSnapshotTests: XCTestCase {
         return url
     }
 
-    private func writeRolloutStub(codexHome: URL, sessionID: ThreadId) throws {
+    @discardableResult
+    private func writeRolloutStub(codexHome: URL, sessionID: ThreadId) throws -> URL {
         let directory = codexHome
             .appendingPathComponent("sessions", isDirectory: true)
             .appendingPathComponent("2025", isDirectory: true)
@@ -680,6 +757,7 @@ final class ShellSnapshotTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let path = directory.appendingPathComponent("rollout-2025-01-01T00-00-00-\(sessionID).jsonl")
         try "".write(to: path, atomically: true, encoding: .utf8)
+        return path
     }
 
     private func shellWithSnapshot(directory: URL, cwd: URL? = nil, contents: String) throws -> Shell {
@@ -689,11 +767,19 @@ final class ShellSnapshotTests: XCTestCase {
         return Shell(shellType: .bash, shellPath: "/bin/bash", shellSnapshot: snapshot)
     }
 
-    private func withSanitizedShellHome<T>(_ home: URL, _ body: () throws -> T) throws -> T {
+    private func withSanitizedShellHome<T>(
+        _ home: URL,
+        bashEnv: String? = "/dev/null",
+        _ body: () throws -> T
+    ) throws -> T {
         let oldHome = getenv("HOME").map { String(cString: $0) }
         let oldBashEnv = getenv("BASH_ENV").map { String(cString: $0) }
         setenv("HOME", home.path, 1)
-        setenv("BASH_ENV", "/dev/null", 1)
+        if let bashEnv {
+            setenv("BASH_ENV", bashEnv, 1)
+        } else {
+            unsetenv("BASH_ENV")
+        }
         defer {
             restoreEnvironment(name: "HOME", value: oldHome)
             restoreEnvironment(name: "BASH_ENV", value: oldBashEnv)
@@ -706,6 +792,77 @@ final class ShellSnapshotTests: XCTestCase {
             setenv(name, value, 1)
         } else {
             unsetenv(name)
+        }
+    }
+
+    private func setModificationDate(_ date: Date, for path: URL) throws {
+        try FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: path.path)
+    }
+
+    private func threadMetadata(id: ThreadId, rolloutPath: URL, updatedAt: Date = Date()) -> ThreadMetadata {
+        ThreadMetadata(
+            id: id,
+            rolloutPath: rolloutPath.path,
+            createdAt: updatedAt,
+            updatedAt: updatedAt,
+            source: "cli",
+            modelProvider: "openai",
+            cwd: rolloutPath.deletingLastPathComponent().path,
+            cliVersion: "0.0.0-test",
+            title: "Shell snapshot state lookup",
+            sandboxPolicy: "workspace-write",
+            approvalMode: "on-request",
+            tokensUsed: 0
+        )
+    }
+
+    private final class BlockingStdinPipe {
+        private let original: Int32
+        private let writeEnd: Int32
+
+        private init(original: Int32, writeEnd: Int32) {
+            self.original = original
+            self.writeEnd = writeEnd
+        }
+
+        static func install() throws -> BlockingStdinPipe {
+            var descriptors = [Int32](repeating: 0, count: 2)
+            guard pipe(&descriptors) == 0 else {
+                throw posixError("create stdin pipe")
+            }
+
+            let original = dup(STDIN_FILENO)
+            guard original != -1 else {
+                let error = posixError("dup stdin")
+                close(descriptors[0])
+                close(descriptors[1])
+                throw error
+            }
+
+            guard dup2(descriptors[0], STDIN_FILENO) != -1 else {
+                let error = posixError("replace stdin")
+                close(descriptors[0])
+                close(descriptors[1])
+                close(original)
+                throw error
+            }
+
+            close(descriptors[0])
+            return BlockingStdinPipe(original: original, writeEnd: descriptors[1])
+        }
+
+        deinit {
+            dup2(original, STDIN_FILENO)
+            close(original)
+            close(writeEnd)
+        }
+
+        private static func posixError(_ operation: String) -> NSError {
+            NSError(
+                domain: NSPOSIXErrorDomain,
+                code: Int(errno),
+                userInfo: [NSLocalizedDescriptionKey: operation]
+            )
         }
     }
 

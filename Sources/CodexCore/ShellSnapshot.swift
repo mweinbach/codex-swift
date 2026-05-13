@@ -1,5 +1,17 @@
 import Foundation
 
+/// Lookup boundary for shell snapshot cleanup to resolve rollout paths from persisted thread state.
+///
+/// SQLite-backed stores implement this when they can return authoritative thread metadata for a
+/// thread id. Callers may rely on the returned `ThreadMetadata.rolloutPath` belonging to the lookup
+/// result, and implementations should keep the async method cancellation-safe and `Sendable`.
+public protocol ShellSnapshotThreadLookup: Sendable {
+    /// Return persisted metadata for `threadID`, or nil when the thread is unknown to the store.
+    func getThread(threadID: ThreadId) async throws -> ThreadMetadata?
+}
+
+extension SQLiteAgentGraphStore: ShellSnapshotThreadLookup {}
+
 public final class ShellSnapshot: @unchecked Sendable {
     public static let directoryName = "shell_snapshots"
 
@@ -45,14 +57,65 @@ public final class ShellSnapshot: @unchecked Sendable {
         }
     }
 
+    public static func attachSnapshotIfEnabled(
+        codexHome: URL,
+        sessionID: ThreadId,
+        sessionCwd: URL,
+        shell: Shell,
+        features: FeatureStates,
+        threadLookup: (any ShellSnapshotThreadLookup)?
+    ) async -> Shell {
+        guard features.isEnabled(.shellSnapshot) else {
+            return Shell(shellType: shell.shellType, shellPath: shell.shellPath)
+        }
+        guard shell.shellSnapshot == nil else {
+            return shell
+        }
+        do {
+            let snapshot = try await tryNew(
+                codexHome: codexHome,
+                sessionID: sessionID,
+                sessionCwd: sessionCwd,
+                shell: shell,
+                threadLookup: threadLookup
+            )
+            return Shell(shellType: shell.shellType, shellPath: shell.shellPath, shellSnapshot: snapshot)
+        } catch {
+            return shell
+        }
+    }
+
     public static func tryNew(codexHome: URL, sessionID: ThreadId, sessionCwd: URL, shell: Shell) throws -> ShellSnapshot {
+        try cleanupStaleSnapshots(codexHome: codexHome, activeSessionID: sessionID)
+        return try createSnapshot(codexHome: codexHome, sessionID: sessionID, sessionCwd: sessionCwd, shell: shell)
+    }
+
+    public static func tryNew(
+        codexHome: URL,
+        sessionID: ThreadId,
+        sessionCwd: URL,
+        shell: Shell,
+        threadLookup: (any ShellSnapshotThreadLookup)?
+    ) async throws -> ShellSnapshot {
+        try await cleanupStaleSnapshots(
+            codexHome: codexHome,
+            activeSessionID: sessionID,
+            threadLookup: threadLookup
+        )
+        return try createSnapshot(codexHome: codexHome, sessionID: sessionID, sessionCwd: sessionCwd, shell: shell)
+    }
+
+    private static func createSnapshot(
+        codexHome: URL,
+        sessionID: ThreadId,
+        sessionCwd: URL,
+        shell: Shell
+    ) throws -> ShellSnapshot {
         let fileExtension = shell.shellType == .powerShell ? "ps1" : "sh"
         let nonce = UInt64(Date().timeIntervalSince1970 * 1_000_000_000)
         let snapshotDirectory = codexHome.appendingPathComponent(directoryName, isDirectory: true)
         let path = snapshotDirectory.appendingPathComponent("\(sessionID).\(nonce).\(fileExtension)")
         let tempPath = snapshotDirectory.appendingPathComponent("\(sessionID).tmp-\(nonce)")
-
-        try cleanupStaleSnapshots(codexHome: codexHome, activeSessionID: sessionID)
 
         do {
             try writeShellSnapshot(shellType: shell.shellType, outputPath: tempPath, cwd: sessionCwd)
@@ -178,41 +241,35 @@ public final class ShellSnapshot: @unchecked Sendable {
     }
 
     public static func cleanupStaleSnapshots(codexHome: URL, activeSessionID: ThreadId) throws {
-        let snapshotDirectory = codexHome.appendingPathComponent(directoryName, isDirectory: true)
-        guard FileManager.default.fileExists(atPath: snapshotDirectory.path) else {
-            return
-        }
-        let entries = try FileManager.default.contentsOfDirectory(
-            at: snapshotDirectory,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: []
-        )
-
         let now = Date()
-        for entry in entries {
-            let resourceValues = try entry.resourceValues(forKeys: [.isRegularFileKey])
-            guard resourceValues.isRegularFile == true else {
+        for entry in try cleanupEntries(codexHome: codexHome) {
+            if entry.sessionID == activeSessionID.description {
                 continue
             }
-            guard let sessionID = snapshotSessionID(fromFileName: entry.lastPathComponent) else {
-                try? FileManager.default.removeItem(at: entry)
-                continue
-            }
-            if sessionID == activeSessionID.description {
-                continue
-            }
-            guard let rolloutPath = try RolloutListing.findConversationPathByIDString(codexHome: codexHome, idString: sessionID) else {
-                try? FileManager.default.removeItem(at: entry)
-                continue
-            }
+            let rolloutPath = try RolloutListing.findConversationPathByIDString(
+                codexHome: codexHome,
+                idString: entry.sessionID
+            )
+            removeSnapshotIfStale(entry.path, rolloutPath: rolloutPath, now: now)
+        }
+    }
 
-            let attributes = try FileManager.default.attributesOfItem(atPath: rolloutPath)
-            guard let modifiedAt = attributes[.modificationDate] as? Date else {
+    public static func cleanupStaleSnapshots(
+        codexHome: URL,
+        activeSessionID: ThreadId,
+        threadLookup: (any ShellSnapshotThreadLookup)?
+    ) async throws {
+        let now = Date()
+        for entry in try cleanupEntries(codexHome: codexHome) {
+            if entry.sessionID == activeSessionID.description {
                 continue
             }
-            if now.timeIntervalSince(modifiedAt) >= retention {
-                try? FileManager.default.removeItem(at: entry)
-            }
+            let rolloutPath = try await rolloutPathForSnapshot(
+                codexHome: codexHome,
+                sessionID: entry.sessionID,
+                threadLookup: threadLookup
+            )
+            removeSnapshotIfStale(entry.path, rolloutPath: rolloutPath, now: now)
         }
     }
 
@@ -417,6 +474,71 @@ $envVars | ForEach-Object {
 
     static func excludedExportsRegex() -> String {
         excludedExportVariables.joined(separator: "|")
+    }
+
+    private struct SnapshotCleanupEntry {
+        var path: URL
+        var sessionID: String
+    }
+
+    private static func cleanupEntries(codexHome: URL) throws -> [SnapshotCleanupEntry] {
+        let snapshotDirectory = codexHome.appendingPathComponent(directoryName, isDirectory: true)
+        guard FileManager.default.fileExists(atPath: snapshotDirectory.path) else {
+            return []
+        }
+        let entries = try FileManager.default.contentsOfDirectory(
+            at: snapshotDirectory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: []
+        )
+
+        var cleanupEntries: [SnapshotCleanupEntry] = []
+        for entry in entries {
+            let resourceValues = try entry.resourceValues(forKeys: [.isRegularFileKey])
+            guard resourceValues.isRegularFile == true else {
+                continue
+            }
+            guard let sessionID = snapshotSessionID(fromFileName: entry.lastPathComponent) else {
+                try? FileManager.default.removeItem(at: entry)
+                continue
+            }
+            cleanupEntries.append(SnapshotCleanupEntry(path: entry, sessionID: sessionID))
+        }
+
+        return cleanupEntries
+    }
+
+    private static func rolloutPathForSnapshot(
+        codexHome: URL,
+        sessionID: String,
+        threadLookup: (any ShellSnapshotThreadLookup)?
+    ) async throws -> String? {
+        if let threadLookup,
+           let threadID = try? ThreadId(string: sessionID),
+           let metadata = try await threadLookup.getThread(threadID: threadID),
+           metadata.archivedAt == nil,
+           FileManager.default.fileExists(atPath: metadata.rolloutPath)
+        {
+            return metadata.rolloutPath
+        }
+
+        return try RolloutListing.findConversationPathByIDString(codexHome: codexHome, idString: sessionID)
+    }
+
+    private static func removeSnapshotIfStale(_ snapshotPath: URL, rolloutPath: String?, now: Date) {
+        guard let rolloutPath else {
+            try? FileManager.default.removeItem(at: snapshotPath)
+            return
+        }
+
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: rolloutPath),
+              let modifiedAt = attributes[.modificationDate] as? Date
+        else {
+            return
+        }
+        if now.timeIntervalSince(modifiedAt) >= retention {
+            try? FileManager.default.removeItem(at: snapshotPath)
+        }
     }
 }
 
