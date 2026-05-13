@@ -688,6 +688,40 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(result.stdoutMessage, "done")
     }
 
+    func testResponsesLoopHandlesModelsETagEventsLikeRust() async throws {
+        let initial = Prompt(input: [
+            .message(role: "user", content: [.inputText(text: "run echo")])
+        ])
+        let capture = ModelsETagCapture()
+        let script = ExecLoopScript(modelsETags: [#""models-etag-1""#, #""models-etag-2""#])
+
+        let result = await NonInteractiveExec.runResponsesLoopWithTranscript(
+            initialPrompt: initial,
+            handleModelsETag: { etag in
+                await capture.append(etag)
+            },
+            streamPrompt: { prompt in
+                .success(await script.next(prompt))
+            },
+            executeFunctionCall: { item in
+                guard case let .functionCall(_, _, _, _, callID) = item else {
+                    return .functionCallOutput(
+                        callID: "bad",
+                        output: FunctionCallOutputPayload(content: "bad", success: false)
+                    )
+                }
+                return .functionCallOutput(
+                    callID: callID,
+                    output: FunctionCallOutputPayload(content: "ok", success: true)
+                )
+            }
+        )
+
+        let capturedETags = await capture.values()
+        XCTAssertEqual(capturedETags, [#""models-etag-1""#, #""models-etag-2""#])
+        XCTAssertEqual(result.transcriptItems.last, .message(role: "assistant", content: [.outputText(text: "done")]))
+    }
+
     func testResponsesLoopContinuesWhenCompletedEndTurnFalseWithoutToolCalls() async throws {
         let initial = Prompt(input: [
             .message(role: "user", content: [.inputText(text: "continue")])
@@ -2640,30 +2674,51 @@ private actor ToolCallCounter {
 private actor ExecLoopScript {
     private var calls = 0
     private var recordedPrompts: [Prompt] = []
+    private let modelsETags: [String]
+
+    init(modelsETags: [String] = []) {
+        self.modelsETags = modelsETags
+    }
 
     func next(_ prompt: Prompt) -> ResponseEventResults {
         calls += 1
         recordedPrompts.append(prompt)
 
         if calls == 1 {
-            return [
+            var events = modelsETags.prefix(1).map { Result<ResponseEvent, APIError>.success(.modelsETag($0)) }
+            events.append(contentsOf: [
                 .success(.outputItemDone(.functionCall(
                     name: "shell_command",
                     arguments: #"{"command":"echo hi"}"#,
                     callID: "call-1"
                 ))),
                 .success(.completed(responseID: "resp-1", tokenUsage: nil))
-            ]
+            ])
+            return events
         }
 
-        return [
+        var events = modelsETags.dropFirst().prefix(1).map { Result<ResponseEvent, APIError>.success(.modelsETag($0)) }
+        events.append(contentsOf: [
             .success(.outputItemDone(.message(role: "assistant", content: [.outputText(text: "done")]))),
             .success(.completed(responseID: "resp-2", tokenUsage: nil))
-        ]
+        ])
+        return events
     }
 
     func prompts() -> [Prompt] {
         recordedPrompts
+    }
+}
+
+private actor ModelsETagCapture {
+    private var etags: [String] = []
+
+    func append(_ etag: String) {
+        etags.append(etag)
+    }
+
+    func values() -> [String] {
+        etags
     }
 }
 

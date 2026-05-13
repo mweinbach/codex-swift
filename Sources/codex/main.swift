@@ -1031,10 +1031,22 @@ private func runNonInteractiveExec(
         provider: provider,
         auth: authResolution.auth
     )
+    let clientVersion = ModelsManager.formatClientVersion(packageVersion: CodexCLI.version)
     let requestTrace = W3CTraceContext.fromEnvironment()
     let loopResult = await NonInteractiveExec.runResponsesLoopWithTranscript(
         initialPrompt: prompt,
         features: settings.features,
+        handleModelsETag: { etag in
+            _ = try? await ModelsManager.refreshCachedModelsIfNewETag(
+                codexHome: codexHome,
+                config: settings,
+                provider: provider,
+                auth: authResolution.auth,
+                transport: URLSessionAPITransport(),
+                clientVersion: clientVersion,
+                modelsETag: etag
+            )
+        },
         streamPrompt: { nextPrompt in
             await client.streamPromptRetryingProviderCommandAuth(
                 model: resolvedModel,

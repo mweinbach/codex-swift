@@ -79,6 +79,9 @@ final class ModelsManagerTests: XCTestCase {
             "1.2.3"
         )
         XCTAssertEqual(ModelsManager.formatClientVersion(ClientVersion(0, 62, 0)), "0.62.0")
+        XCTAssertEqual(ModelsManager.formatClientVersion(packageVersion: "1.2.3-alpha.4"), "1.2.3")
+        XCTAssertEqual(ModelsManager.formatClientVersion(packageVersion: "1.2.3+build.5"), "1.2.3")
+        XCTAssertEqual(ModelsManager.formatClientVersion(packageVersion: "0.0.0"), "99.99.99")
     }
 
     func testRawModelCatalogUsesConfigCatalogBeforeCacheOrNetworkLikeRust() async throws {
@@ -139,6 +142,108 @@ final class ModelsManagerTests: XCTestCase {
 
         XCTAssertEqual(response.etag, "cache-etag")
         XCTAssertTrue(response.models.contains { $0.slug == "cached-remote" })
+    }
+
+    func testRefreshCachedModelsIfNewETagRenewsMatchingCacheWithoutFetchLikeRust() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cachedModel = minimalModelInfo(slug: "cached-etag-match", priority: 0)
+        let staleTime = try parseDate("1970-01-01T00:00:00Z")
+        let renewedTime = try parseDate("2026-05-08T12:00:00Z")
+        try ModelsCache(
+            fetchedAt: staleTime,
+            etag: #""models-etag-1""#,
+            clientVersion: "1.2.3",
+            models: [cachedModel]
+        ).save(to: ModelsManager.cachePath(codexHome: root))
+        let capture = APIRequestCapture()
+        let transport = RecordingAPITransport { request in
+            await capture.append(request)
+            return URLSessionTransportResponse(statusCode: 500)
+        }
+
+        let outcome = try await ModelsManager.refreshCachedModelsIfNewETag(
+            codexHome: root,
+            config: CodexRuntimeConfig(modelProvider: "openai"),
+            provider: chatGPTModelsProvider(),
+            auth: StaticAPIAuthProvider(bearerToken: "chatgpt-token", accountID: "acct-123"),
+            transport: transport,
+            clientVersion: "1.2.3",
+            modelsETag: #""models-etag-1""#,
+            now: renewedTime
+        )
+
+        XCTAssertEqual(outcome, .renewedCache)
+        let requestCount = await capture.count()
+        XCTAssertEqual(requestCount, 0)
+        let cache = try XCTUnwrap(ModelsCache.load(from: ModelsManager.cachePath(codexHome: root)))
+        XCTAssertEqual(cache.fetchedAt, renewedTime)
+        XCTAssertEqual(cache.etag, #""models-etag-1""#)
+        XCTAssertEqual(cache.clientVersion, "1.2.3")
+        XCTAssertEqual(cache.models, [cachedModel])
+    }
+
+    func testRefreshCachedModelsIfNewETagRefetchesOnMismatchThenRenewsLikeRust() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cachedModel = minimalModelInfo(slug: "cached-etag-mismatch", priority: 0)
+        let remoteModel = minimalModelInfo(slug: "remote-etag-refresh", priority: 0)
+        try ModelsCache(
+            fetchedAt: try parseDate("2026-05-08T11:00:00Z"),
+            etag: #""models-etag-1""#,
+            clientVersion: "1.2.3",
+            models: [cachedModel]
+        ).save(to: ModelsManager.cachePath(codexHome: root))
+        let responseBody = try JSONEncoder().encode(ModelsResponse(models: [remoteModel], etag: "body-etag"))
+        let capture = APIRequestCapture()
+        let transport = RecordingAPITransport { request in
+            await capture.append(request)
+            return URLSessionTransportResponse(
+                statusCode: 200,
+                headers: ["ETag": #""models-etag-2""#],
+                body: responseBody
+            )
+        }
+
+        let refreshOutcome = try await ModelsManager.refreshCachedModelsIfNewETag(
+            codexHome: root,
+            config: CodexRuntimeConfig(modelProvider: "openai"),
+            provider: chatGPTModelsProvider(),
+            auth: StaticAPIAuthProvider(bearerToken: "chatgpt-token", accountID: "acct-123"),
+            transport: transport,
+            clientVersion: "1.2.3",
+            modelsETag: #""models-etag-2""#,
+            now: try parseDate("2026-05-08T12:00:00Z")
+        )
+
+        XCTAssertEqual(refreshOutcome, .refreshedCache)
+        var requestCount = await capture.count()
+        XCTAssertEqual(requestCount, 1)
+        let firstRequest = await capture.firstRequest()
+        let request = try XCTUnwrap(firstRequest)
+        XCTAssertEqual(request.url, "https://chatgpt.com/backend-api/codex/models?client_version=1.2.3")
+        var cache = try XCTUnwrap(ModelsCache.load(from: ModelsManager.cachePath(codexHome: root)))
+        XCTAssertEqual(cache.etag, #""models-etag-2""#)
+        XCTAssertEqual(cache.clientVersion, "1.2.3")
+        XCTAssertEqual(cache.models, [remoteModel])
+
+        let renewOutcome = try await ModelsManager.refreshCachedModelsIfNewETag(
+            codexHome: root,
+            config: CodexRuntimeConfig(modelProvider: "openai"),
+            provider: chatGPTModelsProvider(),
+            auth: StaticAPIAuthProvider(bearerToken: "chatgpt-token", accountID: "acct-123"),
+            transport: transport,
+            clientVersion: "1.2.3",
+            modelsETag: #""models-etag-2""#,
+            now: try parseDate("2026-05-08T12:05:00Z")
+        )
+
+        XCTAssertEqual(renewOutcome, .renewedCache)
+        requestCount = await capture.count()
+        XCTAssertEqual(requestCount, 1)
+        cache = try XCTUnwrap(ModelsCache.load(from: ModelsManager.cachePath(codexHome: root)))
+        XCTAssertEqual(cache.fetchedAt, try parseDate("2026-05-08T12:05:00Z"))
+        XCTAssertEqual(cache.models, [remoteModel])
     }
 
     func testRawModelCatalogOnlineIfUncachedFetchesAndPersistsWithChatGPTTokensLikeRust() async throws {
@@ -635,6 +740,10 @@ final class ModelsManagerTests: XCTestCase {
             accountID: accountID
         )
     }
+
+    private func chatGPTModelsProvider() -> APIProvider {
+        ModelProviderInfo.createOpenAIProvider().toAPIProvider(authMode: .chatGPT)
+    }
 }
 
 private actor APIRequestCapture {
@@ -646,6 +755,10 @@ private actor APIRequestCapture {
 
     func firstRequest() -> APIRequest? {
         requests.first
+    }
+
+    func count() -> Int {
+        requests.count
     }
 }
 

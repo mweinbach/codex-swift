@@ -111,6 +111,13 @@ extension ModelsCache: Codable {
     }
 }
 
+public enum ModelsETagRefreshOutcome: Equatable, Sendable {
+    case skipped
+    case renewedCache
+    case refreshedCache
+    case refreshFailed
+}
+
 public enum ModelsManager {
     public static let hideGPT51MigrationPromptConfig = "hide_gpt5_1_migration_prompt"
     public static let hideGPT51CodexMaxMigrationPromptConfig = "hide_gpt-5.1-codex-max_migration_prompt"
@@ -135,6 +142,21 @@ public enum ModelsManager {
             major: "\(version.major)",
             minor: "\(version.minor)",
             patch: "\(version.patch)"
+        )
+    }
+
+    public static func formatClientVersion(packageVersion: String) -> String {
+        let coreVersion = packageVersion.split(
+            maxSplits: 1,
+            omittingEmptySubsequences: false,
+            whereSeparator: { $0 == "-" || $0 == "+" }
+        ).first
+            .map(String.init) ?? packageVersion
+        let parts = coreVersion.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+        return formatClientVersion(
+            major: parts.indices.contains(0) ? parts[0] : "0",
+            minor: parts.indices.contains(1) ? parts[1] : "0",
+            patch: parts.indices.contains(2) ? parts[2] : "0"
         )
     }
 
@@ -305,6 +327,62 @@ public enum ModelsManager {
             )
         case .failure:
             return ModelsResponse(models: fallbackModels)
+        }
+    }
+
+    public static func refreshCachedModelsIfNewETag<Transport: APITransport, Auth: APIAuthProvider>(
+        codexHome: URL,
+        config: CodexRuntimeConfig,
+        provider: APIProvider,
+        auth: Auth,
+        transport: Transport,
+        clientVersion: String,
+        modelsETag: String,
+        now: Date = Date()
+    ) async throws -> ModelsETagRefreshOutcome {
+        if config.modelCatalog != nil {
+            return .skipped
+        }
+
+        let providerInfo = selectedProviderInfo(for: config)
+        if providerInfo.isAmazonBedrock() {
+            return .skipped
+        }
+
+        let cacheURL = cachePath(codexHome: codexHome)
+        if let cached = try ModelsCache.load(from: cacheURL),
+           cached.clientVersion == clientVersion,
+           cached.etag == modelsETag {
+            try ModelsCache(
+                fetchedAt: now,
+                etag: cached.etag,
+                clientVersion: cached.clientVersion,
+                models: cached.models
+            ).save(to: cacheURL)
+            return .renewedCache
+        }
+
+        guard shouldRefreshRawModels(providerInfo: providerInfo, provider: provider) else {
+            return .skipped
+        }
+
+        let client = ModelsClient(
+            transport: transport,
+            provider: provider,
+            auth: auth
+        )
+        switch await client.listModels(clientVersion: clientVersion) {
+        case let .success(response):
+            let cache = ModelsCache(
+                fetchedAt: now,
+                etag: response.etag.isEmpty ? nil : response.etag,
+                clientVersion: clientVersion,
+                models: response.models
+            )
+            try cache.save(to: cacheURL)
+            return .refreshedCache
+        case .failure:
+            return .refreshFailed
         }
     }
 

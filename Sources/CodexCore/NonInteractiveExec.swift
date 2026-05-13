@@ -299,6 +299,7 @@ public enum NonInteractiveExec {
     public typealias ResponseStreamer = (Prompt) async -> Result<ResponseEventResults, APIError>
     public typealias FunctionCallExecutor = (ResponseItem) async -> ResponseItem
     public typealias FunctionCallResultExecutor = (ResponseItem) async -> FunctionCallExecutionResult
+    public typealias ModelsETagHandler = (String) async -> Void
 
     public struct FunctionCallExecutionResult: Equatable, Sendable {
         public var output: ResponseItem
@@ -339,6 +340,7 @@ public enum NonInteractiveExec {
         initialPrompt: Prompt,
         maxToolIterations: Int = 20,
         features: FeatureStates = .withDefaults(),
+        handleModelsETag: ModelsETagHandler? = nil,
         streamPrompt: ResponseStreamer,
         executeFunctionCall: FunctionCallExecutor
     ) async -> ResponseEventResults {
@@ -346,6 +348,7 @@ public enum NonInteractiveExec {
             initialPrompt: initialPrompt,
             maxToolIterations: maxToolIterations,
             features: features,
+            handleModelsETag: handleModelsETag,
             streamPrompt: streamPrompt,
             executeFunctionCall: executeFunctionCall
         ).events
@@ -355,6 +358,7 @@ public enum NonInteractiveExec {
         initialPrompt: Prompt,
         maxToolIterations: Int = 20,
         features: FeatureStates = .withDefaults(),
+        handleModelsETag: ModelsETagHandler? = nil,
         streamPrompt: ResponseStreamer,
         executeFunctionCall: FunctionCallExecutor
     ) async -> NonInteractiveExecLoopResult {
@@ -362,6 +366,7 @@ public enum NonInteractiveExec {
             initialPrompt: initialPrompt,
             maxToolIterations: maxToolIterations,
             features: features,
+            handleModelsETag: handleModelsETag,
             streamPrompt: streamPrompt,
             executeFunctionCall: { item in
                 FunctionCallExecutionResult(output: await executeFunctionCall(item))
@@ -373,6 +378,7 @@ public enum NonInteractiveExec {
         initialPrompt: Prompt,
         maxToolIterations: Int = 20,
         features: FeatureStates = .withDefaults(),
+        handleModelsETag: ModelsETagHandler? = nil,
         streamPrompt: ResponseStreamer,
         stopHookContext: StopHookContext? = nil,
         executeFunctionCall: FunctionCallResultExecutor
@@ -394,6 +400,7 @@ public enum NonInteractiveExec {
             }
 
             allEvents.append(contentsOf: turnEvents)
+            await handleModelsETags(from: turnEvents, handleModelsETag: handleModelsETag)
             runtimeEvents.append(contentsOf: applyPatchStreamingEvents(from: turnEvents, features: features))
             if containsFailure(turnEvents) {
                 return NonInteractiveExecLoopResult(
@@ -457,6 +464,21 @@ public enum NonInteractiveExec {
             transcriptItems: transcriptItems,
             runtimeEvents: runtimeEvents
         )
+    }
+
+    private static func handleModelsETags(
+        from responseEvents: ResponseEventResults,
+        handleModelsETag: ModelsETagHandler?
+    ) async {
+        guard let handleModelsETag else {
+            return
+        }
+        for result in responseEvents {
+            guard case let .success(.modelsETag(etag)) = result else {
+                continue
+            }
+            await handleModelsETag(etag)
+        }
     }
 
     private static func applyPatchStreamingEvents(
