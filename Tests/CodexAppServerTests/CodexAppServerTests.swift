@@ -9715,6 +9715,75 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(requests.allSatisfy { $0.value(forHTTPHeaderField: "chatgpt-account-id") == "account-123" })
     }
 
+    func testPluginListMarksRemotePluginDisabledByAdmin() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        remote_plugin = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+
+        let pluginID = "plugins~Plugin_00000000000000000000000000000000"
+        let directoryBody = remotePluginListPageBody(
+            id: pluginID,
+            name: "linear",
+            displayName: "Linear",
+            status: "DISABLED_BY_ADMIN"
+        )
+        let installedBody = remotePluginListPageBody(
+            id: pluginID,
+            name: "linear",
+            displayName: "Linear",
+            status: "DISABLED_BY_ADMIN",
+            enabled: true
+        )
+        let capture = MCPHTTPTransportCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                capture.append(request)
+                switch (request.url?.path, request.url?.query) {
+                case ("/backend-api/ps/plugins/list", "scope=GLOBAL&limit=200"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(directoryBody.utf8))
+                case ("/backend-api/ps/plugins/installed", "scope=GLOBAL"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(installedBody.utf8))
+                default:
+                    return URLSessionTransportResponse(statusCode: 404)
+                }
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/list","params":{}}"#,
+            configuration: configuration
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let marketplaces = try XCTUnwrap(result["marketplaces"] as? [[String: Any]])
+        let remoteMarketplace = try XCTUnwrap(marketplaces.first { $0["name"] as? String == "chatgpt-global" })
+        let plugins = try XCTUnwrap(remoteMarketplace["plugins"] as? [[String: Any]])
+        let plugin = try XCTUnwrap(plugins.first)
+        XCTAssertEqual(plugin["installed"] as? Bool, true)
+        XCTAssertEqual(plugin["enabled"] as? Bool, true)
+        XCTAssertEqual(plugin["availability"] as? String, "DISABLED_BY_ADMIN")
+        XCTAssertEqual(capture.requests.map { $0.url?.query ?? "" }, [
+            "scope=GLOBAL&limit=200",
+            "scope=GLOBAL"
+        ])
+    }
+
     func testPluginListFetchesWorkspaceDirectoryKindWithoutRemotePluginFlag() throws {
         let temp = try TemporaryDirectory()
         try """
@@ -12300,6 +12369,78 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(error["code"] as? Int, -32600)
         XCTAssertEqual(error["message"] as? String, "remote plugin \(pluginID) is not available for install")
         XCTAssertEqual(capture.requests.count, 2)
+    }
+
+    func testPluginInstallRemoteRejectsDisabledByAdminBeforeDownload() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        plugins = true
+        remote_plugin = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+        let pluginID = "plugins_123"
+        let detailBody = remotePluginDetailBody(
+            id: pluginID,
+            name: "linear",
+            displayName: "Linear",
+            scope: "GLOBAL",
+            status: "DISABLED_BY_ADMIN",
+            releaseVersion: "1.2.3",
+            bundleDownloadURL: "https://bundles.example/linear.tar.gz"
+        )
+        let emptyInstalledBody = """
+        {
+          "plugins": [],
+          "pagination": {
+            "limit": 50,
+            "next_page_token": null
+          }
+        }
+        """
+        let capture = MCPHTTPTransportCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                capture.append(request)
+                switch (request.httpMethod, request.url?.path, request.url?.query) {
+                case ("GET", "/backend-api/ps/plugins/\(pluginID)", "includeDownloadUrls=true"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(detailBody.utf8))
+                case ("GET", "/backend-api/ps/plugins/installed", "scope=GLOBAL"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(emptyInstalledBody.utf8))
+                default:
+                    return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
+                }
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/install","params":{"remoteMarketplaceName":"chatgpt-global","pluginName":"\#(pluginID)"}}"#,
+            configuration: configuration
+        )
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "remote plugin \(pluginID) is disabled by admin")
+        XCTAssertEqual(capture.requests.map { "\($0.httpMethod ?? "") \($0.url?.path ?? "")" }, [
+            "GET /backend-api/ps/plugins/\(pluginID)",
+            "GET /backend-api/ps/plugins/installed"
+        ])
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: temp.url.appendingPathComponent("plugins/cache/chatgpt-global/linear").path
+        ))
     }
 
     func testPluginInstallRemoteRejectsInvalidBackendPluginNameBeforeMutation() throws {
@@ -28081,6 +28222,7 @@ private func remotePluginListPageBody(
     name: String,
     displayName: String,
     scope: String = "GLOBAL",
+    status: String = "ENABLED",
     enabled: Bool? = nil
 ) -> String {
     let enabledField = enabled.map { #", "enabled": \#($0), "disabled_skill_names": []"# } ?? ""
@@ -28093,7 +28235,7 @@ private func remotePluginListPageBody(
           "scope": "\(scope)",
           "installation_policy": "AVAILABLE",
           "authentication_policy": "ON_USE",
-          "status": "ENABLED",
+          "status": "\(status)",
           "release": {
             "display_name": "\(displayName)",
             "description": "Track work",
