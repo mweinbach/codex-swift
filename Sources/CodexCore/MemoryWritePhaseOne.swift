@@ -357,6 +357,23 @@ public func streamMemoryStageOnePrompt(
     return (streamResult.output, streamResult.tokenUsage)
 }
 
+public func streamMemoryStageOnePrompt<Transport: APITransport, Auth: APIAuthProvider>(
+    prompt: Prompt,
+    context: MemoryStageOneRequestContext,
+    verbosity: Verbosity? = nil,
+    responsesClient: ResponsesClient<Transport, Auth>
+) async throws -> (String, TokenUsage?) {
+    let result = await responsesClient.streamPrompt(
+        model: context.modelInfo.slug,
+        instructions: memoryStageOneInstructions(prompt: prompt, context: context),
+        prompt: prompt,
+        options: memoryStageOneResponsesOptions(context: context, prompt: prompt, verbosity: verbosity)
+    )
+    let events = try result.get()
+    let streamResult = try collectMemoryStageOneStreamResult(events)
+    return (streamResult.output, streamResult.tokenUsage)
+}
+
 public func sampleMemoryPhaseOneOutput(
     modelInfo: ModelInfo,
     rolloutPath: URL,

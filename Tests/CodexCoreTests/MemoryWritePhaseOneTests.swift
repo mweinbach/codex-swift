@@ -289,6 +289,73 @@ final class MemoryWritePhaseOneTests: XCTestCase {
         XCTAssertEqual(usage, TokenUsage(totalTokens: 9))
     }
 
+    func testStreamMemoryStageOnePromptUsesResponsesClientWithRustRequestShape() async throws {
+        let transport = MemoryPhaseOneCapturingTransport(
+            streamResults: [
+                .success(APIStreamResponse(statusCode: 200, sseText: #"""
+                data: {"type":"response.output_text.delta","delta":"{\"raw_memory\":\"raw\",\"rollout_summary\":\"summary\",\"rollout_slug\":null}"}
+
+                data: {"type":"response.completed","response":{"id":"resp_mem","usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}}
+
+                """#))
+            ]
+        )
+        let client = ResponsesClient(
+            transport: transport,
+            provider: memoryPhaseOneProvider(),
+            auth: StaticAPIAuthProvider(bearerToken: "tok")
+        )
+        let context = MemoryStageOneRequestContext(
+            modelInfo: minimalModelInfo(defaultReasoningSummary: .auto, defaultVerbosity: .high),
+            reasoningEffort: memoryStageOneReasoningEffort,
+            reasoningSummary: .detailed,
+            serviceTier: "priority",
+            turnMetadataHeader: #"{"turn_id":"turn-memory"}"#
+        )
+        let prompt = Prompt(
+            input: [.message(role: "user", content: [.inputText(text: "remember this rollout")])],
+            baseInstructionsOverride: memoryStageOneSystemPrompt,
+            outputSchema: memoryStageOneOutputSchema()
+        )
+
+        let (output, usage) = try await streamMemoryStageOnePrompt(
+            prompt: prompt,
+            context: context,
+            responsesClient: client
+        )
+
+        XCTAssertEqual(output, #"{"raw_memory":"raw","rollout_summary":"summary","rollout_slug":null}"#)
+        XCTAssertEqual(usage, TokenUsage(inputTokens: 2, outputTokens: 3, totalTokens: 5))
+        let requests = await transport.recordedStreamRequests()
+        XCTAssertEqual(requests.count, 1)
+        let request = try XCTUnwrap(requests.first)
+        XCTAssertEqual(request.method, .post)
+        XCTAssertEqual(request.url, "https://example.com/v1/responses")
+        XCTAssertEqual(request.headers["authorization"], "Bearer tok")
+        XCTAssertEqual(request.headers[CodexRequestHeaders.turnMetadataHeaderName], #"{"turn_id":"turn-memory"}"#)
+        XCTAssertEqual(request.headers["accept"], "text/event-stream")
+
+        let body = try JSONObject(try XCTUnwrap(request.body))
+        XCTAssertEqual(body["model"] as? String, memoryStageOneModel)
+        XCTAssertEqual(body["instructions"] as? String, memoryStageOneSystemPrompt)
+        XCTAssertEqual(body["stream"] as? Bool, true)
+        XCTAssertEqual(body["store"] as? Bool, false)
+        XCTAssertEqual(body["parallel_tool_calls"] as? Bool, false)
+        XCTAssertEqual(body["service_tier"] as? String, "priority")
+        XCTAssertEqual(body["include"] as? [String], [])
+        let reasoning = try XCTUnwrap(body["reasoning"] as? [String: Any])
+        XCTAssertEqual(reasoning["effort"] as? String, "low")
+        XCTAssertEqual(reasoning["summary"] as? String, "detailed")
+        let text = try XCTUnwrap(body["text"] as? [String: Any])
+        XCTAssertEqual(text["verbosity"] as? String, "high")
+        let format = try XCTUnwrap(text["format"] as? [String: Any])
+        XCTAssertEqual(format["type"] as? String, "json_schema")
+        XCTAssertEqual(format["name"] as? String, "codex_output_schema")
+        XCTAssertEqual(format["strict"] as? Bool, true)
+        let metadata = try XCTUnwrap(body["client_metadata"] as? [String: String])
+        XCTAssertEqual(metadata[CodexRequestHeaders.turnMetadataHeaderName], #"{"turn_id":"turn-memory"}"#)
+    }
+
     func testLoadMemoryStageOneRolloutItemsReadsRecorderHistoryForSampling() throws {
         let temp = try temporaryDirectory()
         let recorder = try RolloutRecorder.create(
@@ -964,6 +1031,47 @@ private actor RecordingPhaseOneRetentionStore: MemoryPhaseOneRetentionStore {
         }
         return result
     }
+}
+
+private actor MemoryPhaseOneCapturingTransport: APITransport {
+    private var streamResults: [Result<APIStreamResponse, TransportError>]
+    private var streamRequests: [APIRequest] = []
+
+    init(streamResults: [Result<APIStreamResponse, TransportError>]) {
+        self.streamResults = streamResults
+    }
+
+    func execute(_ request: APIRequest) async -> Result<APIResponse, TransportError> {
+        .failure(.build("unexpected execute request"))
+    }
+
+    func stream(_ request: APIRequest) async -> Result<APIStreamResponse, TransportError> {
+        streamRequests.append(request)
+        guard !streamResults.isEmpty else {
+            return .failure(.build("missing stream result"))
+        }
+        return streamResults.removeFirst()
+    }
+
+    func recordedStreamRequests() -> [APIRequest] {
+        streamRequests
+    }
+}
+
+private func memoryPhaseOneProvider() -> APIProvider {
+    APIProvider(
+        name: "test",
+        baseURL: "https://example.com/v1",
+        wireAPI: .responses,
+        retry: ProviderRetryConfig(
+            maxAttempts: 1,
+            baseDelayMilliseconds: 0,
+            retry429: false,
+            retry5xx: false,
+            retryTransport: false
+        ),
+        streamIdleTimeoutMilliseconds: 1_000
+    )
 }
 
 private struct TestError: Error, CustomStringConvertible {
