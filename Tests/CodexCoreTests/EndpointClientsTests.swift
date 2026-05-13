@@ -296,6 +296,31 @@ final class EndpointClientsTests: XCTestCase {
         ]))
     }
 
+    func testResponsesClientReportsInvalidUTF8AtStreamEndLikeRust() async {
+        let transport = CapturingTransport(
+            streamResults: [
+                .success(APIStreamResponse(
+                    statusCode: 200,
+                    byteStream: byteStream([
+                        Data([0xF0, 0x9F])
+                    ])
+                ))
+            ]
+        )
+        let client = ResponsesClient(
+            transport: transport,
+            provider: provider(),
+            auth: StaticAPIAuthProvider()
+        )
+
+        let result = await client.stream(body: .object([:]))
+
+        XCTAssertEqual(result, .success([
+            .success(.rateLimits(RateLimitSnapshot(limitID: "codex", primary: nil, secondary: nil, credits: nil, planType: nil))),
+            .failure(.stream("UTF8 error: incomplete utf-8 byte sequence from index 0"))
+        ]))
+    }
+
     func testResponsesClientStreamEventsEmitsRateLimitsBeforeSSEEvents() async {
         let snapshot = RateLimitSnapshot(
             limitID: "codex",

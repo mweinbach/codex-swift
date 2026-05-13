@@ -523,7 +523,7 @@ Source baseline inspected for this scaffold:
 - Incremental SSE `data:` frame decoding needed by `codex-rs/codex-api/src/sse/{responses,chat}.rs`
   - chunk-boundary buffering, CRLF normalization, non-data line ignoring, blank-line event flushes, multiline `data:` joins, colonless `data` fields as empty data lines, single-leading-space stripping, and EOF flush of pending frames
 - Incremental UTF-8 and endpoint SSE parsing for `codex-rs/codex-api/src/endpoint/streaming.rs`
-  - byte-stream decoding across multibyte scalar boundaries, transport chunk failure propagation, incremental `data:` frame parsing, and Responses/Chat frame parser adapters while preserving the current collected-result client shape
+  - byte-stream decoding across multibyte scalar boundaries, Rust-style invalid EOF UTF-8 stream errors, transport chunk failure propagation, incremental `data:` frame parsing, and Responses/Chat frame parser adapters while preserving the current collected-result client shape
 - Response event stream surface from `codex-rs/codex-api/src/endpoint/{streaming,responses,chat}.rs`
   - async response-event stream wrapper, Responses/Chat `streamEvents` entrypoints, collected-result compatibility, stream-item error propagation, Responses-only rate-limit snapshot emission before parsed SSE events, stream idle-timeout errors, and SSE poll telemetry
   - server metadata events now match Rust for response-header `OpenAI-Model`, `X-Models-Etag`, `X-Reasoning-Included`, per-event `response.headers`/top-level `headers` model reroutes, and deduped `response.metadata` model-verification recommendations.

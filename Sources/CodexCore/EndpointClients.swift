@@ -311,8 +311,16 @@ private func makeResponseEventStream<Parser: ResponseEventFrameParsing>(
             guard timeout.finishPoll(.streamClosed, startedAt: pollStart) else {
                 return
             }
+            let pendingText: String
+            do {
+                pendingText = try textDecoder.finish()
+            } catch {
+                continuation.yield(.failure(.stream(String(describing: error))))
+                continuation.finish()
+                return
+            }
             appendResponseEvents(
-                from: frameDecoder.receive(textDecoder.finish()) + frameDecoder.finish(),
+                from: frameDecoder.receive(pendingText) + frameDecoder.finish(),
                 using: &parser,
                 to: continuation,
                 lastServerModel: &lastServerModel
