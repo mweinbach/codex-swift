@@ -13468,6 +13468,101 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(remoteDisabledError["message"] as? String, "remote plugin uninstall is not enabled")
     }
 
+    func testPluginUninstallRejectsMalformedRemoteIDsBeforeNetworkCall() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        plugins = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+        let capture = MCPHTTPTransportCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                capture.append(request)
+                return URLSessionTransportResponse(statusCode: 500, body: Data("unexpected network call".utf8))
+            }
+        )
+
+        for pluginID in ["", "sample plugin", "linear/../../oops"] {
+            let response = try appServerResponse(
+                #"{"id":1,"method":"plugin/uninstall","params":{"pluginId":\#(jsonString(pluginID))}}"#,
+                configuration: configuration
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, "invalid remote plugin id")
+        }
+        XCTAssertEqual(capture.requests, [])
+    }
+
+    func testPluginUninstallRejectsRemoteDetailFetchFailureBeforeMutation() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        plugins = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+
+        let pluginID = "plugins~Plugin_linear"
+        let legacyCacheRoot = temp.url.appendingPathComponent("plugins/cache/chatgpt-global/\(pluginID)", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: legacyCacheRoot.appendingPathComponent("local/.codex-plugin", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        let capture = MCPHTTPTransportCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                capture.append(request)
+                switch (request.httpMethod, request.url?.path) {
+                case ("GET", "/backend-api/ps/plugins/\(pluginID)"):
+                    return URLSessionTransportResponse(statusCode: 404, body: Data("missing detail".utf8))
+                default:
+                    return URLSessionTransportResponse(statusCode: 500, body: Data("unexpected mutation".utf8))
+                }
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/uninstall","params":{"pluginId":"\#(pluginID)"}}"#,
+            configuration: configuration
+        )
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertTrue((error["message"] as? String)?.contains("remote plugin catalog request") == true)
+        XCTAssertEqual(capture.requests.map { "\($0.httpMethod ?? "") \($0.url?.path ?? "")" }, [
+            "GET /backend-api/ps/plugins/\(pluginID)"
+        ])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: legacyCacheRoot.path))
+    }
+
     func testPluginUninstallRemovesRemotePluginCacheAfterCloudMutation() throws {
         let temp = try TemporaryDirectory()
         try """
