@@ -75,10 +75,18 @@ public struct UserNotifier: Sendable {
     }
 
     public func notify(_ notification: UserNotification) {
+        guard let process = process(for: notification) else {
+            return
+        }
+
+        try? process.run()
+    }
+
+    func process(for notification: UserNotification) -> Process? {
         guard let invocation = invocationArguments(for: notification),
               let executable = invocation.first
         else {
-            return
+            return nil
         }
 
         let process = Process()
@@ -89,7 +97,10 @@ public struct UserNotifier: Sendable {
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = invocation
         }
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
 
-        try? process.run()
+        return process
     }
 }

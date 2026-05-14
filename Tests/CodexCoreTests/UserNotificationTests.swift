@@ -1,4 +1,4 @@
-import CodexCore
+@testable import CodexCore
 import XCTest
 
 final class UserNotificationTests: XCTestCase {
@@ -71,6 +71,16 @@ final class UserNotificationTests: XCTestCase {
     func testNotifierIgnoresMissingOrEmptyCommands() {
         XCTAssertNil(UserNotifier().invocationArguments(for: sampleNotification()))
         XCTAssertNil(UserNotifier(notifyCommand: []).invocationArguments(for: sampleNotification()))
+    }
+
+    func testNotifyProcessUsesNullStandardIOLikeRustLegacyNotifyHook() throws {
+        let process = try XCTUnwrap(UserNotifier(notifyCommand: ["echo"]).process(for: sampleNotification()))
+
+        XCTAssertEqual(process.executableURL?.path, "/usr/bin/env")
+        XCTAssertEqual(process.arguments?.first, "echo")
+        XCTAssertNotNil(process.standardInput)
+        XCTAssertNotNil(process.standardOutput)
+        XCTAssertNotNil(process.standardError)
     }
 
     private func sampleNotification() -> UserNotification {
