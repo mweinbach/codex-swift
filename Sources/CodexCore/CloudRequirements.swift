@@ -42,6 +42,36 @@ public enum CloudRequirements {
         statusCode.map(String.init) ?? "none"
     }
 
+    public static func fetchAttemptMetricTags(
+        trigger: String,
+        attempt: Int,
+        outcome: String,
+        statusCode: Int?
+    ) -> [CloudRequirementsMetricTag] {
+        [
+            CloudRequirementsMetricTag(key: "trigger", value: trigger),
+            CloudRequirementsMetricTag(key: "attempt", value: String(attempt)),
+            CloudRequirementsMetricTag(key: "outcome", value: outcome),
+            CloudRequirementsMetricTag(key: "status_code", value: statusCodeTag(statusCode))
+        ]
+    }
+
+    public static func fetchFinalMetricTags(
+        trigger: String,
+        outcome: String,
+        reason: String,
+        attemptCount: Int,
+        statusCode: Int?
+    ) -> [CloudRequirementsMetricTag] {
+        [
+            CloudRequirementsMetricTag(key: "trigger", value: trigger),
+            CloudRequirementsMetricTag(key: "outcome", value: outcome),
+            CloudRequirementsMetricTag(key: "reason", value: reason),
+            CloudRequirementsMetricTag(key: "attempt_count", value: String(attemptCount)),
+            CloudRequirementsMetricTag(key: "status_code", value: statusCodeTag(statusCode))
+        ]
+    }
+
     public static func cachePayloadBytes(_ payload: CloudRequirementsCacheSignedPayload) throws -> Data {
         Data(cachePayloadJSONString(payload).utf8)
     }
@@ -272,6 +302,16 @@ public enum CloudRequirementsCacheWriteError: Error, Equatable, CustomStringConv
 
     public var description: String {
         "failed to write cloud requirements cache"
+    }
+}
+
+public struct CloudRequirementsMetricTag: Equatable, Sendable {
+    public var key: String
+    public var value: String
+
+    public init(key: String, value: String) {
+        self.key = key
+        self.value = value
     }
 }
 

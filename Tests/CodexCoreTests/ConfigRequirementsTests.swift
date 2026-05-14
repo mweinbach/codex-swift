@@ -871,6 +871,40 @@ final class ConfigRequirementsTests: XCTestCase {
         XCTAssertEqual(CloudRequirements.statusCodeTag(429), "429")
     }
 
+    func testCloudRequirementsMetricTagsMatchRustOrderAndKeys() {
+        XCTAssertEqual(
+            CloudRequirements.fetchAttemptMetricTags(
+                trigger: "startup",
+                attempt: 2,
+                outcome: "unauthorized",
+                statusCode: 401
+            ),
+            [
+                CloudRequirementsMetricTag(key: "trigger", value: "startup"),
+                CloudRequirementsMetricTag(key: "attempt", value: "2"),
+                CloudRequirementsMetricTag(key: "outcome", value: "unauthorized"),
+                CloudRequirementsMetricTag(key: "status_code", value: "401")
+            ]
+        )
+
+        XCTAssertEqual(
+            CloudRequirements.fetchFinalMetricTags(
+                trigger: "refresh",
+                outcome: "error",
+                reason: "request_retry_exhausted",
+                attemptCount: CloudRequirements.maxAttempts,
+                statusCode: nil
+            ),
+            [
+                CloudRequirementsMetricTag(key: "trigger", value: "refresh"),
+                CloudRequirementsMetricTag(key: "outcome", value: "error"),
+                CloudRequirementsMetricTag(key: "reason", value: "request_retry_exhausted"),
+                CloudRequirementsMetricTag(key: "attempt_count", value: "5"),
+                CloudRequirementsMetricTag(key: "status_code", value: "none")
+            ]
+        )
+    }
+
     func testCloudRequirementsLoaderSharesSingleResultLikeRust() async throws {
         let counter = Counter()
         let loader = CloudRequirementsLoader {

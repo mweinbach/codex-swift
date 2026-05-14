@@ -12,6 +12,7 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-14: rechecked Rust's `emit_fetch_attempt_metric` and `emit_fetch_final_metric` tag construction from `codex-rs/cloud-requirements/src/lib.rs`. Swift now exposes the same ordered tag keys and string conversions for startup/refresh cloud-requirements fetch attempt and final metrics.
 - 2026-05-14: rechecked Rust's cloud requirements fetch attempt error and metric-tag helpers from `codex-rs/cloud-requirements/src/lib.rs`. Swift now carries the retryable backend-client/request distinction, unauthorized attempt status-code forwarding, Rust metric names, and the `None`/numeric status-code tag conversion used by fetch attempt/final metrics.
 - 2026-05-14: rechecked Rust's cloud requirements eligibility and retry/cache timing constants from `codex-rs/cloud-requirements/src/lib.rs`. Swift now exposes the same 15-second startup timeout, five fetch attempts, five-minute background refresh interval, auth recovery failure message, and eligible-auth boundary: Codex-backend auth on Business, Enterprise CBP usage-based, or Enterprise plans only.
 - 2026-05-14: rechecked Rust's cloud requirements cache write path from `codex-rs/cloud-requirements/src/lib.rs`. Swift now creates parent directories and writes Rust-shaped signed pretty cache files for complete and incomplete auth identities, while preserving Rust's single cache-write failure string.
