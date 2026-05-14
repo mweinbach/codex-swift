@@ -41,6 +41,77 @@ public enum CloudRequirements {
         return constantTimeEqual(Array(signatureBytes), Array(Data(expected)))
     }
 
+    public static func loadCacheFileData(
+        _ data: Data,
+        chatgptUserID: String?,
+        accountID: String?,
+        now: Date = Date()
+    ) throws -> CloudRequirementsCacheSignedPayload {
+        guard let chatgptUserID, let accountID else {
+            throw CloudRequirementsCacheLoadStatus.authIdentityIncomplete
+        }
+
+        let cacheFile: CloudRequirementsCacheFile
+        do {
+            cacheFile = try JSONDecoder().decode(CloudRequirementsCacheFile.self, from: data)
+        } catch {
+            throw CloudRequirementsCacheLoadStatus.cacheParseFailed(String(describing: error))
+        }
+
+        let payloadBytes: Data
+        do {
+            payloadBytes = try cachePayloadBytes(cacheFile.signedPayload)
+        } catch {
+            throw CloudRequirementsCacheLoadStatus.cacheParseFailed("failed to serialize cache payload")
+        }
+
+        guard verifyCacheSignature(payloadBytes: payloadBytes, signature: cacheFile.signature) else {
+            throw CloudRequirementsCacheLoadStatus.cacheSignatureInvalid
+        }
+        guard let cachedChatGPTUserID = cacheFile.signedPayload.chatgptUserID,
+              let cachedAccountID = cacheFile.signedPayload.accountID
+        else {
+            throw CloudRequirementsCacheLoadStatus.cacheIdentityIncomplete
+        }
+        guard cachedChatGPTUserID == chatgptUserID, cachedAccountID == accountID else {
+            throw CloudRequirementsCacheLoadStatus.cacheIdentityMismatch
+        }
+        guard cacheFile.signedPayload.isExpired(now: now) == false else {
+            throw CloudRequirementsCacheLoadStatus.cacheExpired
+        }
+
+        return cacheFile.signedPayload
+    }
+
+    public static func loadCacheFile(
+        at path: URL,
+        chatgptUserID: String?,
+        accountID: String?,
+        now: Date = Date(),
+        fileManager: FileManager = .default
+    ) throws -> CloudRequirementsCacheSignedPayload {
+        guard chatgptUserID != nil, accountID != nil else {
+            throw CloudRequirementsCacheLoadStatus.authIdentityIncomplete
+        }
+        guard fileManager.fileExists(atPath: path.path) else {
+            throw CloudRequirementsCacheLoadStatus.cacheFileNotFound
+        }
+
+        let data: Data
+        do {
+            data = try Data(contentsOf: path)
+        } catch {
+            throw CloudRequirementsCacheLoadStatus.cacheReadFailed(error.localizedDescription)
+        }
+
+        return try loadCacheFileData(
+            data,
+            chatgptUserID: chatgptUserID,
+            accountID: accountID,
+            now: now
+        )
+    }
+
     public static func makeCacheFile(
         cachedAt: Date,
         chatgptUserID: String?,
@@ -144,6 +215,38 @@ public enum CloudRequirements {
             difference |= left ^ right
         }
         return difference == 0
+    }
+}
+
+public enum CloudRequirementsCacheLoadStatus: Error, Equatable, CustomStringConvertible, Sendable {
+    case authIdentityIncomplete
+    case cacheFileNotFound
+    case cacheReadFailed(String)
+    case cacheParseFailed(String)
+    case cacheSignatureInvalid
+    case cacheIdentityIncomplete
+    case cacheIdentityMismatch
+    case cacheExpired
+
+    public var description: String {
+        switch self {
+        case .authIdentityIncomplete:
+            return "Skipping cloud requirements cache read because auth identity is incomplete."
+        case .cacheFileNotFound:
+            return "Cloud requirements cache file not found."
+        case let .cacheReadFailed(message):
+            return "Failed to read cloud requirements cache: \(message)."
+        case let .cacheParseFailed(message):
+            return "Failed to parse cloud requirements cache: \(message)."
+        case .cacheSignatureInvalid:
+            return "Cloud requirements cache failed signature verification."
+        case .cacheIdentityIncomplete:
+            return "Ignoring cloud requirements cache because cached identity is incomplete."
+        case .cacheIdentityMismatch:
+            return "Ignoring cloud requirements cache for different auth identity."
+        case .cacheExpired:
+            return "Cloud requirements cache expired."
+        }
     }
 }
 

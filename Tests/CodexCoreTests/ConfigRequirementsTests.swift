@@ -890,6 +890,193 @@ final class ConfigRequirementsTests: XCTestCase {
         XCTAssertTrue(prettyJSON.contains(#""account_id" : null"#))
         XCTAssertTrue(prettyJSON.contains(#""contents" : null"#))
     }
+
+    func testCloudRequirementsLoadCacheFileDataAcceptsValidCacheLikeRust() throws {
+        let now = Date(timeIntervalSince1970: 1_778_752_800)
+        let cacheFile = try CloudRequirements.makeCacheFile(
+            cachedAt: now.addingTimeInterval(-60),
+            chatgptUserID: "user-12345",
+            accountID: "account-12345",
+            contents: #"allowed_approval_policies = ["never"]"#
+        )
+
+        let payload = try CloudRequirements.loadCacheFileData(
+            try CloudRequirements.prettyCacheFileData(cacheFile),
+            chatgptUserID: "user-12345",
+            accountID: "account-12345",
+            now: now
+        )
+
+        XCTAssertEqual(payload, cacheFile.signedPayload)
+        XCTAssertEqual(try payload.requirements()?.requirements().approvalPolicy.value, .never)
+    }
+
+    func testCloudRequirementsLoadCacheFileDataRejectsIncompleteCallerIdentityLikeRust() throws {
+        let cacheFile = try CloudRequirements.makeCacheFile(
+            cachedAt: Date(timeIntervalSince1970: 1_778_752_800),
+            chatgptUserID: "user-12345",
+            accountID: "account-12345",
+            contents: nil
+        )
+        let data = try CloudRequirements.prettyCacheFileData(cacheFile)
+
+        XCTAssertThrowsError(try CloudRequirements.loadCacheFileData(
+            data,
+            chatgptUserID: nil,
+            accountID: "account-12345"
+        )) { error in
+            XCTAssertEqual(error as? CloudRequirementsCacheLoadStatus, .authIdentityIncomplete)
+        }
+
+        XCTAssertThrowsError(try CloudRequirements.loadCacheFileData(
+            data,
+            chatgptUserID: "user-12345",
+            accountID: nil
+        )) { error in
+            XCTAssertEqual(error as? CloudRequirementsCacheLoadStatus, .authIdentityIncomplete)
+        }
+    }
+
+    func testCloudRequirementsLoadCacheFileDataRejectsTamperingIdentityAndExpiryLikeRust() throws {
+        let now = Date(timeIntervalSince1970: 1_778_752_800)
+        let valid = try CloudRequirements.makeCacheFile(
+            cachedAt: now,
+            chatgptUserID: "user-12345",
+            accountID: "account-12345",
+            contents: nil
+        )
+        var tamperedPayload = valid.signedPayload
+        tamperedPayload.contents = #"allowed_approval_policies = ["never"]"#
+        let tampered = CloudRequirementsCacheFile(
+            signedPayload: tamperedPayload,
+            signature: valid.signature
+        )
+
+        XCTAssertThrowsError(try CloudRequirements.loadCacheFileData(
+            try CloudRequirements.prettyCacheFileData(tampered),
+            chatgptUserID: "user-12345",
+            accountID: "account-12345",
+            now: now
+        )) { error in
+            XCTAssertEqual(error as? CloudRequirementsCacheLoadStatus, .cacheSignatureInvalid)
+        }
+
+        let incompleteIdentity = try signedCacheFile(payload: CloudRequirementsCacheSignedPayload(
+            cachedAt: now,
+            expiresAt: now.addingTimeInterval(CloudRequirements.cacheTTL),
+            chatgptUserID: nil,
+            accountID: "account-12345",
+            contents: nil
+        ))
+        XCTAssertThrowsError(try CloudRequirements.loadCacheFileData(
+            try CloudRequirements.prettyCacheFileData(incompleteIdentity),
+            chatgptUserID: "user-12345",
+            accountID: "account-12345",
+            now: now
+        )) { error in
+            XCTAssertEqual(error as? CloudRequirementsCacheLoadStatus, .cacheIdentityIncomplete)
+        }
+
+        XCTAssertThrowsError(try CloudRequirements.loadCacheFileData(
+            try CloudRequirements.prettyCacheFileData(valid),
+            chatgptUserID: "different-user",
+            accountID: "account-12345",
+            now: now
+        )) { error in
+            XCTAssertEqual(error as? CloudRequirementsCacheLoadStatus, .cacheIdentityMismatch)
+        }
+
+        let expired = try signedCacheFile(payload: CloudRequirementsCacheSignedPayload(
+            cachedAt: now.addingTimeInterval(-CloudRequirements.cacheTTL),
+            expiresAt: now,
+            chatgptUserID: "user-12345",
+            accountID: "account-12345",
+            contents: nil
+        ))
+        XCTAssertThrowsError(try CloudRequirements.loadCacheFileData(
+            try CloudRequirements.prettyCacheFileData(expired),
+            chatgptUserID: "user-12345",
+            accountID: "account-12345",
+            now: now
+        )) { error in
+            XCTAssertEqual(error as? CloudRequirementsCacheLoadStatus, .cacheExpired)
+        }
+    }
+
+    func testCloudRequirementsLoadCacheFileReportsMissingAndMalformedCacheLikeRust() {
+        let missingURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathComponent(CloudRequirements.cacheFilename)
+
+        XCTAssertThrowsError(try CloudRequirements.loadCacheFile(
+            at: missingURL,
+            chatgptUserID: nil,
+            accountID: "account-12345"
+        )) { error in
+            XCTAssertEqual(error as? CloudRequirementsCacheLoadStatus, .authIdentityIncomplete)
+        }
+
+        XCTAssertThrowsError(try CloudRequirements.loadCacheFile(
+            at: missingURL,
+            chatgptUserID: "user-12345",
+            accountID: "account-12345"
+        )) { error in
+            XCTAssertEqual(error as? CloudRequirementsCacheLoadStatus, .cacheFileNotFound)
+        }
+
+        XCTAssertThrowsError(try CloudRequirements.loadCacheFileData(
+            Data("not json".utf8),
+            chatgptUserID: "user-12345",
+            accountID: "account-12345"
+        )) { error in
+            guard case .cacheParseFailed = error as? CloudRequirementsCacheLoadStatus else {
+                return XCTFail("expected cache parse failure, got \(error)")
+            }
+        }
+    }
+
+    func testCloudRequirementsCacheLoadStatusDescriptionsMatchRust() {
+        XCTAssertEqual(
+            CloudRequirementsCacheLoadStatus.authIdentityIncomplete.description,
+            "Skipping cloud requirements cache read because auth identity is incomplete."
+        )
+        XCTAssertEqual(
+            CloudRequirementsCacheLoadStatus.cacheFileNotFound.description,
+            "Cloud requirements cache file not found."
+        )
+        XCTAssertEqual(
+            CloudRequirementsCacheLoadStatus.cacheReadFailed("permission denied").description,
+            "Failed to read cloud requirements cache: permission denied."
+        )
+        XCTAssertEqual(
+            CloudRequirementsCacheLoadStatus.cacheParseFailed("invalid json").description,
+            "Failed to parse cloud requirements cache: invalid json."
+        )
+        XCTAssertEqual(
+            CloudRequirementsCacheLoadStatus.cacheSignatureInvalid.description,
+            "Cloud requirements cache failed signature verification."
+        )
+        XCTAssertEqual(
+            CloudRequirementsCacheLoadStatus.cacheIdentityIncomplete.description,
+            "Ignoring cloud requirements cache because cached identity is incomplete."
+        )
+        XCTAssertEqual(
+            CloudRequirementsCacheLoadStatus.cacheIdentityMismatch.description,
+            "Ignoring cloud requirements cache for different auth identity."
+        )
+        XCTAssertEqual(
+            CloudRequirementsCacheLoadStatus.cacheExpired.description,
+            "Cloud requirements cache expired."
+        )
+    }
+
+    private func signedCacheFile(payload: CloudRequirementsCacheSignedPayload) throws -> CloudRequirementsCacheFile {
+        let payloadBytes = try CloudRequirements.cachePayloadBytes(payload)
+        return CloudRequirementsCacheFile(
+            signedPayload: payload,
+            signature: CloudRequirements.signCachePayload(payloadBytes)
+        )
+    }
 }
 
 private actor Counter {
