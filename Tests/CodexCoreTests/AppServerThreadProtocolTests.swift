@@ -1155,10 +1155,11 @@ final class AppServerThreadProtocolTests: XCTestCase {
                 "approvalPolicy": "never",
                 "approvalsReviewer": "guardian_subagent",
                 "sandbox": [
-                    "type": "workspace-write",
-                    "network_access": false,
-                    "exclude_tmpdir_env_var": false,
-                    "exclude_slash_tmp": false
+                    "type": "workspaceWrite",
+                    "writableRoots": [],
+                    "networkAccess": false,
+                    "excludeTmpdirEnvVar": false,
+                    "excludeSlashTmp": false
                 ],
                 "permissionProfile": NSNull(),
                 "activePermissionProfile": NSNull(),
@@ -1176,7 +1177,8 @@ final class AppServerThreadProtocolTests: XCTestCase {
             "approvalPolicy": "on-request",
             "approvalsReviewer": "user",
             "sandbox": [
-                "type": "read-only"
+                "type": "readOnly",
+                "networkAccess": false
             ],
             "permissionProfile": [
                 "type": "managed",
@@ -1252,7 +1254,7 @@ final class AppServerThreadProtocolTests: XCTestCase {
           "approvalPolicy": "never",
           "approvalsReviewer": "guardian_subagent",
           "sandbox": {
-            "type": "read-only"
+            "type": "readOnly"
           },
           "permissionProfile": null,
           "activePermissionProfile": null,

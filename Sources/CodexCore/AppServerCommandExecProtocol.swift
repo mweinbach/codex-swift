@@ -10,7 +10,7 @@ public struct CommandExecTerminalSize: Equatable, Codable, Sendable {
     }
 }
 
-public enum AppServerCommandExecSandboxPolicy: Equatable, Sendable {
+public enum AppServerSandboxPolicy: Equatable, Sendable {
     case dangerFullAccess
     case readOnly(networkAccess: Bool = false)
     case externalSandbox(networkAccess: NetworkAccess = .restricted)
@@ -22,7 +22,7 @@ public enum AppServerCommandExecSandboxPolicy: Equatable, Sendable {
     )
 }
 
-extension AppServerCommandExecSandboxPolicy: Codable {
+extension AppServerSandboxPolicy: Codable {
     private enum CodingKeys: String, CodingKey {
         case type
         case networkAccess
@@ -50,8 +50,9 @@ extension AppServerCommandExecSandboxPolicy: Codable {
                 networkAccess: try container.decodeIfPresent(NetworkAccess.self, forKey: .networkAccess) ?? .restricted
             )
         case .workspaceWrite:
+            let writableRoots = try container.decodeIfPresent([AbsolutePath].self, forKey: .writableRoots) ?? []
             self = .workspaceWrite(
-                writableRoots: try container.decodeIfPresent([String].self, forKey: .writableRoots) ?? [],
+                writableRoots: writableRoots.map(\.path),
                 networkAccess: try container.decodeIfPresent(Bool.self, forKey: .networkAccess) ?? false,
                 excludeTmpdirEnvVar: try container.decodeIfPresent(Bool.self, forKey: .excludeTmpdirEnvVar) ?? false,
                 excludeSlashTmp: try container.decodeIfPresent(Bool.self, forKey: .excludeSlashTmp) ?? false
@@ -79,6 +80,48 @@ extension AppServerCommandExecSandboxPolicy: Codable {
         }
     }
 }
+
+extension AppServerSandboxPolicy {
+    public init(core policy: SandboxPolicy) {
+        switch policy {
+        case .dangerFullAccess:
+            self = .dangerFullAccess
+        case .readOnly:
+            self = .readOnly()
+        case .readOnlyWithNetworkAccess:
+            self = .readOnly(networkAccess: true)
+        case let .externalSandbox(networkAccess):
+            self = .externalSandbox(networkAccess: networkAccess)
+        case let .workspaceWrite(writableRoots, networkAccess, excludeTmpdirEnvVar, excludeSlashTmp):
+            self = .workspaceWrite(
+                writableRoots: writableRoots.map(\.path),
+                networkAccess: networkAccess,
+                excludeTmpdirEnvVar: excludeTmpdirEnvVar,
+                excludeSlashTmp: excludeSlashTmp
+            )
+        }
+    }
+
+    public var coreValue: SandboxPolicy {
+        switch self {
+        case .dangerFullAccess:
+            return .dangerFullAccess
+        case let .readOnly(networkAccess):
+            return networkAccess ? .readOnlyWithNetworkAccess : .readOnly
+        case let .externalSandbox(networkAccess):
+            return .externalSandbox(networkAccess: networkAccess)
+        case let .workspaceWrite(writableRoots, networkAccess, excludeTmpdirEnvVar, excludeSlashTmp):
+            return .workspaceWrite(
+                writableRoots: writableRoots.compactMap { try? AbsolutePath(absolutePath: $0) },
+                networkAccess: networkAccess,
+                excludeTmpdirEnvVar: excludeTmpdirEnvVar,
+                excludeSlashTmp: excludeSlashTmp
+            )
+        }
+    }
+}
+
+public typealias AppServerCommandExecSandboxPolicy = AppServerSandboxPolicy
 
 public struct CommandExecParams: Equatable, Sendable {
     public let command: [String]

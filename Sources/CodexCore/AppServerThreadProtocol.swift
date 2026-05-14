@@ -1704,6 +1704,25 @@ public struct ThreadStartResponse: Equatable, Codable, Sendable {
         self.reasoningEffort = reasoningEffort
     }
 
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        thread = try container.decode(AppServerThread.self, forKey: .thread)
+        model = try container.decode(String.self, forKey: .model)
+        modelProvider = try container.decode(String.self, forKey: .modelProvider)
+        serviceTier = try container.decodeIfPresent(String.self, forKey: .serviceTier)
+        cwd = try container.decode(AbsolutePath.self, forKey: .cwd)
+        instructionSources = try container.decodeIfPresent([AbsolutePath].self, forKey: .instructionSources) ?? []
+        approvalPolicy = try container.decode(AskForApproval.self, forKey: .approvalPolicy)
+        approvalsReviewer = try container.decode(ApprovalsReviewer.self, forKey: .approvalsReviewer)
+        sandbox = try container.decode(AppServerSandboxPolicy.self, forKey: .sandbox).coreValue
+        permissionProfile = try container.decodeIfPresent(AppServerPermissionProfile.self, forKey: .permissionProfile)
+        activePermissionProfile = try container.decodeIfPresent(
+            AppServerActivePermissionProfile.self,
+            forKey: .activePermissionProfile
+        )
+        reasoningEffort = try container.decodeIfPresent(ReasoningEffort.self, forKey: .reasoningEffort)
+    }
+
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(thread, forKey: .thread)
@@ -1714,7 +1733,7 @@ public struct ThreadStartResponse: Equatable, Codable, Sendable {
         try container.encode(instructionSources, forKey: .instructionSources)
         try container.encode(approvalPolicy, forKey: .approvalPolicy)
         try container.encode(approvalsReviewer, forKey: .approvalsReviewer)
-        try container.encode(sandbox, forKey: .sandbox)
+        try container.encode(AppServerSandboxPolicy(core: sandbox), forKey: .sandbox)
         try container.encodeNilOrValue(permissionProfile, forKey: .permissionProfile)
         try container.encodeNilOrValue(activePermissionProfile, forKey: .activePermissionProfile)
         try container.encodeNilOrValue(reasoningEffort, forKey: .reasoningEffort)
@@ -1778,6 +1797,25 @@ public struct ThreadResumeResponse: Equatable, Codable, Sendable {
         self.reasoningEffort = reasoningEffort
     }
 
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        thread = try container.decode(AppServerThread.self, forKey: .thread)
+        model = try container.decode(String.self, forKey: .model)
+        modelProvider = try container.decode(String.self, forKey: .modelProvider)
+        serviceTier = try container.decodeIfPresent(String.self, forKey: .serviceTier)
+        cwd = try container.decode(AbsolutePath.self, forKey: .cwd)
+        instructionSources = try container.decodeIfPresent([AbsolutePath].self, forKey: .instructionSources) ?? []
+        approvalPolicy = try container.decode(AskForApproval.self, forKey: .approvalPolicy)
+        approvalsReviewer = try container.decode(ApprovalsReviewer.self, forKey: .approvalsReviewer)
+        sandbox = try container.decode(AppServerSandboxPolicy.self, forKey: .sandbox).coreValue
+        permissionProfile = try container.decodeIfPresent(AppServerPermissionProfile.self, forKey: .permissionProfile)
+        activePermissionProfile = try container.decodeIfPresent(
+            AppServerActivePermissionProfile.self,
+            forKey: .activePermissionProfile
+        )
+        reasoningEffort = try container.decodeIfPresent(ReasoningEffort.self, forKey: .reasoningEffort)
+    }
+
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(thread, forKey: .thread)
@@ -1788,7 +1826,7 @@ public struct ThreadResumeResponse: Equatable, Codable, Sendable {
         try container.encode(instructionSources, forKey: .instructionSources)
         try container.encode(approvalPolicy, forKey: .approvalPolicy)
         try container.encode(approvalsReviewer, forKey: .approvalsReviewer)
-        try container.encode(sandbox, forKey: .sandbox)
+        try container.encode(AppServerSandboxPolicy(core: sandbox), forKey: .sandbox)
         try container.encodeNilOrValue(permissionProfile, forKey: .permissionProfile)
         try container.encodeNilOrValue(activePermissionProfile, forKey: .activePermissionProfile)
         try container.encodeNilOrValue(reasoningEffort, forKey: .reasoningEffort)
@@ -1852,6 +1890,25 @@ public struct ThreadForkResponse: Equatable, Codable, Sendable {
         self.reasoningEffort = reasoningEffort
     }
 
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        thread = try container.decode(AppServerThread.self, forKey: .thread)
+        model = try container.decode(String.self, forKey: .model)
+        modelProvider = try container.decode(String.self, forKey: .modelProvider)
+        serviceTier = try container.decodeIfPresent(String.self, forKey: .serviceTier)
+        cwd = try container.decode(AbsolutePath.self, forKey: .cwd)
+        instructionSources = try container.decodeIfPresent([AbsolutePath].self, forKey: .instructionSources) ?? []
+        approvalPolicy = try container.decode(AskForApproval.self, forKey: .approvalPolicy)
+        approvalsReviewer = try container.decode(ApprovalsReviewer.self, forKey: .approvalsReviewer)
+        sandbox = try container.decode(AppServerSandboxPolicy.self, forKey: .sandbox).coreValue
+        permissionProfile = try container.decodeIfPresent(AppServerPermissionProfile.self, forKey: .permissionProfile)
+        activePermissionProfile = try container.decodeIfPresent(
+            AppServerActivePermissionProfile.self,
+            forKey: .activePermissionProfile
+        )
+        reasoningEffort = try container.decodeIfPresent(ReasoningEffort.self, forKey: .reasoningEffort)
+    }
+
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(thread, forKey: .thread)
@@ -1862,7 +1919,7 @@ public struct ThreadForkResponse: Equatable, Codable, Sendable {
         try container.encode(instructionSources, forKey: .instructionSources)
         try container.encode(approvalPolicy, forKey: .approvalPolicy)
         try container.encode(approvalsReviewer, forKey: .approvalsReviewer)
-        try container.encode(sandbox, forKey: .sandbox)
+        try container.encode(AppServerSandboxPolicy(core: sandbox), forKey: .sandbox)
         try container.encodeNilOrValue(permissionProfile, forKey: .permissionProfile)
         try container.encodeNilOrValue(activePermissionProfile, forKey: .activePermissionProfile)
         try container.encodeNilOrValue(reasoningEffort, forKey: .reasoningEffort)

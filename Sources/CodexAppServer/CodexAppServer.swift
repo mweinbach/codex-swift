@@ -1202,7 +1202,7 @@ public enum CodexAppServer {
             "instructionSources": started.instructionSources,
             "approvalPolicy": started.approvalPolicy.rawValue,
             "approvalsReviewer": started.approvalsReviewer.appServerRawValue,
-            "sandbox": try jsonObject(started.sandbox),
+            "sandbox": try jsonObject(AppServerSandboxPolicy(core: started.sandbox)),
             "permissionProfile": try jsonObject(permissionProfile),
             "activePermissionProfile": activePermissionProfileObject(started.activePermissionProfile),
             "reasoningEffort": started.reasoningEffort ?? NSNull()
@@ -1887,7 +1887,7 @@ public enum CodexAppServer {
             ),
             "approvalPolicy": approvalPolicy.rawValue,
             "approvalsReviewer": approvalsReviewer.appServerRawValue,
-            "sandbox": try jsonObject(sandbox),
+            "sandbox": try jsonObject(AppServerSandboxPolicy(core: sandbox)),
             "permissionProfile": try jsonObject(permissionProfile),
             "activePermissionProfile": activePermissionProfileObject(runtimeConfig.activePermissionProfile),
             "reasoningEffort": reasoningEffort?.rawValue ?? NSNull()
@@ -2046,7 +2046,7 @@ public enum CodexAppServer {
             ),
             "approvalPolicy": approvalPolicy.rawValue,
             "approvalsReviewer": approvalsReviewer.appServerRawValue,
-            "sandbox": try jsonObject(sandbox),
+            "sandbox": try jsonObject(AppServerSandboxPolicy(core: sandbox)),
             "permissionProfile": try jsonObject(permissionProfile),
             "activePermissionProfile": activePermissionProfileObject(runtimeConfig.activePermissionProfile),
             "reasoningEffort": reasoningEffort?.rawValue ?? NSNull()

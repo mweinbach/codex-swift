@@ -28,7 +28,7 @@ public struct AppServerTurnStartParams: Equatable, Sendable {
     public let cwd: String?
     public let approvalPolicy: AskForApproval?
     public let approvalsReviewer: ApprovalsReviewer?
-    public let sandboxPolicy: SandboxPolicy?
+    public let sandboxPolicy: AppServerSandboxPolicy?
     public let permissions: AppServerPermissionProfileSelectionParams?
     public let model: String?
     public let serviceTier: AppServerServiceTierOverride?
@@ -65,7 +65,7 @@ public struct AppServerTurnStartParams: Equatable, Sendable {
         cwd: String? = nil,
         approvalPolicy: AskForApproval? = nil,
         approvalsReviewer: ApprovalsReviewer? = nil,
-        sandboxPolicy: SandboxPolicy? = nil,
+        sandboxPolicy: AppServerSandboxPolicy? = nil,
         permissions: AppServerPermissionProfileSelectionParams? = nil,
         model: String? = nil,
         serviceTier: AppServerServiceTierOverride? = nil,
@@ -107,7 +107,7 @@ extension AppServerTurnStartParams: Codable {
         cwd = try container.decodeIfPresent(String.self, forKey: .cwd)
         approvalPolicy = try container.decodeIfPresent(AskForApproval.self, forKey: .approvalPolicy)
         approvalsReviewer = try container.decodeIfPresent(ApprovalsReviewer.self, forKey: .approvalsReviewer)
-        sandboxPolicy = try container.decodeIfPresent(SandboxPolicy.self, forKey: .sandboxPolicy)
+        sandboxPolicy = try container.decodeIfPresent(AppServerSandboxPolicy.self, forKey: .sandboxPolicy)
         permissions = try container.decodeIfPresent(
             AppServerPermissionProfileSelectionParams.self,
             forKey: .permissions

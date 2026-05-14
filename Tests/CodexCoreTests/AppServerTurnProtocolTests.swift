@@ -141,6 +141,46 @@ final class AppServerTurnProtocolTests: XCTestCase {
         XCTAssertNil(omittedOverride.serviceTier)
     }
 
+    func testTurnStartParamsUseRustAppServerSandboxPolicyShape() throws {
+        let params = AppServerTurnStartParams(
+            threadID: "thread_123",
+            input: [],
+            sandboxPolicy: .workspaceWrite(
+                writableRoots: ["/repo"],
+                networkAccess: true,
+                excludeTmpdirEnvVar: true,
+                excludeSlashTmp: false
+            )
+        )
+
+        let object = try JSONObject(params)
+        XCTAssertEqual(
+            NSDictionary(dictionary: object["sandboxPolicy"] as? [String: Any] ?? [:]),
+            NSDictionary(dictionary: [
+                "type": "workspaceWrite",
+                "writableRoots": ["/repo"],
+                "networkAccess": true,
+                "excludeTmpdirEnvVar": true,
+                "excludeSlashTmp": false
+            ])
+        )
+
+        let decoded = try JSONDecoder().decode(
+            AppServerTurnStartParams.self,
+            from: Data(#"""
+            {
+              "threadId": "thread_123",
+              "input": [],
+              "sandboxPolicy": {
+                "type": "readOnly",
+                "networkAccess": true
+              }
+            }
+            """#.utf8)
+        )
+        XCTAssertEqual(decoded.sandboxPolicy, .readOnly(networkAccess: true))
+    }
+
     func testTurnStartParamsRoundTripEnvironmentsLikeRustProtocol() throws {
         let cwd = try AbsolutePath(absolutePath: "/tmp/codex-turn")
         let params = AppServerTurnStartParams(
