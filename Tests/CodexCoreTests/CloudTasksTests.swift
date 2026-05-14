@@ -370,6 +370,64 @@ final class CloudTasksTests: XCTestCase {
         ])
     }
 
+    func testHTTPClientAutodetectEnvironmentSortsAndDeduplicatesOriginsLikeRust() async throws {
+        let transport = CloudCapturingTransport(executeResults: [
+            .success(cloudResponse("""
+            []
+            """)),
+            .success(cloudResponse("""
+            [
+              { "id": "env-zeta", "label": "Zeta", "task_count": 1 }
+            ]
+            """))
+        ])
+        let client = CloudHTTPClient(
+            baseURL: "https://chatgpt.com",
+            transport: transport,
+            auth: StaticAPIAuthProvider(),
+            gitOriginURLs: {
+                [
+                    "https://github.com/zeta/repo.git",
+                    "git@github.com:alpha/repo.git",
+                    "git@github.com:alpha/repo.git"
+                ]
+            },
+            errorLog: { _ in }
+        )
+
+        let selection = try await client.autodetectEnvironmentID().get()
+
+        XCTAssertEqual(selection, CloudEnvironmentSelection(id: "env-zeta", label: "Zeta"))
+        XCTAssertEqual(transport.executeRequests.map(\.url), [
+            "https://chatgpt.com/backend-api/wham/environments/by-repo/github/alpha/repo",
+            "https://chatgpt.com/backend-api/wham/environments/by-repo/github/zeta/repo"
+        ])
+    }
+
+    func testHTTPClientAutodetectEnvironmentIgnoresSlashSSHOriginLikeRust() async throws {
+        let transport = CloudCapturingTransport(executeResults: [
+            .success(cloudResponse("""
+            [
+              { "id": "env-global", "label": "Global", "task_count": 1 }
+            ]
+            """))
+        ])
+        let client = CloudHTTPClient(
+            baseURL: "https://chatgpt.com",
+            transport: transport,
+            auth: StaticAPIAuthProvider(),
+            gitOriginURLs: { ["ssh://git@github.com/owner/repo.git"] },
+            errorLog: { _ in }
+        )
+
+        let selection = try await client.autodetectEnvironmentID().get()
+
+        XCTAssertEqual(selection, CloudEnvironmentSelection(id: "env-global", label: "Global"))
+        XCTAssertEqual(transport.executeRequests.map(\.url), [
+            "https://chatgpt.com/backend-api/wham/environments"
+        ])
+    }
+
     func testHTTPClientAutodetectEnvironmentUsesPinnedThenTaskCountFallbackLikeRust() async throws {
         let pinnedTransport = CloudCapturingTransport(executeResults: [
             .success(cloudResponse("""

@@ -152,7 +152,7 @@ public struct CloudHTTPClient<Transport: APITransport, Auth: APIAuthProvider>: C
     public func listEnvironments() async -> CloudTaskResult<[CloudEnvironmentRow]> {
         var rowsByID: [String: CloudEnvironmentRow] = [:]
 
-        for origin in gitOriginURLs() {
+        for origin in gitOrigins() {
             guard let (owner, repo) = Self.parseGitHubOwnerRepo(from: origin) else {
                 continue
             }
@@ -188,7 +188,7 @@ public struct CloudHTTPClient<Transport: APITransport, Auth: APIAuthProvider>: C
     public func autodetectEnvironmentID(desiredLabel: String? = nil) async -> CloudTaskResult<CloudEnvironmentSelection> {
         var byRepoEnvironments: [CloudCodeEnvironment] = []
 
-        for origin in gitOriginURLs() {
+        for origin in gitOrigins() {
             guard let (owner, repo) = Self.parseGitHubOwnerRepo(from: origin) else {
                 continue
             }
@@ -1096,10 +1096,6 @@ private extension CloudHTTPClient {
             let rest = String(value[range.upperBound...])
             return ownerRepo(fromPath: rest)
         }
-        if let range = value.range(of: "@github.com/") {
-            let rest = String(value[range.upperBound...])
-            return ownerRepo(fromPath: rest)
-        }
 
         for prefix in [
             "https://github.com/",
@@ -1113,6 +1109,10 @@ private extension CloudHTTPClient {
             }
         }
         return nil
+    }
+
+    private func gitOrigins() -> [String] {
+        Array(Set(gitOriginURLs())).sorted()
     }
 
     static func ownerRepo(fromPath rawPath: String) -> (owner: String, repo: String)? {
