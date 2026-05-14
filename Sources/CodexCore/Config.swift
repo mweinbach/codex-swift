@@ -4820,10 +4820,12 @@ private struct ParsedCodexConfigToml {
         var attributes: [String: String] = [:]
         for attributeKey in table.keys.sorted() {
             let attributeValue = try stringValue(table[attributeKey] ?? .none, key: "\(key).\(attributeKey)")
-            if attributeKey.isEmpty {
+            do {
+                try OtelConfig.validateSpanAttributes([attributeKey: attributeValue])
+            } catch {
                 pushInvalidOtelConfigWarning(
                     "otel.span_attributes",
-                    message: "configured span attribute key must not be empty",
+                    message: String(describing: error),
                     startupWarnings: &startupWarnings
                 )
                 continue
@@ -4855,7 +4857,7 @@ private struct ParsedCodexConfigToml {
             guard !fields.isEmpty else {
                 continue
             }
-            if let message = invalidConfiguredTracestateMemberMessage(memberKey: memberKey, fields: fields) {
+            if let message = OtelConfig.invalidConfiguredTracestateMemberMessage(memberKey: memberKey, fields: fields) {
                 pushInvalidOtelConfigWarning(
                     "otel.tracestate",
                     message: message,
@@ -4865,7 +4867,7 @@ private struct ParsedCodexConfigToml {
             }
             tracestate[memberKey] = fields
         }
-        if let message = invalidConfiguredTracestateEntriesMessage(tracestate) {
+        if let message = OtelConfig.invalidConfiguredTracestateEntriesMessage(tracestate) {
             pushInvalidOtelConfigWarning(
                 "otel.tracestate",
                 message: message,
@@ -4885,7 +4887,7 @@ private struct ParsedCodexConfigToml {
         var fields: [String: String] = [:]
         for fieldKey in table.keys.sorted() {
             let fieldValue = try stringValue(table[fieldKey] ?? .none, key: "\(key).\(fieldKey)")
-            if let message = invalidConfiguredTracestateFieldMessage(
+            if let message = OtelConfig.invalidConfiguredTracestateFieldMessage(
                 memberKey: memberKey,
                 fieldKey: fieldKey,
                 value: fieldValue
@@ -4902,100 +4904,12 @@ private struct ParsedCodexConfigToml {
         return fields
     }
 
-    private static func invalidConfiguredTracestateFieldMessage(
-        memberKey: String,
-        fieldKey: String,
-        value: String
-    ) -> String? {
-        if !isConfiguredTracestateFieldKey(fieldKey) {
-            return "invalid configured tracestate field key \(memberKey).\(fieldKey)"
-        }
-        if !isConfiguredTracestateFieldValue(value) {
-            return "invalid configured tracestate value for \(memberKey).\(fieldKey)"
-        }
-        return nil
-    }
-
-    private static func invalidConfiguredTracestateMemberMessage(
-        memberKey: String,
-        fields: [String: String]
-    ) -> String? {
-        guard isTracestateMemberKey(memberKey) else {
-            return "invalid configured tracestate: invalid member key \(memberKey)"
-        }
-        let encoded = fields.keys.sorted().map { "\($0):\(fields[$0] ?? "")" }.joined(separator: ";")
-        if !isHeaderSafeTracestateMemberValue(encoded) {
-            return "invalid configured tracestate value for \(memberKey)"
-        }
-        return nil
-    }
-
-    private static func invalidConfiguredTracestateEntriesMessage(_ entries: [String: [String: String]]) -> String? {
-        guard entries.count <= 32 else {
-            return "invalid configured tracestate: list contains more than 32 members"
-        }
-        return nil
-    }
-
     private static func pushInvalidOtelConfigWarning(
         _ configKey: String,
         message: String,
         startupWarnings: inout [String]
     ) {
         startupWarnings.append("Ignoring invalid `\(configKey)` config: \(message)")
-    }
-
-    private static func isConfiguredTracestateFieldKey(_ fieldKey: String) -> Bool {
-        guard !fieldKey.isEmpty else {
-            return false
-        }
-        return fieldKey.utf8.allSatisfy { byte in
-            (33...126).contains(byte) && byte != 58 && byte != 59 && byte != 44 && byte != 61
-        }
-    }
-
-    private static func isConfiguredTracestateFieldValue(_ value: String) -> Bool {
-        value.utf8.allSatisfy { byte in
-            isTracestateMemberValueByte(byte) && byte != 59
-        }
-    }
-
-    private static func isHeaderSafeTracestateMemberValue(_ value: String) -> Bool {
-        guard !value.isEmpty else {
-            return true
-        }
-        return value.utf8.allSatisfy(isTracestateMemberValueByte) && value.utf8.last != 32
-    }
-
-    private static func isTracestateMemberValueByte(_ byte: UInt8) -> Bool {
-        (32...126).contains(byte) && byte != 44 && byte != 61
-    }
-
-    private static func isTracestateMemberKey(_ key: String) -> Bool {
-        let parts = key.split(separator: "@", omittingEmptySubsequences: false)
-        if parts.count == 1 {
-            return isTracestateKeyPart(String(parts[0]), maxBytes: 256)
-        }
-        if parts.count == 2 {
-            return isTracestateKeyPart(String(parts[0]), maxBytes: 241)
-                && isTracestateKeyPart(String(parts[1]), maxBytes: 14)
-        }
-        return false
-    }
-
-    private static func isTracestateKeyPart(_ key: String, maxBytes: Int) -> Bool {
-        let bytes = Array(key.utf8)
-        guard !bytes.isEmpty, bytes.count <= maxBytes else {
-            return false
-        }
-        return bytes.allSatisfy { byte in
-            (97...122).contains(byte)
-                || (48...57).contains(byte)
-                || byte == 95
-                || byte == 45
-                || byte == 42
-                || byte == 47
-        }
     }
 
     private static func agentRuntimeConfigValue(

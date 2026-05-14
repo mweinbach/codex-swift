@@ -3380,6 +3380,27 @@ final class ConfigLoaderTests: XCTestCase {
         })
     }
 
+    func testOtelProviderStartupValidationMatchesRustTraceGate() throws {
+        let invalidSpan = OtelConfig(spanAttributes: ["": "missing-key"])
+        XCTAssertNoThrow(try invalidSpan.validateProviderStartup(traceEnabled: false))
+        XCTAssertThrowsError(try invalidSpan.validateProviderStartup(traceEnabled: true)) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "configured span attribute key must not be empty"
+            )
+        }
+
+        let invalidTracestate = OtelConfig(tracestate: [
+            "example": ["bad;key": "value"]
+        ])
+        XCTAssertThrowsError(try invalidTracestate.validateProviderStartup(traceEnabled: false)) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "invalid configured tracestate field key example.bad;key"
+            )
+        }
+    }
+
     func testToolSuggestDiscoverablesLoadFromConfigTomlLikeRust() throws {
         let dir = try CoreTemporaryDirectory()
         try """
