@@ -19348,6 +19348,57 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual((range["end"] as? [String: Any])?["column"] as? Int, 8)
     }
 
+    func testInitializeEmitsNotifyDeprecationNoticeLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        try #"notify = ["notify-send", "Codex"]"#.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(
+            codexHome: temp.url
+        ))
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"test","version":"0"}}}"#.utf8
+        )))
+
+        XCTAssertEqual(messages.count, 2)
+        XCTAssertEqual(messages[0]["id"] as? Int, 1)
+        XCTAssertNotNil(messages[0]["result"] as? [String: Any])
+        XCTAssertEqual(messages[1]["method"] as? String, "deprecationNotice")
+        let params = try XCTUnwrap(messages[1]["params"] as? [String: Any])
+        XCTAssertEqual(
+            params["summary"] as? String,
+            "`notify` is deprecated and will be removed in a future release."
+        )
+        XCTAssertEqual(
+            params["details"] as? String,
+            "Switch to a `Stop` hook for end-of-turn automation. See https://developers.openai.com/codex/hooks."
+        )
+    }
+
+    func testInitializeSkipsNotifyDeprecationForEmptyCommandLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        for contents in [#"notify = []"#, #"notify = [""]"#] {
+            try contents.write(
+                to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+                atomically: true,
+                encoding: .utf8
+            )
+            let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(
+                codexHome: temp.url
+            ))
+
+            let messages = try decodeMessages(processor.processLine(Data(
+                #"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"test","version":"0"}}}"#.utf8
+            )))
+
+            XCTAssertEqual(messages.count, 1)
+            XCTAssertEqual(messages[0]["id"] as? Int, 1)
+        }
+    }
+
     func testInitializeEmitsInvalidConfigWarningFromConfigLoadLikeRust() throws {
         let temp = try TemporaryDirectory()
         try #"model = 42"#.write(

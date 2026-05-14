@@ -2940,6 +2940,13 @@ public enum CodexAppServer {
         ))
     }
 
+    fileprivate static func legacyNotifyDeprecationNoticeNotification() -> [String: Any] {
+        deprecationNoticeNotification(DeprecationNoticeEvent(
+            summary: "`notify` is deprecated and will be removed in a future release.",
+            details: "Switch to a `Stop` hook for end-of-turn automation. See https://developers.openai.com/codex/hooks."
+        ))
+    }
+
     fileprivate static func requireThreadContextOverrideCompatibility(params: [String: Any]?) throws {
         if let sandbox = params?["sandbox"], !(sandbox is NSNull),
            let permissions = params?["permissions"], !(permissions is NSNull) {
@@ -24720,6 +24727,19 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         return warnings.map(CodexAppServer.configWarningNotification)
     }
 
+    private func initializeDeprecationNoticeNotifications() -> [[String: Any]] {
+        guard let runtimeConfig = try? CodexConfigLoader.load(
+            codexHome: configuration.codexHome,
+            cwd: configuration.cwd,
+            systemConfigFile: nil,
+            managedConfigOverrides: configuration.configLayerOverrides,
+            environment: configuration.environment
+        ), runtimeConfig.usesDeprecatedLegacyNotify else {
+            return []
+        }
+        return [CodexAppServer.legacyNotifyDeprecationNoticeNotification()]
+    }
+
     private func subscribeCurrentConnection(toThreadID threadID: String) {
         rememberLoadedThreadFeatureState(threadID: threadID)
         let manager = threadStateManager
@@ -26612,6 +26632,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                     "platformFamily": CodexAppServer.platformFamily,
                     "platformOs": CodexAppServer.platformOS
                 ])
+                notifications.append(contentsOf: initializeDeprecationNoticeNotifications())
                 notifications.append(contentsOf: initializeConfigWarningNotifications())
                 if let snapshot = currentRemoteControlStatusSnapshot {
                     notifications.append(CodexAppServer.remoteControlStatusChangedNotification(snapshot: snapshot))

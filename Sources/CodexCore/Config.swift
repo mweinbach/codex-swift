@@ -401,6 +401,13 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var tuiKeymap: TuiKeymapConfig
     public var terminalResizeReflow: TerminalResizeReflowConfig
 
+    public var usesDeprecatedLegacyNotify: Bool {
+        guard let notify, let command = notify.first else {
+            return false
+        }
+        return !notify.isEmpty && !command.isEmpty
+    }
+
     public var runtimeMcpConfig: RuntimeMcpConfig {
         let builtinMcpServers = enabledBuiltinMcpServers(options: BuiltinMcpServerOptions(
             memoriesEnabled: features.isEnabled(.builtInMcp)
