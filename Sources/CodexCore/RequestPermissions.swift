@@ -1915,6 +1915,13 @@ public struct RequestPermissionProfile: Codable, Equatable, Sendable {
         self.fileSystem = fileSystem
     }
 
+    public init(from decoder: Decoder) throws {
+        try Self.rejectUnknownKeys(in: decoder, allowed: ["network", "file_system"])
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        network = try container.decodeIfPresent(RequestPermissionNetworkPermissions.self, forKey: .network)
+        fileSystem = try container.decodeIfPresent(FileSystemPermissions.self, forKey: .fileSystem)
+    }
+
     public var isEmpty: Bool {
         network?.enabled != true && (fileSystem?.isEmpty ?? true)
     }
@@ -1949,6 +1956,19 @@ public struct RequestPermissionProfile: Codable, Equatable, Sendable {
 
     private var nonEmpty: RequestPermissionProfile? {
         isEmpty ? nil : self
+    }
+
+    private static func rejectUnknownKeys(in decoder: Decoder, allowed: Set<String>) throws {
+        let container = try decoder.container(keyedBy: DynamicCodingKey.self)
+        if let unknown = container.allKeys.first(where: { !allowed.contains($0.stringValue) }) {
+            throw DecodingError.keyNotFound(
+                unknown,
+                DecodingError.Context(
+                    codingPath: decoder.codingPath,
+                    debugDescription: "Unknown field '\(unknown.stringValue)'"
+                )
+            )
+        }
     }
 }
 

@@ -137,9 +137,17 @@ public enum AppServerPermissionProfileFileSystemPermissions: Codable, Equatable,
         let container = try decoder.container(keyedBy: CodingKeys.self)
         switch try container.decode(ProfileType.self, forKey: .type) {
         case .restricted:
+            let globScanMaxDepth = try container.decodeIfPresent(Int.self, forKey: .globScanMaxDepth)
+            if let globScanMaxDepth, globScanMaxDepth <= 0 {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .globScanMaxDepth,
+                    in: container,
+                    debugDescription: "globScanMaxDepth must be nonzero"
+                )
+            }
             self = .restricted(
                 entries: try container.decode([FileSystemSandboxEntry].self, forKey: .entries),
-                globScanMaxDepth: try container.decodeIfPresent(Int.self, forKey: .globScanMaxDepth)
+                globScanMaxDepth: globScanMaxDepth
             )
         case .unrestricted:
             self = .unrestricted

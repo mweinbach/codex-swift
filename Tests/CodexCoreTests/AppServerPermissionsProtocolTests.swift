@@ -194,4 +194,20 @@ final class AppServerPermissionsProtocolTests: XCTestCase {
             )
         )
     }
+
+    func testRequestPermissionProfileRejectsUnknownFieldsLikeRust() {
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            RequestPermissionProfile.self,
+            from: Data(#"{"network":{"enabled":true},"extra":true}"#.utf8)
+        ))
+    }
+
+    func testManagedPermissionProfileRejectsZeroGlobScanDepthLikeRust() {
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            AppServerPermissionProfile.self,
+            from: Data(
+                #"{"type":"managed","network":{"enabled":true},"fileSystem":{"type":"restricted","entries":[],"globScanMaxDepth":0}}"#.utf8
+            )
+        ))
+    }
 }
