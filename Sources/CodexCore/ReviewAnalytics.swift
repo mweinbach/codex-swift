@@ -829,6 +829,49 @@ public struct CodexWebSearchEventRequest: Equatable, Encodable, Sendable {
     }
 }
 
+public struct CodexImageGenerationEventParams: Equatable, Encodable, Sendable {
+    public let base: CodexToolItemEventBase
+    public let revisedPromptPresent: Bool
+    public let savedPathPresent: Bool
+
+    public init(
+        base: CodexToolItemEventBase,
+        revisedPromptPresent: Bool,
+        savedPathPresent: Bool
+    ) {
+        self.base = base
+        self.revisedPromptPresent = revisedPromptPresent
+        self.savedPathPresent = savedPathPresent
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case revisedPromptPresent = "revised_prompt_present"
+        case savedPathPresent = "saved_path_present"
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        try base.encode(to: encoder)
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(revisedPromptPresent, forKey: .revisedPromptPresent)
+        try container.encode(savedPathPresent, forKey: .savedPathPresent)
+    }
+}
+
+public struct CodexImageGenerationEventRequest: Equatable, Encodable, Sendable {
+    public let eventType: String
+    public let eventParams: CodexImageGenerationEventParams
+
+    public init(eventType: String, eventParams: CodexImageGenerationEventParams) {
+        self.eventType = eventType
+        self.eventParams = eventParams
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case eventType = "event_type"
+        case eventParams = "event_params"
+    }
+}
+
 public struct CodexCommandExecutionAnalyticsContext: Equatable, Sendable {
     public let appServerClient: CodexAppServerClientMetadata
     public let runtime: CodexRuntimeMetadata
@@ -855,6 +898,7 @@ public typealias CodexFileChangeAnalyticsContext = CodexCommandExecutionAnalytic
 public typealias CodexMcpToolCallAnalyticsContext = CodexCommandExecutionAnalyticsContext
 public typealias CodexDynamicToolCallAnalyticsContext = CodexCommandExecutionAnalyticsContext
 public typealias CodexWebSearchAnalyticsContext = CodexCommandExecutionAnalyticsContext
+public typealias CodexImageGenerationAnalyticsContext = CodexCommandExecutionAnalyticsContext
 
 public struct CodexCommandExecutionAnalyticsReducer: Sendable {
     private var startedAtMilliseconds: [CommandExecutionItemKey: UInt64] = [:]
@@ -1338,6 +1382,90 @@ public struct CodexWebSearchAnalyticsReducer: Sendable {
     }
 }
 
+public struct CodexImageGenerationAnalyticsReducer: Sendable {
+    private var startedAtMilliseconds: [ImageGenerationItemKey: UInt64] = [:]
+
+    public init() {}
+
+    public mutating func ingestStarted(_ notification: ItemStartedNotification) {
+        guard case .imageGeneration = notification.item,
+              let startedAtMilliseconds = Self.unsignedMilliseconds(notification.startedAtMilliseconds)
+        else {
+            return
+        }
+
+        self.startedAtMilliseconds[ImageGenerationItemKey(notification)] = startedAtMilliseconds
+    }
+
+    public mutating func ingestCompleted(
+        _ notification: ItemCompletedNotification,
+        context: CodexImageGenerationAnalyticsContext
+    ) -> CodexImageGenerationEventRequest? {
+        let key = ImageGenerationItemKey(notification)
+        guard let startedAtMilliseconds = startedAtMilliseconds.removeValue(forKey: key),
+              let completedAtMilliseconds = Self.unsignedMilliseconds(notification.completedAtMilliseconds)
+        else {
+            return nil
+        }
+
+        guard case let .imageGeneration(id, status, revisedPrompt, _, savedPath) = notification.item else {
+            return nil
+        }
+
+        let outcome = Self.outcome(for: status)
+        return CodexImageGenerationEventRequest(
+            eventType: "codex_image_generation_event",
+            eventParams: CodexImageGenerationEventParams(
+                base: CodexToolItemEventBase(
+                    threadID: notification.threadID,
+                    turnID: notification.turnID,
+                    itemID: id,
+                    appServerClient: context.appServerClient,
+                    runtime: context.runtime,
+                    threadSource: context.threadSource,
+                    subagentSource: context.subagentSource,
+                    parentThreadID: context.parentThreadID,
+                    toolName: "image_generation",
+                    startedAtMilliseconds: startedAtMilliseconds,
+                    completedAtMilliseconds: completedAtMilliseconds,
+                    durationMilliseconds: completedAtMilliseconds >= startedAtMilliseconds
+                        ? completedAtMilliseconds - startedAtMilliseconds
+                        : nil,
+                    executionDurationMilliseconds: nil,
+                    reviewCount: 0,
+                    guardianReviewCount: 0,
+                    userReviewCount: 0,
+                    finalApprovalOutcome: .unknown,
+                    terminalStatus: outcome.terminalStatus,
+                    failureKind: outcome.failureKind,
+                    requestedAdditionalPermissions: false,
+                    requestedNetworkAccess: false
+                ),
+                revisedPromptPresent: revisedPrompt != nil,
+                savedPathPresent: savedPath != nil
+            )
+        )
+    }
+
+    private static func outcome(
+        for status: String
+    ) -> (terminalStatus: ToolItemTerminalStatus, failureKind: ToolItemFailureKind?) {
+        switch status {
+        case "failed", "error":
+            return (.failed, .toolError)
+        default:
+            return (.completed, nil)
+        }
+    }
+
+    private static func unsignedMilliseconds(_ milliseconds: Int64?) -> UInt64? {
+        guard let milliseconds, milliseconds >= 0 else {
+            return nil
+        }
+        return UInt64(milliseconds)
+    }
+}
+
 private struct CommandExecutionItemKey: Hashable {
     let threadID: String
     let turnID: String
@@ -1411,6 +1539,24 @@ private struct DynamicToolCallItemKey: Hashable {
 }
 
 private struct WebSearchItemKey: Hashable {
+    let threadID: String
+    let turnID: String
+    let itemID: String
+
+    init(_ notification: ItemStartedNotification) {
+        self.threadID = notification.threadID
+        self.turnID = notification.turnID
+        self.itemID = notification.item.id
+    }
+
+    init(_ notification: ItemCompletedNotification) {
+        self.threadID = notification.threadID
+        self.turnID = notification.turnID
+        self.itemID = notification.item.id
+    }
+}
+
+private struct ImageGenerationItemKey: Hashable {
     let threadID: String
     let turnID: String
     let itemID: String

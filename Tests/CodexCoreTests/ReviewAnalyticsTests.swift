@@ -2,6 +2,113 @@ import CodexCore
 import XCTest
 
 final class ReviewAnalyticsTests: XCTestCase {
+    func testImageGenerationAnalyticsReducerEmitsLifecycleEventLikeRust() throws {
+        var reducer = CodexImageGenerationAnalyticsReducer()
+        let item = AppServerThreadItem.imageGeneration(
+            id: "image-1",
+            status: "completed",
+            revisedPrompt: "a small blue icon",
+            result: "generated",
+            savedPath: try AbsolutePath(absolutePath: "/repo/icon.png")
+        )
+
+        reducer.ingestStarted(ItemStartedNotification(
+            item: item,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 6_000
+        ))
+        let event = try XCTUnwrap(reducer.ingestCompleted(
+            ItemCompletedNotification(
+                item: item,
+                threadID: "thread-1",
+                turnID: "turn-1",
+                completedAtMilliseconds: 6_240
+            ),
+            context: Self.analyticsContext
+        ))
+
+        try XCTAssertJSONObjectEqual(event, [
+            "event_type": "codex_image_generation_event",
+            "event_params": [
+                "thread_id": "thread-1",
+                "turn_id": "turn-1",
+                "item_id": "image-1",
+                "app_server_client": [
+                    "product_client_id": "codex_tui",
+                    "client_name": "codex-tui",
+                    "client_version": "1.2.3",
+                    "rpc_transport": "websocket",
+                    "experimental_api_enabled": true
+                ],
+                "runtime": [
+                    "codex_rs_version": "0.99.0",
+                    "runtime_os": "macos",
+                    "runtime_os_version": "15.3.1",
+                    "runtime_arch": "aarch64"
+                ],
+                "thread_source": "user",
+                "subagent_source": nil,
+                "parent_thread_id": nil,
+                "tool_name": "image_generation",
+                "started_at_ms": 6_000,
+                "completed_at_ms": 6_240,
+                "duration_ms": 240,
+                "execution_duration_ms": nil,
+                "review_count": 0,
+                "guardian_review_count": 0,
+                "user_review_count": 0,
+                "final_approval_outcome": "unknown",
+                "terminal_status": "completed",
+                "failure_kind": nil,
+                "requested_additional_permissions": false,
+                "requested_network_access": false,
+                "revised_prompt_present": true,
+                "saved_path_present": true
+            ]
+        ])
+    }
+
+    func testImageGenerationAnalyticsReducerMapsRustStatusFallbacks() throws {
+        var reducer = CodexImageGenerationAnalyticsReducer()
+
+        let failed = try Self.reduceImageGeneration(status: "failed", reducer: &reducer)
+        XCTAssertEqual(failed.eventParams.base.terminalStatus, .failed)
+        XCTAssertEqual(failed.eventParams.base.failureKind, .toolError)
+        XCTAssertFalse(failed.eventParams.revisedPromptPresent)
+        XCTAssertFalse(failed.eventParams.savedPathPresent)
+
+        let error = try Self.reduceImageGeneration(status: "error", reducer: &reducer)
+        XCTAssertEqual(error.eventParams.base.terminalStatus, .failed)
+        XCTAssertEqual(error.eventParams.base.failureKind, .toolError)
+
+        let unknown = try Self.reduceImageGeneration(status: "queued", reducer: &reducer)
+        XCTAssertEqual(unknown.eventParams.base.terminalStatus, .completed)
+        XCTAssertNil(unknown.eventParams.base.failureKind)
+    }
+
+    func testImageGenerationAnalyticsReducerSuppressesMissingStartAndDoubleCompletionLikeRust() {
+        var reducer = CodexImageGenerationAnalyticsReducer()
+        let item = AppServerThreadItem.imageGeneration(id: "image-1", status: "completed", result: "generated")
+        let completed = ItemCompletedNotification(
+            item: item,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            completedAtMilliseconds: 20
+        )
+
+        XCTAssertNil(reducer.ingestCompleted(completed, context: Self.analyticsContext))
+
+        reducer.ingestStarted(ItemStartedNotification(
+            item: item,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 10
+        ))
+        XCTAssertNotNil(reducer.ingestCompleted(completed, context: Self.analyticsContext))
+        XCTAssertNil(reducer.ingestCompleted(completed, context: Self.analyticsContext))
+    }
+
     func testWebSearchAnalyticsReducerEmitsLifecycleEventLikeRust() throws {
         var reducer = CodexWebSearchAnalyticsReducer()
         let startedItem = AppServerThreadItem.webSearch(
@@ -933,6 +1040,32 @@ final class ReviewAnalyticsTests: XCTestCase {
         reducer: inout CodexWebSearchAnalyticsReducer
     ) throws -> CodexWebSearchEventRequest {
         let item = AppServerThreadItem.webSearch(id: "web-reduced", query: query, action: action)
+        reducer.ingestStarted(ItemStartedNotification(
+            item: item,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 10
+        ))
+        return try XCTUnwrap(reducer.ingestCompleted(
+            ItemCompletedNotification(
+                item: item,
+                threadID: "thread-1",
+                turnID: "turn-1",
+                completedAtMilliseconds: 20
+            ),
+            context: analyticsContext
+        ))
+    }
+
+    private static func reduceImageGeneration(
+        status: String,
+        reducer: inout CodexImageGenerationAnalyticsReducer
+    ) throws -> CodexImageGenerationEventRequest {
+        let item = AppServerThreadItem.imageGeneration(
+            id: "image-\(status)",
+            status: status,
+            result: "generated"
+        )
         reducer.ingestStarted(ItemStartedNotification(
             item: item,
             threadID: "thread-1",
