@@ -461,6 +461,59 @@ public enum AppServerDynamicToolCallStatus: String, Codable, Equatable, Sendable
     case failed
 }
 
+public enum AppServerCollabAgentTool: String, Codable, Equatable, Sendable {
+    case spawnAgent
+    case sendInput
+    case resumeAgent
+    case wait
+    case closeAgent
+}
+
+public enum AppServerCollabAgentToolCallStatus: String, Codable, Equatable, Sendable {
+    case inProgress
+    case completed
+    case failed
+}
+
+public enum AppServerCollabAgentStatus: String, Codable, Equatable, Sendable {
+    case pendingInit
+    case running
+    case interrupted
+    case completed
+    case errored
+    case shutdown
+    case notFound
+}
+
+public struct AppServerCollabAgentState: Equatable, Sendable {
+    public let status: AppServerCollabAgentStatus
+    public let message: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case status
+        case message
+    }
+
+    public init(status: AppServerCollabAgentStatus, message: String? = nil) {
+        self.status = status
+        self.message = message
+    }
+}
+
+extension AppServerCollabAgentState: Codable {
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        status = try container.decode(AppServerCollabAgentStatus.self, forKey: .status)
+        message = try container.decodeIfPresent(String.self, forKey: .message)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(status, forKey: .status)
+        try container.encodeNilOrValue(message, forKey: .message)
+    }
+}
+
 public enum AppServerThreadItem: Equatable, Sendable {
     case userMessage(id: String, content: [AppServerUserInput])
     case hookPrompt(id: String, fragments: [HookPromptFragment])
@@ -500,6 +553,17 @@ public enum AppServerThreadItem: Equatable, Sendable {
         contentItems: [DynamicToolCallOutputContentItem]? = nil,
         success: Bool? = nil,
         durationMs: Int64? = nil
+    )
+    case collabAgentToolCall(
+        id: String,
+        tool: AppServerCollabAgentTool,
+        status: AppServerCollabAgentToolCallStatus,
+        senderThreadID: String,
+        receiverThreadIDs: [String],
+        prompt: String? = nil,
+        model: String? = nil,
+        reasoningEffort: ReasoningEffort? = nil,
+        agentsStates: [String: AppServerCollabAgentState] = [:]
     )
     case webSearch(id: String, query: String, action: AppServerWebSearchAction? = nil)
     case imageView(id: String, path: AbsolutePath)
@@ -542,6 +606,12 @@ public enum AppServerThreadItem: Equatable, Sendable {
         case namespace
         case contentItems
         case success
+        case senderThreadID = "senderThreadId"
+        case receiverThreadIDs = "receiverThreadIds"
+        case prompt
+        case model
+        case reasoningEffort
+        case agentsStates
     }
 
     private enum ItemType: String, Codable {
@@ -554,6 +624,7 @@ public enum AppServerThreadItem: Equatable, Sendable {
         case fileChange
         case mcpToolCall
         case dynamicToolCall
+        case collabAgentToolCall
         case webSearch
         case imageView
         case imageGeneration
@@ -573,6 +644,7 @@ public enum AppServerThreadItem: Equatable, Sendable {
              let .fileChange(id, _, _),
              let .mcpToolCall(id, _, _, _, _, _, _, _, _),
              let .dynamicToolCall(id, _, _, _, _, _, _, _),
+             let .collabAgentToolCall(id, _, _, _, _, _, _, _, _),
              let .webSearch(id, _, _),
              let .imageView(id, _),
              let .imageGeneration(id, _, _, _, _),
@@ -666,6 +738,21 @@ extension AppServerThreadItem: Codable {
                 ),
                 success: try container.decodeIfPresent(Bool.self, forKey: .success),
                 durationMs: try container.decodeIfPresent(Int64.self, forKey: .durationMs)
+            )
+        case .collabAgentToolCall:
+            self = .collabAgentToolCall(
+                id: try container.decode(String.self, forKey: .id),
+                tool: try container.decode(AppServerCollabAgentTool.self, forKey: .tool),
+                status: try container.decode(AppServerCollabAgentToolCallStatus.self, forKey: .status),
+                senderThreadID: try container.decode(String.self, forKey: .senderThreadID),
+                receiverThreadIDs: try container.decode([String].self, forKey: .receiverThreadIDs),
+                prompt: try container.decodeIfPresent(String.self, forKey: .prompt),
+                model: try container.decodeIfPresent(String.self, forKey: .model),
+                reasoningEffort: try container.decodeIfPresent(ReasoningEffort.self, forKey: .reasoningEffort),
+                agentsStates: try container.decode(
+                    [String: AppServerCollabAgentState].self,
+                    forKey: .agentsStates
+                )
             )
         case .webSearch:
             self = .webSearch(
@@ -776,6 +863,27 @@ extension AppServerThreadItem: Codable {
             try container.encodeNilOrValue(contentItems, forKey: .contentItems)
             try container.encodeNilOrValue(success, forKey: .success)
             try container.encodeNilOrValue(durationMs, forKey: .durationMs)
+        case let .collabAgentToolCall(
+            id,
+            tool,
+            status,
+            senderThreadID,
+            receiverThreadIDs,
+            prompt,
+            model,
+            reasoningEffort,
+            agentsStates
+        ):
+            try container.encode(ItemType.collabAgentToolCall, forKey: .type)
+            try container.encode(id, forKey: .id)
+            try container.encode(tool, forKey: .tool)
+            try container.encode(status, forKey: .status)
+            try container.encode(senderThreadID, forKey: .senderThreadID)
+            try container.encode(receiverThreadIDs, forKey: .receiverThreadIDs)
+            try container.encodeNilOrValue(prompt, forKey: .prompt)
+            try container.encodeNilOrValue(model, forKey: .model)
+            try container.encodeNilOrValue(reasoningEffort, forKey: .reasoningEffort)
+            try container.encode(agentsStates, forKey: .agentsStates)
         case let .webSearch(id, query, action):
             try container.encode(ItemType.webSearch, forKey: .type)
             try container.encode(id, forKey: .id)

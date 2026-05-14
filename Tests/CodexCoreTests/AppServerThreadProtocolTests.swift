@@ -638,6 +638,103 @@ final class AppServerThreadProtocolTests: XCTestCase {
         ))
     }
 
+    func testCollabAgentToolCallItemUsesRustThreadItemShape() throws {
+        let inProgressItem = AppServerThreadItem.collabAgentToolCall(
+            id: "collab-1",
+            tool: .wait,
+            status: .inProgress,
+            senderThreadID: "thread-root",
+            receiverThreadIDs: ["thread-child"],
+            agentsStates: [
+                "thread-child": AppServerCollabAgentState(status: .running)
+            ]
+        )
+
+        try XCTAssertJSONObjectEqual(inProgressItem, [
+            "type": "collabAgentToolCall",
+            "id": "collab-1",
+            "tool": "wait",
+            "status": "inProgress",
+            "senderThreadId": "thread-root",
+            "receiverThreadIds": ["thread-child"],
+            "prompt": NSNull(),
+            "model": NSNull(),
+            "reasoningEffort": NSNull(),
+            "agentsStates": [
+                "thread-child": [
+                    "status": "running",
+                    "message": NSNull()
+                ]
+            ]
+        ])
+
+        let completedItem = AppServerThreadItem.collabAgentToolCall(
+            id: "collab-2",
+            tool: .spawnAgent,
+            status: .completed,
+            senderThreadID: "thread-root",
+            receiverThreadIDs: ["thread-new"],
+            prompt: "Review this change",
+            model: "gpt-5.4",
+            reasoningEffort: .medium,
+            agentsStates: [
+                "thread-new": AppServerCollabAgentState(status: .completed, message: "done")
+            ]
+        )
+
+        try XCTAssertJSONObjectEqual(completedItem, [
+            "type": "collabAgentToolCall",
+            "id": "collab-2",
+            "tool": "spawnAgent",
+            "status": "completed",
+            "senderThreadId": "thread-root",
+            "receiverThreadIds": ["thread-new"],
+            "prompt": "Review this change",
+            "model": "gpt-5.4",
+            "reasoningEffort": "medium",
+            "agentsStates": [
+                "thread-new": [
+                    "status": "completed",
+                    "message": "done"
+                ]
+            ]
+        ])
+
+        let decoded = try JSONDecoder().decode(AppServerThreadItem.self, from: Data(#"""
+        {
+          "type": "collabAgentToolCall",
+          "id": "collab-3",
+          "tool": "closeAgent",
+          "status": "failed",
+          "senderThreadId": "thread-root",
+          "receiverThreadIds": ["thread-child"],
+          "prompt": null,
+          "model": null,
+          "reasoningEffort": null,
+          "agentsStates": {
+            "thread-child": {
+              "status": "errored",
+              "message": "lost connection"
+            }
+          }
+        }
+        """#.utf8))
+
+        XCTAssertEqual(decoded, .collabAgentToolCall(
+            id: "collab-3",
+            tool: .closeAgent,
+            status: .failed,
+            senderThreadID: "thread-root",
+            receiverThreadIDs: ["thread-child"],
+            agentsStates: [
+                "thread-child": AppServerCollabAgentState(
+                    status: .errored,
+                    message: "lost connection"
+                )
+            ]
+        ))
+    }
+
     func testAgentMessageItemCarriesMemoryCitationLikeRustProtocol() throws {
         let citation = AppServerMemoryCitation(
             entries: [
