@@ -277,6 +277,41 @@ final class AppServerThreadProtocolTests: XCTestCase {
         ])
     }
 
+    func testReviewModeItemsUseRustThreadItemShape() throws {
+        let items: [AppServerThreadItem] = [
+            .enteredReviewMode(id: "review-entered", review: "Review uncommitted changes"),
+            .exitedReviewMode(id: "review-exited", review: "Looks good")
+        ]
+
+        try XCTAssertJSONObjectEqual(items[0], [
+            "type": "enteredReviewMode",
+            "id": "review-entered",
+            "review": "Review uncommitted changes"
+        ])
+        try XCTAssertJSONObjectEqual(items[1], [
+            "type": "exitedReviewMode",
+            "id": "review-exited",
+            "review": "Looks good"
+        ])
+
+        let decoded = try JSONDecoder().decode([AppServerThreadItem].self, from: Data(#"""
+        [
+          {
+            "type": "enteredReviewMode",
+            "id": "review-entered",
+            "review": "Review uncommitted changes"
+          },
+          {
+            "type": "exitedReviewMode",
+            "id": "review-exited",
+            "review": "Looks good"
+          }
+        ]
+        """#.utf8))
+        XCTAssertEqual(decoded, items)
+        XCTAssertEqual(decoded.map(\.id), ["review-entered", "review-exited"])
+    }
+
     func testAgentMessageItemCarriesMemoryCitationLikeRustProtocol() throws {
         let citation = AppServerMemoryCitation(
             entries: [

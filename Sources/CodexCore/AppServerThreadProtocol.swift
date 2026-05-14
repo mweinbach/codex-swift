@@ -336,6 +336,8 @@ public enum AppServerThreadItem: Equatable, Sendable {
     case webSearch(id: String, query: String, action: AppServerWebSearchAction? = nil)
     case imageView(id: String, path: AbsolutePath)
     case imageGeneration(id: String, status: String, revisedPrompt: String? = nil, result: String, savedPath: AbsolutePath? = nil)
+    case enteredReviewMode(id: String, review: String)
+    case exitedReviewMode(id: String, review: String)
     case contextCompaction(id: String)
 
     private enum CodingKeys: String, CodingKey {
@@ -350,6 +352,7 @@ public enum AppServerThreadItem: Equatable, Sendable {
         case revisedPrompt
         case result
         case savedPath
+        case review
         case phase
         case memoryCitation
         case summary
@@ -365,6 +368,8 @@ public enum AppServerThreadItem: Equatable, Sendable {
         case webSearch
         case imageView
         case imageGeneration
+        case enteredReviewMode
+        case exitedReviewMode
         case contextCompaction
     }
 
@@ -378,6 +383,8 @@ public enum AppServerThreadItem: Equatable, Sendable {
              let .webSearch(id, _, _),
              let .imageView(id, _),
              let .imageGeneration(id, _, _, _, _),
+             let .enteredReviewMode(id, _),
+             let .exitedReviewMode(id, _),
              let .contextCompaction(id):
             id
         }
@@ -435,6 +442,16 @@ extension AppServerThreadItem: Codable {
                 result: try container.decode(String.self, forKey: .result),
                 savedPath: try container.decodeIfPresent(AbsolutePath.self, forKey: .savedPath)
             )
+        case .enteredReviewMode:
+            self = .enteredReviewMode(
+                id: try container.decode(String.self, forKey: .id),
+                review: try container.decode(String.self, forKey: .review)
+            )
+        case .exitedReviewMode:
+            self = .exitedReviewMode(
+                id: try container.decode(String.self, forKey: .id),
+                review: try container.decode(String.self, forKey: .review)
+            )
         case .contextCompaction:
             self = .contextCompaction(id: try container.decode(String.self, forKey: .id))
         }
@@ -482,6 +499,14 @@ extension AppServerThreadItem: Codable {
             try container.encodeNilOrValue(revisedPrompt, forKey: .revisedPrompt)
             try container.encode(result, forKey: .result)
             try container.encodeIfPresent(savedPath, forKey: .savedPath)
+        case let .enteredReviewMode(id, review):
+            try container.encode(ItemType.enteredReviewMode, forKey: .type)
+            try container.encode(id, forKey: .id)
+            try container.encode(review, forKey: .review)
+        case let .exitedReviewMode(id, review):
+            try container.encode(ItemType.exitedReviewMode, forKey: .type)
+            try container.encode(id, forKey: .id)
+            try container.encode(review, forKey: .review)
         case let .contextCompaction(id):
             try container.encode(ItemType.contextCompaction, forKey: .type)
             try container.encode(id, forKey: .id)
