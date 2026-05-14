@@ -427,6 +427,41 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertFalse(names.contains("view_image"))
     }
 
+    func testFallbackApplyPatchModelsUseFreeformToolLikeRust() throws {
+        let modelFamily = ModelFamily(
+            slug: "fallback-model",
+            family: "fallback",
+            shellType: .disabled
+        )
+
+        let defaultConfig = CodexRuntimeConfig(features: .withDefaults())
+        let defaultToolsConfig = NonInteractiveExec.toolsConfig(modelFamily: modelFamily, config: defaultConfig)
+        XCTAssertEqual(defaultToolsConfig.applyPatchToolType, .freeform)
+
+        var disabledFeatures = FeatureStates.withDefaults()
+        disabledFeatures.set(.applyPatchFreeform, enabled: false)
+        let disabledToolsConfig = NonInteractiveExec.toolsConfig(
+            modelFamily: modelFamily,
+            config: CodexRuntimeConfig(features: disabledFeatures)
+        )
+        XCTAssertNil(disabledToolsConfig.applyPatchToolType)
+
+        let legacyConfig = CodexRuntimeConfig(includeApplyPatchTool: true, features: disabledFeatures)
+        let legacyToolsConfig = NonInteractiveExec.toolsConfig(modelFamily: modelFamily, config: legacyConfig)
+        XCTAssertEqual(legacyToolsConfig.applyPatchToolType, .freeform)
+
+        let specs = ToolSpecFactory.buildSpecs(config: legacyToolsConfig).map(\.spec)
+        let applyPatchSpec = try XCTUnwrap(specs.first { $0.name == "apply_patch" })
+        guard case let .freeform(tool) = applyPatchSpec else {
+            return XCTFail("expected apply_patch to use the freeform custom tool shape")
+        }
+        XCTAssertEqual(tool.name, "apply_patch")
+        let chatToolNames = try ToolSpecFactory.createToolsJSONForChatCompletionsAPI(specs).compactMap { toolJSON in
+            (toolJSON as? [String: Any])?["name"] as? String
+        }
+        XCTAssertFalse(chatToolNames.contains("apply_patch"))
+    }
+
     func testToolSpecsExposeAgentJobToolsForFanoutWorkersLikeRust() {
         var features = FeatureStates.withDefaults()
         features.set(.spawnCsv, enabled: true)
