@@ -2,6 +2,9 @@ import CodexCore
 import XCTest
 
 final class AppServerNotificationProtocolTests: XCTestCase {
+    private let repoPath = try! AbsolutePath(absolutePath: "/repo")
+    private let filePath = try! AbsolutePath(absolutePath: "/repo/Sources/App.swift")
+
     func testWarningAndDeprecationNotificationsEncodeRustNullOptionals() throws {
         try XCTAssertJSONObjectEqual(
             DeprecationNoticeNotification(summary: "old flag"),
@@ -85,7 +88,7 @@ final class AppServerNotificationProtocolTests: XCTestCase {
             reviewID: "review-1",
             targetItemID: nil,
             review: GuardianApprovalReview(status: .inProgress),
-            action: .command(source: .unifiedExec, command: "git status", cwd: "/repo")
+            action: .command(source: .unifiedExec, command: "git status", cwd: repoPath)
         )
 
         try XCTAssertJSONObjectEqual(started, [
@@ -232,6 +235,31 @@ final class AppServerNotificationProtocolTests: XCTestCase {
                 from: Data(#"{"type":"networkAccess","target":"https://example.com","host":"example.com","protocol":"socks5Tcp","port":443}"#.utf8)
             ),
             .networkAccess(target: "https://example.com", host: "example.com", protocol: .socks5Tcp, port: 443)
+        )
+
+        try XCTAssertJSONObjectEqual(
+            GuardianApprovalReviewAction.applyPatch(cwd: repoPath, files: [filePath]),
+            [
+                "type": "applyPatch",
+                "cwd": "/repo",
+                "files": ["/repo/Sources/App.swift"]
+            ]
+        )
+    }
+
+    func testGuardianApprovalReviewPathActionsRejectRelativePathsLikeRustAbsolutePathBuf() throws {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                GuardianApprovalReviewAction.self,
+                from: Data(#"{"type":"command","source":"unifiedExec","command":"git status","cwd":"repo"}"#.utf8)
+            )
+        )
+
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                GuardianApprovalReviewAction.self,
+                from: Data(#"{"type":"applyPatch","cwd":"/repo","files":["Sources/App.swift"]}"#.utf8)
+            )
         )
     }
 

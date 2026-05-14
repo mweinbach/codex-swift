@@ -111,9 +111,9 @@ public enum GuardianApprovalReviewCommandSource: String, Codable, Equatable, Sen
 }
 
 public enum GuardianApprovalReviewAction: Equatable, Sendable {
-    case command(source: GuardianApprovalReviewCommandSource, command: String, cwd: String)
-    case execve(source: GuardianApprovalReviewCommandSource, program: String, argv: [String], cwd: String)
-    case applyPatch(cwd: String, files: [String])
+    case command(source: GuardianApprovalReviewCommandSource, command: String, cwd: AbsolutePath)
+    case execve(source: GuardianApprovalReviewCommandSource, program: String, argv: [String], cwd: AbsolutePath)
+    case applyPatch(cwd: AbsolutePath, files: [AbsolutePath])
     case networkAccess(target: String, host: String, protocol: NetworkApprovalProtocol, port: UInt16)
     case mcpToolCall(
         server: String,
@@ -163,19 +163,19 @@ extension GuardianApprovalReviewAction: Codable {
             self = .command(
                 source: try container.decode(GuardianApprovalReviewCommandSource.self, forKey: .source),
                 command: try container.decode(String.self, forKey: .command),
-                cwd: try container.decode(String.self, forKey: .cwd)
+                cwd: try container.decode(AbsolutePath.self, forKey: .cwd)
             )
         case .execve:
             self = .execve(
                 source: try container.decode(GuardianApprovalReviewCommandSource.self, forKey: .source),
                 program: try container.decode(String.self, forKey: .program),
                 argv: try container.decode([String].self, forKey: .argv),
-                cwd: try container.decode(String.self, forKey: .cwd)
+                cwd: try container.decode(AbsolutePath.self, forKey: .cwd)
             )
         case .applyPatch:
             self = .applyPatch(
-                cwd: try container.decode(String.self, forKey: .cwd),
-                files: try container.decode([String].self, forKey: .files)
+                cwd: try container.decode(AbsolutePath.self, forKey: .cwd),
+                files: try container.decode([AbsolutePath].self, forKey: .files)
             )
         case .networkAccess:
             self = .networkAccess(
