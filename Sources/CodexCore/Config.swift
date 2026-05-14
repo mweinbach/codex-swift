@@ -1938,6 +1938,8 @@ private struct ParsedPermissionProfileToml: Equatable, Sendable {
 }
 
 private struct ParsedCodexConfigToml {
+    private static let localDevBuildVersion = "0.0.0"
+    private static let packageVersion = "0.0.0"
     private static let webSearchToolConfigKey = "__tools_web_search_config"
     private static let projectLocalConfigDenylist: [String] = [
         "openai_base_url",
@@ -3248,7 +3250,7 @@ private struct ParsedCodexConfigToml {
             guard let mode = AuthCredentialsStoreMode(rawValue: rawMode) else {
                 throw CodexConfigLoadError.invalidAuthCredentialsStoreMode
             }
-            config.cliAuthCredentialsStoreMode = mode
+            config.cliAuthCredentialsStoreMode = Self.resolvedCLIAuthCredentialsStoreMode(mode)
         }
 
         if let forcedLoginMethod = topLevel["forced_login_method"] {
@@ -3394,7 +3396,7 @@ private struct ParsedCodexConfigToml {
 
         config.features = featureStates
         config.mcpServers = mcpServers
-        config.mcpOAuthCredentialsStoreMode = mcpOAuthCredentialsStoreMode
+        config.mcpOAuthCredentialsStoreMode = Self.resolvedMCPOAuthCredentialsStoreMode(mcpOAuthCredentialsStoreMode)
         config.modelProviders = try Self.combinedModelProviders(
             from: modelProviders,
             openAIBaseURL: config.openAIBaseURL,
@@ -3408,6 +3410,36 @@ private struct ParsedCodexConfigToml {
         }
 
         return config
+    }
+
+    private static func resolvedCLIAuthCredentialsStoreMode(
+        _ mode: AuthCredentialsStoreMode,
+        packageVersion: String = packageVersion
+    ) -> AuthCredentialsStoreMode {
+        guard packageVersion == localDevBuildVersion else {
+            return mode
+        }
+        switch mode {
+        case .auto, .keyring:
+            return .file
+        case .file, .ephemeral:
+            return mode
+        }
+    }
+
+    private static func resolvedMCPOAuthCredentialsStoreMode(
+        _ mode: OAuthCredentialsStoreMode,
+        packageVersion: String = packageVersion
+    ) -> OAuthCredentialsStoreMode {
+        guard packageVersion == localDevBuildVersion else {
+            return mode
+        }
+        switch mode {
+        case .auto, .keyring:
+            return .file
+        case .file:
+            return mode
+        }
     }
 
     func resolvedSandboxPolicy(

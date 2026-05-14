@@ -73,7 +73,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertTrue(config.features.isEnabled(.shellTool))
         XCTAssertFalse(config.features.isEnabled(.webSearchRequest))
         XCTAssertEqual(config.mcpServers, [:])
-        XCTAssertEqual(config.mcpOAuthCredentialsStoreMode, .auto)
+        XCTAssertEqual(config.mcpOAuthCredentialsStoreMode, .file)
         XCTAssertNil(config.mcpOAuthCallbackPort)
         XCTAssertNil(config.mcpOAuthCallbackURL)
         XCTAssertEqual(config.windowsSandboxLevel, .disabled)
@@ -810,7 +810,7 @@ final class ConfigLoaderTests: XCTestCase {
             transport: .webrtc,
             voice: .cedar
         ))
-        XCTAssertEqual(config.cliAuthCredentialsStoreMode, .auto)
+        XCTAssertEqual(config.cliAuthCredentialsStoreMode, .file)
         XCTAssertEqual(config.forcedLoginMethod, .api)
         XCTAssertEqual(config.forcedChatGPTWorkspaceID, "org_workspace")
         XCTAssertEqual(config.developerInstructions, "Use developer override.")
@@ -2239,7 +2239,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.model, "profile-cli-model")
         XCTAssertEqual(config.approvalPolicy, .never)
         XCTAssertEqual(config.chatgptBaseURL, "https://override.example/backend-api/")
-        XCTAssertEqual(config.cliAuthCredentialsStoreMode, .keyring)
+        XCTAssertEqual(config.cliAuthCredentialsStoreMode, .file)
         XCTAssertEqual(config.forcedLoginMethod, .chatgpt)
         XCTAssertEqual(config.forcedChatGPTWorkspaceID, "org_override")
     }
@@ -2706,7 +2706,20 @@ final class ConfigLoaderTests: XCTestCase {
         )
 
         XCTAssertEqual(config.chatgptBaseURL, "https://user.example/backend-api/")
-        XCTAssertEqual(config.cliAuthCredentialsStoreMode, .auto)
+        XCTAssertEqual(config.cliAuthCredentialsStoreMode, .file)
+    }
+
+    func testLocalDevBuildCredentialStoreModesMatchRustFallbacks() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        cli_auth_credentials_store = "ephemeral"
+        mcp_oauth_credentials_store = "keyring"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.cliAuthCredentialsStoreMode, .ephemeral)
+        XCTAssertEqual(config.mcpOAuthCredentialsStoreMode, .file)
     }
 
     func testProjectRelativePathFieldsResolveAgainstDotCodexAndOverrideInOrder() throws {
