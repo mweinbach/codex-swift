@@ -228,6 +228,7 @@ public struct McpResource: Equatable, Codable, Sendable {
         case annotations
         case description
         case mimeType = "mimeType"
+        case mimeTypeSnake = "mime_type"
         case name
         case size
         case title
@@ -251,6 +252,54 @@ public struct McpResource: Equatable, Codable, Sendable {
         self.title = title
         self.uri = uri
     }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        annotations = try container.decodeIfPresent(McpAnnotations.self, forKey: .annotations)
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+        mimeType = try container.decodeIfPresent(String.self, forKey: .mimeType)
+            ?? container.decodeIfPresent(String.self, forKey: .mimeTypeSnake)
+        name = try container.decode(String.self, forKey: .name)
+        size = try Self.decodeLossySize(from: container)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        uri = try container.decode(String.self, forKey: .uri)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(annotations, forKey: .annotations)
+        try container.encodeIfPresent(description, forKey: .description)
+        try container.encodeIfPresent(mimeType, forKey: .mimeType)
+        try container.encode(name, forKey: .name)
+        try container.encodeIfPresent(size, forKey: .size)
+        try container.encodeIfPresent(title, forKey: .title)
+        try container.encode(uri, forKey: .uri)
+    }
+
+    private static func decodeLossySize(
+        from container: KeyedDecodingContainer<CodingKeys>
+    ) throws -> Int64? {
+        guard container.contains(.size) else {
+            return nil
+        }
+        let value = try container.decode(JSONValue.self, forKey: .size)
+        switch value {
+        case .null:
+            return nil
+        case let .integer(size):
+            return size
+        case .double:
+            return nil
+        case .bool, .string, .array, .object:
+            throw DecodingError.typeMismatch(
+                Int64?.self,
+                DecodingError.Context(
+                    codingPath: container.codingPath + [CodingKeys.size],
+                    debugDescription: "Expected MCP resource size to be a JSON number"
+                )
+            )
+        }
+    }
 }
 
 public struct McpResourceTemplate: Equatable, Codable, Sendable {
@@ -265,9 +314,11 @@ public struct McpResourceTemplate: Equatable, Codable, Sendable {
         case annotations
         case description
         case mimeType = "mimeType"
+        case mimeTypeSnake = "mime_type"
         case name
         case title
         case uriTemplate = "uriTemplate"
+        case uriTemplateSnake = "uri_template"
     }
 
     public init(
@@ -284,6 +335,28 @@ public struct McpResourceTemplate: Equatable, Codable, Sendable {
         self.name = name
         self.title = title
         self.uriTemplate = uriTemplate
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        annotations = try container.decodeIfPresent(McpAnnotations.self, forKey: .annotations)
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+        mimeType = try container.decodeIfPresent(String.self, forKey: .mimeType)
+            ?? container.decodeIfPresent(String.self, forKey: .mimeTypeSnake)
+        name = try container.decode(String.self, forKey: .name)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        uriTemplate = try container.decodeIfPresent(String.self, forKey: .uriTemplate)
+            ?? container.decode(String.self, forKey: .uriTemplateSnake)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(annotations, forKey: .annotations)
+        try container.encodeIfPresent(description, forKey: .description)
+        try container.encodeIfPresent(mimeType, forKey: .mimeType)
+        try container.encode(name, forKey: .name)
+        try container.encodeIfPresent(title, forKey: .title)
+        try container.encode(uriTemplate, forKey: .uriTemplate)
     }
 }
 
@@ -305,9 +378,11 @@ public struct McpTool: Equatable, Codable, Sendable {
         case connectorName = "connector_name"
         case description
         case inputSchema = "inputSchema"
+        case inputSchemaSnake = "input_schema"
         case name
         case namespaceDescription = "namespace_description"
         case outputSchema = "outputSchema"
+        case outputSchemaSnake = "output_schema"
         case pluginDisplayNames = "plugin_display_names"
         case title
     }
@@ -342,10 +417,12 @@ public struct McpTool: Equatable, Codable, Sendable {
         connectorID = try container.decodeIfPresent(String.self, forKey: .connectorID)
         connectorName = try container.decodeIfPresent(String.self, forKey: .connectorName)
         description = try container.decodeIfPresent(String.self, forKey: .description)
-        inputSchema = try container.decode(McpToolInputSchema.self, forKey: .inputSchema)
+        inputSchema = try container.decodeIfPresent(McpToolInputSchema.self, forKey: .inputSchema)
+            ?? container.decode(McpToolInputSchema.self, forKey: .inputSchemaSnake)
         name = try container.decode(String.self, forKey: .name)
         namespaceDescription = try container.decodeIfPresent(String.self, forKey: .namespaceDescription)
         outputSchema = try container.decodeIfPresent(McpToolOutputSchema.self, forKey: .outputSchema)
+            ?? container.decodeIfPresent(McpToolOutputSchema.self, forKey: .outputSchemaSnake)
         pluginDisplayNames = try container.decodeIfPresent([String].self, forKey: .pluginDisplayNames) ?? []
         title = try container.decodeIfPresent(String.self, forKey: .title)
     }

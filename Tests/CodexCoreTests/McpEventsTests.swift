@@ -225,6 +225,83 @@ final class McpEventsTests: XCTestCase {
         XCTAssertEqual(decoded, tool)
     }
 
+    func testMcpToolDecodesRustSnakeCaseSchemaAliases() throws {
+        let decoded = try JSONDecoder().decode(McpTool.self, from: Data("""
+        {
+          "name": "search",
+          "input_schema": {
+            "properties": {
+              "query": {
+                "type": "string"
+              }
+            },
+            "required": ["query"]
+          },
+          "output_schema": {
+            "properties": {
+              "results": {
+                "type": "array"
+              }
+            }
+          }
+        }
+        """.utf8))
+
+        XCTAssertEqual(decoded.name, "search")
+        XCTAssertEqual(decoded.inputSchema.required, ["query"])
+        XCTAssertEqual(decoded.outputSchema?.properties, .object([
+            "results": .object([
+                "type": .string("array")
+            ])
+        ]))
+    }
+
+    func testMcpResourceDecodesRustAliasesAndLossySizes() throws {
+        let resource = try JSONDecoder().decode(McpResource.self, from: Data("""
+        {
+          "name": "readme",
+          "uri": "file:///tmp/README.md",
+          "mime_type": "text/markdown",
+          "size": 5000000000
+        }
+        """.utf8))
+
+        XCTAssertEqual(resource.mimeType, "text/markdown")
+        XCTAssertEqual(resource.size, 5_000_000_000)
+
+        let negative = try JSONDecoder().decode(McpResource.self, from: Data("""
+        {
+          "name": "negative",
+          "uri": "file:///tmp/negative",
+          "size": -1
+        }
+        """.utf8))
+        XCTAssertEqual(negative.size, -1)
+
+        let tooBig = try JSONDecoder().decode(McpResource.self, from: Data("""
+        {
+          "name": "too_big_for_i64",
+          "uri": "file:///tmp/too_big_for_i64",
+          "size": 18446744073709551615
+        }
+        """.utf8))
+        XCTAssertNil(tooBig.size)
+    }
+
+    func testMcpResourceTemplateDecodesRustSnakeCaseAliases() throws {
+        let decoded = try JSONDecoder().decode(McpResourceTemplate.self, from: Data("""
+        {
+          "name": "workspace-file",
+          "uri_template": "file:///workspace/{path}",
+          "mime_type": "text/plain"
+        }
+        """.utf8))
+
+        XCTAssertEqual(decoded.name, "workspace-file")
+        XCTAssertEqual(decoded.uriTemplate, "file:///workspace/{path}")
+        XCTAssertEqual(decoded.mimeType, "text/plain")
+    }
+
     func testSplitQualifiedToolNameReturnsServerAndTool() throws {
         let split = try XCTUnwrap(McpToolName.splitQualifiedToolName("mcp__alpha__do_thing"))
         XCTAssertEqual(split.serverName, "alpha")
