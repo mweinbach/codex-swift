@@ -1022,6 +1022,29 @@ final class ToolSpecTests: XCTestCase {
         ])
     }
 
+    func testBuildSpecsUsesMCPNamespaceDescriptionLikeRust() throws {
+        let specs = ToolSpecFactory.buildSpecs(
+            config: ToolsConfig(
+                shellType: .disabled,
+                applyPatchToolType: nil,
+                includeViewImageTool: false
+            ),
+            mcpToolInfos: [
+                McpToolInfo(
+                    serverName: "rmcp",
+                    namespaceDescription: "Use this server for durable workspace notes.",
+                    tool: makeMcpTool(name: "remember")
+                )
+            ]
+        )
+
+        let mcpSpec = try XCTUnwrap(specs.first { $0.spec.name == "mcp__rmcp__" })
+        guard case let .namespace(namespace) = mcpSpec.spec else {
+            return XCTFail("expected namespace")
+        }
+        XCTAssertEqual(namespace.description, "Use this server for durable workspace notes.")
+    }
+
     func testBuildSpecsCoalescesDynamicToolNamespacesLikeRust() throws {
         let specs = ToolSpecFactory.buildSpecs(
             config: ToolsConfig(
@@ -1410,6 +1433,34 @@ final class ToolSpecTests: XCTestCase {
         }
         XCTAssertEqual(namespace["name"], .string("mcp__docs__"))
         XCTAssertEqual(children.compactMap(toolName), ["search"])
+    }
+
+    func testToolSearchUsesMCPNamespaceDescriptionLikeRust() throws {
+        let index = ToolSearchIndex.deferredToolIndex(
+            mcpTools: [
+                McpToolInfo(
+                    serverName: "rmcp",
+                    namespaceDescription: "Use this server for durable workspace notes.",
+                    tool: makeMcpTool(name: "remember", description: "Store a note")
+                )
+            ],
+            dynamicTools: []
+        )
+
+        let description = try XCTUnwrap(JSONObject(index.toolSpec())["description"] as? String)
+        XCTAssertTrue(description.contains("- rmcp: Use this server for durable workspace notes."))
+
+        let tools = try index.search(arguments: .object([
+            "query": .string("durable workspace"),
+            "limit": .integer(8)
+        ]))
+
+        XCTAssertEqual(tools.count, 1)
+        guard case let .object(namespace) = tools[0] else {
+            return XCTFail("expected namespace result")
+        }
+        XCTAssertEqual(namespace["name"], .string("mcp__rmcp__"))
+        XCTAssertEqual(namespace["description"], .string("Use this server for durable workspace notes."))
     }
 
     func testToolSearchIndexRejectsEmptyQueryAndZeroLimitLikeRust() throws {

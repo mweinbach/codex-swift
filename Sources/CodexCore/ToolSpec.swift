@@ -1120,8 +1120,14 @@ public enum ToolSpecFactory {
     private static func createMCPNamespaces(from mcpTools: [McpToolInfo]) -> [ResponsesAPINamespace] {
         var groupedTools: [String: [(name: String, tool: McpTool)]] = [:]
 
+        var namespaceDescriptions: [String: String] = [:]
         for toolInfo in McpToolName.normalizeToolsForModel(mcpTools) {
             let namespace = "\(McpToolName.prefix)\(McpToolName.delimiter)\(toolInfo.serverName)\(McpToolName.delimiter)"
+            if namespaceDescriptions[namespace] == nil,
+               let description = toolInfo.namespaceDescription?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !description.isEmpty {
+                namespaceDescriptions[namespace] = description
+            }
             groupedTools[namespace, default: []].append((name: toolInfo.tool.name, tool: toolInfo.tool))
         }
 
@@ -1138,7 +1144,7 @@ public enum ToolSpecFactory {
 
             return ResponsesAPINamespace(
                 name: namespace,
-                description: defaultNamespaceDescription(namespace),
+                description: namespaceDescriptions[namespace] ?? defaultNamespaceDescription(namespace),
                 tools: tools
             )
         }

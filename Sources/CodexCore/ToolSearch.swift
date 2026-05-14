@@ -102,9 +102,10 @@ public struct ToolSearchIndex: Equatable, Sendable {
             .map { toolInfo in
                 let qualifiedName = toolInfo.canonicalToolName
                 let namespace = "\(McpToolName.prefix)\(McpToolName.delimiter)\(toolInfo.serverName)\(McpToolName.delimiter)"
+                let description = namespaceDescription(for: namespace, fallback: toolInfo.namespaceDescription)
                 let output = ToolSpec.namespace(ResponsesAPINamespace(
                     name: namespace,
-                    description: ToolSpecFactory.defaultNamespaceDescription(namespace),
+                    description: description,
                     tools: [
                         .function(ToolSpecFactory.createMCPResponsesAPITool(
                             name: toolInfo.tool.name,
@@ -118,6 +119,7 @@ public struct ToolSearchIndex: Equatable, Sendable {
                         qualifiedName: qualifiedName,
                         serverName: toolInfo.serverName,
                         callableName: toolInfo.tool.name,
+                        namespaceDescription: toolInfo.namespaceDescription,
                         tool: toolInfo.tool
                     ),
                     output: output,
@@ -154,8 +156,18 @@ public struct ToolSearchIndex: Equatable, Sendable {
     }
 
     public static func mcpSourceInfos(from tools: [McpToolInfo]) -> [ToolSearchSourceInfo] {
+        var descriptions: [String: String] = [:]
+        for tool in tools {
+            guard descriptions[tool.serverName] == nil,
+                  let description = tool.namespaceDescription?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !description.isEmpty
+            else {
+                continue
+            }
+            descriptions[tool.serverName] = description
+        }
         let names = Set(tools.map(\.serverName))
-        return names.sorted().map { ToolSearchSourceInfo(name: $0) }
+        return names.sorted().map { ToolSearchSourceInfo(name: $0, description: descriptions[$0]) }
     }
 
     private static func mcpToolInfos(from tools: [String: McpTool]) -> [McpToolInfo] {
@@ -441,6 +453,7 @@ public struct ToolSearchIndex: Equatable, Sendable {
         qualifiedName: String,
         serverName: String,
         callableName: String,
+        namespaceDescription: String?,
         tool: McpTool
     ) -> String {
         var parts = [
@@ -456,11 +469,24 @@ public struct ToolSearchIndex: Equatable, Sendable {
         if let description = tool.description?.trimmingCharacters(in: .whitespacesAndNewlines), !description.isEmpty {
             parts.append(description)
         }
+        if let namespaceDescription = namespaceDescription?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !namespaceDescription.isEmpty {
+            parts.append(namespaceDescription)
+        }
         if case let .object(properties) = tool.inputSchema.properties {
             parts.append(contentsOf: properties.keys.sorted())
         }
 
         return parts.joined(separator: " ")
+    }
+
+    private static func namespaceDescription(for namespace: String, fallback: String?) -> String {
+        guard let description = fallback?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !description.isEmpty
+        else {
+            return ToolSpecFactory.defaultNamespaceDescription(namespace)
+        }
+        return description
     }
 
     private struct Document {

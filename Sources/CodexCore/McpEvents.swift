@@ -83,10 +83,12 @@ public struct McpStartupFailure: Equatable, Codable, Sendable {
 
 public struct McpToolInfo: Equatable, Sendable {
     public let serverName: String
+    public let namespaceDescription: String?
     public let tool: McpTool
 
-    public init(serverName: String, tool: McpTool) {
+    public init(serverName: String, namespaceDescription: String? = nil, tool: McpTool) {
         self.serverName = serverName
+        self.namespaceDescription = namespaceDescription
         self.tool = tool
     }
 
