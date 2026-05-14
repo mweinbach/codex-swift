@@ -14,6 +14,9 @@ public typealias AppServerCoreOpSubmitter = @Sendable (
     _ threadID: String,
     _ op: Op
 ) throws -> String
+public typealias AppServerLiveRuntimeSubmitter = @Sendable (
+    _ submission: AppServerLiveRuntimeSubmission
+) throws -> [EventMessage]
 public typealias AppServerMemoryStartupTaskStarter = @Sendable (_ request: AppServerMemoryStartupTaskRequest) -> Void
 public typealias AppServerAccessibleConnectorProvider = @Sendable (
     _ runtimeConfig: CodexRuntimeConfig,
@@ -91,6 +94,20 @@ public struct AppServerMemoryStartupTaskRequest: Equatable, Sendable {
         self.threadID = threadID
         self.sessionSource = sessionSource
         self.isEphemeral = isEphemeral
+    }
+}
+
+public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
+    public let requestID: RequestID
+    public let threadID: String
+    public let turnID: String
+    public let op: Op
+
+    public init(requestID: RequestID, threadID: String, turnID: String, op: Op) {
+        self.requestID = requestID
+        self.threadID = threadID
+        self.turnID = turnID
+        self.op = op
     }
 }
 
@@ -502,6 +519,15 @@ private struct AppServerMcpServerStatusSnapshot: @unchecked Sendable {
     var toolsByServer: [String: [String: Any]] = [:]
     var resources: [String: [[String: Any]]] = [:]
     var resourceTemplates: [String: [[String: Any]]] = [:]
+}
+
+private struct AppServerLiveMcpManagerState: @unchecked Sendable {
+    var statusSnapshot = AppServerMcpServerStatusSnapshot()
+    var startupFailures: [McpStartupFailure] = []
+
+    var requiredStartupFailureMessage: String? {
+        McpRequiredStartupValidator.requiredStartupFailureMessage(for: startupFailures)
+    }
 }
 
 private let appServerDefaultExecCommandTimeoutMs = 10_000
@@ -1146,7 +1172,11 @@ public enum CodexAppServer {
     fileprivate static func threadStartResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
-    ) throws -> (result: [String: Any], sessionStartSource: HookSessionStartSource) {
+    ) throws -> (
+        result: [String: Any],
+        sessionStartSource: HookSessionStartSource,
+        runtimeConfig: CodexRuntimeConfig
+    ) {
         try validateTurnEnvironmentSelections(params?["environments"], configuration: configuration)
         let started = try startRolloutConversation(params: params, configuration: configuration)
         let permissionProfile = started.permissionProfile
@@ -1177,7 +1207,11 @@ public enum CodexAppServer {
             "activePermissionProfile": activePermissionProfileObject(started.activePermissionProfile),
             "reasoningEffort": started.reasoningEffort ?? NSNull()
         ].nullStripped(keepNulls: true)
-        return (result: result, sessionStartSource: started.sessionStartSource)
+        return (
+            result: result,
+            sessionStartSource: started.sessionStartSource,
+            runtimeConfig: started.runtimeConfig
+        )
     }
 
     fileprivate static func newConversationResult(
@@ -1274,7 +1308,8 @@ public enum CodexAppServer {
                 sessionStartSource: sessionStartSource,
                 threadSource: threadSource,
                 instructionSources: instructionSources,
-                ephemeral: true
+                ephemeral: true,
+                runtimeConfig: runtimeConfig
             )
         }
         let recorder = try RolloutRecorder.create(
@@ -1314,7 +1349,8 @@ public enum CodexAppServer {
             sessionStartSource: sessionStartSource,
             threadSource: threadSource,
             instructionSources: instructionSources,
-            ephemeral: false
+            ephemeral: false,
+            runtimeConfig: runtimeConfig
         )
     }
 
@@ -1754,7 +1790,7 @@ public enum CodexAppServer {
     fileprivate static func threadResumeResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
-    ) throws -> [String: Any] {
+    ) throws -> (result: [String: Any], runtimeConfig: CodexRuntimeConfig) {
         let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
 
         let rolloutPath: String
@@ -1836,7 +1872,7 @@ public enum CodexAppServer {
             fallback: baseSandbox
         )
 
-        return [
+        let result = [
             "thread": thread,
             "model": model,
             "modelProvider": modelProvider,
@@ -1854,12 +1890,13 @@ public enum CodexAppServer {
             "activePermissionProfile": activePermissionProfileObject(runtimeConfig.activePermissionProfile),
             "reasoningEffort": reasoningEffort?.rawValue ?? NSNull()
         ].nullStripped(keepNulls: true)
+        return (result: result, runtimeConfig: runtimeConfig)
     }
 
     fileprivate static func threadForkResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
-    ) throws -> [String: Any] {
+    ) throws -> (result: [String: Any], runtimeConfig: CodexRuntimeConfig) {
         let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
 
         let sourceRolloutPath: String
@@ -1994,7 +2031,7 @@ public enum CodexAppServer {
             defaultProvider: configuration.defaultModelProvider,
             turns: includeTurns ? buildTurnsFromRolloutEvents(at: recorder.rolloutPath.path) : []
         )
-        return [
+        let result = [
             "thread": thread,
             "model": model,
             "modelProvider": modelProvider,
@@ -2012,6 +2049,7 @@ public enum CodexAppServer {
             "activePermissionProfile": activePermissionProfileObject(runtimeConfig.activePermissionProfile),
             "reasoningEffort": reasoningEffort?.rawValue ?? NSNull()
         ].nullStripped(keepNulls: true)
+        return (result: result, runtimeConfig: runtimeConfig)
     }
 
     fileprivate static func threadReadResult(
@@ -12754,6 +12792,50 @@ public enum CodexAppServer {
         }
     }
 
+    fileprivate static func liveRequiredMcpManagerState(
+        mcpServers: [String: McpServerConfig],
+        configuration: CodexAppServerConfiguration
+    ) -> AppServerLiveMcpManagerState {
+        var state = AppServerLiveMcpManagerState()
+        for name in mcpServers.keys.sorted() {
+            guard let server = mcpServers[name], server.enabled, server.required else {
+                continue
+            }
+            do {
+                let inventory = try mcpServerInventorySnapshot(
+                    name: name,
+                    server: server,
+                    detail: .toolsAndAuthOnly,
+                    configuration: configuration
+                )
+                state.statusSnapshot.toolsByServer[name] = inventory.toolsByServer[name] ?? [:]
+            } catch {
+                state.startupFailures.append(McpStartupFailure(
+                    server: name,
+                    error: mcpStartupFailureMessage(error)
+                ))
+            }
+        }
+        return state
+    }
+
+    fileprivate static func liveRequiredMcpManagerState(
+        refreshConfig: McpServerRefreshConfig,
+        configuration: CodexAppServerConfiguration
+    ) throws -> AppServerLiveMcpManagerState {
+        try liveRequiredMcpManagerState(
+            mcpServers: mcpServersFromRefreshConfig(refreshConfig),
+            configuration: configuration
+        )
+    }
+
+    private static func mcpStartupFailureMessage(_ error: Error) -> String {
+        if let appServerError = error as? AppServerError {
+            return appServerError.description
+        }
+        return String(describing: error)
+    }
+
     fileprivate static func mcpStdioInventorySnapshot(
         server: String,
         command: String,
@@ -13132,6 +13214,132 @@ public enum CodexAppServer {
             mcpServers: mcpServersRefreshJSONValue(runtimeConfig.mcpServers),
             mcpOAuthCredentialsStoreMode: .string(runtimeConfig.mcpOAuthCredentialsStoreMode.rawValue)
         )
+    }
+
+    fileprivate static func mcpServersFromRefreshConfig(_ refreshConfig: McpServerRefreshConfig) throws
+        -> [String: McpServerConfig]
+    {
+        guard case let .object(servers) = refreshConfig.mcpServers else {
+            throw AppServerError.internalError("MCP refresh config servers must be an object")
+        }
+        return try Dictionary(uniqueKeysWithValues: servers.map { name, value in
+            guard case let .object(server) = value else {
+                throw AppServerError.internalError("MCP refresh config for \(name) must be an object")
+            }
+            let transport: McpServerTransportConfig
+            if let command = try optionalRefreshString(server["command"], field: "command", server: name) {
+                transport = .stdio(
+                    command: command,
+                    args: try optionalRefreshStringArray(server["args"], field: "args", server: name) ?? [],
+                    env: try optionalRefreshStringMap(server["env"], field: "env", server: name),
+                    envVars: try optionalRefreshStringArray(server["env_vars"], field: "env_vars", server: name) ?? [],
+                    cwd: try optionalRefreshString(server["cwd"], field: "cwd", server: name)
+                )
+            } else if let url = try optionalRefreshString(server["url"], field: "url", server: name) {
+                transport = .streamableHttp(
+                    url: url,
+                    bearerTokenEnvVar: try optionalRefreshString(
+                        server["bearer_token_env_var"],
+                        field: "bearer_token_env_var",
+                        server: name
+                    ),
+                    httpHeaders: try optionalRefreshStringMap(server["http_headers"], field: "http_headers", server: name),
+                    envHttpHeaders: try optionalRefreshStringMap(
+                        server["env_http_headers"],
+                        field: "env_http_headers",
+                        server: name
+                    )
+                )
+            } else {
+                throw AppServerError.internalError("MCP refresh config for \(name) is missing command or url")
+            }
+            return (name, McpServerConfig(
+                transport: transport,
+                enabled: try optionalRefreshBool(server["enabled"], field: "enabled", server: name) ?? true,
+                required: try optionalRefreshBool(server["required"], field: "required", server: name) ?? false,
+                supportsParallelToolCalls: try optionalRefreshBool(
+                    server["supports_parallel_tool_calls"],
+                    field: "supports_parallel_tool_calls",
+                    server: name
+                ) ?? false,
+                startupTimeoutSec: try optionalRefreshDouble(
+                    server["startup_timeout_sec"],
+                    field: "startup_timeout_sec",
+                    server: name
+                ),
+                toolTimeoutSec: try optionalRefreshDouble(server["tool_timeout_sec"], field: "tool_timeout_sec", server: name)
+            ))
+        })
+    }
+
+    private static func optionalRefreshString(_ value: JSONValue?, field: String, server: String) throws -> String? {
+        guard let value else {
+            return nil
+        }
+        guard case let .string(string) = value else {
+            throw AppServerError.internalError("MCP refresh config for \(server).\(field) must be a string")
+        }
+        return string
+    }
+
+    private static func optionalRefreshBool(_ value: JSONValue?, field: String, server: String) throws -> Bool? {
+        guard let value else {
+            return nil
+        }
+        guard case let .bool(bool) = value else {
+            throw AppServerError.internalError("MCP refresh config for \(server).\(field) must be a bool")
+        }
+        return bool
+    }
+
+    private static func optionalRefreshDouble(_ value: JSONValue?, field: String, server: String) throws -> Double? {
+        guard let value else {
+            return nil
+        }
+        switch value {
+        case let .double(double):
+            return double
+        case let .integer(integer):
+            return Double(integer)
+        default:
+            throw AppServerError.internalError("MCP refresh config for \(server).\(field) must be a number")
+        }
+    }
+
+    private static func optionalRefreshStringArray(_ value: JSONValue?, field: String, server: String) throws -> [String]? {
+        guard let value else {
+            return nil
+        }
+        guard case let .array(items) = value else {
+            throw AppServerError.internalError("MCP refresh config for \(server).\(field) must be an array")
+        }
+        return try items.enumerated().map { index, item in
+            guard case let .string(string) = item else {
+                throw AppServerError.internalError(
+                    "MCP refresh config for \(server).\(field)[\(index)] must be a string"
+                )
+            }
+            return string
+        }
+    }
+
+    private static func optionalRefreshStringMap(
+        _ value: JSONValue?,
+        field: String,
+        server: String
+    ) throws -> [String: String]? {
+        guard let value else {
+            return nil
+        }
+        guard case let .object(entries) = value else {
+            throw AppServerError.internalError("MCP refresh config for \(server).\(field) must be an object")
+        }
+        return try entries.mapValues { value in
+            guard case let .string(string) = value else {
+                throw AppServerError.internalError("MCP refresh config for \(server).\(field) values must be strings")
+            }
+            return string
+        }
     }
 
     private static func mcpServersRefreshJSONValue(_ servers: [String: McpServerConfig]) -> JSONValue {
@@ -23203,6 +23411,7 @@ private struct AppServerStartedConversation {
     let threadSource: ThreadSource?
     let instructionSources: [String]
     let ephemeral: Bool
+    let runtimeConfig: CodexRuntimeConfig
 }
 
 fileprivate struct AppServerReviewStartOutcome {
@@ -24203,7 +24412,10 @@ private final class AppServerCancellableLoginRegistry: @unchecked Sendable {
     }
 }
 
-final class CodexAppServerMessageProcessor {
+// The app-server processor is driven serially per connection, but some tests
+// synchronously replay async runtime events through SwiftPM's Sendable-checked
+// blocking helper.
+final class CodexAppServerMessageProcessor: @unchecked Sendable {
     private struct ThreadAnalyticsMetadata {
         let modelSlug: String
         let cwd: URL
@@ -24223,6 +24435,7 @@ final class CodexAppServerMessageProcessor {
     private let configuration: CodexAppServerConfiguration
     private let notificationSink: AppServerNotificationSink?
     private let coreOpSubmitter: AppServerCoreOpSubmitter?
+    private let liveRuntimeSubmitter: AppServerLiveRuntimeSubmitter?
     private let acceptedLineAnalyticsClient: AcceptedLineAnalyticsClient
     private let threadStateManager: AppServerThreadStateManager
     private let outgoingRequestBroker: AppServerOutgoingRequestBroker
@@ -24247,7 +24460,9 @@ final class CodexAppServerMessageProcessor {
     private var runtimePendingUserInputCounts: [String: Int] = [:]
     private var runtimeSystemErrorThreadIDs: Set<String> = []
     private var runtimeCommandExecutionStarted: [String: Set<String>] = [:]
+    private var liveMcpManagers: [String: AppServerLiveMcpManagerState] = [:]
     private var pendingRollbackRequests: [String: RequestID] = [:]
+    private var pendingInterruptResponseIDs: [String: [RequestID]] = [:]
     private var pendingSessionStartSources: [String: HookSessionStartSource] = [:]
     private var ephemeralThreadIDs: Set<String> = []
     private var ephemeralThreadSnapshots: [String: [String: Any]] = [:]
@@ -24260,6 +24475,7 @@ final class CodexAppServerMessageProcessor {
         connectionID: AppServerConnectionID = 0,
         notificationSink: AppServerNotificationSink? = nil,
         coreOpSubmitter: AppServerCoreOpSubmitter? = nil,
+        liveRuntimeSubmitter: AppServerLiveRuntimeSubmitter? = nil,
         threadStateManager: AppServerThreadStateManager = AppServerThreadStateManager(),
         outgoingRequestBroker: AppServerOutgoingRequestBroker? = nil
     ) {
@@ -24267,6 +24483,7 @@ final class CodexAppServerMessageProcessor {
         self.connectionID = connectionID
         self.notificationSink = notificationSink
         self.coreOpSubmitter = coreOpSubmitter
+        self.liveRuntimeSubmitter = liveRuntimeSubmitter
         self.acceptedLineAnalyticsClient = AcceptedLineAnalyticsClient(
             uploader: configuration.acceptedLineAnalyticsUploader
         )
@@ -24728,6 +24945,7 @@ final class CodexAppServerMessageProcessor {
 
     func handleRuntimeEvent(threadID: String, turnID: String, event: EventMessage) async {
         let notifications: [[String: Any]]
+        var beforeNotifications: [[String: Any]] = []
         var afterNotifications: (() -> Void)?
         switch event {
         case let .taskStarted(event):
@@ -24773,6 +24991,7 @@ final class CodexAppServerMessageProcessor {
                     error: error
                 )
             ].compactMap(\.self)
+            beforeNotifications = drainPendingInterruptResponseEnvelopes(threadID: threadID)
             trackTurnCompletedForAnalytics(turnID: runtimeTurnID)
         case let .turnAborted(event):
             let runtimeTurnID = event.turnID ?? turnID
@@ -24796,6 +25015,7 @@ final class CodexAppServerMessageProcessor {
                     startedAt: startedAt
                 )
             ].compactMap(\.self)
+            beforeNotifications = drainPendingInterruptResponseEnvelopes(threadID: threadID)
             trackTurnCompletedForAnalytics(turnID: runtimeTurnID)
         case let .error(event):
             var projected = CodexAppServer.runtimeEventNotifications(
@@ -25032,6 +25252,9 @@ final class CodexAppServerMessageProcessor {
                 turnID: turnID,
                 event: event
             )
+        }
+        for envelope in beforeNotifications {
+            await sendEnvelope(envelope)
         }
         guard !notifications.isEmpty else {
             afterNotifications?()
@@ -25373,7 +25596,9 @@ final class CodexAppServerMessageProcessor {
         runtimeCommandExecutionStarted.removeValue(forKey: threadID)
         runtimeTurnStartedAt.removeValue(forKey: threadID)
         runtimeTurnErrors.removeValue(forKey: threadID)
+        liveMcpManagers.removeValue(forKey: threadID)
         pendingRollbackRequests.removeValue(forKey: threadID)
+        pendingInterruptResponseIDs.removeValue(forKey: threadID)
         pendingSessionStartSources.removeValue(forKey: threadID)
         loadedThreadAppsFeatureEnabled.removeValue(forKey: threadID)
         threadAnalyticsMetadata.removeValue(forKey: threadID)
@@ -25397,6 +25622,38 @@ final class CodexAppServerMessageProcessor {
             return
         }
         await notificationSink(data)
+    }
+
+    private func sendEnvelope(_ envelope: [String: Any]) async {
+        guard let notificationSink,
+              let data = CodexAppServer.encodeMessages([envelope])
+        else {
+            return
+        }
+        await notificationSink(data)
+    }
+
+    private func queuePendingInterruptResponse(threadID: String, requestID: RequestID) {
+        pendingInterruptResponseIDs[threadID, default: []].append(requestID)
+    }
+
+    private func removePendingInterruptResponse(threadID: String, requestID: RequestID) {
+        guard var pending = pendingInterruptResponseIDs[threadID] else {
+            return
+        }
+        pending.removeAll { $0 == requestID }
+        if pending.isEmpty {
+            pendingInterruptResponseIDs.removeValue(forKey: threadID)
+        } else {
+            pendingInterruptResponseIDs[threadID] = pending
+        }
+    }
+
+    private func drainPendingInterruptResponseEnvelopes(threadID: String) -> [[String: Any]] {
+        let pending = pendingInterruptResponseIDs.removeValue(forKey: threadID) ?? []
+        return pending.map {
+            CodexAppServer.responseObject(id: $0.jsonObject, result: [:])
+        }
     }
 
     private func incrementOutOfBandElicitationCount(threadID: String) throws -> AppServerElicitationCounterResult {
@@ -25436,6 +25693,7 @@ final class CodexAppServerMessageProcessor {
            let requestID = rawRequestID.flatMap(AppServerRequestIDCodec.requestID(from:)) {
             _ = try coreOpSubmitter(requestID, threadID, .refreshMcpServers(config: config))
         }
+        try refreshLiveMcpManager(threadID: threadID, config: config)
     }
 
     private func queueBestEffortMcpServerRefresh() {
@@ -25506,6 +25764,28 @@ final class CodexAppServerMessageProcessor {
         return try CodexAppServer.runAsyncBlocking {
             await manager.pendingMcpServerRefreshConfig(threadID: threadID)
         }
+    }
+
+    func liveMcpStartupFailureMessage(threadID: String) -> String? {
+        liveMcpManagers[threadID]?.requiredStartupFailureMessage
+    }
+
+    private func startLiveMcpManager(threadID: String, runtimeConfig: CodexRuntimeConfig) throws {
+        let state = CodexAppServer.liveRequiredMcpManagerState(
+            mcpServers: runtimeConfig.mcpServers,
+            configuration: configuration
+        )
+        liveMcpManagers[threadID] = state
+        if let message = state.requiredStartupFailureMessage {
+            throw AppServerError.internalError(message)
+        }
+    }
+
+    private func refreshLiveMcpManager(threadID: String, config: McpServerRefreshConfig) throws {
+        liveMcpManagers[threadID] = try CodexAppServer.liveRequiredMcpManagerState(
+            refreshConfig: config,
+            configuration: configuration
+        )
     }
 
     private func mcpServerRefreshConfigForLoadedThread(threadID: String) throws -> McpServerRefreshConfig? {
@@ -26183,6 +26463,46 @@ final class CodexAppServerMessageProcessor {
         }
     }
 
+    private func liveRuntimeEvents(
+        requestID rawRequestID: Any,
+        threadID: String,
+        turnID: String,
+        op: Op,
+        failureMessage: String
+    ) throws -> [EventMessage] {
+        guard let liveRuntimeSubmitter else {
+            return []
+        }
+        guard let requestID = AppServerRequestIDCodec.requestID(from: rawRequestID) else {
+            throw AppServerError.invalidRequest("invalid request id")
+        }
+        do {
+            return try liveRuntimeSubmitter(AppServerLiveRuntimeSubmission(
+                requestID: requestID,
+                threadID: threadID,
+                turnID: turnID,
+                op: op
+            ))
+        } catch {
+            throw AppServerError.internalError("\(failureMessage): \(error)")
+        }
+    }
+
+    private func projectLiveRuntimeEvents(
+        threadID: String,
+        turnID: String,
+        events: [EventMessage]
+    ) throws {
+        guard !events.isEmpty else {
+            return
+        }
+        try CodexAppServer.runAsyncBlocking {
+            for event in events {
+                await self.handleRuntimeEvent(threadID: threadID, turnID: turnID, event: event)
+            }
+        }
+    }
+
     private func maybeStartMemoryStartupTask(threadID: String, hasInput: Bool) {
         guard hasInput, let memoryStartupTaskStarter = configuration.memoryStartupTaskStarter else {
             return
@@ -26282,6 +26602,10 @@ final class CodexAppServerMessageProcessor {
                     }
                     let outcome = try CodexAppServer.threadStartResult(params: params, configuration: configuration)
                     let result = outcome.result
+                    if let thread = result["thread"] as? [String: Any],
+                       let threadID = thread["id"] as? String {
+                        try startLiveMcpManager(threadID: threadID, runtimeConfig: outcome.runtimeConfig)
+                    }
                     response = CodexAppServer.responseObject(id: id, result: result)
                     if let thread = result["thread"] as? [String: Any] {
                         if let threadID = thread["id"] as? String {
@@ -26381,7 +26705,12 @@ final class CodexAppServerMessageProcessor {
                     if try CodexAppServer.rustDefaultBoolParam(params?["persistExtendedHistory"], defaultValue: false) {
                         notifications.append(CodexAppServer.persistExtendedHistoryDeprecationNoticeNotification())
                     }
-                    let result = try CodexAppServer.threadResumeResult(params: params, configuration: configuration)
+                    let resumeOutcome = try CodexAppServer.threadResumeResult(params: params, configuration: configuration)
+                    let result = resumeOutcome.result
+                    if let thread = result["thread"] as? [String: Any],
+                       let threadID = thread["id"] as? String {
+                        try startLiveMcpManager(threadID: threadID, runtimeConfig: resumeOutcome.runtimeConfig)
+                    }
                     response = CodexAppServer.responseObject(id: id, result: result)
                     if let thread = result["thread"] as? [String: Any],
                        let threadID = thread["id"] as? String {
@@ -26407,7 +26736,12 @@ final class CodexAppServerMessageProcessor {
                     if try CodexAppServer.rustDefaultBoolParam(params?["persistExtendedHistory"], defaultValue: false) {
                         notifications.append(CodexAppServer.persistExtendedHistoryDeprecationNoticeNotification())
                     }
-                    let result = try CodexAppServer.threadForkResult(params: params, configuration: configuration)
+                    let forkOutcome = try CodexAppServer.threadForkResult(params: params, configuration: configuration)
+                    let result = forkOutcome.result
+                    if let thread = result["thread"] as? [String: Any],
+                       let threadID = thread["id"] as? String {
+                        try startLiveMcpManager(threadID: threadID, runtimeConfig: forkOutcome.runtimeConfig)
+                    }
                     response = CodexAppServer.responseObject(id: id, result: result)
                     if let thread = result["thread"] as? [String: Any] {
                         if let threadID = thread["id"] as? String {
@@ -26441,12 +26775,24 @@ final class CodexAppServerMessageProcessor {
                             op: coreOp.op,
                             failureMessage: "failed to start turn"
                         ) ?? UUID().uuidString.lowercased()
+                        let liveEvents = try liveRuntimeEvents(
+                            requestID: id,
+                            threadID: coreOp.threadID,
+                            turnID: turnID,
+                            op: coreOp.op,
+                            failureMessage: "failed to start turn"
+                        )
                         if activeTurnIDs[coreOp.threadID] == nil {
                             activeTurnIDs[coreOp.threadID] = turnID
                         }
                         maybeStartMemoryStartupTask(threadID: coreOp.threadID, hasInput: coreOp.hasInput)
                         let turn = CodexAppServer.inProgressTurnObject(id: turnID)
                         response = CodexAppServer.responseObject(id: id, result: ["turn": turn])
+                        try projectLiveRuntimeEvents(
+                            threadID: coreOp.threadID,
+                            turnID: turnID,
+                            events: liveEvents
+                        )
                         break
                     }
                     let pendingSessionStartSource = (params?["threadId"] as? String)
@@ -26522,39 +26868,55 @@ final class CodexAppServerMessageProcessor {
                         activeTurnID: threadID.flatMap { activeTurnIDs[$0] }
                     )
                     if coreOpSubmitter != nil {
-                        _ = try submitCoreOp(
-                            requestID: id,
-                            threadID: interrupt.threadID,
-                            op: .interrupt,
-                            failureMessage: interrupt.isStartupInterrupt
-                                ? "failed to interrupt startup"
-                                : "failed to interrupt turn"
-                        )
+                        guard let requestID = AppServerRequestIDCodec.requestID(from: id) else {
+                            throw AppServerError.invalidRequest("invalid request id")
+                        }
+                        if !interrupt.isStartupInterrupt {
+                            queuePendingInterruptResponse(threadID: interrupt.threadID, requestID: requestID)
+                        }
+                        do {
+                            _ = try submitCoreOp(
+                                requestID: id,
+                                threadID: interrupt.threadID,
+                                op: .interrupt,
+                                failureMessage: interrupt.isStartupInterrupt
+                                    ? "failed to interrupt startup"
+                                    : "failed to interrupt turn"
+                            )
+                        } catch {
+                            if !interrupt.isStartupInterrupt {
+                                removePendingInterruptResponse(threadID: interrupt.threadID, requestID: requestID)
+                            }
+                            throw error
+                        }
+                        response = interrupt.isStartupInterrupt
+                            ? CodexAppServer.responseObject(id: id, result: [:])
+                            : nil
                     } else {
                         _ = try CodexAppServer.turnInterruptResult(
                             params: params,
                             configuration: configuration,
                             activeTurnID: threadID.flatMap { activeTurnIDs[$0] }
                         )
-                    }
-                    response = CodexAppServer.responseObject(
-                        id: id,
-                        result: [:]
-                    )
-                    if let threadID, let turnID, !interrupt.isStartupInterrupt {
-                        activeTurnIDs.removeValue(forKey: threadID)
-                        notifications.append(CodexAppServer.turnCompletedNotification(
-                            threadID: threadID,
-                            turnID: turnID,
-                            status: "interrupted"
-                        ))
-                        if let notification = threadStatusChangedNotification(
-                            threadID: threadID,
-                            status: CodexAppServer.idleThreadStatus()
-                        ) {
-                            notifications.append(notification)
+                        response = CodexAppServer.responseObject(
+                            id: id,
+                            result: [:]
+                        )
+                        if let threadID, let turnID, !interrupt.isStartupInterrupt {
+                            activeTurnIDs.removeValue(forKey: threadID)
+                            notifications.append(CodexAppServer.turnCompletedNotification(
+                                threadID: threadID,
+                                turnID: turnID,
+                                status: "interrupted"
+                            ))
+                            if let notification = threadStatusChangedNotification(
+                                threadID: threadID,
+                                status: CodexAppServer.idleThreadStatus()
+                            ) {
+                                notifications.append(notification)
+                            }
+                            trackTurnCompletedForAnalytics(turnID: turnID)
                         }
-                        trackTurnCompletedForAnalytics(turnID: turnID)
                     }
                 case "review/start":
                     let outcome = try CodexAppServer.reviewStartResult(params: params, configuration: configuration)

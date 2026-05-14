@@ -1389,6 +1389,45 @@ final class CodexAppServerTests: XCTestCase {
         ))
     }
 
+    func testThreadStartWaitsForRequiredLiveMCPStartupFailuresInSortedRustOrder() throws {
+        let temp = try TemporaryDirectory()
+        let failingServer = try writeMCPServerScript(
+            directory: temp.url,
+            name: "failing-required-mcp.sh",
+            contents: """
+            #!/bin/sh
+            count=0
+            while IFS= read -r _line; do
+                count=$((count + 1))
+                if [ "$count" -ge 2 ]; then
+                    exit 1
+                fi
+            done
+            exit 1
+            """
+        )
+        try writeRequiredLiveMCPConfig(
+            codexHome: temp.url,
+            command: failingServer.path,
+            serverNames: ["z_required", "a_required"]
+        )
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+
+        XCTAssertEqual(messages.count, 1)
+        let error = try XCTUnwrap(messages[0]["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32603)
+        XCTAssertEqual(
+            error["message"] as? String,
+            "required MCP servers failed to initialize: "
+                + "a_required: MCP server a_required produced no response; "
+                + "z_required: MCP server z_required produced no response"
+        )
+    }
+
     func testThreadResumeFailsWhenRequiredMCPServerCommandCannotInitializeLikeRust() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(
@@ -3310,6 +3349,111 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(metadata, ["fiber_run_id": "fiber-live-123"])
     }
 
+    func testTurnStartLiveRuntimeSubmitterProjectsRustStreamTurnCompletion() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let coreOpCapture = AppServerCoreOpCapture()
+        let liveRuntime = AppServerLiveRuntimeCapture { submission in
+            let eventThreadID = try ConversationId(string: submission.threadID)
+            return [
+                .taskStarted(TaskStartedEvent(
+                    turnID: submission.turnID,
+                    startedAt: 1_778_500_000,
+                    modelContextWindow: nil
+                )),
+                .itemCompleted(ItemCompletedEvent(
+                    threadID: eventThreadID,
+                    turnID: submission.turnID,
+                    item: .agentMessage(AgentMessageItem(
+                        id: "agent-live-1",
+                        content: [.text("Done from "), .text("runtime")],
+                        phase: .finalAnswer
+                    )),
+                    completedAtMilliseconds: 1_778_500_250
+                )),
+                .taskComplete(TaskCompleteEvent(
+                    turnID: submission.turnID,
+                    lastAgentMessage: "Done from runtime",
+                    completedAt: 1_778_500_300,
+                    durationMilliseconds: 300
+                ))
+            ]
+        }
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) },
+            coreOpSubmitter: coreOpCapture.submit,
+            liveRuntimeSubmitter: liveRuntime.submit,
+            experimentalAPIEnabled: true
+        )
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let turnMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Live complete"}]}}"#.utf8
+        )))
+
+        XCTAssertEqual(turnMessages.count, 1)
+        let turnResult = try XCTUnwrap(turnMessages[0]["result"] as? [String: Any])
+        let turn = try XCTUnwrap(turnResult["turn"] as? [String: Any])
+        let turnID = try XCTUnwrap(turn["id"] as? String)
+        XCTAssertEqual(turnID, "turn-2")
+        XCTAssertEqual(coreOpCapture.submissions.map(\.requestID), [.integer(2)])
+        XCTAssertEqual(liveRuntime.submissions.map(\.turnID), [turnID])
+
+        let active = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(active[0]["method"] as? String, "thread/status/changed")
+        let activeStatus = try XCTUnwrap((active[0]["params"] as? [String: Any])?["status"] as? [String: Any])
+        XCTAssertEqual(activeStatus["type"] as? String, "active")
+        XCTAssertEqual(activeStatus["activeFlags"] as? [String], [])
+
+        let started = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(started[0]["method"] as? String, "turn/started")
+        let startedTurn = try XCTUnwrap((started[0]["params"] as? [String: Any])?["turn"] as? [String: Any])
+        XCTAssertEqual(startedTurn["id"] as? String, turnID)
+        XCTAssertEqual(startedTurn["status"] as? String, "inProgress")
+        XCTAssertEqual(startedTurn["itemsView"] as? String, "notLoaded")
+        XCTAssertEqual(startedTurn["startedAt"] as? Int, 1_778_500_000)
+
+        let itemCompleted = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(itemCompleted[0]["method"] as? String, "item/completed")
+        let itemParams = try XCTUnwrap(itemCompleted[0]["params"] as? [String: Any])
+        XCTAssertEqual(itemParams["threadId"] as? String, threadID)
+        XCTAssertEqual(itemParams["turnId"] as? String, turnID)
+        XCTAssertEqual(itemParams["completedAtMs"] as? Int, 1_778_500_250)
+        let item = try XCTUnwrap(itemParams["item"] as? [String: Any])
+        XCTAssertEqual(item["type"] as? String, "agentMessage")
+        XCTAssertEqual(item["id"] as? String, "agent-live-1")
+        XCTAssertEqual(item["text"] as? String, "Done from runtime")
+        XCTAssertEqual(item["phase"] as? String, "FinalAnswer")
+
+        let idle = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(idle[0]["method"] as? String, "thread/status/changed")
+        let idleStatus = try XCTUnwrap((idle[0]["params"] as? [String: Any])?["status"] as? [String: Any])
+        XCTAssertEqual(idleStatus["type"] as? String, "idle")
+
+        let completed = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(completed[0]["method"] as? String, "turn/completed")
+        let completedTurn = try XCTUnwrap((completed[0]["params"] as? [String: Any])?["turn"] as? [String: Any])
+        XCTAssertEqual(completedTurn["id"] as? String, turnID)
+        XCTAssertEqual(completedTurn["status"] as? String, "completed")
+        XCTAssertEqual(completedTurn["startedAt"] as? Int, 1_778_500_000)
+        XCTAssertEqual(completedTurn["completedAt"] as? Int, 1_778_500_300)
+        XCTAssertEqual(completedTurn["durationMs"] as? Int, 300)
+        XCTAssertTrue(completedTurn["error"] is NSNull)
+
+        let steerAfterCompletion = try decode(processor.processLine(Data(
+            #"{"id":3,"method":"turn/steer","params":{"threadId":"\#(threadID)","expectedTurnId":"\#(turnID)","input":[{"type":"text","text":"after completion"}]}}"#.utf8
+        )))
+        let steerError = try XCTUnwrap(steerAfterCompletion["error"] as? [String: Any])
+        XCTAssertEqual(steerError["code"] as? Int, -32600)
+        XCTAssertEqual(steerError["message"] as? String, "no active turn to steer")
+    }
+
     func testTurnStartStartsMemoryStartupTaskAfterRuntimeSubmitWithInputLikeRust() throws {
         let temp = try TemporaryDirectory()
         let capture = AppServerCoreOpCapture()
@@ -3700,9 +3844,62 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(turns[0]["status"] as? String, "interrupted")
     }
 
-    func testTurnInterruptRuntimeSubmitterSubmitsInterruptForActiveTurnLikeRust() throws {
+    func testTurnInterruptRuntimeSubmitterSubmitsInterruptAndDefersResponseUntilAbortLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let capture = AppServerCoreOpCapture()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) },
+            coreOpSubmitter: capture.submit
+        )
+        let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+        let turnMessages = try decodeMessages(processor.processLine(Data(#"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Interrupt me"}]}}"#.utf8)))
+        let turnResult = try XCTUnwrap(turnMessages[0]["result"] as? [String: Any])
+        let turn = try XCTUnwrap(turnResult["turn"] as? [String: Any])
+        let turnID = try XCTUnwrap(turn["id"] as? String)
+
+        let immediate = processor.processLine(Data(#"{"id":3,"method":"turn/interrupt","params":{"threadId":"\#(threadID)","turnId":"\#(turnID)"}}"#.utf8))
+
+        XCTAssertNil(immediate)
+        let submissions = capture.submissions
+        XCTAssertEqual(submissions.map(\.requestID), [.integer(2), .integer(3)])
+        XCTAssertEqual(submissions.map(\.threadID), [threadID, threadID])
+        guard case .interrupt = submissions[1].op else {
+            XCTFail("expected runtime interrupt to submit Op.interrupt")
+            return
+        }
+
+        await processor.handleRuntimeEvent(
+            threadID: threadID,
+            turnID: "fallback-turn",
+            event: .turnAborted(TurnAbortedEvent(turnID: turnID, reason: .interrupted))
+        )
+
+        let deferredResponse = try decode(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(deferredResponse["id"] as? Int, 3)
+        let result = try XCTUnwrap(deferredResponse["result"] as? [String: Any])
+        XCTAssertTrue(result.isEmpty)
+
+        let idle = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(idle[0]["method"] as? String, "thread/status/changed")
+        let idleStatus = try XCTUnwrap((idle[0]["params"] as? [String: Any])?["status"] as? [String: Any])
+        XCTAssertEqual(idleStatus["type"] as? String, "idle")
+
+        let completed = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(completed[0]["method"] as? String, "turn/completed")
+        let completedParams = try XCTUnwrap(completed[0]["params"] as? [String: Any])
+        let completedTurn = try XCTUnwrap(completedParams["turn"] as? [String: Any])
+        XCTAssertEqual(completedTurn["id"] as? String, turnID)
+        XCTAssertEqual(completedTurn["status"] as? String, "interrupted")
+    }
+
+    func testTurnInterruptRuntimeSubmitterFailurePreservesActiveTurnLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let capture = AppServerCoreOpFailingInterruptCapture(message: "channel closed")
         let processor = try initializedProcessor(
             configuration: testConfiguration(codexHome: temp.url),
             coreOpSubmitter: capture.submit
@@ -3716,22 +3913,23 @@ final class CodexAppServerTests: XCTestCase {
         let turn = try XCTUnwrap(turnResult["turn"] as? [String: Any])
         let turnID = try XCTUnwrap(turn["id"] as? String)
 
-        let messages = try decodeMessages(processor.processLine(Data(#"{"id":3,"method":"turn/interrupt","params":{"threadId":"\#(threadID)","turnId":"\#(turnID)"}}"#.utf8)))
+        let response = try decode(processor.processLine(Data(#"{"id":3,"method":"turn/interrupt","params":{"threadId":"\#(threadID)","turnId":"\#(turnID)"}}"#.utf8)))
 
-        let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
-        XCTAssertTrue(result.isEmpty)
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32603)
+        XCTAssertEqual(error["message"] as? String, "failed to interrupt turn: channel closed")
         let submissions = capture.submissions
         XCTAssertEqual(submissions.map(\.requestID), [.integer(2), .integer(3)])
         XCTAssertEqual(submissions.map(\.threadID), [threadID, threadID])
         guard case .interrupt = submissions[1].op else {
-            XCTFail("expected runtime interrupt to submit Op.interrupt")
+            XCTFail("expected failed runtime interrupt to submit Op.interrupt")
             return
         }
-        XCTAssertEqual(messages[1]["method"] as? String, "turn/completed")
-        let completedParams = try XCTUnwrap(messages[1]["params"] as? [String: Any])
-        let completedTurn = try XCTUnwrap(completedParams["turn"] as? [String: Any])
-        XCTAssertEqual(completedTurn["id"] as? String, turnID)
-        XCTAssertEqual(completedTurn["status"] as? String, "interrupted")
+
+        let steer = try decode(processor.processLine(Data(#"{"id":4,"method":"turn/steer","params":{"threadId":"\#(threadID)","expectedTurnId":"\#(turnID)","input":[{"type":"text","text":"still active"}]}}"#.utf8)))
+        let steerResult = try XCTUnwrap(steer["result"] as? [String: Any])
+        XCTAssertEqual(steerResult["turnId"] as? String, turnID)
+        XCTAssertEqual(capture.submissions.map(\.requestID), [.integer(2), .integer(3), .integer(4)])
     }
 
     func testTurnInterruptRuntimeSubmitterRejectsMismatchedOrMissingActiveTurnLikeRust() throws {
@@ -3761,6 +3959,61 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(mismatchError["code"] as? Int, -32600)
         XCTAssertEqual(mismatchError["message"] as? String, "expected active turn id wrong-turn but found \(turnID)")
         XCTAssertEqual(capture.submissions.map(\.requestID), [.integer(3)])
+    }
+
+    func testRuntimeCompletionAndAbortClearActiveTurnForInterruptLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let capture = AppServerCoreOpCapture()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) },
+            coreOpSubmitter: capture.submit
+        )
+        let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let completedTurnMessages = try decodeMessages(processor.processLine(Data(#"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Complete me"}]}}"#.utf8)))
+        let completedTurnResult = try XCTUnwrap(completedTurnMessages[0]["result"] as? [String: Any])
+        let completedTurn = try XCTUnwrap(completedTurnResult["turn"] as? [String: Any])
+        let completedTurnID = try XCTUnwrap(completedTurn["id"] as? String)
+        await processor.handleRuntimeEvent(
+            threadID: threadID,
+            turnID: "fallback-turn",
+            event: .taskComplete(TaskCompleteEvent(turnID: completedTurnID, lastAgentMessage: nil))
+        )
+        _ = try await nextNotificationPayload(notificationCapture)
+        _ = try await nextNotificationPayload(notificationCapture)
+
+        let lateInterrupt = try decode(processor.processLine(Data(#"{"id":3,"method":"turn/interrupt","params":{"threadId":"\#(threadID)","turnId":"\#(completedTurnID)"}}"#.utf8)))
+        let lateInterruptError = try XCTUnwrap(lateInterrupt["error"] as? [String: Any])
+        XCTAssertEqual(lateInterruptError["code"] as? Int, -32600)
+        XCTAssertEqual(lateInterruptError["message"] as? String, "no active turn to interrupt")
+
+        let interruptedTurnMessages = try decodeMessages(processor.processLine(Data(#"{"id":4,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Abort me"}]}}"#.utf8)))
+        let interruptedTurnResult = try XCTUnwrap(interruptedTurnMessages[0]["result"] as? [String: Any])
+        let interruptedTurn = try XCTUnwrap(interruptedTurnResult["turn"] as? [String: Any])
+        let interruptedTurnID = try XCTUnwrap(interruptedTurn["id"] as? String)
+        let interruptResponse = processor.processLine(Data(#"{"id":5,"method":"turn/interrupt","params":{"threadId":"\#(threadID)","turnId":"\#(interruptedTurnID)"}}"#.utf8))
+        XCTAssertNil(interruptResponse)
+        await processor.handleRuntimeEvent(
+            threadID: threadID,
+            turnID: "fallback-turn",
+            event: .turnAborted(TurnAbortedEvent(turnID: interruptedTurnID, reason: .interrupted))
+        )
+        let deferredResponse = try decode(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(deferredResponse["id"] as? Int, 5)
+        XCTAssertNotNil(deferredResponse["result"])
+        _ = try await nextNotificationPayload(notificationCapture)
+        _ = try await nextNotificationPayload(notificationCapture)
+
+        let duplicateInterrupt = try decode(processor.processLine(Data(#"{"id":6,"method":"turn/interrupt","params":{"threadId":"\#(threadID)","turnId":"\#(interruptedTurnID)"}}"#.utf8)))
+        let duplicateInterruptError = try XCTUnwrap(duplicateInterrupt["error"] as? [String: Any])
+        XCTAssertEqual(duplicateInterruptError["code"] as? Int, -32600)
+        XCTAssertEqual(duplicateInterruptError["message"] as? String, "no active turn to interrupt")
+        XCTAssertEqual(capture.submissions.map(\.requestID), [.integer(2), .integer(4), .integer(5)])
     }
 
     func testThreadStatusChangedCanBeOptedOut() throws {
@@ -22471,6 +22724,79 @@ final class CodexAppServerTests: XCTestCase {
         ])
     }
 
+    func testMcpServerReloadRefreshesLiveMCPManagerForLoadedThread() throws {
+        let temp = try TemporaryDirectory()
+        let workingServer = try writeMCPServerScript(
+            directory: temp.url,
+            name: "working-required-mcp.sh",
+            contents: """
+            #!/bin/sh
+            count=0
+            while IFS= read -r _line; do
+                count=$((count + 1))
+                if [ "$count" -ge 2 ]; then
+                    printf '%s\\n' '{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}'
+                    exit 0
+                fi
+            done
+            exit 1
+            """
+        )
+        try writeRequiredLiveMCPConfig(
+            codexHome: temp.url,
+            command: workingServer.path,
+            serverNames: ["docs"]
+        )
+        let capture = AppServerCoreOpCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            coreOpSubmitter: capture.submit
+        )
+        let start = try decodeMessages(processor.processLine(
+            Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)
+        ))
+        let threadID = try XCTUnwrap(
+            ((start[0]["result"] as? [String: Any])?["thread"] as? [String: Any])?["id"] as? String
+        )
+        XCTAssertNil(processor.liveMcpStartupFailureMessage(threadID: threadID))
+
+        let failingServer = try writeMCPServerScript(
+            directory: temp.url,
+            name: "failing-required-mcp.sh",
+            contents: """
+            #!/bin/sh
+            count=0
+            while IFS= read -r _line; do
+                count=$((count + 1))
+                if [ "$count" -ge 2 ]; then
+                    exit 1
+                fi
+            done
+            exit 1
+            """
+        )
+        try writeRequiredLiveMCPConfig(
+            codexHome: temp.url,
+            command: failingServer.path,
+            serverNames: ["docs"]
+        )
+
+        let response = try decode(processor.processLine(
+            Data(#"{"id":2,"method":"config/mcpServer/reload"}"#.utf8)
+        ))
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertTrue(result.isEmpty)
+        XCTAssertEqual(
+            processor.liveMcpStartupFailureMessage(threadID: threadID),
+            "required MCP servers failed to initialize: docs: MCP server docs produced no response"
+        )
+        let refresh = try XCTUnwrap(processor.pendingMcpServerRefreshConfig(threadID: threadID))
+        XCTAssertEqual(capture.submissions, [
+            SubmittedCoreOp(requestID: .integer(2), threadID: threadID, op: .refreshMcpServers(config: refresh))
+        ])
+    }
+
     func testMcpServerReloadUsesManagedConfigLayerLikeRust() throws {
         let temp = try TemporaryDirectory()
         let managedConfigFile = temp.url.appendingPathComponent("managed_config.toml", isDirectory: false)
@@ -27913,6 +28239,7 @@ final class CodexAppServerTests: XCTestCase {
         connectionID: AppServerConnectionID = 0,
         notificationSink: AppServerNotificationSink? = nil,
         coreOpSubmitter: AppServerCoreOpSubmitter? = nil,
+        liveRuntimeSubmitter: AppServerLiveRuntimeSubmitter? = nil,
         threadStateManager: AppServerThreadStateManager = AppServerThreadStateManager(),
         experimentalAPIEnabled: Bool = false,
         optOutNotificationMethods: [String] = []
@@ -27922,6 +28249,7 @@ final class CodexAppServerTests: XCTestCase {
             connectionID: connectionID,
             notificationSink: notificationSink,
             coreOpSubmitter: coreOpSubmitter,
+            liveRuntimeSubmitter: liveRuntimeSubmitter,
             threadStateManager: threadStateManager
         )
         var capabilities: [String: Any] = [:]
@@ -28224,6 +28552,33 @@ final class CodexAppServerTests: XCTestCase {
         command = "codex-definitely-not-a-real-binary"
         required = true
         """.write(to: codexHome.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+    }
+
+    private func writeRequiredLiveMCPConfig(
+        codexHome: URL,
+        command: String,
+        serverNames: [String]
+    ) throws {
+        let config = serverNames.map { name in
+            """
+            [mcp_servers.\(name)]
+            command = \(tomlTestString(command))
+            required = true
+            startup_timeout_sec = 1
+            """
+        }.joined(separator: "\n")
+        try config.write(to: codexHome.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+    }
+
+    private func writeMCPServerScript(directory: URL, name: String, contents: String) throws -> URL {
+        let url = directory.appendingPathComponent(name, isDirectory: false)
+        try contents.write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        return url
+    }
+
+    private func tomlTestString(_ value: String) -> String {
+        #""\#(value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\""))""#
     }
 
     private func assertRequiredBrokenMCPStartupError(
@@ -29993,6 +30348,64 @@ private final class AppServerCoreOpCapture: @unchecked Sendable {
         case let .string(value):
             return "turn-\(value)"
         }
+    }
+}
+
+private final class AppServerCoreOpFailingInterruptCapture: @unchecked Sendable {
+    private let lock = NSLock()
+    private let message: String
+    private var recordedSubmissions: [SubmittedCoreOp] = []
+
+    init(message: String) {
+        self.message = message
+    }
+
+    var submissions: [SubmittedCoreOp] {
+        lock.withLock {
+            recordedSubmissions
+        }
+    }
+
+    func submit(requestID: RequestID, threadID: String, op: Op) throws -> String {
+        lock.withLock {
+            recordedSubmissions.append(SubmittedCoreOp(
+                requestID: requestID,
+                threadID: threadID,
+                op: op
+            ))
+        }
+        if case .interrupt = op {
+            throw AppServerCoreOpCaptureError(message: message)
+        }
+        switch requestID {
+        case let .integer(value):
+            return "turn-\(value)"
+        case let .string(value):
+            return "turn-\(value)"
+        }
+    }
+}
+
+private final class AppServerLiveRuntimeCapture: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedSubmissions: [AppServerLiveRuntimeSubmission] = []
+    private let events: @Sendable (AppServerLiveRuntimeSubmission) throws -> [EventMessage]
+
+    init(events: @escaping @Sendable (AppServerLiveRuntimeSubmission) throws -> [EventMessage]) {
+        self.events = events
+    }
+
+    var submissions: [AppServerLiveRuntimeSubmission] {
+        lock.withLock {
+            recordedSubmissions
+        }
+    }
+
+    func submit(_ submission: AppServerLiveRuntimeSubmission) throws -> [EventMessage] {
+        lock.withLock {
+            recordedSubmissions.append(submission)
+        }
+        return try events(submission)
     }
 }
 
