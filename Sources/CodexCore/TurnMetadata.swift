@@ -86,6 +86,30 @@ public final class TurnMetadataState: @unchecked Sendable {
         baseHeader = Self.asciiJSONString(metadata) ?? "{}"
     }
 
+    public convenience init(
+        sessionID: String,
+        threadID: String,
+        threadSource: ThreadSource?,
+        turnID: String,
+        cwd: URL,
+        permissionProfile: PermissionProfile,
+        windowsSandboxLevel: WindowsSandboxLevel,
+        enforceManagedNetwork: Bool
+    ) {
+        self.init(
+            sessionID: sessionID,
+            threadID: threadID,
+            threadSource: threadSource,
+            turnID: turnID,
+            cwd: cwd,
+            sandbox: SandboxTags.permissionProfileSandboxTag(
+                profile: permissionProfile,
+                windowsSandboxLevel: windowsSandboxLevel,
+                enforceManagedNetwork: enforceManagedNetwork
+            )
+        )
+    }
+
     public func currentHeaderValue() -> String? {
         let header: String
         let startedAt: Int64?

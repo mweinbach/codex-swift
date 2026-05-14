@@ -146,6 +146,54 @@ final class TurnMetadataTests: XCTestCase {
         XCTAssertEqual(json["sandbox"] as? String, "read-only")
     }
 
+    func testTurnMetadataStateUsesPermissionProfileSandboxTagLikeRust() throws {
+        let dir = try TurnMetadataTemporaryDirectory()
+        retainedTemporaryDirectories.append(dir)
+        let state = TurnMetadataState(
+            sessionID: "session-a",
+            threadID: "thread-a",
+            threadSource: .user,
+            turnID: "turn-a",
+            cwd: dir.url,
+            permissionProfile: .readOnly(),
+            windowsSandboxLevel: .disabled,
+            enforceManagedNetwork: false
+        )
+
+        let header = try XCTUnwrap(state.currentHeaderValue())
+        let json = try jsonObject(header)
+
+        XCTAssertEqual(json["sandbox"] as? String, SandboxTags.sandboxTag(
+            sandboxPolicy: .newReadOnlyPolicy(),
+            windowsSandboxLevel: .disabled
+        ))
+        XCTAssertEqual(json["session_id"] as? String, "session-a")
+        XCTAssertEqual(json["thread_id"] as? String, "thread-a")
+        XCTAssertEqual(json["thread_source"] as? String, "user")
+        XCTAssertNil(json["session_source"])
+    }
+
+    func testTurnMetadataStateUsesExplicitSubagentThreadSourceLikeRust() throws {
+        let dir = try TurnMetadataTemporaryDirectory()
+        retainedTemporaryDirectories.append(dir)
+        let state = TurnMetadataState(
+            sessionID: "session-a",
+            threadID: "thread-a",
+            threadSource: .subagent,
+            turnID: "turn-a",
+            cwd: dir.url,
+            permissionProfile: .readOnly(),
+            windowsSandboxLevel: .disabled,
+            enforceManagedNetwork: false
+        )
+
+        let header = try XCTUnwrap(state.currentHeaderValue())
+        let json = try jsonObject(header)
+
+        XCTAssertEqual(json["thread_source"] as? String, "subagent")
+        XCTAssertNil(json["session_source"])
+    }
+
     func testClientMetadataCannotSetReservedTurnStartedAtLikeRust() throws {
         let state = TurnMetadataState(
             sessionID: "session-a",
