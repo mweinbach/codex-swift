@@ -218,6 +218,8 @@ public struct McpAnnotations: Equatable, Codable, Sendable {
 public struct McpResource: Equatable, Codable, Sendable {
     public let annotations: McpAnnotations?
     public let description: String?
+    public let icons: [JSONValue]?
+    public let meta: JSONValue?
     public let mimeType: String?
     public let name: String
     public let size: Int64?
@@ -227,6 +229,8 @@ public struct McpResource: Equatable, Codable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case annotations
         case description
+        case icons
+        case meta = "_meta"
         case mimeType = "mimeType"
         case mimeTypeSnake = "mime_type"
         case name
@@ -240,12 +244,16 @@ public struct McpResource: Equatable, Codable, Sendable {
         uri: String,
         annotations: McpAnnotations? = nil,
         description: String? = nil,
+        icons: [JSONValue]? = nil,
+        meta: JSONValue? = nil,
         mimeType: String? = nil,
         size: Int64? = nil,
         title: String? = nil
     ) {
         self.annotations = annotations
         self.description = description
+        self.icons = icons
+        self.meta = meta
         self.mimeType = mimeType
         self.name = name
         self.size = size
@@ -257,6 +265,8 @@ public struct McpResource: Equatable, Codable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         annotations = try container.decodeIfPresent(McpAnnotations.self, forKey: .annotations)
         description = try container.decodeIfPresent(String.self, forKey: .description)
+        icons = try container.decodeIfPresent([JSONValue].self, forKey: .icons)
+        meta = try container.decodeIfPresent(JSONValue.self, forKey: .meta)
         mimeType = try container.decodeIfPresent(String.self, forKey: .mimeType)
             ?? container.decodeIfPresent(String.self, forKey: .mimeTypeSnake)
         name = try container.decode(String.self, forKey: .name)
@@ -269,6 +279,8 @@ public struct McpResource: Equatable, Codable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encodeIfPresent(annotations, forKey: .annotations)
         try container.encodeIfPresent(description, forKey: .description)
+        try container.encodeIfPresent(icons, forKey: .icons)
+        try container.encodeIfPresent(meta, forKey: .meta)
         try container.encodeIfPresent(mimeType, forKey: .mimeType)
         try container.encode(name, forKey: .name)
         try container.encodeIfPresent(size, forKey: .size)
@@ -365,7 +377,9 @@ public struct McpTool: Equatable, Codable, Sendable {
     public let connectorID: String?
     public let connectorName: String?
     public let description: String?
+    public let icons: [JSONValue]?
     public let inputSchema: McpToolInputSchema
+    public let meta: JSONValue?
     public let name: String
     public let namespaceDescription: String?
     public let outputSchema: McpToolOutputSchema?
@@ -377,8 +391,10 @@ public struct McpTool: Equatable, Codable, Sendable {
         case connectorID = "connector_id"
         case connectorName = "connector_name"
         case description
+        case icons
         case inputSchema = "inputSchema"
         case inputSchemaSnake = "input_schema"
+        case meta = "_meta"
         case name
         case namespaceDescription = "namespace_description"
         case outputSchema = "outputSchema"
@@ -394,6 +410,8 @@ public struct McpTool: Equatable, Codable, Sendable {
         connectorID: String? = nil,
         connectorName: String? = nil,
         description: String? = nil,
+        icons: [JSONValue]? = nil,
+        meta: JSONValue? = nil,
         namespaceDescription: String? = nil,
         outputSchema: McpToolOutputSchema? = nil,
         pluginDisplayNames: [String] = [],
@@ -403,7 +421,9 @@ public struct McpTool: Equatable, Codable, Sendable {
         self.connectorID = connectorID
         self.connectorName = connectorName
         self.description = description
+        self.icons = icons
         self.inputSchema = inputSchema
+        self.meta = meta
         self.name = name
         self.namespaceDescription = namespaceDescription
         self.outputSchema = outputSchema
@@ -417,8 +437,10 @@ public struct McpTool: Equatable, Codable, Sendable {
         connectorID = try container.decodeIfPresent(String.self, forKey: .connectorID)
         connectorName = try container.decodeIfPresent(String.self, forKey: .connectorName)
         description = try container.decodeIfPresent(String.self, forKey: .description)
+        icons = try container.decodeIfPresent([JSONValue].self, forKey: .icons)
         inputSchema = try container.decodeIfPresent(McpToolInputSchema.self, forKey: .inputSchema)
             ?? container.decode(McpToolInputSchema.self, forKey: .inputSchemaSnake)
+        meta = try container.decodeIfPresent(JSONValue.self, forKey: .meta)
         name = try container.decode(String.self, forKey: .name)
         namespaceDescription = try container.decodeIfPresent(String.self, forKey: .namespaceDescription)
         outputSchema = try container.decodeIfPresent(McpToolOutputSchema.self, forKey: .outputSchema)
@@ -433,7 +455,9 @@ public struct McpTool: Equatable, Codable, Sendable {
         try container.encodeIfPresent(connectorID, forKey: .connectorID)
         try container.encodeIfPresent(connectorName, forKey: .connectorName)
         try container.encodeIfPresent(description, forKey: .description)
+        try container.encodeIfPresent(icons, forKey: .icons)
         try container.encode(inputSchema, forKey: .inputSchema)
+        try container.encodeIfPresent(meta, forKey: .meta)
         try container.encode(name, forKey: .name)
         try container.encodeIfPresent(namespaceDescription, forKey: .namespaceDescription)
         try container.encodeIfPresent(outputSchema, forKey: .outputSchema)

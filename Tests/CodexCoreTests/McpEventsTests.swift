@@ -256,6 +256,53 @@ final class McpEventsTests: XCTestCase {
         ]))
     }
 
+    func testMcpToolPreservesRustIconsAndMetaFields() throws {
+        let decoded = try JSONDecoder().decode(McpTool.self, from: Data("""
+        {
+          "name": "search",
+          "inputSchema": {"type": "object"},
+          "icons": [
+            {
+              "src": "https://example.test/icon.png",
+              "mimeType": "image/png"
+            }
+          ],
+          "_meta": {
+            "openai/outputTemplate": "ui://widget/search.html",
+            "openai/toolInvocation/invoking": "Searching"
+          }
+        }
+        """.utf8))
+
+        XCTAssertEqual(decoded.icons, [
+            .object([
+                "src": .string("https://example.test/icon.png"),
+                "mimeType": .string("image/png")
+            ])
+        ])
+        XCTAssertEqual(decoded.meta, .object([
+            "openai/outputTemplate": .string("ui://widget/search.html"),
+            "openai/toolInvocation/invoking": .string("Searching")
+        ]))
+
+        try XCTAssertJSONObjectEqual(decoded, [
+            "_meta": [
+                "openai/outputTemplate": "ui://widget/search.html",
+                "openai/toolInvocation/invoking": "Searching"
+            ],
+            "icons": [
+                [
+                    "src": "https://example.test/icon.png",
+                    "mimeType": "image/png"
+                ]
+            ],
+            "inputSchema": [
+                "type": "object"
+            ],
+            "name": "search"
+        ])
+    }
+
     func testMcpResourceDecodesRustAliasesAndLossySizes() throws {
         let resource = try JSONDecoder().decode(McpResource.self, from: Data("""
         {
@@ -286,6 +333,45 @@ final class McpEventsTests: XCTestCase {
         }
         """.utf8))
         XCTAssertNil(tooBig.size)
+    }
+
+    func testMcpResourcePreservesRustIconsAndMetaFields() throws {
+        let decoded = try JSONDecoder().decode(McpResource.self, from: Data("""
+        {
+          "name": "readme",
+          "uri": "file:///tmp/README.md",
+          "icons": [
+            {
+              "src": "file:///tmp/icon.svg"
+            }
+          ],
+          "_meta": {
+            "codex/source": "fixture"
+          }
+        }
+        """.utf8))
+
+        XCTAssertEqual(decoded.icons, [
+            .object([
+                "src": .string("file:///tmp/icon.svg")
+            ])
+        ])
+        XCTAssertEqual(decoded.meta, .object([
+            "codex/source": .string("fixture")
+        ]))
+
+        try XCTAssertJSONObjectEqual(decoded, [
+            "_meta": [
+                "codex/source": "fixture"
+            ],
+            "icons": [
+                [
+                    "src": "file:///tmp/icon.svg"
+                ]
+            ],
+            "name": "readme",
+            "uri": "file:///tmp/README.md"
+        ])
     }
 
     func testMcpResourceTemplateDecodesRustSnakeCaseAliases() throws {
