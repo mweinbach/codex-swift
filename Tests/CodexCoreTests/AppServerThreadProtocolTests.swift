@@ -24,6 +24,46 @@ final class AppServerThreadProtocolTests: XCTestCase {
         XCTAssertNil(turn.error)
     }
 
+    func testThreadStartSourceAndMockExperimentalMethodRoundTripLikeRustProtocol() throws {
+        XCTAssertEqual(
+            String(data: try JSONEncoder().encode(ThreadStartSource.startup), encoding: .utf8),
+            #""startup""#
+        )
+        XCTAssertEqual(
+            String(data: try JSONEncoder().encode(ThreadStartSource.clear), encoding: .utf8),
+            #""clear""#
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(ThreadStartSource.self, from: Data(#""clear""#.utf8)),
+            .clear
+        )
+
+        try XCTAssertJSONObjectEqual(MockExperimentalMethodParams(value: "hello"), [
+            "value": "hello"
+        ])
+        try XCTAssertJSONObjectEqual(MockExperimentalMethodParams(), [
+            "value": NSNull()
+        ])
+        try XCTAssertJSONObjectEqual(MockExperimentalMethodResponse(echoed: "hello"), [
+            "echoed": "hello"
+        ])
+        try XCTAssertJSONObjectEqual(MockExperimentalMethodResponse(echoed: nil), [
+            "echoed": NSNull()
+        ])
+
+        let decodedParams = try JSONDecoder().decode(
+            MockExperimentalMethodParams.self,
+            from: Data(#"{"value":null}"#.utf8)
+        )
+        XCTAssertNil(decodedParams.value)
+
+        let decodedResponse = try JSONDecoder().decode(
+            MockExperimentalMethodResponse.self,
+            from: Data(#"{"echoed":"hello"}"#.utf8)
+        )
+        XCTAssertEqual(decodedResponse.echoed, "hello")
+    }
+
     func testThreadTurnsListParamsAcceptsItemsViewLikeRustProtocol() throws {
         let json = """
         {

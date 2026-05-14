@@ -18,6 +18,11 @@ public enum AppServerTurnStatus: String, Codable, Equatable, Sendable {
     case inProgress
 }
 
+public enum ThreadStartSource: String, Codable, Equatable, Sendable {
+    case startup
+    case clear
+}
+
 public enum AppServerThreadSourceKind: String, Codable, Equatable, Sendable {
     case cli
     case vsCode = "vscode"
@@ -393,6 +398,48 @@ public struct ThreadListParams: Equatable, Codable, Sendable {
             try container.encode(useStateDBOnly, forKey: .useStateDBOnly)
         }
         try container.encodeIfPresent(searchTerm, forKey: .searchTerm)
+    }
+}
+
+public struct MockExperimentalMethodParams: Equatable, Codable, Sendable {
+    public let value: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case value
+    }
+
+    public init(value: String? = nil) {
+        self.value = value
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        if let value {
+            try container.encode(value, forKey: .value)
+        } else {
+            try container.encodeNil(forKey: .value)
+        }
+    }
+}
+
+public struct MockExperimentalMethodResponse: Equatable, Codable, Sendable {
+    public let echoed: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case echoed
+    }
+
+    public init(echoed: String?) {
+        self.echoed = echoed
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        if let echoed {
+            try container.encode(echoed, forKey: .echoed)
+        } else {
+            try container.encodeNil(forKey: .echoed)
+        }
     }
 }
 
