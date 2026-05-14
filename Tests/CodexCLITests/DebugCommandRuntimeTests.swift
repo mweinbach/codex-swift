@@ -343,6 +343,55 @@ final class DebugCommandRuntimeTests: XCTestCase {
         XCTAssertTrue(skillsText.contains(skill.path))
     }
 
+    func testPromptInputIncludesCommitAttributionOnlyWhenFeatureEnabled() async throws {
+        let temp = try TemporaryDirectory()
+        var features = FeatureStates.withDefaults()
+        features.set(.codexGitCommit, enabled: true)
+
+        let enabledResult = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .promptInput(prompt: "inspect", imagePaths: [])),
+            dependencies: testDependencies(
+                codexHome: temp.url,
+                config: CodexRuntimeConfig(
+                    modelProvider: "test-provider",
+                    commitAttribution: "AgentX <agent@example.com>",
+                    features: features,
+                    memories: MemoriesConfig(),
+                    projectDocMaxBytes: 0
+                )
+            )
+        )
+
+        let enabledOutput = try XCTUnwrap(enabledResult.stdoutMessage)
+        let enabledDecoded = try JSONDecoder().decode([ResponseItem].self, from: Data(enabledOutput.utf8))
+        guard case let .message(_, developerRole, developerContent, _) = enabledDecoded[0] else {
+            return XCTFail("expected developer context message")
+        }
+        XCTAssertEqual(developerRole, "developer")
+        XCTAssertEqual(developerContent.count, 2)
+        guard case let .inputText(commitText) = developerContent[1] else {
+            return XCTFail("expected commit attribution after permissions")
+        }
+        XCTAssertTrue(commitText.contains("Co-authored-by: AgentX <agent@example.com>"))
+        XCTAssertTrue(commitText.contains("exactly once"))
+
+        let disabledResult = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .promptInput(prompt: "inspect", imagePaths: [])),
+            dependencies: testDependencies(
+                codexHome: temp.url,
+                config: CodexRuntimeConfig(
+                    modelProvider: "test-provider",
+                    commitAttribution: "AgentX <agent@example.com>",
+                    memories: MemoriesConfig(),
+                    projectDocMaxBytes: 0
+                )
+            )
+        )
+
+        let disabledOutput = try XCTUnwrap(disabledResult.stdoutMessage)
+        XCTAssertFalse(disabledOutput.contains("Co-authored-by: AgentX <agent@example.com>"))
+    }
+
     func testPromptInputAvailableSkillsHonorConfigRules() async throws {
         let temp = try TemporaryDirectory()
         let disabledSkill = temp.url.appendingPathComponent("skills/disabled-helper/SKILL.md", isDirectory: false)

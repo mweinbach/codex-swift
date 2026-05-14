@@ -80,6 +80,7 @@ public enum NonInteractiveExec {
         includePermissionsInstructions: Bool = true,
         developerInstructions: String? = nil,
         memoryToolDeveloperInstructions: String? = nil,
+        commitMessageTrailerInstruction: String? = nil,
         multiAgentV2UsageHintText: String? = nil,
         availableSkills: AvailableSkills? = nil,
         userInstructions: UserInstructions? = nil,
@@ -115,6 +116,9 @@ public enum NonInteractiveExec {
                 skillRootLines: availableSkills.skillRootLines,
                 skillLines: availableSkills.skillLines
             )))
+        }
+        if let commitMessageTrailerInstruction, !commitMessageTrailerInstruction.isEmpty {
+            developerContent.append(.inputText(text: commitMessageTrailerInstruction))
         }
         if !developerContent.isEmpty {
             input.append(.message(role: "developer", content: developerContent))
@@ -162,6 +166,7 @@ public enum NonInteractiveExec {
         includePermissionsInstructions: Bool = true,
         developerInstructions: String? = nil,
         memoryToolDeveloperInstructions: String? = nil,
+        commitMessageTrailerInstruction: String? = nil,
         multiAgentV2UsageHintText: String? = nil,
         availableSkills: AvailableSkills? = nil,
         userInstructions: UserInstructions? = nil,
@@ -182,6 +187,7 @@ public enum NonInteractiveExec {
             includePermissionsInstructions: includePermissionsInstructions,
             developerInstructions: developerInstructions,
             memoryToolDeveloperInstructions: memoryToolDeveloperInstructions,
+            commitMessageTrailerInstruction: commitMessageTrailerInstruction,
             multiAgentV2UsageHintText: multiAgentV2UsageHintText,
             availableSkills: availableSkills,
             userInstructions: userInstructions,
