@@ -79,6 +79,47 @@ final class SessionConfiguredEventTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(SessionConfiguredEvent.self, from: data), event)
     }
 
+    func testSessionConfiguredUsesDistinctSessionIdAndThreadIdLikeRust() throws {
+        let sessionID = try SessionId(string: "67e55044-10b1-426f-9247-bb680e5fe0c7")
+        let threadID = try ThreadId(string: "67e55044-10b1-426f-9247-bb680e5fe0c8")
+        let event = SessionConfiguredEvent(
+            sessionID: sessionID,
+            threadID: threadID,
+            model: "codex-mini-latest",
+            modelProviderID: "openai",
+            approvalPolicy: .never,
+            sandboxPolicy: .readOnly,
+            cwd: "/home/user/project",
+            historyLogID: 0,
+            historyEntryCount: 0,
+            rolloutPath: nil
+        )
+
+        try XCTAssertJSONObjectEqual(event, [
+            "session_id": "67e55044-10b1-426f-9247-bb680e5fe0c7",
+            "thread_id": "67e55044-10b1-426f-9247-bb680e5fe0c8",
+            "model": "codex-mini-latest",
+            "model_provider_id": "openai",
+            "approval_policy": "never",
+            "approvals_reviewer": "user",
+            "permission_profile": [
+                "type": "managed",
+                "file_system": [
+                    "type": "restricted",
+                    "entries": [
+                        rootReadEntry
+                    ]
+                ],
+                "network": "restricted"
+            ],
+            "cwd": "/home/user/project"
+        ])
+
+        let decoded = try JSONDecoder().decode(SessionConfiguredEvent.self, from: JSONEncoder().encode(event))
+        XCTAssertEqual(decoded.sessionID, sessionID)
+        XCTAssertEqual(decoded.threadID, threadID)
+    }
+
     func testSessionConfiguredWireShapeIncludesReasoningAndInitialMessages() throws {
         let sessionID = try ConversationId(string: "67e55044-10b1-426f-9247-bb680e5fe0c8")
         let forkedFromID = try ThreadId(string: "77e55044-10b1-426f-9247-bb680e5fe0c8")

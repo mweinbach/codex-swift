@@ -16,7 +16,7 @@ public struct SessionNetworkProxyRuntime: Equatable, Codable, Sendable {
 }
 
 public struct SessionConfiguredEvent: Equatable, Codable, Sendable {
-    public let sessionID: ConversationId
+    public let sessionID: SessionId
     public let threadID: ThreadId
     public let forkedFromID: ThreadId?
     public let threadSource: ThreadSource?
@@ -80,8 +80,54 @@ public struct SessionConfiguredEvent: Equatable, Codable, Sendable {
         networkProxy: SessionNetworkProxyRuntime? = nil,
         rolloutPath: String?
     ) {
+        self.init(
+            sessionID: SessionId(uuid: sessionID.uuid),
+            threadID: threadID,
+            forkedFromID: forkedFromID,
+            threadSource: threadSource,
+            threadName: threadName,
+            model: model,
+            modelProviderID: modelProviderID,
+            serviceTier: serviceTier,
+            approvalPolicy: approvalPolicy,
+            approvalsReviewer: approvalsReviewer,
+            permissionProfile: permissionProfile,
+            activePermissionProfile: activePermissionProfile,
+            sandboxPolicy: sandboxPolicy,
+            cwd: cwd,
+            reasoningEffort: reasoningEffort,
+            historyLogID: historyLogID,
+            historyEntryCount: historyEntryCount,
+            initialMessages: initialMessages,
+            networkProxy: networkProxy,
+            rolloutPath: rolloutPath
+        )
+    }
+
+    public init(
+        sessionID: SessionId,
+        threadID: ThreadId? = nil,
+        forkedFromID: ThreadId? = nil,
+        threadSource: ThreadSource? = nil,
+        threadName: String? = nil,
+        model: String,
+        modelProviderID: String,
+        serviceTier: String? = nil,
+        approvalPolicy: AskForApproval,
+        approvalsReviewer: ApprovalsReviewer = .user,
+        permissionProfile: PermissionProfile? = nil,
+        activePermissionProfile: ActivePermissionProfile? = nil,
+        sandboxPolicy: SandboxPolicy,
+        cwd: String,
+        reasoningEffort: ReasoningEffort? = nil,
+        historyLogID: UInt64,
+        historyEntryCount: Int,
+        initialMessages: [EventMessage]? = nil,
+        networkProxy: SessionNetworkProxyRuntime? = nil,
+        rolloutPath: String?
+    ) {
         self.sessionID = sessionID
-        self.threadID = threadID ?? ThreadId(uuid: sessionID.uuid)
+        self.threadID = threadID ?? ThreadId(sessionID: sessionID)
         self.forkedFromID = forkedFromID
         self.threadSource = threadSource
         self.threadName = threadName
@@ -104,8 +150,8 @@ public struct SessionConfiguredEvent: Equatable, Codable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        sessionID = try container.decode(ConversationId.self, forKey: .sessionID)
-        threadID = try container.decodeIfPresent(ThreadId.self, forKey: .threadID) ?? ThreadId(uuid: sessionID.uuid)
+        sessionID = try container.decode(SessionId.self, forKey: .sessionID)
+        threadID = try container.decodeIfPresent(ThreadId.self, forKey: .threadID) ?? ThreadId(sessionID: sessionID)
         forkedFromID = try container.decodeIfPresent(ThreadId.self, forKey: .forkedFromID)
         threadSource = try container.decodeIfPresent(ThreadSource.self, forKey: .threadSource)
         threadName = try container.decodeIfPresent(String.self, forKey: .threadName)
