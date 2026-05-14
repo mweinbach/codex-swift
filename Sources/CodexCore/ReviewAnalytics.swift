@@ -761,6 +761,74 @@ public struct CodexDynamicToolCallEventRequest: Equatable, Encodable, Sendable {
     }
 }
 
+public enum WebSearchActionKind: String, Codable, Equatable, Sendable {
+    case search
+    case openPage = "open_page"
+    case findInPage = "find_in_page"
+    case other
+
+    public init(_ action: AppServerWebSearchAction) {
+        switch action {
+        case .search:
+            self = .search
+        case .openPage:
+            self = .openPage
+        case .findInPage:
+            self = .findInPage
+        case .other:
+            self = .other
+        }
+    }
+}
+
+public struct CodexWebSearchEventParams: Equatable, Encodable, Sendable {
+    public let base: CodexToolItemEventBase
+    public let webSearchAction: WebSearchActionKind?
+    public let queryPresent: Bool
+    public let queryCount: UInt64?
+
+    public init(
+        base: CodexToolItemEventBase,
+        webSearchAction: WebSearchActionKind? = nil,
+        queryPresent: Bool,
+        queryCount: UInt64? = nil
+    ) {
+        self.base = base
+        self.webSearchAction = webSearchAction
+        self.queryPresent = queryPresent
+        self.queryCount = queryCount
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case webSearchAction = "web_search_action"
+        case queryPresent = "query_present"
+        case queryCount = "query_count"
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        try base.encode(to: encoder)
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeNilOrValue(webSearchAction, forKey: .webSearchAction)
+        try container.encode(queryPresent, forKey: .queryPresent)
+        try container.encodeNilOrValue(queryCount, forKey: .queryCount)
+    }
+}
+
+public struct CodexWebSearchEventRequest: Equatable, Encodable, Sendable {
+    public let eventType: String
+    public let eventParams: CodexWebSearchEventParams
+
+    public init(eventType: String, eventParams: CodexWebSearchEventParams) {
+        self.eventType = eventType
+        self.eventParams = eventParams
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case eventType = "event_type"
+        case eventParams = "event_params"
+    }
+}
+
 public struct CodexCommandExecutionAnalyticsContext: Equatable, Sendable {
     public let appServerClient: CodexAppServerClientMetadata
     public let runtime: CodexRuntimeMetadata
@@ -786,6 +854,7 @@ public struct CodexCommandExecutionAnalyticsContext: Equatable, Sendable {
 public typealias CodexFileChangeAnalyticsContext = CodexCommandExecutionAnalyticsContext
 public typealias CodexMcpToolCallAnalyticsContext = CodexCommandExecutionAnalyticsContext
 public typealias CodexDynamicToolCallAnalyticsContext = CodexCommandExecutionAnalyticsContext
+public typealias CodexWebSearchAnalyticsContext = CodexCommandExecutionAnalyticsContext
 
 public struct CodexCommandExecutionAnalyticsReducer: Sendable {
     private var startedAtMilliseconds: [CommandExecutionItemKey: UInt64] = [:]
@@ -1182,6 +1251,93 @@ public struct CodexDynamicToolCallAnalyticsReducer: Sendable {
     }
 }
 
+public struct CodexWebSearchAnalyticsReducer: Sendable {
+    private var startedAtMilliseconds: [WebSearchItemKey: UInt64] = [:]
+
+    public init() {}
+
+    public mutating func ingestStarted(_ notification: ItemStartedNotification) {
+        guard case .webSearch = notification.item,
+              let startedAtMilliseconds = Self.unsignedMilliseconds(notification.startedAtMilliseconds)
+        else {
+            return
+        }
+
+        self.startedAtMilliseconds[WebSearchItemKey(notification)] = startedAtMilliseconds
+    }
+
+    public mutating func ingestCompleted(
+        _ notification: ItemCompletedNotification,
+        context: CodexWebSearchAnalyticsContext
+    ) -> CodexWebSearchEventRequest? {
+        let key = WebSearchItemKey(notification)
+        guard let startedAtMilliseconds = startedAtMilliseconds.removeValue(forKey: key),
+              let completedAtMilliseconds = Self.unsignedMilliseconds(notification.completedAtMilliseconds)
+        else {
+            return nil
+        }
+
+        guard case let .webSearch(id, query, action) = notification.item else {
+            return nil
+        }
+
+        return CodexWebSearchEventRequest(
+            eventType: "codex_web_search_event",
+            eventParams: CodexWebSearchEventParams(
+                base: CodexToolItemEventBase(
+                    threadID: notification.threadID,
+                    turnID: notification.turnID,
+                    itemID: id,
+                    appServerClient: context.appServerClient,
+                    runtime: context.runtime,
+                    threadSource: context.threadSource,
+                    subagentSource: context.subagentSource,
+                    parentThreadID: context.parentThreadID,
+                    toolName: "web_search",
+                    startedAtMilliseconds: startedAtMilliseconds,
+                    completedAtMilliseconds: completedAtMilliseconds,
+                    durationMilliseconds: completedAtMilliseconds >= startedAtMilliseconds
+                        ? completedAtMilliseconds - startedAtMilliseconds
+                        : nil,
+                    executionDurationMilliseconds: nil,
+                    reviewCount: 0,
+                    guardianReviewCount: 0,
+                    userReviewCount: 0,
+                    finalApprovalOutcome: .unknown,
+                    terminalStatus: .completed,
+                    failureKind: nil,
+                    requestedAdditionalPermissions: false,
+                    requestedNetworkAccess: false
+                ),
+                webSearchAction: action.map(WebSearchActionKind.init),
+                queryPresent: !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                queryCount: Self.queryCount(query: query, action: action)
+            )
+        )
+    }
+
+    private static func queryCount(query: String, action: AppServerWebSearchAction?) -> UInt64? {
+        switch action {
+        case let .search(query: actionQuery, queries: queries):
+            if let queries {
+                return UInt64(queries.count)
+            }
+            return actionQuery == nil ? nil : 1
+        case .openPage, .findInPage, .other:
+            return nil
+        case nil:
+            return query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : 1
+        }
+    }
+
+    private static func unsignedMilliseconds(_ milliseconds: Int64?) -> UInt64? {
+        guard let milliseconds, milliseconds >= 0 else {
+            return nil
+        }
+        return UInt64(milliseconds)
+    }
+}
+
 private struct CommandExecutionItemKey: Hashable {
     let threadID: String
     let turnID: String
@@ -1237,6 +1393,24 @@ private struct McpToolCallItemKey: Hashable {
 }
 
 private struct DynamicToolCallItemKey: Hashable {
+    let threadID: String
+    let turnID: String
+    let itemID: String
+
+    init(_ notification: ItemStartedNotification) {
+        self.threadID = notification.threadID
+        self.turnID = notification.turnID
+        self.itemID = notification.item.id
+    }
+
+    init(_ notification: ItemCompletedNotification) {
+        self.threadID = notification.threadID
+        self.turnID = notification.turnID
+        self.itemID = notification.item.id
+    }
+}
+
+private struct WebSearchItemKey: Hashable {
     let threadID: String
     let turnID: String
     let itemID: String

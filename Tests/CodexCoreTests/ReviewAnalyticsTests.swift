@@ -2,6 +2,121 @@ import CodexCore
 import XCTest
 
 final class ReviewAnalyticsTests: XCTestCase {
+    func testWebSearchAnalyticsReducerEmitsLifecycleEventLikeRust() throws {
+        var reducer = CodexWebSearchAnalyticsReducer()
+        let startedItem = AppServerThreadItem.webSearch(
+            id: "web-1",
+            query: "fallback query",
+            action: .search(query: nil, queries: ["swift codex", "rust codex"])
+        )
+
+        reducer.ingestStarted(ItemStartedNotification(
+            item: startedItem,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 5_000
+        ))
+        let event = try XCTUnwrap(reducer.ingestCompleted(
+            ItemCompletedNotification(
+                item: startedItem,
+                threadID: "thread-1",
+                turnID: "turn-1",
+                completedAtMilliseconds: 5_080
+            ),
+            context: Self.analyticsContext
+        ))
+
+        try XCTAssertJSONObjectEqual(event, [
+            "event_type": "codex_web_search_event",
+            "event_params": [
+                "thread_id": "thread-1",
+                "turn_id": "turn-1",
+                "item_id": "web-1",
+                "app_server_client": [
+                    "product_client_id": "codex_tui",
+                    "client_name": "codex-tui",
+                    "client_version": "1.2.3",
+                    "rpc_transport": "websocket",
+                    "experimental_api_enabled": true
+                ],
+                "runtime": [
+                    "codex_rs_version": "0.99.0",
+                    "runtime_os": "macos",
+                    "runtime_os_version": "15.3.1",
+                    "runtime_arch": "aarch64"
+                ],
+                "thread_source": "user",
+                "subagent_source": nil,
+                "parent_thread_id": nil,
+                "tool_name": "web_search",
+                "started_at_ms": 5_000,
+                "completed_at_ms": 5_080,
+                "duration_ms": 80,
+                "execution_duration_ms": nil,
+                "review_count": 0,
+                "guardian_review_count": 0,
+                "user_review_count": 0,
+                "final_approval_outcome": "unknown",
+                "terminal_status": "completed",
+                "failure_kind": nil,
+                "requested_additional_permissions": false,
+                "requested_network_access": false,
+                "web_search_action": "search",
+                "query_present": true,
+                "query_count": 2
+            ]
+        ])
+    }
+
+    func testWebSearchAnalyticsReducerMatchesRustQueryCountRules() throws {
+        var reducer = CodexWebSearchAnalyticsReducer()
+
+        let openPage = try Self.reduceWebSearch(
+            query: "   ",
+            action: .openPage(url: "https://example.com"),
+            reducer: &reducer
+        )
+        XCTAssertEqual(openPage.eventParams.webSearchAction, .openPage)
+        XCTAssertFalse(openPage.eventParams.queryPresent)
+        XCTAssertNil(openPage.eventParams.queryCount)
+
+        let legacyQuery = try Self.reduceWebSearch(query: "swift codex", action: nil, reducer: &reducer)
+        XCTAssertNil(legacyQuery.eventParams.webSearchAction)
+        XCTAssertTrue(legacyQuery.eventParams.queryPresent)
+        XCTAssertEqual(legacyQuery.eventParams.queryCount, 1)
+
+        let searchWithQuery = try Self.reduceWebSearch(
+            query: "",
+            action: .search(query: "one query", queries: nil),
+            reducer: &reducer
+        )
+        XCTAssertEqual(searchWithQuery.eventParams.webSearchAction, .search)
+        XCTAssertFalse(searchWithQuery.eventParams.queryPresent)
+        XCTAssertEqual(searchWithQuery.eventParams.queryCount, 1)
+    }
+
+    func testWebSearchAnalyticsReducerSuppressesMissingStartAndDoubleCompletionLikeRust() {
+        var reducer = CodexWebSearchAnalyticsReducer()
+        let item = AppServerThreadItem.webSearch(id: "web-1", query: "swift")
+        let completed = ItemCompletedNotification(
+            item: item,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            completedAtMilliseconds: 20
+        )
+
+        XCTAssertNil(reducer.ingestCompleted(completed, context: Self.analyticsContext))
+
+        reducer.ingestStarted(ItemStartedNotification(
+            item: item,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 10
+        ))
+        XCTAssertNotNil(reducer.ingestCompleted(completed, context: Self.analyticsContext))
+        XCTAssertNil(reducer.ingestCompleted(completed, context: Self.analyticsContext))
+    }
+
     func testDynamicToolCallAnalyticsReducerEmitsLifecycleEventLikeRust() throws {
         var reducer = CodexDynamicToolCallAnalyticsReducer()
         let startedItem = AppServerThreadItem.dynamicToolCall(
@@ -795,6 +910,29 @@ final class ReviewAnalyticsTests: XCTestCase {
         reducer: inout CodexDynamicToolCallAnalyticsReducer
     ) throws -> CodexDynamicToolCallEventRequest {
         let item = dynamicToolCallItem(status: status, contentItems: contentItems, success: success)
+        reducer.ingestStarted(ItemStartedNotification(
+            item: item,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 10
+        ))
+        return try XCTUnwrap(reducer.ingestCompleted(
+            ItemCompletedNotification(
+                item: item,
+                threadID: "thread-1",
+                turnID: "turn-1",
+                completedAtMilliseconds: 20
+            ),
+            context: analyticsContext
+        ))
+    }
+
+    private static func reduceWebSearch(
+        query: String,
+        action: AppServerWebSearchAction?,
+        reducer: inout CodexWebSearchAnalyticsReducer
+    ) throws -> CodexWebSearchEventRequest {
+        let item = AppServerThreadItem.webSearch(id: "web-reduced", query: query, action: action)
         reducer.ingestStarted(ItemStartedNotification(
             item: item,
             threadID: "thread-1",
