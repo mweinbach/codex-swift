@@ -215,6 +215,39 @@ final class McpCLITests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: configFile, encoding: .utf8), #"model = "original""#)
     }
 
+    func testMcpCommandRuntimeRejectsInvalidAddServerNameBeforeWriting() async throws {
+        let temp = try TemporaryMcpRuntimeDirectory()
+        let request = CodexCLI.McpCommandRequest(
+            action: .add(name: "docs.server", transport: .stdio(command: ["docs-server"], env: [])),
+            configOverrides: CliConfigOverrides(rawOverrides: ["model=\"gpt-5-codex\""])
+        )
+
+        do {
+            _ = try await McpCommandRuntime.run(request, dependencies: runtimeDependencies(codexHome: temp.url))
+            XCTFail("mcp add should reject invalid server names")
+        } catch {
+            XCTAssertEqual(String(describing: error), "invalid server name 'docs.server' (use letters, numbers, '-', '_')")
+        }
+
+        XCTAssertEqual(try McpConfigStore.loadGlobalMcpServers(codexHome: temp.url), [:])
+    }
+
+    func testMcpCommandRuntimeRejectsInvalidRemoveServerNameBeforeWriting() async throws {
+        let temp = try TemporaryMcpRuntimeDirectory()
+        let docs = McpServerConfig(transport: .stdio(command: "docs-server", args: [], env: nil, envVars: [], cwd: nil))
+        try McpConfigStore.replaceGlobalMcpServers(codexHome: temp.url, servers: ["docs": docs])
+        let request = CodexCLI.McpCommandRequest(action: .remove(name: "docs.server"))
+
+        do {
+            _ = try await McpCommandRuntime.run(request, dependencies: runtimeDependencies(codexHome: temp.url))
+            XCTFail("mcp remove should reject invalid server names")
+        } catch {
+            XCTAssertEqual(String(describing: error), "invalid server name 'docs.server' (use letters, numbers, '-', '_')")
+        }
+
+        XCTAssertEqual(try McpConfigStore.loadGlobalMcpServers(codexHome: temp.url), ["docs": docs])
+    }
+
     func testMcpCommandRuntimeListGetRemoveAndLogout() async throws {
         let temp = try TemporaryMcpRuntimeDirectory()
         let docs = McpServerConfig(transport: .stdio(command: "docs-server", args: [], env: nil, envVars: [], cwd: nil))
