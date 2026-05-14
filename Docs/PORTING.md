@@ -1437,6 +1437,8 @@ Recent upstream audit checkpoint:
   - extended the Swift live app-server runtime slice for Rust-shaped `turn/interrupt`: active-turn validation rejects missing and mismatched ids with Rust messages, live interrupts submit `Op.interrupt`, submitter failures preserve the active handle for retry/steer, terminal completion/abort events clear active handles, deferred interrupt responses resolve before idle and terminal turn notifications, idle status transitions precede terminal turn notifications, and rollout-backed interrupts keep the persisted interrupted-turn behavior.
 - `codex-rs/app-server/src/bespoke_event_handling.rs` live `stream_turn` completion projection
   - added deterministic Swift app-server coverage for a started live turn driven through `thread/start` then `turn/start` with an injected runtime submitter: `task_started` publishes Rust's active status before `turn/started`, completed agent-message items pass through as `item/completed`, `task_complete` clears active turn state, publishes idle before `turn/completed`, preserves completion timing/error nullability, and leaves the rollout-backed no-submit path unchanged.
+- `codex-rs/app-server/src/request_serialization.rs` shared config-family reads
+  - added Swift's app-server request serialization queue primitive with Rust's exclusive/shared-read access modes: consecutive leading shared reads for the same queue key run together, exclusive requests wait for running shared reads, and later shared reads do not jump ahead of a queued exclusive write. Swift now maps Rust's `config/read`, `plugin/list`, and `skills/list` methods to shared reads on the global `config` queue while preserving exclusive access for config/plugin/skill write surfaces.
 
 ## Known Gaps
 
