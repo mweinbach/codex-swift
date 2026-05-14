@@ -109,8 +109,13 @@ private func runLoginCommand(_ request: CodexCLI.LoginCommandRequest) async thro
         }
 
     case .withAPIKeyFromStdin:
-        let readResult = readAPIKeyFromStdin()
-        guard readResult.exitCode == 0, let apiKey = readResult.apiKey else {
+        let readResult = readSecretFromStdin(
+            terminalMessage: "--with-api-key expects the API key on stdin. Try piping it, e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`.",
+            readingMessage: "Reading API key from stdin...",
+            emptyMessage: "No API key provided via stdin.",
+            invalidUTF8Message: "Failed to read API key from stdin: stream did not contain valid UTF-8"
+        )
+        guard readResult.exitCode == 0, let apiKey = readResult.value else {
             return CodexCLI.CommandExecutionResult(exitCode: readResult.exitCode, stderrMessage: readResult.message)
         }
         let (codexHome, settings) = try resolvedAuthSettings(overrides: request.configOverrides)
@@ -123,6 +128,34 @@ private func runLoginCommand(_ request: CodexCLI.LoginCommandRequest) async thro
         try CodexAuthStorage.loginWithAPIKey(
             codexHome: codexHome,
             apiKey: apiKey,
+            mode: settings.cliAuthCredentialsStoreMode
+        )
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 0,
+            stderrMessage: "\(readResult.message)\nSuccessfully logged in"
+        )
+
+    case .withAccessTokenFromStdin:
+        let readResult = readSecretFromStdin(
+            terminalMessage: "--with-access-token expects the access token on stdin. Try piping it, e.g. `printenv CODEX_ACCESS_TOKEN | codex login --with-access-token`.",
+            readingMessage: "Reading access token from stdin...",
+            emptyMessage: "No access token provided via stdin.",
+            invalidUTF8Message: "Failed to read stdin: stream did not contain valid UTF-8"
+        )
+        guard readResult.exitCode == 0, let accessToken = readResult.value else {
+            return CodexCLI.CommandExecutionResult(exitCode: readResult.exitCode, stderrMessage: readResult.message)
+        }
+        let (codexHome, settings) = try resolvedAuthSettings(overrides: request.configOverrides)
+        if settings.forcedLoginMethod == .api {
+            return CodexCLI.CommandExecutionResult(
+                exitCode: 1,
+                stderrMessage: "\(readResult.message)\nAccess token login is disabled. Use API key login instead."
+            )
+        }
+        try await CodexAuthStorage.loginWithAccessToken(
+            codexHome: codexHome,
+            accessToken: accessToken,
+            chatGPTBaseURL: settings.chatgptBaseURL,
             mode: settings.cliAuthCredentialsStoreMode
         )
         return CodexCLI.CommandExecutionResult(
@@ -1696,35 +1729,39 @@ private func runUpdateCommand(_ request: CodexCLI.UpdateCommandRequest) async th
     try UpdateCommandRuntime.run()
 }
 
-private struct APIKeyReadResult {
+private struct SecretReadResult {
     let exitCode: Int32
     let message: String
-    let apiKey: String?
+    let value: String?
 }
 
-private func readAPIKeyFromStdin() -> APIKeyReadResult {
+private func readSecretFromStdin(
+    terminalMessage: String,
+    readingMessage: String,
+    emptyMessage: String,
+    invalidUTF8Message: String
+) -> SecretReadResult {
     if isatty(STDIN_FILENO) != 0 {
-        return APIKeyReadResult(
+        return SecretReadResult(
             exitCode: 1,
-            message: "--with-api-key expects the API key on stdin. Try piping it, e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`.",
-            apiKey: nil
+            message: terminalMessage,
+            value: nil
         )
     }
 
-    let message = "Reading API key from stdin..."
     let data = FileHandle.standardInput.readDataToEndOfFile()
     guard let input = String(data: data, encoding: .utf8) else {
-        return APIKeyReadResult(
+        return SecretReadResult(
             exitCode: 1,
-            message: "Failed to read API key from stdin: stream did not contain valid UTF-8",
-            apiKey: nil
+            message: invalidUTF8Message,
+            value: nil
         )
     }
     let apiKey = input.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !apiKey.isEmpty else {
-        return APIKeyReadResult(exitCode: 1, message: "No API key provided via stdin.", apiKey: nil)
+        return SecretReadResult(exitCode: 1, message: emptyMessage, value: nil)
     }
-    return APIKeyReadResult(exitCode: 0, message: message, apiKey: apiKey)
+    return SecretReadResult(exitCode: 0, message: readingMessage, value: apiKey)
 }
 
 private func safeFormatAPIKey(_ apiKey: String) -> String {

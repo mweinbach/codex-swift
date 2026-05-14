@@ -74,6 +74,45 @@ final class AuthTests: XCTestCase {
         XCTAssertEqual(loaded?.lastRefresh, "2026-05-07T00:00:00Z")
     }
 
+    func testLoadsFileBackedAgentIdentityAuthLikeRust() throws {
+        let dir = try AuthTemporaryDirectory()
+        let agentIdentity = Self.fakeAgentIdentityJWT()
+        let auth = """
+        {
+          "auth_mode": "agentIdentity",
+          "OPENAI_API_KEY": null,
+          "tokens": null,
+          "last_refresh": null,
+          "agent_identity": "\(agentIdentity)"
+        }
+        """
+        try auth.write(to: dir.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+
+        let loaded = try XCTUnwrap(CodexAuthStorage.loadAuthDotJSON(codexHome: dir.url, mode: .file))
+        XCTAssertEqual(loaded.authMode, .agentIdentity)
+        XCTAssertNil(loaded.openAIAPIKey)
+        XCTAssertNil(loaded.tokens)
+        XCTAssertNil(loaded.lastRefresh)
+        XCTAssertEqual(loaded.agentIdentity, agentIdentity)
+        XCTAssertEqual(try CodexAuthStorage.authStatus(codexHome: dir.url, mode: .file), .chatGPT)
+    }
+
+    func testLoginWithAccessTokenRejectsInvalidAgentIdentityJWTBeforePersisting() async throws {
+        let dir = try AuthTemporaryDirectory()
+
+        await XCTAssertThrowsErrorAsync(
+            try await CodexAuthStorage.loginWithAccessToken(
+                codexHome: dir.url,
+                accessToken: "not-a-jwt",
+                chatGPTBaseURL: "https://chatgpt.com/backend-api",
+                transport: AuthFailingTransport()
+            )
+        ) { error in
+            XCTAssertEqual((error as? AgentIdentityError)?.description, "invalid agent identity JWT format")
+        }
+        XCTAssertNil(try CodexAuthStorage.loadAuthDotJSON(codexHome: dir.url, mode: .file))
+    }
+
     func testLoadFreshTokenDataUsesRecentTokenWithoutRefresh() async throws {
         let dir = try AuthTemporaryDirectory()
         let now = Date(timeIntervalSince1970: 1_800_000_000)
@@ -602,6 +641,22 @@ final class AuthTests: XCTestCase {
         ].joined(separator: ".")
     }
 
+    private static func fakeAgentIdentityJWT() -> String {
+        fakeJWT(payload: [
+            "iss": AgentIdentity.jwtIssuer,
+            "aud": AgentIdentity.jwtAudience,
+            "iat": 1_800_000_000,
+            "exp": 1_800_003_600,
+            "agent_runtime_id": "agent-runtime-123",
+            "agent_private_key": "private-key",
+            "account_id": "account-123",
+            "chatgpt_user_id": "user-123",
+            "email": "agent@example.com",
+            "plan_type": "business",
+            "chatgpt_account_is_fedramp": false
+        ])
+    }
+
     private static func base64URL(_ object: [String: Any]) -> String {
         let data = try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
         return base64URL(data)
@@ -657,6 +712,18 @@ private final class AuthTemporaryDirectory {
 
     deinit {
         try? FileManager.default.removeItem(at: url)
+    }
+}
+
+private struct AuthFailingTransport: APITransport {
+    func execute(_ request: APIRequest) async -> Result<APIResponse, TransportError> {
+        XCTFail("invalid agent identity JWT should fail before fetching JWKS")
+        return .success(APIResponse(statusCode: 500))
+    }
+
+    func stream(_ request: APIRequest) async -> Result<APIStreamResponse, TransportError> {
+        XCTFail("auth tests should not stream")
+        return .failure(.network("unexpected stream"))
     }
 }
 

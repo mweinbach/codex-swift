@@ -276,12 +276,20 @@ public struct AuthDotJSON: Codable, Equatable, Sendable {
     public let openAIAPIKey: String?
     public let tokens: AuthTokenData?
     public let lastRefresh: String?
+    public let agentIdentity: String?
 
-    public init(authMode: AuthMode? = nil, openAIAPIKey: String?, tokens: AuthTokenData?, lastRefresh: String?) {
+    public init(
+        authMode: AuthMode? = nil,
+        openAIAPIKey: String?,
+        tokens: AuthTokenData?,
+        lastRefresh: String?,
+        agentIdentity: String? = nil
+    ) {
         self.authMode = authMode
         self.openAIAPIKey = openAIAPIKey
         self.tokens = tokens
         self.lastRefresh = lastRefresh
+        self.agentIdentity = agentIdentity
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -289,6 +297,7 @@ public struct AuthDotJSON: Codable, Equatable, Sendable {
         case openAIAPIKey = "OPENAI_API_KEY"
         case tokens
         case lastRefresh = "last_refresh"
+        case agentIdentity = "agent_identity"
     }
 }
 
@@ -614,6 +623,54 @@ public enum CodexAuthStorage {
         )
     }
 
+    public static func loginWithAccessToken<Transport: APITransport>(
+        codexHome: URL,
+        accessToken: String,
+        chatGPTBaseURL: String,
+        mode: AuthCredentialsStoreMode = .file,
+        transport: Transport,
+        encoder: JSONEncoder = JSONEncoder(),
+        keyringStore: AuthKeyringStore = SystemAuthKeyringStore()
+    ) async throws {
+        _ = try await verifiedAgentIdentityClaims(
+            accessToken: accessToken,
+            chatGPTBaseURL: chatGPTBaseURL,
+            transport: transport
+        )
+        try saveAuthDotJSON(
+            AuthDotJSON(
+                authMode: .agentIdentity,
+                openAIAPIKey: nil,
+                tokens: nil,
+                lastRefresh: nil,
+                agentIdentity: accessToken
+            ),
+            codexHome: codexHome,
+            mode: mode,
+            encoder: encoder,
+            keyringStore: keyringStore
+        )
+    }
+
+    public static func loginWithAccessToken(
+        codexHome: URL,
+        accessToken: String,
+        chatGPTBaseURL: String,
+        mode: AuthCredentialsStoreMode = .file,
+        encoder: JSONEncoder = JSONEncoder(),
+        keyringStore: AuthKeyringStore = SystemAuthKeyringStore()
+    ) async throws {
+        try await loginWithAccessToken(
+            codexHome: codexHome,
+            accessToken: accessToken,
+            chatGPTBaseURL: chatGPTBaseURL,
+            mode: mode,
+            transport: URLSessionAPITransport(),
+            encoder: encoder,
+            keyringStore: keyringStore
+        )
+    }
+
     public static func saveChatGPTTokens(
         codexHome: URL,
         apiKey: String?,
@@ -714,6 +771,9 @@ public enum CodexAuthStorage {
             return .apiKey(apiKey)
         }
         if auth.tokens != nil {
+            return .chatGPT
+        }
+        if auth.authMode == .agentIdentity, auth.agentIdentity != nil {
             return .chatGPT
         }
         return .notLoggedIn
@@ -976,7 +1036,32 @@ public enum CodexAuthStorage {
         if auth.openAIAPIKey != nil {
             return .apiKey
         }
+        if auth.authMode == .agentIdentity, auth.agentIdentity != nil {
+            return .chatGPT
+        }
         return .chatGPT
+    }
+
+    private static func verifiedAgentIdentityClaims<Transport: APITransport>(
+        accessToken: String,
+        chatGPTBaseURL: String,
+        transport: Transport
+    ) async throws -> AgentIdentityJWTClaims {
+        _ = try AgentIdentity.decodeJWTClaims(accessToken)
+
+        let request = APIRequest(method: .get, url: AgentIdentity.agentIdentityJWKSURL(chatGPTBaseURL: chatGPTBaseURL))
+        let response: APIResponse
+        switch await transport.execute(request) {
+        case let .success(success):
+            response = success
+        case let .failure(error):
+            throw CodexAuthStorageError.refreshTokenFailed(String(describing: error))
+        }
+        guard (200..<300).contains(response.statusCode) else {
+            throw CodexAuthStorageError.refreshTokenFailed("agent identity JWKS endpoint returned HTTP \(response.statusCode)")
+        }
+        let jwks = try JSONDecoder().decode(AgentIdentityJWKS.self, from: response.body)
+        return try AgentIdentity.decodeJWTClaims(accessToken, jwks: jwks)
     }
 
     private static func restrictionErrorAfterLogout(

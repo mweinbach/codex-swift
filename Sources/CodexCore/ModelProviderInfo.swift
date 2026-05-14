@@ -26,10 +26,11 @@ public enum AuthMode: String, Codable, Equatable, Sendable {
     case apiKey = "apikey"
     case chatGPT = "chatgpt"
     case chatGPTAuthTokens = "chatgptAuthTokens"
+    case agentIdentity = "agentIdentity"
 
     public var isChatGPT: Bool {
         switch self {
-        case .chatGPT, .chatGPTAuthTokens:
+        case .chatGPT, .chatGPTAuthTokens, .agentIdentity:
             return true
         case .apiKey:
             return false

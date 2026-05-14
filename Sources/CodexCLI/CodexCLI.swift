@@ -30,6 +30,7 @@ public struct CodexCLI: Sendable {
     public enum LoginCommandAction: Equatable, Sendable {
         case status
         case withAPIKeyFromStdin
+        case withAccessTokenFromStdin
         case chatGPT
         case deviceCode(issuerBaseURL: String?, clientID: String?)
     }
@@ -870,6 +871,10 @@ public struct CodexCLI: Sendable {
                 stderr("The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`.")
                 return 1
             }
+            if usesAPIKeyStdinFlag(arguments), usesAccessTokenStdinFlag(arguments) {
+                stderr("Choose one login credential source: --with-api-key or --with-access-token.")
+                return 1
+            }
             guard let loginRunner else {
                 stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
                 return 78
@@ -1592,8 +1597,11 @@ public struct CodexCLI: Sendable {
                 clientID: optionValue(named: "--experimental_client-id", in: arguments)
             )
         }
-        if arguments.contains("--with-api-key") {
+        if usesAPIKeyStdinFlag(arguments) {
             return .withAPIKeyFromStdin
+        }
+        if usesAccessTokenStdinFlag(arguments) {
+            return .withAccessTokenFromStdin
         }
         return .chatGPT
     }
@@ -1613,6 +1621,14 @@ public struct CodexCLI: Sendable {
 
     private func usesDeprecatedAPIKeyFlag(_ arguments: [String]) -> Bool {
         arguments.contains("--api-key") || arguments.contains { $0.hasPrefix("--api-key=") }
+    }
+
+    private func usesAPIKeyStdinFlag(_ arguments: [String]) -> Bool {
+        arguments.contains("--with-api-key")
+    }
+
+    private func usesAccessTokenStdinFlag(_ arguments: [String]) -> Bool {
+        arguments.contains("--with-access-token")
     }
 
     private func parseConfigOverrides(from arguments: [String]) -> ParseResult<CliConfigOverrides> {

@@ -312,6 +312,39 @@ final class CodexCLITests: XCTestCase {
         ])
     }
 
+    func testRunAsyncLoginWithAccessTokenDelegatesToRunnerLikeRust() async {
+        var receivedAction: CodexCLI.LoginCommandAction?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["login", "--with-access-token"],
+            stderr: { _ in },
+            loginRunner: { request in
+                receivedAction = request.action
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(receivedAction, .withAccessTokenFromStdin)
+    }
+
+    func testRunAsyncLoginRejectsMultipleCredentialSourcesLikeRust() async {
+        var stderr: [String] = []
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["login", "--with-api-key", "--with-access-token"],
+            stdout: { _ in XCTFail("stdout should not be written") },
+            stderr: { stderr.append($0) },
+            loginRunner: { _ in
+                XCTFail("runner should not be called when credential sources conflict")
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 1)
+        XCTAssertEqual(stderr, ["Choose one login credential source: --with-api-key or --with-access-token."])
+    }
+
     func testRunAsyncLoginRejectsDeprecatedAPIKeyFlagBeforeRunner() async {
         let message = "The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`."
 

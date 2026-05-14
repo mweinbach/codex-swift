@@ -179,7 +179,7 @@ Source baseline inspected for this scaffold:
   - API-key login/logout/status command routing, deprecated `--api-key` rejection, stdin API-key loading, forced-login restrictions, and auth storage mutation
 - `codex-rs/cli/src/login.rs`, `codex-rs/login`, and auth/config support from `codex-rs/core`
   - browser ChatGPT login server flow including connector OAuth scopes, device-code login flow with experimental issuer/client-id options, forced workspace validation, token exchange/persistence, and Rust-shaped login success/error messages
-  - `codex login --with-api-key` stdin handling, file/keyring/auto API-key auth storage, `codex login status`, API-key masking, deprecated `--api-key` guidance, `forced_login_method` login-command restrictions, and `codex logout`
+  - `codex login --with-api-key` stdin handling, `codex login --with-access-token` routing and mutually exclusive credential-source validation, file/keyring/auto API-key auth storage, agent-identity `auth.json` wire shape/status projection, invalid agent-identity JWT rejection before persistence, `codex login status`, API-key masking, deprecated `--api-key` guidance, `forced_login_method` login-command restrictions, and `codex logout`
 - `codex-rs/agent-identity/src/lib.rs`
   - Agent registration, task registration, biscuit, and JWKS URL builders now match Rust's
     trailing-slash handling and `/backend-api` JWKS routing. Swift also ports the
