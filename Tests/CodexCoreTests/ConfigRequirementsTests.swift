@@ -792,6 +792,33 @@ final class ConfigRequirementsTests: XCTestCase {
         XCTAssertTrue(ConfigRequirementsToml().isEmpty)
         XCTAssertTrue(ConfigRequirementsToml(permissions: PermissionsRequirementsToml()).isEmpty)
     }
+
+    func testCloudRequirementsParsingMatchesRustEmptyAndPopulatedSemantics() throws {
+        XCTAssertNil(try CloudRequirements.parse(""))
+        XCTAssertNil(try CloudRequirements.parse("   \n\t"))
+        XCTAssertNil(try CloudRequirements.parse("""
+        [apps.some_app]
+        """))
+
+        let parsed = try XCTUnwrap(try CloudRequirements.parse("""
+        allowed_approval_policies = ["never"]
+        [features]
+        remote_control = true
+        """))
+
+        let requirements = try parsed.requirements()
+        XCTAssertEqual(requirements.approvalPolicy.value, .never)
+        XCTAssertEqual(parsed.featureRequirements, ["remote_control": true])
+    }
+
+    func testCloudRequirementsParseFailureMessageMatchesRustPrefix() {
+        let message = CloudRequirements.parseFailedMessage(
+            details: ConfigRequirementsParseError.invalidApprovalPolicy("sometimes")
+        )
+
+        XCTAssertTrue(message.hasPrefix("Cloud requirements (workspace-managed policies) are invalid and could not be parsed. Please contact your workspace admin.\n\nDetails:\n"))
+        XCTAssertTrue(message.contains("Invalid approval policy requirement: sometimes"))
+    }
 }
 
 private func XCTAssertConstraintFailure(
