@@ -639,8 +639,10 @@ final class ModelsManagerTests: XCTestCase {
         XCTAssertTrue(gpt55.isDefault)
         XCTAssertTrue(gpt55.supportedInAPI)
         XCTAssertNil(gpt55.upgrade)
+        XCTAssertEqual(gpt55.defaultReasoningEffort, .medium)
         XCTAssertTrue(gpt55.supportsFastMode())
         XCTAssertEqual(gpt55.serviceTiers.map(\.id), ["priority"])
+        XCTAssertEqual(gpt55.serviceTiers.first?.description, "1.5x speed, increased usage")
         XCTAssertFalse(gpt55.serviceTiers.contains { $0.id == "ultrafast" })
         XCTAssertEqual(gpt55.additionalSpeedTiers, ["fast"])
         XCTAssertEqual(gpt55.supportedReasoningEfforts.map(\.effort), [.low, .medium, .high, .xhigh])
@@ -656,8 +658,10 @@ final class ModelsManagerTests: XCTestCase {
 
         let gpt54 = try XCTUnwrap(presets["gpt-5.4"])
         XCTAssertEqual(gpt54.description, "Strong model for everyday coding.")
+        XCTAssertEqual(gpt54.defaultReasoningEffort, .medium)
         XCTAssertTrue(gpt54.supportsFastMode())
         XCTAssertEqual(gpt54.serviceTiers.map(\.id), ["priority"])
+        XCTAssertEqual(gpt54.serviceTiers.first?.description, "1.5x speed, increased usage")
         XCTAssertFalse(gpt54.serviceTiers.contains { $0.id == "ultrafast" })
         XCTAssertEqual(gpt54.additionalSpeedTiers, ["fast"])
 
