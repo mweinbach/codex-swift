@@ -833,7 +833,7 @@ public struct CodexCLI: Sendable {
         updateRunner: UpdateCommandRunner? = nil
     ) async -> Int32 {
         let invocation = parseInvocation(arguments: arguments)
-        if let message = rootDuplicateProfileRejectionMessage(invocation: invocation, arguments: arguments) {
+        if let message = rootDuplicateSharedOptionRejectionMessage(invocation: invocation, arguments: arguments) {
             stderr(message)
             return 64
         }
@@ -3243,7 +3243,45 @@ public struct CodexCLI: Sendable {
         }
     }
 
-    private func rootDuplicateProfileRejectionMessage(invocation: Invocation, arguments: [String]) -> String? {
+    private struct RootDuplicateOptionSpec {
+        let displayName: String
+        let longValueName: String?
+        let shortValueName: String?
+        let flagNames: Set<String>
+
+        func matches(_ argument: String) -> Bool {
+            if let longValueName,
+               argument == longValueName || argument.hasPrefix("\(longValueName)=") {
+                return true
+            }
+            if let shortValueName,
+               argument == shortValueName ||
+                argument.hasPrefix(shortValueName) && argument.count > shortValueName.count && !argument.hasPrefix("--") {
+                return true
+            }
+            return flagNames.contains(argument)
+        }
+
+        func consumesSeparateValue(_ argument: String) -> Bool {
+            argument == longValueName || argument == shortValueName
+        }
+    }
+
+    private static let rootDuplicateOptionSpecs = [
+        RootDuplicateOptionSpec(displayName: "--model", longValueName: "--model", shortValueName: "-m", flagNames: []),
+        RootDuplicateOptionSpec(displayName: "--oss", longValueName: nil, shortValueName: nil, flagNames: ["--oss"]),
+        RootDuplicateOptionSpec(displayName: "--profile", longValueName: "--profile", shortValueName: "-p", flagNames: []),
+        RootDuplicateOptionSpec(displayName: "--sandbox", longValueName: "--sandbox", shortValueName: "-s", flagNames: []),
+        RootDuplicateOptionSpec(
+            displayName: "--ask-for-approval",
+            longValueName: "--ask-for-approval",
+            shortValueName: "-a",
+            flagNames: []
+        ),
+        RootDuplicateOptionSpec(displayName: "--search", longValueName: nil, shortValueName: nil, flagNames: ["--search"])
+    ]
+
+    private func rootDuplicateSharedOptionRejectionMessage(invocation: Invocation, arguments: [String]) -> String? {
         let commandNames: [String] = switch invocation {
         case let .command(spec, _):
             [spec.name] + spec.aliases
@@ -3251,7 +3289,7 @@ public struct CodexCLI: Sendable {
             []
         }
 
-        var seenProfile = false
+        var seenOptions = Set<String>()
         var index = 0
         while index < arguments.count {
             let argument = arguments[index]
@@ -3259,14 +3297,12 @@ public struct CodexCLI: Sendable {
                 return nil
             }
 
-            if argument == "--profile" || argument == "-p" ||
-                argument.hasPrefix("--profile=") ||
-                argument.hasPrefix("-p") && argument.count > 2 && !argument.hasPrefix("--") {
-                guard !seenProfile else {
-                    return "codex-swift: duplicate option at top level: --profile"
+            if let spec = Self.rootDuplicateOptionSpecs.first(where: { $0.matches(argument) }) {
+                guard !seenOptions.contains(spec.displayName) else {
+                    return "codex-swift: duplicate option at top level: \(spec.displayName)"
                 }
-                seenProfile = true
-                index += (argument == "--profile" || argument == "-p") ? 2 : 1
+                seenOptions.insert(spec.displayName)
+                index += spec.consumesSeparateValue(argument) ? 2 : 1
                 continue
             }
 

@@ -392,13 +392,43 @@ final class CommandSurfaceCLITests: XCTestCase {
         }
     }
 
-    func testRunAsyncRejectsDuplicateRootProfileBeforeRunner() async {
-        let cases = [
-            ["--profile", "first", "--profile", "second", "exec", "ship it"],
-            ["-pfirst", "--profile=second", "resume", "--last"]
+    func testRunAsyncRejectsDuplicateRootSharedOptionsBeforeRunner() async {
+        let cases: [([String], String)] = [
+            (
+                ["--model", "first", "--model", "second", "exec", "ship it"],
+                "codex-swift: duplicate option at top level: --model"
+            ),
+            (
+                ["-mfirst", "--model=second", "resume", "--last"],
+                "codex-swift: duplicate option at top level: --model"
+            ),
+            (
+                ["--oss", "--oss", "exec", "ship it"],
+                "codex-swift: duplicate option at top level: --oss"
+            ),
+            (
+                ["--profile", "first", "--profile", "second", "exec", "ship it"],
+                "codex-swift: duplicate option at top level: --profile"
+            ),
+            (
+                ["-pfirst", "--profile=second", "resume", "--last"],
+                "codex-swift: duplicate option at top level: --profile"
+            ),
+            (
+                ["--sandbox", "read-only", "-sworkspace-write", "exec", "ship it"],
+                "codex-swift: duplicate option at top level: --sandbox"
+            ),
+            (
+                ["--ask-for-approval", "never", "--ask-for-approval=on-request", "exec", "ship it"],
+                "codex-swift: duplicate option at top level: --ask-for-approval"
+            ),
+            (
+                ["--search", "--search", "debug", "models"],
+                "codex-swift: duplicate option at top level: --search"
+            )
         ]
 
-        for arguments in cases {
+        for (arguments, expectedMessage) in cases {
             var stderr: [String] = []
             let exitCode = await CodexCLI().runAsync(
                 arguments: arguments,
@@ -415,7 +445,7 @@ final class CommandSurfaceCLITests: XCTestCase {
             )
 
             XCTAssertEqual(exitCode, 64, "\(arguments)")
-            XCTAssertEqual(stderr, ["codex-swift: duplicate option at top level: --profile"], "\(arguments)")
+            XCTAssertEqual(stderr, [expectedMessage], "\(arguments)")
         }
     }
 
