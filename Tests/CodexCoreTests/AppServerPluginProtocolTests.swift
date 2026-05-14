@@ -302,7 +302,7 @@ final class AppServerPluginProtocolTests: XCTestCase {
                 ]],
                 "hooks": [[
                     "key": "plugin:hooks.json:pre_tool_use:0:0",
-                    "eventName": "pre_tool_use"
+                    "eventName": "preToolUse"
                 ]],
                 "apps": [[
                     "id": "weather-app",

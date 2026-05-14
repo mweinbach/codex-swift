@@ -599,11 +599,15 @@ extension PluginDetail: Codable {
 
 public struct PluginHookSummary: Equatable, Codable, Sendable {
     public let key: String
-    public let eventName: HookEventName
+    public let eventName: AppServerHookEventName
 
-    public init(key: String, eventName: HookEventName) {
+    public init(key: String, eventName: AppServerHookEventName) {
         self.key = key
         self.eventName = eventName
+    }
+
+    public init(key: String, coreEventName: HookEventName) {
+        self.init(key: key, eventName: AppServerHookEventName(core: coreEventName))
     }
 }
 
