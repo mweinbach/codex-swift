@@ -23,6 +23,85 @@ public enum ThreadStartSource: String, Codable, Equatable, Sendable {
     case clear
 }
 
+public enum AppServerSessionSource: Equatable, Sendable {
+    case cli
+    case vsCode
+    case exec
+    case appServer
+    case custom(String)
+    case subAgent(SubAgentSource)
+    case unknown
+
+    private enum UnitValue: String, Codable {
+        case cli
+        case vsCode = "vscode"
+        case exec
+        case appServer
+        case unknown
+    }
+
+    private enum TaggedKey: String, CodingKey {
+        case custom
+        case subAgent
+    }
+}
+
+extension AppServerSessionSource: Codable {
+    public init(from decoder: Decoder) throws {
+        let single = try decoder.singleValueContainer()
+        if let unit = try? single.decode(UnitValue.self) {
+            switch unit {
+            case .cli:
+                self = .cli
+            case .vsCode:
+                self = .vsCode
+            case .exec:
+                self = .exec
+            case .appServer:
+                self = .appServer
+            case .unknown:
+                self = .unknown
+            }
+            return
+        }
+
+        let container = try decoder.container(keyedBy: TaggedKey.self)
+        if container.contains(.custom) {
+            self = .custom(try container.decode(String.self, forKey: .custom))
+        } else if container.contains(.subAgent) {
+            self = .subAgent(try container.decode(SubAgentSource.self, forKey: .subAgent))
+        } else {
+            self = .unknown
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        switch self {
+        case .cli:
+            var container = encoder.singleValueContainer()
+            try container.encode(UnitValue.cli)
+        case .vsCode:
+            var container = encoder.singleValueContainer()
+            try container.encode(UnitValue.vsCode)
+        case .exec:
+            var container = encoder.singleValueContainer()
+            try container.encode(UnitValue.exec)
+        case .appServer:
+            var container = encoder.singleValueContainer()
+            try container.encode(UnitValue.appServer)
+        case let .custom(source):
+            var container = encoder.container(keyedBy: TaggedKey.self)
+            try container.encode(source, forKey: .custom)
+        case let .subAgent(source):
+            var container = encoder.container(keyedBy: TaggedKey.self)
+            try container.encode(source, forKey: .subAgent)
+        case .unknown:
+            var container = encoder.singleValueContainer()
+            try container.encode(UnitValue.unknown)
+        }
+    }
+}
+
 public enum AppServerThreadSourceKind: String, Codable, Equatable, Sendable {
     case cli
     case vsCode = "vscode"
@@ -264,15 +343,151 @@ public struct AppServerTurn: Equatable, Codable, Sendable {
         completedAt = try container.decodeIfPresent(Int64.self, forKey: .completedAt)
         durationMs = try container.decodeIfPresent(Int64.self, forKey: .durationMs)
     }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(items, forKey: .items)
+        try container.encode(itemsView, forKey: .itemsView)
+        try container.encode(status, forKey: .status)
+        try container.encodeNilOrValue(error, forKey: .error)
+        try container.encodeNilOrValue(startedAt, forKey: .startedAt)
+        try container.encodeNilOrValue(completedAt, forKey: .completedAt)
+        try container.encodeNilOrValue(durationMs, forKey: .durationMs)
+    }
+}
+
+public struct AppServerThreadGitInfo: Equatable, Codable, Sendable {
+    public let sha: String?
+    public let branch: String?
+    public let originURL: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case sha
+        case branch
+        case originURL = "originUrl"
+    }
+
+    public init(sha: String? = nil, branch: String? = nil, originURL: String? = nil) {
+        self.sha = sha
+        self.branch = branch
+        self.originURL = originURL
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeNilOrValue(sha, forKey: .sha)
+        try container.encodeNilOrValue(branch, forKey: .branch)
+        try container.encodeNilOrValue(originURL, forKey: .originURL)
+    }
 }
 
 public struct AppServerThread: Equatable, Codable, Sendable {
     public let id: String
+    public let sessionID: String
+    public let forkedFromID: String?
+    public let preview: String
+    public let ephemeral: Bool
+    public let modelProvider: String
+    public let createdAt: Int64
+    public let updatedAt: Int64
+    public let status: AppServerThreadStatus
+    public let path: String?
+    public let cwd: String
+    public let cliVersion: String
+    public let source: AppServerSessionSource
+    public let threadSource: ThreadSource?
+    public let agentNickname: String?
+    public let agentRole: String?
+    public let gitInfo: AppServerThreadGitInfo?
+    public let name: String?
     public var turns: [AppServerTurn]
 
-    public init(id: String, turns: [AppServerTurn]) {
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case sessionID = "sessionId"
+        case forkedFromID = "forkedFromId"
+        case preview
+        case ephemeral
+        case modelProvider
+        case createdAt
+        case updatedAt
+        case status
+        case path
+        case cwd
+        case cliVersion
+        case source
+        case threadSource
+        case agentNickname
+        case agentRole
+        case gitInfo
+        case name
+        case turns
+    }
+
+    public init(
+        id: String,
+        sessionID: String? = nil,
+        forkedFromID: String? = nil,
+        preview: String = "",
+        ephemeral: Bool = false,
+        modelProvider: String = "",
+        createdAt: Int64 = 0,
+        updatedAt: Int64 = 0,
+        status: AppServerThreadStatus = .notLoaded,
+        path: String? = nil,
+        cwd: String = "/",
+        cliVersion: String = "",
+        source: AppServerSessionSource = .vsCode,
+        threadSource: ThreadSource? = nil,
+        agentNickname: String? = nil,
+        agentRole: String? = nil,
+        gitInfo: AppServerThreadGitInfo? = nil,
+        name: String? = nil,
+        turns: [AppServerTurn]
+    ) {
         self.id = id
+        self.sessionID = sessionID ?? id
+        self.forkedFromID = forkedFromID
+        self.preview = preview
+        self.ephemeral = ephemeral
+        self.modelProvider = modelProvider
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.status = status
+        self.path = path
+        self.cwd = cwd
+        self.cliVersion = cliVersion
+        self.source = source
+        self.threadSource = threadSource
+        self.agentNickname = agentNickname
+        self.agentRole = agentRole
+        self.gitInfo = gitInfo
+        self.name = name
         self.turns = turns
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encodeNilOrValue(forkedFromID, forKey: .forkedFromID)
+        try container.encode(preview, forKey: .preview)
+        try container.encode(ephemeral, forKey: .ephemeral)
+        try container.encode(modelProvider, forKey: .modelProvider)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(status, forKey: .status)
+        try container.encodeNilOrValue(path, forKey: .path)
+        try container.encode(cwd, forKey: .cwd)
+        try container.encode(cliVersion, forKey: .cliVersion)
+        try container.encode(source, forKey: .source)
+        try container.encodeNilOrValue(threadSource, forKey: .threadSource)
+        try container.encodeNilOrValue(agentNickname, forKey: .agentNickname)
+        try container.encodeNilOrValue(agentRole, forKey: .agentRole)
+        try container.encodeNilOrValue(gitInfo, forKey: .gitInfo)
+        try container.encodeNilOrValue(name, forKey: .name)
+        try container.encode(turns, forKey: .turns)
     }
 
     public func items(forTurnID turnID: String) -> [AppServerThreadItem]? {
@@ -603,6 +818,31 @@ public struct ThreadListParams: Equatable, Codable, Sendable {
             try container.encode(useStateDBOnly, forKey: .useStateDBOnly)
         }
         try container.encodeIfPresent(searchTerm, forKey: .searchTerm)
+    }
+}
+
+public struct ThreadListResponse: Equatable, Codable, Sendable {
+    public let data: [AppServerThread]
+    public let nextCursor: String?
+    public let backwardsCursor: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case data
+        case nextCursor
+        case backwardsCursor
+    }
+
+    public init(data: [AppServerThread], nextCursor: String?, backwardsCursor: String?) {
+        self.data = data
+        self.nextCursor = nextCursor
+        self.backwardsCursor = backwardsCursor
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(data, forKey: .data)
+        try container.encodeNilOrValue(nextCursor, forKey: .nextCursor)
+        try container.encodeNilOrValue(backwardsCursor, forKey: .backwardsCursor)
     }
 }
 
@@ -1161,6 +1401,24 @@ public struct ThreadReadParams: Equatable, Codable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         threadID = try container.decode(String.self, forKey: .threadID)
         includeTurns = try container.decodeIfPresent(Bool.self, forKey: .includeTurns) ?? false
+    }
+}
+
+public struct ThreadReadResponse: Equatable, Codable, Sendable {
+    public let thread: AppServerThread
+
+    public init(thread: AppServerThread) {
+        self.thread = thread
+    }
+}
+
+private extension KeyedEncodingContainer {
+    mutating func encodeNilOrValue<Value: Encodable>(_ value: Value?, forKey key: Key) throws {
+        if let value {
+            try encode(value, forKey: key)
+        } else {
+            try encodeNil(forKey: key)
+        }
     }
 }
 

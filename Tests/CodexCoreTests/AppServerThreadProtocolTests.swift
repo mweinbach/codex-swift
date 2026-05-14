@@ -160,6 +160,134 @@ final class AppServerThreadProtocolTests: XCTestCase {
         XCTAssertTrue(decoded.useStateDBOnly)
     }
 
+    func testThreadListAndReadResponsesCarryRustThreadDataShape() throws {
+        let turn = AppServerTurn(
+            id: "turn-1",
+            items: [.agentMessage(id: "item-1", text: "Ready")],
+            itemsView: .summary,
+            status: .completed,
+            startedAt: 1_000,
+            completedAt: 1_002,
+            durationMs: 2_000
+        )
+        let thread = AppServerThread(
+            id: "thread-1",
+            sessionID: "session-1",
+            preview: "Ship parity",
+            ephemeral: false,
+            modelProvider: "openai",
+            createdAt: 900,
+            updatedAt: 1_100,
+            status: .idle,
+            path: "/Users/me/.codex/sessions/thread-1.jsonl",
+            cwd: "/repo",
+            cliVersion: "0.50.0",
+            source: .appServer,
+            threadSource: .user,
+            agentRole: "worker",
+            gitInfo: AppServerThreadGitInfo(sha: "abc123", branch: "main", originURL: nil),
+            name: "Parity slice",
+            turns: [turn]
+        )
+
+        try XCTAssertJSONObjectEqual(
+            ThreadListResponse(data: [thread], nextCursor: nil, backwardsCursor: "prev"),
+            [
+                "data": [[
+                    "id": "thread-1",
+                    "sessionId": "session-1",
+                    "forkedFromId": NSNull(),
+                    "preview": "Ship parity",
+                    "ephemeral": false,
+                    "modelProvider": "openai",
+                    "createdAt": 900,
+                    "updatedAt": 1_100,
+                    "status": [
+                        "type": "idle"
+                    ],
+                    "path": "/Users/me/.codex/sessions/thread-1.jsonl",
+                    "cwd": "/repo",
+                    "cliVersion": "0.50.0",
+                    "source": "appServer",
+                    "threadSource": "user",
+                    "agentNickname": NSNull(),
+                    "agentRole": "worker",
+                    "gitInfo": [
+                        "sha": "abc123",
+                        "branch": "main",
+                        "originUrl": NSNull()
+                    ],
+                    "name": "Parity slice",
+                    "turns": [[
+                        "id": "turn-1",
+                        "items": [[
+                            "type": "agentMessage",
+                            "id": "item-1",
+                            "text": "Ready"
+                        ]],
+                        "itemsView": "summary",
+                        "status": "completed",
+                        "error": NSNull(),
+                        "startedAt": 1_000,
+                        "completedAt": 1_002,
+                        "durationMs": 2_000
+                    ]]
+                ]],
+                "nextCursor": NSNull(),
+                "backwardsCursor": "prev"
+            ]
+        )
+
+        try XCTAssertJSONObjectEqual(ThreadReadResponse(thread: thread), [
+            "thread": [
+                "id": "thread-1",
+                "sessionId": "session-1",
+                "forkedFromId": NSNull(),
+                "preview": "Ship parity",
+                "ephemeral": false,
+                "modelProvider": "openai",
+                "createdAt": 900,
+                "updatedAt": 1_100,
+                "status": [
+                    "type": "idle"
+                ],
+                "path": "/Users/me/.codex/sessions/thread-1.jsonl",
+                "cwd": "/repo",
+                "cliVersion": "0.50.0",
+                "source": "appServer",
+                "threadSource": "user",
+                "agentNickname": NSNull(),
+                "agentRole": "worker",
+                "gitInfo": [
+                    "sha": "abc123",
+                    "branch": "main",
+                    "originUrl": NSNull()
+                ],
+                "name": "Parity slice",
+                "turns": [[
+                    "id": "turn-1",
+                    "items": [[
+                        "type": "agentMessage",
+                        "id": "item-1",
+                        "text": "Ready"
+                    ]],
+                    "itemsView": "summary",
+                    "status": "completed",
+                    "error": NSNull(),
+                    "startedAt": 1_000,
+                    "completedAt": 1_002,
+                    "durationMs": 2_000
+                ]]
+            ]
+        ])
+
+        let decodedSource = try JSONDecoder().decode(
+            AppServerSessionSource.self,
+            from: Data(#"{"custom":"atlas"}"#.utf8)
+        )
+        XCTAssertEqual(decodedSource, .custom("atlas"))
+    }
+
     func testThreadStatusRoundTripLikeRustProtocol() throws {
         try XCTAssertJSONObjectEqual(AppServerThreadStatus.notLoaded, [
             "type": "notLoaded"
@@ -236,6 +364,25 @@ final class AppServerThreadProtocolTests: XCTestCase {
             [
                 "thread": [
                     "id": "thread-1",
+                    "sessionId": "thread-1",
+                    "forkedFromId": NSNull(),
+                    "preview": "",
+                    "ephemeral": false,
+                    "modelProvider": "",
+                    "createdAt": 0,
+                    "updatedAt": 0,
+                    "status": [
+                        "type": "notLoaded"
+                    ],
+                    "path": NSNull(),
+                    "cwd": "/",
+                    "cliVersion": "",
+                    "source": "vscode",
+                    "threadSource": NSNull(),
+                    "agentNickname": NSNull(),
+                    "agentRole": NSNull(),
+                    "gitInfo": NSNull(),
+                    "name": NSNull(),
                     "turns": [
                         [
                             "id": "turn-1",
@@ -246,7 +393,11 @@ final class AppServerThreadProtocolTests: XCTestCase {
                                 ]
                             ],
                             "itemsView": "full",
-                            "status": "completed"
+                            "status": "completed",
+                            "error": NSNull(),
+                            "startedAt": NSNull(),
+                            "completedAt": NSNull(),
+                            "durationMs": NSNull()
                         ]
                     ]
                 ]

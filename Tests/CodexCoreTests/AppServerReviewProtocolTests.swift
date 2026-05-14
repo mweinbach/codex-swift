@@ -117,7 +117,10 @@ final class AppServerReviewProtocolTests: XCTestCase {
                     ],
                     "itemsView": "summary",
                     "status": "inProgress",
-                    "startedAt": 1_700_000_000_000
+                    "error": NSNull(),
+                    "startedAt": 1_700_000_000_000,
+                    "completedAt": NSNull(),
+                    "durationMs": NSNull()
                 ],
                 "reviewThreadId": "review-thread-1"
             ]
