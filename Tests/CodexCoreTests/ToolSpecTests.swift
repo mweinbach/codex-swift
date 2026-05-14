@@ -865,6 +865,34 @@ final class ToolSpecTests: XCTestCase {
         XCTAssertFalse(specs.contains { $0.spec.name == requestPluginInstallToolName })
     }
 
+    func testRequestPluginInstallDescriptionIncludesOpenAIDevelopersAllowlistedPluginLikeRust() throws {
+        let specs = ToolSpecFactory.buildSpecs(
+            config: ToolsConfig(
+                shellType: .disabled,
+                toolSuggest: true
+            ),
+            discoverableTools: [
+                .plugin(DiscoverablePluginInfo(
+                    id: "openai-developers@openai-curated",
+                    name: "OpenAI Developers",
+                    description: "Build with OpenAI APIs, Agents SDK, and ChatGPT Apps.",
+                    hasSkills: true,
+                    mcpServerNames: ["openai-developers"],
+                    appConnectorIDs: []
+                ))
+            ]
+        )
+
+        let tool = try XCTUnwrap(specs.first { $0.spec.name == requestPluginInstallToolName }?.spec)
+        guard case let .function(function) = tool else {
+            return XCTFail("expected request_plugin_install function tool")
+        }
+
+        XCTAssertTrue(function.description.contains(
+            "- OpenAI Developers (id: `openai-developers@openai-curated`, type: plugin, action: install): Build with OpenAI APIs, Agents SDK, and ChatGPT Apps."
+        ))
+    }
+
     func testRequestPluginInstallToolUsesRustDescriptionAndSchema() throws {
         let tool = ToolSpecFactory.createRequestPluginInstallTool(entries: [
             RequestPluginInstallEntry(
