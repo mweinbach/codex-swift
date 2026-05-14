@@ -2,6 +2,9 @@ import CodexCore
 import XCTest
 
 final class AppServerThreadProtocolTests: XCTestCase {
+    private let repoPath = try! AbsolutePath(absolutePath: "/repo")
+    private let agentsPath = try! AbsolutePath(absolutePath: "/repo/AGENTS.md")
+
     func testTurnDefaultsLegacyMissingItemsViewToFullLikeRustProtocol() throws {
         let json = """
         {
@@ -377,7 +380,7 @@ final class AppServerThreadProtocolTests: XCTestCase {
                 model: "gpt-5",
                 modelProvider: "mock_provider",
                 serviceTier: nil,
-                cwd: "/repo",
+                cwd: repoPath,
                 approvalPolicy: .never,
                 approvalsReviewer: .autoReview,
                 sandbox: .newWorkspaceWritePolicy(),
@@ -441,8 +444,8 @@ final class AppServerThreadProtocolTests: XCTestCase {
                 model: "gpt-5",
                 modelProvider: "mock_provider",
                 serviceTier: "priority",
-                cwd: "/repo",
-                instructionSources: ["/repo/AGENTS.md"],
+                cwd: repoPath,
+                instructionSources: [agentsPath],
                 approvalPolicy: .onRequest,
                 approvalsReviewer: .user,
                 sandbox: .readOnly,
@@ -459,8 +462,8 @@ final class AppServerThreadProtocolTests: XCTestCase {
                 model: "gpt-5",
                 modelProvider: "mock_provider",
                 serviceTier: "priority",
-                cwd: "/repo",
-                instructionSources: ["/repo/AGENTS.md"],
+                cwd: repoPath,
+                instructionSources: [agentsPath],
                 approvalPolicy: .onRequest,
                 approvalsReviewer: .user,
                 sandbox: .readOnly,
@@ -470,6 +473,54 @@ final class AppServerThreadProtocolTests: XCTestCase {
             ),
             expectedConfiguredRuntime
         )
+    }
+
+    func testThreadRuntimeResponsesRejectRelativeCwdAndInstructionSourcesLikeRustAbsolutePathBuf() throws {
+        let baseResponse = """
+        {
+          "thread": {
+            "id": "thread_123",
+            "archived": false,
+            "source": "user",
+            "metadata": {
+              "createdAt": "2026-05-14T00:00:00Z",
+              "updatedAt": "2026-05-14T00:00:00Z",
+              "git": null
+            },
+            "turns": []
+          },
+          "model": "gpt-5",
+          "modelProvider": "mock_provider",
+          "serviceTier": null,
+          "approvalPolicy": "never",
+          "approvalsReviewer": "guardian_subagent",
+          "sandbox": {
+            "type": "read-only"
+          },
+          "permissionProfile": null,
+          "activePermissionProfile": null,
+          "reasoningEffort": null
+        }
+        """
+        let baseObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(baseResponse.utf8)) as? [String: Any]
+        )
+
+        func payload(cwd: String = "/repo", instructionSources: [String] = []) throws -> Data {
+            var object = baseObject
+            object["cwd"] = cwd
+            object["instructionSources"] = instructionSources
+            return try JSONSerialization.data(withJSONObject: object)
+        }
+
+        XCTAssertThrowsError(try JSONDecoder().decode(ThreadStartResponse.self, from: try payload(cwd: "repo")))
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                ThreadResumeResponse.self,
+                from: try payload(instructionSources: ["AGENTS.md"])
+            )
+        )
+        XCTAssertThrowsError(try JSONDecoder().decode(ThreadForkResponse.self, from: try payload(cwd: "repo")))
     }
 
     func testThreadStatusRoundTripLikeRustProtocol() throws {

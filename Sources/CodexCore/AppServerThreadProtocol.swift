@@ -632,8 +632,8 @@ public struct ThreadStartResponse: Equatable, Codable, Sendable {
     public let model: String
     public let modelProvider: String
     public let serviceTier: String?
-    public let cwd: String
-    public let instructionSources: [String]
+    public let cwd: AbsolutePath
+    public let instructionSources: [AbsolutePath]
     public let approvalPolicy: AskForApproval
     public let approvalsReviewer: ApprovalsReviewer
     public let sandbox: SandboxPolicy
@@ -661,8 +661,8 @@ public struct ThreadStartResponse: Equatable, Codable, Sendable {
         model: String,
         modelProvider: String,
         serviceTier: String?,
-        cwd: String,
-        instructionSources: [String] = [],
+        cwd: AbsolutePath,
+        instructionSources: [AbsolutePath] = [],
         approvalPolicy: AskForApproval,
         approvalsReviewer: ApprovalsReviewer,
         sandbox: SandboxPolicy,
@@ -706,8 +706,8 @@ public struct ThreadResumeResponse: Equatable, Codable, Sendable {
     public let model: String
     public let modelProvider: String
     public let serviceTier: String?
-    public let cwd: String
-    public let instructionSources: [String]
+    public let cwd: AbsolutePath
+    public let instructionSources: [AbsolutePath]
     public let approvalPolicy: AskForApproval
     public let approvalsReviewer: ApprovalsReviewer
     public let sandbox: SandboxPolicy
@@ -735,8 +735,8 @@ public struct ThreadResumeResponse: Equatable, Codable, Sendable {
         model: String,
         modelProvider: String,
         serviceTier: String?,
-        cwd: String,
-        instructionSources: [String] = [],
+        cwd: AbsolutePath,
+        instructionSources: [AbsolutePath] = [],
         approvalPolicy: AskForApproval,
         approvalsReviewer: ApprovalsReviewer,
         sandbox: SandboxPolicy,
@@ -780,8 +780,8 @@ public struct ThreadForkResponse: Equatable, Codable, Sendable {
     public let model: String
     public let modelProvider: String
     public let serviceTier: String?
-    public let cwd: String
-    public let instructionSources: [String]
+    public let cwd: AbsolutePath
+    public let instructionSources: [AbsolutePath]
     public let approvalPolicy: AskForApproval
     public let approvalsReviewer: ApprovalsReviewer
     public let sandbox: SandboxPolicy
@@ -809,8 +809,8 @@ public struct ThreadForkResponse: Equatable, Codable, Sendable {
         model: String,
         modelProvider: String,
         serviceTier: String?,
-        cwd: String,
-        instructionSources: [String] = [],
+        cwd: AbsolutePath,
+        instructionSources: [AbsolutePath] = [],
         approvalPolicy: AskForApproval,
         approvalsReviewer: ApprovalsReviewer,
         sandbox: SandboxPolicy,
