@@ -99,6 +99,79 @@ final class ProtocolConfigTypesTests: XCTestCase {
         ])
     }
 
+    func testCollaborationModeMaskCanClearOptionalFieldsLikeRust() {
+        let mode = CollaborationMode(
+            mode: .defaultMode,
+            settings: CollaborationModeSettings(
+                model: "gpt-5.2-codex",
+                reasoningEffort: .high,
+                developerInstructions: "stay focused"
+            )
+        )
+        let mask = CollaborationModeMask(
+            name: "Clear",
+            reasoningEffort: .clear,
+            developerInstructions: .clear
+        )
+
+        XCTAssertEqual(mode.applying(mask), CollaborationMode(
+            mode: .defaultMode,
+            settings: CollaborationModeSettings(model: "gpt-5.2-codex")
+        ))
+    }
+
+    func testCollaborationModeMaskDecodeDistinguishesMissingNullAndValuesLikeRust() throws {
+        let missing = try JSONDecoder().decode(CollaborationModeMask.self, from: Data(#"""
+        {
+          "name": "Keep"
+        }
+        """#.utf8))
+        XCTAssertEqual(missing.reasoningEffort, .preserve)
+        XCTAssertEqual(missing.developerInstructions, .preserve)
+
+        let clearing = try JSONDecoder().decode(CollaborationModeMask.self, from: Data(#"""
+        {
+          "name": "Clear",
+          "reasoning_effort": null,
+          "developer_instructions": null
+        }
+        """#.utf8))
+        XCTAssertEqual(clearing.reasoningEffort, .clear)
+        XCTAssertEqual(clearing.developerInstructions, .clear)
+
+        let setting = try JSONDecoder().decode(CollaborationModeMask.self, from: Data(#"""
+        {
+          "name": "Set",
+          "mode": "plan",
+          "model": "gpt-5.4",
+          "reasoning_effort": "medium",
+          "developer_instructions": "plan first"
+        }
+        """#.utf8))
+        XCTAssertEqual(setting.mode, .plan)
+        XCTAssertEqual(setting.model, "gpt-5.4")
+        XCTAssertEqual(setting.reasoningEffort, .set(.medium))
+        XCTAssertEqual(setting.developerInstructions, .set("plan first"))
+    }
+
+    func testCollaborationModeMaskEncodesRustWireShape() throws {
+        let mask = CollaborationModeMask(
+            name: "Set",
+            mode: .plan,
+            model: "gpt-5.4",
+            reasoningEffort: .set(.medium),
+            developerInstructions: .clear
+        )
+
+        try XCTAssertJSONObjectEqual(mask, [
+            "name": "Set",
+            "mode": "plan",
+            "model": "gpt-5.4",
+            "reasoning_effort": "medium",
+            "developer_instructions": NSNull()
+        ])
+    }
+
     private func encode<T: Encodable>(_ value: T) throws -> String {
         String(data: try JSONEncoder().encode(value), encoding: .utf8)!
     }

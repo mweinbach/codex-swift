@@ -16416,7 +16416,7 @@ public enum CodexAppServer {
                     "name": preset.name,
                     "mode": preset.mode?.rawValue as Any? ?? NSNull(),
                     "model": preset.model as Any? ?? NSNull(),
-                    "reasoning_effort": preset.reasoningEffort?.rawValue as Any? ?? NSNull()
+                    "reasoning_effort": preset.reasoningEffort.value?.rawValue as Any? ?? NSNull()
                 ]
             }
         ]

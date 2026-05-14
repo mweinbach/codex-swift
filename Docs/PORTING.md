@@ -67,6 +67,7 @@ Recent upstream audit checkpoint:
   - Rust external tags for `New`, `Cleared`, `Resumed`, and `Forked`, rollout item/event extraction, and nullable `rollout_path` encoding/decoding for resumed histories
 - `codex-rs/protocol/src/config_types.rs`
   - reasoning summary, verbosity, forced login method, trust level, and sandbox mode wire values
+  - collaboration-mode masks now preserve Rust's optional-setting semantics for `reasoning_effort` and `developer_instructions`, distinguishing omitted preserve values from explicit `null` clears when decoding and applying masks.
 - `codex-rs/protocol/src/openai_models.rs`
   - reasoning effort wire values needed by config summaries
   - model metadata and `/models` response wire shapes, picker visibility, client version arrays, server truncation config, structured upgrade migration markdown, and remote `ModelInfo` to `ModelPreset` conversion
