@@ -20254,7 +20254,7 @@ public enum CodexAppServer {
         stringParam(value).flatMap(SandboxMode.init(rawValue:))
     }
 
-    private static func v2UserInputs(_ value: Any?) -> (text: String, images: [String]?) {
+    fileprivate static func v2UserInputs(_ value: Any?) -> (text: String, images: [String]?) {
         let input = v2UserInput(value)
         return (input.text, input.images)
     }
@@ -24482,11 +24482,26 @@ private final class AppServerCancellableLoginRegistry: @unchecked Sendable {
 final class CodexAppServerMessageProcessor: @unchecked Sendable {
     private struct ThreadAnalyticsMetadata {
         let modelSlug: String
+        let modelProvider: String
         let cwd: URL
         let approvalPolicy: AskForApproval?
+        let approvalsReviewer: String
+        let serviceTier: String
+        let sandboxPolicy: String?
+        let sandboxNetworkAccess: Bool
+        let reasoningEffort: String?
+        let reasoningSummary: String?
+        let collaborationMode: String?
+        let personality: String?
+        let ephemeral: Bool
+        let initializationMode: ThreadInitializationMode
         let threadSource: ThreadSource?
         let subagentSource: String?
         let parentThreadID: String?
+    }
+
+    private struct RuntimeTurnAnalyticsSeed {
+        var fact: CodexTurnAnalyticsFact
     }
 
     private struct FeaturedPluginIDsCache {
@@ -24524,6 +24539,10 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
     private var activeTurnIDs: [String: String] = [:]
     private var runtimeTurnStartedAt: [String: [String: Int64]] = [:]
     private var runtimeTurnErrors: [String: [String: [String: Any]]] = [:]
+    private var runtimeTurnErrorInfos: [String: [String: CodexErrorInfo]] = [:]
+    private var runtimeTurnTokenUsage: [String: [String: TokenUsage]] = [:]
+    private var runtimeTurnAnalyticsSeeds: [String: [String: RuntimeTurnAnalyticsSeed]] = [:]
+    private var runtimeTurnAnalyticsStartCounts: [String: Int] = [:]
     private var runtimePendingApprovalCounts: [String: Int] = [:]
     private var runtimePendingUserInputCounts: [String: Int] = [:]
     private var runtimeSystemErrorThreadIDs: Set<String> = []
@@ -24834,22 +24853,168 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         return ephemeralThreadSnapshots[threadID]
     }
 
-    private func rememberThreadAnalyticsMetadata(threadID: String, result: [String: Any]) {
+    private func rememberThreadAnalyticsMetadata(
+        threadID: String,
+        result: [String: Any],
+        initializationMode: ThreadInitializationMode
+    ) {
         guard let modelSlug = CodexAppServer.stringParam(result["model"]),
               let cwd = CodexAppServer.stringParam(result["cwd"])
         else {
             return
         }
+        let thread = result["thread"] as? [String: Any]
+        let sandbox = Self.analyticsSandbox(result["sandbox"])
         threadAnalyticsMetadata[threadID] = ThreadAnalyticsMetadata(
             modelSlug: modelSlug,
+            modelProvider: CodexAppServer.stringParam(result["modelProvider"]) ?? configuration.defaultModelProvider,
             cwd: URL(fileURLWithPath: cwd, isDirectory: true),
             approvalPolicy: (result["approvalPolicy"] as? String).flatMap(AskForApproval.init(rawValue:)),
-            threadSource: (result["thread"] as? [String: Any])
+            approvalsReviewer: CodexAppServer.stringParam(result["approvalsReviewer"]) ?? ApprovalsReviewer.user.appServerRawValue,
+            serviceTier: CodexAppServer.stringParam(result["serviceTier"]) ?? "default",
+            sandboxPolicy: sandbox.policy,
+            sandboxNetworkAccess: sandbox.networkAccess,
+            reasoningEffort: CodexAppServer.stringParam(result["reasoningEffort"]),
+            reasoningSummary: nil,
+            collaborationMode: "default",
+            personality: nil,
+            ephemeral: (thread?["ephemeral"] as? Bool) ?? false,
+            initializationMode: initializationMode,
+            threadSource: thread
                 .flatMap { CodexAppServer.stringParam($0["threadSource"]) }
                 .flatMap(ThreadSource.init(rawValue:)),
             subagentSource: Self.analyticsSubagentSource(configuration.sessionSource),
             parentThreadID: Self.analyticsParentThreadID(configuration.sessionSource)
         )
+    }
+
+    private static func analyticsSandbox(_ raw: Any?) -> (policy: String?, networkAccess: Bool) {
+        guard let object = raw as? [String: Any],
+              let type = CodexAppServer.stringParam(object["type"])
+        else {
+            return (nil, false)
+        }
+        switch type {
+        case "dangerFullAccess":
+            return ("full_access", true)
+        case "externalSandbox":
+            let networkAccess = CodexAppServer.stringParam(object["networkAccess"]) == NetworkAccess.enabled.rawValue
+            return ("external_sandbox", networkAccess)
+        case "workspaceWrite":
+            return ("workspace_write", CodexAppServer.boolParam(object["networkAccess"], defaultValue: false))
+        case "readOnly":
+            return ("read_only", CodexAppServer.boolParam(object["networkAccess"], defaultValue: false))
+        default:
+            return (type, CodexAppServer.boolParam(object["networkAccess"], defaultValue: false))
+        }
+    }
+
+    private func recordTurnStartForAnalytics(threadID: String, turnID: String, params: [String: Any]?) {
+        guard let metadata = threadAnalyticsMetadata[threadID] else {
+            return
+        }
+        let input = CodexAppServer.v2UserInputs(params?["input"])
+        let priorTurnCount = runtimeTurnAnalyticsStartCounts[threadID] ?? 0
+        runtimeTurnAnalyticsStartCounts[threadID] = priorTurnCount + 1
+        let serviceTier = CodexAppServer.stringParam(params?["serviceTier"]) ?? metadata.serviceTier
+        let reasoningSummary = CodexAppServer.stringParam(params?["summary"]) ?? metadata.reasoningSummary
+        let personality = CodexAppServer.stringParam(params?["personality"]) ?? metadata.personality
+        runtimeTurnAnalyticsSeeds[threadID, default: [:]][turnID] = RuntimeTurnAnalyticsSeed(
+            fact: CodexTurnAnalyticsFact(
+                threadID: threadID,
+                turnID: turnID,
+                submissionType: .default,
+                ephemeral: metadata.ephemeral,
+                threadSource: metadata.threadSource,
+                initializationMode: metadata.initializationMode,
+                subagentSource: metadata.subagentSource,
+                parentThreadID: metadata.parentThreadID,
+                model: CodexAppServer.stringParam(params?["model"]) ?? metadata.modelSlug,
+                modelProvider: CodexAppServer.stringParam(params?["modelProvider"]) ?? metadata.modelProvider,
+                sandboxPolicy: metadata.sandboxPolicy,
+                reasoningEffort: CodexAppServer.stringParam(params?["effort"]) ?? metadata.reasoningEffort,
+                reasoningSummary: Self.analyticsNonDefaultMode(reasoningSummary),
+                serviceTier: serviceTier.isEmpty ? "default" : serviceTier,
+                approvalPolicy: CodexAppServer.stringParam(params?["approvalPolicy"])
+                    ?? metadata.approvalPolicy?.rawValue
+                    ?? AskForApproval.unlessTrusted.rawValue,
+                approvalsReviewer: CodexAppServer.stringParam(params?["approvalsReviewer"])
+                    ?? metadata.approvalsReviewer,
+                sandboxNetworkAccess: metadata.sandboxNetworkAccess,
+                collaborationMode: metadata.collaborationMode,
+                personality: Self.analyticsNonDefaultMode(personality),
+                numInputImages: UInt64(input.images?.count ?? 0),
+                isFirstTurn: priorTurnCount == 0,
+                steerCount: 0
+            )
+        )
+    }
+
+    private static func analyticsNonDefaultMode(_ value: String?) -> String? {
+        guard let value, !value.isEmpty, value != "none" else {
+            return nil
+        }
+        return value
+    }
+
+    private static func analyticsTimestamp(_ value: Int64?) -> UInt64? {
+        guard let value, value >= 0 else {
+            return nil
+        }
+        return UInt64(value)
+    }
+
+    private func trackTurnEventForAnalytics(
+        threadID: String,
+        turnID: String,
+        status: CodexTurnStatus,
+        turnError: CodexErrorInfo?,
+        startedAt: Int64?,
+        completedAt: Int64?,
+        durationMilliseconds: Int64?
+    ) {
+        guard let seed = runtimeTurnAnalyticsSeeds[threadID]?[turnID] else {
+            return
+        }
+        let client = codexToolItemAnalyticsClient
+        let context = analyticsContext(threadID: threadID)
+        let base = seed.fact
+        let fact = CodexTurnAnalyticsFact(
+            threadID: base.threadID,
+            turnID: base.turnID,
+            submissionType: base.submissionType,
+            ephemeral: base.ephemeral,
+            threadSource: base.threadSource,
+            initializationMode: base.initializationMode,
+            subagentSource: base.subagentSource,
+            parentThreadID: base.parentThreadID,
+            model: base.model,
+            modelProvider: base.modelProvider,
+            sandboxPolicy: base.sandboxPolicy,
+            reasoningEffort: base.reasoningEffort,
+            reasoningSummary: base.reasoningSummary,
+            serviceTier: base.serviceTier,
+            approvalPolicy: base.approvalPolicy,
+            approvalsReviewer: base.approvalsReviewer,
+            sandboxNetworkAccess: base.sandboxNetworkAccess,
+            collaborationMode: base.collaborationMode,
+            personality: base.personality,
+            numInputImages: base.numInputImages,
+            isFirstTurn: base.isFirstTurn,
+            status: status,
+            turnError: turnError,
+            steerCount: base.steerCount,
+            tokenUsage: runtimeTurnTokenUsage[threadID]?[turnID],
+            durationMilliseconds: Self.analyticsTimestamp(durationMilliseconds),
+            startedAt: Self.analyticsTimestamp(startedAt),
+            completedAt: Self.analyticsTimestamp(completedAt)
+        )
+        runtimeTurnAnalyticsSeeds[threadID]?[turnID] = nil
+        runtimeTurnTokenUsage[threadID]?[turnID] = nil
+        runtimeTurnErrorInfos[threadID]?[turnID] = nil
+        _ = try? CodexAppServer.runAsyncBlocking {
+            await client.trackTurn(fact, context: context)
+        }
     }
 
     private static func analyticsSubagentSource(_ sessionSource: SessionSource) -> String? {
@@ -25113,6 +25278,36 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                 runtimeTurnStartedAt[threadID, default: [:]][runtimeTurnID] = startedAt
             }
             runtimeTurnErrors[threadID]?[runtimeTurnID] = nil
+            runtimeTurnErrorInfos[threadID]?[runtimeTurnID] = nil
+            if let collaborationMode = event.collaborationModeKind?.rawValue,
+               var seed = runtimeTurnAnalyticsSeeds[threadID]?[runtimeTurnID] {
+                let base = seed.fact
+                seed.fact = CodexTurnAnalyticsFact(
+                    threadID: base.threadID,
+                    turnID: base.turnID,
+                    submissionType: base.submissionType,
+                    ephemeral: base.ephemeral,
+                    threadSource: base.threadSource,
+                    initializationMode: base.initializationMode,
+                    subagentSource: base.subagentSource,
+                    parentThreadID: base.parentThreadID,
+                    model: base.model,
+                    modelProvider: base.modelProvider,
+                    sandboxPolicy: base.sandboxPolicy,
+                    reasoningEffort: base.reasoningEffort,
+                    reasoningSummary: base.reasoningSummary,
+                    serviceTier: base.serviceTier,
+                    approvalPolicy: base.approvalPolicy,
+                    approvalsReviewer: base.approvalsReviewer,
+                    sandboxNetworkAccess: base.sandboxNetworkAccess,
+                    collaborationMode: collaborationMode,
+                    personality: base.personality,
+                    numInputImages: base.numInputImages,
+                    isFirstTurn: base.isFirstTurn,
+                    steerCount: base.steerCount
+                )
+                runtimeTurnAnalyticsSeeds[threadID]?[runtimeTurnID] = seed
+            }
             notifications = [
                 threadStatusChangedNotification(
                     threadID: threadID,
@@ -25128,6 +25323,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             let runtimeTurnID = event.turnID
             let startedAt = runtimeTurnStartedAt[threadID]?[runtimeTurnID]
             let error = runtimeTurnErrors[threadID]?[runtimeTurnID]
+            let errorInfo = runtimeTurnErrorInfos[threadID]?[runtimeTurnID]
             runtimeTurnStartedAt[threadID]?[runtimeTurnID] = nil
             runtimeTurnErrors[threadID]?[runtimeTurnID] = nil
             clearRuntimePendingActiveFlags(threadID: threadID)
@@ -25150,11 +25346,21 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             ].compactMap(\.self)
             beforeNotifications = drainPendingInterruptResponseEnvelopes(threadID: threadID)
             trackTurnCompletedForAnalytics(turnID: runtimeTurnID)
+            trackTurnEventForAnalytics(
+                threadID: threadID,
+                turnID: runtimeTurnID,
+                status: errorInfo == nil ? .completed : .failed,
+                turnError: errorInfo,
+                startedAt: startedAt,
+                completedAt: event.completedAt,
+                durationMilliseconds: event.durationMilliseconds
+            )
         case let .turnAborted(event):
             let runtimeTurnID = event.turnID ?? turnID
             let startedAt = runtimeTurnStartedAt[threadID]?[runtimeTurnID]
             runtimeTurnStartedAt[threadID]?[runtimeTurnID] = nil
             runtimeTurnErrors[threadID]?[runtimeTurnID] = nil
+            runtimeTurnErrorInfos[threadID]?[runtimeTurnID] = nil
             clearRuntimePendingActiveFlags(threadID: threadID)
             if activeTurnIDs[threadID] == runtimeTurnID {
                 activeTurnIDs[threadID] = nil
@@ -25174,6 +25380,15 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             ].compactMap(\.self)
             beforeNotifications = drainPendingInterruptResponseEnvelopes(threadID: threadID)
             trackTurnCompletedForAnalytics(turnID: runtimeTurnID)
+            trackTurnEventForAnalytics(
+                threadID: threadID,
+                turnID: runtimeTurnID,
+                status: .interrupted,
+                turnError: nil,
+                startedAt: startedAt,
+                completedAt: nil,
+                durationMilliseconds: nil
+            )
         case let .error(event):
             var projected = CodexAppServer.runtimeEventNotifications(
                 threadID: threadID,
@@ -25196,9 +25411,19 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                     codexErrorInfo: event.codexErrorInfo,
                     additionalDetails: nil
                 )
+                runtimeTurnErrorInfos[threadID, default: [:]][turnID] = event.codexErrorInfo ?? .other
             }
             runtimeSystemErrorThreadIDs.insert(threadID)
             notifications = projected
+        case let .tokenCount(event):
+            if let info = event.info {
+                runtimeTurnTokenUsage[threadID, default: [:]][turnID] = info.lastTokenUsage
+            }
+            notifications = CodexAppServer.runtimeEventNotifications(
+                threadID: threadID,
+                turnID: turnID,
+                event: .tokenCount(event)
+            )
         case let .applyPatchApprovalRequest(event):
             notifications = [
                 markRuntimeApprovalRequested(threadID: threadID)
@@ -25749,6 +25974,9 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             || runtimeCommandExecutionStarted[threadID] != nil
             || runtimeTurnStartedAt[threadID] != nil
             || runtimeTurnErrors[threadID] != nil
+            || runtimeTurnErrorInfos[threadID] != nil
+            || runtimeTurnTokenUsage[threadID] != nil
+            || runtimeTurnAnalyticsSeeds[threadID] != nil
             || pendingRollbackRequests[threadID] != nil
         let manager = threadStateManager
         let wasLoaded = (try? CodexAppServer.runAsyncBlocking {
@@ -25761,6 +25989,10 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         runtimeCommandExecutionStarted.removeValue(forKey: threadID)
         runtimeTurnStartedAt.removeValue(forKey: threadID)
         runtimeTurnErrors.removeValue(forKey: threadID)
+        runtimeTurnErrorInfos.removeValue(forKey: threadID)
+        runtimeTurnTokenUsage.removeValue(forKey: threadID)
+        runtimeTurnAnalyticsSeeds.removeValue(forKey: threadID)
+        runtimeTurnAnalyticsStartCounts.removeValue(forKey: threadID)
         liveMcpManagers.removeValue(forKey: threadID)
         pendingRollbackRequests.removeValue(forKey: threadID)
         pendingInterruptResponseIDs.removeValue(forKey: threadID)
@@ -26780,7 +27012,11 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                                 ephemeralThreadIDs.insert(threadID)
                                 ephemeralThreadSnapshots[threadID] = thread
                             }
-                            rememberThreadAnalyticsMetadata(threadID: threadID, result: result)
+                            rememberThreadAnalyticsMetadata(
+                                threadID: threadID,
+                                result: result,
+                                initializationMode: .new
+                            )
                             subscribeCurrentConnection(toThreadID: threadID)
                         }
                         if let notification = threadStartedNotification(thread: thread) {
@@ -26881,7 +27117,11 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                     if let thread = result["thread"] as? [String: Any],
                        let threadID = thread["id"] as? String {
                         pendingSessionStartSources[threadID] = .resume
-                        rememberThreadAnalyticsMetadata(threadID: threadID, result: result)
+                        rememberThreadAnalyticsMetadata(
+                            threadID: threadID,
+                            result: result,
+                            initializationMode: .resumed
+                        )
                         subscribeCurrentConnection(toThreadID: threadID)
                         if let notification = try CodexAppServer.restoredTokenUsageNotification(thread: thread) {
                             notifications.append(notification)
@@ -26912,7 +27152,11 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                     if let thread = result["thread"] as? [String: Any] {
                         if let threadID = thread["id"] as? String {
                             pendingSessionStartSources[threadID] = .startup
-                            rememberThreadAnalyticsMetadata(threadID: threadID, result: result)
+                            rememberThreadAnalyticsMetadata(
+                                threadID: threadID,
+                                result: result,
+                                initializationMode: .forked
+                            )
                             subscribeCurrentConnection(toThreadID: threadID)
                         }
                         if let notification = try CodexAppServer.restoredTokenUsageNotification(thread: thread) {
@@ -26951,6 +27195,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                         if activeTurnIDs[coreOp.threadID] == nil {
                             activeTurnIDs[coreOp.threadID] = turnID
                         }
+                        recordTurnStartForAnalytics(threadID: coreOp.threadID, turnID: turnID, params: params)
                         maybeStartMemoryStartupTask(threadID: coreOp.threadID, hasInput: coreOp.hasInput)
                         let turn = CodexAppServer.inProgressTurnObject(id: turnID)
                         response = CodexAppServer.responseObject(id: id, result: ["turn": turn])
@@ -26979,6 +27224,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                         pendingSessionStartSources.removeValue(forKey: threadID)
                         if let turnID = turn["id"] as? String {
                             activeTurnIDs[threadID] = turnID
+                            recordTurnStartForAnalytics(threadID: threadID, turnID: turnID, params: params)
                         }
                         maybeStartMemoryStartupTask(threadID: threadID, hasInput: outcome.hasInput)
                         trackResolvedTurnForAnalytics(threadID: threadID, turn: turn)

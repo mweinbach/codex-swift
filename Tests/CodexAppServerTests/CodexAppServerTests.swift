@@ -4811,6 +4811,97 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(commandEvent.eventParams.base.parentThreadID, parentThreadID.description)
     }
 
+    func testRuntimeTurnAnalyticsUploadsOnTurnCompletionLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let analyticsUploader = AppServerRecordingCodexAnalyticsUploader()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                cwd: cwd.url,
+                codexAnalyticsUploader: analyticsUploader
+            )
+        )
+
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"model":"mock-model","modelProvider":"mock_provider","threadSource":"user","cwd":"\#(cwd.url.path)","sandbox":"read-only"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let turnMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"image","url":"https://example.com/a.png"}]}}"#.utf8
+        )))
+        let turnResult = try XCTUnwrap(turnMessages[0]["result"] as? [String: Any])
+        let turn = try XCTUnwrap(turnResult["turn"] as? [String: Any])
+        let turnID = try XCTUnwrap(turn["id"] as? String)
+
+        await processor.handleRuntimeEvent(
+            threadID: threadID,
+            turnID: turnID,
+            event: .taskStarted(TaskStartedEvent(
+                turnID: turnID,
+                startedAt: 1_000,
+                modelContextWindow: nil
+            ))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: threadID,
+            turnID: turnID,
+            event: .tokenCount(TokenCountEvent(
+                info: TokenUsageInfo(
+                    totalTokenUsage: TokenUsage(),
+                    lastTokenUsage: TokenUsage(),
+                    modelContextWindow: nil
+                ),
+                rateLimits: nil
+            ))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: threadID,
+            turnID: turnID,
+            event: .taskComplete(TaskCompleteEvent(
+                turnID: turnID,
+                lastAgentMessage: nil,
+                completedAt: 1_250,
+                durationMilliseconds: 250
+            ))
+        )
+
+        let analyticsRequests = await analyticsUploader.requests
+        XCTAssertEqual(analyticsRequests.count, 1)
+        let analyticsEvent = try XCTUnwrap(analyticsRequests.first?.events.first)
+        guard case let .turnEvent(turnEvent) = analyticsEvent else {
+            return XCTFail("expected turn analytics event")
+        }
+        let params = turnEvent.eventParams
+        XCTAssertEqual(params.threadID, threadID)
+        XCTAssertEqual(params.turnID, turnID)
+        XCTAssertEqual(params.submissionType, .default)
+        XCTAssertEqual(params.appServerClient.productClientID, "codex_swift")
+        XCTAssertEqual(params.model, "mock-model")
+        XCTAssertEqual(params.modelProvider, "mock_provider")
+        XCTAssertEqual(params.sandboxPolicy, "read_only")
+        XCTAssertFalse(params.ephemeral)
+        XCTAssertEqual(params.threadSource, .user)
+        XCTAssertEqual(params.initializationMode, .new)
+        XCTAssertNil(params.subagentSource)
+        XCTAssertNil(params.parentThreadID)
+        XCTAssertEqual(params.numInputImages, 1)
+        XCTAssertTrue(params.isFirstTurn)
+        XCTAssertEqual(params.status, .completed)
+        XCTAssertNil(params.turnError)
+        XCTAssertEqual(params.startedAt, 1_000)
+        XCTAssertEqual(params.completedAt, 1_250)
+        XCTAssertEqual(params.durationMilliseconds, 250)
+        XCTAssertEqual(params.inputTokens, 0)
+        XCTAssertEqual(params.cachedInputTokens, 0)
+        XCTAssertEqual(params.outputTokens, 0)
+        XCTAssertEqual(params.reasoningOutputTokens, 0)
+        XCTAssertEqual(params.totalTokens, 0)
+    }
+
     func testRuntimeExecCommandEndWithoutBeginIsSuppressedLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()
