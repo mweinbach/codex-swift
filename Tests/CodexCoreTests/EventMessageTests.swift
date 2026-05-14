@@ -249,6 +249,21 @@ final class EventMessageTests: XCTestCase {
         """#.utf8)
         XCTAssertThrowsError(try JSONDecoder().decode(EventMessage.self, from: relativeCwd))
 
+        let missingRequestPermissionsTiming = Data(#"""
+        {
+          "type": "request_permissions",
+          "call_id": "perm-legacy",
+          "permissions": { "network": { "enabled": true } }
+        }
+        """#.utf8)
+        XCTAssertEqual(
+            try JSONDecoder().decode(EventMessage.self, from: missingRequestPermissionsTiming),
+            .requestPermissions(RequestPermissionsEvent(
+                callID: "perm-legacy",
+                permissions: RequestPermissionProfile(network: RequestPermissionNetworkPermissions(enabled: true))
+            ))
+        )
+
         let userInput = EventMessage.requestUserInput(RequestUserInputEvent(
             callID: "input-1",
             turnID: "turn-1",

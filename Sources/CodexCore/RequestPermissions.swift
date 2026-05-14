@@ -2419,7 +2419,7 @@ public struct RequestPermissionsEvent: Codable, Equatable, Sendable {
     public init(
         callID: String,
         turnID: String = "",
-        startedAtMilliseconds: Int64,
+        startedAtMilliseconds: Int64 = 0,
         reason: String? = nil,
         permissions: RequestPermissionProfile,
         cwd: AbsolutePath? = nil
@@ -2436,7 +2436,7 @@ public struct RequestPermissionsEvent: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         callID = try container.decode(String.self, forKey: .callID)
         turnID = try container.decodeIfPresent(String.self, forKey: .turnID) ?? ""
-        startedAtMilliseconds = try container.decode(Int64.self, forKey: .startedAtMilliseconds)
+        startedAtMilliseconds = try container.decodeIfPresent(Int64.self, forKey: .startedAtMilliseconds) ?? 0
         reason = try container.decodeIfPresent(String.self, forKey: .reason)
         permissions = try container.decode(RequestPermissionProfile.self, forKey: .permissions)
         cwd = try container.decodeIfPresent(AbsolutePath.self, forKey: .cwd)

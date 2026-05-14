@@ -12,6 +12,7 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-14: rechecked Rust commit `99016ec732` and `codex-rs/protocol/src/request_permissions.rs`. Swift `RequestPermissionsEvent` now preserves Rust's backwards-compatible default for missing `started_at_ms`, decoding older rollout/request-permission events as `0` instead of rejecting them.
 - 2026-05-14: rechecked Rust commit `78baa20780` and the legacy `notify` deprecation path in `codex-rs/core/src/session/session.rs`. Swift app-server initialization now emits Rust's `deprecationNotice` for non-empty legacy `notify` commands while leaving empty arrays or empty executable strings quiet.
 - 2026-05-14: rechecked Rust `codex-rs/model-provider-info/src/lib.rs` / `model_provider_info_tests.rs` provider defaults. Swift `ModelProviderInfo` now defaults missing `wire_api` fields to `responses` like Rust while keeping explicit built-in OSS helpers on their Rust-selected wire APIs.
 - 2026-05-14: rechecked Rust commit `772e034594` and `codex-rs/models-manager/models.json`. Swift's bundled `gpt-5.4` model preset now has focused coverage for Rust's removal of the `ultrafast` service tier while retaining the legacy `fast` additional-speed tier.
