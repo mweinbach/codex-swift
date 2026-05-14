@@ -42,6 +42,16 @@ public enum ConfigLockfileError: Error, Equatable, CustomStringConvertible, Send
 }
 
 public enum ConfigLockfileStore {
+    public static func renderConfigLockfile(_ lockfile: ConfigLockfile) -> String {
+        let config = ConfigTomlRenderer.render(.table(["config": lockfile.config]))
+        return [
+            "version = \(lockfile.version)",
+            "codex_version = \(tomlString(lockfile.codexVersion))",
+            "",
+            config.trimmingCharacters(in: .newlines)
+        ].joined(separator: "\n") + "\n"
+    }
+
     public static func readConfigLockfile(from path: String, fileManager: FileManager = .default) throws -> ConfigLockfile {
         let contents: String
         do {
@@ -66,6 +76,32 @@ public enum ConfigLockfileStore {
         }
         try validateMetadataShape(lockfile)
         return lockfile
+    }
+
+    @discardableResult
+    public static func exportConfigLockfile(
+        _ lockfile: ConfigLockfile,
+        to exportDir: URL,
+        threadID: ThreadId,
+        fileManager: FileManager = .default
+    ) throws -> URL {
+        do {
+            try fileManager.createDirectory(at: exportDir, withIntermediateDirectories: true)
+        } catch {
+            throw ConfigLockfileError.invalidLockfile(
+                "failed to create config lock export directory \(exportDir.path): \(error)"
+            )
+        }
+
+        let path = exportDir.appendingPathComponent("\(threadID).config.lock.toml", isDirectory: false)
+        do {
+            try renderConfigLockfile(lockfile).write(to: path, atomically: true, encoding: .utf8)
+        } catch {
+            throw ConfigLockfileError.invalidLockfile(
+                "failed to write config lock to \(path.path): \(error)"
+            )
+        }
+        return path
     }
 
     public static func parseConfigLockfile(_ contents: String) throws -> ConfigLockfile {
@@ -170,11 +206,15 @@ public enum ConfigLockfileStore {
     }
 
     private static func renderedLockfile(_ lockfile: ConfigLockfile) -> String {
-        ConfigTomlRenderer.render(.table([
-            "version": .integer(Int64(lockfile.version)),
-            "codex_version": .string(lockfile.codexVersion),
-            "config": lockfile.config
-        ]))
+        renderConfigLockfile(lockfile)
+    }
+
+    private static func tomlString(_ value: String) -> String {
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+        return "\"\(escaped)\""
     }
 
     private static func diffLines(expected: [Substring], actual: [Substring]) -> [String] {

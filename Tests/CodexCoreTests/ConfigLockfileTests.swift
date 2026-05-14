@@ -31,6 +31,54 @@ final class ConfigLockfileTests: XCTestCase {
         XCTAssertEqual(lockfile.config, expectedConfig)
     }
 
+    func testRenderConfigLockfileUsesRustTopLevelOrder() throws {
+        let lockfile = ConfigLockfile(
+            version: 1,
+            codexVersion: #"0.1."quoted""#,
+            config: .table([
+                "model": .string("gpt-5.1-codex-max"),
+                "approval_policy": .string("on-failure")
+            ])
+        )
+
+        XCTAssertEqual(ConfigLockfileStore.renderConfigLockfile(lockfile), #"""
+        version = 1
+        codex_version = "0.1.\"quoted\""
+
+        [config]
+        approval_policy = "on-failure"
+        model = "gpt-5.1-codex-max"
+        """# + "\n")
+    }
+
+    func testExportConfigLockfileWritesRustPathAndCreatesDirectory() throws {
+        let dir = try ConfigLockfileTemporaryDirectory()
+        let exportDir = dir.url.appendingPathComponent("locks", isDirectory: true)
+        let threadID = try ThreadId(string: "00000000-0000-4000-8000-000000000123")
+        let lockfile = ConfigLockfile(
+            version: 1,
+            codexVersion: "0.1.0",
+            config: .table(["model": .string("gpt-5.1-codex-max")])
+        )
+
+        let path = try ConfigLockfileStore.exportConfigLockfile(
+            lockfile,
+            to: exportDir,
+            threadID: threadID
+        )
+
+        XCTAssertEqual(path.lastPathComponent, "\(threadID).config.lock.toml")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: path.path))
+        XCTAssertEqual(try ConfigLockfileStore.readConfigLockfile(from: path.path), lockfile)
+        XCTAssertEqual(try String(contentsOf: path, encoding: .utf8), #"""
+        version = 1
+        codex_version = "0.1.0"
+
+        [config]
+        model = "gpt-5.1-codex-max"
+        """# + "\n")
+    }
+
     func testConfigWithoutLockControlsRemovesEmptyDebugTableLikeRust() {
         let config: ConfigValue = .table([
             "model": .string("gpt-5.1-codex-max"),
