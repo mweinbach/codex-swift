@@ -267,20 +267,19 @@ final class ConfiguredEnvironmentsTests: XCTestCase {
         """)) { error in
             XCTAssertEqual(
                 (error as? ConfiguredEnvironmentLoadError)?.description,
-                "exec-server protocol error: environment url `ws://` is invalid"
+                "exec-server protocol error: environment url `ws://` is invalid: HTTP format error: empty string"
             )
         }
 
-        XCTAssertThrowsError(try ConfiguredEnvironmentLoader.snapshot(fromToml: """
+        let highPortSnapshot = try ConfiguredEnvironmentLoader.snapshot(fromToml: """
         [[environments]]
         id = "devbox"
         url = "ws://127.0.0.1:99999"
-        """)) { error in
-            XCTAssertEqual(
-                (error as? ConfiguredEnvironmentLoadError)?.description,
-                "exec-server protocol error: environment url `ws://127.0.0.1:99999` is invalid"
-            )
-        }
+        """)
+        XCTAssertEqual(
+            highPortSnapshot.environment(id: "devbox")?.transport,
+            .websocketURL("ws://127.0.0.1:99999")
+        )
     }
 
     func testEnvironmentsTomlRejectsOverlongIDEmptyDefaultAndRelativeCwdWithoutConfigDir() throws {

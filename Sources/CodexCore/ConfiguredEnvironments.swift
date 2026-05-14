@@ -488,12 +488,20 @@ private extension ConfiguredEnvironmentLoader {
         }
         guard let components = URLComponents(string: url),
               (components.scheme == "ws" || components.scheme == "wss"),
-              components.host?.isEmpty == false,
-              components.port.map({ (0...65_535).contains($0) }) ?? true
+              components.host?.isEmpty == false
         else {
-            throw ConfiguredEnvironmentLoadError.protocolError("environment url `\(url)` is invalid")
+            throw ConfiguredEnvironmentLoadError.protocolError(
+                "environment url `\(url)` is invalid: \(websocketURLParseErrorDescription(url))"
+            )
         }
         return url
+    }
+
+    static func websocketURLParseErrorDescription(_ url: String) -> String {
+        if url == "ws://" || url == "wss://" {
+            return "HTTP format error: empty string"
+        }
+        return "HTTP format error: invalid uri character"
     }
 
     static func normalizeStdioCwd(
