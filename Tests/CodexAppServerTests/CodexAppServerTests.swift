@@ -938,6 +938,39 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNil(config["debug"])
     }
 
+    func testThreadStartConfigLockfileKeepsResolvedProviderWhenCatalogFieldsDisabledLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        retainedTemporaryDirectories.append(cwd)
+        let exportDir = temp.url.appendingPathComponent("locks", isDirectory: true)
+        try """
+        model = "gpt-user"
+
+        [debug.config_lockfile]
+        export_dir = "\(exportDir.path)"
+        save_fields_resolved_from_model_catalog = false
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"model":"gpt-param","modelProvider":"mock_provider","cwd":"\#(cwd.url.path)","approvalPolicy":"never","approvalsReviewer":"auto_review","serviceTier":"flex"}}"#.utf8
+        )))
+
+        let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+        let lockPath = exportDir.appendingPathComponent("\(threadID).config.lock.toml", isDirectory: false)
+        let lockfile = try ConfigLockfileStore.readConfigLockfile(from: lockPath.path)
+        guard case let .table(config) = lockfile.config else {
+            return XCTFail("expected config table")
+        }
+        XCTAssertEqual(config["model_provider"], .string("mock_provider"))
+        XCTAssertEqual(config["model"], .string("gpt-user"))
+        XCTAssertNil(config["approval_policy"])
+        XCTAssertNil(config["approvals_reviewer"])
+        XCTAssertNil(config["service_tier"])
+    }
+
     func testThreadStartPersistsThreadSourceInResponseNotificationAndMetadataLikeRust() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))

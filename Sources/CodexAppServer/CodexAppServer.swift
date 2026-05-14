@@ -1439,14 +1439,16 @@ public enum CodexAppServer {
         serviceTier: String?
     ) -> ConfigValue {
         let config = ConfigLockfileStore.configWithoutLockControls(baseConfig)
-        guard runtimeConfig.configLockfile.saveFieldsResolvedFromModelCatalog,
-              case var .table(table) = config
-        else {
+        guard case var .table(table) = config else {
             return config
         }
 
-        table["model"] = .string(model)
         table["model_provider"] = .string(modelProvider)
+        guard runtimeConfig.configLockfile.saveFieldsResolvedFromModelCatalog else {
+            return .table(table)
+        }
+
+        table["model"] = .string(model)
         if let effort = runtimeConfig.modelReasoningEffort {
             table["model_reasoning_effort"] = .string(effort.rawValue)
         }
