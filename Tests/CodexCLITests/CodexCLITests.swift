@@ -167,6 +167,107 @@ final class CodexCLITests: XCTestCase {
         XCTAssertEqual(CodexCLI().parseInvocation(arguments: ["hello codex"]), .interactive(prompt: "hello codex"))
     }
 
+    func testRunAsyncInteractiveDelegatesRootFlagsLikeRust() async {
+        var receivedRequest: CodexCLI.InteractiveCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: [
+                "--remote",
+                "ws://root.example.test",
+                "--remote-auth-token-env",
+                "ROOT_TOKEN",
+                "--oss",
+                "--image",
+                "root.png,/tmp/a.png",
+                "--add-dir",
+                "/root-extra",
+                "-m",
+                "gpt-5.1-test",
+                "--local-provider",
+                "ollama",
+                "--search",
+                "--sandbox",
+                "workspace-write",
+                "--ask-for-approval",
+                "on-request",
+                "-p",
+                "my-profile",
+                "-C",
+                "/tmp",
+                "-c",
+                #"model="override""#,
+                "--no-alt-screen",
+                "hello\r\ncodex"
+            ],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            interactiveRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(receivedRequest, CodexCLI.InteractiveCommandRequest(
+            prompt: "hello\ncodex",
+            remote: "ws://root.example.test",
+            remoteAuthTokenEnv: "ROOT_TOKEN",
+            interactiveOptions: CodexCLI.InteractiveCommandOptions(
+                imagePaths: ["root.png", "/tmp/a.png"],
+                model: "gpt-5.1-test",
+                useOSSProvider: true,
+                localProvider: "ollama",
+                configProfile: "my-profile",
+                sandboxMode: "workspace-write",
+                cwd: "/tmp",
+                additionalWritableRoots: ["/root-extra"],
+                approvalPolicy: "on-request",
+                searchEnabled: true,
+                noAltScreen: true
+            ),
+            configOverrides: .init(rawOverrides: [
+                #"model="override""#,
+                #"profile="my-profile""#,
+                #"web_search="live""#
+            ])
+        ))
+    }
+
+    func testRunAsyncInteractiveRejectsExtraPromptArgumentsBeforeRunner() async {
+        var stderr: [String] = []
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["first", "second"],
+            stdout: { _ in XCTFail("stdout should not be written") },
+            stderr: { stderr.append($0) },
+            interactiveRunner: { _ in
+                XCTFail("runner should not be called with extra prompt arguments")
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 64)
+        XCTAssertEqual(stderr, ["codex-swift: unexpected argument for interactive prompt: second"])
+    }
+
+    func testRunAsyncInteractiveTreatsDoubleDashRemainderAsPrompt() async {
+        var receivedRequest: CodexCLI.InteractiveCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["--", "--search"],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            interactiveRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(receivedRequest?.prompt, "--search")
+        XCTAssertEqual(receivedRequest?.remote, nil)
+        XCTAssertEqual(receivedRequest?.configOverrides.rawOverrides, [])
+        XCTAssertEqual(receivedRequest?.interactiveOptions.searchEnabled, false)
+    }
+
     func testApplyInvocationCarriesTaskIDArgument() {
         XCTAssertEqual(
             CodexCLI().parseInvocation(arguments: ["-c", "chatgpt_base_url=\"https://example.test\"", "apply", "task_123"]),

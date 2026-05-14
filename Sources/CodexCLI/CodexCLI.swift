@@ -338,6 +338,28 @@ public struct CodexCLI: Sendable {
         }
     }
 
+    public struct InteractiveCommandRequest: Equatable, Sendable {
+        public let prompt: String?
+        public let remote: String?
+        public let remoteAuthTokenEnv: String?
+        public let interactiveOptions: InteractiveCommandOptions
+        public let configOverrides: CliConfigOverrides
+
+        public init(
+            prompt: String? = nil,
+            remote: String? = nil,
+            remoteAuthTokenEnv: String? = nil,
+            interactiveOptions: InteractiveCommandOptions = InteractiveCommandOptions(),
+            configOverrides: CliConfigOverrides = CliConfigOverrides()
+        ) {
+            self.prompt = prompt
+            self.remote = remote
+            self.remoteAuthTokenEnv = remoteAuthTokenEnv
+            self.interactiveOptions = interactiveOptions
+            self.configOverrides = configOverrides
+        }
+    }
+
     public struct ResumeCommandRequest: Equatable, Sendable {
         public let sessionID: String?
         public let last: Bool
@@ -664,6 +686,7 @@ public struct CodexCLI: Sendable {
     public typealias ExecCommandRunner = (ExecCommandRequest) async throws -> CommandExecutionResult
     public typealias ComputerUseCommandRunner = (ComputerUseCommandRequest) async throws -> CommandExecutionResult
     public typealias ReviewCommandRunner = (ReviewCommandRequest) async throws -> CommandExecutionResult
+    public typealias InteractiveCommandRunner = (InteractiveCommandRequest) async throws -> CommandExecutionResult
     public typealias ResumeCommandRunner = (ResumeCommandRequest) async throws -> CommandExecutionResult
     public typealias ForkCommandRunner = (ForkCommandRequest) async throws -> CommandExecutionResult
     public typealias ExecServerCommandRunner = (ExecServerCommandRequest) async throws -> CommandExecutionResult
@@ -792,6 +815,7 @@ public struct CodexCLI: Sendable {
         execRunner: ExecCommandRunner? = nil,
         computerUseRunner: ComputerUseCommandRunner? = nil,
         reviewRunner: ReviewCommandRunner? = nil,
+        interactiveRunner: InteractiveCommandRunner? = nil,
         resumeRunner: ResumeCommandRunner? = nil,
         forkRunner: ForkCommandRunner? = nil,
         execServerRunner: ExecServerCommandRunner? = nil,
@@ -1330,8 +1354,24 @@ public struct CodexCLI: Sendable {
             stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
             return 78
         case .interactive:
-            stderr("codex-swift: interactive TUI runtime is not complete yet.")
-            return 78
+            guard let interactiveRunner else {
+                stderr("codex-swift: interactive TUI runtime is not complete yet.")
+                return 78
+            }
+            switch parseInteractiveCommand(arguments) {
+            case let .success(request):
+                do {
+                    let result = try await interactiveRunner(request)
+                    emit(result, stdout: stdout, stderr: stderr)
+                    return result.exitCode
+                } catch {
+                    stderr(describe(error))
+                    return 1
+                }
+            case let .failure(message, exitCode):
+                stderr(message)
+                return exitCode
+            }
         case let .unknown(argument):
             stderr("codex-swift: unknown command or unsupported argument: \(argument)")
             return 64
@@ -1640,6 +1680,8 @@ public struct CodexCLI: Sendable {
     }
 
     private struct ParsedInteractiveCommandOptions {
+        var remote: String?
+        var remoteAuthTokenEnv: String?
         var imagePaths: [String] = []
         var model: String?
         var useOSSProvider = false
@@ -1805,7 +1847,23 @@ public struct CodexCLI: Sendable {
             case let .failure(message, exitCode):
                 return .failure(message, exitCode)
             }
-        case "--remote", "--remote-auth-token-env", "--enable", "--disable", "--color":
+        case "--remote":
+            switch value(after: argument) {
+            case let .success(remote):
+                parsed.remote = remote
+                return .success(index + 2)
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
+        case "--remote-auth-token-env":
+            switch value(after: argument) {
+            case let .success(remoteAuthTokenEnv):
+                parsed.remoteAuthTokenEnv = remoteAuthTokenEnv
+                return .success(index + 2)
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
+        case "--enable", "--disable", "--color":
             switch value(after: argument) {
             case .success:
                 return .success(index + 2)
@@ -1907,8 +1965,15 @@ public struct CodexCLI: Sendable {
         if argument.hasPrefix("--config=") {
             return .success(index + 1)
         }
-        if argument.hasPrefix("--remote=") || argument.hasPrefix("--remote-auth-token-env=") ||
-            argument.hasPrefix("--enable=") || argument.hasPrefix("--disable=") ||
+        if argument.hasPrefix("--remote=") {
+            parsed.remote = compactValue(prefix: "--remote=")
+            return .success(index + 1)
+        }
+        if argument.hasPrefix("--remote-auth-token-env=") {
+            parsed.remoteAuthTokenEnv = compactValue(prefix: "--remote-auth-token-env=")
+            return .success(index + 1)
+        }
+        if argument.hasPrefix("--enable=") || argument.hasPrefix("--disable=") ||
             argument.hasPrefix("--color=") {
             return .success(index + 1)
         }
@@ -1943,6 +2008,69 @@ public struct CodexCLI: Sendable {
             searchEnabled: root.searchEnabled || subcommand.searchEnabled,
             noAltScreen: root.noAltScreen || subcommand.noAltScreen
         )
+    }
+
+    private func parseInteractiveCommand(_ arguments: [String]) -> ParseResult<InteractiveCommandRequest> {
+        var parsedOptions = ParsedInteractiveCommandOptions()
+        var prompt: String?
+        let configArguments = Array(arguments.prefix { $0 != "--" })
+        var index = 0
+
+        while index < arguments.count {
+            let argument = arguments[index]
+            if argument == "--" {
+                let remaining = Array(arguments.dropFirst(index + 1))
+                guard remaining.count <= 1 else {
+                    return .failure("codex-swift: unexpected argument for interactive prompt: \(remaining[1])", 64)
+                }
+                prompt = remaining.first.map(normalizedInteractivePrompt)
+                break
+            }
+
+            switch consumeInteractiveOption(
+                argument,
+                at: index,
+                in: arguments,
+                commandName: "interactive",
+                parsed: &parsedOptions
+            ) {
+            case let .success(nextIndex):
+                if let nextIndex {
+                    index = nextIndex
+                    continue
+                }
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
+
+            guard prompt == nil else {
+                return .failure("codex-swift: unexpected argument for interactive prompt: \(argument)", 64)
+            }
+            prompt = normalizedInteractivePrompt(argument)
+            index += 1
+        }
+
+        switch parseConfigOverrides(from: configArguments) {
+        case let .success(configOverrides):
+            return .success(InteractiveCommandRequest(
+                prompt: prompt,
+                remote: parsedOptions.remote,
+                remoteAuthTokenEnv: parsedOptions.remoteAuthTokenEnv,
+                interactiveOptions: mergeInteractiveOptions(
+                    root: parsedOptions,
+                    subcommand: ParsedInteractiveCommandOptions()
+                ),
+                configOverrides: configOverrides
+            ))
+        case let .failure(message, exitCode):
+            return .failure(message, exitCode)
+        }
+    }
+
+    private func normalizedInteractivePrompt(_ prompt: String) -> String {
+        prompt
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
     }
 
     private func parseExecCommand(
