@@ -410,7 +410,10 @@ public enum NonInteractiveExec {
         var stopHookActive = false
 
         for _ in 0..<maxToolIterations {
-            let streamResult = await streamPrompt(prompt)
+            var samplingPrompt = prompt
+            // Rust normalizes cloned history before each sampling request; keep transcript order raw.
+            ContextNormalization.normalizeHistory(&samplingPrompt.input)
+            let streamResult = await streamPrompt(samplingPrompt)
             let turnEvents: ResponseEventResults
             switch streamResult {
             case let .success(results):

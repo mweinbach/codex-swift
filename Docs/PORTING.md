@@ -156,6 +156,8 @@ Recent upstream audit checkpoint:
   - streaming parser support for complete-line hunk snapshots before `*** End Patch`, CRLF scalar handling, bare empty update context lines, indented hunk markers as context, final-line finishing, Rust-shaped parser errors, and an apply-patch argument-diff consumer that emits/throttles `PatchApplyUpdatedEvent` payloads with add/delete/update/move progress metadata
 - `codex-rs/core/src/session/turn.rs` streamed apply-patch argument diff dispatch
   - non-interactive Responses loops now replay `output_item.added`, `custom_tool_call_input.delta`, and item completion order to collect Rust-shaped `patch_apply_updated` runtime events for freeform `apply_patch` tool calls, gated by the loaded `apply_patch_streaming_events` feature state, ignoring mismatched call ids, and flushing buffered progress when the item completes
+- `codex-rs/core/src/session/turn.rs` Responses tool-call continuation loop
+  - non-interactive Responses loops now dispatch a deterministic registered function/custom tool call through the injected handler, append the model call and tool result in Rust order, normalize a cloned prompt history before each model continuation request, and preserve the final JSONL item/turn notifications for the completion response. Broader live parallel-router parity and every tool family remain pending.
 - `codex-rs/exec/src/event_processor_with_jsonl_output.rs` hosted web-search JSONL events
   - `codex exec --json` now emits Rust-shaped `item.started` and `item.completed` events for hosted web-search response items, preserving stable `item_N` ids between start and completion and carrying the query/action payload through the JSONL item
 - `codex-rs/apply-patch/src/invocation.rs`

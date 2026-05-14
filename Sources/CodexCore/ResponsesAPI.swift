@@ -279,6 +279,74 @@ public struct ResponseCreateWebSocketRequest: Equatable, Encodable, Sendable {
     }
 }
 
+public struct ResponsesWebSocketLastResponse: Equatable, Sendable {
+    public var responseID: String
+    public var itemsAdded: [ResponseItem]
+
+    public init(responseID: String, itemsAdded: [ResponseItem]) {
+        self.responseID = responseID
+        self.itemsAdded = itemsAdded
+    }
+}
+
+public enum ResponsesWebSocketContinuation {
+    public static func incrementalInput(
+        previousRequest: ResponsesAPIRequest?,
+        currentRequest: ResponsesAPIRequest,
+        lastResponse: ResponsesWebSocketLastResponse?,
+        allowEmptyDelta: Bool = true
+    ) -> [ResponseItem]? {
+        guard let previousRequest else {
+            return nil
+        }
+
+        var previousWithoutInput = previousRequest
+        previousWithoutInput.input.removeAll()
+        var currentWithoutInput = currentRequest
+        currentWithoutInput.input.removeAll()
+        guard previousWithoutInput == currentWithoutInput else {
+            return nil
+        }
+
+        var baseline = previousRequest.input
+        if let lastResponse {
+            baseline.append(contentsOf: lastResponse.itemsAdded)
+        }
+
+        guard currentRequest.input.starts(with: baseline),
+              allowEmptyDelta || baseline.count < currentRequest.input.count
+        else {
+            return nil
+        }
+
+        return Array(currentRequest.input.dropFirst(baseline.count))
+    }
+
+    public static func prepareResponseCreateRequest(
+        payload: ResponseCreateWebSocketRequest,
+        currentRequest: ResponsesAPIRequest,
+        previousRequest: ResponsesAPIRequest?,
+        lastResponse: ResponsesWebSocketLastResponse?
+    ) -> ResponseCreateWebSocketRequest {
+        guard let lastResponse,
+              !lastResponse.responseID.isEmpty,
+              let incrementalItems = incrementalInput(
+                previousRequest: previousRequest,
+                currentRequest: currentRequest,
+                lastResponse: lastResponse,
+                allowEmptyDelta: true
+              )
+        else {
+            return payload
+        }
+
+        var copy = payload
+        copy.previousResponseID = lastResponse.responseID
+        copy.input = incrementalItems
+        return copy
+    }
+}
+
 public enum ResponsesWebSocketRequest: Equatable, Encodable, Sendable {
     case responseCreate(ResponseCreateWebSocketRequest)
     case responseProcessed(ResponseProcessedWebSocketRequest)

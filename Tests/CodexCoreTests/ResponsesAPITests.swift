@@ -187,6 +187,142 @@ final class ResponsesAPITests: XCTestCase {
         XCTAssertEqual(websocketRequest.clientMetadata, httpRequest.clientMetadata)
     }
 
+    func testResponseCreateWebSocketContinuationUsesPreviousResponseIDForFunctionToolOutputLikeRust() throws {
+        let userInput = ResponseItem.message(role: "user", content: [.inputText(text: "run tests")])
+        let functionCall = ResponseItem.functionCall(
+            name: "exec_command",
+            arguments: #"{"cmd":"swift test"}"#,
+            callID: "call-1"
+        )
+        let functionOutput = ResponseItem.functionCallOutput(
+            callID: "call-1",
+            output: FunctionCallOutputPayload(content: "tests passed", success: true)
+        )
+        let previousRequest = ResponsesAPIRequest(
+            model: "gpt-test",
+            instructions: "inst",
+            input: [userInput],
+            store: false,
+            promptCacheKey: "thread-1"
+        )
+        let currentRequest = ResponsesAPIRequest(
+            model: "gpt-test",
+            instructions: "inst",
+            input: [userInput, functionCall, functionOutput],
+            store: false,
+            promptCacheKey: "thread-1"
+        )
+
+        let prepared = ResponsesWebSocketContinuation.prepareResponseCreateRequest(
+            payload: ResponseCreateWebSocketRequest(currentRequest),
+            currentRequest: currentRequest,
+            previousRequest: previousRequest,
+            lastResponse: ResponsesWebSocketLastResponse(responseID: "resp-1", itemsAdded: [functionCall])
+        )
+
+        XCTAssertEqual(prepared.previousResponseID, "resp-1")
+        XCTAssertEqual(prepared.input, [functionOutput])
+        let object = try JSONObject(ResponsesWebSocketRequest.responseCreate(prepared))
+        XCTAssertEqual(object["previous_response_id"] as? String, "resp-1")
+        let input = try XCTUnwrap(object["input"] as? [[String: Any]])
+        XCTAssertEqual(input.count, 1)
+        XCTAssertEqual(input[0]["type"] as? String, "function_call_output")
+        XCTAssertEqual(input[0]["call_id"] as? String, "call-1")
+    }
+
+    func testResponseCreateWebSocketContinuationUsesPreviousResponseIDForCustomToolOutputLikeRust() throws {
+        let userInput = ResponseItem.message(role: "user", content: [.inputText(text: "patch")])
+        let customCall = ResponseItem.customToolCall(
+            callID: "custom-1",
+            name: "apply_patch",
+            input: "*** Begin Patch\n*** End Patch"
+        )
+        let customOutput = ResponseItem.customToolCallOutput(callID: "custom-1", output: "patched")
+        let previousRequest = ResponsesAPIRequest(
+            model: "gpt-test",
+            instructions: "inst",
+            input: [userInput],
+            store: false,
+            promptCacheKey: "thread-1"
+        )
+        let currentRequest = ResponsesAPIRequest(
+            model: "gpt-test",
+            instructions: "inst",
+            input: [userInput, customCall, customOutput],
+            store: false,
+            promptCacheKey: "thread-1"
+        )
+
+        let prepared = ResponsesWebSocketContinuation.prepareResponseCreateRequest(
+            payload: ResponseCreateWebSocketRequest(currentRequest),
+            currentRequest: currentRequest,
+            previousRequest: previousRequest,
+            lastResponse: ResponsesWebSocketLastResponse(responseID: "resp-1", itemsAdded: [customCall])
+        )
+
+        XCTAssertEqual(prepared.previousResponseID, "resp-1")
+        XCTAssertEqual(prepared.input, [customOutput])
+        let object = try JSONObject(ResponsesWebSocketRequest.responseCreate(prepared))
+        let input = try XCTUnwrap(object["input"] as? [[String: Any]])
+        XCTAssertEqual(input.count, 1)
+        XCTAssertEqual(input[0]["type"] as? String, "custom_tool_call_output")
+        XCTAssertEqual(input[0]["call_id"] as? String, "custom-1")
+    }
+
+    func testResponseCreateWebSocketContinuationFallsBackToFullInputWhenRequestFieldsChangeLikeRust() {
+        let firstInput = ResponseItem.message(role: "user", content: [.inputText(text: "hello")])
+        let secondInput = ResponseItem.message(role: "user", content: [.inputText(text: "second")])
+        let previousRequest = ResponsesAPIRequest(
+            model: "gpt-test",
+            instructions: "inst one",
+            input: [firstInput],
+            store: false
+        )
+        let currentRequest = ResponsesAPIRequest(
+            model: "gpt-test",
+            instructions: "inst two",
+            input: [firstInput, secondInput],
+            store: false
+        )
+
+        let prepared = ResponsesWebSocketContinuation.prepareResponseCreateRequest(
+            payload: ResponseCreateWebSocketRequest(currentRequest),
+            currentRequest: currentRequest,
+            previousRequest: previousRequest,
+            lastResponse: ResponsesWebSocketLastResponse(responseID: "resp-1", itemsAdded: [])
+        )
+
+        XCTAssertNil(prepared.previousResponseID)
+        XCTAssertEqual(prepared.input, currentRequest.input)
+    }
+
+    func testResponseCreateWebSocketContinuationFallsBackToFullInputAfterMissingResponseIDLikeRust() {
+        let firstInput = ResponseItem.message(role: "user", content: [.inputText(text: "hello")])
+        let secondInput = ResponseItem.message(role: "user", content: [.inputText(text: "second")])
+        let previousRequest = ResponsesAPIRequest(
+            model: "gpt-test",
+            instructions: "inst",
+            input: [firstInput],
+            store: false
+        )
+        let currentRequest = ResponsesAPIRequest(
+            model: "gpt-test",
+            instructions: "inst",
+            input: [firstInput, secondInput],
+            store: false
+        )
+
+        let prepared = ResponsesWebSocketContinuation.prepareResponseCreateRequest(
+            payload: ResponseCreateWebSocketRequest(currentRequest),
+            currentRequest: currentRequest,
+            previousRequest: previousRequest,
+            lastResponse: ResponsesWebSocketLastResponse(responseID: "", itemsAdded: [])
+        )
+
+        XCTAssertNil(prepared.previousResponseID)
+        XCTAssertEqual(prepared.input, currentRequest.input)
+    }
+
     func testResponseProcessedWebSocketRequestMatchesRustWireShape() throws {
         let request = ResponsesWebSocketRequest.responseProcessed(
             ResponseProcessedWebSocketRequest(responseID: "resp-compact")

@@ -927,6 +927,70 @@ final class NonInteractiveExecTests: XCTestCase {
         ])
     }
 
+    func testResponsesLoopDispatchesRegisteredHandlerAndContinuesWithNormalizedHistoryLikeRust() async throws {
+        let orphanOutput = ResponseItem.functionCallOutput(
+            callID: "orphan-call",
+            output: FunctionCallOutputPayload(content: "drop me", success: false)
+        )
+        let userMessage = ResponseItem.message(
+            role: "user",
+            content: [.inputText(text: "call the registered echo tool")]
+        )
+        let toolCall = ResponseItem.functionCall(
+            name: "registered_echo",
+            arguments: #"{"value":7}"#,
+            callID: "call-registered"
+        )
+        let toolOutput = ResponseItem.functionCallOutput(
+            callID: "call-registered",
+            output: FunctionCallOutputPayload(content: #"{"echoed":7}"#, success: true)
+        )
+        let finalMessage = ResponseItem.message(role: "assistant", content: [.outputText(text: "done")])
+        let script = RegisteredToolLoopScript(toolCall: toolCall, finalMessage: finalMessage)
+        let handler = RegisteredFunctionToolHandler(output: toolOutput)
+
+        let result = await NonInteractiveExec.runResponsesLoopWithTranscript(
+            initialPrompt: Prompt(input: [orphanOutput, userMessage]),
+            streamPrompt: { prompt in
+                .success(await script.next(prompt))
+            },
+            executeFunctionCall: { item in
+                await handler.execute(item)
+            }
+        )
+
+        let handledCalls = await handler.calls()
+        XCTAssertEqual(handledCalls, [toolCall])
+        XCTAssertEqual(result.transcriptItems, [toolCall, toolOutput, finalMessage])
+
+        let prompts = await script.prompts()
+        XCTAssertEqual(prompts.count, 2)
+        XCTAssertEqual(prompts[0].input, [userMessage])
+        XCTAssertEqual(prompts[1].input, [userMessage, toolCall, toolOutput])
+
+        let id = try ConversationId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
+        let finished = NonInteractiveExec.finish(
+            responseEvents: result.events,
+            outputMode: .jsonLines,
+            conversationID: id,
+            lastMessageFile: nil
+        )
+
+        XCTAssertEqual(finished.exitCode, 0)
+        let lines = try XCTUnwrap(finished.stdoutMessage?.split(separator: "\n").map(String.init))
+        XCTAssertEqual(lines.count, 4)
+        let objects = try lines.map(jsonObject)
+        XCTAssertEqual(objects[0]["type"], .string("thread.started"))
+        XCTAssertEqual(objects[1]["type"], .string("turn.started"))
+        XCTAssertEqual(objects[2]["type"], .string("item.completed"))
+        XCTAssertEqual(objects[3]["type"], .string("turn.completed"))
+        guard case let .object(item)? = objects[2]["item"] else {
+            return XCTFail("expected completed item")
+        }
+        XCTAssertEqual(item["type"], .string("agent_message"))
+        XCTAssertEqual(item["text"], .string("done"))
+    }
+
     func testResponsesLoopCarriesHookAdditionalContextAfterToolOutput() async throws {
         let initial = Prompt(input: [
             .message(role: "user", content: [.inputText(text: "run echo")])
@@ -3327,6 +3391,57 @@ private actor ExecLoopScript {
 
     func prompts() -> [Prompt] {
         recordedPrompts
+    }
+}
+
+private actor RegisteredToolLoopScript {
+    private var calls = 0
+    private var recordedPrompts: [Prompt] = []
+    private let toolCall: ResponseItem
+    private let finalMessage: ResponseItem
+
+    init(toolCall: ResponseItem, finalMessage: ResponseItem) {
+        self.toolCall = toolCall
+        self.finalMessage = finalMessage
+    }
+
+    func next(_ prompt: Prompt) -> ResponseEventResults {
+        calls += 1
+        recordedPrompts.append(prompt)
+
+        if calls == 1 {
+            return [
+                .success(.outputItemDone(toolCall)),
+                .success(.completed(responseID: "resp-registered-1", tokenUsage: nil))
+            ]
+        }
+
+        return [
+            .success(.outputItemDone(finalMessage)),
+            .success(.completed(responseID: "resp-registered-2", tokenUsage: nil))
+        ]
+    }
+
+    func prompts() -> [Prompt] {
+        recordedPrompts
+    }
+}
+
+private actor RegisteredFunctionToolHandler {
+    private let output: ResponseItem
+    private var handledCalls: [ResponseItem] = []
+
+    init(output: ResponseItem) {
+        self.output = output
+    }
+
+    func execute(_ item: ResponseItem) -> ResponseItem {
+        handledCalls.append(item)
+        return output
+    }
+
+    func calls() -> [ResponseItem] {
+        handledCalls
     }
 }
 
