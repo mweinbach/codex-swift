@@ -1097,6 +1097,89 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNil(agents["max_threads"])
     }
 
+    func testThreadStartConfigLockfileDropsNonReplayableInputsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        retainedTemporaryDirectories.append(cwd)
+        let exportDir = temp.url.appendingPathComponent("locks", isDirectory: true)
+        let catalog = ModelsResponse(models: [
+            minimalModelInfo(slug: "catalog-model", priority: 1)
+        ])
+        try JSONEncoder().encode(catalog).write(to: temp.url.appendingPathComponent("catalog.json"))
+        try "base instructions".write(
+            to: temp.url.appendingPathComponent("instructions.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "experimental instructions".write(
+            to: temp.url.appendingPathComponent("experimental-instructions.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "compact prompt".write(
+            to: temp.url.appendingPathComponent("compact.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        profile = "work"
+        model = "gpt-user"
+        model_instructions_file = "instructions.md"
+        experimental_instructions_file = "experimental-instructions.md"
+        experimental_compact_prompt_file = "compact.md"
+        model_catalog_json = "catalog.json"
+        sandbox_mode = "workspace-write"
+        default_permissions = "limited"
+        experimental_use_unified_exec_tool = false
+        experimental_use_freeform_apply_patch = false
+
+        [sandbox_workspace_write]
+        writable_roots = ["\(cwd.url.path)"]
+        network_access = true
+
+        [permissions.limited.filesystem]
+        ":minimal" = "read"
+
+        [profiles.work]
+        model = "catalog-model"
+
+        [debug.config_lockfile]
+        export_dir = "\(exportDir.path)"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider","cwd":"\#(cwd.url.path)"}}"#.utf8
+        )))
+
+        guard let result = messages[0]["result"] as? [String: Any] else {
+            return XCTFail("expected result, got \(messages[0])")
+        }
+        let thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+        let lockPath = exportDir.appendingPathComponent("\(threadID).config.lock.toml", isDirectory: false)
+        let lockfile = try ConfigLockfileStore.readConfigLockfile(from: lockPath.path)
+        guard case let .table(config) = lockfile.config else {
+            return XCTFail("expected config table")
+        }
+        XCTAssertNil(config["profile"])
+        XCTAssertNil(config["profiles"])
+        XCTAssertNil(config["model_instructions_file"])
+        XCTAssertNil(config["experimental_instructions_file"])
+        XCTAssertNil(config["experimental_compact_prompt_file"])
+        XCTAssertNil(config["model_catalog_json"])
+        XCTAssertNil(config["sandbox_mode"])
+        XCTAssertNil(config["sandbox_workspace_write"])
+        XCTAssertNil(config["default_permissions"])
+        XCTAssertNil(config["permissions"])
+        XCTAssertNil(config["experimental_use_unified_exec_tool"])
+        XCTAssertNil(config["experimental_use_freeform_apply_patch"])
+        XCTAssertEqual(config["model"], .string("catalog-model"))
+        XCTAssertEqual(config["instructions"], .string("base instructions"))
+        XCTAssertNil(config["developer_instructions"])
+        XCTAssertEqual(config["compact_prompt"], .string("compact prompt"))
+    }
+
     func testThreadStartPersistsThreadSourceInResponseNotificationAndMetadataLikeRust() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))

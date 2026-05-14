@@ -1438,7 +1438,7 @@ public enum CodexAppServer {
         approvalsReviewer: ApprovalsReviewer,
         serviceTier: String?
     ) -> ConfigValue {
-        let config = ConfigLockfileStore.configWithoutLockControls(baseConfig)
+        let config = configLockReplayableConfig(baseConfig)
         guard case var .table(table) = config else {
             return config
         }
@@ -1515,6 +1515,26 @@ public enum CodexAppServer {
         }
         table["approval_policy"] = .string(approvalPolicy.rawValue)
         table["approvals_reviewer"] = .string(configRawValue(for: approvalsReviewer))
+        return .table(table)
+    }
+
+    private static func configLockReplayableConfig(_ config: ConfigValue) -> ConfigValue {
+        let stripped = ConfigLockfileStore.configWithoutLockControls(config)
+        guard case var .table(table) = stripped else {
+            return stripped
+        }
+        table.removeValue(forKey: "profile")
+        table.removeValue(forKey: "profiles")
+        table.removeValue(forKey: "model_instructions_file")
+        table.removeValue(forKey: "experimental_instructions_file")
+        table.removeValue(forKey: "experimental_compact_prompt_file")
+        table.removeValue(forKey: "model_catalog_json")
+        table.removeValue(forKey: "sandbox_mode")
+        table.removeValue(forKey: "sandbox_workspace_write")
+        table.removeValue(forKey: "default_permissions")
+        table.removeValue(forKey: "permissions")
+        table.removeValue(forKey: "experimental_use_unified_exec_tool")
+        table.removeValue(forKey: "experimental_use_freeform_apply_patch")
         return .table(table)
     }
 
