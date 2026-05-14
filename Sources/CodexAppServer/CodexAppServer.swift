@@ -24979,16 +24979,16 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             }
             runtimeSystemErrorThreadIDs.remove(threadID)
             notifications = [
+                threadStatusChangedNotification(
+                    threadID: threadID,
+                    status: CodexAppServer.idleThreadStatus()
+                ),
                 CodexAppServer.turnCompletedNotification(
                     threadID: threadID,
                     event: event,
                     fallbackTurnID: turnID,
                     startedAt: startedAt,
                     error: error
-                ),
-                threadStatusChangedNotification(
-                    threadID: threadID,
-                    status: CodexAppServer.idleThreadStatus()
                 )
             ].compactMap(\.self)
             beforeNotifications = drainPendingInterruptResponseEnvelopes(threadID: threadID)
@@ -25004,15 +25004,15 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             }
             runtimeSystemErrorThreadIDs.remove(threadID)
             notifications = [
+                threadStatusChangedNotification(
+                    threadID: threadID,
+                    status: CodexAppServer.idleThreadStatus()
+                ),
                 CodexAppServer.turnAbortedNotification(
                     threadID: threadID,
                     event: event,
                     fallbackTurnID: turnID,
                     startedAt: startedAt
-                ),
-                threadStatusChangedNotification(
-                    threadID: threadID,
-                    status: CodexAppServer.idleThreadStatus()
                 )
             ].compactMap(\.self)
             beforeNotifications = drainPendingInterruptResponseEnvelopes(threadID: threadID)

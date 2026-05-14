@@ -3431,6 +3431,11 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(item["text"] as? String, "Done from runtime")
         XCTAssertEqual(item["phase"] as? String, "FinalAnswer")
 
+        let idle = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(idle[0]["method"] as? String, "thread/status/changed")
+        let idleStatus = try XCTUnwrap((idle[0]["params"] as? [String: Any])?["status"] as? [String: Any])
+        XCTAssertEqual(idleStatus["type"] as? String, "idle")
+
         let completed = try decodeMessages(try await nextNotificationPayload(notificationCapture))
         XCTAssertEqual(completed[0]["method"] as? String, "turn/completed")
         let completedTurn = try XCTUnwrap((completed[0]["params"] as? [String: Any])?["turn"] as? [String: Any])
@@ -3440,11 +3445,6 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(completedTurn["completedAt"] as? Int, 1_778_500_300)
         XCTAssertEqual(completedTurn["durationMs"] as? Int, 300)
         XCTAssertTrue(completedTurn["error"] is NSNull)
-
-        let idle = try decodeMessages(try await nextNotificationPayload(notificationCapture))
-        XCTAssertEqual(idle[0]["method"] as? String, "thread/status/changed")
-        let idleStatus = try XCTUnwrap((idle[0]["params"] as? [String: Any])?["status"] as? [String: Any])
-        XCTAssertEqual(idleStatus["type"] as? String, "idle")
 
         let steerAfterCompletion = try decode(processor.processLine(Data(
             #"{"id":3,"method":"turn/steer","params":{"threadId":"\#(threadID)","expectedTurnId":"\#(turnID)","input":[{"type":"text","text":"after completion"}]}}"#.utf8
@@ -3884,17 +3884,17 @@ final class CodexAppServerTests: XCTestCase {
         let result = try XCTUnwrap(deferredResponse["result"] as? [String: Any])
         XCTAssertTrue(result.isEmpty)
 
+        let idle = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(idle[0]["method"] as? String, "thread/status/changed")
+        let idleStatus = try XCTUnwrap((idle[0]["params"] as? [String: Any])?["status"] as? [String: Any])
+        XCTAssertEqual(idleStatus["type"] as? String, "idle")
+
         let completed = try decodeMessages(try await nextNotificationPayload(notificationCapture))
         XCTAssertEqual(completed[0]["method"] as? String, "turn/completed")
         let completedParams = try XCTUnwrap(completed[0]["params"] as? [String: Any])
         let completedTurn = try XCTUnwrap(completedParams["turn"] as? [String: Any])
         XCTAssertEqual(completedTurn["id"] as? String, turnID)
         XCTAssertEqual(completedTurn["status"] as? String, "interrupted")
-
-        let idle = try decodeMessages(try await nextNotificationPayload(notificationCapture))
-        XCTAssertEqual(idle[0]["method"] as? String, "thread/status/changed")
-        let idleStatus = try XCTUnwrap((idle[0]["params"] as? [String: Any])?["status"] as? [String: Any])
-        XCTAssertEqual(idleStatus["type"] as? String, "idle")
     }
 
     func testTurnInterruptRuntimeSubmitterFailurePreservesActiveTurnLikeRust() throws {
@@ -5679,6 +5679,12 @@ final class CodexAppServerTests: XCTestCase {
         let error = try decodeMessages(try await nextNotificationPayload(notificationCapture))
         XCTAssertEqual(error[0]["method"] as? String, "error")
 
+        let idle = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(idle[0]["method"] as? String, "thread/status/changed")
+        let idleParams = try XCTUnwrap(idle[0]["params"] as? [String: Any])
+        let idleStatus = try XCTUnwrap(idleParams["status"] as? [String: Any])
+        XCTAssertEqual(idleStatus["type"] as? String, "idle")
+
         let completed = try decodeMessages(try await nextNotificationPayload(notificationCapture))
         XCTAssertEqual(completed[0]["method"] as? String, "turn/completed")
         let completedParams = try XCTUnwrap(completed[0]["params"] as? [String: Any])
@@ -5693,12 +5699,6 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(completedError["message"] as? String, "boom")
         XCTAssertEqual(completedError["codexErrorInfo"] as? String, "badRequest")
         XCTAssertTrue(completedError["additionalDetails"] is NSNull)
-
-        let idle = try decodeMessages(try await nextNotificationPayload(notificationCapture))
-        XCTAssertEqual(idle[0]["method"] as? String, "thread/status/changed")
-        let idleParams = try XCTUnwrap(idle[0]["params"] as? [String: Any])
-        let idleStatus = try XCTUnwrap(idleParams["status"] as? [String: Any])
-        XCTAssertEqual(idleStatus["type"] as? String, "idle")
     }
 
     func testRuntimeApprovalAndUserInputEventsUpdateActiveFlags() async throws {
@@ -5813,6 +5813,12 @@ final class CodexAppServerTests: XCTestCase {
             ))
         )
 
+        let idle = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(idle[0]["method"] as? String, "thread/status/changed")
+        let idleParams = try XCTUnwrap(idle[0]["params"] as? [String: Any])
+        let idleStatus = try XCTUnwrap(idleParams["status"] as? [String: Any])
+        XCTAssertEqual(idleStatus["type"] as? String, "idle")
+
         let completed = try decodeMessages(try await nextNotificationPayload(notificationCapture))
         XCTAssertEqual(completed[0]["method"] as? String, "turn/completed")
         let completedParams = try XCTUnwrap(completed[0]["params"] as? [String: Any])
@@ -5820,12 +5826,6 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(completedTurn["id"] as? String, "turn-1")
         XCTAssertEqual(completedTurn["status"] as? String, "interrupted")
         XCTAssertTrue(completedTurn["error"] is NSNull)
-
-        let idle = try decodeMessages(try await nextNotificationPayload(notificationCapture))
-        XCTAssertEqual(idle[0]["method"] as? String, "thread/status/changed")
-        let idleParams = try XCTUnwrap(idle[0]["params"] as? [String: Any])
-        let idleStatus = try XCTUnwrap(idleParams["status"] as? [String: Any])
-        XCTAssertEqual(idleStatus["type"] as? String, "idle")
         XCTAssertEqual(completedTurn["startedAt"] as? Int, 1_778_320_000)
         XCTAssertEqual(completedTurn["completedAt"] as? Int, 1_778_320_005)
         XCTAssertEqual(completedTurn["durationMs"] as? Int, 5_000)
