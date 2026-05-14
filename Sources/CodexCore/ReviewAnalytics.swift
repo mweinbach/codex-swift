@@ -10,6 +10,7 @@ public struct CodexTrackEventsRequest: Equatable, Encodable, Sendable {
 
 public enum CodexTrackEventRequest: Equatable, Encodable, Sendable {
     case compaction(CodexCompactionEventRequest)
+    case guardianReview(CodexGuardianReviewEventRequest)
     case commandExecution(CodexCommandExecutionEventRequest)
     case fileChange(CodexFileChangeEventRequest)
     case mcpToolCall(CodexMcpToolCallEventRequest)
@@ -25,6 +26,7 @@ public enum CodexTrackEventRequest: Equatable, Encodable, Sendable {
         case .acceptedLineFingerprints:
             return true
         case .compaction,
+             .guardianReview,
              .commandExecution,
              .fileChange,
              .mcpToolCall,
@@ -40,6 +42,8 @@ public enum CodexTrackEventRequest: Equatable, Encodable, Sendable {
     public func encode(to encoder: Encoder) throws {
         switch self {
         case let .compaction(event):
+            try event.encode(to: encoder)
+        case let .guardianReview(event):
             try event.encode(to: encoder)
         case let .commandExecution(event):
             try event.encode(to: encoder)
@@ -185,6 +189,7 @@ public enum CodexAnalytics {
 
 public actor CodexToolItemAnalyticsClient {
     private var compactionReducer = CodexCompactionAnalyticsReducer()
+    private var guardianReviewReducer = CodexGuardianReviewAnalyticsReducer()
     private var commandExecutionReducer = CodexCommandExecutionAnalyticsReducer()
     private var fileChangeReducer = CodexFileChangeAnalyticsReducer()
     private var mcpToolCallReducer = CodexMcpToolCallAnalyticsReducer()
@@ -246,6 +251,14 @@ public actor CodexToolItemAnalyticsClient {
     ) async {
         let event = compactionReducer.ingest(fact, context: context)
         try? await uploader.upload(CodexTrackEventsRequest(events: [.compaction(event)]))
+    }
+
+    public func trackGuardianReview(
+        _ fact: CodexGuardianReviewAnalyticsFact,
+        context: CodexGuardianReviewAnalyticsContext
+    ) async {
+        let event = guardianReviewReducer.ingest(fact, context: context)
+        try? await uploader.upload(CodexTrackEventsRequest(events: [.guardianReview(event)]))
     }
 }
 
@@ -640,6 +653,320 @@ public struct CodexCompactionAnalyticsReducer: Sendable {
                 startedAt: fact.startedAt,
                 completedAt: fact.completedAt,
                 durationMilliseconds: fact.durationMilliseconds
+            )
+        )
+    }
+}
+
+public enum GuardianReviewDecision: String, Codable, Equatable, Sendable {
+    case approved
+    case denied
+    case aborted
+}
+
+public enum GuardianReviewTerminalStatus: String, Codable, Equatable, Sendable {
+    case approved
+    case denied
+    case aborted
+    case timedOut = "timed_out"
+    case failedClosed = "failed_closed"
+}
+
+public enum GuardianReviewFailureReason: String, Codable, Equatable, Sendable {
+    case timeout
+    case cancelled
+    case promptBuildError = "prompt_build_error"
+    case sessionError = "session_error"
+    case parseError = "parse_error"
+}
+
+public enum GuardianReviewSessionKind: String, Codable, Equatable, Sendable {
+    case trunkNew = "trunk_new"
+    case trunkReused = "trunk_reused"
+    case ephemeralForked = "ephemeral_forked"
+}
+
+public enum GuardianApprovalRequestSource: String, Codable, Equatable, Sendable {
+    case mainTurn = "main_turn"
+    case delegatedSubagent = "delegated_subagent"
+}
+
+public enum GuardianReviewedAction: Equatable, Encodable, Sendable {
+    case shell(sandboxPermissions: SandboxPermissions, additionalPermissions: JSONValue?)
+    case unifiedExec(sandboxPermissions: SandboxPermissions, additionalPermissions: JSONValue?, tty: Bool)
+    case execve(source: GuardianCommandSource, program: String, additionalPermissions: JSONValue?)
+    case applyPatch
+    case networkAccess(protocol: NetworkApprovalProtocol, port: UInt16)
+    case mcpToolCall(
+        server: String,
+        toolName: String,
+        connectorID: String?,
+        connectorName: String?,
+        toolTitle: String?
+    )
+    case requestPermissions
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case sandboxPermissions = "sandbox_permissions"
+        case additionalPermissions = "additional_permissions"
+        case tty
+        case source
+        case program
+        case `protocol`
+        case port
+        case server
+        case toolName = "tool_name"
+        case connectorID = "connector_id"
+        case connectorName = "connector_name"
+        case toolTitle = "tool_title"
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .shell(sandboxPermissions, additionalPermissions):
+            try container.encode("shell", forKey: .type)
+            try container.encode(sandboxPermissions, forKey: .sandboxPermissions)
+            try container.encodeNilOrValue(additionalPermissions, forKey: .additionalPermissions)
+        case let .unifiedExec(sandboxPermissions, additionalPermissions, tty):
+            try container.encode("unified_exec", forKey: .type)
+            try container.encode(sandboxPermissions, forKey: .sandboxPermissions)
+            try container.encodeNilOrValue(additionalPermissions, forKey: .additionalPermissions)
+            try container.encode(tty, forKey: .tty)
+        case let .execve(source, program, additionalPermissions):
+            try container.encode("execve", forKey: .type)
+            try container.encode(source, forKey: .source)
+            try container.encode(program, forKey: .program)
+            try container.encodeNilOrValue(additionalPermissions, forKey: .additionalPermissions)
+        case .applyPatch:
+            try container.encode("apply_patch", forKey: .type)
+        case let .networkAccess(`protocol`, port):
+            try container.encode("network_access", forKey: .type)
+            try container.encode(`protocol`, forKey: .protocol)
+            try container.encode(port, forKey: .port)
+        case let .mcpToolCall(server, toolName, connectorID, connectorName, toolTitle):
+            try container.encode("mcp_tool_call", forKey: .type)
+            try container.encode(server, forKey: .server)
+            try container.encode(toolName, forKey: .toolName)
+            try container.encodeNilOrValue(connectorID, forKey: .connectorID)
+            try container.encodeNilOrValue(connectorName, forKey: .connectorName)
+            try container.encodeNilOrValue(toolTitle, forKey: .toolTitle)
+        case .requestPermissions:
+            try container.encode("request_permissions", forKey: .type)
+        }
+    }
+}
+
+public struct CodexGuardianReviewAnalyticsFact: Equatable, Sendable {
+    public let threadID: String
+    public let turnID: String
+    public let reviewID: String
+    public let targetItemID: String?
+    public let approvalRequestSource: GuardianApprovalRequestSource
+    public let reviewedAction: GuardianReviewedAction
+    public let reviewedActionTruncated: Bool
+    public let decision: GuardianReviewDecision
+    public let terminalStatus: GuardianReviewTerminalStatus
+    public let failureReason: GuardianReviewFailureReason?
+    public let riskLevel: GuardianRiskLevel?
+    public let userAuthorization: GuardianUserAuthorization?
+    public let outcome: GuardianAssessmentOutcome?
+    public let guardianThreadID: String?
+    public let guardianSessionKind: GuardianReviewSessionKind?
+    public let guardianModel: String?
+    public let guardianReasoningEffort: String?
+    public let hadPriorReviewContext: Bool?
+    public let reviewTimeoutMilliseconds: UInt64
+    public let toolCallCount: UInt64?
+    public let timeToFirstTokenMilliseconds: UInt64?
+    public let completionLatencyMilliseconds: UInt64?
+    public let startedAt: UInt64
+    public let completedAt: UInt64?
+    public let inputTokens: Int64?
+    public let cachedInputTokens: Int64?
+    public let outputTokens: Int64?
+    public let reasoningOutputTokens: Int64?
+    public let totalTokens: Int64?
+
+    public init(
+        threadID: String,
+        turnID: String,
+        reviewID: String,
+        targetItemID: String? = nil,
+        approvalRequestSource: GuardianApprovalRequestSource,
+        reviewedAction: GuardianReviewedAction,
+        reviewedActionTruncated: Bool,
+        decision: GuardianReviewDecision,
+        terminalStatus: GuardianReviewTerminalStatus,
+        failureReason: GuardianReviewFailureReason? = nil,
+        riskLevel: GuardianRiskLevel? = nil,
+        userAuthorization: GuardianUserAuthorization? = nil,
+        outcome: GuardianAssessmentOutcome? = nil,
+        guardianThreadID: String? = nil,
+        guardianSessionKind: GuardianReviewSessionKind? = nil,
+        guardianModel: String? = nil,
+        guardianReasoningEffort: String? = nil,
+        hadPriorReviewContext: Bool? = nil,
+        reviewTimeoutMilliseconds: UInt64,
+        toolCallCount: UInt64? = nil,
+        timeToFirstTokenMilliseconds: UInt64? = nil,
+        completionLatencyMilliseconds: UInt64? = nil,
+        startedAt: UInt64,
+        completedAt: UInt64? = nil,
+        inputTokens: Int64? = nil,
+        cachedInputTokens: Int64? = nil,
+        outputTokens: Int64? = nil,
+        reasoningOutputTokens: Int64? = nil,
+        totalTokens: Int64? = nil
+    ) {
+        self.threadID = threadID
+        self.turnID = turnID
+        self.reviewID = reviewID
+        self.targetItemID = targetItemID
+        self.approvalRequestSource = approvalRequestSource
+        self.reviewedAction = reviewedAction
+        self.reviewedActionTruncated = reviewedActionTruncated
+        self.decision = decision
+        self.terminalStatus = terminalStatus
+        self.failureReason = failureReason
+        self.riskLevel = riskLevel
+        self.userAuthorization = userAuthorization
+        self.outcome = outcome
+        self.guardianThreadID = guardianThreadID
+        self.guardianSessionKind = guardianSessionKind
+        self.guardianModel = guardianModel
+        self.guardianReasoningEffort = guardianReasoningEffort
+        self.hadPriorReviewContext = hadPriorReviewContext
+        self.reviewTimeoutMilliseconds = reviewTimeoutMilliseconds
+        self.toolCallCount = toolCallCount
+        self.timeToFirstTokenMilliseconds = timeToFirstTokenMilliseconds
+        self.completionLatencyMilliseconds = completionLatencyMilliseconds
+        self.startedAt = startedAt
+        self.completedAt = completedAt
+        self.inputTokens = inputTokens
+        self.cachedInputTokens = cachedInputTokens
+        self.outputTokens = outputTokens
+        self.reasoningOutputTokens = reasoningOutputTokens
+        self.totalTokens = totalTokens
+    }
+}
+
+public struct CodexGuardianReviewEventParams: Equatable, Encodable, Sendable {
+    public let appServerClient: CodexAppServerClientMetadata
+    public let runtime: CodexRuntimeMetadata
+    public let guardianReview: CodexGuardianReviewAnalyticsFact
+
+    public init(
+        appServerClient: CodexAppServerClientMetadata,
+        runtime: CodexRuntimeMetadata,
+        guardianReview: CodexGuardianReviewAnalyticsFact
+    ) {
+        self.appServerClient = appServerClient
+        self.runtime = runtime
+        self.guardianReview = guardianReview
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case appServerClient = "app_server_client"
+        case runtime
+        case threadID = "thread_id"
+        case turnID = "turn_id"
+        case reviewID = "review_id"
+        case targetItemID = "target_item_id"
+        case approvalRequestSource = "approval_request_source"
+        case reviewedAction = "reviewed_action"
+        case reviewedActionTruncated = "reviewed_action_truncated"
+        case decision
+        case terminalStatus = "terminal_status"
+        case failureReason = "failure_reason"
+        case riskLevel = "risk_level"
+        case userAuthorization = "user_authorization"
+        case outcome
+        case guardianThreadID = "guardian_thread_id"
+        case guardianSessionKind = "guardian_session_kind"
+        case guardianModel = "guardian_model"
+        case guardianReasoningEffort = "guardian_reasoning_effort"
+        case hadPriorReviewContext = "had_prior_review_context"
+        case reviewTimeoutMilliseconds = "review_timeout_ms"
+        case toolCallCount = "tool_call_count"
+        case timeToFirstTokenMilliseconds = "time_to_first_token_ms"
+        case completionLatencyMilliseconds = "completion_latency_ms"
+        case startedAt = "started_at"
+        case completedAt = "completed_at"
+        case inputTokens = "input_tokens"
+        case cachedInputTokens = "cached_input_tokens"
+        case outputTokens = "output_tokens"
+        case reasoningOutputTokens = "reasoning_output_tokens"
+        case totalTokens = "total_tokens"
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(appServerClient, forKey: .appServerClient)
+        try container.encode(runtime, forKey: .runtime)
+        try container.encode(guardianReview.threadID, forKey: .threadID)
+        try container.encode(guardianReview.turnID, forKey: .turnID)
+        try container.encode(guardianReview.reviewID, forKey: .reviewID)
+        try container.encodeNilOrValue(guardianReview.targetItemID, forKey: .targetItemID)
+        try container.encode(guardianReview.approvalRequestSource, forKey: .approvalRequestSource)
+        try container.encode(guardianReview.reviewedAction, forKey: .reviewedAction)
+        try container.encode(guardianReview.reviewedActionTruncated, forKey: .reviewedActionTruncated)
+        try container.encode(guardianReview.decision, forKey: .decision)
+        try container.encode(guardianReview.terminalStatus, forKey: .terminalStatus)
+        try container.encodeNilOrValue(guardianReview.failureReason, forKey: .failureReason)
+        try container.encodeNilOrValue(guardianReview.riskLevel, forKey: .riskLevel)
+        try container.encodeNilOrValue(guardianReview.userAuthorization, forKey: .userAuthorization)
+        try container.encodeNilOrValue(guardianReview.outcome, forKey: .outcome)
+        try container.encodeNilOrValue(guardianReview.guardianThreadID, forKey: .guardianThreadID)
+        try container.encodeNilOrValue(guardianReview.guardianSessionKind, forKey: .guardianSessionKind)
+        try container.encodeNilOrValue(guardianReview.guardianModel, forKey: .guardianModel)
+        try container.encodeNilOrValue(guardianReview.guardianReasoningEffort, forKey: .guardianReasoningEffort)
+        try container.encodeNilOrValue(guardianReview.hadPriorReviewContext, forKey: .hadPriorReviewContext)
+        try container.encode(guardianReview.reviewTimeoutMilliseconds, forKey: .reviewTimeoutMilliseconds)
+        try container.encodeNilOrValue(guardianReview.toolCallCount, forKey: .toolCallCount)
+        try container.encodeNilOrValue(guardianReview.timeToFirstTokenMilliseconds, forKey: .timeToFirstTokenMilliseconds)
+        try container.encodeNilOrValue(guardianReview.completionLatencyMilliseconds, forKey: .completionLatencyMilliseconds)
+        try container.encode(guardianReview.startedAt, forKey: .startedAt)
+        try container.encodeNilOrValue(guardianReview.completedAt, forKey: .completedAt)
+        try container.encodeNilOrValue(guardianReview.inputTokens, forKey: .inputTokens)
+        try container.encodeNilOrValue(guardianReview.cachedInputTokens, forKey: .cachedInputTokens)
+        try container.encodeNilOrValue(guardianReview.outputTokens, forKey: .outputTokens)
+        try container.encodeNilOrValue(guardianReview.reasoningOutputTokens, forKey: .reasoningOutputTokens)
+        try container.encodeNilOrValue(guardianReview.totalTokens, forKey: .totalTokens)
+    }
+}
+
+public struct CodexGuardianReviewEventRequest: Equatable, Encodable, Sendable {
+    public let eventType: String
+    public let eventParams: CodexGuardianReviewEventParams
+
+    public init(eventType: String, eventParams: CodexGuardianReviewEventParams) {
+        self.eventType = eventType
+        self.eventParams = eventParams
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case eventType = "event_type"
+        case eventParams = "event_params"
+    }
+}
+
+public typealias CodexGuardianReviewAnalyticsContext = CodexCommandExecutionAnalyticsContext
+
+public struct CodexGuardianReviewAnalyticsReducer: Sendable {
+    public init() {}
+
+    public func ingest(
+        _ fact: CodexGuardianReviewAnalyticsFact,
+        context: CodexGuardianReviewAnalyticsContext
+    ) -> CodexGuardianReviewEventRequest {
+        CodexGuardianReviewEventRequest(
+            eventType: "codex_guardian_review",
+            eventParams: CodexGuardianReviewEventParams(
+                appServerClient: context.appServerClient,
+                runtime: context.runtime,
+                guardianReview: fact
             )
         )
     }

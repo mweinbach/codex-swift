@@ -1301,6 +1301,126 @@ final class ReviewAnalyticsTests: XCTestCase {
         XCTAssertEqual(event.eventParams.status, .completed)
     }
 
+    func testGuardianReviewAnalyticsReducerIngestsCustomFactLikeRust() throws {
+        let reducer = CodexGuardianReviewAnalyticsReducer()
+        let event = reducer.ingest(
+            CodexGuardianReviewAnalyticsFact(
+                threadID: "thread-guardian",
+                turnID: "turn-guardian",
+                reviewID: "review-guardian",
+                targetItemID: nil,
+                approvalRequestSource: .delegatedSubagent,
+                reviewedAction: .networkAccess(protocol: .https, port: 443),
+                reviewedActionTruncated: false,
+                decision: .denied,
+                terminalStatus: .timedOut,
+                failureReason: .timeout,
+                reviewTimeoutMilliseconds: 90_000,
+                completionLatencyMilliseconds: 90_000,
+                startedAt: 100,
+                completedAt: 190
+            ),
+            context: CodexGuardianReviewAnalyticsContext(
+                appServerClient: CodexAppServerClientMetadata(
+                    productClientID: "codex_tui",
+                    clientName: "codex-tui",
+                    clientVersion: "1.0.0",
+                    rpcTransport: .websocket,
+                    experimentalAPIEnabled: false
+                ),
+                runtime: CodexRuntimeMetadata(
+                    codexRSVersion: "0.1.0",
+                    runtimeOS: "macos",
+                    runtimeOSVersion: "15.3.1",
+                    runtimeArch: "aarch64"
+                )
+            )
+        )
+
+        try XCTAssertJSONObjectEqual(event, [
+            "event_type": "codex_guardian_review",
+            "event_params": [
+                "app_server_client": [
+                    "product_client_id": "codex_tui",
+                    "client_name": "codex-tui",
+                    "client_version": "1.0.0",
+                    "rpc_transport": "websocket",
+                    "experimental_api_enabled": false
+                ],
+                "runtime": [
+                    "codex_rs_version": "0.1.0",
+                    "runtime_os": "macos",
+                    "runtime_os_version": "15.3.1",
+                    "runtime_arch": "aarch64"
+                ],
+                "thread_id": "thread-guardian",
+                "turn_id": "turn-guardian",
+                "review_id": "review-guardian",
+                "target_item_id": nil,
+                "approval_request_source": "delegated_subagent",
+                "reviewed_action": [
+                    "type": "network_access",
+                    "protocol": "https",
+                    "port": 443
+                ],
+                "reviewed_action_truncated": false,
+                "decision": "denied",
+                "terminal_status": "timed_out",
+                "failure_reason": "timeout",
+                "risk_level": nil,
+                "user_authorization": nil,
+                "outcome": nil,
+                "guardian_thread_id": nil,
+                "guardian_session_kind": nil,
+                "guardian_model": nil,
+                "guardian_reasoning_effort": nil,
+                "had_prior_review_context": nil,
+                "review_timeout_ms": 90_000,
+                "tool_call_count": nil,
+                "time_to_first_token_ms": nil,
+                "completion_latency_ms": 90_000,
+                "started_at": 100,
+                "completed_at": 190,
+                "input_tokens": nil,
+                "cached_input_tokens": nil,
+                "output_tokens": nil,
+                "reasoning_output_tokens": nil,
+                "total_tokens": nil
+            ]
+        ])
+    }
+
+    func testCodexAnalyticsClientUploadsGuardianReviewEventLikeRust() async throws {
+        let uploader = RecordingCodexAnalyticsUploader()
+        let client = CodexToolItemAnalyticsClient(uploader: uploader)
+
+        await client.trackGuardianReview(
+            CodexGuardianReviewAnalyticsFact(
+                threadID: "thread-guardian",
+                turnID: "turn-guardian",
+                reviewID: "review-guardian",
+                approvalRequestSource: .mainTurn,
+                reviewedAction: .applyPatch,
+                reviewedActionTruncated: false,
+                decision: .approved,
+                terminalStatus: .approved,
+                reviewTimeoutMilliseconds: 90_000,
+                startedAt: 100
+            ),
+            context: Self.analyticsContext
+        )
+
+        let requests = await uploader.requests
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests[0].events.count, 1)
+        guard case let .guardianReview(event) = requests[0].events[0] else {
+            return XCTFail("expected guardian review analytics event")
+        }
+        XCTAssertEqual(event.eventType, "codex_guardian_review")
+        XCTAssertEqual(event.eventParams.guardianReview.threadID, "thread-guardian")
+        XCTAssertEqual(event.eventParams.guardianReview.decision, .approved)
+    }
+
     private static let analyticsContext = CodexCommandExecutionAnalyticsContext(
         appServerClient: CodexAppServerClientMetadata(
             productClientID: "codex_tui",
