@@ -24502,6 +24502,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
 
     private struct RuntimeTurnAnalyticsSeed {
         var fact: CodexTurnAnalyticsFact
+        var steerCount: UInt64
     }
 
     private struct FeaturedPluginIDsCache {
@@ -24946,7 +24947,8 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                 numInputImages: UInt64(input.images?.count ?? 0),
                 isFirstTurn: priorTurnCount == 0,
                 steerCount: 0
-            )
+            ),
+            steerCount: 0
         )
     }
 
@@ -25003,7 +25005,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             isFirstTurn: base.isFirstTurn,
             status: status,
             turnError: turnError,
-            steerCount: base.steerCount,
+            steerCount: seed.steerCount,
             tokenUsage: runtimeTurnTokenUsage[threadID]?[turnID],
             durationMilliseconds: Self.analyticsTimestamp(durationMilliseconds),
             startedAt: Self.analyticsTimestamp(startedAt),
@@ -25014,6 +25016,75 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         runtimeTurnErrorInfos[threadID]?[turnID] = nil
         _ = try? CodexAppServer.runAsyncBlocking {
             await client.trackTurn(fact, context: context)
+        }
+    }
+
+    private func incrementTurnSteerCountForAnalytics(threadID: String, turnID: String) {
+        guard var seed = runtimeTurnAnalyticsSeeds[threadID]?[turnID] else {
+            return
+        }
+        seed.steerCount += 1
+        runtimeTurnAnalyticsSeeds[threadID]?[turnID] = seed
+    }
+
+    private func trackTurnSteerForAnalytics(
+        threadID: String?,
+        expectedTurnID: String?,
+        acceptedTurnID: String?,
+        numInputImages: UInt64,
+        result: TurnSteerResult,
+        rejectionReason: TurnSteerRejectionReason?
+    ) {
+        guard let threadID,
+              threadAnalyticsMetadata[threadID] != nil
+        else {
+            return
+        }
+        if result == .accepted, let acceptedTurnID {
+            incrementTurnSteerCountForAnalytics(threadID: threadID, turnID: acceptedTurnID)
+        }
+        let fact = CodexTurnSteerAnalyticsFact(
+            threadID: threadID,
+            expectedTurnID: expectedTurnID,
+            acceptedTurnID: acceptedTurnID,
+            numInputImages: numInputImages,
+            result: result,
+            rejectionReason: rejectionReason,
+            createdAt: UInt64(Date().timeIntervalSince1970)
+        )
+        let client = codexToolItemAnalyticsClient
+        let context = analyticsContext(threadID: threadID)
+        _ = try? CodexAppServer.runAsyncBlocking {
+            await client.trackTurnSteer(fact, context: context)
+        }
+    }
+
+    private static func turnSteerNumInputImagesForAnalytics(params: [String: Any]?) -> UInt64 {
+        UInt64(CodexAppServer.v2UserInputs(params?["input"]).images?.count ?? 0)
+    }
+
+    private static func turnSteerRejectionReasonForAnalytics(_ error: Error) -> TurnSteerRejectionReason? {
+        guard let appServerError = error as? AppServerError else {
+            return nil
+        }
+        switch appServerError {
+        case .invalidParamsWithInputTooLargeData:
+            return .inputTooLarge
+        case let .invalidRequest(message),
+             let .invalidParams(message),
+             let .invalidRequestWithData(message, _):
+            if message == "no active turn to steer" {
+                return .noActiveTurn
+            }
+            if message.hasPrefix("expected active turn id `") {
+                return .expectedTurnMismatch
+            }
+            if message == "input must not be empty" {
+                return .emptyInput
+            }
+            return nil
+        case .methodNotFound, .internalError:
+            return nil
         }
     }
 
@@ -27248,28 +27319,57 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                         experimentalAPIEnabled: experimentalAPIEnabled
                     )
                     let threadID = CodexAppServer.stringParam(params?["threadId"])
-                    if coreOpSubmitter != nil {
-                        let coreOp = try CodexAppServer.turnSteerCoreOp(
-                            params: params,
-                            configuration: configuration,
-                            activeTurnID: threadID.flatMap { activeTurnIDs[$0] }
-                        )
-                        _ = try submitCoreOp(
-                            requestID: id,
-                            threadID: coreOp.threadID,
-                            op: coreOp.op,
-                            failureMessage: "failed to steer turn"
-                        )
-                        response = CodexAppServer.responseObject(id: id, result: ["turnId": coreOp.turnID])
-                    } else {
-                        response = CodexAppServer.responseObject(
-                            id: id,
-                            result: try CodexAppServer.turnSteerResult(
+                    let expectedTurnID = CodexAppServer.stringParam(params?["expectedTurnId"])
+                    let numInputImages = Self.turnSteerNumInputImagesForAnalytics(params: params)
+                    do {
+                        if coreOpSubmitter != nil {
+                            let coreOp = try CodexAppServer.turnSteerCoreOp(
                                 params: params,
                                 configuration: configuration,
                                 activeTurnID: threadID.flatMap { activeTurnIDs[$0] }
                             )
+                            _ = try submitCoreOp(
+                                requestID: id,
+                                threadID: coreOp.threadID,
+                                op: coreOp.op,
+                                failureMessage: "failed to steer turn"
+                            )
+                            trackTurnSteerForAnalytics(
+                                threadID: coreOp.threadID,
+                                expectedTurnID: expectedTurnID,
+                                acceptedTurnID: coreOp.turnID,
+                                numInputImages: numInputImages,
+                                result: .accepted,
+                                rejectionReason: nil
+                            )
+                            response = CodexAppServer.responseObject(id: id, result: ["turnId": coreOp.turnID])
+                        } else {
+                            let result = try CodexAppServer.turnSteerResult(
+                                params: params,
+                                configuration: configuration,
+                                activeTurnID: threadID.flatMap { activeTurnIDs[$0] }
+                            )
+                            let acceptedTurnID = CodexAppServer.stringParam(result["turnId"])
+                            trackTurnSteerForAnalytics(
+                                threadID: threadID,
+                                expectedTurnID: expectedTurnID,
+                                acceptedTurnID: acceptedTurnID,
+                                numInputImages: numInputImages,
+                                result: .accepted,
+                                rejectionReason: nil
+                            )
+                            response = CodexAppServer.responseObject(id: id, result: result)
+                        }
+                    } catch {
+                        trackTurnSteerForAnalytics(
+                            threadID: threadID,
+                            expectedTurnID: expectedTurnID,
+                            acceptedTurnID: nil,
+                            numInputImages: numInputImages,
+                            result: .rejected,
+                            rejectionReason: Self.turnSteerRejectionReasonForAnalytics(error)
                         )
+                        throw error
                     }
                 case "turn/interrupt":
                     let threadID = CodexAppServer.stringParam(params?["threadId"])

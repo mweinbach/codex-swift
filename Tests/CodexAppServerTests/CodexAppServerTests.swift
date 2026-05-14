@@ -3241,6 +3241,120 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(turns.count, 0)
     }
 
+    func testTurnSteerAnalyticsUploadsAcceptedLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let analyticsUploader = AppServerRecordingCodexAnalyticsUploader()
+        let processor = try initializedProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            codexAnalyticsUploader: analyticsUploader
+        ))
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider","threadSource":"user"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+        let turnMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Start"}]}}"#.utf8
+        )))
+        let turnResult = try XCTUnwrap(turnMessages[0]["result"] as? [String: Any])
+        let turn = try XCTUnwrap(turnResult["turn"] as? [String: Any])
+        let turnID = try XCTUnwrap(turn["id"] as? String)
+
+        let steer = try decode(processor.processLine(Data(
+            #"{"id":3,"method":"turn/steer","params":{"threadId":"\#(threadID)","expectedTurnId":"\#(turnID)","input":[{"type":"text","text":"Steer"},{"type":"image","url":"https://example.test/two.png"}]}}"#.utf8
+        )))
+
+        let steerResult = try XCTUnwrap(steer["result"] as? [String: Any])
+        XCTAssertEqual(steerResult["turnId"] as? String, turnID)
+        let analyticsRequests = await analyticsUploader.requests
+        XCTAssertEqual(analyticsRequests.count, 1)
+        let analyticsEvent = try XCTUnwrap(analyticsRequests.first?.events.first)
+        guard case let .turnSteer(turnSteerEvent) = analyticsEvent else {
+            return XCTFail("expected turn steer analytics event")
+        }
+        XCTAssertEqual(turnSteerEvent.eventType, "codex_turn_steer_event")
+        let params = turnSteerEvent.eventParams
+        XCTAssertEqual(params.threadID, threadID)
+        XCTAssertEqual(params.expectedTurnID, turnID)
+        XCTAssertEqual(params.acceptedTurnID, turnID)
+        XCTAssertEqual(params.appServerClient.productClientID, "codex_swift")
+        XCTAssertEqual(params.threadSource, .user)
+        XCTAssertEqual(params.numInputImages, 1)
+        XCTAssertEqual(params.result, .accepted)
+        XCTAssertNil(params.rejectionReason)
+        XCTAssertGreaterThan(params.createdAt, 0)
+
+        await processor.handleRuntimeEvent(
+            threadID: threadID,
+            turnID: turnID,
+            event: .taskStarted(TaskStartedEvent(
+                turnID: turnID,
+                startedAt: 1_000,
+                modelContextWindow: nil
+            ))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: threadID,
+            turnID: turnID,
+            event: .taskComplete(TaskCompleteEvent(
+                turnID: turnID,
+                lastAgentMessage: nil,
+                completedAt: 1_200,
+                durationMilliseconds: 200
+            ))
+        )
+        let completedAnalyticsRequests = await analyticsUploader.requests
+        XCTAssertEqual(completedAnalyticsRequests.count, 2)
+        let completedAnalyticsEvent = try XCTUnwrap(completedAnalyticsRequests.last?.events.first)
+        guard case let .turnEvent(turnEvent) = completedAnalyticsEvent else {
+            return XCTFail("expected completed turn analytics event")
+        }
+        XCTAssertEqual(turnEvent.eventParams.threadID, threadID)
+        XCTAssertEqual(turnEvent.eventParams.turnID, turnID)
+        XCTAssertEqual(turnEvent.eventParams.steerCount, 1)
+    }
+
+    func testTurnSteerAnalyticsUploadsRejectedNoActiveLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let analyticsUploader = AppServerRecordingCodexAnalyticsUploader()
+        let processor = try initializedProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            codexAnalyticsUploader: analyticsUploader
+        ))
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider","threadSource":"user"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let noActive = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"turn/steer","params":{"threadId":"\#(threadID)","expectedTurnId":"turn-does-not-exist","input":[{"type":"text","text":"Steer"}]}}"#.utf8
+        )))
+
+        let error = try XCTUnwrap(noActive["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "no active turn to steer")
+        let analyticsRequests = await analyticsUploader.requests
+        XCTAssertEqual(analyticsRequests.count, 1)
+        let analyticsEvent = try XCTUnwrap(analyticsRequests.first?.events.first)
+        guard case let .turnSteer(turnSteerEvent) = analyticsEvent else {
+            return XCTFail("expected turn steer analytics event")
+        }
+        XCTAssertEqual(turnSteerEvent.eventType, "codex_turn_steer_event")
+        let params = turnSteerEvent.eventParams
+        XCTAssertEqual(params.threadID, threadID)
+        XCTAssertEqual(params.expectedTurnID, "turn-does-not-exist")
+        XCTAssertNil(params.acceptedTurnID)
+        XCTAssertEqual(params.appServerClient.productClientID, "codex_swift")
+        XCTAssertEqual(params.threadSource, .user)
+        XCTAssertEqual(params.numInputImages, 0)
+        XCTAssertEqual(params.result, .rejected)
+        XCTAssertEqual(params.rejectionReason, .noActiveTurn)
+        XCTAssertGreaterThan(params.createdAt, 0)
+    }
+
     func testTurnStartRuntimeSubmitterKeepsExistingActiveTurnForSameTurnInputLikeRust() throws {
         let temp = try TemporaryDirectory()
         let capture = AppServerCoreOpCapture()

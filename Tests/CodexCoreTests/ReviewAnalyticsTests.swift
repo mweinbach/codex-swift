@@ -57,7 +57,7 @@ final class ReviewAnalyticsTests: XCTestCase {
                 )
             )),
             .turnSteer(CodexTurnSteerEventRequest(
-                eventType: "codex_turn_steer",
+                eventType: "codex_turn_steer_event",
                 eventParams: CodexTurnSteerEventParams(
                     threadID: "thread-1",
                     expectedTurnID: "turn-1",
@@ -80,7 +80,7 @@ final class ReviewAnalyticsTests: XCTestCase {
         XCTAssertEqual(events.compactMap { $0["event_type"] as? String }, [
             "codex_command_execution_event",
             "codex_turn_event",
-            "codex_turn_steer",
+            "codex_turn_steer_event",
             "codex_collab_agent_tool_call_event",
             "codex_accepted_line_fingerprints"
         ])
@@ -1570,7 +1570,7 @@ final class ReviewAnalyticsTests: XCTestCase {
         )
 
         try XCTAssertJSONObjectEqual(event, [
-            "event_type": "codex_turn_steer",
+            "event_type": "codex_turn_steer_event",
             "event_params": [
                 "thread_id": "thread-steer",
                 "expected_turn_id": "turn-expected",
@@ -1614,7 +1614,7 @@ final class ReviewAnalyticsTests: XCTestCase {
         )
 
         try XCTAssertJSONObjectEqual(event, [
-            "event_type": "codex_turn_steer",
+            "event_type": "codex_turn_steer_event",
             "event_params": [
                 "thread_id": "thread-steer",
                 "expected_turn_id": nil,
@@ -1655,7 +1655,7 @@ final class ReviewAnalyticsTests: XCTestCase {
         guard case let .turnSteer(event) = requests[0].events[0] else {
             return XCTFail("expected turn steer analytics event")
         }
-        XCTAssertEqual(event.eventType, "codex_turn_steer")
+        XCTAssertEqual(event.eventType, "codex_turn_steer_event")
         XCTAssertEqual(event.eventParams.threadID, "thread-steer")
         XCTAssertEqual(event.eventParams.result, .rejected)
         XCTAssertEqual(event.eventParams.rejectionReason, .inputTooLarge)

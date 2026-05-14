@@ -1242,7 +1242,7 @@ public struct CodexTurnSteerAnalyticsReducer: Sendable {
         context: CodexTurnSteerAnalyticsContext
     ) -> CodexTurnSteerEventRequest {
         CodexTurnSteerEventRequest(
-            eventType: "codex_turn_steer",
+            eventType: "codex_turn_steer_event",
             eventParams: CodexTurnSteerEventParams(
                 threadID: fact.threadID,
                 expectedTurnID: fact.expectedTurnID,
