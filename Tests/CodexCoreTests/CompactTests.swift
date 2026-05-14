@@ -263,6 +263,23 @@ final class CompactTests: XCTestCase {
         )
     }
 
+    func testRemoteV2ResponseProcessedRequestUsesCollectedCompletedResponseIDLikeRust() throws {
+        let contextCompaction = ResponseItem.contextCompaction(encryptedContent: "encrypted")
+        let output = try XCTUnwrap(Compact.collectRemoteV2ContextCompactionOutput(from: [
+            .success(.outputItemDone(contextCompaction)),
+            .success(.completed(responseID: "resp-compact", tokenUsage: nil)),
+            .failure(.stream("ignored after response.completed")),
+        ]).successValue)
+        var features = FeatureStates.withDefaults()
+        features.set(.responsesWebsocketResponseProcessed, enabled: true)
+
+        XCTAssertEqual(output, RemoteCompactionV2Output(item: contextCompaction, responseID: "resp-compact"))
+        XCTAssertEqual(
+            Compact.remoteV2ResponseProcessedRequest(output: output, features: features),
+            .responseProcessed(ResponseProcessedWebSocketRequest(responseID: "resp-compact"))
+        )
+    }
+
     func testCollectRemoteV2ContextCompactionOutputRejectsMissingEncryptedContent() {
         let result = Compact.collectRemoteV2ContextCompactionOutput(from: [
             .success(.outputItemDone(.contextCompaction())),
