@@ -3422,6 +3422,7 @@ public struct CodexCLI: Sendable {
         var issuer: String?
         var audience: String?
         var maxClockSkewSeconds: UInt64?
+        var seenSingleValueOptions = Set<String>()
         var index = 0
 
         func value(after option: String) -> ParseResult<String> {
@@ -3429,6 +3430,13 @@ public struct CodexCLI: Sendable {
                 return .failure("codex-swift: missing value for \(option)", 64)
             }
             return .success(arguments[index + 1])
+        }
+
+        func markSingleValueOption(_ option: String) -> ParseResult<Void> {
+            guard seenSingleValueOptions.insert(option).inserted else {
+                return .failure("codex-swift: duplicate option for command 'app-server': \(option)", 64)
+            }
+            return .success(())
         }
 
         while index < arguments.count {
@@ -3439,6 +3447,12 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument == "--listen" {
+                switch markSingleValueOption("--listen") {
+                case .success:
+                    break
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
                 switch value(after: argument) {
                 case let .success(listenURL):
                     switch parseAppServerListenTransport(listenURL) {
@@ -3454,6 +3468,12 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("--listen=") {
+                switch markSingleValueOption("--listen") {
+                case .success:
+                    break
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
                 let listenURL = String(argument.dropFirst("--listen=".count))
                 switch parseAppServerListenTransport(listenURL) {
                 case let .success(transport):
@@ -3465,6 +3485,12 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument == "--session-source" {
+                switch markSingleValueOption("--session-source") {
+                case .success:
+                    break
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
                 switch value(after: argument) {
                 case let .success(rawSource):
                     switch parseAppServerSessionSource(rawSource) {
@@ -3480,6 +3506,12 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("--session-source=") {
+                switch markSingleValueOption("--session-source") {
+                case .success:
+                    break
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
                 let rawSource = String(argument.dropFirst("--session-source=".count))
                 switch parseAppServerSessionSource(rawSource) {
                 case let .success(source):
@@ -3491,6 +3523,12 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument == "--ws-auth" {
+                switch markSingleValueOption("--ws-auth") {
+                case .success:
+                    break
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
                 switch value(after: argument) {
                 case let .success(mode):
                     switch parseAppServerWebsocketAuthMode(mode) {
@@ -3506,6 +3544,12 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("--ws-auth=") {
+                switch markSingleValueOption("--ws-auth") {
+                case .success:
+                    break
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
                 switch parseAppServerWebsocketAuthMode(String(argument.dropFirst("--ws-auth=".count))) {
                 case let .success(parsed):
                     websocketAuthMode = parsed
@@ -3524,6 +3568,12 @@ public struct CodexCLI: Sendable {
                 "--ws-audience": { (value: String) in audience = value }
             ]
             if let assign = stringOptions[argument] {
+                switch markSingleValueOption(argument) {
+                case .success:
+                    break
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
                 switch value(after: argument) {
                 case let .success(rawValue):
                     assign(rawValue)
@@ -3536,12 +3586,24 @@ public struct CodexCLI: Sendable {
             if let equalIndex = argument.firstIndex(of: "=") {
                 let option = String(argument[..<equalIndex])
                 if let assign = stringOptions[option] {
+                    switch markSingleValueOption(option) {
+                    case .success:
+                        break
+                    case let .failure(message, exitCode):
+                        return .failure(message, exitCode)
+                    }
                     assign(String(argument[argument.index(after: equalIndex)...]))
                     index += 1
                     continue
                 }
             }
             if argument == "--ws-max-clock-skew-seconds" {
+                switch markSingleValueOption("--ws-max-clock-skew-seconds") {
+                case .success:
+                    break
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
                 switch value(after: argument) {
                 case let .success(rawValue):
                     switch parseUInt64Option(rawValue, option: argument, command: "app-server") {
@@ -3557,6 +3619,12 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("--ws-max-clock-skew-seconds=") {
+                switch markSingleValueOption("--ws-max-clock-skew-seconds") {
+                case .success:
+                    break
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
                 let rawValue = String(argument.dropFirst("--ws-max-clock-skew-seconds=".count))
                 switch parseUInt64Option(rawValue, option: "--ws-max-clock-skew-seconds", command: "app-server") {
                 case let .success(parsed):
@@ -3635,11 +3703,16 @@ public struct CodexCLI: Sendable {
 
     private func parseAppServerProxy(_ arguments: [String]) -> ParseResult<String?> {
         var socketPath: String?
+        var seenSocketPath = false
         var index = 0
 
         while index < arguments.count {
             let argument = arguments[index]
             if argument == "--sock" {
+                guard !seenSocketPath else {
+                    return .failure("codex-swift: duplicate option for command 'app-server proxy': --sock", 64)
+                }
+                seenSocketPath = true
                 guard index + 1 < arguments.count else {
                     return .failure("codex-swift: missing value for \(argument)", 64)
                 }
@@ -3648,6 +3721,10 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("--sock=") {
+                guard !seenSocketPath else {
+                    return .failure("codex-swift: duplicate option for command 'app-server proxy': --sock", 64)
+                }
+                seenSocketPath = true
                 socketPath = normalizeAppServerProxySocketPath(String(argument.dropFirst("--sock=".count)))
                 index += 1
                 continue
@@ -3678,11 +3755,17 @@ public struct CodexCLI: Sendable {
         var outDir: String?
         var prettier: String?
         var experimental = false
+        var seenOutDir = false
+        var seenPrettier = false
         var index = 0
 
         while index < arguments.count {
             let argument = arguments[index]
             if argument == "--out" || argument == "-o" {
+                guard !seenOutDir else {
+                    return .failure("codex-swift: duplicate option for command 'app-server generate-ts': --out", 64)
+                }
+                seenOutDir = true
                 guard index + 1 < arguments.count else {
                     return .failure("codex-swift: missing value for \(argument)", 64)
                 }
@@ -3691,16 +3774,28 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("--out=") {
+                guard !seenOutDir else {
+                    return .failure("codex-swift: duplicate option for command 'app-server generate-ts': --out", 64)
+                }
+                seenOutDir = true
                 outDir = String(argument.dropFirst("--out=".count))
                 index += 1
                 continue
             }
             if argument.hasPrefix("-o"), argument.count > 2, !argument.hasPrefix("--") {
+                guard !seenOutDir else {
+                    return .failure("codex-swift: duplicate option for command 'app-server generate-ts': --out", 64)
+                }
+                seenOutDir = true
                 outDir = String(argument.dropFirst(2))
                 index += 1
                 continue
             }
             if argument == "--prettier" || argument == "-p" {
+                guard !seenPrettier else {
+                    return .failure("codex-swift: duplicate option for command 'app-server generate-ts': --prettier", 64)
+                }
+                seenPrettier = true
                 guard index + 1 < arguments.count else {
                     return .failure("codex-swift: missing value for \(argument)", 64)
                 }
@@ -3709,11 +3804,19 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("--prettier=") {
+                guard !seenPrettier else {
+                    return .failure("codex-swift: duplicate option for command 'app-server generate-ts': --prettier", 64)
+                }
+                seenPrettier = true
                 prettier = String(argument.dropFirst("--prettier=".count))
                 index += 1
                 continue
             }
             if argument.hasPrefix("-p"), argument.count > 2, !argument.hasPrefix("--") {
+                guard !seenPrettier else {
+                    return .failure("codex-swift: duplicate option for command 'app-server generate-ts': --prettier", 64)
+                }
+                seenPrettier = true
                 prettier = String(argument.dropFirst(2))
                 index += 1
                 continue
@@ -3738,11 +3841,16 @@ public struct CodexCLI: Sendable {
     private func parseAppServerGenerateJSONSchema(_ arguments: [String]) -> ParseResult<(outDir: String, experimental: Bool)> {
         var outDir: String?
         var experimental = false
+        var seenOutDir = false
         var index = 0
 
         while index < arguments.count {
             let argument = arguments[index]
             if argument == "--out" || argument == "-o" {
+                guard !seenOutDir else {
+                    return .failure("codex-swift: duplicate option for command 'app-server generate-json-schema': --out", 64)
+                }
+                seenOutDir = true
                 guard index + 1 < arguments.count else {
                     return .failure("codex-swift: missing value for \(argument)", 64)
                 }
@@ -3751,11 +3859,19 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("--out=") {
+                guard !seenOutDir else {
+                    return .failure("codex-swift: duplicate option for command 'app-server generate-json-schema': --out", 64)
+                }
+                seenOutDir = true
                 outDir = String(argument.dropFirst("--out=".count))
                 index += 1
                 continue
             }
             if argument.hasPrefix("-o"), argument.count > 2, !argument.hasPrefix("--") {
+                guard !seenOutDir else {
+                    return .failure("codex-swift: duplicate option for command 'app-server generate-json-schema': --out", 64)
+                }
+                seenOutDir = true
                 outDir = String(argument.dropFirst(2))
                 index += 1
                 continue
@@ -3779,11 +3895,16 @@ public struct CodexCLI: Sendable {
 
     private func parseAppServerGenerateInternalJSONSchema(_ arguments: [String]) -> ParseResult<String> {
         var outDir: String?
+        var seenOutDir = false
         var index = 0
 
         while index < arguments.count {
             let argument = arguments[index]
             if argument == "--out" || argument == "-o" {
+                guard !seenOutDir else {
+                    return .failure("codex-swift: duplicate option for command 'app-server generate-internal-json-schema': --out", 64)
+                }
+                seenOutDir = true
                 guard index + 1 < arguments.count else {
                     return .failure("codex-swift: missing value for \(argument)", 64)
                 }
@@ -3792,11 +3913,19 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("--out=") {
+                guard !seenOutDir else {
+                    return .failure("codex-swift: duplicate option for command 'app-server generate-internal-json-schema': --out", 64)
+                }
+                seenOutDir = true
                 outDir = String(argument.dropFirst("--out=".count))
                 index += 1
                 continue
             }
             if argument.hasPrefix("-o"), argument.count > 2, !argument.hasPrefix("--") {
+                guard !seenOutDir else {
+                    return .failure("codex-swift: duplicate option for command 'app-server generate-internal-json-schema': --out", 64)
+                }
+                seenOutDir = true
                 outDir = String(argument.dropFirst(2))
                 index += 1
                 continue

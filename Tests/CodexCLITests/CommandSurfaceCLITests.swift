@@ -1325,6 +1325,42 @@ final class CommandSurfaceCLITests: XCTestCase {
                 "codex-swift: invalid value for command 'app-server' --ws-max-clock-skew-seconds: -1"
             ),
             (
+                ["app-server", "--listen", "stdio://", "--listen=off"],
+                "codex-swift: duplicate option for command 'app-server': --listen"
+            ),
+            (
+                ["app-server", "--ws-auth", "capability-token", "--ws-auth=signed-bearer-token"],
+                "codex-swift: duplicate option for command 'app-server': --ws-auth"
+            ),
+            (
+                ["app-server", "--ws-token-file", "/tmp/token-a", "--ws-token-file=/tmp/token-b"],
+                "codex-swift: duplicate option for command 'app-server': --ws-token-file"
+            ),
+            (
+                ["app-server", "--ws-max-clock-skew-seconds", "10", "--ws-max-clock-skew-seconds=20"],
+                "codex-swift: duplicate option for command 'app-server': --ws-max-clock-skew-seconds"
+            ),
+            (
+                ["app-server", "proxy", "--sock", "/tmp/a.sock", "--sock=/tmp/b.sock"],
+                "codex-swift: duplicate option for command 'app-server proxy': --sock"
+            ),
+            (
+                ["app-server", "generate-ts", "--out", "/tmp/ts-a", "-o/tmp/ts-b"],
+                "codex-swift: duplicate option for command 'app-server generate-ts': --out"
+            ),
+            (
+                ["app-server", "generate-ts", "--out", "/tmp/ts", "--prettier", "prettier-a", "-pprettier-b"],
+                "codex-swift: duplicate option for command 'app-server generate-ts': --prettier"
+            ),
+            (
+                ["app-server", "generate-json-schema", "-o", "/tmp/schema-a", "--out=/tmp/schema-b"],
+                "codex-swift: duplicate option for command 'app-server generate-json-schema': --out"
+            ),
+            (
+                ["app-server", "generate-internal-json-schema", "-o/tmp/schema-a", "--out", "/tmp/schema-b"],
+                "codex-swift: duplicate option for command 'app-server generate-internal-json-schema': --out"
+            ),
+            (
                 ["app-server", "generate-internal-json-schema"],
                 "codex-swift: missing required option for command 'app-server generate-internal-json-schema': --out <DIR>"
             ),
