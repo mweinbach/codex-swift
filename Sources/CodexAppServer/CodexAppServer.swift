@@ -1317,6 +1317,10 @@ public enum CodexAppServer {
             runtimeConfig: runtimeConfig,
             cwd: cwd,
             conversationID: conversationID,
+            model: model,
+            approvalPolicy: approvalPolicy,
+            approvalsReviewer: approvalsReviewer,
+            serviceTier: serviceTier,
             configuration: configuration
         )
         if try rustOptionalBoolParam(params?["ephemeral"], defaultValue: false) {
@@ -1386,6 +1390,10 @@ public enum CodexAppServer {
         runtimeConfig: CodexRuntimeConfig,
         cwd: URL,
         conversationID: ConversationId,
+        model: String,
+        approvalPolicy: AskForApproval,
+        approvalsReviewer: ApprovalsReviewer,
+        serviceTier: String?,
         configuration: CodexAppServerConfiguration
     ) throws {
         guard let exportDir = runtimeConfig.configLockfile.exportDir else {
@@ -1399,8 +1407,16 @@ public enum CodexAppServer {
             overrides: configuration.configLayerOverrides,
             environment: configuration.environment
         )
+        let config = configLockConfigForThreadStart(
+            baseConfig: stack.effectiveConfig(),
+            runtimeConfig: runtimeConfig,
+            model: model,
+            approvalPolicy: approvalPolicy,
+            approvalsReviewer: approvalsReviewer,
+            serviceTier: serviceTier
+        )
         let lockfile = ConfigLockfile.current(
-            config: ConfigLockfileStore.configWithoutLockControls(stack.effectiveConfig()),
+            config: config,
             codexVersion: configuration.version
         )
         try ConfigLockfileStore.exportConfigLockfile(
@@ -1408,6 +1424,57 @@ public enum CodexAppServer {
             to: URL(fileURLWithPath: exportDir, isDirectory: true),
             threadID: ThreadId(uuid: conversationID.uuid)
         )
+    }
+
+    private static func configLockConfigForThreadStart(
+        baseConfig: ConfigValue,
+        runtimeConfig: CodexRuntimeConfig,
+        model: String,
+        approvalPolicy: AskForApproval,
+        approvalsReviewer: ApprovalsReviewer,
+        serviceTier: String?
+    ) -> ConfigValue {
+        let config = ConfigLockfileStore.configWithoutLockControls(baseConfig)
+        guard runtimeConfig.configLockfile.saveFieldsResolvedFromModelCatalog,
+              case var .table(table) = config
+        else {
+            return config
+        }
+
+        table["model"] = .string(model)
+        if let effort = runtimeConfig.modelReasoningEffort {
+            table["model_reasoning_effort"] = .string(effort.rawValue)
+        }
+        if let summary = runtimeConfig.modelReasoningSummary {
+            table["model_reasoning_summary"] = .string(summary.rawValue)
+        }
+        if let serviceTier {
+            table["service_tier"] = .string(serviceTier)
+        }
+        if let instructions = runtimeConfig.baseInstructions {
+            table["instructions"] = .string(instructions)
+        }
+        if let developerInstructions = runtimeConfig.developerInstructions {
+            table["developer_instructions"] = .string(developerInstructions)
+        }
+        if let compactPrompt = runtimeConfig.compactPrompt {
+            table["compact_prompt"] = .string(compactPrompt)
+        }
+        if let personality = runtimeConfig.personality {
+            table["personality"] = .string(personality.rawValue)
+        }
+        table["approval_policy"] = .string(approvalPolicy.rawValue)
+        table["approvals_reviewer"] = .string(configRawValue(for: approvalsReviewer))
+        return .table(table)
+    }
+
+    private static func configRawValue(for reviewer: ApprovalsReviewer) -> String {
+        switch reviewer {
+        case .user:
+            return "user"
+        case .autoReview:
+            return "auto_review"
+        }
     }
 
     private static func instructionSourcePaths(

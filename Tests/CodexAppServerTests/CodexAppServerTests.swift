@@ -917,7 +917,7 @@ final class CodexAppServerTests: XCTestCase {
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
 
         let messages = try decodeMessages(processor.processLine(Data(
-            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider","cwd":"\#(cwd.url.path)"}}"#.utf8
+            #"{"id":1,"method":"thread/start","params":{"model":"gpt-param","modelProvider":"mock_provider","cwd":"\#(cwd.url.path)","approvalPolicy":"never","approvalsReviewer":"auto_review","serviceTier":"flex"}}"#.utf8
         )))
 
         let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
@@ -930,7 +930,10 @@ final class CodexAppServerTests: XCTestCase {
         guard case let .table(config) = lockfile.config else {
             return XCTFail("expected config table")
         }
-        XCTAssertEqual(config["model"], .string("gpt-user"))
+        XCTAssertEqual(config["model"], .string("gpt-param"))
+        XCTAssertEqual(config["approval_policy"], .string("never"))
+        XCTAssertEqual(config["approvals_reviewer"], .string("auto_review"))
+        XCTAssertEqual(config["service_tier"], .string("flex"))
         XCTAssertNil(config["debug"])
     }
 
