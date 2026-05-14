@@ -16173,8 +16173,10 @@ public enum CodexAppServer {
         guard let enabled = params?["enabled"] as? Bool else {
             throw AppServerError.invalidParams("missing enabled")
         }
+        let path = try rustOptionalAbsolutePathParam(params?["path"])
+        let name = try rustOptionalStringParam(params?["name"])
         let selector: SkillConfigSelector
-        switch (stringParam(params?["path"]), stringParam(params?["name"])) {
+        switch (path, name) {
         case let (path?, nil):
             selector = .path(normalizeSkillConfigPath(path))
         case let (nil, name?) where !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty:

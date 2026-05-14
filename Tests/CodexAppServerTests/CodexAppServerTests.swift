@@ -24050,6 +24050,33 @@ final class CodexAppServerTests: XCTestCase {
         }
     }
 
+    func testSkillsConfigWriteRejectsMalformedPathAndNameLikeRustProtocol() throws {
+        let codexHome = try TemporaryDirectory()
+
+        for (index, testCase) in [
+            (
+                #"{"path":"relative/SKILL.md","enabled":false}"#,
+                "Invalid request: AbsolutePathBuf deserialized without a base path"
+            ),
+            (
+                #"{"path":7,"enabled":false}"#,
+                "Invalid request: invalid type: integer `7`, expected a string"
+            ),
+            (
+                #"{"name":7,"enabled":false}"#,
+                "Invalid request: invalid type: integer `7`, expected a string"
+            )
+        ].enumerated() {
+            let invalid = try appServerResponse(
+                #"{"id":\#(index + 1),"method":"skills/config/write","params":\#(testCase.0)}"#,
+                codexHome: codexHome.url
+            )
+            let error = try XCTUnwrap(invalid["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, testCase.1)
+        }
+    }
+
     func testHooksListReturnsUserCommandHooks() throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
