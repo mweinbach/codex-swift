@@ -146,6 +146,30 @@ final class AppServerThreadProtocolTests: XCTestCase {
         XCTAssertEqual(decoded.status, .notSubscribed)
     }
 
+    func testThreadElicitationCounterRoundTripsLikeRustProtocol() throws {
+        try XCTAssertJSONObjectEqual(ThreadIncrementElicitationParams(threadID: "thr_increment"), [
+            "threadId": "thr_increment"
+        ])
+        try XCTAssertJSONObjectEqual(ThreadIncrementElicitationResponse(count: 1, paused: true), [
+            "count": 1,
+            "paused": true
+        ])
+
+        try XCTAssertJSONObjectEqual(ThreadDecrementElicitationParams(threadID: "thr_decrement"), [
+            "threadId": "thr_decrement"
+        ])
+        try XCTAssertJSONObjectEqual(ThreadDecrementElicitationResponse(count: 0, paused: false), [
+            "count": 0,
+            "paused": false
+        ])
+
+        let decoded = try JSONDecoder().decode(
+            ThreadIncrementElicitationResponse.self,
+            from: Data(#"{"count":42,"paused":true}"#.utf8)
+        )
+        XCTAssertEqual(decoded, ThreadIncrementElicitationResponse(count: 42, paused: true))
+    }
+
     func testThreadTurnsItemsListRoundTripsLikeRustProtocol() throws {
         let params = ThreadTurnsItemsListParams(
             threadID: "thr_123",

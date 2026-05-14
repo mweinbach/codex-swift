@@ -307,6 +307,50 @@ public struct ThreadUnsubscribeResponse: Equatable, Codable, Sendable {
     }
 }
 
+public struct ThreadIncrementElicitationParams: Equatable, Codable, Sendable {
+    public let threadID: String
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+    }
+
+    public init(threadID: String) {
+        self.threadID = threadID
+    }
+}
+
+public struct ThreadIncrementElicitationResponse: Equatable, Codable, Sendable {
+    public let count: UInt64
+    public let paused: Bool
+
+    public init(count: UInt64, paused: Bool) {
+        self.count = count
+        self.paused = paused
+    }
+}
+
+public struct ThreadDecrementElicitationParams: Equatable, Codable, Sendable {
+    public let threadID: String
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+    }
+
+    public init(threadID: String) {
+        self.threadID = threadID
+    }
+}
+
+public struct ThreadDecrementElicitationResponse: Equatable, Codable, Sendable {
+    public let count: UInt64
+    public let paused: Bool
+
+    public init(count: UInt64, paused: Bool) {
+        self.count = count
+        self.paused = paused
+    }
+}
+
 public struct ThreadTurnsListParams: Equatable, Codable, Sendable {
     public let threadID: String
     public let cursor: String?
