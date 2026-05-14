@@ -16,10 +16,15 @@ public enum AbsolutePathError: Error, Equatable, CustomStringConvertible, Sendab
 
 public struct AbsolutePath: Equatable, Hashable, Codable, CustomStringConvertible, Sendable {
     public static let decodingBaseUserInfoKey = CodingUserInfoKey(rawValue: "codex.absolutePath.base")!
+    public static let root = AbsolutePath(normalizedAbsolutePath: "/")
 
     public let path: String
 
     public var description: String { path }
+
+    private init(normalizedAbsolutePath path: String) {
+        self.path = path
+    }
 
     public init(absolutePath path: String) throws {
         let path = Self.expandingHomeDirectory(in: path)

@@ -448,7 +448,7 @@ public struct AppServerThread: Equatable, Codable, Sendable {
     public let updatedAt: Int64
     public let status: AppServerThreadStatus
     public let path: String?
-    public let cwd: String
+    public let cwd: AbsolutePath
     public let cliVersion: String
     public let source: AppServerSessionSource
     public let threadSource: ThreadSource?
@@ -491,7 +491,7 @@ public struct AppServerThread: Equatable, Codable, Sendable {
         updatedAt: Int64 = 0,
         status: AppServerThreadStatus = .notLoaded,
         path: String? = nil,
-        cwd: String = "/",
+        cwd: AbsolutePath = .root,
         cliVersion: String = "",
         source: AppServerSessionSource = .vsCode,
         threadSource: ThreadSource? = nil,

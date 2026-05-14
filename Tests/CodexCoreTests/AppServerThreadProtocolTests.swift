@@ -241,7 +241,7 @@ final class AppServerThreadProtocolTests: XCTestCase {
             updatedAt: 1_100,
             status: .idle,
             path: "/Users/me/.codex/sessions/thread-1.jsonl",
-            cwd: "/repo",
+            cwd: try AbsolutePath(absolutePath: "/repo"),
             cliVersion: "0.50.0",
             source: .appServer,
             threadSource: .user,
@@ -349,6 +349,27 @@ final class AppServerThreadProtocolTests: XCTestCase {
         XCTAssertEqual(decodedSource, .custom("atlas"))
     }
 
+    func testThreadDataRejectsRelativeCwdLikeRustAbsolutePathBuf() throws {
+        let payload = Data(#"""
+        {
+          "id": "thread-1",
+          "sessionId": "session-1",
+          "preview": "Ship parity",
+          "ephemeral": false,
+          "modelProvider": "openai",
+          "createdAt": 900,
+          "updatedAt": 1100,
+          "status": { "type": "idle" },
+          "cwd": "repo",
+          "cliVersion": "0.50.0",
+          "source": "appServer",
+          "turns": []
+        }
+        """#.utf8)
+
+        XCTAssertThrowsError(try JSONDecoder().decode(AppServerThread.self, from: payload))
+    }
+
     func testThreadStartResumeAndForkResponsesCarryRustRuntimeShape() throws {
         let thread = AppServerThread(
             id: "thread-1",
@@ -360,7 +381,7 @@ final class AppServerThreadProtocolTests: XCTestCase {
             updatedAt: 2,
             status: .notLoaded,
             path: nil,
-            cwd: "/repo",
+            cwd: try AbsolutePath(absolutePath: "/repo"),
             cliVersion: "0.50.0",
             source: .appServer,
             threadSource: .user,
@@ -832,7 +853,7 @@ final class AppServerThreadProtocolTests: XCTestCase {
             updatedAt: 2,
             status: .notLoaded,
             path: nil,
-            cwd: "/repo",
+            cwd: try AbsolutePath(absolutePath: "/repo"),
             cliVersion: "0.50.0",
             source: .appServer,
             threadSource: .user,
@@ -1042,7 +1063,7 @@ final class AppServerThreadProtocolTests: XCTestCase {
             updatedAt: 2,
             status: .notLoaded,
             path: nil,
-            cwd: "/repo",
+            cwd: try AbsolutePath(absolutePath: "/repo"),
             cliVersion: "0.50.0",
             source: .appServer,
             threadSource: .user,
