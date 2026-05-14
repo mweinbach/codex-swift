@@ -77,6 +77,28 @@ final class AcceptedLinesTests: XCTestCase {
         ))
     }
 
+    func testEffectiveLineLengthUsesUTF8BytesLikeRust() {
+        let diff = """
+        diff --git a/src/lib.rs b/src/lib.rs
+        index 1111111..2222222
+        --- a/src/lib.rs
+        +++ b/src/lib.rs
+        @@ -0,0 +1 @@
+        +éé
+        """
+
+        let summary = AcceptedLines.acceptedLineFingerprints(fromUnifiedDiff: diff)
+
+        XCTAssertEqual(summary.acceptedAddedLines, 1)
+        XCTAssertEqual(summary.acceptedDeletedLines, 0)
+        XCTAssertEqual(summary.lineFingerprints, [
+            AcceptedLineFingerprint(
+                pathHash: AcceptedLines.fingerprintHash(domain: "path", value: "src/lib.rs"),
+                lineHash: AcceptedLines.fingerprintHash(domain: "line", value: "éé")
+            )
+        ])
+    }
+
     func testAcceptedLineFingerprintEventRequestUsesRustWireShape() throws {
         let fingerprints = [
             AcceptedLineFingerprint(pathHash: "path1", lineHash: "line1"),

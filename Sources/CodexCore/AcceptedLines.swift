@@ -451,7 +451,7 @@ public enum AcceptedLines {
 
     private static func normalizeEffectiveLine(_ line: String) -> String? {
         let normalized = line.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        if normalized.count <= 3 {
+        if normalized.utf8.count <= 3 {
             return nil
         }
         if !normalized.contains(where: { character in
@@ -494,7 +494,7 @@ public enum AcceptedLines {
     }
 
     private static func acceptedLineFingerprintJSONBytes(_ fingerprint: AcceptedLineFingerprint) -> Int {
-        32 + fingerprint.pathHash.count + fingerprint.lineHash.count
+        32 + fingerprint.pathHash.utf8.count + fingerprint.lineHash.utf8.count
     }
 }
 
