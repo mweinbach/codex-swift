@@ -398,6 +398,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var startupWarnings: [String]
     public var fileOpener: UriBasedFileOpener
     public var tui: TuiRuntimeConfig
+    public var tuiKeymap: TuiKeymapConfig
     public var terminalResizeReflow: TerminalResizeReflowConfig
 
     public var runtimeMcpConfig: RuntimeMcpConfig {
@@ -589,6 +590,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.startupWarnings = []
         self.fileOpener = .vsCode
         self.tui = TuiRuntimeConfig()
+        self.tuiKeymap = TuiKeymapConfig()
         self.terminalResizeReflow = TerminalResizeReflowConfig()
     }
 
@@ -2025,6 +2027,7 @@ private struct ParsedCodexConfigToml {
     var realtime: [String: ConfigValue] = [:]
     var tui: [String: ConfigValue] = [:]
     var tuiModelAvailabilityNux: [String: ConfigValue] = [:]
+    var tuiKeymap: [String: ConfigValue] = [:]
     var profileTui: [String: [String: ConfigValue]] = [:]
     var shellEnvironmentPolicy: [String: ConfigValue] = [:]
     var toolSuggest: [String: ConfigValue] = [:]
@@ -2433,6 +2436,12 @@ private struct ParsedCodexConfigToml {
             case .tuiModelAvailabilityNux:
                 parsed.tuiModelAvailabilityNux[try parseDottedKey(key).joined(separator: ".")] =
                     try ConfigValueParser.parseTomlLiteral(valueText)
+            case .tuiKeymap:
+                parsed.tuiKeymap[key] = try ConfigValueParser.parseTomlLiteral(valueText)
+            case let .tuiKeymapContext(context):
+                var contextTable = parsed.tuiKeymap[context] ?? .table([:])
+                contextTable.merge(overlay: .table([key: try ConfigValueParser.parseTomlLiteral(valueText)]))
+                parsed.tuiKeymap[context] = contextTable
             case let .profileTui(name):
                 parsed.profileTui[name, default: [:]][key] = try ConfigValueParser.parseTomlLiteral(valueText)
             case .shellEnvironmentPolicy:
@@ -2818,6 +2827,18 @@ private struct ParsedCodexConfigToml {
                 continue
             }
 
+            if parts.count == 3, parts[0] == "tui", parts[1] == "keymap" {
+                tuiKeymap[parts[2]] = value
+                continue
+            }
+
+            if parts.count == 4, parts[0] == "tui", parts[1] == "keymap" {
+                var contextTable = tuiKeymap[parts[2]] ?? .table([:])
+                contextTable.merge(overlay: .table([parts[3]: value]))
+                tuiKeymap[parts[2]] = contextTable
+                continue
+            }
+
             if parts.count == 4, parts[0] == "profiles", parts[2] == "tui" {
                 profileTui[parts[1], default: [:]][parts[3]] = value
                 continue
@@ -3024,6 +3045,12 @@ private struct ParsedCodexConfigToml {
             tuiModelAvailabilityNux[key] = value
         }
 
+        for (context, value) in overlay.tuiKeymap {
+            var existing = tuiKeymap[context] ?? .table([:])
+            existing.merge(overlay: value)
+            tuiKeymap[context] = existing
+        }
+
         for (profileName, profileValue) in overlay.profileTui {
             var mergedProfile = profileTui[profileName] ?? [:]
             for (key, value) in profileValue {
@@ -3153,6 +3180,12 @@ private struct ParsedCodexConfigToml {
                 if key == "model_availability_nux", case let .table(nuxTable) = value {
                     for (nuxKey, nuxValue) in nuxTable {
                         tuiModelAvailabilityNux[try Self.parseDottedKey(nuxKey).joined(separator: ".")] = nuxValue
+                    }
+                    continue
+                }
+                if key == "keymap", case let .table(keymapTable) = value {
+                    for (context, contextValue) in keymapTable {
+                        tuiKeymap[context] = contextValue
                     }
                     continue
                 }
@@ -3330,6 +3363,7 @@ private struct ParsedCodexConfigToml {
             profile: activeProfileName.flatMap { profileTui[$0] },
             key: "tui"
         )
+        config.tuiKeymap = try TuiKeymapConfig.parse(.table(tuiKeymap), key: "tui.keymap")
         config.terminalResizeReflow = try Self.terminalResizeReflowConfigValue(tui, key: "tui")
         config.shellEnvironmentPolicy = try Self.shellEnvironmentPolicyValue(
             shellEnvironmentPolicy,
@@ -5521,6 +5555,7 @@ private struct ParsedCodexConfigToml {
             "terminal_title",
             "theme",
             "session_picker_view",
+            "keymap",
             "terminal_resize_reflow_max_rows",
             "notifications",
             "notification_method",
@@ -5967,6 +6002,12 @@ private struct ParsedCodexConfigToml {
         if parts.count == 2, parts[0] == "tui", parts[1] == "model_availability_nux" {
             return .tuiModelAvailabilityNux
         }
+        if parts.count == 2, parts[0] == "tui", parts[1] == "keymap" {
+            return .tuiKeymap
+        }
+        if parts.count == 3, parts[0] == "tui", parts[1] == "keymap" {
+            return .tuiKeymapContext(parts[2])
+        }
         if parts.count == 1, parts[0] == "shell_environment_policy" {
             return .shellEnvironmentPolicy
         }
@@ -6233,6 +6274,8 @@ private enum ConfigSection {
     case realtime
     case tui
     case tuiModelAvailabilityNux
+    case tuiKeymap
+    case tuiKeymapContext(String)
     case profileTui(String)
     case shellEnvironmentPolicy
     case shellEnvironmentPolicySet

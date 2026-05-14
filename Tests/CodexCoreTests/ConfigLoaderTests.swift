@@ -2313,6 +2313,55 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.tui.sessionPickerView, .comfortable)
     }
 
+    func testTuiKeymapConfigAcceptsRustContextsAndNormalizesKeybindings() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [tui.keymap.global]
+        open_transcript = "Control-S"
+        copy = ["Option-Shift-PageUp", "escape"]
+
+        [tui.keymap.composer]
+        queue = []
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(
+            config.tuiKeymap.bindings(context: .global, action: "open_transcript"),
+            .one(try TuiKeybindingSpec("ctrl-s"))
+        )
+        XCTAssertEqual(
+            config.tuiKeymap.bindings(context: .global, action: "copy"),
+            .many([try TuiKeybindingSpec("alt-shift-page-up"), try TuiKeybindingSpec("esc")])
+        )
+        XCTAssertEqual(
+            config.tuiKeymap.bindings(context: .composer, action: "queue"),
+            .many([])
+        )
+    }
+
+    func testTuiKeymapConfigRejectsRustUnknownRootAndContextActions() throws {
+        let dir = try CoreTemporaryDirectory()
+
+        try """
+        [tui.keymap]
+        open_transcript = "ctrl-s"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual(String(describing: error), "Invalid config line: tui.keymap.open_transcript")
+        }
+
+        try """
+        [tui.keymap.global]
+        open_transcrip = "ctrl-s"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual(String(describing: error), "Invalid config line: tui.keymap.global.open_transcrip")
+        }
+    }
+
     func testPromptOverridesLoadFromFilesAndTrimLikeRust() throws {
         let dir = try CoreTemporaryDirectory()
         let instructions = dir.url.appendingPathComponent("instructions.txt")

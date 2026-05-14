@@ -12,6 +12,7 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-14: rechecked Rust's `[tui.keymap]` config schema from `codex-rs/config/src/tui_keymap.rs`. Swift config loading now accepts Rust-shaped keymap contexts and string/list bindings, preserves empty-list unbinding, normalizes key aliases and modifier ordering, and rejects misplaced or misspelled keymap actions instead of silently ignoring them.
 - 2026-05-14: rechecked Rust's `CODEX_HOME/environments.toml` loader from `codex-rs/exec-server/src/environment_toml.rs`. Swift configured-environment loading now accepts Rust-valid multi-line `args` arrays and inline `env` tables instead of treating each physical line as a separate TOML assignment.
 - 2026-05-14: rechecked Rust commit `53f9480cd8` and `codex-rs/core/src/session/mod.rs` / `session.rs` service-tier normalization. Swift app-server thread lifecycle and turn-start service-tier parsing now drops the legacy `fast` / `priority` tier when `fast_mode` is disabled, while preserving `flex` and unknown custom service-tier strings.
 - 2026-05-14: rechecked Rust's HTTP transport-to-Codex error bridge from `codex-rs/codex-client/src/error.rs` and `codex-rs/codex-api/src/api_bridge.rs`. Swift transport HTTP errors now carry the failing request URL through `URLSessionAPITransport` into `UnexpectedResponseError`, while preserving Rust's transport error display string.
