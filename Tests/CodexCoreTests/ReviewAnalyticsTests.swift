@@ -2,6 +2,99 @@ import CodexCore
 import XCTest
 
 final class ReviewAnalyticsTests: XCTestCase {
+    func testTrackEventsRequestUsesRustUntaggedEventEnvelope() throws {
+        var commandReducer = CodexCommandExecutionAnalyticsReducer()
+        var collabReducer = CodexCollabAgentToolCallAnalyticsReducer()
+        let command = try Self.reduceCommandExecution(
+            status: .completed,
+            source: .agent,
+            reducer: &commandReducer
+        )
+        let collab = try Self.reduceCollabAgentToolCall(
+            tool: .wait,
+            status: .completed,
+            receiverThreadIDs: ["child-1"],
+            model: "gpt-5.5",
+            reasoningEffort: .medium,
+            agentsStates: ["child-1": AppServerCollabAgentState(status: .completed)],
+            reducer: &collabReducer
+        )
+        let acceptedLine = AcceptedLineFingerprintsEventRequest(eventParams: AcceptedLineFingerprintsEventParams(
+            eventType: "codex.accepted_line_fingerprints",
+            turnID: "turn-1",
+            threadID: "thread-1",
+            productSurface: "codex-tui",
+            modelSlug: "gpt-5.5",
+            completedAt: 123,
+            repoHash: "repo-hash",
+            acceptedAddedLines: 1,
+            acceptedDeletedLines: 0,
+            lineFingerprints: [
+                AcceptedLineFingerprint(pathHash: String(repeating: "a", count: 40), lineHash: String(repeating: "b", count: 40))
+            ]
+        ))
+
+        let request = CodexTrackEventsRequest(events: [
+            .commandExecution(command),
+            .collabAgentToolCall(collab),
+            .acceptedLineFingerprints(acceptedLine)
+        ])
+
+        let object = try JSONObject(request)
+        let events = try XCTUnwrap(object["events"] as? [[String: Any]])
+        XCTAssertEqual(events.compactMap { $0["event_type"] as? String }, [
+            "codex_command_execution_event",
+            "codex_collab_agent_tool_call_event",
+            "codex_accepted_line_fingerprints"
+        ])
+        XCTAssertNotNil(events[0]["event_params"])
+        XCTAssertNotNil(events[1]["event_params"])
+        XCTAssertNotNil(events[2]["event_params"])
+    }
+
+    func testTrackEventRequestBatchesIsolateAcceptedLineEventsLikeRust() throws {
+        var commandReducer = CodexCommandExecutionAnalyticsReducer()
+        var collabReducer = CodexCollabAgentToolCallAnalyticsReducer()
+        var imageReducer = CodexImageGenerationAnalyticsReducer()
+        let acceptedLine = AcceptedLineFingerprintsEventRequest(eventParams: AcceptedLineFingerprintsEventParams(
+            eventType: "codex.accepted_line_fingerprints",
+            turnID: "turn-1",
+            threadID: "thread-1",
+            completedAt: 123,
+            acceptedAddedLines: 1,
+            acceptedDeletedLines: 0,
+            lineFingerprints: []
+        ))
+        let events: [CodexTrackEventRequest] = [
+            .commandExecution(try Self.reduceCommandExecution(
+                status: .completed,
+                source: .agent,
+                reducer: &commandReducer
+            )),
+            .collabAgentToolCall(try Self.reduceCollabAgentToolCall(
+                tool: .closeAgent,
+                status: .completed,
+                receiverThreadIDs: ["child-1"],
+                model: nil,
+                reasoningEffort: nil,
+                agentsStates: ["child-1": AppServerCollabAgentState(status: .completed)],
+                reducer: &collabReducer
+            )),
+            .acceptedLineFingerprints(acceptedLine),
+            .imageGeneration(try Self.reduceImageGeneration(status: "completed", reducer: &imageReducer)),
+            .acceptedLineFingerprints(acceptedLine)
+        ]
+
+        let batches = CodexAnalytics.trackEventRequestBatches(events)
+
+        XCTAssertEqual(batches, [
+            [events[0], events[1]],
+            [events[2]],
+            [events[3]],
+            [events[4]]
+        ])
+    }
+
     func testImageGenerationAnalyticsReducerEmitsLifecycleEventLikeRust() throws {
         var reducer = CodexImageGenerationAnalyticsReducer()
         let item = AppServerThreadItem.imageGeneration(

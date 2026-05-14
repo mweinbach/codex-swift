@@ -1,5 +1,93 @@
 import Foundation
 
+public struct CodexTrackEventsRequest: Equatable, Encodable, Sendable {
+    public let events: [CodexTrackEventRequest]
+
+    public init(events: [CodexTrackEventRequest]) {
+        self.events = events
+    }
+}
+
+public enum CodexTrackEventRequest: Equatable, Encodable, Sendable {
+    case compaction(CodexCompactionEventRequest)
+    case commandExecution(CodexCommandExecutionEventRequest)
+    case fileChange(CodexFileChangeEventRequest)
+    case mcpToolCall(CodexMcpToolCallEventRequest)
+    case dynamicToolCall(CodexDynamicToolCallEventRequest)
+    case collabAgentToolCall(CodexCollabAgentToolCallEventRequest)
+    case webSearch(CodexWebSearchEventRequest)
+    case imageGeneration(CodexImageGenerationEventRequest)
+    case acceptedLineFingerprints(AcceptedLineFingerprintsEventRequest)
+    case reviewEvent(CodexReviewEventRequest)
+
+    public var shouldSendInIsolatedRequest: Bool {
+        switch self {
+        case .acceptedLineFingerprints:
+            return true
+        case .compaction,
+             .commandExecution,
+             .fileChange,
+             .mcpToolCall,
+             .dynamicToolCall,
+             .collabAgentToolCall,
+             .webSearch,
+             .imageGeneration,
+             .reviewEvent:
+            return false
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        switch self {
+        case let .compaction(event):
+            try event.encode(to: encoder)
+        case let .commandExecution(event):
+            try event.encode(to: encoder)
+        case let .fileChange(event):
+            try event.encode(to: encoder)
+        case let .mcpToolCall(event):
+            try event.encode(to: encoder)
+        case let .dynamicToolCall(event):
+            try event.encode(to: encoder)
+        case let .collabAgentToolCall(event):
+            try event.encode(to: encoder)
+        case let .webSearch(event):
+            try event.encode(to: encoder)
+        case let .imageGeneration(event):
+            try event.encode(to: encoder)
+        case let .acceptedLineFingerprints(event):
+            try event.encode(to: encoder)
+        case let .reviewEvent(event):
+            try event.encode(to: encoder)
+        }
+    }
+}
+
+public enum CodexAnalytics {
+    public static func trackEventRequestBatches(_ events: [CodexTrackEventRequest]) -> [[CodexTrackEventRequest]] {
+        var batches: [[CodexTrackEventRequest]] = []
+        var currentBatch: [CodexTrackEventRequest] = []
+
+        for event in events {
+            if event.shouldSendInIsolatedRequest {
+                if !currentBatch.isEmpty {
+                    batches.append(currentBatch)
+                    currentBatch = []
+                }
+                batches.append([event])
+            } else {
+                currentBatch.append(event)
+            }
+        }
+
+        if !currentBatch.isEmpty {
+            batches.append(currentBatch)
+        }
+
+        return batches
+    }
+}
+
 public enum AppServerRpcTransport: String, Codable, Equatable, Sendable {
     case stdio
     case websocket

@@ -81,6 +81,30 @@ public struct AcceptedLineFingerprintsEventParams: Equatable, Codable, Sendable 
     public let acceptedDeletedLines: UInt64
     public let lineFingerprints: [AcceptedLineFingerprint]
 
+    public init(
+        eventType: String,
+        turnID: String,
+        threadID: String,
+        productSurface: String? = nil,
+        modelSlug: String? = nil,
+        completedAt: UInt64,
+        repoHash: String? = nil,
+        acceptedAddedLines: UInt64,
+        acceptedDeletedLines: UInt64,
+        lineFingerprints: [AcceptedLineFingerprint]
+    ) {
+        self.eventType = eventType
+        self.turnID = turnID
+        self.threadID = threadID
+        self.productSurface = productSurface
+        self.modelSlug = modelSlug
+        self.completedAt = completedAt
+        self.repoHash = repoHash
+        self.acceptedAddedLines = acceptedAddedLines
+        self.acceptedDeletedLines = acceptedDeletedLines
+        self.lineFingerprints = lineFingerprints
+    }
+
     private enum CodingKeys: String, CodingKey {
         case eventType = "event_type"
         case turnID = "turn_id"
