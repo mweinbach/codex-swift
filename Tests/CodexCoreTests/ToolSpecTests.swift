@@ -992,6 +992,36 @@ final class ToolSpecTests: XCTestCase {
         ])
     }
 
+    func testBuildSpecsDerivesMCPNamespaceFromToolInfoLikeRust() throws {
+        let specs = ToolSpecFactory.buildSpecs(
+            config: ToolsConfig(
+                shellType: .disabled,
+                applyPatchToolType: nil,
+                includeViewImageTool: false
+            ),
+            mcpToolInfos: [
+                McpToolInfo(serverName: "docs", tool: makeMcpTool(name: "search")),
+                McpToolInfo(serverName: "docs", tool: makeMcpTool(name: "search", description: "Duplicate")),
+                McpToolInfo(serverName: "calendar", tool: makeMcpTool(name: "list_events"))
+            ]
+        )
+
+        let namespaceSpecs = specs.compactMap { configured -> ResponsesAPINamespace? in
+            guard case let .namespace(namespace) = configured.spec,
+                  namespace.name.hasPrefix("mcp__")
+            else {
+                return nil
+            }
+            return namespace
+        }
+
+        XCTAssertEqual(namespaceSpecs.map(\.name), ["mcp__calendar__", "mcp__docs__"])
+        XCTAssertEqual(namespaceSpecs.map { $0.tools.map(namespaceToolName) }, [
+            ["list_events"],
+            ["search"]
+        ])
+    }
+
     func testBuildSpecsCoalescesDynamicToolNamespacesLikeRust() throws {
         let specs = ToolSpecFactory.buildSpecs(
             config: ToolsConfig(

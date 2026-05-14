@@ -874,6 +874,24 @@ public enum ToolSpecFactory {
         discoverableTools: [DiscoverableTool]? = nil,
         unavailableCalledTools: [UnavailableToolName] = []
     ) -> [ConfiguredToolSpec] {
+        buildSpecs(
+            config: config,
+            mcpToolInfos: mcpTools.map(mcpToolInfos(from:)),
+            deferredMcpToolInfos: deferredMcpTools.map(mcpToolInfos(from:)),
+            dynamicTools: dynamicTools,
+            discoverableTools: discoverableTools,
+            unavailableCalledTools: unavailableCalledTools
+        )
+    }
+
+    public static func buildSpecs(
+        config: ToolsConfig,
+        mcpToolInfos: [McpToolInfo]?,
+        deferredMcpToolInfos: [McpToolInfo]? = nil,
+        dynamicTools: [DynamicToolSpec] = [],
+        discoverableTools: [DiscoverableTool]? = nil,
+        unavailableCalledTools: [UnavailableToolName] = []
+    ) -> [ConfiguredToolSpec] {
         var specs: [ConfiguredToolSpec] = []
 
         switch config.shellType {
@@ -901,14 +919,14 @@ public enum ToolSpecFactory {
         specs.append(ConfiguredToolSpec(spec: createReadMCPResourceTool(), supportsParallelToolCalls: true))
         specs.append(ConfiguredToolSpec(spec: createPlanTool(), supportsParallelToolCalls: false))
 
-        let deferredMcpToolsForSearch = config.namespaceTools ? deferredMcpTools : nil
+        let deferredMcpToolsForSearch = config.namespaceTools ? deferredMcpToolInfos : nil
         let deferredDynamicTools = dynamicTools.filter { tool in
             tool.deferLoading && (config.namespaceTools || tool.namespace == nil)
         }
         if config.toolSearch,
            (deferredMcpToolsForSearch?.isEmpty == false || !deferredDynamicTools.isEmpty) {
             let index = ToolSearchIndex.deferredToolIndex(
-                mcpTools: deferredMcpToolsForSearch ?? [:],
+                mcpTools: deferredMcpToolsForSearch ?? [],
                 dynamicTools: deferredDynamicTools,
                 namespaceTools: config.namespaceTools
             )
@@ -1009,8 +1027,8 @@ public enum ToolSpecFactory {
             specs.append(ConfiguredToolSpec(spec: createComputerKeyTool(), supportsParallelToolCalls: true))
         }
 
-        if let mcpTools, config.namespaceTools {
-            for namespace in createMCPNamespaces(from: mcpTools) {
+        if let mcpToolInfos, config.namespaceTools {
+            for namespace in createMCPNamespaces(from: mcpToolInfos) {
                 specs.append(ConfiguredToolSpec(spec: .namespace(namespace), supportsParallelToolCalls: false))
             }
         }
@@ -1090,18 +1108,21 @@ public enum ToolSpecFactory {
         "Tools in the \(namespaceName) namespace."
     }
 
-    private static func createMCPNamespaces(from mcpTools: [String: McpTool]) -> [ResponsesAPINamespace] {
+    private static func mcpToolInfos(from mcpTools: [String: McpTool]) -> [McpToolInfo] {
+        mcpTools.compactMap { qualifiedName, tool in
+            guard let split = McpToolName.splitQualifiedToolName(qualifiedName) else {
+                return nil
+            }
+            return McpToolInfo(serverName: split.serverName, tool: tool)
+        }
+    }
+
+    private static func createMCPNamespaces(from mcpTools: [McpToolInfo]) -> [ResponsesAPINamespace] {
         var groupedTools: [String: [(name: String, tool: McpTool)]] = [:]
 
-        for qualifiedName in mcpTools.keys.sorted() {
-            guard let tool = mcpTools[qualifiedName],
-                  let split = McpToolName.splitQualifiedToolName(qualifiedName)
-            else {
-                continue
-            }
-
-            let namespace = "\(McpToolName.prefix)\(McpToolName.delimiter)\(split.serverName)\(McpToolName.delimiter)"
-            groupedTools[namespace, default: []].append((name: split.toolName, tool: tool))
+        for toolInfo in McpToolName.normalizeToolsForModel(mcpTools) {
+            let namespace = "\(McpToolName.prefix)\(McpToolName.delimiter)\(toolInfo.serverName)\(McpToolName.delimiter)"
+            groupedTools[namespace, default: []].append((name: toolInfo.tool.name, tool: toolInfo.tool))
         }
 
         return groupedTools.keys.sorted().compactMap { namespace in
