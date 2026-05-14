@@ -1444,6 +1444,17 @@ public enum CodexAppServer {
         }
 
         table["model_provider"] = .string(modelProvider)
+        table["web_search"] = .string((runtimeConfig.webSearchMode ?? .cached).rawValue)
+        if let effort = runtimeConfig.planModeReasoningEffort {
+            table["plan_mode_reasoning_effort"] = .string(effort.rawValue)
+        }
+        if let verbosity = runtimeConfig.modelVerbosity {
+            table["model_verbosity"] = .string(verbosity.rawValue)
+        }
+        table["include_permissions_instructions"] = .bool(runtimeConfig.includePermissionsInstructions)
+        table["include_apps_instructions"] = .bool(runtimeConfig.includeAppsInstructions)
+        table["include_environment_context"] = .bool(runtimeConfig.includeEnvironmentContext)
+        table["background_terminal_max_timeout"] = .integer(Int64(runtimeConfig.backgroundTerminalMaxTimeoutMS))
         guard runtimeConfig.configLockfile.saveFieldsResolvedFromModelCatalog else {
             return .table(table)
         }

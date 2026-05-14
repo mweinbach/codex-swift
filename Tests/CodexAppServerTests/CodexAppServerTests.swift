@@ -945,6 +945,8 @@ final class CodexAppServerTests: XCTestCase {
         let exportDir = temp.url.appendingPathComponent("locks", isDirectory: true)
         try """
         model = "gpt-user"
+        plan_mode_reasoning_effort = "high"
+        model_verbosity = "low"
 
         [debug.config_lockfile]
         export_dir = "\(exportDir.path)"
@@ -965,6 +967,13 @@ final class CodexAppServerTests: XCTestCase {
             return XCTFail("expected config table")
         }
         XCTAssertEqual(config["model_provider"], .string("mock_provider"))
+        XCTAssertEqual(config["web_search"], .string("cached"))
+        XCTAssertEqual(config["plan_mode_reasoning_effort"], .string("high"))
+        XCTAssertEqual(config["model_verbosity"], .string("low"))
+        XCTAssertEqual(config["include_permissions_instructions"], .bool(true))
+        XCTAssertEqual(config["include_apps_instructions"], .bool(true))
+        XCTAssertEqual(config["include_environment_context"], .bool(true))
+        XCTAssertEqual(config["background_terminal_max_timeout"], .integer(300_000))
         XCTAssertEqual(config["model"], .string("gpt-user"))
         XCTAssertNil(config["approval_policy"])
         XCTAssertNil(config["approvals_reviewer"])
