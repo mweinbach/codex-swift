@@ -3368,7 +3368,22 @@ public enum CodexAppServer {
             } catch {
                 throw AppServerError.invalidRequest("invalid conversation id: \(error)")
             }
-            rolloutPath = try rolloutPathForConversation(conversationID, configuration: configuration)
+            do {
+                rolloutPath = try rolloutPathForConversation(conversationID, configuration: configuration)
+            } catch {
+                if let metadata = try stateStoreThreadMetadata(
+                    conversationID: conversationID,
+                    configuration: configuration
+                ) {
+                    return [
+                        "summary": conversationObject(
+                            for: metadata,
+                            defaultProvider: configuration.defaultModelProvider
+                        )
+                    ]
+                }
+                throw error
+            }
         }
         return [
             "summary": try conversationObject(
@@ -18771,6 +18786,38 @@ public enum CodexAppServer {
             "source": summary.source.description,
             "gitInfo": summary.v1GitInfo as Any
         ].nullStripped()
+    }
+
+    private static func conversationObject(for metadata: ThreadMetadata, defaultProvider: String) -> [String: Any] {
+        [
+            "conversationId": metadata.id.description,
+            "path": metadata.rolloutPath,
+            "preview": metadata.firstUserMessage ?? metadata.title,
+            "timestamp": iso8601String(from: metadata.createdAt),
+            "modelProvider": metadata.modelProvider.isEmpty ? defaultProvider : metadata.modelProvider,
+            "cwd": metadata.cwd,
+            "cliVersion": metadata.cliVersion,
+            "source": threadListSessionSource(from: metadata.source).description,
+            "gitInfo": threadListGitInfo(from: metadata) as Any
+        ].nullStripped()
+    }
+
+    private static func stateStoreThreadMetadata(
+        conversationID: ConversationId,
+        configuration: CodexAppServerConfiguration
+    ) throws -> ThreadMetadata? {
+        guard let stateStore = configuration.stateStore else {
+            return nil
+        }
+        let threadID: ThreadId
+        do {
+            threadID = try ThreadId(string: conversationID.description)
+        } catch {
+            return nil
+        }
+        return try runAsyncBlocking {
+            try await stateStore.getThread(threadID: threadID)
+        }
     }
 
     private static func appServerSource(_ source: SessionSource) -> String {

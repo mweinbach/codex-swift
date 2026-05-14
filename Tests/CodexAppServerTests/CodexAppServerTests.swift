@@ -2090,6 +2090,42 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(summary["modelProvider"] as? String, "mock_provider")
     }
 
+    func testGetConversationSummaryByThreadIDReadsPathlessStateStoreThread() async throws {
+        let temp = try TemporaryDirectory()
+        let stateStore = try createAppServerStateStore(codexHome: temp.url)
+        let threadID = try ThreadId(string: "00000000-0000-4000-8000-000000000125")
+        try await stateStore.upsertThread(ThreadMetadata(
+            id: threadID,
+            rolloutPath: "",
+            createdAt: try appServerDate("2025-01-02T12:00:00Z"),
+            updatedAt: try appServerDate("2025-01-02T12:30:00Z"),
+            source: "cli",
+            modelProvider: "pathless-provider",
+            cwd: "",
+            cliVersion: "0.0.0",
+            title: "stored title",
+            sandboxPolicy: "read-only",
+            approvalMode: "never",
+            tokensUsed: 0,
+            firstUserMessage: "stored preview"
+        ))
+        let configuration = testConfiguration(codexHome: temp.url, stateStore: stateStore)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"getConversationSummary","params":{"conversationId":"\#(threadID.description)"}}"#,
+            configuration: configuration
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let summary = try XCTUnwrap(result["summary"] as? [String: Any])
+        XCTAssertEqual(summary["conversationId"] as? String, threadID.description)
+        XCTAssertEqual(summary["path"] as? String, "")
+        XCTAssertEqual(summary["preview"] as? String, "stored preview")
+        XCTAssertEqual(summary["modelProvider"] as? String, "pathless-provider")
+        XCTAssertEqual(summary["cwd"] as? String, "")
+        XCTAssertEqual(summary["source"] as? String, "cli")
+    }
+
     func testLegacySendUserTurnAndInterruptConversation() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
