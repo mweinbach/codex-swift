@@ -4360,26 +4360,27 @@ final class CodexAppServerTests: XCTestCase {
         let payloadsAfterDuplicateBegin = await notificationCapture.payloadsData()
         XCTAssertEqual(payloadsAfterDuplicateBegin.count, 0)
 
+        let endEvent = ExecCommandEndEvent(
+            callID: "cmd-1",
+            processID: "proc-1",
+            turnID: "runtime-turn",
+            completedAtMilliseconds: 99,
+            command: command,
+            cwd: "/tmp/project",
+            parsedCmd: parsed,
+            source: .userShell,
+            stdout: "hi\n",
+            stderr: "",
+            aggregatedOutput: "hi\n",
+            exitCode: 0,
+            duration: ProtocolDuration(secs: 1, nanos: 500_000_000),
+            formattedOutput: "hi",
+            status: .completed
+        )
         await processor.handleRuntimeEvent(
             threadID: "thread-1",
             turnID: "turn-1",
-            event: .execCommandEnd(ExecCommandEndEvent(
-                callID: "cmd-1",
-                processID: "proc-1",
-                turnID: "runtime-turn",
-                completedAtMilliseconds: 99,
-                command: command,
-                cwd: "/tmp/project",
-                parsedCmd: parsed,
-                source: .userShell,
-                stdout: "hi\n",
-                stderr: "",
-                aggregatedOutput: "hi\n",
-                exitCode: 0,
-                duration: ProtocolDuration(secs: 1, nanos: 500_000_000),
-                formattedOutput: "hi",
-                status: .completed
-            ))
+            event: .execCommandEnd(endEvent)
         )
 
         let completedMessages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
@@ -4395,6 +4396,50 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(completedItem["aggregatedOutput"] as? String, "hi\n")
         XCTAssertEqual(completedItem["exitCode"] as? Int, 0)
         XCTAssertEqual(completedItem["durationMs"] as? Int, 1_500)
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .execCommandEnd(endEvent)
+        )
+        let payloadsAfterDuplicateEnd = await notificationCapture.payloadsData()
+        XCTAssertEqual(payloadsAfterDuplicateEnd.count, 0)
+    }
+
+    func testRuntimeExecCommandEndWithoutBeginIsSuppressedLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .execCommandEnd(ExecCommandEndEvent(
+                callID: "cmd-1",
+                processID: "proc-1",
+                turnID: "runtime-turn",
+                completedAtMilliseconds: 99,
+                command: ["/bin/sh", "-lc", "cat Package.swift"],
+                cwd: "/tmp/project",
+                parsedCmd: [
+                    ParsedCommand.read(cmd: "cat Package.swift", name: "Package.swift", path: "Package.swift")
+                ],
+                source: .userShell,
+                stdout: "hi\n",
+                stderr: "",
+                aggregatedOutput: "hi\n",
+                exitCode: 0,
+                duration: ProtocolDuration(secs: 1),
+                formattedOutput: "hi",
+                status: .completed
+            ))
+        )
+
+        let orphanPayloads = await notificationCapture.payloadsData()
+        XCTAssertEqual(orphanPayloads, [])
     }
 
     func testRuntimeUnifiedExecInteractionBeginAndEndDoNotEmitCommandExecutionItems() async throws {

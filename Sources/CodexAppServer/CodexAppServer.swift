@@ -24975,9 +24975,16 @@ final class CodexAppServerMessageProcessor {
                 notifications = []
                 break
             }
-            runtimeCommandExecutionStarted[threadID]?.remove(event.callID)
-            if runtimeCommandExecutionStarted[threadID]?.isEmpty == true {
+            guard var started = runtimeCommandExecutionStarted[threadID],
+                  started.remove(event.callID) != nil
+            else {
+                notifications = []
+                break
+            }
+            if started.isEmpty {
                 runtimeCommandExecutionStarted[threadID] = nil
+            } else {
+                runtimeCommandExecutionStarted[threadID] = started
             }
             notifications = [
                 CodexAppServer.commandExecutionCompletedNotification(
