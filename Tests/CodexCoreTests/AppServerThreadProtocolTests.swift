@@ -67,6 +67,50 @@ final class AppServerThreadProtocolTests: XCTestCase {
         XCTAssertEqual(decoded.limit, 0)
     }
 
+    func testThreadInjectItemsRoundTripsLikeRustProtocol() throws {
+        let item: JSONValue = .object([
+            "type": .string("message"),
+            "role": .string("assistant"),
+            "content": .array([
+                .object([
+                    "type": .string("output_text"),
+                    "text": .string("Injected assistant context")
+                ])
+            ])
+        ])
+        let params = ThreadInjectItemsParams(threadID: "thr_123", items: [item])
+
+        try XCTAssertJSONObjectEqual(params, [
+            "threadId": "thr_123",
+            "items": [
+                [
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        [
+                            "type": "output_text",
+                            "text": "Injected assistant context"
+                        ]
+                    ]
+                ]
+            ]
+        ])
+
+        let decoded = try JSONDecoder().decode(
+            ThreadInjectItemsParams.self,
+            from: Data(#"{"threadId":"thr_456","items":[{"type":"reasoning","summary":[]}]}"#.utf8)
+        )
+        XCTAssertEqual(decoded.threadID, "thr_456")
+        XCTAssertEqual(decoded.items, [
+            .object([
+                "type": .string("reasoning"),
+                "summary": .array([])
+            ])
+        ])
+
+        try XCTAssertJSONObjectEqual(ThreadInjectItemsResponse(), [:])
+    }
+
     func testThreadTurnsItemsListRoundTripsLikeRustProtocol() throws {
         let params = ThreadTurnsItemsListParams(
             threadID: "thr_123",

@@ -246,6 +246,25 @@ public struct ThreadLoadedListResponse: Equatable, Codable, Sendable {
     }
 }
 
+public struct ThreadInjectItemsParams: Equatable, Codable, Sendable {
+    public let threadID: String
+    public let items: [JSONValue]
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+        case items
+    }
+
+    public init(threadID: String, items: [JSONValue]) {
+        self.threadID = threadID
+        self.items = items
+    }
+}
+
+public struct ThreadInjectItemsResponse: Equatable, Codable, Sendable {
+    public init() {}
+}
+
 public struct ThreadTurnsListParams: Equatable, Codable, Sendable {
     public let threadID: String
     public let cursor: String?
