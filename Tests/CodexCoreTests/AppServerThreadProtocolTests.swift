@@ -87,6 +87,92 @@ final class AppServerThreadProtocolTests: XCTestCase {
         XCTAssertEqual(params.itemsView, .notLoaded)
     }
 
+    func testUserMessageAndHookPromptItemsUseRustThreadItemShape() throws {
+        let userMessage = AppServerThreadItem.userMessage(
+            id: "item-user",
+            content: [
+                .text("Inspect @file", textElements: [
+                    AppServerTextElement(
+                        byteRange: AppServerByteRange(start: 8, end: 13),
+                        placeholder: "@file"
+                    )
+                ]),
+                .mention(name: "README.md", path: "/repo/README.md")
+            ]
+        )
+        let hookPrompt = AppServerThreadItem.hookPrompt(
+            id: "item-hook",
+            fragments: [
+                HookPromptFragment(text: "Check policy", hookRunID: "hook-1")
+            ]
+        )
+
+        try XCTAssertJSONObjectEqual(userMessage, [
+            "type": "userMessage",
+            "id": "item-user",
+            "content": [
+                [
+                    "type": "text",
+                    "text": "Inspect @file",
+                    "textElements": [[
+                        "byteRange": [
+                            "start": 8,
+                            "end": 13
+                        ],
+                        "placeholder": "@file"
+                    ]]
+                ],
+                [
+                    "type": "mention",
+                    "name": "README.md",
+                    "path": "/repo/README.md"
+                ]
+            ]
+        ])
+        try XCTAssertJSONObjectEqual(hookPrompt, [
+            "type": "hookPrompt",
+            "id": "item-hook",
+            "fragments": [[
+                "text": "Check policy",
+                "hookRunId": "hook-1"
+            ]]
+        ])
+
+        let decoded = try JSONDecoder().decode([AppServerThreadItem].self, from: Data(#"""
+        [
+          {
+            "type": "userMessage",
+            "id": "item-user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect @file",
+                "textElements": [{
+                  "byteRange": { "start": 8, "end": 13 },
+                  "placeholder": "@file"
+                }]
+              },
+              {
+                "type": "mention",
+                "name": "README.md",
+                "path": "/repo/README.md"
+              }
+            ]
+          },
+          {
+            "type": "hookPrompt",
+            "id": "item-hook",
+            "fragments": [{
+              "text": "Check policy",
+              "hookRunId": "hook-1"
+            }]
+          }
+        ]
+        """#.utf8))
+        XCTAssertEqual(decoded, [userMessage, hookPrompt])
+        XCTAssertEqual(decoded.map(\.id), ["item-user", "item-hook"])
+    }
+
     func testAgentMessageItemCarriesMemoryCitationLikeRustProtocol() throws {
         let citation = AppServerMemoryCitation(
             entries: [

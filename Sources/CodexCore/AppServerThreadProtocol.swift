@@ -261,6 +261,8 @@ public struct AppServerMemoryCitationEntry: Equatable, Codable, Sendable {
 }
 
 public enum AppServerThreadItem: Equatable, Sendable {
+    case userMessage(id: String, content: [AppServerUserInput])
+    case hookPrompt(id: String, fragments: [HookPromptFragment])
     case agentMessage(id: String, text: String, phase: MessagePhase? = nil, memoryCitation: AppServerMemoryCitation? = nil)
     case plan(id: String, text: String)
     case reasoning(id: String, summary: [String] = [], content: [String] = [])
@@ -269,6 +271,7 @@ public enum AppServerThreadItem: Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case type
         case id
+        case fragments
         case text
         case phase
         case memoryCitation
@@ -277,6 +280,8 @@ public enum AppServerThreadItem: Equatable, Sendable {
     }
 
     private enum ItemType: String, Codable {
+        case userMessage
+        case hookPrompt
         case agentMessage
         case plan
         case reasoning
@@ -285,7 +290,9 @@ public enum AppServerThreadItem: Equatable, Sendable {
 
     public var id: String {
         switch self {
-        case let .agentMessage(id, _, _, _),
+        case let .userMessage(id, _),
+             let .hookPrompt(id, _),
+             let .agentMessage(id, _, _, _),
              let .plan(id, _),
              let .reasoning(id, _, _),
              let .contextCompaction(id):
@@ -298,6 +305,16 @@ extension AppServerThreadItem: Codable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         switch try container.decode(ItemType.self, forKey: .type) {
+        case .userMessage:
+            self = .userMessage(
+                id: try container.decode(String.self, forKey: .id),
+                content: try container.decode([AppServerUserInput].self, forKey: .content)
+            )
+        case .hookPrompt:
+            self = .hookPrompt(
+                id: try container.decode(String.self, forKey: .id),
+                fragments: try container.decode([HookPromptFragment].self, forKey: .fragments)
+            )
         case .agentMessage:
             self = .agentMessage(
                 id: try container.decode(String.self, forKey: .id),
@@ -324,6 +341,14 @@ extension AppServerThreadItem: Codable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
+        case let .userMessage(id, content):
+            try container.encode(ItemType.userMessage, forKey: .type)
+            try container.encode(id, forKey: .id)
+            try container.encode(content, forKey: .content)
+        case let .hookPrompt(id, fragments):
+            try container.encode(ItemType.hookPrompt, forKey: .type)
+            try container.encode(id, forKey: .id)
+            try container.encode(fragments, forKey: .fragments)
         case let .agentMessage(id, text, phase, memoryCitation):
             try container.encode(ItemType.agentMessage, forKey: .type)
             try container.encode(id, forKey: .id)
