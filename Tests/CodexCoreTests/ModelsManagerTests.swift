@@ -659,6 +659,7 @@ final class ModelsManagerTests: XCTestCase {
         XCTAssertTrue(gpt54.supportsFastMode())
         XCTAssertEqual(gpt54.serviceTiers.map(\.id), ["priority"])
         XCTAssertFalse(gpt54.serviceTiers.contains { $0.id == "ultrafast" })
+        XCTAssertEqual(gpt54.additionalSpeedTiers, ["fast"])
 
         let codex53 = try XCTUnwrap(presets["gpt-5.3-codex"])
         XCTAssertEqual(codex53.upgrade?.id, "gpt-5.4")
