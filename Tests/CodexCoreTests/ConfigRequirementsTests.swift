@@ -824,6 +824,9 @@ final class ConfigRequirementsTests: XCTestCase {
         XCTAssertEqual(CloudRequirements.timeout, 15)
         XCTAssertEqual(CloudRequirements.maxAttempts, 5)
         XCTAssertEqual(CloudRequirements.cacheRefreshInterval, 5 * 60)
+        XCTAssertEqual(CloudRequirements.fetchAttemptMetricName, "codex.cloud_requirements.fetch_attempt")
+        XCTAssertEqual(CloudRequirements.fetchFinalMetricName, "codex.cloud_requirements.fetch_final")
+        XCTAssertEqual(CloudRequirements.loadMetricName, "codex.cloud_requirements.load")
         XCTAssertEqual(CloudRequirements.cacheTTL, 30 * 60)
         XCTAssertEqual(
             CloudRequirements.authRecoveryFailedMessage,
@@ -842,6 +845,30 @@ final class ConfigRequirementsTests: XCTestCase {
         XCTAssertFalse(CloudRequirements.isEligibleAuth(planType: .edu, usesCodexBackend: true))
         XCTAssertFalse(CloudRequirements.isEligibleAuth(planType: .pro, usesCodexBackend: true))
         XCTAssertFalse(CloudRequirements.isEligibleAuth(planType: .unknown, usesCodexBackend: true))
+    }
+
+    func testCloudRequirementsFetchAttemptStatusCodesMatchRust() {
+        XCTAssertNil(CloudRequirementsRetryableFailureKind.backendClientInit.statusCode)
+        XCTAssertNil(CloudRequirementsRetryableFailureKind.request(statusCode: nil).statusCode)
+        XCTAssertEqual(CloudRequirementsRetryableFailureKind.request(statusCode: 503).statusCode, 503)
+
+        XCTAssertEqual(
+            CloudRequirementsFetchAttemptError.retryable(.backendClientInit).statusCode,
+            nil
+        )
+        XCTAssertEqual(
+            CloudRequirementsFetchAttemptError.retryable(.request(statusCode: 502)).statusCode,
+            502
+        )
+        XCTAssertEqual(
+            CloudRequirementsFetchAttemptError.unauthorized(
+                statusCode: 401,
+                message: "GET /config/requirements failed: 401"
+            ).statusCode,
+            401
+        )
+        XCTAssertEqual(CloudRequirements.statusCodeTag(nil), "none")
+        XCTAssertEqual(CloudRequirements.statusCodeTag(429), "429")
     }
 
     func testCloudRequirementsLoaderSharesSingleResultLikeRust() async throws {

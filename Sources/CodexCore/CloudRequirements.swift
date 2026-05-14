@@ -5,6 +5,9 @@ public enum CloudRequirements {
     public static let timeout: TimeInterval = 15
     public static let maxAttempts = 5
     public static let cacheRefreshInterval: TimeInterval = 5 * 60
+    public static let fetchAttemptMetricName = "codex.cloud_requirements.fetch_attempt"
+    public static let fetchFinalMetricName = "codex.cloud_requirements.fetch_final"
+    public static let loadMetricName = "codex.cloud_requirements.load"
     public static let loadFailedMessage = "Failed to load cloud requirements (workspace-managed policies)."
     public static let parseFailedMessagePrefix = "Cloud requirements (workspace-managed policies) are invalid and could not be parsed. Please contact your workspace admin."
     public static let authRecoveryFailedMessage = "Your authentication session could not be refreshed automatically. Please log out and sign in again."
@@ -33,6 +36,10 @@ public enum CloudRequirements {
             return false
         }
         return planType.isBusinessLike || planType == .enterprise
+    }
+
+    public static func statusCodeTag(_ statusCode: Int?) -> String {
+        statusCode.map(String.init) ?? "none"
     }
 
     public static func cachePayloadBytes(_ payload: CloudRequirementsCacheSignedPayload) throws -> Data {
@@ -265,6 +272,34 @@ public enum CloudRequirementsCacheWriteError: Error, Equatable, CustomStringConv
 
     public var description: String {
         "failed to write cloud requirements cache"
+    }
+}
+
+public enum CloudRequirementsRetryableFailureKind: Equatable, Sendable {
+    case backendClientInit
+    case request(statusCode: Int?)
+
+    public var statusCode: Int? {
+        switch self {
+        case .backendClientInit:
+            nil
+        case let .request(statusCode):
+            statusCode
+        }
+    }
+}
+
+public enum CloudRequirementsFetchAttemptError: Error, Equatable, Sendable {
+    case retryable(CloudRequirementsRetryableFailureKind)
+    case unauthorized(statusCode: Int?, message: String)
+
+    public var statusCode: Int? {
+        switch self {
+        case let .retryable(kind):
+            kind.statusCode
+        case let .unauthorized(statusCode, _):
+            statusCode
+        }
     }
 }
 
