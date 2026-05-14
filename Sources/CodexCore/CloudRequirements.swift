@@ -8,6 +8,7 @@ public enum CloudRequirements {
     public static let fetchAttemptMetricName = "codex.cloud_requirements.fetch_attempt"
     public static let fetchFinalMetricName = "codex.cloud_requirements.fetch_final"
     public static let loadMetricName = "codex.cloud_requirements.load"
+    public static let fetchDurationMetricName = "codex.cloud_requirements.fetch.duration_ms"
     public static let loadFailedMessage = "Failed to load cloud requirements (workspace-managed policies)."
     public static let parseFailedMessagePrefix = "Cloud requirements (workspace-managed policies) are invalid and could not be parsed. Please contact your workspace admin."
     public static let authRecoveryFailedMessage = "Your authentication session could not be refreshed automatically. Please log out and sign in again."
@@ -69,6 +70,13 @@ public enum CloudRequirements {
             CloudRequirementsMetricTag(key: "reason", value: reason),
             CloudRequirementsMetricTag(key: "attempt_count", value: String(attemptCount)),
             CloudRequirementsMetricTag(key: "status_code", value: statusCodeTag(statusCode))
+        ]
+    }
+
+    public static func loadMetricTags(trigger: String, outcome: String) -> [CloudRequirementsMetricTag] {
+        [
+            CloudRequirementsMetricTag(key: "trigger", value: trigger),
+            CloudRequirementsMetricTag(key: "outcome", value: outcome)
         ]
     }
 

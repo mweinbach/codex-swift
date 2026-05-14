@@ -827,6 +827,7 @@ final class ConfigRequirementsTests: XCTestCase {
         XCTAssertEqual(CloudRequirements.fetchAttemptMetricName, "codex.cloud_requirements.fetch_attempt")
         XCTAssertEqual(CloudRequirements.fetchFinalMetricName, "codex.cloud_requirements.fetch_final")
         XCTAssertEqual(CloudRequirements.loadMetricName, "codex.cloud_requirements.load")
+        XCTAssertEqual(CloudRequirements.fetchDurationMetricName, "codex.cloud_requirements.fetch.duration_ms")
         XCTAssertEqual(CloudRequirements.cacheTTL, 30 * 60)
         XCTAssertEqual(
             CloudRequirements.authRecoveryFailedMessage,
@@ -901,6 +902,14 @@ final class ConfigRequirementsTests: XCTestCase {
                 CloudRequirementsMetricTag(key: "reason", value: "request_retry_exhausted"),
                 CloudRequirementsMetricTag(key: "attempt_count", value: "5"),
                 CloudRequirementsMetricTag(key: "status_code", value: "none")
+            ]
+        )
+
+        XCTAssertEqual(
+            CloudRequirements.loadMetricTags(trigger: "startup", outcome: "success"),
+            [
+                CloudRequirementsMetricTag(key: "trigger", value: "startup"),
+                CloudRequirementsMetricTag(key: "outcome", value: "success")
             ]
         )
     }
