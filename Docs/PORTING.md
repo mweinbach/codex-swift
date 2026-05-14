@@ -12,6 +12,7 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-14: rechecked Rust commit `5f2543b74e` and the `CODEX_HOME/environments.toml` provider selection path from `codex-rs/core/src/environment_selection.rs` / `codex-rs/exec-server/src/environment_toml.rs`. Swift now has focused coverage for the configured-provider boundary where `default = "local"` still starts new threads with all configured environments after local, while the legacy `CODEX_EXEC_SERVER_URL` fallback remains separately covered.
 - 2026-05-14: rechecked Rust's cloud requirements load metric and fetch duration timer names from `codex-rs/cloud-requirements/src/lib.rs`. Swift now exposes the same load metric tag order (`trigger`, `outcome`) and fetch duration metric name.
 - 2026-05-14: rechecked Rust commit `d5f0b6d63a` and `codex-rs/models-manager/src/manager.rs` namespaced model metadata lookup. Swift now has focused tests pinning the one-segment hyphenated provider namespace suffix retry and the multi-segment rejection boundary.
 - 2026-05-14: rechecked Rust's `emit_fetch_attempt_metric` and `emit_fetch_final_metric` tag construction from `codex-rs/cloud-requirements/src/lib.rs`. Swift now exposes the same ordered tag keys and string conversions for startup/refresh cloud-requirements fetch attempt and final metrics.

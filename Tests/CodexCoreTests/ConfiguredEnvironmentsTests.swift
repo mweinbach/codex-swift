@@ -83,6 +83,37 @@ final class ConfiguredEnvironmentsTests: XCTestCase {
         ])
     }
 
+    func testLoadCodexHomeEnvironmentsTomlKeepsConfiguredEnvironmentsWhenLocalIsDefault() throws {
+        let temp = try ConfiguredEnvironmentTemporaryDirectory()
+        try """
+        default = "local"
+
+        [[environments]]
+        id = "dev"
+        program = "ssh"
+
+        [[environments]]
+        id = "qa"
+        url = "ws://127.0.0.1:4512"
+        """.write(
+            to: temp.url.appendingPathComponent("environments.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let snapshot = try ConfiguredEnvironmentLoader.load(codexHome: temp.url, environment: [
+            ConfiguredEnvironmentLoader.codexExecServerURLEnvironmentVariable: "ws://legacy.example"
+        ])
+
+        XCTAssertEqual(snapshot.environments.map(\.id), ["local", "dev", "qa"])
+        XCTAssertEqual(snapshot.defaultEnvironmentIDs(), ["local", "dev", "qa"])
+        XCTAssertEqual(snapshot.defaultThreadEnvironmentSelections(cwd: "/workspace"), [
+            TurnEnvironmentSelection(environmentID: "local", cwd: "/workspace"),
+            TurnEnvironmentSelection(environmentID: "dev", cwd: "/workspace"),
+            TurnEnvironmentSelection(environmentID: "qa", cwd: "/workspace")
+        ])
+    }
+
     func testEnvironmentContextEnvironmentsUseDefaultFirstSelections() throws {
         let snapshot = try ConfiguredEnvironmentLoader.snapshot(fromToml: """
         default = "dev"
