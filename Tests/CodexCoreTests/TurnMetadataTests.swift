@@ -43,6 +43,28 @@ final class TurnMetadataTests: XCTestCase {
         XCTAssertNil(json["workspaces"])
     }
 
+    func testBuildTurnMetadataHeaderWithIdentityKeepsIdentityOutsideGitRepoLikeRust() throws {
+        let dir = try TurnMetadataTemporaryDirectory()
+        retainedTemporaryDirectories.append(dir)
+
+        XCTAssertNil(buildTurnMetadataHeader(cwd: dir.url))
+        let header = try XCTUnwrap(buildTurnMetadataHeaderWithIdentity(
+            cwd: dir.url,
+            sessionID: "session-a",
+            threadID: "thread-a",
+            threadSource: .memoryConsolidation,
+            turnID: "turn-a"
+        ))
+        XCTAssertTrue(header.allSatisfy(\.isASCII))
+        let json = try jsonObject(header)
+
+        XCTAssertEqual(json["session_id"] as? String, "session-a")
+        XCTAssertEqual(json["thread_id"] as? String, "thread-a")
+        XCTAssertEqual(json["thread_source"] as? String, "memory_consolidation")
+        XCTAssertEqual(json["turn_id"] as? String, "turn-a")
+        XCTAssertNil(json["workspaces"])
+    }
+
     func testTurnMetadataStateEnrichesHeaderWithWorkspaceGitMetadataLikeRust() async throws {
         let repo = try createRepository(named: "repo-東京")
         let remoteURL = "https://github.com/OpenAI/Codex.git"

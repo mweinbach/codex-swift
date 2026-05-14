@@ -5,21 +5,36 @@ private let reasoningEffortKey = "reasoning_effort"
 private let turnStartedAtUnixMsKey = "turn_started_at_unix_ms"
 
 public func buildTurnMetadataHeader(cwd: URL, sandbox: String? = nil) -> String? {
+    buildTurnMetadataHeaderWithIdentity(cwd: cwd, sandbox: sandbox)
+}
+
+public func buildTurnMetadataHeaderWithIdentity(
+    cwd: URL,
+    sandbox: String? = nil,
+    sessionID: String? = nil,
+    threadID: String? = nil,
+    threadSource: ThreadSource? = nil,
+    turnID: String? = nil
+) -> String? {
     let repoRoot = GitInfoCollector.gitRepoRoot(baseDir: cwd)?.path
     let workspaceGitMetadata = WorkspaceGitMetadata.collect(cwd: cwd)
 
     if workspaceGitMetadata.isEmpty,
-       sandbox == nil
+       sandbox == nil,
+       sessionID == nil,
+       threadID == nil,
+       threadSource == nil,
+       turnID == nil
     {
         return nil
     }
 
     return TurnMetadataState.asciiJSONString(
         TurnMetadataState.buildTurnMetadataBag(
-            sessionID: nil,
-            threadID: nil,
-            threadSource: nil,
-            turnID: nil,
+            sessionID: sessionID,
+            threadID: threadID,
+            threadSource: threadSource,
+            turnID: turnID,
             sandbox: sandbox,
             repoRoot: repoRoot,
             workspaceGitMetadata: workspaceGitMetadata
