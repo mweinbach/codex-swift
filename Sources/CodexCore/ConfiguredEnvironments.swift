@@ -321,9 +321,7 @@ private extension ConfiguredEnvironmentLoader {
             currentEnvironment = nil
         }
 
-        for rawLine in contents.split(whereSeparator: \.isNewline) {
-            let line = stripComment(from: String(rawLine)).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !line.isEmpty else { continue }
+        for line in logicalTomlLines(contents) {
 
             if line == "[[environments]]" {
                 finishCurrentEnvironment()
@@ -588,6 +586,70 @@ private extension ConfiguredEnvironmentLoader {
             }
         }
         return raw
+    }
+
+    static func logicalTomlLines(_ contents: String) -> [String] {
+        var lines: [String] = []
+        var pending: String?
+
+        for rawLine in contents.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = stripComment(from: String(rawLine)).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty else { continue }
+
+            if let current = pending {
+                pending = "\(current)\n\(line)"
+            } else {
+                pending = line
+            }
+
+            guard let candidate = pending else { continue }
+            if tomlLiteralDelimitersAreBalanced(in: candidate) {
+                lines.append(candidate)
+                pending = nil
+            }
+        }
+
+        if let pending {
+            lines.append(pending)
+        }
+        return lines
+    }
+
+    static func tomlLiteralDelimitersAreBalanced(in text: String) -> Bool {
+        var squareDepth = 0
+        var braceDepth = 0
+        var quote: Character?
+        var previousWasBackslash = false
+
+        for character in text {
+            if let activeQuote = quote {
+                if character == activeQuote && !previousWasBackslash {
+                    quote = nil
+                }
+                previousWasBackslash = character == "\\" && !previousWasBackslash
+                if character != "\\" {
+                    previousWasBackslash = false
+                }
+                continue
+            }
+
+            switch character {
+            case "\"", "'":
+                quote = character
+            case "[":
+                squareDepth += 1
+            case "]":
+                squareDepth -= 1
+            case "{":
+                braceDepth += 1
+            case "}":
+                braceDepth -= 1
+            default:
+                continue
+            }
+        }
+
+        return quote == nil && squareDepth == 0 && braceDepth == 0
     }
 
     static func tableName(fromHeader header: String) -> String {

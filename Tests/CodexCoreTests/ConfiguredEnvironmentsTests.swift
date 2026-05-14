@@ -159,6 +159,32 @@ final class ConfiguredEnvironmentsTests: XCTestCase {
         )
     }
 
+    func testEnvironmentsTomlAcceptsMultilineLiteralsLikeRustToml() throws {
+        let snapshot = try ConfiguredEnvironmentLoader.snapshot(fromToml: """
+        [[environments]]
+        id = "ssh-dev"
+        program = "ssh"
+        args = [
+          "dev",
+          "codex exec-server --listen stdio",
+        ]
+        env = {
+          CODEX_LOG = "debug",
+          CODEX_TRACE = "1",
+        }
+        """)
+
+        XCTAssertEqual(
+            snapshot.environment(id: "ssh-dev")?.transport,
+            .stdio(StdioConfiguredEnvironmentCommand(
+                program: "ssh",
+                args: ["dev", "codex exec-server --listen stdio"],
+                env: ["CODEX_LOG": "debug", "CODEX_TRACE": "1"],
+                cwd: nil
+            ))
+        )
+    }
+
     func testEnvironmentsTomlDefaultOmittedSelectsLocalAndNoneDisablesDefault() throws {
         let localSnapshot = try ConfiguredEnvironmentLoader.snapshot(fromToml: "")
         XCTAssertEqual(localSnapshot.defaultEnvironment, .environmentID("local"))
