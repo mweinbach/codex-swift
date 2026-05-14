@@ -572,6 +572,228 @@ public struct ThreadStartedNotification: Equatable, Codable, Sendable {
     }
 }
 
+public struct ThreadStartResponse: Equatable, Codable, Sendable {
+    public let thread: AppServerThread
+    public let model: String
+    public let modelProvider: String
+    public let serviceTier: String?
+    public let cwd: String
+    public let instructionSources: [String]
+    public let approvalPolicy: AskForApproval
+    public let approvalsReviewer: ApprovalsReviewer
+    public let sandbox: SandboxPolicy
+    public let permissionProfile: AppServerPermissionProfile?
+    public let activePermissionProfile: AppServerActivePermissionProfile?
+    public let reasoningEffort: ReasoningEffort?
+
+    private enum CodingKeys: String, CodingKey {
+        case thread
+        case model
+        case modelProvider
+        case serviceTier
+        case cwd
+        case instructionSources
+        case approvalPolicy
+        case approvalsReviewer
+        case sandbox
+        case permissionProfile
+        case activePermissionProfile
+        case reasoningEffort
+    }
+
+    public init(
+        thread: AppServerThread,
+        model: String,
+        modelProvider: String,
+        serviceTier: String?,
+        cwd: String,
+        instructionSources: [String] = [],
+        approvalPolicy: AskForApproval,
+        approvalsReviewer: ApprovalsReviewer,
+        sandbox: SandboxPolicy,
+        permissionProfile: AppServerPermissionProfile?,
+        activePermissionProfile: AppServerActivePermissionProfile?,
+        reasoningEffort: ReasoningEffort?
+    ) {
+        self.thread = thread
+        self.model = model
+        self.modelProvider = modelProvider
+        self.serviceTier = serviceTier
+        self.cwd = cwd
+        self.instructionSources = instructionSources
+        self.approvalPolicy = approvalPolicy
+        self.approvalsReviewer = approvalsReviewer
+        self.sandbox = sandbox
+        self.permissionProfile = permissionProfile
+        self.activePermissionProfile = activePermissionProfile
+        self.reasoningEffort = reasoningEffort
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(thread, forKey: .thread)
+        try container.encode(model, forKey: .model)
+        try container.encode(modelProvider, forKey: .modelProvider)
+        try container.encodeNilOrValue(serviceTier, forKey: .serviceTier)
+        try container.encode(cwd, forKey: .cwd)
+        try container.encode(instructionSources, forKey: .instructionSources)
+        try container.encode(approvalPolicy, forKey: .approvalPolicy)
+        try container.encode(approvalsReviewer, forKey: .approvalsReviewer)
+        try container.encode(sandbox, forKey: .sandbox)
+        try container.encodeNilOrValue(permissionProfile, forKey: .permissionProfile)
+        try container.encodeNilOrValue(activePermissionProfile, forKey: .activePermissionProfile)
+        try container.encodeNilOrValue(reasoningEffort, forKey: .reasoningEffort)
+    }
+}
+
+public struct ThreadResumeResponse: Equatable, Codable, Sendable {
+    public let thread: AppServerThread
+    public let model: String
+    public let modelProvider: String
+    public let serviceTier: String?
+    public let cwd: String
+    public let instructionSources: [String]
+    public let approvalPolicy: AskForApproval
+    public let approvalsReviewer: ApprovalsReviewer
+    public let sandbox: SandboxPolicy
+    public let permissionProfile: AppServerPermissionProfile?
+    public let activePermissionProfile: AppServerActivePermissionProfile?
+    public let reasoningEffort: ReasoningEffort?
+
+    private enum CodingKeys: String, CodingKey {
+        case thread
+        case model
+        case modelProvider
+        case serviceTier
+        case cwd
+        case instructionSources
+        case approvalPolicy
+        case approvalsReviewer
+        case sandbox
+        case permissionProfile
+        case activePermissionProfile
+        case reasoningEffort
+    }
+
+    public init(
+        thread: AppServerThread,
+        model: String,
+        modelProvider: String,
+        serviceTier: String?,
+        cwd: String,
+        instructionSources: [String] = [],
+        approvalPolicy: AskForApproval,
+        approvalsReviewer: ApprovalsReviewer,
+        sandbox: SandboxPolicy,
+        permissionProfile: AppServerPermissionProfile?,
+        activePermissionProfile: AppServerActivePermissionProfile?,
+        reasoningEffort: ReasoningEffort?
+    ) {
+        self.thread = thread
+        self.model = model
+        self.modelProvider = modelProvider
+        self.serviceTier = serviceTier
+        self.cwd = cwd
+        self.instructionSources = instructionSources
+        self.approvalPolicy = approvalPolicy
+        self.approvalsReviewer = approvalsReviewer
+        self.sandbox = sandbox
+        self.permissionProfile = permissionProfile
+        self.activePermissionProfile = activePermissionProfile
+        self.reasoningEffort = reasoningEffort
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(thread, forKey: .thread)
+        try container.encode(model, forKey: .model)
+        try container.encode(modelProvider, forKey: .modelProvider)
+        try container.encodeNilOrValue(serviceTier, forKey: .serviceTier)
+        try container.encode(cwd, forKey: .cwd)
+        try container.encode(instructionSources, forKey: .instructionSources)
+        try container.encode(approvalPolicy, forKey: .approvalPolicy)
+        try container.encode(approvalsReviewer, forKey: .approvalsReviewer)
+        try container.encode(sandbox, forKey: .sandbox)
+        try container.encodeNilOrValue(permissionProfile, forKey: .permissionProfile)
+        try container.encodeNilOrValue(activePermissionProfile, forKey: .activePermissionProfile)
+        try container.encodeNilOrValue(reasoningEffort, forKey: .reasoningEffort)
+    }
+}
+
+public struct ThreadForkResponse: Equatable, Codable, Sendable {
+    public let thread: AppServerThread
+    public let model: String
+    public let modelProvider: String
+    public let serviceTier: String?
+    public let cwd: String
+    public let instructionSources: [String]
+    public let approvalPolicy: AskForApproval
+    public let approvalsReviewer: ApprovalsReviewer
+    public let sandbox: SandboxPolicy
+    public let permissionProfile: AppServerPermissionProfile?
+    public let activePermissionProfile: AppServerActivePermissionProfile?
+    public let reasoningEffort: ReasoningEffort?
+
+    private enum CodingKeys: String, CodingKey {
+        case thread
+        case model
+        case modelProvider
+        case serviceTier
+        case cwd
+        case instructionSources
+        case approvalPolicy
+        case approvalsReviewer
+        case sandbox
+        case permissionProfile
+        case activePermissionProfile
+        case reasoningEffort
+    }
+
+    public init(
+        thread: AppServerThread,
+        model: String,
+        modelProvider: String,
+        serviceTier: String?,
+        cwd: String,
+        instructionSources: [String] = [],
+        approvalPolicy: AskForApproval,
+        approvalsReviewer: ApprovalsReviewer,
+        sandbox: SandboxPolicy,
+        permissionProfile: AppServerPermissionProfile?,
+        activePermissionProfile: AppServerActivePermissionProfile?,
+        reasoningEffort: ReasoningEffort?
+    ) {
+        self.thread = thread
+        self.model = model
+        self.modelProvider = modelProvider
+        self.serviceTier = serviceTier
+        self.cwd = cwd
+        self.instructionSources = instructionSources
+        self.approvalPolicy = approvalPolicy
+        self.approvalsReviewer = approvalsReviewer
+        self.sandbox = sandbox
+        self.permissionProfile = permissionProfile
+        self.activePermissionProfile = activePermissionProfile
+        self.reasoningEffort = reasoningEffort
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(thread, forKey: .thread)
+        try container.encode(model, forKey: .model)
+        try container.encode(modelProvider, forKey: .modelProvider)
+        try container.encodeNilOrValue(serviceTier, forKey: .serviceTier)
+        try container.encode(cwd, forKey: .cwd)
+        try container.encode(instructionSources, forKey: .instructionSources)
+        try container.encode(approvalPolicy, forKey: .approvalPolicy)
+        try container.encode(approvalsReviewer, forKey: .approvalsReviewer)
+        try container.encode(sandbox, forKey: .sandbox)
+        try container.encodeNilOrValue(permissionProfile, forKey: .permissionProfile)
+        try container.encodeNilOrValue(activePermissionProfile, forKey: .activePermissionProfile)
+        try container.encodeNilOrValue(reasoningEffort, forKey: .reasoningEffort)
+    }
+}
+
 public struct ThreadStatusChangedNotification: Equatable, Codable, Sendable {
     public let threadID: String
     public let status: AppServerThreadStatus

@@ -288,6 +288,132 @@ final class AppServerThreadProtocolTests: XCTestCase {
         XCTAssertEqual(decodedSource, .custom("atlas"))
     }
 
+    func testThreadStartResumeAndForkResponsesCarryRustRuntimeShape() throws {
+        let thread = AppServerThread(
+            id: "thread-1",
+            sessionID: "session-1",
+            preview: "Runtime",
+            ephemeral: false,
+            modelProvider: "mock_provider",
+            createdAt: 1,
+            updatedAt: 2,
+            status: .notLoaded,
+            path: nil,
+            cwd: "/repo",
+            cliVersion: "0.50.0",
+            source: .appServer,
+            threadSource: .user,
+            turns: []
+        )
+
+        let permissionProfile = AppServerPermissionProfile.managed(
+            network: AppServerPermissionProfileNetworkPermissions(enabled: true),
+            fileSystem: .unrestricted
+        )
+        let activePermissionProfile = AppServerActivePermissionProfile(id: ":workspace")
+        let expectedThread = expectedRuntimeThreadJSON()
+
+        try XCTAssertJSONObjectEqual(
+            ThreadStartResponse(
+                thread: thread,
+                model: "gpt-5",
+                modelProvider: "mock_provider",
+                serviceTier: nil,
+                cwd: "/repo",
+                approvalPolicy: .never,
+                approvalsReviewer: .autoReview,
+                sandbox: .newWorkspaceWritePolicy(),
+                permissionProfile: nil,
+                activePermissionProfile: nil,
+                reasoningEffort: nil
+            ),
+            [
+                "thread": expectedThread,
+                "model": "gpt-5",
+                "modelProvider": "mock_provider",
+                "serviceTier": NSNull(),
+                "cwd": "/repo",
+                "instructionSources": [],
+                "approvalPolicy": "never",
+                "approvalsReviewer": "guardian_subagent",
+                "sandbox": [
+                    "type": "workspace-write",
+                    "network_access": false,
+                    "exclude_tmpdir_env_var": false,
+                    "exclude_slash_tmp": false
+                ],
+                "permissionProfile": NSNull(),
+                "activePermissionProfile": NSNull(),
+                "reasoningEffort": NSNull()
+            ]
+        )
+
+        let expectedConfiguredRuntime: [String: Any] = [
+            "thread": expectedThread,
+            "model": "gpt-5",
+            "modelProvider": "mock_provider",
+            "serviceTier": "priority",
+            "cwd": "/repo",
+            "instructionSources": ["/repo/AGENTS.md"],
+            "approvalPolicy": "on-request",
+            "approvalsReviewer": "user",
+            "sandbox": [
+                "type": "read-only"
+            ],
+            "permissionProfile": [
+                "type": "managed",
+                "network": [
+                    "enabled": true
+                ],
+                "fileSystem": [
+                    "type": "unrestricted"
+                ]
+            ],
+            "activePermissionProfile": [
+                "id": ":workspace",
+                "extends": NSNull(),
+                "modifications": []
+            ],
+            "reasoningEffort": "high"
+        ]
+
+        try XCTAssertJSONObjectEqual(
+            ThreadResumeResponse(
+                thread: thread,
+                model: "gpt-5",
+                modelProvider: "mock_provider",
+                serviceTier: "priority",
+                cwd: "/repo",
+                instructionSources: ["/repo/AGENTS.md"],
+                approvalPolicy: .onRequest,
+                approvalsReviewer: .user,
+                sandbox: .readOnly,
+                permissionProfile: permissionProfile,
+                activePermissionProfile: activePermissionProfile,
+                reasoningEffort: .high
+            ),
+            expectedConfiguredRuntime
+        )
+
+        try XCTAssertJSONObjectEqual(
+            ThreadForkResponse(
+                thread: thread,
+                model: "gpt-5",
+                modelProvider: "mock_provider",
+                serviceTier: "priority",
+                cwd: "/repo",
+                instructionSources: ["/repo/AGENTS.md"],
+                approvalPolicy: .onRequest,
+                approvalsReviewer: .user,
+                sandbox: .readOnly,
+                permissionProfile: permissionProfile,
+                activePermissionProfile: activePermissionProfile,
+                reasoningEffort: .high
+            ),
+            expectedConfiguredRuntime
+        )
+    }
+
     func testThreadStatusRoundTripLikeRustProtocol() throws {
         try XCTAssertJSONObjectEqual(AppServerThreadStatus.notLoaded, [
             "type": "notLoaded"
@@ -929,4 +1055,30 @@ final class AppServerThreadProtocolTests: XCTestCase {
             []
         )
     }
+}
+
+private func expectedRuntimeThreadJSON() -> [String: Any] {
+    [
+        "id": "thread-1",
+        "sessionId": "session-1",
+        "forkedFromId": NSNull(),
+        "preview": "Runtime",
+        "ephemeral": false,
+        "modelProvider": "mock_provider",
+        "createdAt": 1,
+        "updatedAt": 2,
+        "status": [
+            "type": "notLoaded"
+        ],
+        "path": NSNull(),
+        "cwd": "/repo",
+        "cliVersion": "0.50.0",
+        "source": "appServer",
+        "threadSource": "user",
+        "agentNickname": NSNull(),
+        "agentRole": NSNull(),
+        "gitInfo": NSNull(),
+        "name": NSNull(),
+        "turns": []
+    ]
 }
