@@ -113,16 +113,7 @@ public struct ToolSearchIndex: Equatable, Sendable {
 
     public static func dynamicEntries(from tools: [DynamicToolSpec]) -> [ToolSearchEntry] {
         tools.sorted {
-            switch ($0.namespace, $1.namespace) {
-            case let (lhs?, rhs?) where lhs != rhs:
-                return lhs < rhs
-            case (nil, _?):
-                return true
-            case (_?, nil):
-                return false
-            default:
-                return $0.name < $1.name
-            }
+            compareDynamicToolOrder($0, $1)
         }.map { tool in
             let output: ToolSpec
             let function = ToolSpecFactory.createDynamicResponsesAPITool(name: tool.name, tool: tool)
@@ -168,6 +159,31 @@ public struct ToolSearchIndex: Equatable, Sendable {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: " ")
+    }
+
+    private static func dynamicToolSortKey(_ tool: DynamicToolSpec) -> (String, String?) {
+        if let namespace = tool.namespace {
+            return (namespace, tool.name)
+        }
+        return (tool.name, nil)
+    }
+
+    private static func compareDynamicToolOrder(_ lhs: DynamicToolSpec, _ rhs: DynamicToolSpec) -> Bool {
+        let lhsKey = dynamicToolSortKey(lhs)
+        let rhsKey = dynamicToolSortKey(rhs)
+        if lhsKey.0 != rhsKey.0 {
+            return lhsKey.0 < rhsKey.0
+        }
+        switch (lhsKey.1, rhsKey.1) {
+        case (nil, nil):
+            return false
+        case (nil, _?):
+            return true
+        case (_?, nil):
+            return false
+        case let (lhsName?, rhsName?):
+            return lhsName < rhsName
+        }
     }
 
     public func toolSpec(defaultLimit: Int = ToolSearchIndex.defaultLimit) -> ToolSpec {

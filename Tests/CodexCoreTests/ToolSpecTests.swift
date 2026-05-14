@@ -1165,6 +1165,46 @@ final class ToolSpecTests: XCTestCase {
         XCTAssertNil(entries[0].limitBucket)
     }
 
+    func testDynamicToolSearchEntriesUseRustToolNameOrdering() {
+        let entries = ToolSearchIndex.dynamicEntries(from: [
+            DynamicToolSpec(
+                namespace: nil,
+                name: "z_plain",
+                description: "Plain tool that sorts last.",
+                inputSchema: .object(["type": .string("object"), "properties": .object([:])]),
+                deferLoading: true
+            ),
+            DynamicToolSpec(
+                namespace: "automation_",
+                name: "update",
+                description: "Namespaced tool that sorts by namespace.",
+                inputSchema: .object(["type": .string("object"), "properties": .object([:])]),
+                deferLoading: true
+            ),
+            DynamicToolSpec(
+                namespace: nil,
+                name: "alpha_plain",
+                description: "Plain tool that sorts by name.",
+                inputSchema: .object(["type": .string("object"), "properties": .object([:])]),
+                deferLoading: true
+            ),
+            DynamicToolSpec(
+                namespace: "alpha_plain",
+                name: "nested",
+                description: "Namespaced tool with the same primary key as a plain tool.",
+                inputSchema: .object(["type": .string("object"), "properties": .object([:])]),
+                deferLoading: true
+            )
+        ])
+
+        XCTAssertEqual(entries.map(\.output.name), [
+            "alpha_plain",
+            "alpha_plain",
+            "automation_",
+            "z_plain"
+        ])
+    }
+
     func testToolSearchIndexReturnsCoalescedDeferredMCPNamespace() throws {
         let index = ToolSearchIndex.mcpIndex(from: [
             "mcp__calendar__create_event": makeMcpTool(name: "create_event", description: "Create events"),
