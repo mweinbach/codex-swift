@@ -905,6 +905,26 @@ final class CommandSurfaceCLITests: XCTestCase {
                 64
             ),
             (
+                ["exec-server", "--listen", "stdio", "--listen=ws://127.0.0.1:4500"],
+                "codex-swift: duplicate option for command 'exec-server': --listen",
+                64
+            ),
+            (
+                ["exec-server", "--remote", "https://registry.example.test", "--remote=https://other.example.test"],
+                "codex-swift: duplicate option for command 'exec-server': --remote",
+                64
+            ),
+            (
+                ["exec-server", "--remote", "https://registry.example.test", "--executor-id", "exec-1", "--executor-id=exec-2"],
+                "codex-swift: duplicate option for command 'exec-server': --executor-id",
+                64
+            ),
+            (
+                ["exec-server", "--remote", "https://registry.example.test", "--executor-id", "exec-1", "--name", "a", "--name=b"],
+                "codex-swift: duplicate option for command 'exec-server': --name",
+                64
+            ),
+            (
                 ["exec-server", "--bogus"],
                 "codex-swift: unsupported option for command 'exec-server': --bogus",
                 64

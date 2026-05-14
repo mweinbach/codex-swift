@@ -2945,12 +2945,26 @@ public struct CodexCLI: Sendable {
         var remote: String?
         var executorID: String?
         var name: String?
+        var seenSingleValueOptions = Set<String>()
         var index = 0
+
+        func markSingleValueOption(_ option: String) -> ParseResult<Void> {
+            guard seenSingleValueOptions.insert(option).inserted else {
+                return .failure("codex-swift: duplicate option for command 'exec-server': \(option)", 64)
+            }
+            return .success(())
+        }
 
         while index < arguments.count {
             let argument = arguments[index]
             switch argument {
             case "--listen", "--remote", "--executor-id", "--name":
+                switch markSingleValueOption(argument) {
+                case .success:
+                    break
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
                 guard index + 1 < arguments.count else {
                     return .failure("codex-swift: missing value for \(argument)", 64)
                 }
@@ -2976,21 +2990,45 @@ public struct CodexCLI: Sendable {
                 index += 2
             default:
                 if argument.hasPrefix("--listen=") {
+                    switch markSingleValueOption("--listen") {
+                    case .success:
+                        break
+                    case let .failure(message, exitCode):
+                        return .failure(message, exitCode)
+                    }
                     guard remote == nil else {
                         return .failure("codex-swift: argument conflict for command 'exec-server': --listen conflicts with --remote", 64)
                     }
                     listen = String(argument.dropFirst("--listen=".count))
                     index += 1
                 } else if argument.hasPrefix("--remote=") {
+                    switch markSingleValueOption("--remote") {
+                    case .success:
+                        break
+                    case let .failure(message, exitCode):
+                        return .failure(message, exitCode)
+                    }
                     guard listen == nil else {
                         return .failure("codex-swift: argument conflict for command 'exec-server': --remote conflicts with --listen", 64)
                     }
                     remote = String(argument.dropFirst("--remote=".count))
                     index += 1
                 } else if argument.hasPrefix("--executor-id=") {
+                    switch markSingleValueOption("--executor-id") {
+                    case .success:
+                        break
+                    case let .failure(message, exitCode):
+                        return .failure(message, exitCode)
+                    }
                     executorID = String(argument.dropFirst("--executor-id=".count))
                     index += 1
                 } else if argument.hasPrefix("--name=") {
+                    switch markSingleValueOption("--name") {
+                    case .success:
+                        break
+                    case let .failure(message, exitCode):
+                        return .failure(message, exitCode)
+                    }
                     name = String(argument.dropFirst("--name=".count))
                     index += 1
                 } else if argument.hasPrefix("-") {
