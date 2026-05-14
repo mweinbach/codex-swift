@@ -25495,8 +25495,8 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             permissions: RequestPermissionProfile.intersectAdditionalPermissionProfiles(
                 requested: requestedPermissions,
                 granted: RequestPermissionProfile(
-                    network: permissionsResponse.permissions.network,
-                    fileSystem: permissionsResponse.permissions.fileSystem
+                    network: permissionsResponse.permissions.network?.requestPermissions,
+                    fileSystem: permissionsResponse.permissions.fileSystem?.fileSystemPermissions
                 ),
                 cwd: cwd
             ),

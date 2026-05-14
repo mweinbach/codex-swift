@@ -411,7 +411,17 @@ final class AppServerProtocolTests: XCTestCase {
                         "enabled": true
                     ],
                     "fileSystem": [
-                        "read": ["/tmp/project"]
+                        "read": ["/tmp/project"],
+                        "write": NSNull(),
+                        "entries": [
+                            [
+                                "path": [
+                                    "type": "path",
+                                    "path": "/tmp/project"
+                                ],
+                                "access": "read"
+                            ]
+                        ]
                     ]
                 ],
                 "proposedExecpolicyAmendment": ["git", "status"],
@@ -447,7 +457,7 @@ final class AppServerProtocolTests: XCTestCase {
 
         let decoded = try JSONDecoder().decode(
             AppServerProtocol.ServerRequest.self,
-            from: Data(#"{"method":"item/commandExecution/requestApproval","id":4,"params":{"threadId":"thr_123","turnId":"turn_123","itemId":"item_123","startedAtMs":43,"reason":"needs network","networkApprovalContext":{"host":"example.com","protocol":"https"},"command":"git status","cwd":"/tmp/project","commandActions":[{"type":"read","command":"cat Package.swift","name":"Package.swift","path":"/tmp/project/Package.swift"},{"type":"listFiles","command":"ls Sources","path":"Sources"}],"additionalPermissions":{"network":{"enabled":true},"fileSystem":{"read":["/tmp/project"]}},"proposedExecpolicyAmendment":["git","status"],"proposedNetworkPolicyAmendments":[{"host":"example.com","action":"allow"}],"availableDecisions":["accept",{"acceptWithExecpolicyAmendment":{"execpolicy_amendment":["git","status"]}},{"applyNetworkPolicyAmendment":{"network_policy_amendment":{"host":"example.com","action":"allow"}}},"cancel"]}}"#.utf8)
+            from: Data(#"{"method":"item/commandExecution/requestApproval","id":4,"params":{"threadId":"thr_123","turnId":"turn_123","itemId":"item_123","startedAtMs":43,"reason":"needs network","networkApprovalContext":{"host":"example.com","protocol":"https"},"command":"git status","cwd":"/tmp/project","commandActions":[{"type":"read","command":"cat Package.swift","name":"Package.swift","path":"/tmp/project/Package.swift"},{"type":"listFiles","command":"ls Sources","path":"Sources"}],"additionalPermissions":{"network":{"enabled":true},"fileSystem":{"read":["/tmp/project"],"write":null,"entries":[{"path":{"type":"path","path":"/tmp/project"},"access":"read"}]}},"proposedExecpolicyAmendment":["git","status"],"proposedNetworkPolicyAmendments":[{"host":"example.com","action":"allow"}],"availableDecisions":["accept",{"acceptWithExecpolicyAmendment":{"execpolicy_amendment":["git","status"]}},{"applyNetworkPolicyAmendment":{"network_policy_amendment":{"host":"example.com","action":"allow"}}},"cancel"]}}"#.utf8)
         )
         XCTAssertEqual(decoded, request)
     }
@@ -543,7 +553,17 @@ final class AppServerProtocolTests: XCTestCase {
                 "cwd": "/tmp",
                 "additionalPermissions": [
                     "fileSystem": [
-                        "read": ["/tmp/allowed"]
+                        "read": ["/tmp/allowed"],
+                        "write": NSNull(),
+                        "entries": [
+                            [
+                                "path": [
+                                    "type": "path",
+                                    "path": "/tmp/allowed"
+                                ],
+                                "access": "read"
+                            ]
+                        ]
                     ]
                 ]
             ]
@@ -784,7 +804,23 @@ final class AppServerProtocolTests: XCTestCase {
                     ],
                     "fileSystem": [
                         "read": ["/tmp/project"],
-                        "write": ["/tmp/project/Sources"]
+                        "write": ["/tmp/project/Sources"],
+                        "entries": [
+                            [
+                                "path": [
+                                    "type": "path",
+                                    "path": "/tmp/project"
+                                ],
+                                "access": "read"
+                            ],
+                            [
+                                "path": [
+                                    "type": "path",
+                                    "path": "/tmp/project/Sources"
+                                ],
+                                "access": "write"
+                            ]
+                        ]
                     ]
                 ]
             ]
@@ -796,7 +832,7 @@ final class AppServerProtocolTests: XCTestCase {
 
         let decoded = try JSONDecoder().decode(
             AppServerProtocol.ServerRequest.self,
-            from: Data(#"{"method":"item/permissions/requestApproval","id":1,"params":{"threadId":"thr_123","turnId":"turn_123","itemId":"item_123","startedAtMs":44,"cwd":"/tmp/project","reason":null,"permissions":{"network":{"enabled":true},"fileSystem":{"read":["/tmp/project"],"write":["/tmp/project/Sources"]}}}}"#.utf8)
+            from: Data(#"{"method":"item/permissions/requestApproval","id":1,"params":{"threadId":"thr_123","turnId":"turn_123","itemId":"item_123","startedAtMs":44,"cwd":"/tmp/project","reason":null,"permissions":{"network":{"enabled":true},"fileSystem":{"read":["/tmp/project"],"write":["/tmp/project/Sources"],"entries":[{"path":{"type":"path","path":"/tmp/project"},"access":"read"},{"path":{"type":"path","path":"/tmp/project/Sources"},"access":"write"}]}}}}"#.utf8)
         )
         XCTAssertEqual(decoded, request)
     }

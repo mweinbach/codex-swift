@@ -889,7 +889,7 @@ Recent upstream audit checkpoint:
 - `codex-rs/protocol/src/models.rs` permission profiles
   - Added typed `PermissionProfile`, `ManagedFileSystemPermissions`, and `NetworkSandboxPolicy` models, including Rust's tagged managed/disabled/external wire shape and legacy `{network,file_system}` rollout decode path, and wired user-turn/turn-context submissions through the typed profile.
 - `codex-rs/app-server-protocol/src/protocol/v2/permissions.rs` app-server permission payloads
-  - Reused typed `FileSystemPermissions` for app-server permissions, granted-permission, and command additional-permission payloads while preserving the existing camelCase app-server field names.
+  - Added app-server v2 permission wrappers for additional network/filesystem permissions, managed profile filesystem permissions, active-profile selections, and granted permissions. App-server request/response payloads now preserve Rust's explicit nullable `read`/`write` and `enabled` fields, camelCase `globScanMaxDepth`, `additionalWritableRoot` modification tags, and granted-profile skip-if-nil behavior while converting back to the core rollout permission models at runtime boundaries.
 - `codex-rs/protocol/src/models.rs` permission profile helpers
   - Added `SandboxEnforcement` and Swift helpers for `PermissionProfile.enforcement` and `networkSandboxPolicy`, including Rust's disabled-profile behavior of reporting enabled network access.
 - `codex-rs/protocol/src/models.rs` permission profile constructors

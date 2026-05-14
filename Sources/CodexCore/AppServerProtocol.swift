@@ -1200,17 +1200,34 @@ public enum AppServerProtocol {
     }
 
     public struct PermissionsProfile: Equatable, Codable, Sendable {
-        public let network: RequestPermissionNetworkPermissions?
-        public let fileSystem: FileSystemPermissions?
+        public let network: AppServerAdditionalNetworkPermissions?
+        public let fileSystem: AppServerAdditionalFileSystemPermissions?
 
         private enum CodingKeys: String, CodingKey {
             case network
             case fileSystem
         }
 
-        public init(network: RequestPermissionNetworkPermissions? = nil, fileSystem: FileSystemPermissions? = nil) {
+        public init(
+            network: AppServerAdditionalNetworkPermissions? = nil,
+            fileSystem: AppServerAdditionalFileSystemPermissions? = nil
+        ) {
             self.network = network
             self.fileSystem = fileSystem
+        }
+
+        public init(
+            network: RequestPermissionNetworkPermissions?,
+            fileSystem: FileSystemPermissions?
+        ) {
+            self.init(
+                network: network.map(AppServerAdditionalNetworkPermissions.init),
+                fileSystem: fileSystem.map(AppServerAdditionalFileSystemPermissions.init)
+            )
+        }
+
+        public init(fileSystem: FileSystemPermissions?) {
+            self.init(network: nil as RequestPermissionNetworkPermissions?, fileSystem: fileSystem)
         }
 
         public func encode(to encoder: Encoder) throws {
@@ -1221,17 +1238,38 @@ public enum AppServerProtocol {
     }
 
     public struct GrantedPermissionProfile: Equatable, Codable, Sendable {
-        public let network: RequestPermissionNetworkPermissions?
-        public let fileSystem: FileSystemPermissions?
+        public let network: AppServerAdditionalNetworkPermissions?
+        public let fileSystem: AppServerAdditionalFileSystemPermissions?
 
         private enum CodingKeys: String, CodingKey {
             case network
             case fileSystem
         }
 
-        public init(network: RequestPermissionNetworkPermissions? = nil, fileSystem: FileSystemPermissions? = nil) {
+        public init(
+            network: AppServerAdditionalNetworkPermissions? = nil,
+            fileSystem: AppServerAdditionalFileSystemPermissions? = nil
+        ) {
             self.network = network
             self.fileSystem = fileSystem
+        }
+
+        public init(
+            network: RequestPermissionNetworkPermissions?,
+            fileSystem: FileSystemPermissions?
+        ) {
+            self.init(
+                network: network.map(AppServerAdditionalNetworkPermissions.init),
+                fileSystem: fileSystem.map(AppServerAdditionalFileSystemPermissions.init)
+            )
+        }
+
+        public init(network: RequestPermissionNetworkPermissions?) {
+            self.init(network: network, fileSystem: nil as FileSystemPermissions?)
+        }
+
+        public init(fileSystem: FileSystemPermissions?) {
+            self.init(network: nil as RequestPermissionNetworkPermissions?, fileSystem: fileSystem)
         }
 
         public func encode(to encoder: Encoder) throws {
@@ -1593,17 +1631,38 @@ public enum AppServerProtocol {
     }
 
     public struct AdditionalPermissionProfile: Equatable, Codable, Sendable {
-        public let network: RequestPermissionNetworkPermissions?
-        public let fileSystem: FileSystemPermissions?
+        public let network: AppServerAdditionalNetworkPermissions?
+        public let fileSystem: AppServerAdditionalFileSystemPermissions?
 
         private enum CodingKeys: String, CodingKey {
             case network
             case fileSystem
         }
 
-        public init(network: RequestPermissionNetworkPermissions? = nil, fileSystem: FileSystemPermissions? = nil) {
+        public init(
+            network: AppServerAdditionalNetworkPermissions? = nil,
+            fileSystem: AppServerAdditionalFileSystemPermissions? = nil
+        ) {
             self.network = network
             self.fileSystem = fileSystem
+        }
+
+        public init(
+            network: RequestPermissionNetworkPermissions?,
+            fileSystem: FileSystemPermissions?
+        ) {
+            self.init(
+                network: network.map(AppServerAdditionalNetworkPermissions.init),
+                fileSystem: fileSystem.map(AppServerAdditionalFileSystemPermissions.init)
+            )
+        }
+
+        public init(network: RequestPermissionNetworkPermissions?) {
+            self.init(network: network, fileSystem: nil as FileSystemPermissions?)
+        }
+
+        public init(fileSystem: FileSystemPermissions?) {
+            self.init(network: nil as RequestPermissionNetworkPermissions?, fileSystem: fileSystem)
         }
     }
 
