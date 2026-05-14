@@ -1104,6 +1104,60 @@ final class AppServerProtocolTests: XCTestCase {
         XCTAssertEqual(decoded, schema)
     }
 
+    func testMcpElicitationSchemasRejectUnknownFieldsLikeRustDenyUnknownFields() {
+        func assertRejectsUnknownField<T: Decodable>(
+            _ type: T.Type,
+            _ json: String,
+            file: StaticString = #filePath,
+            line: UInt = #line
+        ) {
+            XCTAssertThrowsError(
+                try JSONDecoder().decode(type, from: Data(json.utf8)),
+                file: file,
+                line: line
+            ) { error in
+                XCTAssertTrue(
+                    String(describing: error).contains("unknown field `extra`"),
+                    "unexpected error: \(error)",
+                    file: file,
+                    line: line
+                )
+            }
+        }
+
+        assertRejectsUnknownField(
+            AppServerProtocol.McpElicitationSchema.self,
+            #"{"type":"object","properties":{},"extra":true}"#
+        )
+        assertRejectsUnknownField(
+            AppServerProtocol.McpElicitationPrimitiveSchema.self,
+            #"{"type":"string","title":"Email","extra":true}"#
+        )
+        assertRejectsUnknownField(
+            AppServerProtocol.McpElicitationPrimitiveSchema.self,
+            #"{"type":"array","items":{"type":"string","enum":["ios"],"extra":true}}"#
+        )
+        assertRejectsUnknownField(
+            AppServerProtocol.McpElicitationPrimitiveSchema.self,
+            #"{"type":"string","oneOf":[{"const":"auto","title":"Auto","extra":true}]}"#
+        )
+    }
+
+    func testMcpElicitationConcreteSchemasRejectWrongFixedTypeLikeRust() {
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            AppServerProtocol.McpElicitationStringSchema.self,
+            from: Data(#"{"type":"number"}"#.utf8)
+        ))
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            AppServerProtocol.McpElicitationBooleanSchema.self,
+            from: Data(#"{"type":"string"}"#.utf8)
+        ))
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            AppServerProtocol.McpElicitationUntitledEnumItems.self,
+            from: Data(#"{"type":"array","enum":["a"]}"#.utf8)
+        ))
+    }
+
     func testMcpServerElicitationServerResponseMatchesRustWireShape() throws {
         let response = AppServerProtocol.ServerResponse.mcpServerElicitationRequest(
             requestID: .integer(10),

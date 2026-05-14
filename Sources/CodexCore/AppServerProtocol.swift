@@ -1,6 +1,35 @@
 import Foundation
 
 public enum AppServerProtocol {
+    private struct AnyCodingKey: CodingKey {
+        let stringValue: String
+        let intValue: Int?
+
+        init?(stringValue: String) {
+            self.stringValue = stringValue
+            intValue = nil
+        }
+
+        init?(intValue: Int) {
+            stringValue = "\(intValue)"
+            self.intValue = intValue
+        }
+    }
+
+    private static func rejectUnknownKeys<K: CodingKey & CaseIterable>(
+        _ decoder: Decoder,
+        allowedBy _: K.Type
+    ) throws {
+        let container = try decoder.container(keyedBy: AnyCodingKey.self)
+        let allowedKeys = Set(K.allCases.map(\.stringValue))
+        if let unknown = container.allKeys.first(where: { !allowedKeys.contains($0.stringValue) }) {
+            throw DecodingError.dataCorrupted(DecodingError.Context(
+                codingPath: decoder.codingPath + [unknown],
+                debugDescription: "unknown field `\(unknown.stringValue)`"
+            ))
+        }
+    }
+
     public enum ServerRequest: Equatable, Codable, Sendable {
         case attestationGenerate(requestID: RequestID, params: Attestation.GenerateParams)
         case chatGPTAuthTokensRefresh(requestID: RequestID, params: ChatGPTAuthTokensRefreshParams)
@@ -552,7 +581,7 @@ public enum AppServerProtocol {
         public let properties: [String: McpElicitationPrimitiveSchema]
         public let required: [String]?
 
-        private enum CodingKeys: String, CodingKey {
+        private enum CodingKeys: String, CodingKey, CaseIterable {
             case schemaURI = "$schema"
             case type
             case properties
@@ -570,6 +599,7 @@ public enum AppServerProtocol {
         }
 
         public init(from decoder: Decoder) throws {
+            try AppServerProtocol.rejectUnknownKeys(decoder, allowedBy: CodingKeys.self)
             let container = try decoder.container(keyedBy: CodingKeys.self)
             let type = try container.decode(String.self, forKey: .type)
             guard type == "object" else {
@@ -767,7 +797,7 @@ public enum AppServerProtocol {
         public let format: McpElicitationStringFormat?
         public let defaultValue: String?
 
-        private enum CodingKeys: String, CodingKey {
+        private enum CodingKeys: String, CodingKey, CaseIterable {
             case type
             case title
             case description
@@ -794,7 +824,16 @@ public enum AppServerProtocol {
         }
 
         public init(from decoder: Decoder) throws {
+            try AppServerProtocol.rejectUnknownKeys(decoder, allowedBy: CodingKeys.self)
             let container = try decoder.container(keyedBy: CodingKeys.self)
+            let type = try container.decode(String.self, forKey: .type)
+            guard type == "string" else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .type,
+                    in: container,
+                    debugDescription: "unsupported MCP elicitation string schema type: \(type)"
+                )
+            }
             title = try container.decodeIfPresent(String.self, forKey: .title)
             description = try container.decodeIfPresent(String.self, forKey: .description)
             minLength = try container.decodeIfPresent(UInt32.self, forKey: .minLength)
@@ -823,7 +862,7 @@ public enum AppServerProtocol {
         public let maximum: Double?
         public let defaultValue: Double?
 
-        private enum CodingKeys: String, CodingKey {
+        private enum CodingKeys: String, CodingKey, CaseIterable {
             case type
             case title
             case description
@@ -847,6 +886,17 @@ public enum AppServerProtocol {
             self.maximum = maximum
             self.defaultValue = defaultValue
         }
+
+        public init(from decoder: Decoder) throws {
+            try AppServerProtocol.rejectUnknownKeys(decoder, allowedBy: CodingKeys.self)
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            type = try container.decode(McpElicitationNumberType.self, forKey: .type)
+            title = try container.decodeIfPresent(String.self, forKey: .title)
+            description = try container.decodeIfPresent(String.self, forKey: .description)
+            minimum = try container.decodeIfPresent(Double.self, forKey: .minimum)
+            maximum = try container.decodeIfPresent(Double.self, forKey: .maximum)
+            defaultValue = try container.decodeIfPresent(Double.self, forKey: .defaultValue)
+        }
     }
 
     public struct McpElicitationBooleanSchema: Equatable, Codable, Sendable {
@@ -854,7 +904,7 @@ public enum AppServerProtocol {
         public let description: String?
         public let defaultValue: Bool?
 
-        private enum CodingKeys: String, CodingKey {
+        private enum CodingKeys: String, CodingKey, CaseIterable {
             case type
             case title
             case description
@@ -868,7 +918,16 @@ public enum AppServerProtocol {
         }
 
         public init(from decoder: Decoder) throws {
+            try AppServerProtocol.rejectUnknownKeys(decoder, allowedBy: CodingKeys.self)
             let container = try decoder.container(keyedBy: CodingKeys.self)
+            let type = try container.decode(String.self, forKey: .type)
+            guard type == "boolean" else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .type,
+                    in: container,
+                    debugDescription: "unsupported MCP elicitation boolean schema type: \(type)"
+                )
+            }
             title = try container.decodeIfPresent(String.self, forKey: .title)
             description = try container.decodeIfPresent(String.self, forKey: .description)
             defaultValue = try container.decodeIfPresent(Bool.self, forKey: .defaultValue)
@@ -889,7 +948,7 @@ public enum AppServerProtocol {
         public let values: [String]
         public let defaultValue: String?
 
-        private enum CodingKeys: String, CodingKey {
+        private enum CodingKeys: String, CodingKey, CaseIterable {
             case type
             case title
             case description
@@ -910,7 +969,16 @@ public enum AppServerProtocol {
         }
 
         public init(from decoder: Decoder) throws {
+            try AppServerProtocol.rejectUnknownKeys(decoder, allowedBy: CodingKeys.self)
             let container = try decoder.container(keyedBy: CodingKeys.self)
+            let type = try container.decode(String.self, forKey: .type)
+            guard type == "string" else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .type,
+                    in: container,
+                    debugDescription: "unsupported MCP elicitation single-select schema type: \(type)"
+                )
+            }
             title = try container.decodeIfPresent(String.self, forKey: .title)
             description = try container.decodeIfPresent(String.self, forKey: .description)
             values = try container.decode([String].self, forKey: .values)
@@ -933,7 +1001,7 @@ public enum AppServerProtocol {
         public let oneOf: [McpElicitationConstOption]
         public let defaultValue: String?
 
-        private enum CodingKeys: String, CodingKey {
+        private enum CodingKeys: String, CodingKey, CaseIterable {
             case type
             case title
             case description
@@ -954,7 +1022,16 @@ public enum AppServerProtocol {
         }
 
         public init(from decoder: Decoder) throws {
+            try AppServerProtocol.rejectUnknownKeys(decoder, allowedBy: CodingKeys.self)
             let container = try decoder.container(keyedBy: CodingKeys.self)
+            let type = try container.decode(String.self, forKey: .type)
+            guard type == "string" else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .type,
+                    in: container,
+                    debugDescription: "unsupported MCP elicitation single-select schema type: \(type)"
+                )
+            }
             title = try container.decodeIfPresent(String.self, forKey: .title)
             description = try container.decodeIfPresent(String.self, forKey: .description)
             oneOf = try container.decode([McpElicitationConstOption].self, forKey: .oneOf)
@@ -978,7 +1055,7 @@ public enum AppServerProtocol {
         public let enumNames: [String]?
         public let defaultValue: String?
 
-        private enum CodingKeys: String, CodingKey {
+        private enum CodingKeys: String, CodingKey, CaseIterable {
             case type
             case title
             case description
@@ -1002,7 +1079,16 @@ public enum AppServerProtocol {
         }
 
         public init(from decoder: Decoder) throws {
+            try AppServerProtocol.rejectUnknownKeys(decoder, allowedBy: CodingKeys.self)
             let container = try decoder.container(keyedBy: CodingKeys.self)
+            let type = try container.decode(String.self, forKey: .type)
+            guard type == "string" else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .type,
+                    in: container,
+                    debugDescription: "unsupported MCP elicitation legacy enum schema type: \(type)"
+                )
+            }
             title = try container.decodeIfPresent(String.self, forKey: .title)
             description = try container.decodeIfPresent(String.self, forKey: .description)
             values = try container.decode([String].self, forKey: .values)
@@ -1029,7 +1115,7 @@ public enum AppServerProtocol {
         public let items: McpElicitationUntitledEnumItems
         public let defaultValue: [String]?
 
-        private enum CodingKeys: String, CodingKey {
+        private enum CodingKeys: String, CodingKey, CaseIterable {
             case type
             case title
             case description
@@ -1056,7 +1142,16 @@ public enum AppServerProtocol {
         }
 
         public init(from decoder: Decoder) throws {
+            try AppServerProtocol.rejectUnknownKeys(decoder, allowedBy: CodingKeys.self)
             let container = try decoder.container(keyedBy: CodingKeys.self)
+            let type = try container.decode(String.self, forKey: .type)
+            guard type == "array" else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .type,
+                    in: container,
+                    debugDescription: "unsupported MCP elicitation multi-select schema type: \(type)"
+                )
+            }
             title = try container.decodeIfPresent(String.self, forKey: .title)
             description = try container.decodeIfPresent(String.self, forKey: .description)
             minItems = try container.decodeIfPresent(UInt64.self, forKey: .minItems)
@@ -1085,7 +1180,7 @@ public enum AppServerProtocol {
         public let items: McpElicitationTitledEnumItems
         public let defaultValue: [String]?
 
-        private enum CodingKeys: String, CodingKey {
+        private enum CodingKeys: String, CodingKey, CaseIterable {
             case type
             case title
             case description
@@ -1112,7 +1207,16 @@ public enum AppServerProtocol {
         }
 
         public init(from decoder: Decoder) throws {
+            try AppServerProtocol.rejectUnknownKeys(decoder, allowedBy: CodingKeys.self)
             let container = try decoder.container(keyedBy: CodingKeys.self)
+            let type = try container.decode(String.self, forKey: .type)
+            guard type == "array" else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .type,
+                    in: container,
+                    debugDescription: "unsupported MCP elicitation multi-select schema type: \(type)"
+                )
+            }
             title = try container.decodeIfPresent(String.self, forKey: .title)
             description = try container.decodeIfPresent(String.self, forKey: .description)
             minItems = try container.decodeIfPresent(UInt64.self, forKey: .minItems)
@@ -1136,7 +1240,7 @@ public enum AppServerProtocol {
     public struct McpElicitationUntitledEnumItems: Equatable, Codable, Sendable {
         public let values: [String]
 
-        private enum CodingKeys: String, CodingKey {
+        private enum CodingKeys: String, CodingKey, CaseIterable {
             case type
             case values = "enum"
         }
@@ -1146,7 +1250,16 @@ public enum AppServerProtocol {
         }
 
         public init(from decoder: Decoder) throws {
+            try AppServerProtocol.rejectUnknownKeys(decoder, allowedBy: CodingKeys.self)
             let container = try decoder.container(keyedBy: CodingKeys.self)
+            let type = try container.decode(String.self, forKey: .type)
+            guard type == "string" else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .type,
+                    in: container,
+                    debugDescription: "unsupported MCP elicitation enum item type: \(type)"
+                )
+            }
             values = try container.decode([String].self, forKey: .values)
         }
 
@@ -1160,7 +1273,7 @@ public enum AppServerProtocol {
     public struct McpElicitationTitledEnumItems: Equatable, Codable, Sendable {
         public let anyOf: [McpElicitationConstOption]
 
-        private enum CodingKeys: String, CodingKey {
+        private enum CodingKeys: String, CodingKey, CaseIterable {
             case anyOf
             case oneOf
         }
@@ -1170,6 +1283,7 @@ public enum AppServerProtocol {
         }
 
         public init(from decoder: Decoder) throws {
+            try AppServerProtocol.rejectUnknownKeys(decoder, allowedBy: CodingKeys.self)
             let container = try decoder.container(keyedBy: CodingKeys.self)
             if let anyOf = try container.decodeIfPresent([McpElicitationConstOption].self, forKey: .anyOf) {
                 self.anyOf = anyOf
@@ -1188,7 +1302,7 @@ public enum AppServerProtocol {
         public let constValue: String
         public let title: String
 
-        private enum CodingKeys: String, CodingKey {
+        private enum CodingKeys: String, CodingKey, CaseIterable {
             case constValue = "const"
             case title
         }
@@ -1196,6 +1310,13 @@ public enum AppServerProtocol {
         public init(constValue: String, title: String) {
             self.constValue = constValue
             self.title = title
+        }
+
+        public init(from decoder: Decoder) throws {
+            try AppServerProtocol.rejectUnknownKeys(decoder, allowedBy: CodingKeys.self)
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            constValue = try container.decode(String.self, forKey: .constValue)
+            title = try container.decode(String.self, forKey: .title)
         }
     }
 
