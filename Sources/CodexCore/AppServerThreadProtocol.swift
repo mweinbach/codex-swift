@@ -327,12 +327,38 @@ extension AppServerWebSearchAction: Codable {
     }
 }
 
+public enum AppServerCommandExecutionSource: String, Codable, Equatable, Sendable {
+    case agent
+    case userShell
+    case unifiedExecStartup
+    case unifiedExecInteraction
+}
+
+public enum AppServerCommandExecutionStatus: String, Codable, Equatable, Sendable {
+    case inProgress
+    case completed
+    case failed
+    case declined
+}
+
 public enum AppServerThreadItem: Equatable, Sendable {
     case userMessage(id: String, content: [AppServerUserInput])
     case hookPrompt(id: String, fragments: [HookPromptFragment])
     case agentMessage(id: String, text: String, phase: MessagePhase? = nil, memoryCitation: AppServerMemoryCitation? = nil)
     case plan(id: String, text: String)
     case reasoning(id: String, summary: [String] = [], content: [String] = [])
+    case commandExecution(
+        id: String,
+        command: String,
+        cwd: AbsolutePath,
+        processID: String? = nil,
+        source: AppServerCommandExecutionSource = .agent,
+        status: AppServerCommandExecutionStatus,
+        commandActions: [AppServerProtocol.CommandAction],
+        aggregatedOutput: String? = nil,
+        exitCode: Int32? = nil,
+        durationMs: Int64? = nil
+    )
     case webSearch(id: String, query: String, action: AppServerWebSearchAction? = nil)
     case imageView(id: String, path: AbsolutePath)
     case imageGeneration(id: String, status: String, revisedPrompt: String? = nil, result: String, savedPath: AbsolutePath? = nil)
@@ -357,6 +383,14 @@ public enum AppServerThreadItem: Equatable, Sendable {
         case memoryCitation
         case summary
         case content
+        case command
+        case cwd
+        case processID = "processId"
+        case source
+        case commandActions
+        case aggregatedOutput
+        case exitCode
+        case durationMs
     }
 
     private enum ItemType: String, Codable {
@@ -365,6 +399,7 @@ public enum AppServerThreadItem: Equatable, Sendable {
         case agentMessage
         case plan
         case reasoning
+        case commandExecution
         case webSearch
         case imageView
         case imageGeneration
@@ -380,6 +415,7 @@ public enum AppServerThreadItem: Equatable, Sendable {
              let .agentMessage(id, _, _, _),
              let .plan(id, _),
              let .reasoning(id, _, _),
+             let .commandExecution(id, _, _, _, _, _, _, _, _, _),
              let .webSearch(id, _, _),
              let .imageView(id, _),
              let .imageGeneration(id, _, _, _, _),
@@ -422,6 +458,19 @@ extension AppServerThreadItem: Codable {
                 id: try container.decode(String.self, forKey: .id),
                 summary: try container.decodeIfPresent([String].self, forKey: .summary) ?? [],
                 content: try container.decodeIfPresent([String].self, forKey: .content) ?? []
+            )
+        case .commandExecution:
+            self = .commandExecution(
+                id: try container.decode(String.self, forKey: .id),
+                command: try container.decode(String.self, forKey: .command),
+                cwd: try container.decode(AbsolutePath.self, forKey: .cwd),
+                processID: try container.decodeIfPresent(String.self, forKey: .processID),
+                source: try container.decodeIfPresent(AppServerCommandExecutionSource.self, forKey: .source) ?? .agent,
+                status: try container.decode(AppServerCommandExecutionStatus.self, forKey: .status),
+                commandActions: try container.decode([AppServerProtocol.CommandAction].self, forKey: .commandActions),
+                aggregatedOutput: try container.decodeIfPresent(String.self, forKey: .aggregatedOutput),
+                exitCode: try container.decodeIfPresent(Int32.self, forKey: .exitCode),
+                durationMs: try container.decodeIfPresent(Int64.self, forKey: .durationMs)
             )
         case .webSearch:
             self = .webSearch(
@@ -483,6 +532,29 @@ extension AppServerThreadItem: Codable {
             try container.encode(id, forKey: .id)
             try container.encode(summary, forKey: .summary)
             try container.encode(content, forKey: .content)
+        case let .commandExecution(
+            id,
+            command,
+            cwd,
+            processID,
+            source,
+            status,
+            commandActions,
+            aggregatedOutput,
+            exitCode,
+            durationMs
+        ):
+            try container.encode(ItemType.commandExecution, forKey: .type)
+            try container.encode(id, forKey: .id)
+            try container.encode(command, forKey: .command)
+            try container.encode(cwd, forKey: .cwd)
+            try container.encodeNilOrValue(processID, forKey: .processID)
+            try container.encode(source, forKey: .source)
+            try container.encode(status, forKey: .status)
+            try container.encode(commandActions, forKey: .commandActions)
+            try container.encodeNilOrValue(aggregatedOutput, forKey: .aggregatedOutput)
+            try container.encodeNilOrValue(exitCode, forKey: .exitCode)
+            try container.encodeNilOrValue(durationMs, forKey: .durationMs)
         case let .webSearch(id, query, action):
             try container.encode(ItemType.webSearch, forKey: .type)
             try container.encode(id, forKey: .id)

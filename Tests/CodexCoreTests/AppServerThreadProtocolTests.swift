@@ -312,6 +312,86 @@ final class AppServerThreadProtocolTests: XCTestCase {
         XCTAssertEqual(decoded.map(\.id), ["review-entered", "review-exited"])
     }
 
+    func testCommandExecutionItemUsesRustThreadItemShape() throws {
+        let item = AppServerThreadItem.commandExecution(
+            id: "exec-1",
+            command: "cat Package.swift && ls Sources",
+            cwd: repoPath,
+            source: .unifiedExecStartup,
+            status: .inProgress,
+            commandActions: [
+                .read(command: "cat Package.swift", name: "Package.swift", path: "/repo/Package.swift"),
+                .listFiles(command: "ls Sources", path: nil)
+            ]
+        )
+
+        try XCTAssertJSONObjectEqual(item, [
+            "type": "commandExecution",
+            "id": "exec-1",
+            "command": "cat Package.swift && ls Sources",
+            "cwd": "/repo",
+            "processId": NSNull(),
+            "source": "unifiedExecStartup",
+            "status": "inProgress",
+            "commandActions": [
+                [
+                    "type": "read",
+                    "command": "cat Package.swift",
+                    "name": "Package.swift",
+                    "path": "/repo/Package.swift"
+                ],
+                [
+                    "type": "listFiles",
+                    "command": "ls Sources"
+                ]
+            ],
+            "aggregatedOutput": NSNull(),
+            "exitCode": NSNull(),
+            "durationMs": NSNull()
+        ])
+
+        let decoded = try JSONDecoder().decode(AppServerThreadItem.self, from: Data(#"""
+        {
+          "type": "commandExecution",
+          "id": "exec-1",
+          "command": "cat Package.swift && ls Sources",
+          "cwd": "/repo",
+          "processId": null,
+          "status": "completed",
+          "commandActions": [
+            {
+              "type": "read",
+              "command": "cat Package.swift",
+              "name": "Package.swift",
+              "path": "/repo/Package.swift"
+            },
+            {
+              "type": "listFiles",
+              "command": "ls Sources"
+            }
+          ],
+          "aggregatedOutput": "Package.swift\nSources\n",
+          "exitCode": 0,
+          "durationMs": 42
+        }
+        """#.utf8))
+
+        XCTAssertEqual(decoded, .commandExecution(
+            id: "exec-1",
+            command: "cat Package.swift && ls Sources",
+            cwd: repoPath,
+            source: .agent,
+            status: .completed,
+            commandActions: [
+                .read(command: "cat Package.swift", name: "Package.swift", path: "/repo/Package.swift"),
+                .listFiles(command: "ls Sources", path: nil)
+            ],
+            aggregatedOutput: "Package.swift\nSources\n",
+            exitCode: 0,
+            durationMs: 42
+        ))
+    }
+
     func testAgentMessageItemCarriesMemoryCitationLikeRustProtocol() throws {
         let citation = AppServerMemoryCitation(
             entries: [
