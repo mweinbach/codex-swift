@@ -47,7 +47,11 @@ final class AppServerNotificationProtocolTests: XCTestCase {
     func testErrorAndResolvedNotificationsEncodeRustWireShape() throws {
         try XCTAssertJSONObjectEqual(
             ErrorNotification(
-                error: AppServerTurnError(message: "model failed"),
+                error: AppServerTurnError(
+                    message: "model failed",
+                    codexErrorInfo: .usageLimitExceeded,
+                    additionalDetails: "retry later"
+                ),
                 willRetry: true,
                 threadID: "thread-1",
                 turnID: "turn-1"
@@ -55,13 +59,89 @@ final class AppServerNotificationProtocolTests: XCTestCase {
             [
                 "error": [
                     "message": "model failed",
-                    "codexErrorInfo": NSNull(),
-                    "additionalDetails": NSNull()
+                    "codexErrorInfo": "usageLimitExceeded",
+                    "additionalDetails": "retry later"
                 ],
                 "willRetry": true,
                 "threadId": "thread-1",
                 "turnId": "turn-1"
             ]
+        )
+
+        try XCTAssertJSONObjectEqual(
+            ErrorNotification(
+                error: AppServerTurnError(
+                    message: "active turn cannot be steered",
+                    codexErrorInfo: .activeTurnNotSteerable(turnKind: .compact)
+                ),
+                willRetry: false,
+                threadID: "thread-1",
+                turnID: "turn-1"
+            ),
+            [
+                "error": [
+                    "message": "active turn cannot be steered",
+                    "codexErrorInfo": [
+                        "activeTurnNotSteerable": [
+                            "turnKind": "compact"
+                        ]
+                    ],
+                    "additionalDetails": NSNull()
+                ],
+                "willRetry": false,
+                "threadId": "thread-1",
+                "turnId": "turn-1"
+            ]
+        )
+
+        try XCTAssertJSONObjectEqual(
+            ErrorNotification(
+                error: AppServerTurnError(
+                    message: "stream disconnected",
+                    codexErrorInfo: .responseStreamDisconnected(httpStatusCode: nil)
+                ),
+                willRetry: false,
+                threadID: "thread-1",
+                turnID: "turn-1"
+            ),
+            [
+                "error": [
+                    "message": "stream disconnected",
+                    "codexErrorInfo": [
+                        "responseStreamDisconnected": [
+                            "httpStatusCode": NSNull()
+                        ]
+                    ],
+                    "additionalDetails": NSNull()
+                ],
+                "willRetry": false,
+                "threadId": "thread-1",
+                "turnId": "turn-1"
+            ]
+        )
+
+        let decoded = try JSONDecoder().decode(
+            AppServerTurnError.self,
+            from: Data(
+                #"""
+                {
+                  "message": "stream disconnected",
+                  "codexErrorInfo": {
+                    "responseStreamDisconnected": {
+                      "httpStatusCode": 502
+                    }
+                  },
+                  "additionalDetails": null
+                }
+                """#.utf8
+            )
+        )
+        XCTAssertEqual(
+            decoded,
+            AppServerTurnError(
+                message: "stream disconnected",
+                codexErrorInfo: .responseStreamDisconnected(httpStatusCode: 502)
+            )
         )
 
         try XCTAssertJSONObjectEqual(

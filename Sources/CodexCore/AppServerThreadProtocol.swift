@@ -207,11 +207,204 @@ public struct AppServerTurnError: Equatable, Codable, Sendable {
         self.additionalDetails = additionalDetails
     }
 
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.message = try container.decode(String.self, forKey: .message)
+        if container.contains(.codexErrorInfo), try !container.decodeNil(forKey: .codexErrorInfo) {
+            self.codexErrorInfo = try container.decode(AppServerCodexErrorInfo.self, forKey: .codexErrorInfo).value
+        } else {
+            self.codexErrorInfo = nil
+        }
+        self.additionalDetails = try container.decodeIfPresent(String.self, forKey: .additionalDetails)
+    }
+
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(message, forKey: .message)
-        try container.encodeNilOrValue(codexErrorInfo, forKey: .codexErrorInfo)
+        try container.encodeNilOrValue(codexErrorInfo.map(AppServerCodexErrorInfo.init), forKey: .codexErrorInfo)
         try container.encodeNilOrValue(additionalDetails, forKey: .additionalDetails)
+    }
+}
+
+private struct AppServerCodexErrorInfo: Equatable, Codable, Sendable {
+    let value: CodexErrorInfo
+
+    init(_ value: CodexErrorInfo) {
+        self.value = value
+    }
+
+    fileprivate enum UnitVariant: String, Codable {
+        case contextWindowExceeded
+        case usageLimitExceeded
+        case serverOverloaded
+        case cyberPolicy
+        case internalServerError
+        case unauthorized
+        case badRequest
+        case sandboxError
+        case threadRollbackFailed
+        case other
+    }
+
+    private enum ObjectVariant: String, CodingKey {
+        case httpConnectionFailed
+        case responseStreamConnectionFailed
+        case responseStreamDisconnected
+        case responseTooManyFailedAttempts
+        case activeTurnNotSteerable
+    }
+
+    private struct HTTPStatusPayload: Equatable, Codable, Sendable {
+        let httpStatusCode: UInt16?
+
+        private enum CodingKeys: String, CodingKey {
+            case httpStatusCode
+        }
+
+        init(httpStatusCode: UInt16?) {
+            self.httpStatusCode = httpStatusCode
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            httpStatusCode = try container.decodeIfPresent(UInt16.self, forKey: .httpStatusCode)
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encodeNilOrValue(httpStatusCode, forKey: .httpStatusCode)
+        }
+    }
+
+    private struct ActiveTurnNotSteerablePayload: Equatable, Codable, Sendable {
+        let turnKind: NonSteerableTurnKind
+    }
+
+    init(from decoder: Decoder) throws {
+        let singleValue = try decoder.singleValueContainer()
+        if let rawValue = try? singleValue.decode(String.self) {
+            guard let variant = UnitVariant(rawValue: rawValue) else {
+                throw DecodingError.dataCorruptedError(
+                    in: singleValue,
+                    debugDescription: "Unknown app-server CodexErrorInfo variant: \(rawValue)"
+                )
+            }
+            self.value = variant.codexErrorInfo
+            return
+        }
+
+        let container = try decoder.container(keyedBy: ObjectVariant.self)
+        guard container.allKeys.count == 1, let key = container.allKeys.first else {
+            throw DecodingError.dataCorrupted(
+                DecodingError.Context(
+                    codingPath: decoder.codingPath,
+                    debugDescription: "Expected exactly one app-server CodexErrorInfo object variant"
+                )
+            )
+        }
+
+        switch key {
+        case .httpConnectionFailed:
+            value = .httpConnectionFailed(
+                httpStatusCode: try container.decode(HTTPStatusPayload.self, forKey: key).httpStatusCode
+            )
+        case .responseStreamConnectionFailed:
+            value = .responseStreamConnectionFailed(
+                httpStatusCode: try container.decode(HTTPStatusPayload.self, forKey: key).httpStatusCode
+            )
+        case .responseStreamDisconnected:
+            value = .responseStreamDisconnected(
+                httpStatusCode: try container.decode(HTTPStatusPayload.self, forKey: key).httpStatusCode
+            )
+        case .responseTooManyFailedAttempts:
+            value = .responseTooManyFailedAttempts(
+                httpStatusCode: try container.decode(HTTPStatusPayload.self, forKey: key).httpStatusCode
+            )
+        case .activeTurnNotSteerable:
+            value = .activeTurnNotSteerable(
+                turnKind: try container.decode(ActiveTurnNotSteerablePayload.self, forKey: key).turnKind
+            )
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        switch value {
+        case .contextWindowExceeded:
+            try encodeUnit(.contextWindowExceeded, to: encoder)
+        case .usageLimitExceeded:
+            try encodeUnit(.usageLimitExceeded, to: encoder)
+        case .serverOverloaded:
+            try encodeUnit(.serverOverloaded, to: encoder)
+        case .cyberPolicy:
+            try encodeUnit(.cyberPolicy, to: encoder)
+        case let .httpConnectionFailed(httpStatusCode):
+            try encodeHTTPStatusPayload(httpStatusCode, forKey: .httpConnectionFailed, to: encoder)
+        case let .responseStreamConnectionFailed(httpStatusCode):
+            try encodeHTTPStatusPayload(httpStatusCode, forKey: .responseStreamConnectionFailed, to: encoder)
+        case .internalServerError:
+            try encodeUnit(.internalServerError, to: encoder)
+        case .unauthorized:
+            try encodeUnit(.unauthorized, to: encoder)
+        case .badRequest:
+            try encodeUnit(.badRequest, to: encoder)
+        case .sandboxError:
+            try encodeUnit(.sandboxError, to: encoder)
+        case let .responseStreamDisconnected(httpStatusCode):
+            try encodeHTTPStatusPayload(httpStatusCode, forKey: .responseStreamDisconnected, to: encoder)
+        case let .responseTooManyFailedAttempts(httpStatusCode):
+            try encodeHTTPStatusPayload(httpStatusCode, forKey: .responseTooManyFailedAttempts, to: encoder)
+        case let .activeTurnNotSteerable(turnKind):
+            var container = encoder.container(keyedBy: ObjectVariant.self)
+            try container.encode(
+                ActiveTurnNotSteerablePayload(turnKind: turnKind),
+                forKey: .activeTurnNotSteerable
+            )
+        case .threadRollbackFailed:
+            try encodeUnit(.threadRollbackFailed, to: encoder)
+        case .other:
+            try encodeUnit(.other, to: encoder)
+        }
+    }
+
+    private func encodeUnit(_ variant: UnitVariant, to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(variant.rawValue)
+    }
+
+    private func encodeHTTPStatusPayload(
+        _ httpStatusCode: UInt16?,
+        forKey key: ObjectVariant,
+        to encoder: Encoder
+    ) throws {
+        var container = encoder.container(keyedBy: ObjectVariant.self)
+        try container.encode(HTTPStatusPayload(httpStatusCode: httpStatusCode), forKey: key)
+    }
+}
+
+private extension AppServerCodexErrorInfo.UnitVariant {
+    var codexErrorInfo: CodexErrorInfo {
+        switch self {
+        case .contextWindowExceeded:
+            return .contextWindowExceeded
+        case .usageLimitExceeded:
+            return .usageLimitExceeded
+        case .serverOverloaded:
+            return .serverOverloaded
+        case .cyberPolicy:
+            return .cyberPolicy
+        case .internalServerError:
+            return .internalServerError
+        case .unauthorized:
+            return .unauthorized
+        case .badRequest:
+            return .badRequest
+        case .sandboxError:
+            return .sandboxError
+        case .threadRollbackFailed:
+            return .threadRollbackFailed
+        case .other:
+            return .other
+        }
     }
 }
 
