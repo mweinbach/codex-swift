@@ -206,6 +206,46 @@ public enum AppServerTurnCompletionBackfill {
     }
 }
 
+public struct ThreadLoadedListParams: Equatable, Codable, Sendable {
+    public let cursor: String?
+    public let limit: UInt32?
+
+    private enum CodingKeys: String, CodingKey {
+        case cursor
+        case limit
+    }
+
+    public init(cursor: String? = nil, limit: UInt32? = nil) {
+        self.cursor = cursor
+        self.limit = limit
+    }
+}
+
+public struct ThreadLoadedListResponse: Equatable, Codable, Sendable {
+    public let data: [String]
+    public let nextCursor: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case data
+        case nextCursor
+    }
+
+    public init(data: [String], nextCursor: String?) {
+        self.data = data
+        self.nextCursor = nextCursor
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(data, forKey: .data)
+        if let nextCursor {
+            try container.encode(nextCursor, forKey: .nextCursor)
+        } else {
+            try container.encodeNil(forKey: .nextCursor)
+        }
+    }
+}
+
 public struct ThreadTurnsListParams: Equatable, Codable, Sendable {
     public let threadID: String
     public let cursor: String?

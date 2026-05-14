@@ -44,6 +44,29 @@ final class AppServerThreadProtocolTests: XCTestCase {
         XCTAssertEqual(params.itemsView, .notLoaded)
     }
 
+    func testThreadLoadedListRoundTripsLikeRustProtocol() throws {
+        let params = ThreadLoadedListParams(cursor: "thread-1", limit: 25)
+
+        try XCTAssertJSONObjectEqual(params, [
+            "cursor": "thread-1",
+            "limit": 25
+        ])
+
+        let response = ThreadLoadedListResponse(data: ["thread-2"], nextCursor: nil)
+
+        try XCTAssertJSONObjectEqual(response, [
+            "data": ["thread-2"],
+            "nextCursor": NSNull()
+        ])
+
+        let decoded = try JSONDecoder().decode(
+            ThreadLoadedListParams.self,
+            from: Data(#"{"cursor":null,"limit":0}"#.utf8)
+        )
+        XCTAssertNil(decoded.cursor)
+        XCTAssertEqual(decoded.limit, 0)
+    }
+
     func testThreadTurnsItemsListRoundTripsLikeRustProtocol() throws {
         let params = ThreadTurnsItemsListParams(
             threadID: "thr_123",
