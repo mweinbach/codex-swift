@@ -931,6 +931,7 @@ final class CodexAppServerTests: XCTestCase {
             return XCTFail("expected config table")
         }
         XCTAssertEqual(config["model"], .string("gpt-param"))
+        XCTAssertEqual(config["model_provider"], .string("mock_provider"))
         XCTAssertEqual(config["approval_policy"], .string("never"))
         XCTAssertEqual(config["approvals_reviewer"], .string("auto_review"))
         XCTAssertEqual(config["service_tier"], .string("flex"))

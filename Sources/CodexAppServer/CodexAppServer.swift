@@ -1318,6 +1318,7 @@ public enum CodexAppServer {
             cwd: cwd,
             conversationID: conversationID,
             model: model,
+            modelProvider: modelProvider,
             approvalPolicy: approvalPolicy,
             approvalsReviewer: approvalsReviewer,
             serviceTier: serviceTier,
@@ -1391,6 +1392,7 @@ public enum CodexAppServer {
         cwd: URL,
         conversationID: ConversationId,
         model: String,
+        modelProvider: String,
         approvalPolicy: AskForApproval,
         approvalsReviewer: ApprovalsReviewer,
         serviceTier: String?,
@@ -1411,6 +1413,7 @@ public enum CodexAppServer {
             baseConfig: stack.effectiveConfig(),
             runtimeConfig: runtimeConfig,
             model: model,
+            modelProvider: modelProvider,
             approvalPolicy: approvalPolicy,
             approvalsReviewer: approvalsReviewer,
             serviceTier: serviceTier
@@ -1430,6 +1433,7 @@ public enum CodexAppServer {
         baseConfig: ConfigValue,
         runtimeConfig: CodexRuntimeConfig,
         model: String,
+        modelProvider: String,
         approvalPolicy: AskForApproval,
         approvalsReviewer: ApprovalsReviewer,
         serviceTier: String?
@@ -1442,6 +1446,7 @@ public enum CodexAppServer {
         }
 
         table["model"] = .string(model)
+        table["model_provider"] = .string(modelProvider)
         if let effort = runtimeConfig.modelReasoningEffort {
             table["model_reasoning_effort"] = .string(effort.rawValue)
         }
