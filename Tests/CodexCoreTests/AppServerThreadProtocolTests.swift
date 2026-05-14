@@ -1454,6 +1454,176 @@ final class AppServerThreadProtocolTests: XCTestCase {
         XCTAssertEqual(decodedUsage.last.reasoningOutputTokens, 10)
     }
 
+    func testItemDeltaNotificationModelsUseRustProtocolShape() throws {
+        try XCTAssertJSONObjectEqual(
+            PlanDeltaNotification(threadID: "thread-1", turnID: "turn-1", itemID: "plan-1", delta: "- step"),
+            [
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "itemId": "plan-1",
+                "delta": "- step"
+            ]
+        )
+        try XCTAssertJSONObjectEqual(
+            ReasoningSummaryTextDeltaNotification(
+                threadID: "thread-1",
+                turnID: "turn-1",
+                itemID: "reasoning-1",
+                delta: "summary",
+                summaryIndex: 2
+            ),
+            [
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "itemId": "reasoning-1",
+                "delta": "summary",
+                "summaryIndex": 2
+            ]
+        )
+        try XCTAssertJSONObjectEqual(
+            ReasoningSummaryPartAddedNotification(
+                threadID: "thread-1",
+                turnID: "turn-1",
+                itemID: "reasoning-1",
+                summaryIndex: 3
+            ),
+            [
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "itemId": "reasoning-1",
+                "summaryIndex": 3
+            ]
+        )
+        try XCTAssertJSONObjectEqual(
+            ReasoningTextDeltaNotification(
+                threadID: "thread-1",
+                turnID: "turn-1",
+                itemID: "reasoning-1",
+                delta: "thinking",
+                contentIndex: 4
+            ),
+            [
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "itemId": "reasoning-1",
+                "delta": "thinking",
+                "contentIndex": 4
+            ]
+        )
+        try XCTAssertJSONObjectEqual(
+            TerminalInteractionNotification(
+                threadID: "thread-1",
+                turnID: "turn-1",
+                itemID: "exec-1",
+                processID: "process-1",
+                stdin: "q\n"
+            ),
+            [
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "itemId": "exec-1",
+                "processId": "process-1",
+                "stdin": "q\n"
+            ]
+        )
+        try XCTAssertJSONObjectEqual(
+            CommandExecutionOutputDeltaNotification(
+                threadID: "thread-1",
+                turnID: "turn-1",
+                itemID: "exec-1",
+                delta: "stdout"
+            ),
+            [
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "itemId": "exec-1",
+                "delta": "stdout"
+            ]
+        )
+        try XCTAssertJSONObjectEqual(
+            FileChangeOutputDeltaNotification(
+                threadID: "thread-1",
+                turnID: "turn-1",
+                itemID: "patch-1",
+                delta: "diff"
+            ),
+            [
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "itemId": "patch-1",
+                "delta": "diff"
+            ]
+        )
+
+        let decodedSummaryDelta = try JSONDecoder().decode(
+            ReasoningSummaryTextDeltaNotification.self,
+            from: Data(#"""
+            {
+              "threadId": "thread-1",
+              "turnId": "turn-1",
+              "itemId": "reasoning-1",
+              "delta": "summary",
+              "summaryIndex": 2
+            }
+            """#.utf8)
+        )
+        XCTAssertEqual(decodedSummaryDelta.summaryIndex, 2)
+        XCTAssertEqual(decodedSummaryDelta.itemID, "reasoning-1")
+    }
+
+    func testFileChangePatchUpdatedNotificationUsesRustProtocolShape() throws {
+        let notification = FileChangePatchUpdatedNotification(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            itemID: "patch-1",
+            changes: [
+                AppServerFileUpdateChange(
+                    path: "Sources/Updated.swift",
+                    kind: .update(movePath: nil),
+                    diff: "@@ -1 +1 @@\n-old\n+new\n"
+                )
+            ]
+        )
+
+        try XCTAssertJSONObjectEqual(notification, [
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "itemId": "patch-1",
+            "changes": [
+                [
+                    "path": "Sources/Updated.swift",
+                    "kind": [
+                        "type": "update",
+                        "movePath": NSNull()
+                    ],
+                    "diff": "@@ -1 +1 @@\n-old\n+new\n"
+                ]
+            ]
+        ])
+
+        let decoded = try JSONDecoder().decode(
+            FileChangePatchUpdatedNotification.self,
+            from: Data(#"""
+            {
+              "threadId": "thread-1",
+              "turnId": "turn-1",
+              "itemId": "patch-1",
+              "changes": [
+                {
+                  "path": "Sources/Updated.swift",
+                  "kind": {
+                    "type": "update",
+                    "movePath": null
+                  },
+                  "diff": "@@ -1 +1 @@\n-old\n+new\n"
+                }
+              ]
+            }
+            """#.utf8)
+        )
+        XCTAssertEqual(decoded, notification)
+    }
+
     func testThreadNameAndGoalNotificationsPreserveRustNullSemantics() throws {
         let threadID = try ThreadId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
         let goal = ThreadGoal(

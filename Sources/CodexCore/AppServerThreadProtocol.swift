@@ -1188,6 +1188,183 @@ public struct ThreadTokenUsageUpdatedNotification: Equatable, Codable, Sendable 
     }
 }
 
+public struct PlanDeltaNotification: Equatable, Codable, Sendable {
+    public let threadID: String
+    public let turnID: String
+    public let itemID: String
+    public let delta: String
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+        case turnID = "turnId"
+        case itemID = "itemId"
+        case delta
+    }
+
+    public init(threadID: String, turnID: String, itemID: String, delta: String) {
+        self.threadID = threadID
+        self.turnID = turnID
+        self.itemID = itemID
+        self.delta = delta
+    }
+}
+
+public struct ReasoningSummaryTextDeltaNotification: Equatable, Codable, Sendable {
+    public let threadID: String
+    public let turnID: String
+    public let itemID: String
+    public let delta: String
+    public let summaryIndex: Int64
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+        case turnID = "turnId"
+        case itemID = "itemId"
+        case delta
+        case summaryIndex
+    }
+
+    public init(threadID: String, turnID: String, itemID: String, delta: String, summaryIndex: Int64) {
+        self.threadID = threadID
+        self.turnID = turnID
+        self.itemID = itemID
+        self.delta = delta
+        self.summaryIndex = summaryIndex
+    }
+}
+
+public struct ReasoningSummaryPartAddedNotification: Equatable, Codable, Sendable {
+    public let threadID: String
+    public let turnID: String
+    public let itemID: String
+    public let summaryIndex: Int64
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+        case turnID = "turnId"
+        case itemID = "itemId"
+        case summaryIndex
+    }
+
+    public init(threadID: String, turnID: String, itemID: String, summaryIndex: Int64) {
+        self.threadID = threadID
+        self.turnID = turnID
+        self.itemID = itemID
+        self.summaryIndex = summaryIndex
+    }
+}
+
+public struct ReasoningTextDeltaNotification: Equatable, Codable, Sendable {
+    public let threadID: String
+    public let turnID: String
+    public let itemID: String
+    public let delta: String
+    public let contentIndex: Int64
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+        case turnID = "turnId"
+        case itemID = "itemId"
+        case delta
+        case contentIndex
+    }
+
+    public init(threadID: String, turnID: String, itemID: String, delta: String, contentIndex: Int64) {
+        self.threadID = threadID
+        self.turnID = turnID
+        self.itemID = itemID
+        self.delta = delta
+        self.contentIndex = contentIndex
+    }
+}
+
+public struct TerminalInteractionNotification: Equatable, Codable, Sendable {
+    public let threadID: String
+    public let turnID: String
+    public let itemID: String
+    public let processID: String
+    public let stdin: String
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+        case turnID = "turnId"
+        case itemID = "itemId"
+        case processID = "processId"
+        case stdin
+    }
+
+    public init(threadID: String, turnID: String, itemID: String, processID: String, stdin: String) {
+        self.threadID = threadID
+        self.turnID = turnID
+        self.itemID = itemID
+        self.processID = processID
+        self.stdin = stdin
+    }
+}
+
+public struct CommandExecutionOutputDeltaNotification: Equatable, Codable, Sendable {
+    public let threadID: String
+    public let turnID: String
+    public let itemID: String
+    public let delta: String
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+        case turnID = "turnId"
+        case itemID = "itemId"
+        case delta
+    }
+
+    public init(threadID: String, turnID: String, itemID: String, delta: String) {
+        self.threadID = threadID
+        self.turnID = turnID
+        self.itemID = itemID
+        self.delta = delta
+    }
+}
+
+public struct FileChangeOutputDeltaNotification: Equatable, Codable, Sendable {
+    public let threadID: String
+    public let turnID: String
+    public let itemID: String
+    public let delta: String
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+        case turnID = "turnId"
+        case itemID = "itemId"
+        case delta
+    }
+
+    public init(threadID: String, turnID: String, itemID: String, delta: String) {
+        self.threadID = threadID
+        self.turnID = turnID
+        self.itemID = itemID
+        self.delta = delta
+    }
+}
+
+public struct FileChangePatchUpdatedNotification: Equatable, Codable, Sendable {
+    public let threadID: String
+    public let turnID: String
+    public let itemID: String
+    public let changes: [AppServerFileUpdateChange]
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+        case turnID = "turnId"
+        case itemID = "itemId"
+        case changes
+    }
+
+    public init(threadID: String, turnID: String, itemID: String, changes: [AppServerFileUpdateChange]) {
+        self.threadID = threadID
+        self.turnID = turnID
+        self.itemID = itemID
+        self.changes = changes
+    }
+}
+
 public struct ThreadStartedNotification: Equatable, Codable, Sendable {
     public let thread: AppServerThread
 
