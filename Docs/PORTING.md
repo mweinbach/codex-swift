@@ -13,6 +13,7 @@ Source baseline inspected for this scaffold:
 Recent upstream audit checkpoint:
 
 - 2026-05-14: rechecked Rust commits `46e2250bcf` (legacy `AfterToolUse` removal), `872b8b15b3` (remote-control installation id), `5f4d0ec343` (desktop attestation), `1bfc3d9773` (selected-environment `view_image`), `9cbd4c0371` (Bedrock Mantle snake-case header filtering), `79ad209ce6` (remote thread-store removal), and `f32c496144` (Git pagination option safety). The corresponding Swift parity remains covered by the hook, remote-control, attestation, `view_image`, model-provider, config/thread-store, and command-safety entries below.
+- 2026-05-14: rechecked Rust commits `bbb6bf0a37` (accepted-line fingerprint analytics), `bd8fc9adb9` (hyphenated session/thread request headers), `7c0e54bf59` (catalog-driven service-tier commands), `5733e00c79` (Seatbelt network policy without Darwin user-cache writes), `d2e71db22a` (exec banner wording), `cce059467a` / `e783341b70` (freeform-only `apply_patch` defaults), `607b0dd1f0` (OTEL span-attribute preflight), and `61142b6169` (structural dynamic tool-name ordering). Swift parity remains covered by `AcceptedLines`, Responses/Chat request-header, slash-command service-tier, Seatbelt, config-summary, tool-spec/apply-patch, OTEL config, and dynamic-tool-search tests. Rust TUI-only status-line commits `e6312d44f0` and `f86d95a242` have no current Swift renderer counterpart beyond the already ported slash-command and token-usage helpers.
 
 ## Current Swift Package Shape
 
