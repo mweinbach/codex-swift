@@ -530,6 +530,87 @@ public struct CodexCommandExecutionEventRequest: Equatable, Encodable, Sendable 
     }
 }
 
+public struct CodexFileChangeCounts: Equatable, Sendable {
+    public let total: UInt64
+    public let add: UInt64
+    public let update: UInt64
+    public let delete: UInt64
+    public let move: UInt64
+
+    public init(total: UInt64, add: UInt64, update: UInt64, delete: UInt64, move: UInt64) {
+        self.total = total
+        self.add = add
+        self.update = update
+        self.delete = delete
+        self.move = move
+    }
+
+    public init(changes: [AppServerFileUpdateChange]) {
+        var add: UInt64 = 0
+        var update: UInt64 = 0
+        var delete: UInt64 = 0
+        var move: UInt64 = 0
+
+        for change in changes {
+            switch change.kind {
+            case .add:
+                add += 1
+            case .delete:
+                delete += 1
+            case .update(movePath: .some):
+                move += 1
+            case .update(movePath: .none):
+                update += 1
+            }
+        }
+
+        self.init(total: UInt64(changes.count), add: add, update: update, delete: delete, move: move)
+    }
+}
+
+public struct CodexFileChangeEventParams: Equatable, Encodable, Sendable {
+    public let base: CodexToolItemEventBase
+    public let fileChangeCounts: CodexFileChangeCounts
+
+    public init(base: CodexToolItemEventBase, fileChangeCounts: CodexFileChangeCounts) {
+        self.base = base
+        self.fileChangeCounts = fileChangeCounts
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case fileChangeCount = "file_change_count"
+        case fileAddCount = "file_add_count"
+        case fileUpdateCount = "file_update_count"
+        case fileDeleteCount = "file_delete_count"
+        case fileMoveCount = "file_move_count"
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        try base.encode(to: encoder)
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(fileChangeCounts.total, forKey: .fileChangeCount)
+        try container.encode(fileChangeCounts.add, forKey: .fileAddCount)
+        try container.encode(fileChangeCounts.update, forKey: .fileUpdateCount)
+        try container.encode(fileChangeCounts.delete, forKey: .fileDeleteCount)
+        try container.encode(fileChangeCounts.move, forKey: .fileMoveCount)
+    }
+}
+
+public struct CodexFileChangeEventRequest: Equatable, Encodable, Sendable {
+    public let eventType: String
+    public let eventParams: CodexFileChangeEventParams
+
+    public init(eventType: String, eventParams: CodexFileChangeEventParams) {
+        self.eventType = eventType
+        self.eventParams = eventParams
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case eventType = "event_type"
+        case eventParams = "event_params"
+    }
+}
+
 public struct CodexCommandExecutionAnalyticsContext: Equatable, Sendable {
     public let appServerClient: CodexAppServerClientMetadata
     public let runtime: CodexRuntimeMetadata
@@ -551,6 +632,8 @@ public struct CodexCommandExecutionAnalyticsContext: Equatable, Sendable {
         self.parentThreadID = parentThreadID
     }
 }
+
+public typealias CodexFileChangeAnalyticsContext = CodexCommandExecutionAnalyticsContext
 
 public struct CodexCommandExecutionAnalyticsReducer: Sendable {
     private var startedAtMilliseconds: [CommandExecutionItemKey: UInt64] = [:]
@@ -664,7 +747,113 @@ public struct CodexCommandExecutionAnalyticsReducer: Sendable {
     }
 }
 
+public struct CodexFileChangeAnalyticsReducer: Sendable {
+    private var startedAtMilliseconds: [FileChangeItemKey: UInt64] = [:]
+
+    public init() {}
+
+    public mutating func ingestStarted(_ notification: ItemStartedNotification) {
+        guard case .fileChange = notification.item,
+              let startedAtMilliseconds = Self.unsignedMilliseconds(notification.startedAtMilliseconds)
+        else {
+            return
+        }
+
+        self.startedAtMilliseconds[FileChangeItemKey(notification)] = startedAtMilliseconds
+    }
+
+    public mutating func ingestCompleted(
+        _ notification: ItemCompletedNotification,
+        context: CodexFileChangeAnalyticsContext
+    ) -> CodexFileChangeEventRequest? {
+        let key = FileChangeItemKey(notification)
+        guard let startedAtMilliseconds = startedAtMilliseconds.removeValue(forKey: key),
+              let completedAtMilliseconds = Self.unsignedMilliseconds(notification.completedAtMilliseconds)
+        else {
+            return nil
+        }
+
+        guard case let .fileChange(id, changes, status) = notification.item,
+              let outcome = Self.outcome(for: status)
+        else {
+            return nil
+        }
+
+        return CodexFileChangeEventRequest(
+            eventType: "codex_file_change_event",
+            eventParams: CodexFileChangeEventParams(
+                base: CodexToolItemEventBase(
+                    threadID: notification.threadID,
+                    turnID: notification.turnID,
+                    itemID: id,
+                    appServerClient: context.appServerClient,
+                    runtime: context.runtime,
+                    threadSource: context.threadSource,
+                    subagentSource: context.subagentSource,
+                    parentThreadID: context.parentThreadID,
+                    toolName: "apply_patch",
+                    startedAtMilliseconds: startedAtMilliseconds,
+                    completedAtMilliseconds: completedAtMilliseconds,
+                    durationMilliseconds: completedAtMilliseconds >= startedAtMilliseconds
+                        ? completedAtMilliseconds - startedAtMilliseconds
+                        : nil,
+                    executionDurationMilliseconds: nil,
+                    reviewCount: 0,
+                    guardianReviewCount: 0,
+                    userReviewCount: 0,
+                    finalApprovalOutcome: .unknown,
+                    terminalStatus: outcome.terminalStatus,
+                    failureKind: outcome.failureKind,
+                    requestedAdditionalPermissions: false,
+                    requestedNetworkAccess: false
+                ),
+                fileChangeCounts: CodexFileChangeCounts(changes: changes)
+            )
+        )
+    }
+
+    private static func outcome(
+        for status: AppServerPatchApplyStatus
+    ) -> (terminalStatus: ToolItemTerminalStatus, failureKind: ToolItemFailureKind?)? {
+        switch status {
+        case .inProgress:
+            return nil
+        case .completed:
+            return (.completed, nil)
+        case .failed:
+            return (.failed, .toolError)
+        case .declined:
+            return (.rejected, .approvalDenied)
+        }
+    }
+
+    private static func unsignedMilliseconds(_ milliseconds: Int64?) -> UInt64? {
+        guard let milliseconds, milliseconds >= 0 else {
+            return nil
+        }
+        return UInt64(milliseconds)
+    }
+}
+
 private struct CommandExecutionItemKey: Hashable {
+    let threadID: String
+    let turnID: String
+    let itemID: String
+
+    init(_ notification: ItemStartedNotification) {
+        self.threadID = notification.threadID
+        self.turnID = notification.turnID
+        self.itemID = notification.item.id
+    }
+
+    init(_ notification: ItemCompletedNotification) {
+        self.threadID = notification.threadID
+        self.turnID = notification.turnID
+        self.itemID = notification.item.id
+    }
+}
+
+private struct FileChangeItemKey: Hashable {
     let threadID: String
     let turnID: String
     let itemID: String

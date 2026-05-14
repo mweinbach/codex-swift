@@ -2,6 +2,138 @@ import CodexCore
 import XCTest
 
 final class ReviewAnalyticsTests: XCTestCase {
+    func testFileChangeAnalyticsReducerEmitsLifecycleEventLikeRust() throws {
+        var reducer = CodexFileChangeAnalyticsReducer()
+        let startedItem = AppServerThreadItem.fileChange(
+            id: "patch-1",
+            changes: Self.sampleFileChanges,
+            status: .inProgress
+        )
+        let completedItem = AppServerThreadItem.fileChange(
+            id: "patch-1",
+            changes: Self.sampleFileChanges,
+            status: .completed
+        )
+
+        reducer.ingestStarted(ItemStartedNotification(
+            item: startedItem,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 2_000
+        ))
+        let event = try XCTUnwrap(reducer.ingestCompleted(
+            ItemCompletedNotification(
+                item: completedItem,
+                threadID: "thread-1",
+                turnID: "turn-1",
+                completedAtMilliseconds: 2_333
+            ),
+            context: Self.analyticsContext
+        ))
+
+        try XCTAssertJSONObjectEqual(event, [
+            "event_type": "codex_file_change_event",
+            "event_params": [
+                "thread_id": "thread-1",
+                "turn_id": "turn-1",
+                "item_id": "patch-1",
+                "app_server_client": [
+                    "product_client_id": "codex_tui",
+                    "client_name": "codex-tui",
+                    "client_version": "1.2.3",
+                    "rpc_transport": "websocket",
+                    "experimental_api_enabled": true
+                ],
+                "runtime": [
+                    "codex_rs_version": "0.99.0",
+                    "runtime_os": "macos",
+                    "runtime_os_version": "15.3.1",
+                    "runtime_arch": "aarch64"
+                ],
+                "thread_source": "user",
+                "subagent_source": nil,
+                "parent_thread_id": nil,
+                "tool_name": "apply_patch",
+                "started_at_ms": 2_000,
+                "completed_at_ms": 2_333,
+                "duration_ms": 333,
+                "execution_duration_ms": nil,
+                "review_count": 0,
+                "guardian_review_count": 0,
+                "user_review_count": 0,
+                "final_approval_outcome": "unknown",
+                "terminal_status": "completed",
+                "failure_kind": nil,
+                "requested_additional_permissions": false,
+                "requested_network_access": false,
+                "file_change_count": 4,
+                "file_add_count": 1,
+                "file_update_count": 1,
+                "file_delete_count": 1,
+                "file_move_count": 1
+            ]
+        ])
+    }
+
+    func testFileChangeAnalyticsReducerSuppressesMissingStartDoubleCompletionAndInProgressLikeRust() {
+        var reducer = CodexFileChangeAnalyticsReducer()
+        let completedItem = AppServerThreadItem.fileChange(
+            id: "patch-1",
+            changes: Self.sampleFileChanges,
+            status: .completed
+        )
+        let inProgressItem = AppServerThreadItem.fileChange(
+            id: "patch-2",
+            changes: Self.sampleFileChanges,
+            status: .inProgress
+        )
+        let completed = ItemCompletedNotification(
+            item: completedItem,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            completedAtMilliseconds: 20
+        )
+
+        XCTAssertNil(reducer.ingestCompleted(completed, context: Self.analyticsContext))
+
+        reducer.ingestStarted(ItemStartedNotification(
+            item: completedItem,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 10
+        ))
+        XCTAssertNotNil(reducer.ingestCompleted(completed, context: Self.analyticsContext))
+        XCTAssertNil(reducer.ingestCompleted(completed, context: Self.analyticsContext))
+
+        reducer.ingestStarted(ItemStartedNotification(
+            item: inProgressItem,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 10
+        ))
+        XCTAssertNil(reducer.ingestCompleted(
+            ItemCompletedNotification(
+                item: inProgressItem,
+                threadID: "thread-1",
+                turnID: "turn-1",
+                completedAtMilliseconds: 20
+            ),
+            context: Self.analyticsContext
+        ))
+    }
+
+    func testFileChangeAnalyticsReducerMapsFailureAndDeclinedStatusesLikeRust() throws {
+        var reducer = CodexFileChangeAnalyticsReducer()
+
+        let failed = try Self.reduceFileChange(status: .failed, reducer: &reducer)
+        XCTAssertEqual(failed.eventParams.base.terminalStatus, .failed)
+        XCTAssertEqual(failed.eventParams.base.failureKind, .toolError)
+
+        let declined = try Self.reduceFileChange(status: .declined, reducer: &reducer)
+        XCTAssertEqual(declined.eventParams.base.terminalStatus, .rejected)
+        XCTAssertEqual(declined.eventParams.base.failureKind, .approvalDenied)
+    }
+
     func testCommandExecutionAnalyticsReducerEmitsLifecycleEventLikeRust() throws {
         var reducer = CodexCommandExecutionAnalyticsReducer()
         let startedItem = AppServerThreadItem.commandExecution(
@@ -260,6 +392,13 @@ final class ReviewAnalyticsTests: XCTestCase {
         threadSource: .user
     )
 
+    private static let sampleFileChanges: [AppServerFileUpdateChange] = [
+        AppServerFileUpdateChange(path: "/repo/new.swift", kind: .add, diff: "+new"),
+        AppServerFileUpdateChange(path: "/repo/existing.swift", kind: .update(movePath: nil), diff: "-old\n+new"),
+        AppServerFileUpdateChange(path: "/repo/old.swift", kind: .delete, diff: "-old"),
+        AppServerFileUpdateChange(path: "/repo/moved.swift", kind: .update(movePath: "/repo/renamed.swift"), diff: "-old\n+new")
+    ]
+
     private static func reduceCommandExecution(
         status: AppServerCommandExecutionStatus,
         source: AppServerCommandExecutionSource,
@@ -274,6 +413,32 @@ final class ReviewAnalyticsTests: XCTestCase {
             commandActions: [.unknown(command: "command")],
             exitCode: status == .failed ? 1 : nil,
             durationMs: 10
+        )
+        reducer.ingestStarted(ItemStartedNotification(
+            item: item,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 10
+        ))
+        return try XCTUnwrap(reducer.ingestCompleted(
+            ItemCompletedNotification(
+                item: item,
+                threadID: "thread-1",
+                turnID: "turn-1",
+                completedAtMilliseconds: 20
+            ),
+            context: analyticsContext
+        ))
+    }
+
+    private static func reduceFileChange(
+        status: AppServerPatchApplyStatus,
+        reducer: inout CodexFileChangeAnalyticsReducer
+    ) throws -> CodexFileChangeEventRequest {
+        let item = AppServerThreadItem.fileChange(
+            id: "patch-\(status.rawValue)",
+            changes: sampleFileChanges,
+            status: status
         )
         reducer.ingestStarted(ItemStartedNotification(
             item: item,
