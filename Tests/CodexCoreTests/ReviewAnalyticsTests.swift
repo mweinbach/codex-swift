@@ -2,6 +2,80 @@ import CodexCore
 import XCTest
 
 final class ReviewAnalyticsTests: XCTestCase {
+    func testCodexCompactionEventRequestUsesRustWireShape() throws {
+        let event = CodexCompactionEventRequest(
+            eventType: "codex_compaction_event",
+            eventParams: CodexCompactionEventParams(
+                threadID: "thread-1",
+                turnID: "turn-1",
+                appServerClient: CodexAppServerClientMetadata(
+                    productClientID: "codex_tui",
+                    clientName: "codex-tui",
+                    clientVersion: "1.2.3",
+                    rpcTransport: .websocket,
+                    experimentalAPIEnabled: true
+                ),
+                runtime: CodexRuntimeMetadata(
+                    codexRSVersion: "0.99.0",
+                    runtimeOS: "macos",
+                    runtimeOSVersion: "15.3.1",
+                    runtimeArch: "aarch64"
+                ),
+                threadSource: .user,
+                subagentSource: nil,
+                parentThreadID: nil,
+                trigger: .auto,
+                reason: .contextLimit,
+                implementation: .responsesCompact,
+                phase: .midTurn,
+                strategy: .memento,
+                status: .completed,
+                error: nil,
+                activeContextTokensBefore: 120_000,
+                activeContextTokensAfter: 18_000,
+                startedAt: 100,
+                completedAt: 106,
+                durationMilliseconds: 6_543
+            )
+        )
+
+        try XCTAssertJSONObjectEqual(event, [
+            "event_type": "codex_compaction_event",
+            "event_params": [
+                "thread_id": "thread-1",
+                "turn_id": "turn-1",
+                "app_server_client": [
+                    "product_client_id": "codex_tui",
+                    "client_name": "codex-tui",
+                    "client_version": "1.2.3",
+                    "rpc_transport": "websocket",
+                    "experimental_api_enabled": true
+                ],
+                "runtime": [
+                    "codex_rs_version": "0.99.0",
+                    "runtime_os": "macos",
+                    "runtime_os_version": "15.3.1",
+                    "runtime_arch": "aarch64"
+                ],
+                "thread_source": "user",
+                "subagent_source": nil,
+                "parent_thread_id": nil,
+                "trigger": "auto",
+                "reason": "context_limit",
+                "implementation": "responses_compact",
+                "phase": "mid_turn",
+                "strategy": "memento",
+                "status": "completed",
+                "error": nil,
+                "active_context_tokens_before": 120_000,
+                "active_context_tokens_after": 18_000,
+                "started_at": 100,
+                "completed_at": 106,
+                "duration_ms": 6_543
+            ]
+        ])
+    }
+
     func testCodexCommandExecutionEventRequestUsesRustWireShape() throws {
         let actions: [AppServerProtocol.CommandAction] = [
             .read(command: "cat README.md", name: "README.md", path: "/repo/README.md"),
@@ -232,6 +306,33 @@ final class ReviewAnalyticsTests: XCTestCase {
                 "user_shell",
                 "unified_exec_startup",
                 "unified_exec_interaction"
+            ],
+            "compaction_triggers": [
+                "manual",
+                "auto"
+            ],
+            "compaction_reasons": [
+                "user_requested",
+                "context_limit",
+                "model_downshift"
+            ],
+            "compaction_implementations": [
+                "responses",
+                "responses_compact"
+            ],
+            "compaction_phases": [
+                "standalone_turn",
+                "pre_turn",
+                "mid_turn"
+            ],
+            "compaction_strategies": [
+                "memento",
+                "prefix_compaction"
+            ],
+            "compaction_statuses": [
+                "completed",
+                "failed",
+                "interrupted"
             ]
         ])
     }
@@ -290,6 +391,30 @@ final class ReviewAnalyticsTests: XCTestCase {
             .unifiedExecStartup,
             .unifiedExecInteraction
         ]
+        let compactionTriggers: [CompactionTrigger] = [.manual, .auto]
+        let compactionReasons: [CompactionReason] = [
+            .userRequested,
+            .contextLimit,
+            .modelDownshift
+        ]
+        let compactionImplementations: [CompactionImplementation] = [
+            .responses,
+            .responsesCompact
+        ]
+        let compactionPhases: [CompactionPhase] = [
+            .standaloneTurn,
+            .preTurn,
+            .midTurn
+        ]
+        let compactionStrategies: [CompactionStrategy] = [
+            .memento,
+            .prefixCompaction
+        ]
+        let compactionStatuses: [CompactionStatus] = [
+            .completed,
+            .failed,
+            .interrupted
+        ]
 
         private enum CodingKeys: String, CodingKey {
             case toolKinds = "tool_kinds"
@@ -301,6 +426,12 @@ final class ReviewAnalyticsTests: XCTestCase {
             case toolItemStatuses = "tool_item_statuses"
             case toolItemFailureKinds = "tool_item_failure_kinds"
             case commandExecutionSources = "command_execution_sources"
+            case compactionTriggers = "compaction_triggers"
+            case compactionReasons = "compaction_reasons"
+            case compactionImplementations = "compaction_implementations"
+            case compactionPhases = "compaction_phases"
+            case compactionStrategies = "compaction_strategies"
+            case compactionStatuses = "compaction_statuses"
         }
     }
 }

@@ -141,6 +141,163 @@ public enum CommandExecutionSource: String, Codable, Equatable, Sendable {
     case unifiedExecInteraction = "unified_exec_interaction"
 }
 
+public enum CompactionTrigger: String, Codable, Equatable, Sendable {
+    case manual
+    case auto
+}
+
+public enum CompactionReason: String, Codable, Equatable, Sendable {
+    case userRequested = "user_requested"
+    case contextLimit = "context_limit"
+    case modelDownshift = "model_downshift"
+}
+
+public enum CompactionImplementation: String, Codable, Equatable, Sendable {
+    case responses
+    case responsesCompact = "responses_compact"
+}
+
+public enum CompactionPhase: String, Codable, Equatable, Sendable {
+    case standaloneTurn = "standalone_turn"
+    case preTurn = "pre_turn"
+    case midTurn = "mid_turn"
+}
+
+public enum CompactionStrategy: String, Codable, Equatable, Sendable {
+    case memento
+    case prefixCompaction = "prefix_compaction"
+}
+
+public enum CompactionStatus: String, Codable, Equatable, Sendable {
+    case completed
+    case failed
+    case interrupted
+}
+
+public struct CodexCompactionEventParams: Equatable, Encodable, Sendable {
+    public let threadID: String
+    public let turnID: String
+    public let appServerClient: CodexAppServerClientMetadata
+    public let runtime: CodexRuntimeMetadata
+    public let threadSource: ThreadSource?
+    public let subagentSource: String?
+    public let parentThreadID: String?
+    public let trigger: CompactionTrigger
+    public let reason: CompactionReason
+    public let implementation: CompactionImplementation
+    public let phase: CompactionPhase
+    public let strategy: CompactionStrategy
+    public let status: CompactionStatus
+    public let error: String?
+    public let activeContextTokensBefore: Int64
+    public let activeContextTokensAfter: Int64
+    public let startedAt: UInt64
+    public let completedAt: UInt64
+    public let durationMilliseconds: UInt64?
+
+    public init(
+        threadID: String,
+        turnID: String,
+        appServerClient: CodexAppServerClientMetadata,
+        runtime: CodexRuntimeMetadata,
+        threadSource: ThreadSource? = nil,
+        subagentSource: String? = nil,
+        parentThreadID: String? = nil,
+        trigger: CompactionTrigger,
+        reason: CompactionReason,
+        implementation: CompactionImplementation,
+        phase: CompactionPhase,
+        strategy: CompactionStrategy,
+        status: CompactionStatus,
+        error: String? = nil,
+        activeContextTokensBefore: Int64,
+        activeContextTokensAfter: Int64,
+        startedAt: UInt64,
+        completedAt: UInt64,
+        durationMilliseconds: UInt64? = nil
+    ) {
+        self.threadID = threadID
+        self.turnID = turnID
+        self.appServerClient = appServerClient
+        self.runtime = runtime
+        self.threadSource = threadSource
+        self.subagentSource = subagentSource
+        self.parentThreadID = parentThreadID
+        self.trigger = trigger
+        self.reason = reason
+        self.implementation = implementation
+        self.phase = phase
+        self.strategy = strategy
+        self.status = status
+        self.error = error
+        self.activeContextTokensBefore = activeContextTokensBefore
+        self.activeContextTokensAfter = activeContextTokensAfter
+        self.startedAt = startedAt
+        self.completedAt = completedAt
+        self.durationMilliseconds = durationMilliseconds
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "thread_id"
+        case turnID = "turn_id"
+        case appServerClient = "app_server_client"
+        case runtime
+        case threadSource = "thread_source"
+        case subagentSource = "subagent_source"
+        case parentThreadID = "parent_thread_id"
+        case trigger
+        case reason
+        case implementation
+        case phase
+        case strategy
+        case status
+        case error
+        case activeContextTokensBefore = "active_context_tokens_before"
+        case activeContextTokensAfter = "active_context_tokens_after"
+        case startedAt = "started_at"
+        case completedAt = "completed_at"
+        case durationMilliseconds = "duration_ms"
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(threadID, forKey: .threadID)
+        try container.encode(turnID, forKey: .turnID)
+        try container.encode(appServerClient, forKey: .appServerClient)
+        try container.encode(runtime, forKey: .runtime)
+        try container.encodeNilOrValue(threadSource, forKey: .threadSource)
+        try container.encodeNilOrValue(subagentSource, forKey: .subagentSource)
+        try container.encodeNilOrValue(parentThreadID, forKey: .parentThreadID)
+        try container.encode(trigger, forKey: .trigger)
+        try container.encode(reason, forKey: .reason)
+        try container.encode(implementation, forKey: .implementation)
+        try container.encode(phase, forKey: .phase)
+        try container.encode(strategy, forKey: .strategy)
+        try container.encode(status, forKey: .status)
+        try container.encodeNilOrValue(error, forKey: .error)
+        try container.encode(activeContextTokensBefore, forKey: .activeContextTokensBefore)
+        try container.encode(activeContextTokensAfter, forKey: .activeContextTokensAfter)
+        try container.encode(startedAt, forKey: .startedAt)
+        try container.encode(completedAt, forKey: .completedAt)
+        try container.encodeNilOrValue(durationMilliseconds, forKey: .durationMilliseconds)
+    }
+}
+
+public struct CodexCompactionEventRequest: Equatable, Encodable, Sendable {
+    public let eventType: String
+    public let eventParams: CodexCompactionEventParams
+
+    public init(eventType: String, eventParams: CodexCompactionEventParams) {
+        self.eventType = eventType
+        self.eventParams = eventParams
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case eventType = "event_type"
+        case eventParams = "event_params"
+    }
+}
+
 public struct CodexToolItemEventBase: Equatable, Encodable, Sendable {
     public let threadID: String
     public let turnID: String
