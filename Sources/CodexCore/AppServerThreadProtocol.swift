@@ -18,10 +18,88 @@ public enum AppServerTurnStatus: String, Codable, Equatable, Sendable {
     case inProgress
 }
 
+public enum AppServerThreadSourceKind: String, Codable, Equatable, Sendable {
+    case cli
+    case vsCode = "vscode"
+    case exec
+    case appServer
+    case subAgent
+    case subAgentReview
+    case subAgentCompact
+    case subAgentThreadSpawn
+    case subAgentOther
+    case unknown
+}
+
+public enum AppServerThreadSortKey: String, Codable, Equatable, Sendable {
+    case createdAt = "created_at"
+    case updatedAt = "updated_at"
+}
+
+public enum AppServerThreadActiveFlag: String, Codable, Equatable, Sendable {
+    case waitingOnApproval
+    case waitingOnUserInput
+}
+
 public enum ThreadUnsubscribeStatus: String, Codable, Equatable, Sendable {
     case notLoaded
     case notSubscribed
     case unsubscribed
+}
+
+public enum AppServerThreadStatus: Equatable, Sendable {
+    case notLoaded
+    case idle
+    case systemError
+    case active(activeFlags: [AppServerThreadActiveFlag])
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case activeFlags
+    }
+
+    private enum StatusType: String, Codable {
+        case notLoaded
+        case idle
+        case systemError
+        case active
+    }
+}
+
+extension AppServerThreadStatus: Codable {
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(StatusType.self, forKey: .type) {
+        case .notLoaded:
+            self = .notLoaded
+        case .idle:
+            self = .idle
+        case .systemError:
+            self = .systemError
+        case .active:
+            self = .active(
+                activeFlags: try container.decodeIfPresent(
+                    [AppServerThreadActiveFlag].self,
+                    forKey: .activeFlags
+                ) ?? []
+            )
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .notLoaded:
+            try container.encode(StatusType.notLoaded, forKey: .type)
+        case .idle:
+            try container.encode(StatusType.idle, forKey: .type)
+        case .systemError:
+            try container.encode(StatusType.systemError, forKey: .type)
+        case let .active(activeFlags):
+            try container.encode(StatusType.active, forKey: .type)
+            try container.encode(activeFlags, forKey: .activeFlags)
+        }
+    }
 }
 
 public struct AppServerTurnError: Equatable, Codable, Sendable {
@@ -209,6 +287,112 @@ public enum AppServerTurnCompletionBackfill {
         var turn = completedTurn
         turn.items = items
         return turn
+    }
+}
+
+public enum ThreadListCwdFilter: Equatable, Sendable {
+    case one(String)
+    case many([String])
+}
+
+extension ThreadListCwdFilter: Codable {
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let one = try? container.decode(String.self) {
+            self = .one(one)
+            return
+        }
+        self = .many(try container.decode([String].self))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case let .one(value):
+            try container.encode(value)
+        case let .many(values):
+            try container.encode(values)
+        }
+    }
+}
+
+public struct ThreadListParams: Equatable, Codable, Sendable {
+    public let cursor: String?
+    public let limit: UInt32?
+    public let sortKey: AppServerThreadSortKey?
+    public let sortDirection: AppServerSortDirection?
+    public let modelProviders: [String]?
+    public let sourceKinds: [AppServerThreadSourceKind]?
+    public let archived: Bool?
+    public let cwd: ThreadListCwdFilter?
+    public let useStateDBOnly: Bool
+    public let searchTerm: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case cursor
+        case limit
+        case sortKey
+        case sortDirection
+        case modelProviders
+        case sourceKinds
+        case archived
+        case cwd
+        case useStateDBOnly = "useStateDbOnly"
+        case searchTerm
+    }
+
+    public init(
+        cursor: String? = nil,
+        limit: UInt32? = nil,
+        sortKey: AppServerThreadSortKey? = nil,
+        sortDirection: AppServerSortDirection? = nil,
+        modelProviders: [String]? = nil,
+        sourceKinds: [AppServerThreadSourceKind]? = nil,
+        archived: Bool? = nil,
+        cwd: ThreadListCwdFilter? = nil,
+        useStateDBOnly: Bool = false,
+        searchTerm: String? = nil
+    ) {
+        self.cursor = cursor
+        self.limit = limit
+        self.sortKey = sortKey
+        self.sortDirection = sortDirection
+        self.modelProviders = modelProviders
+        self.sourceKinds = sourceKinds
+        self.archived = archived
+        self.cwd = cwd
+        self.useStateDBOnly = useStateDBOnly
+        self.searchTerm = searchTerm
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        cursor = try container.decodeIfPresent(String.self, forKey: .cursor)
+        limit = try container.decodeIfPresent(UInt32.self, forKey: .limit)
+        sortKey = try container.decodeIfPresent(AppServerThreadSortKey.self, forKey: .sortKey)
+        sortDirection = try container.decodeIfPresent(AppServerSortDirection.self, forKey: .sortDirection)
+        modelProviders = try container.decodeIfPresent([String].self, forKey: .modelProviders)
+        sourceKinds = try container.decodeIfPresent([AppServerThreadSourceKind].self, forKey: .sourceKinds)
+        archived = try container.decodeIfPresent(Bool.self, forKey: .archived)
+        cwd = try container.decodeIfPresent(ThreadListCwdFilter.self, forKey: .cwd)
+        useStateDBOnly = try container.decodeIfPresent(Bool.self, forKey: .useStateDBOnly) ?? false
+        searchTerm = try container.decodeIfPresent(String.self, forKey: .searchTerm)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(cursor, forKey: .cursor)
+        try container.encodeIfPresent(limit, forKey: .limit)
+        try container.encodeIfPresent(sortKey, forKey: .sortKey)
+        try container.encodeIfPresent(sortDirection, forKey: .sortDirection)
+        try container.encodeIfPresent(modelProviders, forKey: .modelProviders)
+        try container.encodeIfPresent(sourceKinds, forKey: .sourceKinds)
+        try container.encodeIfPresent(archived, forKey: .archived)
+        try container.encodeIfPresent(cwd, forKey: .cwd)
+        if useStateDBOnly {
+            try container.encode(useStateDBOnly, forKey: .useStateDBOnly)
+        }
+        try container.encodeIfPresent(searchTerm, forKey: .searchTerm)
     }
 }
 

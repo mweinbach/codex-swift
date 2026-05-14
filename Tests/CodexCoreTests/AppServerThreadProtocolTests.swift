@@ -67,6 +67,84 @@ final class AppServerThreadProtocolTests: XCTestCase {
         XCTAssertEqual(decoded.limit, 0)
     }
 
+    func testThreadListParamsRoundTripLikeRustProtocol() throws {
+        try XCTAssertJSONObjectEqual(ThreadListParams(), [:])
+
+        try XCTAssertJSONObjectEqual(
+            ThreadListParams(
+                cursor: "cursor_1",
+                limit: 25,
+                sortKey: .createdAt,
+                sortDirection: .asc,
+                modelProviders: ["openai"],
+                sourceKinds: [.cli, .vsCode, .subAgentThreadSpawn],
+                archived: true,
+                cwd: .many(["/repo", "/other"]),
+                useStateDBOnly: true,
+                searchTerm: "shipping"
+            ),
+            [
+                "cursor": "cursor_1",
+                "limit": 25,
+                "sortKey": "created_at",
+                "sortDirection": "asc",
+                "modelProviders": ["openai"],
+                "sourceKinds": ["cli", "vscode", "subAgentThreadSpawn"],
+                "archived": true,
+                "cwd": ["/repo", "/other"],
+                "useStateDbOnly": true,
+                "searchTerm": "shipping"
+            ]
+        )
+
+        try XCTAssertJSONObjectEqual(ThreadListParams(cwd: .one("/repo")), [
+            "cwd": "/repo"
+        ])
+
+        let decoded = try JSONDecoder().decode(
+            ThreadListParams.self,
+            from: Data(#"""
+            {
+              "sortKey": "updated_at",
+              "sortDirection": "desc",
+              "sourceKinds": ["exec", "appServer", "unknown"],
+              "cwd": "/repo",
+              "useStateDbOnly": true
+            }
+            """#.utf8)
+        )
+        XCTAssertEqual(decoded.sortKey, .updatedAt)
+        XCTAssertEqual(decoded.sortDirection, .desc)
+        XCTAssertEqual(decoded.sourceKinds, [.exec, .appServer, .unknown])
+        XCTAssertEqual(decoded.cwd, .one("/repo"))
+        XCTAssertTrue(decoded.useStateDBOnly)
+    }
+
+    func testThreadStatusRoundTripLikeRustProtocol() throws {
+        try XCTAssertJSONObjectEqual(AppServerThreadStatus.notLoaded, [
+            "type": "notLoaded"
+        ])
+        try XCTAssertJSONObjectEqual(AppServerThreadStatus.idle, [
+            "type": "idle"
+        ])
+        try XCTAssertJSONObjectEqual(AppServerThreadStatus.systemError, [
+            "type": "systemError"
+        ])
+        try XCTAssertJSONObjectEqual(
+            AppServerThreadStatus.active(activeFlags: [.waitingOnApproval, .waitingOnUserInput]),
+            [
+                "type": "active",
+                "activeFlags": ["waitingOnApproval", "waitingOnUserInput"]
+            ]
+        )
+
+        let decoded = try JSONDecoder().decode(
+            AppServerThreadStatus.self,
+            from: Data(#"{"type":"active","activeFlags":["waitingOnApproval"]}"#.utf8)
+        )
+        XCTAssertEqual(decoded, .active(activeFlags: [.waitingOnApproval]))
+    }
+
     func testThreadInjectItemsRoundTripsLikeRustProtocol() throws {
         let item: JSONValue = .object([
             "type": .string("message"),
