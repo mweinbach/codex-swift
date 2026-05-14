@@ -7417,6 +7417,55 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(data.first?["name"] as? String, "State backed name")
     }
 
+    func testThreadReadPrefersStateStoreTitleOverLegacyIndexLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-45-00",
+            timestamp: "2025-01-05T12:45:00Z",
+            preview: "Saved user message",
+            provider: "openai",
+            cwd: temp.url.path
+        )
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        try appendSessionIndexName(
+            threadID: threadID,
+            name: "Legacy stale name",
+            codexHome: temp.url
+        )
+        let stateStore = try createAppServerStateStore(codexHome: temp.url)
+        try await stateStore.upsertThread(ThreadMetadata(
+            id: ThreadId(string: threadID),
+            rolloutPath: rolloutPath,
+            createdAt: try appServerDate("2025-01-05T12:45:00Z"),
+            updatedAt: try appServerDate("2025-01-05T12:45:00Z"),
+            source: "cli",
+            modelProvider: "openai",
+            cwd: temp.url.path,
+            cliVersion: "0.0.0",
+            title: "State store name",
+            sandboxPolicy: "read-only",
+            approvalMode: "never",
+            tokensUsed: 0,
+            firstUserMessage: "Saved user message"
+        ))
+        let processor = try initializedProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            stateStore: stateStore
+        ))
+
+        let read = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"thread/read","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        let readResult = try XCTUnwrap(read["result"] as? [String: Any])
+        let thread = try XCTUnwrap(readResult["thread"] as? [String: Any])
+        XCTAssertEqual(thread["preview"] as? String, "Saved user message")
+        XCTAssertEqual(thread["name"] as? String, "State store name")
+    }
+
     func testThreadNameSetRejectsEmptyOrMissingThread() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(
@@ -28670,6 +28719,25 @@ final class CodexAppServerTests: XCTestCase {
         let stateDatabaseURL = codexHome.appendingPathComponent("state.sqlite3", isDirectory: false)
         try createAppServerThreadsTable(databaseURL: stateDatabaseURL)
         return try SQLiteAgentGraphStore(databaseURL: stateDatabaseURL, defaultProvider: "openai")
+    }
+
+    private func appendSessionIndexName(threadID: String, name: String, codexHome: URL) throws {
+        let path = codexHome.appendingPathComponent("session_index.jsonl", isDirectory: false)
+        let entry: [String: Any] = [
+            "id": threadID,
+            "thread_name": name,
+            "updated_at": "2025-01-05T12:45:00Z"
+        ]
+        let data = try JSONSerialization.data(withJSONObject: entry, options: [.sortedKeys])
+        try FileManager.default.createDirectory(at: codexHome, withIntermediateDirectories: true)
+        if !FileManager.default.fileExists(atPath: path.path) {
+            try Data().write(to: path, options: .atomic)
+        }
+        let handle = try FileHandle(forWritingTo: path)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        try handle.write(contentsOf: data)
+        try handle.write(contentsOf: Data([0x0A]))
     }
 
     private func upsertAppServerStateThread(

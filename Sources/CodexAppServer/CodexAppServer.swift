@@ -2092,10 +2092,12 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("thread not loaded: \(conversationID)")
         }
         let item = ConversationItem(path: rolloutPath, head: [], createdAt: nil, updatedAt: nil)
+        let metadataOverlay = try stateMetadataOverlays(for: [item], configuration: configuration)[conversationID.description]
         var thread = try threadObject(
             for: item,
             defaultProvider: configuration.defaultModelProvider,
-            turns: includeTurns ? buildTurnsFromRolloutEvents(at: rolloutPath) : []
+            turns: includeTurns ? buildTurnsFromRolloutEvents(at: rolloutPath) : [],
+            metadataOverlay: metadataOverlay
         )
         if let status = loadedThreadStatus(conversationID.description) {
             thread["status"] = status
