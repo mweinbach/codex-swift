@@ -3982,8 +3982,17 @@ public struct CodexCLI: Sendable {
 
     private func parseAppCommand(_ arguments: [String]) -> ParseResult<AppCommandRequest> {
         var downloadURLOverride: String?
+        var sawDownloadURL = false
         var positionals: [String] = []
         var index = 0
+
+        func markDownloadURLOption() -> ParseResult<Void> {
+            guard !sawDownloadURL else {
+                return .failure("codex-swift: duplicate option for command 'app': --download-url", 64)
+            }
+            sawDownloadURL = true
+            return .success(())
+        }
 
         func value(after option: String, at index: Int) -> ParseResult<String> {
             guard index + 1 < arguments.count else {
@@ -3995,6 +4004,12 @@ public struct CodexCLI: Sendable {
         while index < arguments.count {
             let argument = arguments[index]
             if argument == "--download-url" {
+                switch markDownloadURLOption() {
+                case .success:
+                    break
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
                 switch value(after: argument, at: index) {
                 case let .success(url):
                     downloadURLOverride = url
@@ -4005,6 +4020,12 @@ public struct CodexCLI: Sendable {
                 }
             }
             if argument.hasPrefix("--download-url=") {
+                switch markDownloadURLOption() {
+                case .success:
+                    break
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
                 downloadURLOverride = String(argument.dropFirst("--download-url=".count))
                 index += 1
                 continue

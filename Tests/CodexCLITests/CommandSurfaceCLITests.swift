@@ -1442,6 +1442,10 @@ final class CommandSurfaceCLITests: XCTestCase {
                 "codex-swift: missing value for --download-url"
             ),
             (
+                ["app", "--download-url", "https://example.test/a.dmg", "--download-url=https://example.test/b.dmg"],
+                "codex-swift: duplicate option for command 'app': --download-url"
+            ),
+            (
                 ["app", "--verbose"],
                 "codex-swift: unsupported option for command 'app': --verbose"
             ),
