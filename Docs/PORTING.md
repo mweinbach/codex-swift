@@ -10,6 +10,10 @@ Source baseline inspected for this scaffold:
 - Rust workspace member count: 115 Cargo manifests
 - Rust source size: 1,816 tracked `.rs` files
 
+Recent upstream audit checkpoint:
+
+- 2026-05-14: rechecked Rust commits `46e2250bcf` (legacy `AfterToolUse` removal), `872b8b15b3` (remote-control installation id), `5f4d0ec343` (desktop attestation), `1bfc3d9773` (selected-environment `view_image`), `9cbd4c0371` (Bedrock Mantle snake-case header filtering), `79ad209ce6` (remote thread-store removal), and `f32c496144` (Git pagination option safety). The corresponding Swift parity remains covered by the hook, remote-control, attestation, `view_image`, model-provider, config/thread-store, and command-safety entries below.
+
 ## Current Swift Package Shape
 
 - `CodexCore`: pure core/protocol utilities that can be tested without network, terminal, or model runtime.
