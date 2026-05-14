@@ -403,6 +403,58 @@ final class ConfigLoaderTests: XCTestCase {
         ))
     }
 
+    func testDebugConfigLockfileLoadPathReplaysLockConfigLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let lockPath = dir.url.appendingPathComponent("session.config.lock.toml")
+        try """
+        version = 1
+        codex_version = "older-version"
+
+        [config]
+        model = "locked-model"
+        approval_policy = "on-failure"
+
+        [config.debug.config_lockfile]
+        load_path = "/tmp/ignored.config.lock.toml"
+        allow_codex_version_mismatch = false
+        save_fields_resolved_from_model_catalog = true
+        """.write(to: lockPath, atomically: true, encoding: .utf8)
+        try """
+        model = "user-model"
+        approval_policy = "never"
+
+        [debug.config_lockfile]
+        load_path = "session.config.lock.toml"
+        allow_codex_version_mismatch = true
+        save_fields_resolved_from_model_catalog = false
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.model, "locked-model")
+        XCTAssertEqual(config.approvalPolicy, .onFailure)
+        XCTAssertEqual(config.configLockfile, ConfigLockfileDebugConfig(
+            loadPath: lockPath.path,
+            allowCodexVersionMismatch: true,
+            saveFieldsResolvedFromModelCatalog: false
+        ))
+        XCTAssertEqual(config.configLockToml, ConfigLockfile(
+            version: 1,
+            codexVersion: "older-version",
+            config: .table([
+                "model": .string("locked-model"),
+                "approval_policy": .string("on-failure"),
+                "debug": .table([
+                    "config_lockfile": .table([
+                        "load_path": .string("/tmp/ignored.config.lock.toml"),
+                        "allow_codex_version_mismatch": .bool(false),
+                        "save_fields_resolved_from_model_catalog": .bool(true)
+                    ])
+                ])
+            ])
+        ))
+    }
+
     func testModelCatalogJSONRejectsEmptyCatalogLikeRust() throws {
         let dir = try CoreTemporaryDirectory()
         let catalogFile = dir.url.appendingPathComponent("catalog.json")

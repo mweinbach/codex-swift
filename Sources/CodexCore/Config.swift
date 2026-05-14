@@ -1245,7 +1245,25 @@ public enum CodexConfigLoader {
         }
 
         let requirements = try requirementsToml.requirements()
+        let initialConfig = try parsed.resolvedConfig(environment: environment)
+        let initialConfigLockfile = initialConfig.configLockfile
+        var loadedConfigLockfile: ConfigLockfile?
+        if let loadPath = initialConfigLockfile.loadPath {
+            let lockfile = try ConfigLockfileStore.readConfigLockfile(
+                from: loadPath,
+                fileManager: fileManager
+            )
+            var lockParsed = ParsedCodexConfigToml()
+            try lockParsed.merge(ConfigLockfileStore.configWithoutLockControls(lockfile.config))
+            parsed = lockParsed
+            loadedConfigLockfile = lockfile
+        }
+
         var config = try parsed.resolvedConfig(environment: environment)
+        if let loadedConfigLockfile {
+            config.configLockfile = initialConfigLockfile
+            config.configLockToml = loadedConfigLockfile
+        }
         config.sqliteHome = config.sqliteHome ?? {
             let sqliteHome = environment["CODEX_SQLITE_HOME"]?.trimmingCharacters(in: .whitespacesAndNewlines)
             return sqliteHome?.isEmpty == false ? environment["CODEX_SQLITE_HOME"] : codexHome.standardizedFileURL.path
@@ -1288,12 +1306,6 @@ public enum CodexConfigLoader {
             cwd: cwd ?? codexHome
         )
         applyNetworkRequirements(requirements, to: &config)
-        if let loadPath = config.configLockfile.loadPath {
-            config.configLockToml = try ConfigLockfileStore.readConfigLockfile(
-                from: loadPath,
-                fileManager: fileManager
-            )
-        }
         return config
     }
 
