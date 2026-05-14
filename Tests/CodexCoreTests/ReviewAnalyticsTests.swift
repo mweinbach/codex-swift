@@ -1190,6 +1190,117 @@ final class ReviewAnalyticsTests: XCTestCase {
         ])
     }
 
+    func testCompactionAnalyticsReducerIngestsCustomFactLikeRust() throws {
+        let reducer = CodexCompactionAnalyticsReducer()
+        let event = reducer.ingest(
+            CodexCompactionAnalyticsFact(
+                threadID: "thread-1",
+                turnID: "turn-compact",
+                trigger: .manual,
+                reason: .userRequested,
+                implementation: .responses,
+                phase: .standaloneTurn,
+                strategy: .memento,
+                status: .failed,
+                error: "context limit exceeded",
+                activeContextTokensBefore: 131_000,
+                activeContextTokensAfter: 131_000,
+                startedAt: 100,
+                completedAt: 101,
+                durationMilliseconds: 1_200
+            ),
+            context: CodexCompactionAnalyticsContext(
+                appServerClient: CodexAppServerClientMetadata(
+                    productClientID: "codex_tui",
+                    clientName: "codex-tui",
+                    clientVersion: "1.0.0",
+                    rpcTransport: .websocket,
+                    experimentalAPIEnabled: false
+                ),
+                runtime: CodexRuntimeMetadata(
+                    codexRSVersion: "0.99.0",
+                    runtimeOS: "macos",
+                    runtimeOSVersion: "15.3.1",
+                    runtimeArch: "aarch64"
+                ),
+                threadSource: .subagent,
+                subagentSource: "thread_spawn",
+                parentThreadID: "22222222-2222-2222-2222-222222222222"
+            )
+        )
+
+        try XCTAssertJSONObjectEqual(event, [
+            "event_type": "codex_compaction_event",
+            "event_params": [
+                "thread_id": "thread-1",
+                "turn_id": "turn-compact",
+                "app_server_client": [
+                    "product_client_id": "codex_tui",
+                    "client_name": "codex-tui",
+                    "client_version": "1.0.0",
+                    "rpc_transport": "websocket",
+                    "experimental_api_enabled": false
+                ],
+                "runtime": [
+                    "codex_rs_version": "0.99.0",
+                    "runtime_os": "macos",
+                    "runtime_os_version": "15.3.1",
+                    "runtime_arch": "aarch64"
+                ],
+                "thread_source": "subagent",
+                "subagent_source": "thread_spawn",
+                "parent_thread_id": "22222222-2222-2222-2222-222222222222",
+                "trigger": "manual",
+                "reason": "user_requested",
+                "implementation": "responses",
+                "phase": "standalone_turn",
+                "strategy": "memento",
+                "status": "failed",
+                "error": "context limit exceeded",
+                "active_context_tokens_before": 131_000,
+                "active_context_tokens_after": 131_000,
+                "started_at": 100,
+                "completed_at": 101,
+                "duration_ms": 1_200
+            ]
+        ])
+    }
+
+    func testCodexAnalyticsClientUploadsCompactionEventLikeRust() async throws {
+        let uploader = RecordingCodexAnalyticsUploader()
+        let client = CodexToolItemAnalyticsClient(uploader: uploader)
+
+        await client.trackCompaction(
+            CodexCompactionAnalyticsFact(
+                threadID: "thread-1",
+                turnID: "turn-compact",
+                trigger: .auto,
+                reason: .contextLimit,
+                implementation: .responsesCompact,
+                phase: .midTurn,
+                strategy: .prefixCompaction,
+                status: .completed,
+                activeContextTokensBefore: 120_000,
+                activeContextTokensAfter: 18_000,
+                startedAt: 20,
+                completedAt: 40,
+                durationMilliseconds: 20
+            ),
+            context: Self.analyticsContext
+        )
+
+        let requests = await uploader.requests
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests[0].events.count, 1)
+        guard case let .compaction(event) = requests[0].events[0] else {
+            return XCTFail("expected compaction analytics event")
+        }
+        XCTAssertEqual(event.eventType, "codex_compaction_event")
+        XCTAssertEqual(event.eventParams.threadID, "thread-1")
+        XCTAssertEqual(event.eventParams.threadSource, .user)
+        XCTAssertEqual(event.eventParams.status, .completed)
+    }
+
     private static let analyticsContext = CodexCommandExecutionAnalyticsContext(
         appServerClient: CodexAppServerClientMetadata(
             productClientID: "codex_tui",
@@ -1843,6 +1954,14 @@ private actor RecordingCodexAnalyticsAPITransport: APITransport {
 
     func stream(_: APIRequest) async -> Result<APIStreamResponse, TransportError> {
         .failure(.network("stream not supported"))
+    }
+}
+
+private actor RecordingCodexAnalyticsUploader: CodexAnalyticsUploading {
+    private(set) var requests: [CodexTrackEventsRequest] = []
+
+    func upload(_ request: CodexTrackEventsRequest) async throws {
+        requests.append(request)
     }
 }
 

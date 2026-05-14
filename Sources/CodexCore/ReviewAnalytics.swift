@@ -184,6 +184,7 @@ public enum CodexAnalytics {
 }
 
 public actor CodexToolItemAnalyticsClient {
+    private var compactionReducer = CodexCompactionAnalyticsReducer()
     private var commandExecutionReducer = CodexCommandExecutionAnalyticsReducer()
     private var fileChangeReducer = CodexFileChangeAnalyticsReducer()
     private var mcpToolCallReducer = CodexMcpToolCallAnalyticsReducer()
@@ -237,6 +238,14 @@ public actor CodexToolItemAnalyticsClient {
         for batch in CodexAnalytics.trackEventRequestBatches(events) {
             try? await uploader.upload(CodexTrackEventsRequest(events: batch))
         }
+    }
+
+    public func trackCompaction(
+        _ fact: CodexCompactionAnalyticsFact,
+        context: CodexCompactionAnalyticsContext
+    ) async {
+        let event = compactionReducer.ingest(fact, context: context)
+        try? await uploader.upload(CodexTrackEventsRequest(events: [.compaction(event)]))
     }
 }
 
@@ -548,6 +557,91 @@ public struct CodexCompactionEventRequest: Equatable, Encodable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case eventType = "event_type"
         case eventParams = "event_params"
+    }
+}
+
+public struct CodexCompactionAnalyticsFact: Equatable, Sendable {
+    public let threadID: String
+    public let turnID: String
+    public let trigger: CompactionTrigger
+    public let reason: CompactionReason
+    public let implementation: CompactionImplementation
+    public let phase: CompactionPhase
+    public let strategy: CompactionStrategy
+    public let status: CompactionStatus
+    public let error: String?
+    public let activeContextTokensBefore: Int64
+    public let activeContextTokensAfter: Int64
+    public let startedAt: UInt64
+    public let completedAt: UInt64
+    public let durationMilliseconds: UInt64?
+
+    public init(
+        threadID: String,
+        turnID: String,
+        trigger: CompactionTrigger,
+        reason: CompactionReason,
+        implementation: CompactionImplementation,
+        phase: CompactionPhase,
+        strategy: CompactionStrategy,
+        status: CompactionStatus,
+        error: String? = nil,
+        activeContextTokensBefore: Int64,
+        activeContextTokensAfter: Int64,
+        startedAt: UInt64,
+        completedAt: UInt64,
+        durationMilliseconds: UInt64? = nil
+    ) {
+        self.threadID = threadID
+        self.turnID = turnID
+        self.trigger = trigger
+        self.reason = reason
+        self.implementation = implementation
+        self.phase = phase
+        self.strategy = strategy
+        self.status = status
+        self.error = error
+        self.activeContextTokensBefore = activeContextTokensBefore
+        self.activeContextTokensAfter = activeContextTokensAfter
+        self.startedAt = startedAt
+        self.completedAt = completedAt
+        self.durationMilliseconds = durationMilliseconds
+    }
+}
+
+public typealias CodexCompactionAnalyticsContext = CodexCommandExecutionAnalyticsContext
+
+public struct CodexCompactionAnalyticsReducer: Sendable {
+    public init() {}
+
+    public func ingest(
+        _ fact: CodexCompactionAnalyticsFact,
+        context: CodexCompactionAnalyticsContext
+    ) -> CodexCompactionEventRequest {
+        CodexCompactionEventRequest(
+            eventType: "codex_compaction_event",
+            eventParams: CodexCompactionEventParams(
+                threadID: fact.threadID,
+                turnID: fact.turnID,
+                appServerClient: context.appServerClient,
+                runtime: context.runtime,
+                threadSource: context.threadSource,
+                subagentSource: context.subagentSource,
+                parentThreadID: context.parentThreadID,
+                trigger: fact.trigger,
+                reason: fact.reason,
+                implementation: fact.implementation,
+                phase: fact.phase,
+                strategy: fact.strategy,
+                status: fact.status,
+                error: fact.error,
+                activeContextTokensBefore: fact.activeContextTokensBefore,
+                activeContextTokensAfter: fact.activeContextTokensAfter,
+                startedAt: fact.startedAt,
+                completedAt: fact.completedAt,
+                durationMilliseconds: fact.durationMilliseconds
+            )
+        )
     }
 }
 
