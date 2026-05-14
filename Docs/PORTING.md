@@ -12,6 +12,7 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-14: rechecked Rust's cloud requirements cache write path from `codex-rs/cloud-requirements/src/lib.rs`. Swift now creates parent directories and writes Rust-shaped signed pretty cache files for complete and incomplete auth identities, while preserving Rust's single cache-write failure string.
 - 2026-05-14: rechecked Rust's cloud requirements cache read validation from `codex-rs/cloud-requirements/src/lib.rs`. Swift now mirrors the cache load status decisions for missing caller identity, missing/unreadable/malformed cache data, bad signatures, incomplete or mismatched cached identity, expiry, and valid payload recovery.
 - 2026-05-14: rechecked Rust's signed cloud requirements cache payload from `codex-rs/cloud-requirements/src/lib.rs`. Swift now preserves the Rust cache filename/TTL constants, snake_case signed payload/file JSON, RFC3339 timestamps, HMAC-SHA256 base64 signature key, signature verification, cache expiry boundary, and cached contents parsing back through `ConfigRequirementsToml`.
 - 2026-05-14: rechecked Rust's shared cloud requirements loader from `codex-rs/config/src/cloud_requirements.rs`. Swift now exposes the same completed error-code set and a run-once async `CloudRequirementsLoader` whose concurrent callers share a single underlying result, with the default loader returning no requirements.

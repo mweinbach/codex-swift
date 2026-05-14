@@ -1035,6 +1035,101 @@ final class ConfigRequirementsTests: XCTestCase {
         }
     }
 
+    func testCloudRequirementsSaveCacheFileWritesSignedPrettyCacheLikeRust() throws {
+        let now = Date(timeIntervalSince1970: 1_778_752_800)
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .appendingPathComponent("nested", isDirectory: true)
+        let path = directory.appendingPathComponent(CloudRequirements.cacheFilename)
+        defer {
+            try? FileManager.default.removeItem(at: directory.deletingLastPathComponent())
+        }
+
+        try CloudRequirements.saveCacheFile(
+            at: path,
+            cachedAt: now,
+            chatgptUserID: "user-12345",
+            accountID: "account-12345",
+            contents: #"allowed_approval_policies = ["never"]"#
+        )
+
+        let data = try Data(contentsOf: path)
+        let json = String(decoding: data, as: UTF8.self)
+        XCTAssertTrue(json.contains(#""signed_payload" : {"#))
+        XCTAssertTrue(json.contains(#""signature" : ""#))
+
+        let payload = try CloudRequirements.loadCacheFile(
+            at: path,
+            chatgptUserID: "user-12345",
+            accountID: "account-12345",
+            now: now
+        )
+        XCTAssertEqual(payload.cachedAt, now)
+        XCTAssertEqual(payload.expiresAt, now.addingTimeInterval(CloudRequirements.cacheTTL))
+        XCTAssertEqual(payload.chatgptUserID, "user-12345")
+        XCTAssertEqual(payload.accountID, "account-12345")
+        XCTAssertEqual(try payload.requirements()?.requirements().approvalPolicy.value, .never)
+    }
+
+    func testCloudRequirementsSaveCacheFileKeepsIncompleteIdentityLikeRust() throws {
+        let now = Date(timeIntervalSince1970: 1_778_752_800)
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let path = directory.appendingPathComponent(CloudRequirements.cacheFilename)
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+        }
+
+        try CloudRequirements.saveCacheFile(
+            at: path,
+            cachedAt: now,
+            chatgptUserID: nil,
+            accountID: nil,
+            contents: nil
+        )
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: path.path))
+        XCTAssertThrowsError(try CloudRequirements.loadCacheFile(
+            at: path,
+            chatgptUserID: "user-12345",
+            accountID: "account-12345",
+            now: now
+        )) { error in
+            XCTAssertEqual(error as? CloudRequirementsCacheLoadStatus, .cacheIdentityIncomplete)
+        }
+
+        let cacheFile = try JSONDecoder().decode(
+            CloudRequirementsCacheFile.self,
+            from: Data(contentsOf: path)
+        )
+        XCTAssertNil(cacheFile.signedPayload.chatgptUserID)
+        XCTAssertNil(cacheFile.signedPayload.accountID)
+        XCTAssertTrue(CloudRequirements.verifyCacheSignature(
+            payloadBytes: try CloudRequirements.cachePayloadBytes(cacheFile.signedPayload),
+            signature: cacheFile.signature
+        ))
+    }
+
+    func testCloudRequirementsSaveCacheFileReportsWriteFailureLikeRust() throws {
+        let fileAsParent = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try Data().write(to: fileAsParent)
+        defer {
+            try? FileManager.default.removeItem(at: fileAsParent)
+        }
+
+        XCTAssertThrowsError(try CloudRequirements.saveCacheFile(
+            at: fileAsParent.appendingPathComponent(CloudRequirements.cacheFilename),
+            cachedAt: Date(timeIntervalSince1970: 1_778_752_800),
+            chatgptUserID: "user-12345",
+            accountID: "account-12345",
+            contents: nil
+        )) { error in
+            XCTAssertEqual(error as? CloudRequirementsCacheWriteError, .cacheWrite)
+            XCTAssertEqual("\(error)", "failed to write cloud requirements cache")
+        }
+    }
+
     func testCloudRequirementsCacheLoadStatusDescriptionsMatchRust() {
         XCTAssertEqual(
             CloudRequirementsCacheLoadStatus.authIdentityIncomplete.description,

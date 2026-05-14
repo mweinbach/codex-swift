@@ -112,6 +112,37 @@ public enum CloudRequirements {
         )
     }
 
+    public static func saveCacheFile(
+        at path: URL,
+        cachedAt: Date = Date(),
+        chatgptUserID: String?,
+        accountID: String?,
+        contents: String?,
+        fileManager: FileManager = .default
+    ) throws {
+        let cacheFile: CloudRequirementsCacheFile
+        let data: Data
+        do {
+            cacheFile = try makeCacheFile(
+                cachedAt: cachedAt,
+                chatgptUserID: chatgptUserID,
+                accountID: accountID,
+                contents: contents
+            )
+            data = try prettyCacheFileData(cacheFile)
+        } catch {
+            throw CloudRequirementsCacheWriteError.cacheWrite
+        }
+
+        do {
+            let parent = path.deletingLastPathComponent()
+            try fileManager.createDirectory(at: parent, withIntermediateDirectories: true)
+            try data.write(to: path)
+        } catch {
+            throw CloudRequirementsCacheWriteError.cacheWrite
+        }
+    }
+
     public static func makeCacheFile(
         cachedAt: Date,
         chatgptUserID: String?,
@@ -215,6 +246,14 @@ public enum CloudRequirements {
             difference |= left ^ right
         }
         return difference == 0
+    }
+}
+
+public enum CloudRequirementsCacheWriteError: Error, Equatable, CustomStringConvertible, Sendable {
+    case cacheWrite
+
+    public var description: String {
+        "failed to write cloud requirements cache"
     }
 }
 
