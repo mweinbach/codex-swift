@@ -73,7 +73,7 @@ final class ModelProviderInfoTests: XCTestCase {
                 "experimental_bearer_token": NSNull(),
                 "auth": NSNull(),
                 "aws": NSNull(),
-                "wire_api": "chat",
+                "wire_api": "responses",
                 "query_params": NSNull(),
                 "http_headers": NSNull(),
                 "env_http_headers": NSNull(),
@@ -102,7 +102,7 @@ final class ModelProviderInfoTests: XCTestCase {
         XCTAssertEqual(provider.envKey, "AZURE_OPENAI_API_KEY")
         XCTAssertNil(provider.auth)
         XCTAssertNil(provider.aws)
-        XCTAssertEqual(provider.wireAPI, .chat)
+        XCTAssertEqual(provider.wireAPI, .responses)
         XCTAssertEqual(provider.queryParams, ["api-version": "2025-04-01-preview"])
         XCTAssertNil(provider.websocketConnectTimeoutMilliseconds)
         XCTAssertFalse(provider.requiresOpenAIAuth)
@@ -272,7 +272,7 @@ final class ModelProviderInfoTests: XCTestCase {
 
         let api = provider.toAPIProvider(authMode: nil, environment: [:])
         XCTAssertEqual(api.baseURL, "https://api.openai.com/v1")
-        XCTAssertEqual(api.wireAPI, .chat)
+        XCTAssertEqual(api.wireAPI, .responses)
         XCTAssertEqual(api.headers, ["X-Test": "1"])
         XCTAssertEqual(api.retry, ProviderRetryConfig(
             maxAttempts: 4,
@@ -442,10 +442,10 @@ final class ModelProviderInfoTests: XCTestCase {
         XCTAssertEqual(
             ModelProviderInfo.createOSSProvider(
                 defaultProviderPort: 9999,
-                wireAPI: .chat,
+                wireAPI: .responses,
                 environment: ["CODEX_OSS_BASE_URL": "http://remote/v1", "CODEX_OSS_PORT": "1111"]
             ),
-            ModelProviderInfo.createOSSProvider(baseURL: "http://remote/v1", wireAPI: .chat)
+            ModelProviderInfo.createOSSProvider(baseURL: "http://remote/v1", wireAPI: .responses)
         )
         XCTAssertEqual(
             ModelProviderInfo.createOSSProvider(

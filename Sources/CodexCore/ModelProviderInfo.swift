@@ -283,7 +283,7 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
         experimentalBearerToken: String? = nil,
         auth: ModelProviderAuthInfo? = nil,
         aws: ModelProviderAWSAuthInfo? = nil,
-        wireAPI: WireAPI = .chat,
+        wireAPI: WireAPI = .responses,
         queryParams: [String: String]? = nil,
         httpHeaders: [String: String]? = nil,
         envHTTPHeaders: [String: String]? = nil,
@@ -322,7 +322,7 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
         self.experimentalBearerToken = try container.decodeIfPresent(String.self, forKey: .experimentalBearerToken)
         self.auth = try container.decodeIfPresent(ModelProviderAuthInfo.self, forKey: .auth)
         self.aws = try container.decodeIfPresent(ModelProviderAWSAuthInfo.self, forKey: .aws)
-        self.wireAPI = try container.decodeIfPresent(WireAPI.self, forKey: .wireAPI) ?? .chat
+        self.wireAPI = try container.decodeIfPresent(WireAPI.self, forKey: .wireAPI) ?? .responses
         self.queryParams = try container.decodeIfPresent([String: String].self, forKey: .queryParams)
         self.httpHeaders = try container.decodeIfPresent([String: String].self, forKey: .httpHeaders)
         self.envHTTPHeaders = try container.decodeIfPresent([String: String].self, forKey: .envHTTPHeaders)
