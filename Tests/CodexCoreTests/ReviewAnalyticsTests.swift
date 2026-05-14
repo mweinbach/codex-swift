@@ -2,6 +2,173 @@ import CodexCore
 import XCTest
 
 final class ReviewAnalyticsTests: XCTestCase {
+    func testCommandExecutionAnalyticsReducerEmitsLifecycleEventLikeRust() throws {
+        var reducer = CodexCommandExecutionAnalyticsReducer()
+        let startedItem = AppServerThreadItem.commandExecution(
+            id: "exec-1",
+            command: "cat Package.swift && rg TODO",
+            cwd: try AbsolutePath(absolutePath: "/repo"),
+            source: .unifiedExecStartup,
+            status: .inProgress,
+            commandActions: [
+                .read(command: "cat Package.swift", name: "Package.swift", path: "/repo/Package.swift"),
+                .search(command: "rg TODO", query: "TODO", path: "/repo")
+            ]
+        )
+        let completedItem = AppServerThreadItem.commandExecution(
+            id: "exec-1",
+            command: "cat Package.swift && rg TODO",
+            cwd: try AbsolutePath(absolutePath: "/repo"),
+            source: .unifiedExecStartup,
+            status: .completed,
+            commandActions: [
+                .read(command: "cat Package.swift", name: "Package.swift", path: "/repo/Package.swift"),
+                .search(command: "rg TODO", query: "TODO", path: "/repo")
+            ],
+            aggregatedOutput: "package\nmatch\n",
+            exitCode: 0,
+            durationMs: 120
+        )
+
+        reducer.ingestStarted(ItemStartedNotification(
+            item: startedItem,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 1_000
+        ))
+        let event = try XCTUnwrap(reducer.ingestCompleted(
+            ItemCompletedNotification(
+                item: completedItem,
+                threadID: "thread-1",
+                turnID: "turn-1",
+                completedAtMilliseconds: 1_250
+            ),
+            context: Self.analyticsContext
+        ))
+
+        try XCTAssertJSONObjectEqual(event, [
+            "event_type": "codex_command_execution_event",
+            "event_params": [
+                "thread_id": "thread-1",
+                "turn_id": "turn-1",
+                "item_id": "exec-1",
+                "app_server_client": [
+                    "product_client_id": "codex_tui",
+                    "client_name": "codex-tui",
+                    "client_version": "1.2.3",
+                    "rpc_transport": "websocket",
+                    "experimental_api_enabled": true
+                ],
+                "runtime": [
+                    "codex_rs_version": "0.99.0",
+                    "runtime_os": "macos",
+                    "runtime_os_version": "15.3.1",
+                    "runtime_arch": "aarch64"
+                ],
+                "thread_source": "user",
+                "subagent_source": nil,
+                "parent_thread_id": nil,
+                "tool_name": "unified_exec",
+                "started_at_ms": 1_000,
+                "completed_at_ms": 1_250,
+                "duration_ms": 250,
+                "execution_duration_ms": 120,
+                "review_count": 0,
+                "guardian_review_count": 0,
+                "user_review_count": 0,
+                "final_approval_outcome": "unknown",
+                "terminal_status": "completed",
+                "failure_kind": nil,
+                "requested_additional_permissions": false,
+                "requested_network_access": false,
+                "command_execution_source": "unified_exec_startup",
+                "exit_code": 0,
+                "command_total_action_count": 2,
+                "command_read_action_count": 1,
+                "command_list_files_action_count": 0,
+                "command_search_action_count": 1,
+                "command_unknown_action_count": 0
+            ]
+        ])
+    }
+
+    func testCommandExecutionAnalyticsReducerSuppressesMissingStartAndDoubleCompletionLikeRust() throws {
+        var reducer = CodexCommandExecutionAnalyticsReducer()
+        let item = AppServerThreadItem.commandExecution(
+            id: "exec-1",
+            command: "false",
+            cwd: try AbsolutePath(absolutePath: "/repo"),
+            source: .agent,
+            status: .failed,
+            commandActions: [.unknown(command: "false")],
+            exitCode: 1,
+            durationMs: 10
+        )
+        let completed = ItemCompletedNotification(
+            item: item,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            completedAtMilliseconds: 20
+        )
+
+        XCTAssertNil(reducer.ingestCompleted(completed, context: Self.analyticsContext))
+
+        reducer.ingestStarted(ItemStartedNotification(
+            item: item,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 10
+        ))
+        let firstEvent = reducer.ingestCompleted(completed, context: Self.analyticsContext)
+        XCTAssertNotNil(firstEvent)
+        XCTAssertNil(reducer.ingestCompleted(completed, context: Self.analyticsContext))
+    }
+
+    func testCommandExecutionAnalyticsReducerMapsFailureAndDeclinedStatusesLikeRust() throws {
+        var reducer = CodexCommandExecutionAnalyticsReducer()
+
+        let failed = try Self.reduceCommandExecution(status: .failed, source: .agent, reducer: &reducer)
+        XCTAssertEqual(failed.eventParams.base.toolName, "shell")
+        XCTAssertEqual(failed.eventParams.base.terminalStatus, .failed)
+        XCTAssertEqual(failed.eventParams.base.failureKind, .toolError)
+        XCTAssertEqual(failed.eventParams.commandExecutionSource, .agent)
+
+        let declined = try Self.reduceCommandExecution(status: .declined, source: .userShell, reducer: &reducer)
+        XCTAssertEqual(declined.eventParams.base.toolName, "user_shell")
+        XCTAssertEqual(declined.eventParams.base.terminalStatus, .rejected)
+        XCTAssertEqual(declined.eventParams.base.failureKind, .approvalDenied)
+        XCTAssertEqual(declined.eventParams.commandExecutionSource, .userShell)
+    }
+
+    func testCommandExecutionAnalyticsReducerSkipsInProgressCompletionLikeRust() throws {
+        var reducer = CodexCommandExecutionAnalyticsReducer()
+        let item = AppServerThreadItem.commandExecution(
+            id: "exec-1",
+            command: "sleep 1",
+            cwd: try AbsolutePath(absolutePath: "/repo"),
+            source: .unifiedExecInteraction,
+            status: .inProgress,
+            commandActions: []
+        )
+
+        reducer.ingestStarted(ItemStartedNotification(
+            item: item,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 10
+        ))
+
+        XCTAssertNil(reducer.ingestCompleted(
+            ItemCompletedNotification(
+                item: item,
+                threadID: "thread-1",
+                turnID: "turn-1",
+                completedAtMilliseconds: 20
+            ),
+            context: Self.analyticsContext
+        ))
+    }
+
     func testCodexCompactionEventRequestUsesRustWireShape() throws {
         let event = CodexCompactionEventRequest(
             eventType: "codex_compaction_event",
@@ -74,6 +241,55 @@ final class ReviewAnalyticsTests: XCTestCase {
                 "duration_ms": 6_543
             ]
         ])
+    }
+
+    private static let analyticsContext = CodexCommandExecutionAnalyticsContext(
+        appServerClient: CodexAppServerClientMetadata(
+            productClientID: "codex_tui",
+            clientName: "codex-tui",
+            clientVersion: "1.2.3",
+            rpcTransport: .websocket,
+            experimentalAPIEnabled: true
+        ),
+        runtime: CodexRuntimeMetadata(
+            codexRSVersion: "0.99.0",
+            runtimeOS: "macos",
+            runtimeOSVersion: "15.3.1",
+            runtimeArch: "aarch64"
+        ),
+        threadSource: .user
+    )
+
+    private static func reduceCommandExecution(
+        status: AppServerCommandExecutionStatus,
+        source: AppServerCommandExecutionSource,
+        reducer: inout CodexCommandExecutionAnalyticsReducer
+    ) throws -> CodexCommandExecutionEventRequest {
+        let item = AppServerThreadItem.commandExecution(
+            id: "exec-\(status.rawValue)",
+            command: "command",
+            cwd: try AbsolutePath(absolutePath: "/repo"),
+            source: source,
+            status: status,
+            commandActions: [.unknown(command: "command")],
+            exitCode: status == .failed ? 1 : nil,
+            durationMs: 10
+        )
+        reducer.ingestStarted(ItemStartedNotification(
+            item: item,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 10
+        ))
+        return try XCTUnwrap(reducer.ingestCompleted(
+            ItemCompletedNotification(
+                item: item,
+                threadID: "thread-1",
+                turnID: "turn-1",
+                completedAtMilliseconds: 20
+            ),
+            context: analyticsContext
+        ))
     }
 
     func testCodexCommandExecutionEventRequestUsesRustWireShape() throws {

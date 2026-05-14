@@ -139,6 +139,19 @@ public enum CommandExecutionSource: String, Codable, Equatable, Sendable {
     case userShell = "user_shell"
     case unifiedExecStartup = "unified_exec_startup"
     case unifiedExecInteraction = "unified_exec_interaction"
+
+    public init(_ source: AppServerCommandExecutionSource) {
+        switch source {
+        case .agent:
+            self = .agent
+        case .userShell:
+            self = .userShell
+        case .unifiedExecStartup:
+            self = .unifiedExecStartup
+        case .unifiedExecInteraction:
+            self = .unifiedExecInteraction
+        }
+    }
 }
 
 public enum CompactionTrigger: String, Codable, Equatable, Sendable {
@@ -514,6 +527,158 @@ public struct CodexCommandExecutionEventRequest: Equatable, Encodable, Sendable 
     private enum CodingKeys: String, CodingKey {
         case eventType = "event_type"
         case eventParams = "event_params"
+    }
+}
+
+public struct CodexCommandExecutionAnalyticsContext: Equatable, Sendable {
+    public let appServerClient: CodexAppServerClientMetadata
+    public let runtime: CodexRuntimeMetadata
+    public let threadSource: ThreadSource?
+    public let subagentSource: String?
+    public let parentThreadID: String?
+
+    public init(
+        appServerClient: CodexAppServerClientMetadata,
+        runtime: CodexRuntimeMetadata,
+        threadSource: ThreadSource? = nil,
+        subagentSource: String? = nil,
+        parentThreadID: String? = nil
+    ) {
+        self.appServerClient = appServerClient
+        self.runtime = runtime
+        self.threadSource = threadSource
+        self.subagentSource = subagentSource
+        self.parentThreadID = parentThreadID
+    }
+}
+
+public struct CodexCommandExecutionAnalyticsReducer: Sendable {
+    private var startedAtMilliseconds: [CommandExecutionItemKey: UInt64] = [:]
+
+    public init() {}
+
+    public mutating func ingestStarted(_ notification: ItemStartedNotification) {
+        guard case .commandExecution = notification.item,
+              let startedAtMilliseconds = Self.unsignedMilliseconds(notification.startedAtMilliseconds)
+        else {
+            return
+        }
+
+        self.startedAtMilliseconds[CommandExecutionItemKey(notification)] = startedAtMilliseconds
+    }
+
+    public mutating func ingestCompleted(
+        _ notification: ItemCompletedNotification,
+        context: CodexCommandExecutionAnalyticsContext
+    ) -> CodexCommandExecutionEventRequest? {
+        let key = CommandExecutionItemKey(notification)
+        guard let startedAtMilliseconds = startedAtMilliseconds.removeValue(forKey: key),
+              let completedAtMilliseconds = Self.unsignedMilliseconds(notification.completedAtMilliseconds)
+        else {
+            return nil
+        }
+
+        guard case let .commandExecution(
+            id,
+            _,
+            _,
+            _,
+            source,
+            status,
+            commandActions,
+            _,
+            exitCode,
+            durationMs
+        ) = notification.item,
+            let outcome = CodexCommandExecutionAnalyticsReducer.outcome(for: status)
+        else {
+            return nil
+        }
+
+        return CodexCommandExecutionEventRequest(
+            eventType: "codex_command_execution_event",
+            eventParams: CodexCommandExecutionEventParams(
+                base: CodexToolItemEventBase(
+                    threadID: notification.threadID,
+                    turnID: notification.turnID,
+                    itemID: id,
+                    appServerClient: context.appServerClient,
+                    runtime: context.runtime,
+                    threadSource: context.threadSource,
+                    subagentSource: context.subagentSource,
+                    parentThreadID: context.parentThreadID,
+                    toolName: Self.toolName(for: source),
+                    startedAtMilliseconds: startedAtMilliseconds,
+                    completedAtMilliseconds: completedAtMilliseconds,
+                    durationMilliseconds: completedAtMilliseconds >= startedAtMilliseconds
+                        ? completedAtMilliseconds - startedAtMilliseconds
+                        : nil,
+                    executionDurationMilliseconds: Self.unsignedMilliseconds(durationMs),
+                    reviewCount: 0,
+                    guardianReviewCount: 0,
+                    userReviewCount: 0,
+                    finalApprovalOutcome: .unknown,
+                    terminalStatus: outcome.terminalStatus,
+                    failureKind: outcome.failureKind,
+                    requestedAdditionalPermissions: false,
+                    requestedNetworkAccess: false
+                ),
+                commandExecutionSource: CommandExecutionSource(source),
+                exitCode: exitCode,
+                commandActionCounts: CodexCommandActionCounts(actions: commandActions)
+            )
+        )
+    }
+
+    private static func toolName(for source: AppServerCommandExecutionSource) -> String {
+        switch source {
+        case .agent:
+            return "shell"
+        case .userShell:
+            return "user_shell"
+        case .unifiedExecStartup, .unifiedExecInteraction:
+            return "unified_exec"
+        }
+    }
+
+    private static func outcome(
+        for status: AppServerCommandExecutionStatus
+    ) -> (terminalStatus: ToolItemTerminalStatus, failureKind: ToolItemFailureKind?)? {
+        switch status {
+        case .inProgress:
+            return nil
+        case .completed:
+            return (.completed, nil)
+        case .failed:
+            return (.failed, .toolError)
+        case .declined:
+            return (.rejected, .approvalDenied)
+        }
+    }
+
+    private static func unsignedMilliseconds(_ milliseconds: Int64?) -> UInt64? {
+        guard let milliseconds, milliseconds >= 0 else {
+            return nil
+        }
+        return UInt64(milliseconds)
+    }
+}
+
+private struct CommandExecutionItemKey: Hashable {
+    let threadID: String
+    let turnID: String
+    let itemID: String
+
+    init(_ notification: ItemStartedNotification) {
+        self.threadID = notification.threadID
+        self.turnID = notification.turnID
+        self.itemID = notification.item.id
+    }
+
+    init(_ notification: ItemCompletedNotification) {
+        self.threadID = notification.threadID
+        self.turnID = notification.turnID
+        self.itemID = notification.item.id
     }
 }
 
