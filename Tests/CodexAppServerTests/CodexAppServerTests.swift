@@ -7466,6 +7466,55 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(thread["name"] as? String, "State store name")
     }
 
+    func testThreadResumePrefersStateStoreTitleOverLegacyIndexLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-50-00",
+            timestamp: "2025-01-05T12:50:00Z",
+            preview: "Saved user message",
+            provider: "openai",
+            cwd: temp.url.path
+        )
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        try appendSessionIndexName(
+            threadID: threadID,
+            name: "Legacy stale name",
+            codexHome: temp.url
+        )
+        let stateStore = try createAppServerStateStore(codexHome: temp.url)
+        try await stateStore.upsertThread(ThreadMetadata(
+            id: ThreadId(string: threadID),
+            rolloutPath: rolloutPath,
+            createdAt: try appServerDate("2025-01-05T12:50:00Z"),
+            updatedAt: try appServerDate("2025-01-05T12:50:00Z"),
+            source: "cli",
+            modelProvider: "openai",
+            cwd: temp.url.path,
+            cliVersion: "0.0.0",
+            title: "State store name",
+            sandboxPolicy: "read-only",
+            approvalMode: "never",
+            tokensUsed: 0,
+            firstUserMessage: "Saved user message"
+        ))
+        let processor = try initializedProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            stateStore: stateStore
+        ))
+
+        let resume = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"thread/resume","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        let resumeResult = try XCTUnwrap(resume["result"] as? [String: Any])
+        let thread = try XCTUnwrap(resumeResult["thread"] as? [String: Any])
+        XCTAssertEqual(thread["preview"] as? String, "Saved user message")
+        XCTAssertEqual(thread["name"] as? String, "State store name")
+    }
+
     func testThreadNameSetRejectsEmptyOrMissingThread() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(

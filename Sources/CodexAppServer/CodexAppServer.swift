@@ -1821,10 +1821,12 @@ public enum CodexAppServer {
         let item = ConversationItem(path: rolloutPath, head: [], createdAt: nil, updatedAt: nil)
         let excludeTurns = try rustDefaultBoolParam(params?["excludeTurns"], defaultValue: false)
         let includeTurns = !excludeTurns
+        let metadataOverlay = try stateMetadataOverlays(for: [item], configuration: configuration)[threadID]
         let thread = try threadObject(
             for: item,
             defaultProvider: configuration.defaultModelProvider,
-            turns: includeTurns ? buildTurnsFromRolloutEvents(at: rolloutPath) : []
+            turns: includeTurns ? buildTurnsFromRolloutEvents(at: rolloutPath) : [],
+            metadataOverlay: metadataOverlay
         )
         let summary = try RolloutSummary(path: rolloutPath, defaultProvider: configuration.defaultModelProvider)
         let resumeCwd = URL(
