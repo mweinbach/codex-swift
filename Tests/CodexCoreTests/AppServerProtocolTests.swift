@@ -786,7 +786,7 @@ final class AppServerProtocolTests: XCTestCase {
             turnID: "turn_123",
             itemID: "item_123",
             startedAtMilliseconds: 44,
-            cwd: "/tmp/project",
+            cwd: projectPath,
             reason: nil,
             permissions: AppServerProtocol.PermissionsProfile(
                 network: RequestPermissionNetworkPermissions(enabled: true),
@@ -847,6 +847,14 @@ final class AppServerProtocolTests: XCTestCase {
             from: Data(#"{"method":"item/permissions/requestApproval","id":1,"params":{"threadId":"thr_123","turnId":"turn_123","itemId":"item_123","startedAtMs":44,"cwd":"/tmp/project","reason":null,"permissions":{"network":{"enabled":true},"fileSystem":{"read":["/tmp/project"],"write":["/tmp/project/Sources"],"entries":[{"path":{"type":"path","path":"/tmp/project"},"access":"read"},{"path":{"type":"path","path":"/tmp/project/Sources"},"access":"write"}]}}}}"#.utf8)
         )
         XCTAssertEqual(decoded, request)
+    }
+
+    func testPermissionsRequestApprovalRejectsRelativeCwdLikeRustAbsolutePathBuf() throws {
+        let payload = Data(#"{"method":"item/permissions/requestApproval","id":1,"params":{"threadId":"thr_123","turnId":"turn_123","itemId":"item_123","startedAtMs":44,"cwd":"relative/project","reason":null,"permissions":{}}}"#.utf8)
+
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(AppServerProtocol.ServerRequest.self, from: payload)
+        )
     }
 
     func testPermissionsRequestApprovalServerResponseMatchesRustWireShapeAndDefaults() throws {

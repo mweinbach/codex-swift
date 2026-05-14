@@ -25139,13 +25139,18 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             let submitter = coreOpSubmitter
             afterNotifications = {
                 Task { [broker, submitter, threadID, event] in
+                    guard let cwdValue = event.cwd,
+                          let cwd = try? AbsolutePath(absolutePath: cwdValue)
+                    else {
+                        return
+                    }
                     let result = await broker.requestPermissionsApproval(
                         params: AppServerProtocol.PermissionsRequestApprovalParams(
                             threadID: threadID,
                             turnID: event.turnID,
                             itemID: event.callID,
                             startedAtMilliseconds: event.startedAtMilliseconds,
-                            cwd: event.cwd ?? "",
+                            cwd: cwd,
                             reason: event.reason,
                             permissions: Self.permissionsProfile(event.permissions)
                         )

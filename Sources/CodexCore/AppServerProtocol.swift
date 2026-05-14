@@ -1407,7 +1407,7 @@ public enum AppServerProtocol {
         public let turnID: String
         public let itemID: String
         public let startedAtMilliseconds: Int64
-        public let cwd: String
+        public let cwd: AbsolutePath
         public let reason: String?
         public let permissions: PermissionsProfile
 
@@ -1426,7 +1426,7 @@ public enum AppServerProtocol {
             turnID: String,
             itemID: String,
             startedAtMilliseconds: Int64,
-            cwd: String,
+            cwd: AbsolutePath,
             reason: String?,
             permissions: PermissionsProfile
         ) {
