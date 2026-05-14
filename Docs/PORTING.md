@@ -314,6 +314,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/exec/src/event_processor_with_jsonl_output.rs` and `exec_events.rs`
   - exec JSONL output now maps completed reasoning items from Rust's summary-only text projection, skips empty reasoning summaries, and emits `reasoning_output_tokens` in turn usage with Rust's zero default.
 - `codex-rs/exec/src/event_processor_with_human_output.rs` final-message recovery
+  - human `codex exec` output now emits Rust's startup banner and config summary before turn output, using the current `OpenAI Codex v<VERSION>` text without the removed ` (research preview)` suffix.
   - added Swift `TurnItem.finalMessage(from:)` parity for Rust's completed-turn final-message projection: the latest agent message wins over any plan item, and turns with no agent message fall back to the latest plan text.
 - `codex-rs/core/src/environment_context.rs`
   - environment context sandbox/network derivation, shell-insensitive comparison, turn-context diffing, XML serialization, and user response-item projection

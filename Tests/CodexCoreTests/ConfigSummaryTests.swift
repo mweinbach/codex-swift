@@ -2,6 +2,24 @@ import XCTest
 @testable import CodexCore
 
 final class ConfigSummaryTests: XCTestCase {
+    func testRendersExecStartupBannerWithoutResearchPreviewSuffix() {
+        let output = ConfigSummary.renderStartupBanner(
+            version: "1.2.3",
+            entries: [
+                ConfigSummaryEntry("workdir", "/repo"),
+                ConfigSummaryEntry("model", "gpt-5.1-codex")
+            ]
+        )
+
+        XCTAssertEqual(output, """
+        OpenAI Codex v1.2.3
+        --------
+        workdir: /repo
+        model: gpt-5.1-codex
+        """)
+        XCTAssertFalse(output.contains("research preview"))
+    }
+
     func testCreatesResponsesProviderSummaryEntriesInRustOrder() {
         let entries = ConfigSummary.createEntries(
             config: ConfigSummaryInput(

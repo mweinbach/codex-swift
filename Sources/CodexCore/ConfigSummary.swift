@@ -39,6 +39,15 @@ public struct ConfigSummaryInput: Equatable, Sendable {
 }
 
 public enum ConfigSummary {
+    public static func renderStartupBanner(version: String, entries: [ConfigSummaryEntry]) -> String {
+        var lines = [
+            "OpenAI Codex v\(version)",
+            "--------"
+        ]
+        lines.append(contentsOf: entries.map { "\($0.key): \($0.value)" })
+        return lines.joined(separator: "\n")
+    }
+
     public static func createEntries(config: ConfigSummaryInput, model: String) -> [ConfigSummaryEntry] {
         var entries = [
             ConfigSummaryEntry("workdir", config.workdir),

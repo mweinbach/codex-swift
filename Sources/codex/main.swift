@@ -951,6 +951,21 @@ private func runNonInteractiveExec(
         : ConfiguredEnvironmentLoader.load(codexHome: codexHome, environment: environment)
     let turnEnvironmentSelections = configuredEnvironmentSnapshot.defaultThreadEnvironmentSelections(cwd: cwd.path)
     let configuredTools = NonInteractiveExec.toolSpecs(modelFamily: modelFamily, config: settings)
+    let configSummary = ConfigSummary.renderStartupBanner(
+        version: CodexCLI.version,
+        entries: ConfigSummary.createEntries(
+            config: ConfigSummaryInput(
+                workdir: cwd.standardizedFileURL.path,
+                modelProviderID: providerResolution.id,
+                approvalPolicy: approvalPolicy,
+                sandboxPolicy: sandboxPolicy,
+                modelProviderWireAPI: providerResolution.info.wireAPI,
+                modelReasoningEffort: settings.modelReasoningEffort,
+                modelReasoningSummary: settings.modelReasoningSummary ?? modelFamily.defaultReasoningSummary
+            ),
+            model: resolvedModel
+        )
+    )
     let projectInstructions = ProjectDoc.getUserInstructions(
         config: ProjectDocConfig(runtimeConfig: settings, cwd: cwd)
     ).map { UserInstructions(directory: cwd.path, text: $0) }
@@ -1157,6 +1172,9 @@ private func runNonInteractiveExec(
     var stderrMessages = [String]()
     if let promptStderr = promptResolution.stderrMessage {
         stderrMessages.append(promptStderr)
+    }
+    if !options.json {
+        stderrMessages.append(configSummary)
     }
     stderrMessages.append(contentsOf: result.stderrMessages)
 
