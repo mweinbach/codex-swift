@@ -1197,6 +1197,14 @@ public struct ThreadUnarchiveParams: Equatable, Codable, Sendable {
     }
 }
 
+public struct ThreadUnarchiveResponse: Equatable, Codable, Sendable {
+    public let thread: AppServerThread
+
+    public init(thread: AppServerThread) {
+        self.thread = thread
+    }
+}
+
 public struct ThreadUnsubscribeParams: Equatable, Codable, Sendable {
     public let threadID: String
 
@@ -1445,6 +1453,14 @@ public struct ThreadMetadataUpdateParams: Equatable, Codable, Sendable {
     }
 }
 
+public struct ThreadMetadataUpdateResponse: Equatable, Codable, Sendable {
+    public let thread: AppServerThread
+
+    public init(thread: AppServerThread) {
+        self.thread = thread
+    }
+}
+
 public enum ThreadGoalTokenBudgetPatch: Equatable, Sendable {
     case preserve
     case clear
@@ -1602,6 +1618,14 @@ public struct ThreadRollbackParams: Equatable, Codable, Sendable {
     public init(threadID: String, numTurns: UInt32) {
         self.threadID = threadID
         self.numTurns = numTurns
+    }
+}
+
+public struct ThreadRollbackResponse: Equatable, Codable, Sendable {
+    public let thread: AppServerThread
+
+    public init(thread: AppServerThread) {
+        self.thread = thread
     }
 }
 

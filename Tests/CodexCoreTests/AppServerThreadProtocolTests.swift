@@ -713,6 +713,26 @@ final class AppServerThreadProtocolTests: XCTestCase {
             "threadId": "thr_unarchive"
         ])
 
+        let unarchivedThread = AppServerThread(
+            id: "thread-1",
+            sessionID: "session-1",
+            preview: "Runtime",
+            ephemeral: false,
+            modelProvider: "mock_provider",
+            createdAt: 1,
+            updatedAt: 2,
+            status: .notLoaded,
+            path: nil,
+            cwd: "/repo",
+            cliVersion: "0.50.0",
+            source: .appServer,
+            threadSource: .user,
+            turns: []
+        )
+        try XCTAssertJSONObjectEqual(ThreadUnarchiveResponse(thread: unarchivedThread), [
+            "thread": expectedRuntimeThreadJSON()
+        ])
+
         try XCTAssertJSONObjectEqual(ThreadUnsubscribeParams(threadID: "thr_unsubscribe"), [
             "threadId": "thr_unsubscribe"
         ])
@@ -903,6 +923,22 @@ final class AppServerThreadProtocolTests: XCTestCase {
 
     func testThreadReadRollbackMetadataAndMemoryResetRoundTripLikeRustProtocol() throws {
         let threadID = "018f7a2d-4c5b-7abc-8def-0123456789ab"
+        let thread = AppServerThread(
+            id: "thread-1",
+            sessionID: "session-1",
+            preview: "Runtime",
+            ephemeral: false,
+            modelProvider: "mock_provider",
+            createdAt: 1,
+            updatedAt: 2,
+            status: .notLoaded,
+            path: nil,
+            cwd: "/repo",
+            cliVersion: "0.50.0",
+            source: .appServer,
+            threadSource: .user,
+            turns: []
+        )
 
         try XCTAssertJSONObjectEqual(ThreadReadParams(threadID: threadID), [
             "threadId": threadID,
@@ -922,6 +958,9 @@ final class AppServerThreadProtocolTests: XCTestCase {
             "threadId": threadID,
             "numTurns": 3
         ])
+        try XCTAssertJSONObjectEqual(ThreadRollbackResponse(thread: thread), [
+            "thread": expectedRuntimeThreadJSON()
+        ])
 
         try XCTAssertJSONObjectEqual(
             ThreadMetadataUpdateParams(
@@ -940,6 +979,9 @@ final class AppServerThreadProtocolTests: XCTestCase {
                 ]
             ]
         )
+        try XCTAssertJSONObjectEqual(ThreadMetadataUpdateResponse(thread: thread), [
+            "thread": expectedRuntimeThreadJSON()
+        ])
         try XCTAssertJSONObjectEqual(ThreadMetadataUpdateParams(threadID: threadID, gitInfo: nil), [
             "threadId": threadID,
             "gitInfo": NSNull()
