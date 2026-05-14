@@ -2,6 +2,141 @@ import CodexCore
 import XCTest
 
 final class ReviewAnalyticsTests: XCTestCase {
+    func testMcpToolCallAnalyticsReducerEmitsLifecycleEventLikeRust() throws {
+        var reducer = CodexMcpToolCallAnalyticsReducer()
+        let startedItem = AppServerThreadItem.mcpToolCall(
+            id: "mcp-1",
+            server: "filesystem",
+            tool: "read_file",
+            status: .inProgress,
+            arguments: .object(["path": .string("/repo/README.md")])
+        )
+        let completedItem = AppServerThreadItem.mcpToolCall(
+            id: "mcp-1",
+            server: "filesystem",
+            tool: "read_file",
+            status: .completed,
+            arguments: .object(["path": .string("/repo/README.md")]),
+            result: AppServerProtocol.McpToolCallResult(
+                content: [.object(["type": .string("text"), "text": .string("done")])],
+                structuredContent: nil,
+                meta: nil
+            ),
+            durationMs: 150
+        )
+
+        reducer.ingestStarted(ItemStartedNotification(
+            item: startedItem,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 3_000
+        ))
+        let event = try XCTUnwrap(reducer.ingestCompleted(
+            ItemCompletedNotification(
+                item: completedItem,
+                threadID: "thread-1",
+                turnID: "turn-1",
+                completedAtMilliseconds: 3_275
+            ),
+            context: Self.analyticsContext
+        ))
+
+        try XCTAssertJSONObjectEqual(event, [
+            "event_type": "codex_mcp_tool_call_event",
+            "event_params": [
+                "thread_id": "thread-1",
+                "turn_id": "turn-1",
+                "item_id": "mcp-1",
+                "app_server_client": [
+                    "product_client_id": "codex_tui",
+                    "client_name": "codex-tui",
+                    "client_version": "1.2.3",
+                    "rpc_transport": "websocket",
+                    "experimental_api_enabled": true
+                ],
+                "runtime": [
+                    "codex_rs_version": "0.99.0",
+                    "runtime_os": "macos",
+                    "runtime_os_version": "15.3.1",
+                    "runtime_arch": "aarch64"
+                ],
+                "thread_source": "user",
+                "subagent_source": nil,
+                "parent_thread_id": nil,
+                "tool_name": "read_file",
+                "started_at_ms": 3_000,
+                "completed_at_ms": 3_275,
+                "duration_ms": 275,
+                "execution_duration_ms": 150,
+                "review_count": 0,
+                "guardian_review_count": 0,
+                "user_review_count": 0,
+                "final_approval_outcome": "unknown",
+                "terminal_status": "completed",
+                "failure_kind": nil,
+                "requested_additional_permissions": false,
+                "requested_network_access": false,
+                "mcp_server_name": "filesystem",
+                "mcp_tool_name": "read_file",
+                "mcp_error_present": false
+            ]
+        ])
+    }
+
+    func testMcpToolCallAnalyticsReducerMapsFailedErrorPresenceLikeRust() throws {
+        var reducer = CodexMcpToolCallAnalyticsReducer()
+        let event = try Self.reduceMcpToolCall(
+            status: .failed,
+            error: AppServerProtocol.McpToolCallError(message: "server disconnected"),
+            reducer: &reducer
+        )
+
+        XCTAssertEqual(event.eventParams.base.terminalStatus, .failed)
+        XCTAssertEqual(event.eventParams.base.failureKind, .toolError)
+        XCTAssertEqual(event.eventParams.mcpServerName, "docs")
+        XCTAssertEqual(event.eventParams.mcpToolName, "lookup")
+        XCTAssertTrue(event.eventParams.mcpErrorPresent)
+    }
+
+    func testMcpToolCallAnalyticsReducerSuppressesMissingStartDoubleCompletionAndInProgressLikeRust() {
+        var reducer = CodexMcpToolCallAnalyticsReducer()
+        let completedItem = Self.mcpToolCallItem(status: .completed)
+        let inProgressItem = Self.mcpToolCallItem(status: .inProgress)
+        let completed = ItemCompletedNotification(
+            item: completedItem,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            completedAtMilliseconds: 20
+        )
+
+        XCTAssertNil(reducer.ingestCompleted(completed, context: Self.analyticsContext))
+
+        reducer.ingestStarted(ItemStartedNotification(
+            item: completedItem,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 10
+        ))
+        XCTAssertNotNil(reducer.ingestCompleted(completed, context: Self.analyticsContext))
+        XCTAssertNil(reducer.ingestCompleted(completed, context: Self.analyticsContext))
+
+        reducer.ingestStarted(ItemStartedNotification(
+            item: inProgressItem,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 10
+        ))
+        XCTAssertNil(reducer.ingestCompleted(
+            ItemCompletedNotification(
+                item: inProgressItem,
+                threadID: "thread-1",
+                turnID: "turn-1",
+                completedAtMilliseconds: 20
+            ),
+            context: Self.analyticsContext
+        ))
+    }
+
     func testFileChangeAnalyticsReducerEmitsLifecycleEventLikeRust() throws {
         var reducer = CodexFileChangeAnalyticsReducer()
         let startedItem = AppServerThreadItem.fileChange(
@@ -440,6 +575,44 @@ final class ReviewAnalyticsTests: XCTestCase {
             changes: sampleFileChanges,
             status: status
         )
+        reducer.ingestStarted(ItemStartedNotification(
+            item: item,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 10
+        ))
+        return try XCTUnwrap(reducer.ingestCompleted(
+            ItemCompletedNotification(
+                item: item,
+                threadID: "thread-1",
+                turnID: "turn-1",
+                completedAtMilliseconds: 20
+            ),
+            context: analyticsContext
+        ))
+    }
+
+    private static func mcpToolCallItem(
+        status: McpToolCallStatus,
+        error: AppServerProtocol.McpToolCallError? = nil
+    ) -> AppServerThreadItem {
+        .mcpToolCall(
+            id: "mcp-\(status.rawValue)",
+            server: "docs",
+            tool: "lookup",
+            status: status,
+            arguments: .object([:]),
+            error: error,
+            durationMs: 10
+        )
+    }
+
+    private static func reduceMcpToolCall(
+        status: McpToolCallStatus,
+        error: AppServerProtocol.McpToolCallError?,
+        reducer: inout CodexMcpToolCallAnalyticsReducer
+    ) throws -> CodexMcpToolCallEventRequest {
+        let item = mcpToolCallItem(status: status, error: error)
         reducer.ingestStarted(ItemStartedNotification(
             item: item,
             threadID: "thread-1",

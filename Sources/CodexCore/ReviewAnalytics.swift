@@ -611,6 +611,54 @@ public struct CodexFileChangeEventRequest: Equatable, Encodable, Sendable {
     }
 }
 
+public struct CodexMcpToolCallEventParams: Equatable, Encodable, Sendable {
+    public let base: CodexToolItemEventBase
+    public let mcpServerName: String
+    public let mcpToolName: String
+    public let mcpErrorPresent: Bool
+
+    public init(
+        base: CodexToolItemEventBase,
+        mcpServerName: String,
+        mcpToolName: String,
+        mcpErrorPresent: Bool
+    ) {
+        self.base = base
+        self.mcpServerName = mcpServerName
+        self.mcpToolName = mcpToolName
+        self.mcpErrorPresent = mcpErrorPresent
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case mcpServerName = "mcp_server_name"
+        case mcpToolName = "mcp_tool_name"
+        case mcpErrorPresent = "mcp_error_present"
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        try base.encode(to: encoder)
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(mcpServerName, forKey: .mcpServerName)
+        try container.encode(mcpToolName, forKey: .mcpToolName)
+        try container.encode(mcpErrorPresent, forKey: .mcpErrorPresent)
+    }
+}
+
+public struct CodexMcpToolCallEventRequest: Equatable, Encodable, Sendable {
+    public let eventType: String
+    public let eventParams: CodexMcpToolCallEventParams
+
+    public init(eventType: String, eventParams: CodexMcpToolCallEventParams) {
+        self.eventType = eventType
+        self.eventParams = eventParams
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case eventType = "event_type"
+        case eventParams = "event_params"
+    }
+}
+
 public struct CodexCommandExecutionAnalyticsContext: Equatable, Sendable {
     public let appServerClient: CodexAppServerClientMetadata
     public let runtime: CodexRuntimeMetadata
@@ -634,6 +682,7 @@ public struct CodexCommandExecutionAnalyticsContext: Equatable, Sendable {
 }
 
 public typealias CodexFileChangeAnalyticsContext = CodexCommandExecutionAnalyticsContext
+public typealias CodexMcpToolCallAnalyticsContext = CodexCommandExecutionAnalyticsContext
 
 public struct CodexCommandExecutionAnalyticsReducer: Sendable {
     private var startedAtMilliseconds: [CommandExecutionItemKey: UInt64] = [:]
@@ -835,6 +884,104 @@ public struct CodexFileChangeAnalyticsReducer: Sendable {
     }
 }
 
+public struct CodexMcpToolCallAnalyticsReducer: Sendable {
+    private var startedAtMilliseconds: [McpToolCallItemKey: UInt64] = [:]
+
+    public init() {}
+
+    public mutating func ingestStarted(_ notification: ItemStartedNotification) {
+        guard case .mcpToolCall = notification.item,
+              let startedAtMilliseconds = Self.unsignedMilliseconds(notification.startedAtMilliseconds)
+        else {
+            return
+        }
+
+        self.startedAtMilliseconds[McpToolCallItemKey(notification)] = startedAtMilliseconds
+    }
+
+    public mutating func ingestCompleted(
+        _ notification: ItemCompletedNotification,
+        context: CodexMcpToolCallAnalyticsContext
+    ) -> CodexMcpToolCallEventRequest? {
+        let key = McpToolCallItemKey(notification)
+        guard let startedAtMilliseconds = startedAtMilliseconds.removeValue(forKey: key),
+              let completedAtMilliseconds = Self.unsignedMilliseconds(notification.completedAtMilliseconds)
+        else {
+            return nil
+        }
+
+        guard case let .mcpToolCall(
+            id,
+            server,
+            tool,
+            status,
+            _,
+            _,
+            _,
+            error,
+            durationMs
+        ) = notification.item,
+            let outcome = Self.outcome(for: status)
+        else {
+            return nil
+        }
+
+        return CodexMcpToolCallEventRequest(
+            eventType: "codex_mcp_tool_call_event",
+            eventParams: CodexMcpToolCallEventParams(
+                base: CodexToolItemEventBase(
+                    threadID: notification.threadID,
+                    turnID: notification.turnID,
+                    itemID: id,
+                    appServerClient: context.appServerClient,
+                    runtime: context.runtime,
+                    threadSource: context.threadSource,
+                    subagentSource: context.subagentSource,
+                    parentThreadID: context.parentThreadID,
+                    toolName: tool,
+                    startedAtMilliseconds: startedAtMilliseconds,
+                    completedAtMilliseconds: completedAtMilliseconds,
+                    durationMilliseconds: completedAtMilliseconds >= startedAtMilliseconds
+                        ? completedAtMilliseconds - startedAtMilliseconds
+                        : nil,
+                    executionDurationMilliseconds: Self.unsignedMilliseconds(durationMs),
+                    reviewCount: 0,
+                    guardianReviewCount: 0,
+                    userReviewCount: 0,
+                    finalApprovalOutcome: .unknown,
+                    terminalStatus: outcome.terminalStatus,
+                    failureKind: outcome.failureKind,
+                    requestedAdditionalPermissions: false,
+                    requestedNetworkAccess: false
+                ),
+                mcpServerName: server,
+                mcpToolName: tool,
+                mcpErrorPresent: error != nil
+            )
+        )
+    }
+
+    private static func outcome(
+        for status: McpToolCallStatus
+    ) -> (terminalStatus: ToolItemTerminalStatus, failureKind: ToolItemFailureKind?)? {
+        switch status {
+        case .inProgress:
+            return nil
+        case .completed:
+            return (.completed, nil)
+        case .failed:
+            return (.failed, .toolError)
+        }
+    }
+
+    private static func unsignedMilliseconds(_ milliseconds: Int64?) -> UInt64? {
+        guard let milliseconds, milliseconds >= 0 else {
+            return nil
+        }
+        return UInt64(milliseconds)
+    }
+}
+
 private struct CommandExecutionItemKey: Hashable {
     let threadID: String
     let turnID: String
@@ -854,6 +1001,24 @@ private struct CommandExecutionItemKey: Hashable {
 }
 
 private struct FileChangeItemKey: Hashable {
+    let threadID: String
+    let turnID: String
+    let itemID: String
+
+    init(_ notification: ItemStartedNotification) {
+        self.threadID = notification.threadID
+        self.turnID = notification.turnID
+        self.itemID = notification.item.id
+    }
+
+    init(_ notification: ItemCompletedNotification) {
+        self.threadID = notification.threadID
+        self.turnID = notification.turnID
+        self.itemID = notification.item.id
+    }
+}
+
+private struct McpToolCallItemKey: Hashable {
     let threadID: String
     let turnID: String
     let itemID: String
