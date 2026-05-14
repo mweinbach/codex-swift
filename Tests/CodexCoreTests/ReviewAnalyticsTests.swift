@@ -365,6 +365,163 @@ final class ReviewAnalyticsTests: XCTestCase {
         ))
     }
 
+    func testCollabAgentToolCallAnalyticsReducerEmitsLifecycleEventLikeRust() throws {
+        var reducer = CodexCollabAgentToolCallAnalyticsReducer()
+        let item = AppServerThreadItem.collabAgentToolCall(
+            id: "collab-1",
+            tool: .spawnAgent,
+            status: .completed,
+            senderThreadID: "thread-sender",
+            receiverThreadIDs: ["child-1", "child-2", "child-3"],
+            prompt: "research the issue",
+            model: "gpt-5.5",
+            reasoningEffort: .high,
+            agentsStates: [
+                "child-1": AppServerCollabAgentState(status: .completed),
+                "child-2": AppServerCollabAgentState(status: .errored, message: "boom"),
+                "child-3": AppServerCollabAgentState(status: .running)
+            ]
+        )
+
+        reducer.ingestStarted(ItemStartedNotification(
+            item: item,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 7_000
+        ))
+        let event = try XCTUnwrap(reducer.ingestCompleted(
+            ItemCompletedNotification(
+                item: item,
+                threadID: "thread-1",
+                turnID: "turn-1",
+                completedAtMilliseconds: 7_125
+            ),
+            context: Self.analyticsContext
+        ))
+
+        try XCTAssertJSONObjectEqual(event, [
+            "event_type": "codex_collab_agent_tool_call_event",
+            "event_params": [
+                "thread_id": "thread-1",
+                "turn_id": "turn-1",
+                "item_id": "collab-1",
+                "app_server_client": [
+                    "product_client_id": "codex_tui",
+                    "client_name": "codex-tui",
+                    "client_version": "1.2.3",
+                    "rpc_transport": "websocket",
+                    "experimental_api_enabled": true
+                ],
+                "runtime": [
+                    "codex_rs_version": "0.99.0",
+                    "runtime_os": "macos",
+                    "runtime_os_version": "15.3.1",
+                    "runtime_arch": "aarch64"
+                ],
+                "thread_source": "user",
+                "subagent_source": nil,
+                "parent_thread_id": nil,
+                "tool_name": "spawn_agent",
+                "started_at_ms": 7_000,
+                "completed_at_ms": 7_125,
+                "duration_ms": 125,
+                "execution_duration_ms": nil,
+                "review_count": 0,
+                "guardian_review_count": 0,
+                "user_review_count": 0,
+                "final_approval_outcome": "unknown",
+                "terminal_status": "completed",
+                "failure_kind": nil,
+                "requested_additional_permissions": false,
+                "requested_network_access": false,
+                "sender_thread_id": "thread-sender",
+                "receiver_thread_count": 3,
+                "receiver_thread_ids": ["child-1", "child-2", "child-3"],
+                "requested_model": "gpt-5.5",
+                "requested_reasoning_effort": "high",
+                "agent_state_count": 3,
+                "completed_agent_count": 1,
+                "failed_agent_count": 1
+            ]
+        ])
+    }
+
+    func testCollabAgentToolCallAnalyticsReducerMapsFailedAndToolNamesLikeRust() throws {
+        let mappings: [(AppServerCollabAgentTool, String)] = [
+            (.spawnAgent, "spawn_agent"),
+            (.sendInput, "send_input"),
+            (.resumeAgent, "resume_agent"),
+            (.wait, "wait_agent"),
+            (.closeAgent, "close_agent")
+        ]
+
+        for (tool, expectedToolName) in mappings {
+            var reducer = CodexCollabAgentToolCallAnalyticsReducer()
+            let event = try Self.reduceCollabAgentToolCall(
+                tool: tool,
+                status: .failed,
+                receiverThreadIDs: [],
+                model: nil,
+                reasoningEffort: nil,
+                agentsStates: [
+                    "child-1": AppServerCollabAgentState(status: .shutdown),
+                    "child-2": AppServerCollabAgentState(status: .notFound)
+                ],
+                reducer: &reducer
+            )
+
+            XCTAssertEqual(event.eventParams.base.toolName, expectedToolName)
+            XCTAssertEqual(event.eventParams.base.terminalStatus, .failed)
+            XCTAssertEqual(event.eventParams.base.failureKind, .toolError)
+            XCTAssertEqual(event.eventParams.receiverThreadCount, 0)
+            XCTAssertEqual(event.eventParams.receiverThreadIDs, [])
+            XCTAssertNil(event.eventParams.requestedModel)
+            XCTAssertNil(event.eventParams.requestedReasoningEffort)
+            XCTAssertEqual(event.eventParams.agentStateCount, 2)
+            XCTAssertEqual(event.eventParams.completedAgentCount, 0)
+            XCTAssertEqual(event.eventParams.failedAgentCount, 2)
+        }
+    }
+
+    func testCollabAgentToolCallAnalyticsReducerSuppressesMissingStartDoubleCompletionAndInProgressLikeRust() {
+        var reducer = CodexCollabAgentToolCallAnalyticsReducer()
+        let completedItem = Self.collabAgentToolCallItem(status: .completed)
+        let inProgressItem = Self.collabAgentToolCallItem(status: .inProgress)
+        let completed = ItemCompletedNotification(
+            item: completedItem,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            completedAtMilliseconds: 20
+        )
+
+        XCTAssertNil(reducer.ingestCompleted(completed, context: Self.analyticsContext))
+
+        reducer.ingestStarted(ItemStartedNotification(
+            item: completedItem,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 10
+        ))
+        XCTAssertNotNil(reducer.ingestCompleted(completed, context: Self.analyticsContext))
+        XCTAssertNil(reducer.ingestCompleted(completed, context: Self.analyticsContext))
+
+        reducer.ingestStarted(ItemStartedNotification(
+            item: inProgressItem,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 10
+        ))
+        XCTAssertNil(reducer.ingestCompleted(
+            ItemCompletedNotification(
+                item: inProgressItem,
+                threadID: "thread-1",
+                turnID: "turn-1",
+                completedAtMilliseconds: 20
+            ),
+            context: Self.analyticsContext
+        ))
+    }
+
     func testMcpToolCallAnalyticsReducerEmitsLifecycleEventLikeRust() throws {
         var reducer = CodexMcpToolCallAnalyticsReducer()
         let startedItem = AppServerThreadItem.mcpToolCall(
@@ -1017,6 +1174,63 @@ final class ReviewAnalyticsTests: XCTestCase {
         reducer: inout CodexDynamicToolCallAnalyticsReducer
     ) throws -> CodexDynamicToolCallEventRequest {
         let item = dynamicToolCallItem(status: status, contentItems: contentItems, success: success)
+        reducer.ingestStarted(ItemStartedNotification(
+            item: item,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 10
+        ))
+        return try XCTUnwrap(reducer.ingestCompleted(
+            ItemCompletedNotification(
+                item: item,
+                threadID: "thread-1",
+                turnID: "turn-1",
+                completedAtMilliseconds: 20
+            ),
+            context: analyticsContext
+        ))
+    }
+
+    private static func collabAgentToolCallItem(
+        tool: AppServerCollabAgentTool = .spawnAgent,
+        status: AppServerCollabAgentToolCallStatus,
+        receiverThreadIDs: [String] = ["child-1"],
+        model: String? = "gpt-5.5",
+        reasoningEffort: ReasoningEffort? = .medium,
+        agentsStates: [String: AppServerCollabAgentState] = [
+            "child-1": AppServerCollabAgentState(status: .completed)
+        ]
+    ) -> AppServerThreadItem {
+        .collabAgentToolCall(
+            id: "collab-\(tool.rawValue)-\(status.rawValue)",
+            tool: tool,
+            status: status,
+            senderThreadID: "thread-sender",
+            receiverThreadIDs: receiverThreadIDs,
+            prompt: "work on this",
+            model: model,
+            reasoningEffort: reasoningEffort,
+            agentsStates: agentsStates
+        )
+    }
+
+    private static func reduceCollabAgentToolCall(
+        tool: AppServerCollabAgentTool,
+        status: AppServerCollabAgentToolCallStatus,
+        receiverThreadIDs: [String],
+        model: String?,
+        reasoningEffort: ReasoningEffort?,
+        agentsStates: [String: AppServerCollabAgentState],
+        reducer: inout CodexCollabAgentToolCallAnalyticsReducer
+    ) throws -> CodexCollabAgentToolCallEventRequest {
+        let item = collabAgentToolCallItem(
+            tool: tool,
+            status: status,
+            receiverThreadIDs: receiverThreadIDs,
+            model: model,
+            reasoningEffort: reasoningEffort,
+            agentsStates: agentsStates
+        )
         reducer.ingestStarted(ItemStartedNotification(
             item: item,
             threadID: "thread-1",

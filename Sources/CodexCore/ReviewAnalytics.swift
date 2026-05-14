@@ -761,6 +761,130 @@ public struct CodexDynamicToolCallEventRequest: Equatable, Encodable, Sendable {
     }
 }
 
+public struct CodexCollabAgentStateCounts: Equatable, Sendable {
+    public let total: UInt64
+    public let completed: UInt64
+    public let failed: UInt64
+
+    public init(total: UInt64, completed: UInt64, failed: UInt64) {
+        self.total = total
+        self.completed = completed
+        self.failed = failed
+    }
+
+    public init(states: [String: AppServerCollabAgentState]) {
+        var completed: UInt64 = 0
+        var failed: UInt64 = 0
+
+        for state in states.values {
+            switch state.status {
+            case .completed:
+                completed += 1
+            case .errored, .shutdown, .notFound:
+                failed += 1
+            case .pendingInit, .running, .interrupted:
+                break
+            }
+        }
+
+        self.init(total: UInt64(states.count), completed: completed, failed: failed)
+    }
+}
+
+public struct CodexCollabAgentToolCallEventParams: Equatable, Encodable, Sendable {
+    public let base: CodexToolItemEventBase
+    public let senderThreadID: String
+    public let receiverThreadCount: UInt64
+    public let receiverThreadIDs: [String]?
+    public let requestedModel: String?
+    public let requestedReasoningEffort: String?
+    public let agentStateCount: UInt64?
+    public let completedAgentCount: UInt64?
+    public let failedAgentCount: UInt64?
+
+    public init(
+        base: CodexToolItemEventBase,
+        senderThreadID: String,
+        receiverThreadCount: UInt64,
+        receiverThreadIDs: [String]? = nil,
+        requestedModel: String? = nil,
+        requestedReasoningEffort: String? = nil,
+        agentStateCount: UInt64? = nil,
+        completedAgentCount: UInt64? = nil,
+        failedAgentCount: UInt64? = nil
+    ) {
+        self.base = base
+        self.senderThreadID = senderThreadID
+        self.receiverThreadCount = receiverThreadCount
+        self.receiverThreadIDs = receiverThreadIDs
+        self.requestedModel = requestedModel
+        self.requestedReasoningEffort = requestedReasoningEffort
+        self.agentStateCount = agentStateCount
+        self.completedAgentCount = completedAgentCount
+        self.failedAgentCount = failedAgentCount
+    }
+
+    public init(
+        base: CodexToolItemEventBase,
+        senderThreadID: String,
+        receiverThreadIDs: [String],
+        requestedModel: String? = nil,
+        requestedReasoningEffort: String? = nil,
+        stateCounts: CodexCollabAgentStateCounts
+    ) {
+        self.init(
+            base: base,
+            senderThreadID: senderThreadID,
+            receiverThreadCount: UInt64(receiverThreadIDs.count),
+            receiverThreadIDs: receiverThreadIDs,
+            requestedModel: requestedModel,
+            requestedReasoningEffort: requestedReasoningEffort,
+            agentStateCount: stateCounts.total,
+            completedAgentCount: stateCounts.completed,
+            failedAgentCount: stateCounts.failed
+        )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case senderThreadID = "sender_thread_id"
+        case receiverThreadCount = "receiver_thread_count"
+        case receiverThreadIDs = "receiver_thread_ids"
+        case requestedModel = "requested_model"
+        case requestedReasoningEffort = "requested_reasoning_effort"
+        case agentStateCount = "agent_state_count"
+        case completedAgentCount = "completed_agent_count"
+        case failedAgentCount = "failed_agent_count"
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        try base.encode(to: encoder)
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(senderThreadID, forKey: .senderThreadID)
+        try container.encode(receiverThreadCount, forKey: .receiverThreadCount)
+        try container.encodeNilOrValue(receiverThreadIDs, forKey: .receiverThreadIDs)
+        try container.encodeNilOrValue(requestedModel, forKey: .requestedModel)
+        try container.encodeNilOrValue(requestedReasoningEffort, forKey: .requestedReasoningEffort)
+        try container.encodeNilOrValue(agentStateCount, forKey: .agentStateCount)
+        try container.encodeNilOrValue(completedAgentCount, forKey: .completedAgentCount)
+        try container.encodeNilOrValue(failedAgentCount, forKey: .failedAgentCount)
+    }
+}
+
+public struct CodexCollabAgentToolCallEventRequest: Equatable, Encodable, Sendable {
+    public let eventType: String
+    public let eventParams: CodexCollabAgentToolCallEventParams
+
+    public init(eventType: String, eventParams: CodexCollabAgentToolCallEventParams) {
+        self.eventType = eventType
+        self.eventParams = eventParams
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case eventType = "event_type"
+        case eventParams = "event_params"
+    }
+}
+
 public enum WebSearchActionKind: String, Codable, Equatable, Sendable {
     case search
     case openPage = "open_page"
@@ -897,6 +1021,7 @@ public struct CodexCommandExecutionAnalyticsContext: Equatable, Sendable {
 public typealias CodexFileChangeAnalyticsContext = CodexCommandExecutionAnalyticsContext
 public typealias CodexMcpToolCallAnalyticsContext = CodexCommandExecutionAnalyticsContext
 public typealias CodexDynamicToolCallAnalyticsContext = CodexCommandExecutionAnalyticsContext
+public typealias CodexCollabAgentToolCallAnalyticsContext = CodexCommandExecutionAnalyticsContext
 public typealias CodexWebSearchAnalyticsContext = CodexCommandExecutionAnalyticsContext
 public typealias CodexImageGenerationAnalyticsContext = CodexCommandExecutionAnalyticsContext
 
@@ -1295,6 +1420,121 @@ public struct CodexDynamicToolCallAnalyticsReducer: Sendable {
     }
 }
 
+public struct CodexCollabAgentToolCallAnalyticsReducer: Sendable {
+    private var startedAtMilliseconds: [CollabAgentToolCallItemKey: UInt64] = [:]
+
+    public init() {}
+
+    public mutating func ingestStarted(_ notification: ItemStartedNotification) {
+        guard case .collabAgentToolCall = notification.item,
+              let startedAtMilliseconds = Self.unsignedMilliseconds(notification.startedAtMilliseconds)
+        else {
+            return
+        }
+
+        self.startedAtMilliseconds[CollabAgentToolCallItemKey(notification)] = startedAtMilliseconds
+    }
+
+    public mutating func ingestCompleted(
+        _ notification: ItemCompletedNotification,
+        context: CodexCollabAgentToolCallAnalyticsContext
+    ) -> CodexCollabAgentToolCallEventRequest? {
+        let key = CollabAgentToolCallItemKey(notification)
+        guard let startedAtMilliseconds = startedAtMilliseconds.removeValue(forKey: key),
+              let completedAtMilliseconds = Self.unsignedMilliseconds(notification.completedAtMilliseconds)
+        else {
+            return nil
+        }
+
+        guard case let .collabAgentToolCall(
+            id,
+            tool,
+            status,
+            senderThreadID,
+            receiverThreadIDs,
+            _,
+            model,
+            reasoningEffort,
+            agentsStates
+        ) = notification.item,
+            let outcome = Self.outcome(for: status)
+        else {
+            return nil
+        }
+
+        return CodexCollabAgentToolCallEventRequest(
+            eventType: "codex_collab_agent_tool_call_event",
+            eventParams: CodexCollabAgentToolCallEventParams(
+                base: CodexToolItemEventBase(
+                    threadID: notification.threadID,
+                    turnID: notification.turnID,
+                    itemID: id,
+                    appServerClient: context.appServerClient,
+                    runtime: context.runtime,
+                    threadSource: context.threadSource,
+                    subagentSource: context.subagentSource,
+                    parentThreadID: context.parentThreadID,
+                    toolName: Self.toolName(for: tool),
+                    startedAtMilliseconds: startedAtMilliseconds,
+                    completedAtMilliseconds: completedAtMilliseconds,
+                    durationMilliseconds: completedAtMilliseconds >= startedAtMilliseconds
+                        ? completedAtMilliseconds - startedAtMilliseconds
+                        : nil,
+                    executionDurationMilliseconds: nil,
+                    reviewCount: 0,
+                    guardianReviewCount: 0,
+                    userReviewCount: 0,
+                    finalApprovalOutcome: .unknown,
+                    terminalStatus: outcome.terminalStatus,
+                    failureKind: outcome.failureKind,
+                    requestedAdditionalPermissions: false,
+                    requestedNetworkAccess: false
+                ),
+                senderThreadID: senderThreadID,
+                receiverThreadIDs: receiverThreadIDs,
+                requestedModel: model,
+                requestedReasoningEffort: reasoningEffort?.rawValue,
+                stateCounts: CodexCollabAgentStateCounts(states: agentsStates)
+            )
+        )
+    }
+
+    private static func outcome(
+        for status: AppServerCollabAgentToolCallStatus
+    ) -> (terminalStatus: ToolItemTerminalStatus, failureKind: ToolItemFailureKind?)? {
+        switch status {
+        case .inProgress:
+            return nil
+        case .completed:
+            return (.completed, nil)
+        case .failed:
+            return (.failed, .toolError)
+        }
+    }
+
+    private static func toolName(for tool: AppServerCollabAgentTool) -> String {
+        switch tool {
+        case .spawnAgent:
+            return "spawn_agent"
+        case .sendInput:
+            return "send_input"
+        case .resumeAgent:
+            return "resume_agent"
+        case .wait:
+            return "wait_agent"
+        case .closeAgent:
+            return "close_agent"
+        }
+    }
+
+    private static func unsignedMilliseconds(_ milliseconds: Int64?) -> UInt64? {
+        guard let milliseconds, milliseconds >= 0 else {
+            return nil
+        }
+        return UInt64(milliseconds)
+    }
+}
+
 public struct CodexWebSearchAnalyticsReducer: Sendable {
     private var startedAtMilliseconds: [WebSearchItemKey: UInt64] = [:]
 
@@ -1521,6 +1761,24 @@ private struct McpToolCallItemKey: Hashable {
 }
 
 private struct DynamicToolCallItemKey: Hashable {
+    let threadID: String
+    let turnID: String
+    let itemID: String
+
+    init(_ notification: ItemStartedNotification) {
+        self.threadID = notification.threadID
+        self.turnID = notification.turnID
+        self.itemID = notification.item.id
+    }
+
+    init(_ notification: ItemCompletedNotification) {
+        self.threadID = notification.threadID
+        self.turnID = notification.turnID
+        self.itemID = notification.item.id
+    }
+}
+
+private struct CollabAgentToolCallItemKey: Hashable {
     let threadID: String
     let turnID: String
     let itemID: String
