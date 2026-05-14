@@ -850,6 +850,46 @@ final class ConfigRequirementsTests: XCTestCase {
         XCTAssertEqual(CloudRequirementsLoadErrorCode.requestFailed.rawValue, "RequestFailed")
         XCTAssertEqual(CloudRequirementsLoadErrorCode.internalError.rawValue, "Internal")
     }
+
+    func testCloudRequirementsCachePayloadSignsAndParsesLikeRust() throws {
+        let cachedAt = Date(timeIntervalSince1970: 1_778_752_800)
+        let cacheFile = try CloudRequirements.makeCacheFile(
+            cachedAt: cachedAt,
+            chatgptUserID: "user-12345",
+            accountID: "account-12345",
+            contents: #"allowed_approval_policies = ["never"]"#
+        )
+
+        let payloadBytes = try CloudRequirements.cachePayloadBytes(cacheFile.signedPayload)
+        XCTAssertEqual(
+            String(decoding: payloadBytes, as: UTF8.self),
+            #"{"cached_at":"2026-05-14T10:00:00Z","expires_at":"2026-05-14T10:30:00Z","chatgpt_user_id":"user-12345","account_id":"account-12345","contents":"allowed_approval_policies = [\"never\"]"}"#
+        )
+        XCTAssertEqual(cacheFile.signature, "yjgMb/kCjSFMpyh+SyIUwf21DmT0yoW6E6iktDwJpZA=")
+        XCTAssertTrue(CloudRequirements.verifyCacheSignature(payloadBytes: payloadBytes, signature: cacheFile.signature))
+        XCTAssertFalse(CloudRequirements.verifyCacheSignature(payloadBytes: payloadBytes, signature: "not-base64"))
+
+        let requirements = try XCTUnwrap(cacheFile.signedPayload.requirements())
+        XCTAssertEqual(try requirements.requirements().approvalPolicy.value, .never)
+        XCTAssertFalse(cacheFile.signedPayload.isExpired(now: cachedAt.addingTimeInterval(60)))
+        XCTAssertTrue(cacheFile.signedPayload.isExpired(now: cachedAt.addingTimeInterval(CloudRequirements.cacheTTL)))
+    }
+
+    func testCloudRequirementsCacheFileUsesRustSnakeCaseJSON() throws {
+        let cacheFile = try CloudRequirements.makeCacheFile(
+            cachedAt: Date(timeIntervalSince1970: 1_778_752_800),
+            chatgptUserID: nil,
+            accountID: nil,
+            contents: nil
+        )
+
+        let prettyJSON = String(decoding: try CloudRequirements.prettyCacheFileData(cacheFile), as: UTF8.self)
+        XCTAssertTrue(prettyJSON.contains(#""signed_payload" : {"#))
+        XCTAssertTrue(prettyJSON.contains(#""signature" : ""#))
+        XCTAssertTrue(prettyJSON.contains(#""chatgpt_user_id" : null"#))
+        XCTAssertTrue(prettyJSON.contains(#""account_id" : null"#))
+        XCTAssertTrue(prettyJSON.contains(#""contents" : null"#))
+    }
 }
 
 private actor Counter {
