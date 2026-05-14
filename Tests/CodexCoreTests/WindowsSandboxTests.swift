@@ -52,6 +52,66 @@ final class WindowsSandboxTests: XCTestCase {
         #endif
     }
 
+    func testRuntimeBinDirectoryUsesLocalAppDataBeforeUserProfileLikeRust() throws {
+        let dir = try WindowsSandboxTemporaryDirectory()
+        let localAppData = dir.url.appendingPathComponent("local-app-data", isDirectory: true)
+        let userProfile = dir.url.appendingPathComponent("profile", isDirectory: true)
+        let runtimeBin = localAppData
+            .appendingPathComponent("OpenAI", isDirectory: true)
+            .appendingPathComponent("Codex", isDirectory: true)
+            .appendingPathComponent("bin", isDirectory: true)
+        let fallbackBin = userProfile
+            .appendingPathComponent("AppData", isDirectory: true)
+            .appendingPathComponent("Local", isDirectory: true)
+            .appendingPathComponent("OpenAI", isDirectory: true)
+            .appendingPathComponent("Codex", isDirectory: true)
+            .appendingPathComponent("bin", isDirectory: true)
+        try FileManager.default.createDirectory(at: runtimeBin, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: fallbackBin, withIntermediateDirectories: true)
+
+        XCTAssertEqual(
+            windowsSandboxCodexAppRuntimeBinDirectory(
+                environment: [
+                    "LOCALAPPDATA": localAppData.path,
+                    "USERPROFILE": userProfile.path
+                ]
+            ),
+            runtimeBin
+        )
+    }
+
+    func testRuntimeBinDirectoryFallsBackToUserProfileLikeRust() throws {
+        let dir = try WindowsSandboxTemporaryDirectory()
+        let userProfile = dir.url.appendingPathComponent("profile", isDirectory: true)
+        let runtimeBin = userProfile
+            .appendingPathComponent("AppData", isDirectory: true)
+            .appendingPathComponent("Local", isDirectory: true)
+            .appendingPathComponent("OpenAI", isDirectory: true)
+            .appendingPathComponent("Codex", isDirectory: true)
+            .appendingPathComponent("bin", isDirectory: true)
+        try FileManager.default.createDirectory(at: runtimeBin, withIntermediateDirectories: true)
+
+        XCTAssertEqual(
+            windowsSandboxCodexAppRuntimeBinDirectory(
+                environment: ["USERPROFILE": userProfile.path]
+            ),
+            runtimeBin
+        )
+    }
+
+    func testRuntimeBinDirectoryNoOpsWhenMissingLikeRust() throws {
+        let dir = try WindowsSandboxTemporaryDirectory()
+        let localAppData = dir.url.appendingPathComponent("local-app-data", isDirectory: true)
+        try FileManager.default.createDirectory(at: localAppData, withIntermediateDirectories: true)
+
+        XCTAssertNil(
+            windowsSandboxCodexAppRuntimeBinDirectory(
+                environment: ["LOCALAPPDATA": localAppData.path]
+            )
+        )
+        XCTAssertNil(windowsSandboxCodexAppRuntimeBinDirectory(environment: [:]))
+    }
+
     func testPersistSetupModeWritesWindowsSandboxAndClearsLegacyFlags() throws {
         let dir = try WindowsSandboxTemporaryDirectory()
         let configFile = dir.url.appendingPathComponent("config.toml")

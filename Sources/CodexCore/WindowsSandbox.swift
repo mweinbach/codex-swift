@@ -64,6 +64,38 @@ public func runWindowsSandboxSetup(_ request: WindowsSandboxSetupRequest) throws
     #endif
 }
 
+public func windowsSandboxCodexAppRuntimeBinDirectory(
+    environment: [String: String],
+    fileManager: FileManager = .default
+) -> URL? {
+    let localAppData: URL?
+    if let value = environment["LOCALAPPDATA"], !value.isEmpty {
+        localAppData = URL(fileURLWithPath: value, isDirectory: true)
+    } else if let value = environment["USERPROFILE"], !value.isEmpty {
+        localAppData = URL(fileURLWithPath: value, isDirectory: true)
+            .appendingPathComponent("AppData", isDirectory: true)
+            .appendingPathComponent("Local", isDirectory: true)
+    } else {
+        localAppData = nil
+    }
+
+    guard let localAppData else {
+        return nil
+    }
+
+    let runtimeBin = localAppData
+        .appendingPathComponent("OpenAI", isDirectory: true)
+        .appendingPathComponent("Codex", isDirectory: true)
+        .appendingPathComponent("bin", isDirectory: true)
+    var isDirectory: ObjCBool = false
+    guard fileManager.fileExists(atPath: runtimeBin.path, isDirectory: &isDirectory),
+          isDirectory.boolValue
+    else {
+        return nil
+    }
+    return runtimeBin
+}
+
 public func persistWindowsSandboxSetupMode(
     codexHome: URL,
     activeProfile: String?,

@@ -1105,6 +1105,8 @@ Recent upstream audit checkpoint:
   - added public `parseCommand` parity coverage for Rust tree-sitter cases such as `-g"*.swift"` and `-g'*.txt'`, while preserving Rust's rejection of concatenated shell words that contain variable expansion.
 - `codex-rs/core/src/windows_sandbox.rs` off-Windows setup behavior
   - factored Windows sandbox setup/readiness into `CodexCore`, matching Rust's off-Windows setup-completion default and exact elevated/legacy setup error strings; the app-server `windowsSandbox/readiness` and `windowsSandbox/setupStart` routes now delegate to the shared helper instead of carrying route-local placeholder behavior.
+- `codex-rs/windows-sandbox-rs/src/setup_runtime_bin.rs` desktop runtime bin discovery
+  - added Swift coverage for Rust's packaged Windows desktop runtime-bin discovery path, including `LOCALAPPDATA` precedence, `USERPROFILE/AppData/Local` fallback, and clean no-op when `OpenAI/Codex/bin` is absent. Native Windows ACL repair remains pending with the broader Windows sandbox runtime.
 - `codex-rs/shell-command/src/powershell.rs` UTF-8 output prefixing
   - added Swift PowerShell command prefixing with Rust's `[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;` prelude, including idempotence, accepted flag validation, and non-interactive shell/unified exec wiring.
 - `codex-rs/shell-command/src/powershell.rs` wrapper command extraction
