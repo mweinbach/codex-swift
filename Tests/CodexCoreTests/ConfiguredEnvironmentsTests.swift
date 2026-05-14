@@ -83,6 +83,44 @@ final class ConfiguredEnvironmentsTests: XCTestCase {
         ])
     }
 
+    func testEnvironmentContextEnvironmentsUseDefaultFirstSelections() throws {
+        let snapshot = try ConfiguredEnvironmentLoader.snapshot(fromToml: """
+        default = "dev"
+
+        [[environments]]
+        id = "dev"
+        program = "ssh"
+
+        [[environments]]
+        id = "qa"
+        url = "ws://127.0.0.1:4512"
+        """)
+
+        XCTAssertEqual(
+            snapshot.environmentContextEnvironments(cwd: "/workspace", shell: Shell(shellType: .zsh, shellPath: "/bin/zsh")),
+            [
+                EnvironmentContextEnvironment(id: "dev", cwd: "/workspace", shell: "zsh"),
+                EnvironmentContextEnvironment(id: "local", cwd: "/workspace", shell: "zsh"),
+                EnvironmentContextEnvironment(id: "qa", cwd: "/workspace", shell: "zsh")
+            ]
+        )
+    }
+
+    func testLegacySnapshotStillExpandsRemoteBeforeLocalForExecServerURL() {
+        let snapshot = ConfiguredEnvironmentLoader.legacyEnvironmentSnapshot(environment: [
+            ConfiguredEnvironmentLoader.codexExecServerURLEnvironmentVariable: "ws://127.0.0.1:8765"
+        ])
+
+        XCTAssertEqual(snapshot.defaultEnvironmentIDs(), ["remote", "local"])
+        XCTAssertEqual(
+            snapshot.environmentContextEnvironments(cwd: "/workspace", shell: Shell(shellType: .bash, shellPath: "/bin/bash")),
+            [
+                EnvironmentContextEnvironment(id: "remote", cwd: "/workspace", shell: "bash"),
+                EnvironmentContextEnvironment(id: "local", cwd: "/workspace", shell: "bash")
+            ]
+        )
+    }
+
     func testLoadCodexHomeEnvironmentsTomlParsesWebsocketAndStdioEntries() throws {
         let temp = try ConfiguredEnvironmentTemporaryDirectory()
         try """

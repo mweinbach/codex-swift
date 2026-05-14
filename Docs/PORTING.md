@@ -357,7 +357,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/core/src/function_tool.rs`
   - function-call error variants and Rust `thiserror` display strings for respond-to-model, denied, missing local shell call id, fatal errors, and unsupported function/custom tool calls
 - `codex-rs/exec-server/src/environment_{provider,toml}.rs` and `codex-rs/core/src/environment_selection.rs`
-  - `$CODEX_HOME/environments.toml` loading, config-path inspect error wrapping, legacy `CODEX_EXEC_SERVER_URL` fallback, environment id/default validation, websocket URL scheme/host/port validation, websocket and stdio environment entries, relative stdio cwd resolution, duplicate TOML key rejection, empty env-table handling, and default-first turn environment selections
+  - `$CODEX_HOME/environments.toml` loading, config-path inspect error wrapping, legacy `CODEX_EXEC_SERVER_URL` fallback, environment id/default validation, websocket URL scheme/host/port validation, websocket and stdio environment entries, relative stdio cwd resolution, duplicate TOML key rejection, empty env-table handling, default-first turn environment selections, and non-interactive exec prompt/tool-call wiring with `--ignore-user-config` preserving the legacy env-var provider
 - `codex-rs/core/src/context_manager/normalize.rs`
   - function/custom/local-shell call-output invariant repair, synthetic aborted outputs for missing pairs, orphan output removal, and paired-item removal helpers for transcript trimming
 - `codex-rs/protocol/src/protocol.rs` review request/target models and `codex-rs/core/src/review_prompts.rs`

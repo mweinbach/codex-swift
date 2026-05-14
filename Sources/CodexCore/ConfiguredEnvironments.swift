@@ -91,6 +91,16 @@ public struct ConfiguredEnvironmentSnapshot: Equatable, Sendable {
     public func defaultThreadEnvironmentSelections(cwd: String) -> [TurnEnvironmentSelection] {
         defaultEnvironmentIDs().map { TurnEnvironmentSelection(environmentID: $0, cwd: cwd) }
     }
+
+    public func environmentContextEnvironments(cwd: String, shell: Shell) -> [EnvironmentContextEnvironment] {
+        defaultThreadEnvironmentSelections(cwd: cwd).map { selection in
+            EnvironmentContextEnvironment(
+                id: selection.environmentID,
+                cwd: selection.cwd,
+                shell: shell.name
+            )
+        }
+    }
 }
 
 public enum ConfiguredEnvironmentLoader {

@@ -913,6 +913,10 @@ private func runNonInteractiveExec(
         shell: ShellResolver.defaultUserShell(),
         features: settings.features
     )
+    let configuredEnvironmentSnapshot = try loaderOverrides.ignoreUserConfig
+        ? ConfiguredEnvironmentLoader.legacyEnvironmentSnapshot(environment: environment)
+        : ConfiguredEnvironmentLoader.load(codexHome: codexHome, environment: environment)
+    let turnEnvironmentSelections = configuredEnvironmentSnapshot.defaultThreadEnvironmentSelections(cwd: cwd.path)
     let configuredTools = NonInteractiveExec.toolSpecs(modelFamily: modelFamily, config: settings)
     let projectInstructions = ProjectDoc.getUserInstructions(
         config: ProjectDocConfig(runtimeConfig: settings, cwd: cwd)
@@ -950,6 +954,10 @@ private func runNonInteractiveExec(
         multiAgentV2UsageHintText: multiAgentV2UsageHintText,
         availableSkills: availableSkills,
         userInstructions: projectInstructions,
+        environmentContextEnvironments: configuredEnvironmentSnapshot.environmentContextEnvironments(
+            cwd: cwd.path,
+            shell: shell
+        ),
         history: history,
         tools: configuredTools.map(\.spec),
         parallelToolCalls: modelFamily.supportsParallelToolCalls
@@ -1098,6 +1106,8 @@ private func runNonInteractiveExec(
                 allowLoginShell: settings.allowLoginShell,
                 canRequestOriginalImageDetail: modelFamily.supportsImageDetailOriginal,
                 backgroundTerminalMaxTimeoutMS: settings.backgroundTerminalMaxTimeoutMS,
+                turnEnvironmentSelections: turnEnvironmentSelections,
+                configuredEnvironmentSnapshot: configuredEnvironmentSnapshot,
                 features: settings.features,
                 execPolicyManager: execPolicyManager
             )
