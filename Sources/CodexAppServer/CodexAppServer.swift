@@ -1254,7 +1254,7 @@ public enum CodexAppServer {
         let approvalsReviewer = try approvalsReviewerParam(params?["approvalsReviewer"])
             ?? runtimeConfig.approvalsReviewer
         let serviceTier = try resolvedServiceTier(
-            serviceTierParam(params?["serviceTier"]),
+            serviceTierParam(params?["serviceTier"], features: runtimeConfig.features),
             fallback: runtimeConfig.serviceTier
         )
         let instructionSources = instructionSourcePaths(
@@ -1858,7 +1858,7 @@ public enum CodexAppServer {
         let approvalsReviewer = try approvalsReviewerParam(params?["approvalsReviewer"])
             ?? runtimeConfig.approvalsReviewer
         let serviceTier = try resolvedServiceTier(
-            serviceTierParam(params?["serviceTier"]),
+            serviceTierParam(params?["serviceTier"], features: runtimeConfig.features),
             fallback: runtimeConfig.serviceTier
         )
         let baseSandbox = runtimeConfig.legacySandboxPolicy()
@@ -1972,7 +1972,7 @@ public enum CodexAppServer {
         let approvalsReviewer = try approvalsReviewerParam(params?["approvalsReviewer"])
             ?? runtimeConfig.approvalsReviewer
         let serviceTier = try resolvedServiceTier(
-            serviceTierParam(params?["serviceTier"]),
+            serviceTierParam(params?["serviceTier"], features: runtimeConfig.features),
             fallback: runtimeConfig.serviceTier
         )
         let baseSandbox = sandboxModeParam(params?["sandbox"])
@@ -2415,7 +2415,7 @@ public enum CodexAppServer {
         let input = v2UserInputs(params?["input"])
         try validateV2UserInputLimit(input)
         _ = try approvalsReviewerParam(params?["approvalsReviewer"])
-        _ = try serviceTierParam(params?["serviceTier"])
+        _ = try serviceTierParam(params?["serviceTier"], features: .withDefaults())
         let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
         let conversationID: ConversationId
         do {
@@ -2721,7 +2721,7 @@ public enum CodexAppServer {
         return rawValue
     }
 
-    private static func serviceTierParam(_ value: Any?) throws -> NullableStringPatch {
+    private static func serviceTierParam(_ value: Any?, features: FeatureStates) throws -> NullableStringPatch {
         guard let value else {
             return .absent
         }
@@ -2731,7 +2731,10 @@ public enum CodexAppServer {
         guard let rawValue = value as? String else {
             throw AppServerError.invalidRequest("invalid value for field `serviceTier`")
         }
-        return .set(normalizedServiceTier(rawValue))
+        guard let normalized = normalizedServiceTier(rawValue, features: features) else {
+            return .clear
+        }
+        return .set(normalized)
     }
 
     private static func resolvedServiceTier(_ patch: NullableStringPatch, fallback: String?) -> String? {
@@ -2745,8 +2748,15 @@ public enum CodexAppServer {
         }
     }
 
-    private static func normalizedServiceTier(_ value: String) -> String {
-        ServiceTier.fromRequestValue(value)?.requestValue ?? value
+    private static func normalizedServiceTier(_ value: String, features: FeatureStates) -> String? {
+        switch ServiceTier.fromRequestValue(value) {
+        case .fast:
+            return features.isEnabled(.fastMode) ? ServiceTier.fast.requestValue : nil
+        case let serviceTier?:
+            return serviceTier.requestValue
+        case nil:
+            return value
+        }
     }
 
     private static func unknownVariant(_ rawValue: String, expected: [String]) -> AppServerError {
@@ -3026,7 +3036,7 @@ public enum CodexAppServer {
         let input = v2UserInput(params?["input"])
         try validateV2UserInputLimit((text: input.text, images: input.images))
         _ = try approvalsReviewerParam(params?["approvalsReviewer"])
-        _ = try serviceTierParam(params?["serviceTier"])
+        _ = try serviceTierParam(params?["serviceTier"], features: .withDefaults())
         let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
         let conversationID: ConversationId
         do {
@@ -3038,6 +3048,12 @@ public enum CodexAppServer {
         let existing = try RolloutSummary(path: rolloutPath, defaultProvider: configuration.defaultModelProvider)
         let environments = try turnEnvironmentSelections(params?["environments"], configuration: configuration)
         let cwd = try optionalAbsolutePathParam(params?["cwd"], name: "cwd")
+        let serviceTierFeatures = params?["serviceTier"] == nil
+            ? FeatureStates.withDefaults()
+            : try loadRuntimeConfigForThreadStartup(
+                configuration: configuration,
+                cwd: URL(fileURLWithPath: cwd ?? existing.cwd, isDirectory: true)
+            ).features
         let approvalPolicy = try turnStartApprovalPolicyParam(params?["approvalPolicy"])
         let approvalsReviewer = try approvalsReviewerParam(params?["approvalsReviewer"])
         let sandboxPolicy = try commandExecSandboxPolicy(params?["sandboxPolicy"])
@@ -3045,7 +3061,7 @@ public enum CodexAppServer {
         let model = stringParam(params?["model"])
         let effort = try turnStartReasoningEffortParam(params?["effort"])
         let summary = try turnStartReasoningSummaryParam(params?["summary"])
-        let serviceTier = try serviceTierParam(params?["serviceTier"])
+        let serviceTier = try serviceTierParam(params?["serviceTier"], features: serviceTierFeatures)
         let collaborationMode = try turnStartCollaborationModeParam(params?["collaborationMode"])
         let personality = try turnStartPersonalityParam(params?["personality"])
         let outputSchema = try jsonValueParam(params?["outputSchema"], fieldName: "outputSchema")

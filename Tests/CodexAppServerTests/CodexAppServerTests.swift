@@ -2865,6 +2865,35 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(clearedResult["serviceTier"] is NSNull)
     }
 
+    func testThreadLifecycleServiceTierDropsFastWhenFastModeDisabledLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [features]
+        fast_mode = false
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let start = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider","serviceTier":"fast"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(start[0]["result"] as? [String: Any])
+        XCTAssertTrue(startResult["serviceTier"] is NSNull)
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let resume = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"thread/resume","params":{"threadId":"\#(threadID)","serviceTier":"fast"}}"#.utf8
+        )))
+        let resumeResult = try XCTUnwrap(resume[0]["result"] as? [String: Any])
+        XCTAssertTrue(resumeResult["serviceTier"] is NSNull)
+
+        let fork = try decodeMessages(processor.processLine(Data(
+            #"{"id":3,"method":"thread/fork","params":{"threadId":"\#(threadID)","serviceTier":"fast"}}"#.utf8
+        )))
+        let forkResult = try XCTUnwrap(fork[0]["result"] as? [String: Any])
+        XCTAssertTrue(forkResult["serviceTier"] is NSNull)
+    }
+
     func testThreadAndTurnServiceTierRejectMalformedValuesLikeRust() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
@@ -3616,6 +3645,36 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(params.summary, .auto)
         XCTAssertEqual(params.serviceTier, .string("priority"))
         XCTAssertEqual(params.personality, .string("pragmatic"))
+    }
+
+    func testTurnStartDropsFastServiceTierWhenFastModeDisabledLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [features]
+        fast_mode = false
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let capture = AppServerCoreOpCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            coreOpSubmitter: capture.submit,
+            experimentalAPIEnabled: true
+        )
+        let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        _ = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Override"}],"serviceTier":"fast"}}"#.utf8
+        )))
+
+        let submissions = capture.submissions
+        XCTAssertEqual(submissions.count, 1)
+        guard case let .userInputWithTurnContext(params) = submissions[0].op else {
+            XCTFail("expected runtime turn start to submit context-aware user input")
+            return
+        }
+        XCTAssertEqual(params.serviceTier, .null)
     }
 
     func testTurnSteerRuntimeSubmitterFailuresReturnRustInternalErrors() throws {
