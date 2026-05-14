@@ -1571,6 +1571,120 @@ final class AppServerThreadProtocolTests: XCTestCase {
         XCTAssertEqual(decodedSummaryDelta.itemID, "reasoning-1")
     }
 
+    func testItemLifecycleNotificationsUseRustProtocolShape() throws {
+        let started = ItemStartedNotification(
+            item: .contextCompaction(id: "compact-1"),
+            threadID: "thread-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 1_700
+        )
+        let completed = ItemCompletedNotification(
+            item: .contextCompaction(id: "compact-1"),
+            threadID: "thread-1",
+            turnID: "turn-1",
+            completedAtMilliseconds: 1_900
+        )
+
+        try XCTAssertJSONObjectEqual(started, [
+            "item": [
+                "type": "contextCompaction",
+                "id": "compact-1"
+            ],
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "startedAtMs": 1_700
+        ])
+        try XCTAssertJSONObjectEqual(completed, [
+            "item": [
+                "type": "contextCompaction",
+                "id": "compact-1"
+            ],
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "completedAtMs": 1_900
+        ])
+
+        let decoded = try JSONDecoder().decode(ItemCompletedNotification.self, from: Data(#"""
+        {
+          "item": { "type": "contextCompaction", "id": "compact-1" },
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "completedAtMs": 1900
+        }
+        """#.utf8))
+        XCTAssertEqual(decoded, completed)
+    }
+
+    func testRawResponseAndAgentDeltaNotificationsUseRustProtocolShape() throws {
+        let raw = RawResponseItemCompletedNotification(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            item: .message(
+                role: "assistant",
+                content: [.outputText(text: "done")],
+                phase: .finalAnswer
+            )
+        )
+
+        try XCTAssertJSONObjectEqual(raw, [
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "item": [
+                "type": "message",
+                "role": "assistant",
+                "content": [
+                    [
+                        "type": "output_text",
+                        "text": "done"
+                    ]
+                ],
+                "phase": "final_answer"
+            ]
+        ])
+
+        let decodedRaw = try JSONDecoder().decode(
+            RawResponseItemCompletedNotification.self,
+            from: Data(#"""
+            {
+              "threadId": "thread-1",
+              "turnId": "turn-1",
+              "item": {
+                "type": "message",
+                "role": "assistant",
+                "content": [
+                  { "type": "output_text", "text": "done" }
+                ],
+                "phase": "final_answer"
+              }
+            }
+            """#.utf8)
+        )
+        XCTAssertEqual(decodedRaw, raw)
+
+        let delta = AgentMessageDeltaNotification(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            itemID: "msg-1",
+            delta: "hel"
+        )
+        try XCTAssertJSONObjectEqual(delta, [
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "itemId": "msg-1",
+            "delta": "hel"
+        ])
+
+        let decodedDelta = try JSONDecoder().decode(AgentMessageDeltaNotification.self, from: Data(#"""
+        {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "itemId": "msg-1",
+          "delta": "hel"
+        }
+        """#.utf8))
+        XCTAssertEqual(decodedDelta, delta)
+    }
+
     func testFileChangePatchUpdatedNotificationUsesRustProtocolShape() throws {
         let notification = FileChangePatchUpdatedNotification(
             threadID: "thread-1",

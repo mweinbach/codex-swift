@@ -1188,6 +1188,87 @@ public struct ThreadTokenUsageUpdatedNotification: Equatable, Codable, Sendable 
     }
 }
 
+public struct ItemStartedNotification: Equatable, Codable, Sendable {
+    public let item: AppServerThreadItem
+    public let threadID: String
+    public let turnID: String
+    public let startedAtMilliseconds: Int64
+
+    private enum CodingKeys: String, CodingKey {
+        case item
+        case threadID = "threadId"
+        case turnID = "turnId"
+        case startedAtMilliseconds = "startedAtMs"
+    }
+
+    public init(item: AppServerThreadItem, threadID: String, turnID: String, startedAtMilliseconds: Int64) {
+        self.item = item
+        self.threadID = threadID
+        self.turnID = turnID
+        self.startedAtMilliseconds = startedAtMilliseconds
+    }
+}
+
+public struct ItemCompletedNotification: Equatable, Codable, Sendable {
+    public let item: AppServerThreadItem
+    public let threadID: String
+    public let turnID: String
+    public let completedAtMilliseconds: Int64
+
+    private enum CodingKeys: String, CodingKey {
+        case item
+        case threadID = "threadId"
+        case turnID = "turnId"
+        case completedAtMilliseconds = "completedAtMs"
+    }
+
+    public init(item: AppServerThreadItem, threadID: String, turnID: String, completedAtMilliseconds: Int64) {
+        self.item = item
+        self.threadID = threadID
+        self.turnID = turnID
+        self.completedAtMilliseconds = completedAtMilliseconds
+    }
+}
+
+public struct RawResponseItemCompletedNotification: Equatable, Codable, Sendable {
+    public let threadID: String
+    public let turnID: String
+    public let item: ResponseItem
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+        case turnID = "turnId"
+        case item
+    }
+
+    public init(threadID: String, turnID: String, item: ResponseItem) {
+        self.threadID = threadID
+        self.turnID = turnID
+        self.item = item
+    }
+}
+
+public struct AgentMessageDeltaNotification: Equatable, Codable, Sendable {
+    public let threadID: String
+    public let turnID: String
+    public let itemID: String
+    public let delta: String
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+        case turnID = "turnId"
+        case itemID = "itemId"
+        case delta
+    }
+
+    public init(threadID: String, turnID: String, itemID: String, delta: String) {
+        self.threadID = threadID
+        self.turnID = turnID
+        self.itemID = itemID
+        self.delta = delta
+    }
+}
+
 public struct PlanDeltaNotification: Equatable, Codable, Sendable {
     public let threadID: String
     public let turnID: String
