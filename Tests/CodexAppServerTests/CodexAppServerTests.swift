@@ -1572,6 +1572,26 @@ final class CodexAppServerTests: XCTestCase {
             (
                 #"[{"namespace":"codex_app","name":"mcp__lookup","description":"Reserved","inputSchema":\#(inputSchema)}]"#,
                 "dynamic tool name is reserved: mcp__lookup"
+            ),
+            (
+                #"[{"namespace":"codex_app","name":"mcp","description":"Reserved","inputSchema":\#(inputSchema)}]"#,
+                "dynamic tool name is reserved: mcp"
+            ),
+            (
+                #"[{"namespace":"mcp","name":"lookup","description":"Reserved","inputSchema":\#(inputSchema),"deferLoading":true}]"#,
+                "dynamic tool namespace is reserved for lookup: mcp"
+            ),
+            (
+                #"[{"namespace":"mcp__server__","name":"lookup","description":"Reserved","inputSchema":\#(inputSchema),"deferLoading":true}]"#,
+                "dynamic tool namespace is reserved for lookup: mcp__server__"
+            ),
+            (
+                #"[{"namespace":"codex_app","name":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","description":"Too long","inputSchema":\#(inputSchema)}]"#,
+                "dynamic tool name must be at most 128 characters to match Responses API: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            ),
+            (
+                #"[{"namespace":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","name":"lookup","description":"Too long","inputSchema":\#(inputSchema),"deferLoading":true}]"#,
+                "dynamic tool namespace must be at most 64 characters to match Responses API: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
             )
         ]
 
@@ -18391,6 +18411,100 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(image["revisedPrompt"] as? String, "A tiny blue square")
         XCTAssertEqual(image["result"] as? String, "Zm9v")
         XCTAssertEqual(image["savedPath"] as? String, "/tmp/generated.png")
+    }
+
+    func testThreadResumePreservesExplicitTurnLifecycleLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "Initial turn",
+            provider: "mock_provider"
+        )
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        try appendRolloutEvents(
+            to: rolloutPath,
+            timestamp: "2025-01-05T12:00:01Z",
+            events: [
+                .taskStarted(TaskStartedEvent(
+                    turnID: "turn-explicit",
+                    startedAt: 1_000,
+                    modelContextWindow: nil
+                )),
+                .userMessage(UserMessageEvent(message: "Explicit turn")),
+                .agentMessage(AgentMessageEvent(message: "Explicit reply")),
+                .taskComplete(TaskCompleteEvent(
+                    turnID: "turn-explicit",
+                    lastAgentMessage: nil,
+                    completedAt: 1_250,
+                    durationMilliseconds: 250
+                ))
+            ]
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"thread/resume","params":{"threadId":"\#(threadID)"}}"#,
+            codexHome: temp.url
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        let turns = try XCTUnwrap(thread["turns"] as? [[String: Any]])
+        XCTAssertEqual(turns.count, 2)
+        XCTAssertEqual(turns[0]["id"] as? String, "turn-1")
+        XCTAssertEqual(turns[1]["id"] as? String, "turn-explicit")
+        XCTAssertEqual(turns[1]["status"] as? String, "completed")
+        XCTAssertEqual(turns[1]["startedAt"] as? Int, 1_000)
+        XCTAssertEqual(turns[1]["completedAt"] as? Int, 1_250)
+        XCTAssertEqual(turns[1]["durationMs"] as? Int, 250)
+        let explicitItems = try XCTUnwrap(turns[1]["items"] as? [[String: Any]])
+        XCTAssertEqual(explicitItems.map { $0["type"] as? String }, ["userMessage", "agentMessage"])
+        XCTAssertEqual(turnUserText(turns[1]), "Explicit turn")
+        XCTAssertEqual(turnAgentTexts(turns[1]), ["Explicit reply"])
+    }
+
+    func testThreadReadPreservesEmptyExplicitInProgressTurnLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "Initial turn",
+            provider: "mock_provider"
+        )
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        try appendRolloutEvents(
+            to: rolloutPath,
+            timestamp: "2025-01-05T12:00:01Z",
+            events: [
+                .taskStarted(TaskStartedEvent(
+                    turnID: "turn-empty",
+                    startedAt: 2_000,
+                    modelContextWindow: nil
+                ))
+            ]
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"thread/read","params":{"threadId":"\#(threadID)","includeTurns":true}}"#,
+            codexHome: temp.url
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        let turns = try XCTUnwrap(thread["turns"] as? [[String: Any]])
+        XCTAssertEqual(turns.count, 2)
+        XCTAssertEqual(turns[1]["id"] as? String, "turn-empty")
+        XCTAssertEqual(turns[1]["status"] as? String, "inProgress")
+        XCTAssertEqual(turns[1]["startedAt"] as? Int, 2_000)
+        XCTAssertEqual((turns[1]["items"] as? [[String: Any]])?.count, 0)
     }
 
     func testThreadResumeRejectsMissingRollout() throws {

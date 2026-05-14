@@ -28237,14 +28237,20 @@ private struct AppServerThreadHistoryBuilder {
     private var currentTurn: [String: Any]?
     private var currentItems: [[String: Any]] = []
     private var currentStatus = "completed"
+    private var currentStartedAt: Int64?
+    private var currentCompletedAt: Int64?
+    private var currentDurationMs: Int64?
+    private var currentOpenedExplicitly = false
     private var nextTurnIndex = 1
     private var nextItemIndex = 1
 
     mutating func handle(_ event: EventMessage) {
         switch event {
         case let .userMessage(payload):
-            finishCurrentTurn()
-            startTurn()
+            if currentTurn != nil, !currentOpenedExplicitly {
+                finishCurrentTurn()
+            }
+            ensureTurn()
             var content: [[String: Any]] = []
             if !payload.message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 content.append([
@@ -28285,6 +28291,13 @@ private struct AppServerThreadHistoryBuilder {
             }
             ensureTurn()
             appendReasoning(summary: nil, content: payload.text)
+        case let .taskStarted(payload):
+            finishCurrentTurn()
+            startTurn(id: payload.turnID, openedExplicitly: true)
+            currentStatus = "inProgress"
+            currentStartedAt = payload.startedAt
+        case let .taskComplete(payload):
+            completeTurn(id: payload.turnID, completedAt: payload.completedAt, durationMs: payload.durationMilliseconds)
         case let .imageGenerationBegin(payload):
             upsertImageGeneration(
                 id: payload.callID,
@@ -28341,12 +28354,14 @@ private struct AppServerThreadHistoryBuilder {
     }
 
     func activeTurnSnapshot() -> AppServerTokenUsageTurnOwner? {
-        guard !currentItems.isEmpty,
-              let id = currentTurn?["id"] as? String
-        else {
-            return nil
+        if let id = currentTurn?["id"] as? String {
+            return AppServerTokenUsageTurnOwner(id: id, position: turns.count)
         }
-        return AppServerTokenUsageTurnOwner(id: id, position: turns.count)
+        if let index = turns.indices.last,
+           let id = turns[index]["id"] as? String {
+            return AppServerTokenUsageTurnOwner(id: id, position: index)
+        }
+        return nil
     }
 
     mutating func finish() -> [[String: Any]] {
@@ -28360,29 +28375,86 @@ private struct AppServerThreadHistoryBuilder {
         }
     }
 
-    private mutating func startTurn() {
+    private mutating func startTurn(id: String? = nil, openedExplicitly: Bool = false) {
         currentTurn = [
-            "id": nextTurnID()
+            "id": id ?? nextTurnID()
         ]
         currentItems = []
         currentStatus = "completed"
+        currentStartedAt = nil
+        currentCompletedAt = nil
+        currentDurationMs = nil
+        currentOpenedExplicitly = openedExplicitly
     }
 
     private mutating func finishCurrentTurn() {
         guard var turn = currentTurn else {
             return
         }
-        guard !currentItems.isEmpty else {
+        guard !currentItems.isEmpty || currentOpenedExplicitly else {
             currentTurn = nil
+            resetCurrentTurnState()
             return
         }
         turn["items"] = currentItems
         turn["status"] = currentStatus
         turn["error"] = NSNull()
+        if let currentStartedAt {
+            turn["startedAt"] = currentStartedAt
+        }
+        if let currentCompletedAt {
+            turn["completedAt"] = currentCompletedAt
+        }
+        if let currentDurationMs {
+            turn["durationMs"] = currentDurationMs
+        }
         turns.append(turn)
         currentTurn = nil
         currentItems = []
+        resetCurrentTurnState()
+    }
+
+    private mutating func resetCurrentTurnState() {
         currentStatus = "completed"
+        currentStartedAt = nil
+        currentCompletedAt = nil
+        currentDurationMs = nil
+        currentOpenedExplicitly = false
+    }
+
+    private mutating func completeTurn(id: String, completedAt: Int64?, durationMs: Int64?) {
+        if let currentID = currentTurn?["id"] as? String, currentID == id {
+            markCurrentTurnCompleted(completedAt: completedAt, durationMs: durationMs)
+            finishCurrentTurn()
+            return
+        }
+
+        if let index = turns.firstIndex(where: { $0["id"] as? String == id }) {
+            if let status = turns[index]["status"] as? String,
+               status == "completed" || status == "inProgress" {
+                turns[index]["status"] = "completed"
+            }
+            if let completedAt {
+                turns[index]["completedAt"] = completedAt
+            }
+            if let durationMs {
+                turns[index]["durationMs"] = durationMs
+            }
+            return
+        }
+
+        if currentTurn != nil {
+            markCurrentTurnCompleted(completedAt: completedAt, durationMs: durationMs)
+            finishCurrentTurn()
+        }
+    }
+
+    private mutating func markCurrentTurnCompleted(completedAt: Int64?, durationMs: Int64?) {
+        if currentStatus == "completed" || currentStatus == "inProgress" {
+            currentStatus = "completed"
+        }
+        currentCompletedAt = completedAt
+        currentDurationMs = durationMs
     }
 
     private mutating func appendReasoning(summary: String?, content: String?) {
