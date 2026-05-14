@@ -95,6 +95,73 @@ final class ReviewAnalyticsTests: XCTestCase {
         ])
     }
 
+    func testURLSessionCodexAnalyticsUploaderPostsChatGPTTokenEventsLikeRust() async throws {
+        let temp = try ReviewAnalyticsTemporaryDirectory()
+        let accessToken = Self.fakeJWT(authClaims: [
+            "chatgpt_account_id": "acct-123",
+            "chatgpt_plan_type": "pro"
+        ])
+        try CodexAuthStorage.saveChatGPTAuthTokens(
+            codexHome: temp.url,
+            accessToken: accessToken,
+            chatGPTAccountID: "acct-123",
+            chatGPTPlanType: "pro",
+            now: Date()
+        )
+        var reducer = CodexCommandExecutionAnalyticsReducer()
+        let request = CodexTrackEventsRequest(events: [
+            .commandExecution(try Self.reduceCommandExecution(
+                status: .completed,
+                source: .agent,
+                reducer: &reducer
+            ))
+        ])
+        let transport = RecordingCodexAnalyticsAPITransport()
+        let uploader = URLSessionCodexAnalyticsUploader(
+            codexHome: temp.url,
+            baseURL: "https://chatgpt.example/backend-api/",
+            transport: transport
+        )
+
+        try await uploader.upload(request)
+
+        let requests = await transport.executeRequests
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests[0].method, .post)
+        XCTAssertEqual(
+            requests[0].url,
+            "https://chatgpt.example/backend-api/codex/analytics-events/events"
+        )
+        XCTAssertEqual(requests[0].headers["authorization"], "Bearer \(accessToken)")
+        XCTAssertEqual(requests[0].headers["ChatGPT-Account-ID"], "acct-123")
+        XCTAssertEqual(requests[0].headers["Content-Type"], "application/json")
+        XCTAssertEqual(requests[0].timeoutMilliseconds, URLSessionCodexAnalyticsUploader.timeoutMilliseconds)
+        XCTAssertEqual(requests[0].body, try CodexAnalytics.jsonValue(request))
+    }
+
+    func testURLSessionCodexAnalyticsUploaderSkipsAPIKeyAuthLikeRust() async throws {
+        let temp = try ReviewAnalyticsTemporaryDirectory()
+        try CodexAuthStorage.loginWithAPIKey(codexHome: temp.url, apiKey: "sk-api")
+        var reducer = CodexCommandExecutionAnalyticsReducer()
+        let transport = RecordingCodexAnalyticsAPITransport()
+        let uploader = URLSessionCodexAnalyticsUploader(
+            codexHome: temp.url,
+            baseURL: "https://chatgpt.example/backend-api/",
+            transport: transport
+        )
+
+        try await uploader.upload(CodexTrackEventsRequest(events: [
+            .commandExecution(try Self.reduceCommandExecution(
+                status: .completed,
+                source: .agent,
+                reducer: &reducer
+            ))
+        ]))
+
+        let requests = await transport.executeRequests
+        XCTAssertTrue(requests.isEmpty)
+    }
+
     func testImageGenerationAnalyticsReducerEmitsLifecycleEventLikeRust() throws {
         var reducer = CodexImageGenerationAnalyticsReducer()
         let item = AppServerThreadItem.imageGeneration(
@@ -1747,5 +1814,47 @@ final class ReviewAnalyticsTests: XCTestCase {
             case compactionStrategies = "compaction_strategies"
             case compactionStatuses = "compaction_statuses"
         }
+    }
+
+    private static func fakeJWT(authClaims: [String: Any]) -> String {
+        func encode(_ object: Any) -> String {
+            let data = try! JSONSerialization.data(withJSONObject: object)
+            return data.base64EncodedString()
+                .replacingOccurrences(of: "+", with: "-")
+                .replacingOccurrences(of: "/", with: "_")
+                .replacingOccurrences(of: "=", with: "")
+        }
+
+        return [
+            encode(["alg": "none"]),
+            encode(["https://api.openai.com/auth": authClaims]),
+            "sig"
+        ].joined(separator: ".")
+    }
+}
+
+private actor RecordingCodexAnalyticsAPITransport: APITransport {
+    private(set) var executeRequests: [APIRequest] = []
+
+    func execute(_ request: APIRequest) async -> Result<APIResponse, TransportError> {
+        executeRequests.append(request)
+        return .success(APIResponse(statusCode: 204))
+    }
+
+    func stream(_: APIRequest) async -> Result<APIStreamResponse, TransportError> {
+        .failure(.network("stream not supported"))
+    }
+}
+
+private final class ReviewAnalyticsTemporaryDirectory {
+    let url: URL
+
+    init() throws {
+        url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: url)
     }
 }

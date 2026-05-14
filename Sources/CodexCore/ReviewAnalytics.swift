@@ -63,6 +63,96 @@ public enum CodexTrackEventRequest: Equatable, Encodable, Sendable {
     }
 }
 
+/// Uploads Codex analytics event envelopes after reducers have produced Rust-compatible payloads.
+///
+/// Implementers are the live URLSession-backed uploader and test/no-op uploaders. Callers may rely
+/// on implementations preserving Rust's auth gate and request shape, and on uploads being safe to
+/// call from asynchronous analytics pipelines.
+public protocol CodexAnalyticsUploading: Sendable {
+    func upload(_ request: CodexTrackEventsRequest) async throws
+}
+
+public struct DisabledCodexAnalyticsUploader: CodexAnalyticsUploading {
+    public init() {}
+
+    public func upload(_: CodexTrackEventsRequest) async throws {}
+}
+
+// The stored refresh transport closure comes from the auth storage boundary; the uploader is
+// immutable after initialization and all other collaborators conform to Sendable.
+public struct URLSessionCodexAnalyticsUploader: CodexAnalyticsUploading, @unchecked Sendable {
+    public static let timeoutMilliseconds: UInt64 = 10_000
+
+    private let codexHome: URL
+    private let authCredentialsStoreMode: AuthCredentialsStoreMode
+    private let baseURL: String
+    private let environment: [String: String]
+    private let refreshTransport: CodexAuthStorage.RefreshTransport?
+    private let keyringStore: any AuthKeyringStore
+    private let transport: any APITransport
+
+    public init(
+        codexHome: URL,
+        authCredentialsStoreMode: AuthCredentialsStoreMode = .file,
+        baseURL: String = CodexConfigDefaults.chatgptBaseURL,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        refreshTransport: CodexAuthStorage.RefreshTransport? = nil,
+        keyringStore: any AuthKeyringStore = SystemAuthKeyringStore(),
+        transport: any APITransport = URLSessionAPITransport()
+    ) {
+        self.codexHome = codexHome
+        self.authCredentialsStoreMode = authCredentialsStoreMode
+        self.baseURL = baseURL
+        self.environment = environment
+        self.refreshTransport = refreshTransport
+        self.keyringStore = keyringStore
+        self.transport = transport
+    }
+
+    public func upload(_ request: CodexTrackEventsRequest) async throws {
+        guard !request.events.isEmpty,
+              let auth = try CodexAuthStorage.loadAuthDotJSON(
+                codexHome: codexHome,
+                mode: authCredentialsStoreMode,
+                keyringStore: keyringStore
+              ),
+              auth.tokens != nil,
+              let tokens = try await CodexAuthStorage.loadFreshTokenData(
+                codexHome: codexHome,
+                mode: authCredentialsStoreMode,
+                environment: environment,
+                refreshTransport: refreshTransport,
+                keyringStore: keyringStore
+              )
+        else {
+            return
+        }
+
+        let payload = try CodexAnalytics.jsonValue(request)
+        let apiRequest = APIRequest(
+            method: .post,
+            url: Self.analyticsEventsURL(baseURL: baseURL),
+            headers: ["Content-Type": "application/json"],
+            body: payload,
+            timeoutMilliseconds: Self.timeoutMilliseconds
+        ).addingAuthHeaders(from: StaticAPIAuthProvider(
+            bearerToken: tokens.accessToken,
+            accountID: tokens.accountID
+        ))
+
+        switch await transport.execute(apiRequest) {
+        case .success:
+            return
+        case let .failure(error):
+            throw error
+        }
+    }
+
+    public static func analyticsEventsURL(baseURL: String) -> String {
+        "\(baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/")))/codex/analytics-events/events"
+    }
+}
+
 public enum CodexAnalytics {
     public static func trackEventRequestBatches(_ events: [CodexTrackEventRequest]) -> [[CodexTrackEventRequest]] {
         var batches: [[CodexTrackEventRequest]] = []
@@ -85,6 +175,11 @@ public enum CodexAnalytics {
         }
 
         return batches
+    }
+
+    public static func jsonValue<T: Encodable>(_ value: T) throws -> JSONValue {
+        let data = try JSONEncoder().encode(value)
+        return try JSONDecoder().decode(JSONValue.self, from: data)
     }
 }
 
