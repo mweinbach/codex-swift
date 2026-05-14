@@ -4903,11 +4903,26 @@ public struct CodexCLI: Sendable {
     private func parsePluginMarketplaceAdd(_ arguments: [String]) -> ParseResult<PluginCommandAction> {
         var source: String?
         var refName: String?
+        var sawRef = false
         var sparsePaths: [String] = []
         var iterator = arguments.makeIterator()
 
+        func markRefOption() -> ParseResult<Void> {
+            guard !sawRef else {
+                return .failure("codex-swift: duplicate option for command 'plugin marketplace add': --ref", 64)
+            }
+            sawRef = true
+            return .success(())
+        }
+
         while let argument = iterator.next() {
             if argument == "--ref" {
+                switch markRefOption() {
+                case .success:
+                    break
+                case let .failure(message, code):
+                    return .failure(message, code)
+                }
                 guard let value = iterator.next() else {
                     return .failure("codex-swift: missing value for --ref", 64)
                 }
@@ -4915,6 +4930,12 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("--ref=") {
+                switch markRefOption() {
+                case .success:
+                    break
+                case let .failure(message, code):
+                    return .failure(message, code)
+                }
                 refName = String(argument.dropFirst("--ref=".count))
                 continue
             }

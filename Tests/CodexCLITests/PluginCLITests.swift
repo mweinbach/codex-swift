@@ -96,6 +96,10 @@ final class PluginCLITests: XCTestCase {
                 "codex-swift: unexpected argument for command 'plugin marketplace add': extra"
             ),
             (
+                ["plugin", "marketplace", "add", "--ref", "main", "owner/repo", "--ref=next"],
+                "codex-swift: duplicate option for command 'plugin marketplace add': --ref"
+            ),
+            (
                 ["plugin", "marketplace", "upgrade", "--all"],
                 "codex-swift: unsupported option for command 'plugin marketplace upgrade': --all"
             ),
