@@ -467,6 +467,95 @@ final class AppServerThreadProtocolTests: XCTestCase {
         XCTAssertEqual(AppServerPatchApplyStatus(.failed), .failed)
     }
 
+    func testMcpToolCallItemUsesRustThreadItemShape() throws {
+        let completedItem = AppServerThreadItem.mcpToolCall(
+            id: "mcp-1",
+            server: "filesystem",
+            tool: "read_file",
+            status: .completed,
+            arguments: .object(["path": .string("/tmp/notes.txt")]),
+            mcpAppResourceURI: "plugin://filesystem",
+            result: AppServerProtocol.McpToolCallResult(
+                content: [
+                    .object([
+                        "type": .string("text"),
+                        "text": .string("done")
+                    ])
+                ],
+                structuredContent: nil,
+                meta: nil
+            ),
+            durationMs: 2_000
+        )
+
+        try XCTAssertJSONObjectEqual(completedItem, [
+            "type": "mcpToolCall",
+            "id": "mcp-1",
+            "server": "filesystem",
+            "tool": "read_file",
+            "status": "completed",
+            "arguments": ["path": "/tmp/notes.txt"],
+            "mcpAppResourceUri": "plugin://filesystem",
+            "result": [
+                "content": [[
+                    "type": "text",
+                    "text": "done"
+                ]],
+                "structuredContent": NSNull(),
+                "_meta": NSNull()
+            ],
+            "error": NSNull(),
+            "durationMs": 2_000
+        ])
+
+        let inProgressItem = AppServerThreadItem.mcpToolCall(
+            id: "mcp-2",
+            server: "github",
+            tool: "search",
+            status: .inProgress,
+            arguments: .null
+        )
+        let encodedInProgress = try JSONObject(inProgressItem)
+        XCTAssertNil(encodedInProgress["mcpAppResourceUri"])
+        try XCTAssertJSONObjectEqual(inProgressItem, [
+            "type": "mcpToolCall",
+            "id": "mcp-2",
+            "server": "github",
+            "tool": "search",
+            "status": "inProgress",
+            "arguments": NSNull(),
+            "result": NSNull(),
+            "error": NSNull(),
+            "durationMs": NSNull()
+        ])
+
+        let decoded = try JSONDecoder().decode(AppServerThreadItem.self, from: Data(#"""
+        {
+          "type": "mcpToolCall",
+          "id": "mcp-3",
+          "server": "docs",
+          "tool": "lookup",
+          "status": "failed",
+          "arguments": {},
+          "result": null,
+          "error": {
+            "message": "server disconnected"
+          },
+          "durationMs": 42
+        }
+        """#.utf8))
+
+        XCTAssertEqual(decoded, .mcpToolCall(
+            id: "mcp-3",
+            server: "docs",
+            tool: "lookup",
+            status: .failed,
+            arguments: .object([:]),
+            error: AppServerProtocol.McpToolCallError(message: "server disconnected"),
+            durationMs: 42
+        ))
+    }
+
     func testAgentMessageItemCarriesMemoryCitationLikeRustProtocol() throws {
         let citation = AppServerMemoryCitation(
             entries: [

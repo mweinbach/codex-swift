@@ -474,6 +474,17 @@ public enum AppServerThreadItem: Equatable, Sendable {
         durationMs: Int64? = nil
     )
     case fileChange(id: String, changes: [AppServerFileUpdateChange], status: AppServerPatchApplyStatus)
+    case mcpToolCall(
+        id: String,
+        server: String,
+        tool: String,
+        status: McpToolCallStatus,
+        arguments: JSONValue,
+        mcpAppResourceURI: String? = nil,
+        result: AppServerProtocol.McpToolCallResult? = nil,
+        error: AppServerProtocol.McpToolCallError? = nil,
+        durationMs: Int64? = nil
+    )
     case webSearch(id: String, query: String, action: AppServerWebSearchAction? = nil)
     case imageView(id: String, path: AbsolutePath)
     case imageGeneration(id: String, status: String, revisedPrompt: String? = nil, result: String, savedPath: AbsolutePath? = nil)
@@ -492,6 +503,7 @@ public enum AppServerThreadItem: Equatable, Sendable {
         case status
         case revisedPrompt
         case result
+        case error
         case savedPath
         case review
         case phase
@@ -507,6 +519,10 @@ public enum AppServerThreadItem: Equatable, Sendable {
         case exitCode
         case durationMs
         case changes
+        case server
+        case tool
+        case arguments
+        case mcpAppResourceURI = "mcpAppResourceUri"
     }
 
     private enum ItemType: String, Codable {
@@ -517,6 +533,7 @@ public enum AppServerThreadItem: Equatable, Sendable {
         case reasoning
         case commandExecution
         case fileChange
+        case mcpToolCall
         case webSearch
         case imageView
         case imageGeneration
@@ -534,6 +551,7 @@ public enum AppServerThreadItem: Equatable, Sendable {
              let .reasoning(id, _, _),
              let .commandExecution(id, _, _, _, _, _, _, _, _, _),
              let .fileChange(id, _, _),
+             let .mcpToolCall(id, _, _, _, _, _, _, _, _),
              let .webSearch(id, _, _),
              let .imageView(id, _),
              let .imageGeneration(id, _, _, _, _),
@@ -595,6 +613,24 @@ extension AppServerThreadItem: Codable {
                 id: try container.decode(String.self, forKey: .id),
                 changes: try container.decode([AppServerFileUpdateChange].self, forKey: .changes),
                 status: try container.decode(AppServerPatchApplyStatus.self, forKey: .status)
+            )
+        case .mcpToolCall:
+            self = .mcpToolCall(
+                id: try container.decode(String.self, forKey: .id),
+                server: try container.decode(String.self, forKey: .server),
+                tool: try container.decode(String.self, forKey: .tool),
+                status: try container.decode(McpToolCallStatus.self, forKey: .status),
+                arguments: try container.decode(JSONValue.self, forKey: .arguments),
+                mcpAppResourceURI: try container.decodeIfPresent(String.self, forKey: .mcpAppResourceURI),
+                result: try container.decodeIfPresent(
+                    AppServerProtocol.McpToolCallResult.self,
+                    forKey: .result
+                ),
+                error: try container.decodeIfPresent(
+                    AppServerProtocol.McpToolCallError.self,
+                    forKey: .error
+                ),
+                durationMs: try container.decodeIfPresent(Int64.self, forKey: .durationMs)
             )
         case .webSearch:
             self = .webSearch(
@@ -684,6 +720,17 @@ extension AppServerThreadItem: Codable {
             try container.encode(id, forKey: .id)
             try container.encode(changes, forKey: .changes)
             try container.encode(status, forKey: .status)
+        case let .mcpToolCall(id, server, tool, status, arguments, mcpAppResourceURI, result, error, durationMs):
+            try container.encode(ItemType.mcpToolCall, forKey: .type)
+            try container.encode(id, forKey: .id)
+            try container.encode(server, forKey: .server)
+            try container.encode(tool, forKey: .tool)
+            try container.encode(status, forKey: .status)
+            try container.encode(arguments, forKey: .arguments)
+            try container.encodeIfPresent(mcpAppResourceURI, forKey: .mcpAppResourceURI)
+            try container.encodeNilOrValue(result, forKey: .result)
+            try container.encodeNilOrValue(error, forKey: .error)
+            try container.encodeNilOrValue(durationMs, forKey: .durationMs)
         case let .webSearch(id, query, action):
             try container.encode(ItemType.webSearch, forKey: .type)
             try container.encode(id, forKey: .id)
