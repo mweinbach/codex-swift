@@ -136,6 +136,23 @@ final class McpCLITests: XCTestCase {
             (
                 ["mcp", "add", "docs", "--env", "BROKEN"],
                 "environment entries must be in KEY=VALUE form"
+            ),
+            (
+                ["mcp", "add", "docs", "--url", "https://one.example/mcp", "--url=https://two.example/mcp"],
+                "codex-swift: duplicate option for command 'mcp add': --url"
+            ),
+            (
+                [
+                    "mcp",
+                    "add",
+                    "docs",
+                    "--url",
+                    "https://example.com/mcp",
+                    "--bearer-token-env-var",
+                    "TOKEN_A",
+                    "--bearer-token-env-var=TOKEN_B"
+                ],
+                "codex-swift: duplicate option for command 'mcp add': --bearer-token-env-var"
             )
         ]
 

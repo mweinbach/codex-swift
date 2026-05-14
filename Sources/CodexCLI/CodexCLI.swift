@@ -4324,6 +4324,9 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument == "--url" {
+                guard url == nil else {
+                    return .failure("codex-swift: duplicate option for command 'mcp add': --url", 64)
+                }
                 guard index + 1 < arguments.count else {
                     return .failure("codex-swift: missing value for --url", 64)
                 }
@@ -4332,11 +4335,20 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("--url=") {
+                guard url == nil else {
+                    return .failure("codex-swift: duplicate option for command 'mcp add': --url", 64)
+                }
                 url = String(argument.dropFirst("--url=".count))
                 index += 1
                 continue
             }
             if argument == "--bearer-token-env-var" {
+                guard bearerTokenEnvVar == nil else {
+                    return .failure(
+                        "codex-swift: duplicate option for command 'mcp add': --bearer-token-env-var",
+                        64
+                    )
+                }
                 guard index + 1 < arguments.count else {
                     return .failure("codex-swift: missing value for --bearer-token-env-var", 64)
                 }
@@ -4345,6 +4357,12 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("--bearer-token-env-var=") {
+                guard bearerTokenEnvVar == nil else {
+                    return .failure(
+                        "codex-swift: duplicate option for command 'mcp add': --bearer-token-env-var",
+                        64
+                    )
+                }
                 bearerTokenEnvVar = String(argument.dropFirst("--bearer-token-env-var=".count))
                 index += 1
                 continue
