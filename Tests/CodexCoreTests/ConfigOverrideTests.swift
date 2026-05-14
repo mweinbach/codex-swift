@@ -35,6 +35,15 @@ final class ConfigOverrideTests: XCTestCase {
         )
     }
 
+    func testInlineTablesRejectDuplicateKeysLikeRustToml() throws {
+        XCTAssertThrowsError(try ConfigValueParser.parseTomlLiteral(#"{ CODEX_LOG = "debug", CODEX_LOG = "trace" }"#)) { error in
+            XCTAssertEqual(
+                (error as? ConfigOverrideError)?.description,
+                #"Invalid inline table: { CODEX_LOG = "debug", CODEX_LOG = "trace" }"#
+            )
+        }
+    }
+
     func testApplyOverrideCreatesIntermediateTables() throws {
         let overrides = CliConfigOverrides(rawOverrides: [
             "features.web_search_request=true",

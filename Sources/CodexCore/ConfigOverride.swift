@@ -493,6 +493,9 @@ public enum ConfigValueParser {
                 guard !key.isEmpty else {
                     throw ConfigOverrideError.invalidInlineTable(raw)
                 }
+                guard table[key] == nil else {
+                    throw ConfigOverrideError.invalidInlineTable(raw)
+                }
                 table[key] = try parseTomlLiteral(valueText)
             }
             return .table(table)

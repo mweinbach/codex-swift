@@ -12,6 +12,7 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-14: rechecked Rust's configured-environment TOML loading from `codex-rs/exec-server/src/environment_toml.rs`. Swift's shared TOML literal parser now rejects duplicate inline-table keys, preserving Rust TOML parser behavior for inline environment `env = { ... }` tables instead of silently keeping the last value.
 - 2026-05-14: rechecked Rust's sandbox summary helper from `codex-rs/utils/sandbox-summary/src/sandbox_summary.rs`. Swift now includes Rust's ` (network access enabled)` suffix for read-only policies that explicitly allow network access.
 - 2026-05-14: rechecked Rust's MCP elicitation schema validation from `codex-rs/app-server-protocol/src/protocol/v2/mcp.rs`. Swift now rejects unknown fields and wrong fixed `type` values in the typed app-server `McpElicitationSchema` primitive/object/enum payloads to mirror Rust's `deny_unknown_fields` and typed enum boundaries.
 - 2026-05-14: tightened Rust permission payload parity from `codex-rs/protocol/src/request_permissions.rs` and `codex-rs/app-server-protocol/src/protocol/v2/permissions.rs`. Swift now rejects unknown `RequestPermissionProfile` fields like Rust's `deny_unknown_fields` and rejects zero `globScanMaxDepth` values in app-server managed permission profiles to match Rust's `NonZeroUsize` boundary.
