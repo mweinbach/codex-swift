@@ -101,6 +101,38 @@ final class HookConfigTests: XCTestCase {
         ])
     }
 
+    func testConfiguredHandlersIgnoreLegacyAfterToolUseHooksLikeRust() throws {
+        let stack = try ConfigLayerStack(
+            layers: [],
+            requirements: ConfigRequirements(managedHooks: ManagedHooksRequirement(
+                value: ManagedHooksRequirementsToml(
+                    managedDir: "/tmp/managed-hooks",
+                    hooks: .table([
+                        "AfterToolUse": hookGroup(command: "echo legacy"),
+                        "after_tool_use": hookGroup(command: "echo legacy raw"),
+                        "UserPromptSubmit": hookGroup(command: "echo supported")
+                    ])
+                ),
+                source: .system,
+                sourceDescription: "/etc/codex/requirements.toml"
+            ))
+        )
+
+        let handlers = HookConfig.configuredHandlers(from: stack)
+
+        XCTAssertEqual(handlers, [
+            ConfiguredHookHandler(
+                eventName: .userPromptSubmit,
+                matcher: nil,
+                command: "echo supported",
+                timeoutSec: 600,
+                sourcePath: try path("/tmp/managed-hooks"),
+                source: .system,
+                displayOrder: 0
+            )
+        ])
+    }
+
     func testConfiguredHandlersIncludeSystemAndMdmConfigHooksWithoutTrustState() throws {
         let stack = try ConfigLayerStack(layers: [
             ConfigLayerEntry(
@@ -330,6 +362,19 @@ final class HookConfigTests: XCTestCase {
             "UserPromptSubmit": .array([
                 .table([
                     "hooks": .array([.table(handler)])
+                ])
+            ])
+        ])
+    }
+
+    private func hookGroup(command: String) -> ConfigValue {
+        .array([
+            .table([
+                "hooks": .array([
+                    .table([
+                        "type": .string("command"),
+                        "command": .string(command)
+                    ])
                 ])
             ])
         ])
