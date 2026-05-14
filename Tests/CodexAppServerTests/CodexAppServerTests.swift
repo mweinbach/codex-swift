@@ -4960,7 +4960,7 @@ final class CodexAppServerTests: XCTestCase {
                 permissions: RequestPermissionProfile(
                     network: RequestPermissionNetworkPermissions(enabled: true)
                 ),
-                cwd: "/repo"
+                cwd: try AbsolutePath(absolutePath: "/repo")
             ))
         )
         let permissionsRequest = try await nextClientRequest(

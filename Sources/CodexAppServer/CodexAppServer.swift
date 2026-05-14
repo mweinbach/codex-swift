@@ -25139,8 +25139,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             let submitter = coreOpSubmitter
             afterNotifications = {
                 Task { [broker, submitter, threadID, event] in
-                    guard let cwdValue = event.cwd,
-                          let cwd = try? AbsolutePath(absolutePath: cwdValue)
+                    guard let cwd = event.cwd
                     else {
                         return
                     }
@@ -25159,7 +25158,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                           let submission = Self.permissionsApprovalSubmission(
                             callID: event.callID,
                             requestedPermissions: event.permissions,
-                            cwd: event.cwd ?? "",
+                            cwd: cwd.path,
                             result: result
                           )
                     else {

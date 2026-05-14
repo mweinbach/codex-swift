@@ -2405,7 +2405,7 @@ public struct RequestPermissionsEvent: Codable, Equatable, Sendable {
     public let startedAtMilliseconds: Int64
     public let reason: String?
     public let permissions: RequestPermissionProfile
-    public let cwd: String?
+    public let cwd: AbsolutePath?
 
     private enum CodingKeys: String, CodingKey {
         case callID = "call_id"
@@ -2422,7 +2422,7 @@ public struct RequestPermissionsEvent: Codable, Equatable, Sendable {
         startedAtMilliseconds: Int64,
         reason: String? = nil,
         permissions: RequestPermissionProfile,
-        cwd: String? = nil
+        cwd: AbsolutePath? = nil
     ) {
         self.callID = callID
         self.turnID = turnID
@@ -2439,6 +2439,6 @@ public struct RequestPermissionsEvent: Codable, Equatable, Sendable {
         startedAtMilliseconds = try container.decode(Int64.self, forKey: .startedAtMilliseconds)
         reason = try container.decodeIfPresent(String.self, forKey: .reason)
         permissions = try container.decode(RequestPermissionProfile.self, forKey: .permissions)
-        cwd = try container.decodeIfPresent(String.self, forKey: .cwd)
+        cwd = try container.decodeIfPresent(AbsolutePath.self, forKey: .cwd)
     }
 }

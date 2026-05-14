@@ -221,7 +221,7 @@ final class EventMessageTests: XCTestCase {
             startedAtMilliseconds: 1_000,
             reason: "needs network",
             permissions: RequestPermissionProfile(network: RequestPermissionNetworkPermissions(enabled: true)),
-            cwd: "/repo"
+            cwd: try AbsolutePath(absolutePath: "/repo")
         ))
         try XCTAssertJSONObjectEqual(permissions, [
             "type": "request_permissions",
@@ -236,6 +236,18 @@ final class EventMessageTests: XCTestCase {
             ],
             "cwd": "/repo"
         ])
+
+        let relativeCwd = Data(#"""
+        {
+          "type": "request_permissions",
+          "call_id": "perm-1",
+          "turn_id": "turn-1",
+          "started_at_ms": 1000,
+          "permissions": { "network": { "enabled": true } },
+          "cwd": "repo"
+        }
+        """#.utf8)
+        XCTAssertThrowsError(try JSONDecoder().decode(EventMessage.self, from: relativeCwd))
 
         let userInput = EventMessage.requestUserInput(RequestUserInputEvent(
             callID: "input-1",
