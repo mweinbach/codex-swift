@@ -849,6 +849,8 @@ Recent upstream audit checkpoint:
   - Added public `SearchToolCallParams` with Rust's `query` and optional `limit` wire shape, and routed `ToolSearchIndex` argument decoding through it so deferred-tool search uses the shared protocol model.
 - `codex-rs/protocol/src/models.rs` content image detail
   - `ContentItem.inputImage` now preserves Rust's optional `detail` field, and user/local image inputs attach `defaultImageDetail` (`high`) to match Rust's `DEFAULT_IMAGE_DETAIL` request payloads.
+- `codex-rs/tools/src/image_detail.rs` original image detail helpers
+  - added Swift equivalents for Rust's `can_request_original_image_detail`, `normalize_output_image_detail`, and `sanitize_original_image_detail`, including the unsupported-model fallback from `original` to `defaultImageDetail` for structured function-call image outputs.
 - `codex-rs/protocol/src/models.rs` sandbox permission overrides
   - `SandboxPermissions` now decodes Rust's `with_additional_permissions` wire value and exposes helper semantics for escalated execution, any explicit sandbox override, and sandboxed additional-permission widening.
 - `codex-rs/protocol/src/models.rs` user image input conversion

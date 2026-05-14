@@ -93,6 +93,53 @@ final class ResponseModelsTests: XCTestCase {
         ])
     }
 
+    func testOriginalImageDetailIsAllowedWhenModelSupportsItLikeRustToolsHelper() throws {
+        let modelInfo = try imageDetailModelInfo(supportsOriginal: true)
+
+        XCTAssertTrue(canRequestOriginalImageDetail(modelInfo))
+        XCTAssertEqual(normalizeOutputImageDetail(modelInfo: modelInfo, detail: .original), .original)
+        XCTAssertNil(normalizeOutputImageDetail(modelInfo: modelInfo, detail: nil))
+    }
+
+    func testOriginalImageDetailIsDroppedWithoutModelSupportLikeRustToolsHelper() throws {
+        let modelInfo = try imageDetailModelInfo(supportsOriginal: false)
+
+        XCTAssertFalse(canRequestOriginalImageDetail(modelInfo))
+        XCTAssertNil(normalizeOutputImageDetail(modelInfo: modelInfo, detail: .original))
+    }
+
+    func testNonOriginalImageDetailIsPreservedLikeRustToolsHelper() throws {
+        let modelInfo = try imageDetailModelInfo(supportsOriginal: true)
+
+        XCTAssertEqual(normalizeOutputImageDetail(modelInfo: modelInfo, detail: .low), .low)
+        XCTAssertEqual(normalizeOutputImageDetail(modelInfo: modelInfo, detail: .high), .high)
+        XCTAssertEqual(normalizeOutputImageDetail(modelInfo: modelInfo, detail: .auto), .auto)
+    }
+
+    func testSanitizeOriginalImageDetailFallsBackToHighWithoutSupportLikeRustToolsHelper() {
+        let items: [FunctionCallOutputContentItem] = [
+            .inputText(text: "header"),
+            .inputImage(imageURL: "data:image/png;base64,AAA", detail: .original),
+            .inputImage(imageURL: "data:image/png;base64,BBB", detail: .low),
+            .inputImage(imageURL: "data:image/png;base64,CCC")
+        ]
+
+        XCTAssertEqual(sanitizeOriginalImageDetail(
+            canRequestOriginalImageDetail: false,
+            items: items
+        ), [
+            .inputText(text: "header"),
+            .inputImage(imageURL: "data:image/png;base64,AAA", detail: defaultImageDetail),
+            .inputImage(imageURL: "data:image/png;base64,BBB", detail: .low),
+            .inputImage(imageURL: "data:image/png;base64,CCC")
+        ])
+
+        XCTAssertEqual(sanitizeOriginalImageDetail(
+            canRequestOriginalImageDetail: true,
+            items: items
+        ), items)
+    }
+
     func testReasoningSummaryRejectsUnknownTypeLikeRustSerdeTag() throws {
         let json = #"{"type":"summary_markdown","text":"notes"}"#
         XCTAssertThrowsError(try JSONDecoder().decode(
@@ -1394,6 +1441,42 @@ final class ResponseModelsTests: XCTestCase {
         }
         return output.description
     }
+}
+
+private func imageDetailModelInfo(supportsOriginal: Bool) throws -> ModelInfo {
+    try JSONDecoder().decode(ModelInfo.self, from: Data("""
+    {
+      "slug": "test-model",
+      "display_name": "Test Model",
+      "description": null,
+      "supported_reasoning_levels": [],
+      "shell_type": "shell_command",
+      "visibility": "list",
+      "supported_in_api": true,
+      "priority": 1,
+      "availability_nux": null,
+      "upgrade": null,
+      "base_instructions": "base",
+      "model_messages": null,
+      "supports_reasoning_summaries": false,
+      "default_reasoning_summary": "auto",
+      "support_verbosity": false,
+      "default_verbosity": null,
+      "apply_patch_tool_type": null,
+      "truncation_policy": {
+        "mode": "bytes",
+        "limit": 10000
+      },
+      "supports_parallel_tool_calls": false,
+      "supports_image_detail_original": \(supportsOriginal),
+      "context_window": null,
+      "auto_compact_token_limit": null,
+      "effective_context_window_percent": 95,
+      "experimental_supported_tools": [],
+      "input_modalities": ["text", "image"],
+      "supports_search_tool": false
+    }
+    """.utf8))
 }
 
 private enum TestImageError: Error {
