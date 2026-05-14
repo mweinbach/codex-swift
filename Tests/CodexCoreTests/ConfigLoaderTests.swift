@@ -3494,7 +3494,7 @@ final class ConfigLoaderTests: XCTestCase {
             visibility: .list,
             supportedInAPI: true,
             priority: 0,
-            baseInstructions: nil,
+            baseInstructions: "",
             supportsReasoningSummaries: false,
             supportVerbosity: false,
             truncationPolicy: .bytes(10_000),

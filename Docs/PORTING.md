@@ -71,7 +71,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/models-manager/models.json` and legacy notice keys from `codex-rs/models-manager/src/model_presets.rs`
   - bundled model catalog ordering, picker visibility, default model marker, upgrade prompt metadata, supported reasoning effort labels, service tiers, and migration markdown
 - `codex-rs/protocol/src/openai_models.rs`, `codex-rs/protocol/src/config_types.rs`, and service-tier request plumbing from `codex-rs/core`
-  - model service-tier metadata, dynamic fast-tier support detection, arbitrary string service-tier config, legacy `fast` to `priority` normalization, Responses API `service_tier` request encoding, and request-path filtering that omits unsupported tiers using the selected model metadata
+  - model service-tier metadata, dynamic fast-tier support detection, required `base_instructions` model metadata decoding, arbitrary string service-tier config, legacy `fast` to `priority` normalization, Responses API `service_tier` request encoding, and request-path filtering that omits unsupported tiers using the selected model metadata
 - `codex-rs/core/src/models_manager/model_family.rs` and model prompt includes from `codex-rs/core/*.md`
   - model-family slug matching, context window defaults, base instruction prompts, reasoning/verbosity/tool capabilities, remote metadata overrides, config override order, truncation policy conversion, and auto-compact token-limit defaults
 - `codex-rs/core/src/client_common.rs` prompt instruction assembly and `codex-rs/apply-patch/apply_patch_tool_instructions.md`

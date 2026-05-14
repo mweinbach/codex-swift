@@ -127,7 +127,7 @@ final class OpenAIModelsTests: XCTestCase {
                 "model": "gpt-5.1",
                 "migration_markdown": "Move to GPT-5.1."
             ],
-            "base_instructions": NSNull(),
+            "base_instructions": "",
             "model_messages": NSNull(),
             "supports_reasoning_summaries": true,
             "default_reasoning_summary": "auto",
@@ -183,6 +183,31 @@ final class OpenAIModelsTests: XCTestCase {
         XCTAssertEqual(decoded.serviceTiers, [])
         XCTAssertNil(decoded.availabilityNux)
         XCTAssertEqual(decoded.inputModalities, [.text, .image])
+    }
+
+    func testModelInfoRejectsMissingBaseInstructionsLikeRust() {
+        XCTAssertThrowsError(try JSONDecoder().decode(ModelInfo.self, from: Data("""
+        {
+          "slug": "gpt-test",
+          "display_name": "GPT Test",
+          "description": null,
+          "default_reasoning_level": "medium",
+          "supported_reasoning_levels": [],
+          "shell_type": "default",
+          "visibility": "list",
+          "supported_in_api": true,
+          "priority": 1,
+          "upgrade": null,
+          "supports_reasoning_summaries": false,
+          "support_verbosity": false,
+          "default_verbosity": null,
+          "apply_patch_tool_type": null,
+          "truncation_policy": { "mode": "bytes", "limit": 4096 },
+          "supports_parallel_tool_calls": false,
+          "context_window": null,
+          "experimental_supported_tools": []
+        }
+        """.utf8)))
     }
 
     func testModelsResponseDefaultsMissingEtagToEmptyString() throws {
@@ -265,7 +290,7 @@ final class OpenAIModelsTests: XCTestCase {
             ],
             availabilityNux: ModelAvailabilityNux(message: "Try it."),
             upgrade: ModelInfoUpgrade(model: "gpt-5.1", migrationMarkdown: "Move to GPT-5.1."),
-            baseInstructions: nil,
+            baseInstructions: "",
             supportsReasoningSummaries: true,
             supportVerbosity: false,
             defaultVerbosity: nil,

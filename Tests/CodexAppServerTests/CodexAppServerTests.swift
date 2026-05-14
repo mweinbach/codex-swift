@@ -27803,7 +27803,7 @@ final class CodexAppServerTests: XCTestCase {
             visibility: .list,
             supportedInAPI: true,
             priority: priority,
-            baseInstructions: nil,
+            baseInstructions: "",
             supportsReasoningSummaries: false,
             supportVerbosity: false,
             truncationPolicy: .bytes(10_000),

@@ -154,7 +154,7 @@ final class ContextUpdateBuilderTests: XCTestCase {
             current: current,
             shell: shell(),
             previousModel: previous.model,
-            currentModelInfo: modelInfo(slug: "new-model", baseInstructions: nil)
+            currentModelInfo: modelInfo(slug: "new-model", baseInstructions: "")
         )
 
         XCTAssertEqual(developerTexts(in: items), [])
@@ -444,7 +444,7 @@ private func shell() -> Shell {
 
 private func modelInfo(
     slug: String,
-    baseInstructions: String? = "base instructions",
+    baseInstructions: String = "base instructions",
     modelMessages: ModelMessages? = nil
 ) -> ModelInfo {
     ModelInfo(

@@ -133,9 +133,7 @@ public struct ModelFamily: Equatable, Sendable {
     private mutating func applyRemoteOverrides(_ model: ModelInfo) {
         defaultReasoningEffort = model.defaultReasoningLevel
         shellType = model.shellType
-        if let baseInstructions = model.baseInstructions {
-            self.baseInstructions = baseInstructions
-        }
+        baseInstructions = model.baseInstructions
         supportsReasoningSummaries = model.supportsReasoningSummaries
         defaultReasoningSummary = model.defaultReasoningSummary
         supportVerbosity = model.supportVerbosity

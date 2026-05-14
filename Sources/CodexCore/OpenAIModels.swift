@@ -446,7 +446,7 @@ public struct ModelInfo: Equatable, Sendable {
     public let serviceTiers: [ModelServiceTier]
     public let availabilityNux: ModelAvailabilityNux?
     public let upgrade: ModelInfoUpgrade?
-    public let baseInstructions: String?
+    public let baseInstructions: String
     public let modelMessages: ModelMessages?
     public let supportsReasoningSummaries: Bool
     public let defaultReasoningSummary: ReasoningSummary
@@ -513,7 +513,7 @@ public struct ModelInfo: Equatable, Sendable {
         serviceTiers: [ModelServiceTier] = [],
         availabilityNux: ModelAvailabilityNux? = nil,
         upgrade: ModelInfoUpgrade? = nil,
-        baseInstructions: String? = nil,
+        baseInstructions: String = "",
         modelMessages: ModelMessages? = nil,
         supportsReasoningSummaries: Bool,
         defaultReasoningSummary: ReasoningSummary = .auto,
@@ -579,7 +579,7 @@ public struct ModelInfo: Equatable, Sendable {
 
     public func modelInstructions(personality: Personality?) -> String {
         guard let template = modelMessages?.instructionsTemplate else {
-            return baseInstructions ?? ""
+            return baseInstructions
         }
         let personalityMessage = modelMessages?.personalityMessage(for: personality) ?? ""
         return template.replacingOccurrences(
@@ -629,7 +629,7 @@ extension ModelInfo: Codable {
         self.serviceTiers = try container.decodeIfPresent([ModelServiceTier].self, forKey: .serviceTiers) ?? []
         self.availabilityNux = try container.decodeIfPresent(ModelAvailabilityNux.self, forKey: .availabilityNux)
         self.upgrade = try container.decodeIfPresent(ModelInfoUpgrade.self, forKey: .upgrade)
-        self.baseInstructions = try container.decodeIfPresent(String.self, forKey: .baseInstructions)
+        self.baseInstructions = try container.decode(String.self, forKey: .baseInstructions)
         self.modelMessages = try container.decodeIfPresent(ModelMessages.self, forKey: .modelMessages)
         self.supportsReasoningSummaries = try container.decode(Bool.self, forKey: .supportsReasoningSummaries)
         self.defaultReasoningSummary = try container.decodeIfPresent(
@@ -679,7 +679,7 @@ extension ModelInfo: Codable {
         try container.encode(serviceTiers, forKey: .serviceTiers)
         try encodeNullingOptional(availabilityNux, into: &container, forKey: .availabilityNux)
         try encodeNullingOptional(upgrade, into: &container, forKey: .upgrade)
-        try encodeNullingOptional(baseInstructions, into: &container, forKey: .baseInstructions)
+        try container.encode(baseInstructions, forKey: .baseInstructions)
         try encodeNullingOptional(modelMessages, into: &container, forKey: .modelMessages)
         try container.encode(supportsReasoningSummaries, forKey: .supportsReasoningSummaries)
         try container.encode(defaultReasoningSummary, forKey: .defaultReasoningSummary)

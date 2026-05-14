@@ -698,7 +698,7 @@ final class ModelsManagerTests: XCTestCase {
             supportedInAPI: supportedInAPI,
             priority: priority,
             upgrade: nil,
-            baseInstructions: nil,
+            baseInstructions: "",
             supportsReasoningSummaries: false,
             supportVerbosity: false,
             defaultVerbosity: nil,
