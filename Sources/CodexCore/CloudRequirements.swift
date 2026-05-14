@@ -2,8 +2,12 @@ import CryptoKit
 import Foundation
 
 public enum CloudRequirements {
+    public static let timeout: TimeInterval = 15
+    public static let maxAttempts = 5
+    public static let cacheRefreshInterval: TimeInterval = 5 * 60
     public static let loadFailedMessage = "Failed to load cloud requirements (workspace-managed policies)."
     public static let parseFailedMessagePrefix = "Cloud requirements (workspace-managed policies) are invalid and could not be parsed. Please contact your workspace admin."
+    public static let authRecoveryFailedMessage = "Your authentication session could not be refreshed automatically. Please log out and sign in again."
     public static let cacheFilename = "cloud-requirements-cache.json"
     public static let cacheTTL: TimeInterval = 30 * 60
 
@@ -22,6 +26,13 @@ public enum CloudRequirements {
 
     public static func parseFailedMessage(details: Error) -> String {
         "\(parseFailedMessagePrefix)\n\nDetails:\n\(details)"
+    }
+
+    public static func isEligibleAuth(planType: PlanType?, usesCodexBackend: Bool) -> Bool {
+        guard usesCodexBackend, let planType else {
+            return false
+        }
+        return planType.isBusinessLike || planType == .enterprise
     }
 
     public static func cachePayloadBytes(_ payload: CloudRequirementsCacheSignedPayload) throws -> Data {

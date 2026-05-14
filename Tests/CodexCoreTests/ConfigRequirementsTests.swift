@@ -820,6 +820,30 @@ final class ConfigRequirementsTests: XCTestCase {
         XCTAssertTrue(message.contains("Invalid approval policy requirement: sometimes"))
     }
 
+    func testCloudRequirementsEligibilityMatchesRustPlanBoundary() {
+        XCTAssertEqual(CloudRequirements.timeout, 15)
+        XCTAssertEqual(CloudRequirements.maxAttempts, 5)
+        XCTAssertEqual(CloudRequirements.cacheRefreshInterval, 5 * 60)
+        XCTAssertEqual(CloudRequirements.cacheTTL, 30 * 60)
+        XCTAssertEqual(
+            CloudRequirements.authRecoveryFailedMessage,
+            "Your authentication session could not be refreshed automatically. Please log out and sign in again."
+        )
+
+        XCTAssertFalse(CloudRequirements.isEligibleAuth(planType: nil, usesCodexBackend: true))
+        XCTAssertFalse(CloudRequirements.isEligibleAuth(planType: .business, usesCodexBackend: false))
+
+        XCTAssertTrue(CloudRequirements.isEligibleAuth(planType: .business, usesCodexBackend: true))
+        XCTAssertTrue(CloudRequirements.isEligibleAuth(planType: .enterpriseCbpUsageBased, usesCodexBackend: true))
+        XCTAssertTrue(CloudRequirements.isEligibleAuth(planType: .enterprise, usesCodexBackend: true))
+
+        XCTAssertFalse(CloudRequirements.isEligibleAuth(planType: .team, usesCodexBackend: true))
+        XCTAssertFalse(CloudRequirements.isEligibleAuth(planType: .selfServeBusinessUsageBased, usesCodexBackend: true))
+        XCTAssertFalse(CloudRequirements.isEligibleAuth(planType: .edu, usesCodexBackend: true))
+        XCTAssertFalse(CloudRequirements.isEligibleAuth(planType: .pro, usesCodexBackend: true))
+        XCTAssertFalse(CloudRequirements.isEligibleAuth(planType: .unknown, usesCodexBackend: true))
+    }
+
     func testCloudRequirementsLoaderSharesSingleResultLikeRust() async throws {
         let counter = Counter()
         let loader = CloudRequirementsLoader {
