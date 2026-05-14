@@ -260,6 +260,17 @@ public actor CodexToolItemAnalyticsClient {
         let event = guardianReviewReducer.ingest(fact, context: context)
         try? await uploader.upload(CodexTrackEventsRequest(events: [.guardianReview(event)]))
     }
+
+    public func trackGuardianReview(
+        _ tracking: CodexGuardianReviewTrackContext,
+        result: CodexGuardianReviewAnalyticsResult,
+        context: CodexGuardianReviewAnalyticsContext
+    ) async {
+        await trackGuardianReview(
+            tracking.eventParams(result: result),
+            context: context
+        )
+    }
 }
 
 public enum AppServerRpcTransport: String, Codable, Equatable, Sendable {
@@ -849,6 +860,152 @@ public struct CodexGuardianReviewAnalyticsFact: Equatable, Sendable {
         self.outputTokens = outputTokens
         self.reasoningOutputTokens = reasoningOutputTokens
         self.totalTokens = totalTokens
+    }
+}
+
+public struct CodexGuardianReviewTrackContext: Sendable {
+    public let threadID: String
+    public let turnID: String
+    public let reviewID: String
+    public let targetItemID: String?
+    public let approvalRequestSource: GuardianApprovalRequestSource
+    public let reviewedAction: GuardianReviewedAction
+    public let reviewTimeoutMilliseconds: UInt64
+    public let startedAtMilliseconds: UInt64
+    private let elapsedMilliseconds: @Sendable () -> UInt64
+
+    public init(
+        threadID: String,
+        turnID: String,
+        reviewID: String,
+        targetItemID: String? = nil,
+        approvalRequestSource: GuardianApprovalRequestSource,
+        reviewedAction: GuardianReviewedAction,
+        reviewTimeoutMilliseconds: UInt64,
+        startedAtMilliseconds: UInt64 = UInt64(Date().timeIntervalSince1970 * 1_000),
+        elapsedMilliseconds: (@Sendable () -> UInt64)? = nil
+    ) {
+        self.threadID = threadID
+        self.turnID = turnID
+        self.reviewID = reviewID
+        self.targetItemID = targetItemID
+        self.approvalRequestSource = approvalRequestSource
+        self.reviewedAction = reviewedAction
+        self.reviewTimeoutMilliseconds = reviewTimeoutMilliseconds
+        self.startedAtMilliseconds = startedAtMilliseconds
+        let createdAt = Date()
+        self.elapsedMilliseconds = elapsedMilliseconds ?? {
+            UInt64(max(0, Date().timeIntervalSince(createdAt)) * 1_000)
+        }
+    }
+
+    public func eventParams(
+        result: CodexGuardianReviewAnalyticsResult,
+        completedAtSeconds: UInt64 = UInt64(Date().timeIntervalSince1970)
+    ) -> CodexGuardianReviewAnalyticsFact {
+        CodexGuardianReviewAnalyticsFact(
+            threadID: threadID,
+            turnID: turnID,
+            reviewID: reviewID,
+            targetItemID: targetItemID,
+            approvalRequestSource: approvalRequestSource,
+            reviewedAction: reviewedAction,
+            reviewedActionTruncated: result.reviewedActionTruncated,
+            decision: result.decision,
+            terminalStatus: result.terminalStatus,
+            failureReason: result.failureReason,
+            riskLevel: result.riskLevel,
+            userAuthorization: result.userAuthorization,
+            outcome: result.outcome,
+            guardianThreadID: result.guardianThreadID,
+            guardianSessionKind: result.guardianSessionKind,
+            guardianModel: result.guardianModel,
+            guardianReasoningEffort: result.guardianReasoningEffort,
+            hadPriorReviewContext: result.hadPriorReviewContext,
+            reviewTimeoutMilliseconds: reviewTimeoutMilliseconds,
+            toolCallCount: nil,
+            timeToFirstTokenMilliseconds: result.timeToFirstTokenMilliseconds,
+            completionLatencyMilliseconds: elapsedMilliseconds(),
+            startedAt: startedAtMilliseconds / 1_000,
+            completedAt: completedAtSeconds,
+            inputTokens: result.tokenUsage?.inputTokens,
+            cachedInputTokens: result.tokenUsage?.cachedInputTokens,
+            outputTokens: result.tokenUsage?.outputTokens,
+            reasoningOutputTokens: result.tokenUsage?.reasoningOutputTokens,
+            totalTokens: result.tokenUsage?.totalTokens
+        )
+    }
+}
+
+public struct CodexGuardianReviewAnalyticsResult: Equatable, Sendable {
+    public var decision: GuardianReviewDecision
+    public var terminalStatus: GuardianReviewTerminalStatus
+    public var failureReason: GuardianReviewFailureReason?
+    public var riskLevel: GuardianRiskLevel?
+    public var userAuthorization: GuardianUserAuthorization?
+    public var outcome: GuardianAssessmentOutcome?
+    public var guardianThreadID: String?
+    public var guardianSessionKind: GuardianReviewSessionKind?
+    public var guardianModel: String?
+    public var guardianReasoningEffort: String?
+    public var hadPriorReviewContext: Bool?
+    public var reviewedActionTruncated: Bool
+    public var tokenUsage: TokenUsage?
+    public var timeToFirstTokenMilliseconds: UInt64?
+
+    public init(
+        decision: GuardianReviewDecision,
+        terminalStatus: GuardianReviewTerminalStatus,
+        failureReason: GuardianReviewFailureReason? = nil,
+        riskLevel: GuardianRiskLevel? = nil,
+        userAuthorization: GuardianUserAuthorization? = nil,
+        outcome: GuardianAssessmentOutcome? = nil,
+        guardianThreadID: String? = nil,
+        guardianSessionKind: GuardianReviewSessionKind? = nil,
+        guardianModel: String? = nil,
+        guardianReasoningEffort: String? = nil,
+        hadPriorReviewContext: Bool? = nil,
+        reviewedActionTruncated: Bool = false,
+        tokenUsage: TokenUsage? = nil,
+        timeToFirstTokenMilliseconds: UInt64? = nil
+    ) {
+        self.decision = decision
+        self.terminalStatus = terminalStatus
+        self.failureReason = failureReason
+        self.riskLevel = riskLevel
+        self.userAuthorization = userAuthorization
+        self.outcome = outcome
+        self.guardianThreadID = guardianThreadID
+        self.guardianSessionKind = guardianSessionKind
+        self.guardianModel = guardianModel
+        self.guardianReasoningEffort = guardianReasoningEffort
+        self.hadPriorReviewContext = hadPriorReviewContext
+        self.reviewedActionTruncated = reviewedActionTruncated
+        self.tokenUsage = tokenUsage
+        self.timeToFirstTokenMilliseconds = timeToFirstTokenMilliseconds
+    }
+
+    public static func withoutSession() -> Self {
+        Self(
+            decision: .denied,
+            terminalStatus: .failedClosed
+        )
+    }
+
+    public static func fromSession(
+        guardianThreadID: String,
+        guardianSessionKind: GuardianReviewSessionKind,
+        guardianModel: String,
+        guardianReasoningEffort: String?,
+        hadPriorReviewContext: Bool
+    ) -> Self {
+        var result = Self.withoutSession()
+        result.guardianThreadID = guardianThreadID
+        result.guardianSessionKind = guardianSessionKind
+        result.guardianModel = guardianModel
+        result.guardianReasoningEffort = guardianReasoningEffort
+        result.hadPriorReviewContext = hadPriorReviewContext
+        return result
     }
 }
 

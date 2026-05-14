@@ -1421,6 +1421,125 @@ final class ReviewAnalyticsTests: XCTestCase {
         XCTAssertEqual(event.eventParams.guardianReview.decision, .approved)
     }
 
+    func testGuardianReviewTrackContextBuildsEventParamsLikeRust() throws {
+        let tracking = CodexGuardianReviewTrackContext(
+            threadID: "thread-track",
+            turnID: "turn-track",
+            reviewID: "review-track",
+            targetItemID: "item-track",
+            approvalRequestSource: .delegatedSubagent,
+            reviewedAction: .mcpToolCall(
+                server: "github",
+                toolName: "pull_request_read",
+                connectorID: "connector-1",
+                connectorName: "GitHub",
+                toolTitle: "Read Pull Request"
+            ),
+            reviewTimeoutMilliseconds: 120_000,
+            startedAtMilliseconds: 123_456,
+            elapsedMilliseconds: { 789 }
+        )
+        var result = CodexGuardianReviewAnalyticsResult.fromSession(
+            guardianThreadID: "guardian-thread",
+            guardianSessionKind: .ephemeralForked,
+            guardianModel: "gpt-5.1",
+            guardianReasoningEffort: "high",
+            hadPriorReviewContext: true
+        )
+        result.decision = .approved
+        result.terminalStatus = .approved
+        result.riskLevel = .medium
+        result.userAuthorization = .high
+        result.outcome = .allow
+        result.reviewedActionTruncated = true
+        result.tokenUsage = TokenUsage(
+            inputTokens: 10,
+            cachedInputTokens: 4,
+            outputTokens: 6,
+            reasoningOutputTokens: 2,
+            totalTokens: 16
+        )
+        result.timeToFirstTokenMilliseconds = 321
+
+        let fact = tracking.eventParams(
+            result: result,
+            completedAtSeconds: 130
+        )
+        let event = CodexGuardianReviewAnalyticsReducer().ingest(
+            fact,
+            context: Self.analyticsContext
+        )
+
+        try XCTAssertJSONObjectEqual(event, [
+            "event_type": "codex_guardian_review",
+            "event_params": [
+                "app_server_client": Self.analyticsContextAppServerClientJSON(),
+                "runtime": Self.analyticsContextRuntimeJSON(),
+                "thread_id": "thread-track",
+                "turn_id": "turn-track",
+                "review_id": "review-track",
+                "target_item_id": "item-track",
+                "approval_request_source": "delegated_subagent",
+                "reviewed_action": [
+                    "type": "mcp_tool_call",
+                    "server": "github",
+                    "tool_name": "pull_request_read",
+                    "connector_id": "connector-1",
+                    "connector_name": "GitHub",
+                    "tool_title": "Read Pull Request"
+                ],
+                "reviewed_action_truncated": true,
+                "decision": "approved",
+                "terminal_status": "approved",
+                "failure_reason": nil,
+                "risk_level": "medium",
+                "user_authorization": "high",
+                "outcome": "allow",
+                "guardian_thread_id": "guardian-thread",
+                "guardian_session_kind": "ephemeral_forked",
+                "guardian_model": "gpt-5.1",
+                "guardian_reasoning_effort": "high",
+                "had_prior_review_context": true,
+                "review_timeout_ms": 120_000,
+                "tool_call_count": nil,
+                "time_to_first_token_ms": 321,
+                "completion_latency_ms": 789,
+                "started_at": 123,
+                "completed_at": 130,
+                "input_tokens": 10,
+                "cached_input_tokens": 4,
+                "output_tokens": 6,
+                "reasoning_output_tokens": 2,
+                "total_tokens": 16
+            ]
+        ])
+    }
+
+    func testGuardianReviewAnalyticsResultDefaultsMatchRust() {
+        XCTAssertEqual(
+            CodexGuardianReviewAnalyticsResult.withoutSession(),
+            CodexGuardianReviewAnalyticsResult(
+                decision: .denied,
+                terminalStatus: .failedClosed
+            )
+        )
+
+        let result = CodexGuardianReviewAnalyticsResult.fromSession(
+            guardianThreadID: "guardian-thread",
+            guardianSessionKind: .trunkReused,
+            guardianModel: "gpt-5",
+            guardianReasoningEffort: nil,
+            hadPriorReviewContext: false
+        )
+        XCTAssertEqual(result.decision, .denied)
+        XCTAssertEqual(result.terminalStatus, .failedClosed)
+        XCTAssertEqual(result.guardianThreadID, "guardian-thread")
+        XCTAssertEqual(result.guardianSessionKind, .trunkReused)
+        XCTAssertEqual(result.guardianModel, "gpt-5")
+        XCTAssertNil(result.guardianReasoningEffort)
+        XCTAssertEqual(result.hadPriorReviewContext, false)
+    }
+
     private static let analyticsContext = CodexCommandExecutionAnalyticsContext(
         appServerClient: CodexAppServerClientMetadata(
             productClientID: "codex_tui",
@@ -1437,6 +1556,25 @@ final class ReviewAnalyticsTests: XCTestCase {
         ),
         threadSource: .user
     )
+
+    private static func analyticsContextAppServerClientJSON() -> [String: Any?] {
+        [
+            "product_client_id": "codex_tui",
+            "client_name": "codex-tui",
+            "client_version": "1.2.3",
+            "rpc_transport": "websocket",
+            "experimental_api_enabled": true
+        ]
+    }
+
+    private static func analyticsContextRuntimeJSON() -> [String: Any?] {
+        [
+            "codex_rs_version": "0.99.0",
+            "runtime_os": "macos",
+            "runtime_os_version": "15.3.1",
+            "runtime_arch": "aarch64"
+        ]
+    }
 
     private static let sampleFileChanges: [AppServerFileUpdateChange] = [
         AppServerFileUpdateChange(path: "/repo/new.swift", kind: .add, diff: "+new"),
