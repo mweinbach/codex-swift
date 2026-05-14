@@ -1,0 +1,237 @@
+import XCTest
+@testable import CodexCore
+
+final class AppServerMcpProtocolTests: XCTestCase {
+    func testMcpServerStatusParamsAndResponseUseRustNullAndCamelCaseRules() throws {
+        try XCTAssertJSONObjectEqual(AppServerProtocol.ListMcpServerStatusParams(), [
+            "cursor": NSNull(),
+            "limit": NSNull(),
+            "detail": NSNull()
+        ])
+        try XCTAssertJSONObjectEqual(
+            AppServerProtocol.ListMcpServerStatusParams(cursor: "cursor-1", limit: 25, detail: .toolsAndAuthOnly),
+            [
+                "cursor": "cursor-1",
+                "limit": 25,
+                "detail": "toolsAndAuthOnly"
+            ]
+        )
+
+        let response = AppServerProtocol.ListMcpServerStatusResponse(
+            data: [
+                AppServerProtocol.McpServerStatus(
+                    name: "docs",
+                    tools: [
+                        "search": McpTool(
+                            name: "search",
+                            inputSchema: McpToolInputSchema(),
+                            description: "Search docs"
+                        )
+                    ],
+                    resources: [
+                        McpResource(
+                            name: "Guide",
+                            uri: "file:///guide.md",
+                            mimeType: "text/markdown",
+                            title: "Guide"
+                        )
+                    ],
+                    resourceTemplates: [
+                        McpResourceTemplate(
+                            name: "doc",
+                            uriTemplate: "file:///{name}.md",
+                            mimeType: "text/markdown"
+                        )
+                    ],
+                    authStatus: .oAuth
+                )
+            ],
+            nextCursor: nil
+        )
+
+        try XCTAssertJSONObjectEqual(response, [
+            "data": [[
+                "name": "docs",
+                "tools": [
+                    "search": [
+                        "name": "search",
+                        "description": "Search docs",
+                        "inputSchema": [
+                            "type": "object"
+                        ]
+                    ]
+                ],
+                "resources": [[
+                    "mimeType": "text/markdown",
+                    "name": "Guide",
+                    "title": "Guide",
+                    "uri": "file:///guide.md"
+                ]],
+                "resourceTemplates": [[
+                    "mimeType": "text/markdown",
+                    "name": "doc",
+                    "uriTemplate": "file:///{name}.md"
+                ]],
+                "authStatus": "oAuth"
+            ]],
+            "nextCursor": NSNull()
+        ])
+    }
+
+    func testMcpResourceReadUsesExplicitNullableThreadID() throws {
+        try XCTAssertJSONObjectEqual(AppServerProtocol.McpResourceReadParams(server: "docs", uri: "file:///guide.md"), [
+            "threadId": NSNull(),
+            "server": "docs",
+            "uri": "file:///guide.md"
+        ])
+
+        let response = AppServerProtocol.McpResourceReadResponse(contents: [
+            .text(McpTextResourceContents(
+                text: "# Guide",
+                uri: "file:///guide.md",
+                mimeType: "text/markdown"
+            )),
+            .blob(McpBlobResourceContents(
+                blob: "AAEC",
+                uri: "file:///image.png",
+                mimeType: "image/png"
+            ))
+        ])
+
+        try XCTAssertJSONObjectEqual(response, [
+            "contents": [
+                [
+                    "mimeType": "text/markdown",
+                    "text": "# Guide",
+                    "uri": "file:///guide.md"
+                ],
+                [
+                    "blob": "AAEC",
+                    "mimeType": "image/png",
+                    "uri": "file:///image.png"
+                ]
+            ]
+        ])
+    }
+
+    func testMcpToolCallParamsAndResponsesFollowSkipAndNullRules() throws {
+        try XCTAssertJSONObjectEqual(
+            AppServerProtocol.McpServerToolCallParams(threadID: "thr_1", server: "docs", tool: "search"),
+            [
+                "threadId": "thr_1",
+                "server": "docs",
+                "tool": "search"
+            ]
+        )
+
+        try XCTAssertJSONObjectEqual(
+            AppServerProtocol.McpServerToolCallParams(
+                threadID: "thr_1",
+                server: "docs",
+                tool: "search",
+                arguments: .object(["query": .string("Codex")]),
+                meta: .object(["trace": .string("abc")])
+            ),
+            [
+                "threadId": "thr_1",
+                "server": "docs",
+                "tool": "search",
+                "arguments": [
+                    "query": "Codex"
+                ],
+                "_meta": [
+                    "trace": "abc"
+                ]
+            ]
+        )
+
+        try XCTAssertJSONObjectEqual(
+            AppServerProtocol.McpServerToolCallResponse(
+                content: [.object(["type": .string("text"), "text": .string("hello")])]
+            ),
+            [
+                "content": [[
+                    "type": "text",
+                    "text": "hello"
+                ]]
+            ]
+        )
+
+        try XCTAssertJSONObjectEqual(
+            AppServerProtocol.McpToolCallResult(
+                content: [],
+                structuredContent: nil,
+                meta: nil
+            ),
+            [
+                "content": [Any](),
+                "structuredContent": NSNull(),
+                "_meta": NSNull()
+            ]
+        )
+    }
+
+    func testMcpRefreshOauthAndNotificationsMatchRustWireShape() throws {
+        try XCTAssertJSONObjectEqual(AppServerProtocol.McpServerRefreshParams(), [String: Any]())
+        try XCTAssertJSONObjectEqual(AppServerProtocol.McpServerRefreshResponse(), [String: Any]())
+
+        try XCTAssertJSONObjectEqual(AppServerProtocol.McpServerOauthLoginParams(name: "github"), [
+            "name": "github"
+        ])
+        try XCTAssertJSONObjectEqual(
+            AppServerProtocol.McpServerOauthLoginParams(
+                name: "github",
+                scopes: ["repo"],
+                timeoutSeconds: 30
+            ),
+            [
+                "name": "github",
+                "scopes": ["repo"],
+                "timeoutSecs": 30
+            ]
+        )
+        try XCTAssertJSONObjectEqual(
+            AppServerProtocol.McpServerOauthLoginResponse(authorizationURL: "https://auth.example/authorize"),
+            [
+                "authorizationUrl": "https://auth.example/authorize"
+            ]
+        )
+
+        try XCTAssertJSONObjectEqual(
+            AppServerProtocol.McpToolCallProgressNotification(
+                threadID: "thr_1",
+                turnID: "turn_1",
+                itemID: "item_1",
+                message: "Working"
+            ),
+            [
+                "threadId": "thr_1",
+                "turnId": "turn_1",
+                "itemId": "item_1",
+                "message": "Working"
+            ]
+        )
+        try XCTAssertJSONObjectEqual(
+            AppServerProtocol.McpServerOauthLoginCompletedNotification(name: "github", success: false),
+            [
+                "name": "github",
+                "success": false
+            ]
+        )
+        try XCTAssertJSONObjectEqual(
+            AppServerProtocol.McpServerStatusUpdatedNotification(name: "github", status: .failed, error: nil),
+            [
+                "name": "github",
+                "status": "failed",
+                "error": NSNull()
+            ]
+        )
+    }
+
+    func testMcpAuthStatusProjectsCoreAuthStatusToAppServerV2Spelling() {
+        XCTAssertEqual(AppServerMcpAuthStatus(coreStatus: .unsupported), .unsupported)
+        XCTAssertEqual(AppServerMcpAuthStatus(coreStatus: .notLoggedIn), .notLoggedIn)
+        XCTAssertEqual(AppServerMcpAuthStatus(coreStatus: .bearerToken), .bearerToken)
+        XCTAssertEqual(AppServerMcpAuthStatus(coreStatus: .oauth), .oAuth)
+    }
+}
