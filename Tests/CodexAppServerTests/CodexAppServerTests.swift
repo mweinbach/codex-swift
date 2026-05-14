@@ -21620,7 +21620,11 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(features["memories"], .bool(true))
         XCTAssertEqual(features["plugins"], .bool(false))
         XCTAssertEqual(capture.submissions, [
-            SubmittedCoreOp(requestID: .integer(2), threadID: threadID, op: .reloadUserConfig)
+            SubmittedCoreOp(
+                requestID: .integer(2),
+                threadID: threadID,
+                op: .refreshRuntimeConfig(config: .table(config))
+            )
         ])
     }
 
@@ -25186,7 +25190,11 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(config["model"], .string("gpt-reloaded"))
         XCTAssertEqual(config["project_marker"], .string("loaded-thread-cwd"))
         XCTAssertEqual(capture.submissions, [
-            SubmittedCoreOp(requestID: .integer(3), threadID: threadID, op: .reloadUserConfig)
+            SubmittedCoreOp(
+                requestID: .integer(3),
+                threadID: threadID,
+                op: .refreshRuntimeConfig(config: .table(config))
+            )
         ])
     }
 

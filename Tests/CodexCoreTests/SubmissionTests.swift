@@ -122,6 +122,23 @@ final class SubmissionTests: XCTestCase {
         }
     }
 
+    func testRefreshRuntimeConfigCarriesMaterializedSnapshot() throws {
+        let op = Op.refreshRuntimeConfig(config: .table([
+            "model": .string("gpt-reloaded"),
+            "features": .table(["plugins": .bool(true)])
+        ]))
+
+        try XCTAssertJSONObjectEqual(op, [
+            "type": "refresh_runtime_config",
+            "config": [
+                "model": "gpt-reloaded",
+                "features": ["plugins": true]
+            ]
+        ])
+        let data = try JSONEncoder().encode(op)
+        XCTAssertEqual(try JSONDecoder().decode(Op.self, from: data), op)
+    }
+
     func testUserTurnWireShapeIncludesNullSchemaAndOmitsMissingEffort() throws {
         let op = Op.userTurn(
             items: [.text("build")],

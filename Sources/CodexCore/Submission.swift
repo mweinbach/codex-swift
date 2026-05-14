@@ -149,6 +149,7 @@ public enum Op: Equatable, Sendable {
     case listCustomPrompts
     case listSkills(cwds: [String], forceReload: Bool)
     case reloadUserConfig
+    case refreshRuntimeConfig(config: ConfigValue)
     case compact
     case setThreadMemoryMode(mode: ThreadMemoryMode)
     case threadRollback(numTurns: UInt32)
@@ -233,6 +234,7 @@ public enum Op: Equatable, Sendable {
         case listCustomPrompts = "list_custom_prompts"
         case listSkills = "list_skills"
         case reloadUserConfig = "reload_user_config"
+        case refreshRuntimeConfig = "refresh_runtime_config"
         case compact
         case setThreadMemoryMode = "set_thread_memory_mode"
         case threadRollback = "thread_rollback"
@@ -370,6 +372,8 @@ extension Op: Codable {
             )
         case .reloadUserConfig:
             self = .reloadUserConfig
+        case .refreshRuntimeConfig:
+            self = .refreshRuntimeConfig(config: try container.decode(ConfigValue.self, forKey: .config))
         case .compact:
             self = .compact
         case .setThreadMemoryMode:
@@ -535,6 +539,9 @@ extension Op: Codable {
             }
         case .reloadUserConfig:
             try container.encode(OperationType.reloadUserConfig, forKey: .type)
+        case let .refreshRuntimeConfig(config):
+            try container.encode(OperationType.refreshRuntimeConfig, forKey: .type)
+            try container.encode(config, forKey: .config)
         case .compact:
             try container.encode(OperationType.compact, forKey: .type)
         case let .setThreadMemoryMode(mode):

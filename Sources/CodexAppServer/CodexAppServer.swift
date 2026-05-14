@@ -25884,7 +25884,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                 throw AppServerError.invalidRequest("thread not found: \(threadID)")
             }
             if let coreOpSubmitter, let requestID {
-                _ = try? coreOpSubmitter(requestID, threadID, .reloadUserConfig)
+                _ = try? coreOpSubmitter(requestID, threadID, .refreshRuntimeConfig(config: effectiveConfig))
             }
         }
     }
