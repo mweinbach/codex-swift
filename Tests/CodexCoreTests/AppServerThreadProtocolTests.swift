@@ -117,6 +117,10 @@ final class AppServerThreadProtocolTests: XCTestCase {
         ])
         try XCTAssertJSONObjectEqual(ThreadArchiveResponse(), [:])
 
+        try XCTAssertJSONObjectEqual(ThreadUnarchiveParams(threadID: "thr_unarchive"), [
+            "threadId": "thr_unarchive"
+        ])
+
         try XCTAssertJSONObjectEqual(ThreadUnsubscribeParams(threadID: "thr_unsubscribe"), [
             "threadId": "thr_unsubscribe"
         ])
@@ -303,6 +307,60 @@ final class AppServerThreadProtocolTests: XCTestCase {
             from: Data(#"{"threadId":"\#(threadID.description)","tokenBudget":99}"#.utf8)
         )
         XCTAssertEqual(set.tokenBudget, .set(99))
+    }
+
+    func testThreadReadRollbackMetadataAndMemoryResetRoundTripLikeRustProtocol() throws {
+        let threadID = "018f7a2d-4c5b-7abc-8def-0123456789ab"
+
+        try XCTAssertJSONObjectEqual(ThreadReadParams(threadID: threadID), [
+            "threadId": threadID,
+            "includeTurns": false
+        ])
+        try XCTAssertJSONObjectEqual(ThreadReadParams(threadID: threadID, includeTurns: true), [
+            "threadId": threadID,
+            "includeTurns": true
+        ])
+        let defaultRead = try JSONDecoder().decode(
+            ThreadReadParams.self,
+            from: Data(#"{"threadId":"\#(threadID)"}"#.utf8)
+        )
+        XCTAssertFalse(defaultRead.includeTurns)
+
+        try XCTAssertJSONObjectEqual(ThreadRollbackParams(threadID: threadID, numTurns: 3), [
+            "threadId": threadID,
+            "numTurns": 3
+        ])
+
+        try XCTAssertJSONObjectEqual(
+            ThreadMetadataUpdateParams(
+                threadID: threadID,
+                gitInfo: ThreadMetadataGitInfoUpdateParams(
+                    sha: .set("abc123"),
+                    branch: .clear,
+                    originURL: .preserve
+                )
+            ),
+            [
+                "threadId": threadID,
+                "gitInfo": [
+                    "sha": "abc123",
+                    "branch": NSNull()
+                ]
+            ]
+        )
+        try XCTAssertJSONObjectEqual(ThreadMetadataUpdateParams(threadID: threadID, gitInfo: nil), [
+            "threadId": threadID,
+            "gitInfo": NSNull()
+        ])
+        let gitPatch = try JSONDecoder().decode(
+            ThreadMetadataGitInfoUpdateParams.self,
+            from: Data(#"{"sha":"def456","branch":null}"#.utf8)
+        )
+        XCTAssertEqual(gitPatch.sha, .set("def456"))
+        XCTAssertEqual(gitPatch.branch, .clear)
+        XCTAssertEqual(gitPatch.originURL, .preserve)
+
+        try XCTAssertJSONObjectEqual(MemoryResetResponse(), [:])
     }
 
     func testThreadTurnsItemsListRoundTripsLikeRustProtocol() throws {

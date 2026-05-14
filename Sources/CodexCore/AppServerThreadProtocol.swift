@@ -287,6 +287,18 @@ public struct ThreadArchiveResponse: Equatable, Codable, Sendable {
     public init() {}
 }
 
+public struct ThreadUnarchiveParams: Equatable, Codable, Sendable {
+    public let threadID: String
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+    }
+
+    public init(threadID: String) {
+        self.threadID = threadID
+    }
+}
+
 public struct ThreadUnsubscribeParams: Equatable, Codable, Sendable {
     public let threadID: String
 
@@ -440,6 +452,101 @@ public struct ThreadBackgroundTerminalsCleanResponse: Equatable, Codable, Sendab
     public init() {}
 }
 
+public enum ThreadMetadataStringPatch: Equatable, Sendable {
+    case preserve
+    case clear
+    case set(String)
+}
+
+public struct ThreadMetadataGitInfoUpdateParams: Equatable, Codable, Sendable {
+    public let sha: ThreadMetadataStringPatch
+    public let branch: ThreadMetadataStringPatch
+    public let originURL: ThreadMetadataStringPatch
+
+    private enum CodingKeys: String, CodingKey {
+        case sha
+        case branch
+        case originURL = "originUrl"
+    }
+
+    public init(
+        sha: ThreadMetadataStringPatch = .preserve,
+        branch: ThreadMetadataStringPatch = .preserve,
+        originURL: ThreadMetadataStringPatch = .preserve
+    ) {
+        self.sha = sha
+        self.branch = branch
+        self.originURL = originURL
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sha = try Self.decodePatch(from: container, forKey: .sha)
+        branch = try Self.decodePatch(from: container, forKey: .branch)
+        originURL = try Self.decodePatch(from: container, forKey: .originURL)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try Self.encodePatch(sha, into: &container, forKey: .sha)
+        try Self.encodePatch(branch, into: &container, forKey: .branch)
+        try Self.encodePatch(originURL, into: &container, forKey: .originURL)
+    }
+
+    private static func decodePatch(
+        from container: KeyedDecodingContainer<CodingKeys>,
+        forKey key: CodingKeys
+    ) throws -> ThreadMetadataStringPatch {
+        if !container.contains(key) {
+            return .preserve
+        }
+        if try container.decodeNil(forKey: key) {
+            return .clear
+        }
+        return .set(try container.decode(String.self, forKey: key))
+    }
+
+    private static func encodePatch(
+        _ patch: ThreadMetadataStringPatch,
+        into container: inout KeyedEncodingContainer<CodingKeys>,
+        forKey key: CodingKeys
+    ) throws {
+        switch patch {
+        case .preserve:
+            break
+        case .clear:
+            try container.encodeNil(forKey: key)
+        case let .set(value):
+            try container.encode(value, forKey: key)
+        }
+    }
+}
+
+public struct ThreadMetadataUpdateParams: Equatable, Codable, Sendable {
+    public let threadID: String
+    public let gitInfo: ThreadMetadataGitInfoUpdateParams?
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+        case gitInfo
+    }
+
+    public init(threadID: String, gitInfo: ThreadMetadataGitInfoUpdateParams?) {
+        self.threadID = threadID
+        self.gitInfo = gitInfo
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(threadID, forKey: .threadID)
+        if let gitInfo {
+            try container.encode(gitInfo, forKey: .gitInfo)
+        } else {
+            try container.encodeNil(forKey: .gitInfo)
+        }
+    }
+}
+
 public enum ThreadGoalTokenBudgetPatch: Equatable, Sendable {
     case preserve
     case clear
@@ -579,6 +686,46 @@ public struct ThreadMemoryModeSetParams: Equatable, Codable, Sendable {
 
 public struct ThreadMemoryModeSetResponse: Equatable, Codable, Sendable {
     public init() {}
+}
+
+public struct MemoryResetResponse: Equatable, Codable, Sendable {
+    public init() {}
+}
+
+public struct ThreadRollbackParams: Equatable, Codable, Sendable {
+    public let threadID: String
+    public let numTurns: UInt32
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+        case numTurns
+    }
+
+    public init(threadID: String, numTurns: UInt32) {
+        self.threadID = threadID
+        self.numTurns = numTurns
+    }
+}
+
+public struct ThreadReadParams: Equatable, Codable, Sendable {
+    public let threadID: String
+    public let includeTurns: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+        case includeTurns
+    }
+
+    public init(threadID: String, includeTurns: Bool = false) {
+        self.threadID = threadID
+        self.includeTurns = includeTurns
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        threadID = try container.decode(String.self, forKey: .threadID)
+        includeTurns = try container.decodeIfPresent(Bool.self, forKey: .includeTurns) ?? false
+    }
 }
 
 public struct ThreadTurnsListParams: Equatable, Codable, Sendable {
