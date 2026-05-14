@@ -36,6 +36,21 @@ final class ReviewAnalyticsTests: XCTestCase {
 
         let request = CodexTrackEventsRequest(events: [
             .commandExecution(command),
+            .turnSteer(CodexTurnSteerEventRequest(
+                eventType: "codex_turn_steer",
+                eventParams: CodexTurnSteerEventParams(
+                    threadID: "thread-1",
+                    expectedTurnID: "turn-1",
+                    acceptedTurnID: "turn-2",
+                    appServerClient: Self.analyticsContext.appServerClient,
+                    runtime: Self.analyticsContext.runtime,
+                    threadSource: .user,
+                    numInputImages: 0,
+                    result: .accepted,
+                    rejectionReason: nil,
+                    createdAt: 124
+                )
+            )),
             .collabAgentToolCall(collab),
             .acceptedLineFingerprints(acceptedLine)
         ])
@@ -44,12 +59,14 @@ final class ReviewAnalyticsTests: XCTestCase {
         let events = try XCTUnwrap(object["events"] as? [[String: Any]])
         XCTAssertEqual(events.compactMap { $0["event_type"] as? String }, [
             "codex_command_execution_event",
+            "codex_turn_steer",
             "codex_collab_agent_tool_call_event",
             "codex_accepted_line_fingerprints"
         ])
         XCTAssertNotNil(events[0]["event_params"])
         XCTAssertNotNil(events[1]["event_params"])
         XCTAssertNotNil(events[2]["event_params"])
+        XCTAssertNotNil(events[3]["event_params"])
     }
 
     func testTrackEventRequestBatchesIsolateAcceptedLineEventsLikeRust() throws {
@@ -1299,6 +1316,130 @@ final class ReviewAnalyticsTests: XCTestCase {
         XCTAssertEqual(event.eventParams.threadID, "thread-1")
         XCTAssertEqual(event.eventParams.threadSource, .user)
         XCTAssertEqual(event.eventParams.status, .completed)
+    }
+
+    func testTurnSteerAnalyticsReducerIngestsCustomFactLikeRust() throws {
+        let reducer = CodexTurnSteerAnalyticsReducer()
+        let event = reducer.ingest(
+            CodexTurnSteerAnalyticsFact(
+                threadID: "thread-steer",
+                expectedTurnID: "turn-expected",
+                acceptedTurnID: nil,
+                numInputImages: 2,
+                result: .rejected,
+                rejectionReason: .expectedTurnMismatch,
+                createdAt: 123
+            ),
+            context: CodexTurnSteerAnalyticsContext(
+                appServerClient: CodexAppServerClientMetadata(
+                    productClientID: "codex_tui",
+                    clientName: "codex-tui",
+                    clientVersion: "1.0.0",
+                    rpcTransport: .websocket,
+                    experimentalAPIEnabled: true
+                ),
+                runtime: CodexRuntimeMetadata(
+                    codexRSVersion: "0.99.0",
+                    runtimeOS: "macos",
+                    runtimeOSVersion: "15.3.1",
+                    runtimeArch: "aarch64"
+                ),
+                threadSource: .subagent,
+                subagentSource: "thread_spawn",
+                parentThreadID: "parent-thread"
+            )
+        )
+
+        try XCTAssertJSONObjectEqual(event, [
+            "event_type": "codex_turn_steer",
+            "event_params": [
+                "thread_id": "thread-steer",
+                "expected_turn_id": "turn-expected",
+                "accepted_turn_id": nil,
+                "app_server_client": [
+                    "product_client_id": "codex_tui",
+                    "client_name": "codex-tui",
+                    "client_version": "1.0.0",
+                    "rpc_transport": "websocket",
+                    "experimental_api_enabled": true
+                ],
+                "runtime": [
+                    "codex_rs_version": "0.99.0",
+                    "runtime_os": "macos",
+                    "runtime_os_version": "15.3.1",
+                    "runtime_arch": "aarch64"
+                ],
+                "thread_source": "subagent",
+                "subagent_source": "thread_spawn",
+                "parent_thread_id": "parent-thread",
+                "num_input_images": 2,
+                "result": "rejected",
+                "rejection_reason": "expected_turn_mismatch",
+                "created_at": 123
+            ]
+        ])
+    }
+
+    func testTurnSteerAnalyticsAcceptedEventPreservesNullRejectionReasonLikeRust() throws {
+        let event = CodexTurnSteerAnalyticsReducer().ingest(
+            CodexTurnSteerAnalyticsFact(
+                threadID: "thread-steer",
+                expectedTurnID: nil,
+                acceptedTurnID: "turn-accepted",
+                numInputImages: 0,
+                result: .accepted,
+                rejectionReason: nil,
+                createdAt: 456
+            ),
+            context: Self.analyticsContext
+        )
+
+        try XCTAssertJSONObjectEqual(event, [
+            "event_type": "codex_turn_steer",
+            "event_params": [
+                "thread_id": "thread-steer",
+                "expected_turn_id": nil,
+                "accepted_turn_id": "turn-accepted",
+                "app_server_client": Self.analyticsContextAppServerClientJSON(),
+                "runtime": Self.analyticsContextRuntimeJSON(),
+                "thread_source": "user",
+                "subagent_source": nil,
+                "parent_thread_id": nil,
+                "num_input_images": 0,
+                "result": "accepted",
+                "rejection_reason": nil,
+                "created_at": 456
+            ]
+        ])
+    }
+
+    func testCodexAnalyticsClientUploadsTurnSteerEventLikeRust() async throws {
+        let uploader = RecordingCodexAnalyticsUploader()
+        let client = CodexToolItemAnalyticsClient(uploader: uploader)
+
+        await client.trackTurnSteer(
+            CodexTurnSteerAnalyticsFact(
+                threadID: "thread-steer",
+                expectedTurnID: "turn-old",
+                acceptedTurnID: nil,
+                numInputImages: 1,
+                result: .rejected,
+                rejectionReason: .inputTooLarge,
+                createdAt: 789
+            ),
+            context: Self.analyticsContext
+        )
+
+        let requests = await uploader.requests
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests[0].events.count, 1)
+        guard case let .turnSteer(event) = requests[0].events[0] else {
+            return XCTFail("expected turn steer analytics event")
+        }
+        XCTAssertEqual(event.eventType, "codex_turn_steer")
+        XCTAssertEqual(event.eventParams.threadID, "thread-steer")
+        XCTAssertEqual(event.eventParams.result, .rejected)
+        XCTAssertEqual(event.eventParams.rejectionReason, .inputTooLarge)
     }
 
     func testGuardianReviewAnalyticsReducerIngestsCustomFactLikeRust() throws {

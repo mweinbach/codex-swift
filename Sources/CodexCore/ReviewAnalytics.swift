@@ -10,6 +10,7 @@ public struct CodexTrackEventsRequest: Equatable, Encodable, Sendable {
 
 public enum CodexTrackEventRequest: Equatable, Encodable, Sendable {
     case compaction(CodexCompactionEventRequest)
+    case turnSteer(CodexTurnSteerEventRequest)
     case guardianReview(CodexGuardianReviewEventRequest)
     case commandExecution(CodexCommandExecutionEventRequest)
     case fileChange(CodexFileChangeEventRequest)
@@ -26,6 +27,7 @@ public enum CodexTrackEventRequest: Equatable, Encodable, Sendable {
         case .acceptedLineFingerprints:
             return true
         case .compaction,
+             .turnSteer,
              .guardianReview,
              .commandExecution,
              .fileChange,
@@ -42,6 +44,8 @@ public enum CodexTrackEventRequest: Equatable, Encodable, Sendable {
     public func encode(to encoder: Encoder) throws {
         switch self {
         case let .compaction(event):
+            try event.encode(to: encoder)
+        case let .turnSteer(event):
             try event.encode(to: encoder)
         case let .guardianReview(event):
             try event.encode(to: encoder)
@@ -189,6 +193,7 @@ public enum CodexAnalytics {
 
 public actor CodexToolItemAnalyticsClient {
     private var compactionReducer = CodexCompactionAnalyticsReducer()
+    private var turnSteerReducer = CodexTurnSteerAnalyticsReducer()
     private var guardianReviewReducer = CodexGuardianReviewAnalyticsReducer()
     private var commandExecutionReducer = CodexCommandExecutionAnalyticsReducer()
     private var fileChangeReducer = CodexFileChangeAnalyticsReducer()
@@ -251,6 +256,14 @@ public actor CodexToolItemAnalyticsClient {
     ) async {
         let event = compactionReducer.ingest(fact, context: context)
         try? await uploader.upload(CodexTrackEventsRequest(events: [.compaction(event)]))
+    }
+
+    public func trackTurnSteer(
+        _ fact: CodexTurnSteerAnalyticsFact,
+        context: CodexTurnSteerAnalyticsContext
+    ) async {
+        let event = turnSteerReducer.ingest(fact, context: context)
+        try? await uploader.upload(CodexTrackEventsRequest(events: [.turnSteer(event)]))
     }
 
     public func trackGuardianReview(
@@ -664,6 +677,166 @@ public struct CodexCompactionAnalyticsReducer: Sendable {
                 startedAt: fact.startedAt,
                 completedAt: fact.completedAt,
                 durationMilliseconds: fact.durationMilliseconds
+            )
+        )
+    }
+}
+
+public enum TurnSteerResult: String, Codable, Equatable, Sendable {
+    case accepted
+    case rejected
+}
+
+public enum TurnSteerRejectionReason: String, Codable, Equatable, Sendable {
+    case noActiveTurn = "no_active_turn"
+    case expectedTurnMismatch = "expected_turn_mismatch"
+    case nonSteerableReview = "non_steerable_review"
+    case nonSteerableCompact = "non_steerable_compact"
+    case emptyInput = "empty_input"
+    case inputTooLarge = "input_too_large"
+}
+
+public struct CodexTurnSteerEventParams: Equatable, Encodable, Sendable {
+    public let threadID: String
+    public let expectedTurnID: String?
+    public let acceptedTurnID: String?
+    public let appServerClient: CodexAppServerClientMetadata
+    public let runtime: CodexRuntimeMetadata
+    public let threadSource: ThreadSource?
+    public let subagentSource: String?
+    public let parentThreadID: String?
+    public let numInputImages: UInt64
+    public let result: TurnSteerResult
+    public let rejectionReason: TurnSteerRejectionReason?
+    public let createdAt: UInt64
+
+    public init(
+        threadID: String,
+        expectedTurnID: String?,
+        acceptedTurnID: String?,
+        appServerClient: CodexAppServerClientMetadata,
+        runtime: CodexRuntimeMetadata,
+        threadSource: ThreadSource? = nil,
+        subagentSource: String? = nil,
+        parentThreadID: String? = nil,
+        numInputImages: UInt64,
+        result: TurnSteerResult,
+        rejectionReason: TurnSteerRejectionReason?,
+        createdAt: UInt64
+    ) {
+        self.threadID = threadID
+        self.expectedTurnID = expectedTurnID
+        self.acceptedTurnID = acceptedTurnID
+        self.appServerClient = appServerClient
+        self.runtime = runtime
+        self.threadSource = threadSource
+        self.subagentSource = subagentSource
+        self.parentThreadID = parentThreadID
+        self.numInputImages = numInputImages
+        self.result = result
+        self.rejectionReason = rejectionReason
+        self.createdAt = createdAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "thread_id"
+        case expectedTurnID = "expected_turn_id"
+        case acceptedTurnID = "accepted_turn_id"
+        case appServerClient = "app_server_client"
+        case runtime
+        case threadSource = "thread_source"
+        case subagentSource = "subagent_source"
+        case parentThreadID = "parent_thread_id"
+        case numInputImages = "num_input_images"
+        case result
+        case rejectionReason = "rejection_reason"
+        case createdAt = "created_at"
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(threadID, forKey: .threadID)
+        try container.encodeNilOrValue(expectedTurnID, forKey: .expectedTurnID)
+        try container.encodeNilOrValue(acceptedTurnID, forKey: .acceptedTurnID)
+        try container.encode(appServerClient, forKey: .appServerClient)
+        try container.encode(runtime, forKey: .runtime)
+        try container.encodeNilOrValue(threadSource, forKey: .threadSource)
+        try container.encodeNilOrValue(subagentSource, forKey: .subagentSource)
+        try container.encodeNilOrValue(parentThreadID, forKey: .parentThreadID)
+        try container.encode(numInputImages, forKey: .numInputImages)
+        try container.encode(result, forKey: .result)
+        try container.encodeNilOrValue(rejectionReason, forKey: .rejectionReason)
+        try container.encode(createdAt, forKey: .createdAt)
+    }
+}
+
+public struct CodexTurnSteerEventRequest: Equatable, Encodable, Sendable {
+    public let eventType: String
+    public let eventParams: CodexTurnSteerEventParams
+
+    public init(eventType: String, eventParams: CodexTurnSteerEventParams) {
+        self.eventType = eventType
+        self.eventParams = eventParams
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case eventType = "event_type"
+        case eventParams = "event_params"
+    }
+}
+
+public struct CodexTurnSteerAnalyticsFact: Equatable, Sendable {
+    public let threadID: String
+    public let expectedTurnID: String?
+    public let acceptedTurnID: String?
+    public let numInputImages: UInt64
+    public let result: TurnSteerResult
+    public let rejectionReason: TurnSteerRejectionReason?
+    public let createdAt: UInt64
+
+    public init(
+        threadID: String,
+        expectedTurnID: String?,
+        acceptedTurnID: String?,
+        numInputImages: UInt64,
+        result: TurnSteerResult,
+        rejectionReason: TurnSteerRejectionReason?,
+        createdAt: UInt64
+    ) {
+        self.threadID = threadID
+        self.expectedTurnID = expectedTurnID
+        self.acceptedTurnID = acceptedTurnID
+        self.numInputImages = numInputImages
+        self.result = result
+        self.rejectionReason = rejectionReason
+        self.createdAt = createdAt
+    }
+}
+
+public typealias CodexTurnSteerAnalyticsContext = CodexCommandExecutionAnalyticsContext
+
+public struct CodexTurnSteerAnalyticsReducer: Sendable {
+    public init() {}
+
+    public func ingest(
+        _ fact: CodexTurnSteerAnalyticsFact,
+        context: CodexTurnSteerAnalyticsContext
+    ) -> CodexTurnSteerEventRequest {
+        CodexTurnSteerEventRequest(
+            eventType: "codex_turn_steer",
+            eventParams: CodexTurnSteerEventParams(
+                threadID: fact.threadID,
+                expectedTurnID: fact.expectedTurnID,
+                acceptedTurnID: fact.acceptedTurnID,
+                appServerClient: context.appServerClient,
+                runtime: context.runtime,
+                threadSource: context.threadSource,
+                subagentSource: context.subagentSource,
+                parentThreadID: context.parentThreadID,
+                numInputImages: fact.numInputImages,
+                result: fact.result,
+                rejectionReason: fact.rejectionReason,
+                createdAt: fact.createdAt
             )
         )
     }
