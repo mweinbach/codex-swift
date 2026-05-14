@@ -575,6 +575,7 @@ final class EventMessageTests: XCTestCase {
                 "threadId": threadID.description,
                 "objective": "port everything",
                 "status": "budgetLimited",
+                "tokenBudget": NSNull(),
                 "tokensUsed": 42,
                 "timeUsedSeconds": 7,
                 "createdAt": 1_000,

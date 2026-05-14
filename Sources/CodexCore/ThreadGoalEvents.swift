@@ -53,7 +53,11 @@ public struct ThreadGoal: Equatable, Codable, Sendable {
         try container.encode(threadID, forKey: .threadID)
         try container.encode(objective, forKey: .objective)
         try container.encode(status, forKey: .status)
-        try container.encodeIfPresent(tokenBudget, forKey: .tokenBudget)
+        if let tokenBudget {
+            try container.encode(tokenBudget, forKey: .tokenBudget)
+        } else {
+            try container.encodeNil(forKey: .tokenBudget)
+        }
         try container.encode(tokensUsed, forKey: .tokensUsed)
         try container.encode(timeUsedSeconds, forKey: .timeUsedSeconds)
         try container.encode(createdAt, forKey: .createdAt)

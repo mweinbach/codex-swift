@@ -217,6 +217,94 @@ final class AppServerThreadProtocolTests: XCTestCase {
         XCTAssertEqual(decoded.command, "printf 'hello' | cat")
     }
 
+    func testThreadGoalAndMemoryModeParamsRoundTripLikeRustProtocol() throws {
+        let threadID = try ThreadId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
+        let goal = ThreadGoal(
+            threadID: threadID,
+            objective: "ship parity",
+            status: .active,
+            tokenBudget: nil,
+            tokensUsed: 12,
+            timeUsedSeconds: 34,
+            createdAt: 100,
+            updatedAt: 200
+        )
+
+        try XCTAssertJSONObjectEqual(
+            ThreadGoalSetParams(
+                threadID: threadID.description,
+                objective: "ship parity",
+                status: .budgetLimited,
+                tokenBudget: .set(1_024)
+            ),
+            [
+                "threadId": threadID.description,
+                "objective": "ship parity",
+                "status": "budgetLimited",
+                "tokenBudget": 1_024
+            ]
+        )
+        try XCTAssertJSONObjectEqual(ThreadGoalSetParams(threadID: threadID.description), [
+            "threadId": threadID.description
+        ])
+        try XCTAssertJSONObjectEqual(
+            ThreadGoalSetParams(threadID: threadID.description, tokenBudget: .clear),
+            [
+                "threadId": threadID.description,
+                "tokenBudget": NSNull()
+            ]
+        )
+        try XCTAssertJSONObjectEqual(ThreadGoalSetResponse(goal: goal), [
+            "goal": [
+                "threadId": threadID.description,
+                "objective": "ship parity",
+                "status": "active",
+                "tokenBudget": NSNull(),
+                "tokensUsed": 12,
+                "timeUsedSeconds": 34,
+                "createdAt": 100,
+                "updatedAt": 200
+            ]
+        ])
+
+        try XCTAssertJSONObjectEqual(ThreadGoalGetParams(threadID: threadID.description), [
+            "threadId": threadID.description
+        ])
+        try XCTAssertJSONObjectEqual(ThreadGoalGetResponse(goal: nil), [
+            "goal": NSNull()
+        ])
+        try XCTAssertJSONObjectEqual(ThreadGoalClearParams(threadID: threadID.description), [
+            "threadId": threadID.description
+        ])
+        try XCTAssertJSONObjectEqual(ThreadGoalClearResponse(cleared: true), [
+            "cleared": true
+        ])
+
+        try XCTAssertJSONObjectEqual(ThreadMemoryModeSetParams(threadID: threadID.description, mode: .disabled), [
+            "threadId": threadID.description,
+            "mode": "disabled"
+        ])
+        try XCTAssertJSONObjectEqual(ThreadMemoryModeSetResponse(), [:])
+
+        let preserve = try JSONDecoder().decode(
+            ThreadGoalSetParams.self,
+            from: Data(#"{"threadId":"\#(threadID.description)","objective":"keep going"}"#.utf8)
+        )
+        XCTAssertEqual(preserve.tokenBudget, .preserve)
+
+        let clear = try JSONDecoder().decode(
+            ThreadGoalSetParams.self,
+            from: Data(#"{"threadId":"\#(threadID.description)","tokenBudget":null}"#.utf8)
+        )
+        XCTAssertEqual(clear.tokenBudget, .clear)
+
+        let set = try JSONDecoder().decode(
+            ThreadGoalSetParams.self,
+            from: Data(#"{"threadId":"\#(threadID.description)","tokenBudget":99}"#.utf8)
+        )
+        XCTAssertEqual(set.tokenBudget, .set(99))
+    }
+
     func testThreadTurnsItemsListRoundTripsLikeRustProtocol() throws {
         let params = ThreadTurnsItemsListParams(
             threadID: "thr_123",

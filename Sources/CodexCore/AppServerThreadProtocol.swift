@@ -440,6 +440,147 @@ public struct ThreadBackgroundTerminalsCleanResponse: Equatable, Codable, Sendab
     public init() {}
 }
 
+public enum ThreadGoalTokenBudgetPatch: Equatable, Sendable {
+    case preserve
+    case clear
+    case set(Int64)
+}
+
+public struct ThreadGoalSetParams: Equatable, Codable, Sendable {
+    public let threadID: String
+    public let objective: String?
+    public let status: ThreadGoalStatus?
+    public let tokenBudget: ThreadGoalTokenBudgetPatch
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+        case objective
+        case status
+        case tokenBudget
+    }
+
+    public init(
+        threadID: String,
+        objective: String? = nil,
+        status: ThreadGoalStatus? = nil,
+        tokenBudget: ThreadGoalTokenBudgetPatch = .preserve
+    ) {
+        self.threadID = threadID
+        self.objective = objective
+        self.status = status
+        self.tokenBudget = tokenBudget
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        threadID = try container.decode(String.self, forKey: .threadID)
+        objective = try container.decodeIfPresent(String.self, forKey: .objective)
+        status = try container.decodeIfPresent(ThreadGoalStatus.self, forKey: .status)
+        if !container.contains(.tokenBudget) {
+            tokenBudget = .preserve
+        } else if try container.decodeNil(forKey: .tokenBudget) {
+            tokenBudget = .clear
+        } else {
+            tokenBudget = .set(try container.decode(Int64.self, forKey: .tokenBudget))
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(threadID, forKey: .threadID)
+        try container.encodeIfPresent(objective, forKey: .objective)
+        try container.encodeIfPresent(status, forKey: .status)
+        switch tokenBudget {
+        case .preserve:
+            break
+        case .clear:
+            try container.encodeNil(forKey: .tokenBudget)
+        case let .set(value):
+            try container.encode(value, forKey: .tokenBudget)
+        }
+    }
+}
+
+public struct ThreadGoalSetResponse: Equatable, Codable, Sendable {
+    public let goal: ThreadGoal
+
+    public init(goal: ThreadGoal) {
+        self.goal = goal
+    }
+}
+
+public struct ThreadGoalGetParams: Equatable, Codable, Sendable {
+    public let threadID: String
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+    }
+
+    public init(threadID: String) {
+        self.threadID = threadID
+    }
+}
+
+public struct ThreadGoalGetResponse: Equatable, Codable, Sendable {
+    public let goal: ThreadGoal?
+
+    public init(goal: ThreadGoal?) {
+        self.goal = goal
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        if let goal {
+            try container.encode(goal, forKey: .goal)
+        } else {
+            try container.encodeNil(forKey: .goal)
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case goal
+    }
+}
+
+public struct ThreadGoalClearParams: Equatable, Codable, Sendable {
+    public let threadID: String
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+    }
+
+    public init(threadID: String) {
+        self.threadID = threadID
+    }
+}
+
+public struct ThreadGoalClearResponse: Equatable, Codable, Sendable {
+    public let cleared: Bool
+
+    public init(cleared: Bool) {
+        self.cleared = cleared
+    }
+}
+
+public struct ThreadMemoryModeSetParams: Equatable, Codable, Sendable {
+    public let threadID: String
+    public let mode: ThreadMemoryMode
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+        case mode
+    }
+
+    public init(threadID: String, mode: ThreadMemoryMode) {
+        self.threadID = threadID
+        self.mode = mode
+    }
+}
+
+public struct ThreadMemoryModeSetResponse: Equatable, Codable, Sendable {
+    public init() {}
+}
+
 public struct ThreadTurnsListParams: Equatable, Codable, Sendable {
     public let threadID: String
     public let cursor: String?
