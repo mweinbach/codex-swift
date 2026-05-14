@@ -388,7 +388,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/core/src/git_info.rs`
   - lightweight `.git` root detection, git metadata collection, recent commit picker entries, branch/default-branch helpers, remote-base diff collection with untracked-file diffs, and trust-root resolution for regular repos and worktrees
 - `codex-rs/analytics/src/accepted_lines.rs` plus `codex-rs/git-utils/src/info.rs` remote URL helpers
-  - accepted added/deleted line counting from unified diffs, effective added-line normalization, domain-separated SHA-1 line/path/repo fingerprints, accepted-line analytics event chunking, fetch-remote parsing, canonical repository URL normalization, isolated-request marking, and latest-turn-diff reducer emission on turn completion
+  - accepted added/deleted line counting from unified diffs, effective added-line normalization, domain-separated SHA-1 line/path/repo fingerprints, accepted-line analytics event chunking, fetch-remote parsing, canonical repository URL normalization, origin-first repository hash selection with sorted fallback, isolated-request marking, and latest-turn-diff reducer emission on turn completion
 - `codex-rs/app-server/src/bespoke_event_handling.rs` turn diff notification projection
   - runtime `TurnDiff` events now emit Rust-shaped `turn/diff/updated` app-server notifications with `threadId`, `turnId`, and the latest unified diff
 - `codex-rs/app-server/src/bespoke_event_handling.rs` command execution item projection plus `codex-rs/app-server-protocol/src/protocol/item_builders.rs`

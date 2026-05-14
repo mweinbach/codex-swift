@@ -210,6 +210,34 @@ final class AcceptedLinesTests: XCTestCase {
         XCTAssertEqual(event.eventParams.acceptedDeletedLines, 1)
     }
 
+    func testAcceptedLineRepoHashPrefersOriginRemoteLikeRust() throws {
+        let repo = try AcceptedLinesTemporaryDirectory()
+        try Self.runGit(["init"], cwd: repo.url)
+        try Self.runGit(["remote", "add", "z-fallback", "https://github.com/example/fallback.git"], cwd: repo.url)
+        try Self.runGit(["remote", "add", "origin", "git@github.com:OpenAI/Codex.git"], cwd: repo.url)
+
+        let repoHash = try XCTUnwrap(AcceptedLines.acceptedLineRepoHash(cwd: repo.url))
+
+        XCTAssertEqual(
+            repoHash,
+            AcceptedLines.fingerprintHash(domain: "repo", value: "github.com/openai/codex")
+        )
+    }
+
+    func testAcceptedLineRepoHashFallsBackToFirstSortedRemoteLikeRust() throws {
+        let repo = try AcceptedLinesTemporaryDirectory()
+        try Self.runGit(["init"], cwd: repo.url)
+        try Self.runGit(["remote", "add", "zeta", "https://github.com/example/zeta.git"], cwd: repo.url)
+        try Self.runGit(["remote", "add", "alpha", "https://github.com/example/alpha.git"], cwd: repo.url)
+
+        let repoHash = try XCTUnwrap(AcceptedLines.acceptedLineRepoHash(cwd: repo.url))
+
+        XCTAssertEqual(
+            repoHash,
+            AcceptedLines.fingerprintHash(domain: "repo", value: "github.com/example/alpha")
+        )
+    }
+
     func testAnalyticsUploadBatchesIsolateAcceptedLineFingerprintEvents() {
         let requests = AcceptedLines.acceptedLineFingerprintEventRequests(input: AcceptedLineFingerprintEventInput(
             eventType: "codex.accepted_line_fingerprints",
@@ -352,6 +380,21 @@ final class AcceptedLinesTests: XCTestCase {
             encode(["https://api.openai.com/auth": authClaims]),
             "sig"
         ].joined(separator: ".")
+    }
+
+    private static func runGit(_ arguments: [String], cwd: URL) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = [
+            "-c", "user.email=codex@example.test",
+            "-c", "user.name=Codex Test"
+        ] + arguments
+        process.currentDirectoryURL = cwd
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        try process.run()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0, "git \(arguments.joined(separator: " "))")
     }
 }
 
