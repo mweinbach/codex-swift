@@ -351,6 +351,95 @@ public struct ThreadDecrementElicitationResponse: Equatable, Codable, Sendable {
     }
 }
 
+public struct ThreadSetNameParams: Equatable, Codable, Sendable {
+    public let threadID: String
+    public let name: String
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+        case name
+    }
+
+    public init(threadID: String, name: String) {
+        self.threadID = threadID
+        self.name = name
+    }
+}
+
+public struct ThreadSetNameResponse: Equatable, Codable, Sendable {
+    public init() {}
+}
+
+public struct ThreadCompactStartParams: Equatable, Codable, Sendable {
+    public let threadID: String
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+    }
+
+    public init(threadID: String) {
+        self.threadID = threadID
+    }
+}
+
+public struct ThreadCompactStartResponse: Equatable, Codable, Sendable {
+    public init() {}
+}
+
+public struct ThreadShellCommandParams: Equatable, Codable, Sendable {
+    public let threadID: String
+    public let command: String
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+        case command
+    }
+
+    public init(threadID: String, command: String) {
+        self.threadID = threadID
+        self.command = command
+    }
+}
+
+public struct ThreadShellCommandResponse: Equatable, Codable, Sendable {
+    public init() {}
+}
+
+public struct ThreadApproveGuardianDeniedActionParams: Equatable, Codable, Sendable {
+    public let threadID: String
+    public let event: JSONValue
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+        case event
+    }
+
+    public init(threadID: String, event: JSONValue) {
+        self.threadID = threadID
+        self.event = event
+    }
+}
+
+public struct ThreadApproveGuardianDeniedActionResponse: Equatable, Codable, Sendable {
+    public init() {}
+}
+
+public struct ThreadBackgroundTerminalsCleanParams: Equatable, Codable, Sendable {
+    public let threadID: String
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+    }
+
+    public init(threadID: String) {
+        self.threadID = threadID
+    }
+}
+
+public struct ThreadBackgroundTerminalsCleanResponse: Equatable, Codable, Sendable {
+    public init() {}
+}
+
 public struct ThreadTurnsListParams: Equatable, Codable, Sendable {
     public let threadID: String
     public let cursor: String?

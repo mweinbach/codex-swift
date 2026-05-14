@@ -170,6 +170,53 @@ final class AppServerThreadProtocolTests: XCTestCase {
         XCTAssertEqual(decoded, ThreadIncrementElicitationResponse(count: 42, paused: true))
     }
 
+    func testThreadCommandActionParamsRoundTripLikeRustProtocol() throws {
+        try XCTAssertJSONObjectEqual(ThreadSetNameParams(threadID: "thr_name", name: "Working title"), [
+            "threadId": "thr_name",
+            "name": "Working title"
+        ])
+        try XCTAssertJSONObjectEqual(ThreadSetNameResponse(), [:])
+
+        try XCTAssertJSONObjectEqual(ThreadCompactStartParams(threadID: "thr_compact"), [
+            "threadId": "thr_compact"
+        ])
+        try XCTAssertJSONObjectEqual(ThreadCompactStartResponse(), [:])
+
+        try XCTAssertJSONObjectEqual(ThreadShellCommandParams(threadID: "thr_shell", command: "git status --short"), [
+            "threadId": "thr_shell",
+            "command": "git status --short"
+        ])
+        try XCTAssertJSONObjectEqual(ThreadShellCommandResponse(), [:])
+
+        let guardianEvent: JSONValue = .object([
+            "kind": .string("guardian"),
+            "decision": .string("denied")
+        ])
+        try XCTAssertJSONObjectEqual(
+            ThreadApproveGuardianDeniedActionParams(threadID: "thr_guardian", event: guardianEvent),
+            [
+                "threadId": "thr_guardian",
+                "event": [
+                    "kind": "guardian",
+                    "decision": "denied"
+                ]
+            ]
+        )
+        try XCTAssertJSONObjectEqual(ThreadApproveGuardianDeniedActionResponse(), [:])
+
+        try XCTAssertJSONObjectEqual(ThreadBackgroundTerminalsCleanParams(threadID: "thr_background"), [
+            "threadId": "thr_background"
+        ])
+        try XCTAssertJSONObjectEqual(ThreadBackgroundTerminalsCleanResponse(), [:])
+
+        let decoded = try JSONDecoder().decode(
+            ThreadShellCommandParams.self,
+            from: Data(#"{"threadId":"thr_shell_2","command":"printf 'hello' | cat"}"#.utf8)
+        )
+        XCTAssertEqual(decoded.threadID, "thr_shell_2")
+        XCTAssertEqual(decoded.command, "printf 'hello' | cat")
+    }
+
     func testThreadTurnsItemsListRoundTripsLikeRustProtocol() throws {
         let params = ThreadTurnsItemsListParams(
             threadID: "thr_123",
