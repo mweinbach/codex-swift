@@ -2,6 +2,9 @@ import CodexCore
 import XCTest
 
 final class AppServerProtocolTests: XCTestCase {
+    private let projectPath = try! AbsolutePath(absolutePath: "/tmp/project")
+    private let tmpPath = try! AbsolutePath(absolutePath: "/tmp")
+
     func testAttestationGenerateServerRequestMatchesRustWireShape() throws {
         let request = AppServerProtocol.ServerRequest.attestationGenerate(
             requestID: .integer(9),
@@ -353,7 +356,7 @@ final class AppServerProtocolTests: XCTestCase {
             reason: "needs network",
             networkApprovalContext: NetworkApprovalContext(host: "example.com", protocol: .https),
             command: "git status",
-            cwd: "/tmp/project",
+            cwd: projectPath,
             commandActions: [
                 .read(command: "cat Package.swift", name: "Package.swift", path: "/tmp/project/Package.swift"),
                 .listFiles(command: "ls Sources", path: "Sources")
@@ -462,6 +465,15 @@ final class AppServerProtocolTests: XCTestCase {
         XCTAssertEqual(decoded, request)
     }
 
+    func testCommandExecutionRequestApprovalRejectsRelativeCwdLikeRustAbsolutePathBuf() throws {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AppServerProtocol.ServerRequest.self,
+                from: Data(#"{"method":"item/commandExecution/requestApproval","id":4,"params":{"threadId":"thr_123","turnId":"turn_123","itemId":"item_123","startedAtMs":43,"cwd":"tmp/project"}}"#.utf8)
+            )
+        )
+    }
+
     func testCommandExecutionRequestApprovalSkipsNilOptionalsLikeRust() throws {
         let request = AppServerProtocol.ServerRequest.commandExecutionRequestApproval(
             requestID: .integer(4),
@@ -493,7 +505,7 @@ final class AppServerProtocolTests: XCTestCase {
             startedAtMilliseconds: 0,
             reason: "Need extra read access",
             command: "cat file",
-            cwd: "/tmp",
+            cwd: tmpPath,
             additionalPermissions: AppServerProtocol.AdditionalPermissionProfile(
                 fileSystem: FileSystemPermissions(read: ["/tmp/allowed"])
             )
@@ -528,7 +540,7 @@ final class AppServerProtocolTests: XCTestCase {
             startedAtMilliseconds: 0,
             reason: "Need extra read access",
             command: "cat file",
-            cwd: "/tmp",
+            cwd: tmpPath,
             additionalPermissions: AppServerProtocol.AdditionalPermissionProfile(
                 fileSystem: FileSystemPermissions(read: ["/tmp/allowed"])
             )

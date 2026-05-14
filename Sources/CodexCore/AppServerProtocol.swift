@@ -1798,7 +1798,7 @@ public enum AppServerProtocol {
         public let reason: String?
         public let networkApprovalContext: NetworkApprovalContext?
         public let command: String?
-        public let cwd: String?
+        public let cwd: AbsolutePath?
         public let commandActions: [CommandAction]?
         public let additionalPermissions: AdditionalPermissionProfile?
         public let proposedExecPolicyAmendment: ExecPolicyAmendment?
@@ -1814,7 +1814,7 @@ public enum AppServerProtocol {
             reason: String? = nil,
             networkApprovalContext: NetworkApprovalContext? = nil,
             command: String? = nil,
-            cwd: String? = nil,
+            cwd: AbsolutePath? = nil,
             commandActions: [CommandAction]? = nil,
             additionalPermissions: AdditionalPermissionProfile? = nil,
             proposedExecPolicyAmendment: ExecPolicyAmendment? = nil,

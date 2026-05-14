@@ -25089,6 +25089,9 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             let submitter = coreOpSubmitter
             afterNotifications = {
                 Task { [broker, submitter, threadID, turnID, event] in
+                    guard let cwd = try? AbsolutePath(absolutePath: event.cwd) else {
+                        return
+                    }
                     let result = await broker.requestCommandExecutionApproval(
                         params: AppServerProtocol.CommandExecutionRequestApprovalParams(
                             threadID: threadID,
@@ -25099,7 +25102,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                             reason: event.reason,
                             networkApprovalContext: event.networkApprovalContext,
                             command: CommandParser.shlexJoin(event.command),
-                            cwd: event.cwd,
+                            cwd: cwd,
                             commandActions: event.parsedCmd.map {
                                 Self.commandAction($0, cwd: event.cwd)
                             },
