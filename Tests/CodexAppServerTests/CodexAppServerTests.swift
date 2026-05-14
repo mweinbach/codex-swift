@@ -22240,6 +22240,59 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual((status["resourceTemplates"] as? [Any])?.count, 0)
     }
 
+    func testMcpServerStatusListUsesV2OAuthAuthStatusSpellingLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        mcp_oauth_credentials_store = "file"
+
+        [mcp_servers.linear]
+        url = "https://linear.example.test/mcp"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        try McpOAuthCredentialStore.saveOAuthTokens(
+            McpOAuthStoredTokens(
+                serverName: "linear",
+                url: "https://linear.example.test/mcp",
+                clientID: "client-id",
+                tokenResponse: McpOAuthTokenResponse(
+                    accessToken: "access-token",
+                    expiresIn: 3_600,
+                    refreshToken: "refresh-token",
+                    scopes: ["read"]
+                ),
+                expiresAt: 4_600_000
+            ),
+            codexHome: temp.url,
+            mode: .file,
+            now: Date(timeIntervalSince1970: 1_000)
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"mcpServerStatus/list","params":{"detail":"toolsAndAuthOnly"}}"#,
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                requiresOpenAIAuth: false,
+                environment: [
+                    CodexConfigLayerLoader.managedConfigEnvironmentVariable: temp.url
+                        .appendingPathComponent("missing-managed-config.toml", isDirectory: false)
+                        .path
+                ],
+                mcpHTTPTransport: { _ in
+                    URLSessionTransportResponse(
+                        statusCode: 503,
+                        body: Data(#"{"jsonrpc":"2.0","id":0,"error":{"code":-32000,"message":"offline"}}"#.utf8)
+                    )
+                }
+            )
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        let status = try XCTUnwrap(data.first)
+        XCTAssertEqual(status["name"] as? String, "linear")
+        XCTAssertEqual(status["authStatus"] as? String, "oAuth")
+    }
+
     func testMcpServerStatusListReturnsRawToolNamesFromConfiguredHTTPServer() throws {
         let temp = try TemporaryDirectory()
         try """

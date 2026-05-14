@@ -20999,7 +20999,7 @@ public enum CodexAppServer {
         case .bearerToken:
             return "bearerToken"
         case .oauth:
-            return "oauth"
+            return "oAuth"
         }
     }
 
