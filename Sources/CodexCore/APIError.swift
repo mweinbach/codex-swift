@@ -166,8 +166,8 @@ public enum CodexError: Error, Equatable, CustomStringConvertible, Sendable {
 
     private static func mapTransportError(_ error: TransportError) -> CodexError {
         switch error {
-        case let .http(statusCode, headers, body):
-            return mapHTTPError(statusCode: statusCode, headers: headers, body: body ?? "")
+        case let .http(statusCode, url, headers, body):
+            return mapHTTPError(statusCode: statusCode, url: url, headers: headers, body: body ?? "")
         case .retryLimit:
             return .retryLimit(RetryLimitReachedError(statusCode: 500))
         case .timeout:
@@ -177,7 +177,12 @@ public enum CodexError: Error, Equatable, CustomStringConvertible, Sendable {
         }
     }
 
-    private static func mapHTTPError(statusCode: Int, headers: [String: String]?, body: String) -> CodexError {
+    private static func mapHTTPError(
+        statusCode: Int,
+        url: String?,
+        headers: [String: String]?,
+        body: String
+    ) -> CodexError {
         if statusCode == 503,
            let value = decodeJSONObject(body),
            let code = (value["error"] as? [String: Any])?["code"] as? String,
@@ -225,6 +230,7 @@ public enum CodexError: Error, Equatable, CustomStringConvertible, Sendable {
         return .unexpectedStatus(UnexpectedResponseError(
             statusCode: statusCode,
             body: body,
+            url: url,
             cfRay: header(headers, cfRayHeader),
             requestID: requestID(headers),
             identityAuthorizationError: header(headers, openAIAuthorizationErrorHeader),

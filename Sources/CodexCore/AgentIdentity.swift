@@ -121,7 +121,7 @@ public enum AgentIdentity {
         switch await transport.execute(request) {
         case let .success(success):
             response = success
-        case let .failure(.http(statusCode, _, body)):
+        case let .failure(.http(statusCode, _, _, body)):
             throw AgentIdentityError.message(
                 "failed to register agent task with status \(HTTPStatus.description(for: statusCode)): \(truncatedTaskRegistrationBody(body))"
             )

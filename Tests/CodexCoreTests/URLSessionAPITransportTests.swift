@@ -51,7 +51,12 @@ final class URLSessionAPITransportTests: XCTestCase {
 
         XCTAssertEqual(
             result,
-            .failure(.http(statusCode: 429, headers: ["retry-after": "1"], body: "slow down"))
+            .failure(.http(
+                statusCode: 429,
+                url: "https://example.com/v1/models",
+                headers: ["retry-after": "1"],
+                body: "slow down"
+            ))
         )
     }
 
@@ -156,7 +161,12 @@ final class URLSessionAPITransportTests: XCTestCase {
 
         XCTAssertEqual(
             result,
-            .failure(.http(statusCode: 503, headers: ["retry-after": "2"], body: "temporarily unavailable"))
+            .failure(.http(
+                statusCode: 503,
+                url: "https://example.com/v1/responses",
+                headers: ["retry-after": "2"],
+                body: "temporarily unavailable"
+            ))
         )
     }
 

@@ -1070,7 +1070,7 @@ public extension ResponsesClient where Auth == StaticAPIAuthProvider {
 
 private extension Result where Success == ResponseEventResults, Failure == APIError {
     var isUnauthorized: Bool {
-        guard case let .failure(.transport(.http(statusCode, _, _))) = self else {
+        guard case let .failure(.transport(.http(statusCode, _, _, _))) = self else {
             return false
         }
         return statusCode == 401

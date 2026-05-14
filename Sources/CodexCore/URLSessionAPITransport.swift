@@ -46,6 +46,7 @@ public struct URLSessionAPITransport: APITransport {
             guard (200..<300).contains(response.statusCode) else {
                 return .failure(.http(
                     statusCode: response.statusCode,
+                    url: request.url,
                     headers: response.headers,
                     body: String(data: response.body, encoding: .utf8)
                 ))
@@ -74,6 +75,7 @@ public struct URLSessionAPITransport: APITransport {
                 }
                 return .failure(.http(
                     statusCode: response.statusCode,
+                    url: request.url,
                     headers: response.headers,
                     body: body
                 ))

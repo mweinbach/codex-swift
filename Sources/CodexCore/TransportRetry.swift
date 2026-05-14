@@ -1,7 +1,7 @@
 import Foundation
 
 public enum TransportError: Error, Equatable, CustomStringConvertible, Sendable {
-    case http(statusCode: Int, headers: [String: String]?, body: String?)
+    case http(statusCode: Int, url: String? = nil, headers: [String: String]?, body: String?)
     case retryLimit
     case timeout
     case network(String)
@@ -9,7 +9,7 @@ public enum TransportError: Error, Equatable, CustomStringConvertible, Sendable 
 
     public var description: String {
         switch self {
-        case let .http(statusCode, _, body):
+        case let .http(statusCode, _, _, body):
             return "http \(HTTPStatus.description(for: statusCode)): \(Self.debugOptional(body))"
         case .retryLimit:
             return "retry limit reached"
@@ -23,7 +23,7 @@ public enum TransportError: Error, Equatable, CustomStringConvertible, Sendable 
     }
 
     public var httpStatusCode: Int? {
-        guard case let .http(statusCode, _, _) = self else {
+        guard case let .http(statusCode, _, _, _) = self else {
             return nil
         }
         return statusCode
@@ -168,7 +168,7 @@ public extension ProviderRetryOn {
         }
 
         switch error {
-        case let .http(statusCode, _, _):
+        case let .http(statusCode, _, _, _):
             return (retry429 && statusCode == 429)
                 || (retry5xx && (500..<600).contains(statusCode))
         case .timeout, .network:

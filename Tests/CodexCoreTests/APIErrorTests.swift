@@ -160,6 +160,7 @@ final class APIErrorTests: XCTestCase {
         let xErrorJSON = Data(#"{"error":{"code":"token_expired"}}"#.utf8).base64EncodedString()
         let error = CodexError(apiError: .transport(.http(
             statusCode: 401,
+            url: "https://api.example.test/responses",
             headers: [
                 "x-request-id": "req-401",
                 "cf-ray": "ray-401",
@@ -172,6 +173,7 @@ final class APIErrorTests: XCTestCase {
         guard case let .unexpectedStatus(unexpected) = error else {
             return XCTFail("expected unexpected status, got \(error)")
         }
+        XCTAssertEqual(unexpected.url, "https://api.example.test/responses")
         XCTAssertEqual(unexpected.requestID, "req-401")
         XCTAssertEqual(unexpected.cfRay, "ray-401")
         XCTAssertEqual(unexpected.identityAuthorizationError, "missing_authorization_header")

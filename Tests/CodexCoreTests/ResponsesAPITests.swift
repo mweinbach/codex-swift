@@ -370,7 +370,7 @@ final class ResponsesAPITests: XCTestCase {
         """#
 
         let error = try XCTUnwrap(ResponsesWebSocketErrorMapper.mapErrorEvent(payload: payload))
-        guard case let .transport(.http(statusCode, headers, body)) = error else {
+        guard case let .transport(.http(statusCode, _, headers, body)) = error else {
             return XCTFail("expected transport HTTP error, got \(error)")
         }
 
@@ -404,7 +404,7 @@ final class ResponsesAPITests: XCTestCase {
         """#
 
         let error = try XCTUnwrap(ResponsesWebSocketErrorMapper.mapErrorEvent(payload: payload))
-        guard case let .transport(.http(statusCode, headers, body)) = error else {
+        guard case let .transport(.http(statusCode, _, headers, body)) = error else {
             return XCTFail("expected transport HTTP error, got \(error)")
         }
 
