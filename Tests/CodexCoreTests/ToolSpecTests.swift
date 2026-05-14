@@ -756,6 +756,30 @@ final class ToolSpecTests: XCTestCase {
         )
     }
 
+    func testCollectUnavailableCalledToolsKeepsFirstFlatNameCollisionLikeRust() {
+        let input = [
+            ResponseItem.functionCall(
+                name: "mcp__server__lookup",
+                arguments: "{}",
+                callID: "call-flat"
+            ),
+            ResponseItem.functionCall(
+                name: "lookup",
+                namespace: "mcp__server__",
+                arguments: "{}",
+                callID: "call-namespaced"
+            )
+        ]
+
+        XCTAssertEqual(
+            ToolSpecFactory.collectUnavailableCalledTools(
+                input: input,
+                exposedToolNames: []
+            ),
+            [.plain("mcp__server__lookup")]
+        )
+    }
+
     func testBuildSpecsAddsUnavailableMcpPlaceholderSpecLikeRust() throws {
         let unavailableTool = UnavailableToolName.namespaced(
             "mcp__codex_apps__calendar",

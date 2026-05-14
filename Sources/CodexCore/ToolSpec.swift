@@ -1220,7 +1220,9 @@ public enum ToolSpecFactory {
             guard !exposedFlatNames.contains(toolName.flatName) else {
                 continue
             }
-            unavailableByFlatName[toolName.flatName] = toolName
+            if unavailableByFlatName[toolName.flatName] == nil {
+                unavailableByFlatName[toolName.flatName] = toolName
+            }
         }
         return unavailableByFlatName.keys.sorted().compactMap { unavailableByFlatName[$0] }
     }
