@@ -111,6 +111,41 @@ final class AppServerThreadProtocolTests: XCTestCase {
         try XCTAssertJSONObjectEqual(ThreadInjectItemsResponse(), [:])
     }
 
+    func testThreadArchiveAndUnsubscribeRoundTripLikeRustProtocol() throws {
+        try XCTAssertJSONObjectEqual(ThreadArchiveParams(threadID: "thr_archive"), [
+            "threadId": "thr_archive"
+        ])
+        try XCTAssertJSONObjectEqual(ThreadArchiveResponse(), [:])
+
+        try XCTAssertJSONObjectEqual(ThreadUnsubscribeParams(threadID: "thr_unsubscribe"), [
+            "threadId": "thr_unsubscribe"
+        ])
+
+        for status in [
+            ThreadUnsubscribeStatus.notLoaded,
+            .notSubscribed,
+            .unsubscribed
+        ] {
+            let response = ThreadUnsubscribeResponse(status: status)
+            let expectedStatus: String
+            switch status {
+            case .notLoaded:
+                expectedStatus = "notLoaded"
+            case .notSubscribed:
+                expectedStatus = "notSubscribed"
+            case .unsubscribed:
+                expectedStatus = "unsubscribed"
+            }
+            try XCTAssertJSONObjectEqual(response, ["status": expectedStatus])
+        }
+
+        let decoded = try JSONDecoder().decode(
+            ThreadUnsubscribeResponse.self,
+            from: Data(#"{"status":"notSubscribed"}"#.utf8)
+        )
+        XCTAssertEqual(decoded.status, .notSubscribed)
+    }
+
     func testThreadTurnsItemsListRoundTripsLikeRustProtocol() throws {
         let params = ThreadTurnsItemsListParams(
             threadID: "thr_123",

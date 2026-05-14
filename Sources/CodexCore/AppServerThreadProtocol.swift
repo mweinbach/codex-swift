@@ -18,6 +18,12 @@ public enum AppServerTurnStatus: String, Codable, Equatable, Sendable {
     case inProgress
 }
 
+public enum ThreadUnsubscribeStatus: String, Codable, Equatable, Sendable {
+    case notLoaded
+    case notSubscribed
+    case unsubscribed
+}
+
 public struct AppServerTurnError: Equatable, Codable, Sendable {
     public let message: String
     public let codexErrorInfo: CodexErrorInfo?
@@ -263,6 +269,42 @@ public struct ThreadInjectItemsParams: Equatable, Codable, Sendable {
 
 public struct ThreadInjectItemsResponse: Equatable, Codable, Sendable {
     public init() {}
+}
+
+public struct ThreadArchiveParams: Equatable, Codable, Sendable {
+    public let threadID: String
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+    }
+
+    public init(threadID: String) {
+        self.threadID = threadID
+    }
+}
+
+public struct ThreadArchiveResponse: Equatable, Codable, Sendable {
+    public init() {}
+}
+
+public struct ThreadUnsubscribeParams: Equatable, Codable, Sendable {
+    public let threadID: String
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+    }
+
+    public init(threadID: String) {
+        self.threadID = threadID
+    }
+}
+
+public struct ThreadUnsubscribeResponse: Equatable, Codable, Sendable {
+    public let status: ThreadUnsubscribeStatus
+
+    public init(status: ThreadUnsubscribeStatus) {
+        self.status = status
+    }
 }
 
 public struct ThreadTurnsListParams: Equatable, Codable, Sendable {
