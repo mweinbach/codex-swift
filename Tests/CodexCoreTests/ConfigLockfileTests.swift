@@ -51,6 +51,29 @@ final class ConfigLockfileTests: XCTestCase {
         """# + "\n")
     }
 
+    func testConfigLockfilePersistsArbitraryServiceTierStringLikeRust() throws {
+        let lockfile = ConfigLockfile(
+            version: 1,
+            codexVersion: "0.1.0",
+            config: .table([
+                "model": .string("gpt-5.1-codex-max"),
+                "service_tier": .string("experimental-tier-id")
+            ])
+        )
+
+        let rendered = ConfigLockfileStore.renderConfigLockfile(lockfile)
+
+        XCTAssertEqual(rendered, #"""
+        version = 1
+        codex_version = "0.1.0"
+
+        [config]
+        model = "gpt-5.1-codex-max"
+        service_tier = "experimental-tier-id"
+        """# + "\n")
+        XCTAssertEqual(try ConfigLockfileStore.parseConfigLockfile(rendered), lockfile)
+    }
+
     func testExportConfigLockfileWritesRustPathAndCreatesDirectory() throws {
         let dir = try ConfigLockfileTemporaryDirectory()
         let exportDir = dir.url.appendingPathComponent("locks", isDirectory: true)

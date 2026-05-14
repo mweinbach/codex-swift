@@ -12,6 +12,7 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-14: tightened Rust commit `317213fd33` config-lock coverage. Swift already loads arbitrary TOML `service_tier` strings and normalizes legacy `fast`; config lockfiles now have focused coverage that arbitrary resolved service-tier strings persist and round-trip as plain strings instead of enum-limited values.
 - 2026-05-14: rechecked Rust's `skills/config/write` request decoding from `codex-rs/app-server-protocol/src/protocol/v2/plugin.rs` and `catalog_processor.rs`. Swift now rejects relative `path` selectors and malformed `path` / `name` selector values with Rust-shaped invalid-request errors before applying the route-level exactly-one-selector validation.
 - 2026-05-14: rechecked Rust's defaulted optional `review/start.delivery` field from `codex-rs/app-server-protocol/src/protocol/v2/review.rs`. Swift now has focused coverage that omitted `delivery` decodes as `nil` like Rust's `#[serde(default)]` option and re-encodes through the app-server protocol model as explicit `null`.
 - 2026-05-14: rechecked Rust's app-server v2 `SandboxPolicy` projection from `codex-rs/app-server-protocol/src/protocol/v2/permissions.rs` and `thread/start` / `thread/resume` / `thread/fork` / `turn/start` payloads. Swift typed app-server turn/thread surfaces and live thread lifecycle responses now encode sandbox policies with Rust's camelCase app-server tags and fields instead of the core legacy kebab/snake sandbox persistence shape.
