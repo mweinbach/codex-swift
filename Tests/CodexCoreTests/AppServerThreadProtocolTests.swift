@@ -173,6 +173,63 @@ final class AppServerThreadProtocolTests: XCTestCase {
         XCTAssertEqual(decoded.map(\.id), ["item-user", "item-hook"])
     }
 
+    func testPlanAndReasoningItemsUseRustThreadItemShape() throws {
+        let plan = AppServerThreadItem.plan(
+            id: "item-plan",
+            text: "1. Inspect\n2. Patch\n3. Test"
+        )
+        let reasoning = AppServerThreadItem.reasoning(
+            id: "item-reasoning",
+            summary: ["Checked Rust ThreadItem shape"],
+            content: ["Reasoning body"]
+        )
+        let emptyReasoning = AppServerThreadItem.reasoning(id: "item-empty-reasoning")
+
+        try XCTAssertJSONObjectEqual(plan, [
+            "type": "plan",
+            "id": "item-plan",
+            "text": "1. Inspect\n2. Patch\n3. Test"
+        ])
+        try XCTAssertJSONObjectEqual(reasoning, [
+            "type": "reasoning",
+            "id": "item-reasoning",
+            "summary": ["Checked Rust ThreadItem shape"],
+            "content": ["Reasoning body"]
+        ])
+        try XCTAssertJSONObjectEqual(emptyReasoning, [
+            "type": "reasoning",
+            "id": "item-empty-reasoning",
+            "summary": [],
+            "content": []
+        ])
+
+        let decoded = try JSONDecoder().decode([AppServerThreadItem].self, from: Data(#"""
+        [
+          {
+            "type": "plan",
+            "id": "item-plan",
+            "text": "1. Inspect\n2. Patch\n3. Test"
+          },
+          {
+            "type": "reasoning",
+            "id": "item-reasoning",
+            "summary": ["Checked Rust ThreadItem shape"],
+            "content": ["Reasoning body"]
+          },
+          {
+            "type": "reasoning",
+            "id": "item-default-reasoning"
+          }
+        ]
+        """#.utf8))
+
+        XCTAssertEqual(decoded, [
+            plan,
+            reasoning,
+            .reasoning(id: "item-default-reasoning")
+        ])
+    }
+
     func testMediaAndSearchItemsUseRustThreadItemShape() throws {
         let imagePath = try AbsolutePath(absolutePath: "/repo/screenshot.png")
         let savedPath = try AbsolutePath(absolutePath: "/repo/generated.png")
