@@ -217,6 +217,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let feedback: CodexFeedback
     public let feedbackUploadTransport: any FeedbackUploadTransport
     public let acceptedLineAnalyticsUploader: any AcceptedLineAnalyticsUploading
+    public let codexAnalyticsUploader: any CodexAnalyticsUploading
     public let accountRateLimitsFetcher: any AccountRateLimitsFetching
     public let addCreditsNudgeEmailSender: any AddCreditsNudgeEmailSending
     public let authRefreshTransport: AppServerAuthRefreshTransport?
@@ -252,6 +253,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         feedback: CodexFeedback = CodexFeedback(),
         feedbackUploadTransport: any FeedbackUploadTransport = URLSessionFeedbackUploadTransport(),
         acceptedLineAnalyticsUploader: (any AcceptedLineAnalyticsUploading)? = nil,
+        codexAnalyticsUploader: (any CodexAnalyticsUploading)? = nil,
         accountRateLimitsFetcher: any AccountRateLimitsFetching = URLSessionAccountRateLimitsFetcher(),
         addCreditsNudgeEmailSender: any AddCreditsNudgeEmailSending = URLSessionAddCreditsNudgeEmailSender(),
         authRefreshTransport: AppServerAuthRefreshTransport? = nil,
@@ -286,6 +288,13 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         self.feedback = feedback
         self.feedbackUploadTransport = feedbackUploadTransport
         self.acceptedLineAnalyticsUploader = acceptedLineAnalyticsUploader ?? URLSessionAcceptedLineAnalyticsUploader(
+            codexHome: codexHome,
+            authCredentialsStoreMode: authCredentialsStoreMode,
+            baseURL: CodexConfigDefaults.chatgptBaseURL,
+            environment: environment,
+            refreshTransport: authRefreshTransport
+        )
+        self.codexAnalyticsUploader = codexAnalyticsUploader ?? URLSessionCodexAnalyticsUploader(
             codexHome: codexHome,
             authCredentialsStoreMode: authCredentialsStoreMode,
             baseURL: CodexConfigDefaults.chatgptBaseURL,
@@ -892,6 +901,19 @@ public enum CodexAppServer {
             return "linux"
         #elseif os(Windows)
             return "windows"
+        #else
+            return "unknown"
+        #endif
+    }
+    fileprivate static var runtimeArch: String {
+        #if arch(arm64)
+            return "aarch64"
+        #elseif arch(x86_64)
+            return "x86_64"
+        #elseif arch(arm)
+            return "arm"
+        #elseif arch(i386)
+            return "x86"
         #else
             return "unknown"
         #endif
@@ -24479,6 +24501,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
     private let coreOpSubmitter: AppServerCoreOpSubmitter?
     private let liveRuntimeSubmitter: AppServerLiveRuntimeSubmitter?
     private let acceptedLineAnalyticsClient: AcceptedLineAnalyticsClient
+    private let codexToolItemAnalyticsClient: CodexToolItemAnalyticsClient
     private let threadStateManager: AppServerThreadStateManager
     private let outgoingRequestBroker: AppServerOutgoingRequestBroker
     private var threadAnalyticsMetadata: [String: ThreadAnalyticsMetadata] = [:]
@@ -24528,6 +24551,9 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         self.liveRuntimeSubmitter = liveRuntimeSubmitter
         self.acceptedLineAnalyticsClient = AcceptedLineAnalyticsClient(
             uploader: configuration.acceptedLineAnalyticsUploader
+        )
+        self.codexToolItemAnalyticsClient = CodexToolItemAnalyticsClient(
+            uploader: configuration.codexAnalyticsUploader
         )
         self.threadStateManager = threadStateManager
         self.outgoingRequestBroker = outgoingRequestBroker ?? AppServerOutgoingRequestBroker(notificationSink: notificationSink)
@@ -24998,6 +25024,54 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         }
     }
 
+    private func trackItemLifecycleNotificationsForAnalytics(_ notifications: [[String: Any]]) async {
+        for notification in notifications {
+            guard let method = notification["method"] as? String,
+                  let params = notification["params"] as? [String: Any],
+                  JSONSerialization.isValidJSONObject(params),
+                  let data = try? JSONSerialization.data(withJSONObject: params)
+            else {
+                continue
+            }
+
+            switch method {
+            case "item/started":
+                if let started = try? JSONDecoder().decode(ItemStartedNotification.self, from: data) {
+                    await codexToolItemAnalyticsClient.trackItemStarted(started)
+                }
+            case "item/completed":
+                if let completed = try? JSONDecoder().decode(ItemCompletedNotification.self, from: data) {
+                    await codexToolItemAnalyticsClient.trackItemCompleted(
+                        completed,
+                        context: analyticsContext(threadID: completed.threadID)
+                    )
+                }
+            default:
+                continue
+            }
+        }
+    }
+
+    private func analyticsContext(threadID: String) -> CodexCommandExecutionAnalyticsContext {
+        CodexCommandExecutionAnalyticsContext(
+            appServerClient: CodexAppServerClientMetadata(
+                productClientID: configuration.originator,
+                clientVersion: configuration.version,
+                rpcTransport: .stdio,
+                experimentalAPIEnabled: experimentalAPIEnabled
+            ),
+            runtime: CodexRuntimeMetadata(
+                codexRSVersion: configuration.version,
+                runtimeOS: CodexAppServer.platformOS,
+                runtimeOSVersion: ProcessInfo.processInfo.operatingSystemVersionString,
+                runtimeArch: CodexAppServer.runtimeArch
+            ),
+            threadSource: nil,
+            subagentSource: nil,
+            parentThreadID: nil
+        )
+    }
+
     func handleRuntimeEvent(threadID: String, turnID: String, event: EventMessage) async {
         let notifications: [[String: Any]]
         var beforeNotifications: [[String: Any]] = []
@@ -25329,6 +25403,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                 unifiedDiff: turnDiff.unifiedDiff
             )
         }
+        await trackItemLifecycleNotificationsForAnalytics(notifications)
         for notification in notifications {
             await sendNotification(notification)
         }

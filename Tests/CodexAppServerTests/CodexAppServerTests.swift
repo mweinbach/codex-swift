@@ -4606,9 +4606,13 @@ final class CodexAppServerTests: XCTestCase {
 
     func testRuntimeExecCommandBeginAndEndEmitCommandExecutionItemsLikeRust() async throws {
         let temp = try TemporaryDirectory()
+        let analyticsUploader = AppServerRecordingCodexAnalyticsUploader()
         let notificationCapture = AppServerNotificationCapture()
         let processor = try initializedProcessor(
-            configuration: testConfiguration(codexHome: temp.url),
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                codexAnalyticsUploader: analyticsUploader
+            ),
             notificationSink: { data in await notificationCapture.append(data) }
         )
         let command = ["/bin/sh", "-lc", "cat Package.swift"]
@@ -4716,6 +4720,24 @@ final class CodexAppServerTests: XCTestCase {
         )
         let payloadsAfterDuplicateEnd = await notificationCapture.payloadsData()
         XCTAssertEqual(payloadsAfterDuplicateEnd.count, 0)
+
+        let analyticsRequests = await analyticsUploader.requests
+        XCTAssertEqual(analyticsRequests.count, 1)
+        let analyticsEvent = try XCTUnwrap(analyticsRequests.first?.events.first)
+        guard case let .commandExecution(commandEvent) = analyticsEvent else {
+            return XCTFail("expected command execution analytics event")
+        }
+        let params = commandEvent.eventParams
+        XCTAssertEqual(params.base.threadID, "thread-1")
+        XCTAssertEqual(params.base.turnID, "turn-1")
+        XCTAssertEqual(params.base.itemID, "cmd-1")
+        XCTAssertEqual(params.base.toolName, "user_shell")
+        XCTAssertEqual(params.base.startedAtMilliseconds, 43)
+        XCTAssertEqual(params.base.completedAtMilliseconds, 99)
+        XCTAssertEqual(params.base.terminalStatus, .completed)
+        XCTAssertEqual(params.commandExecutionSource, .userShell)
+        XCTAssertEqual(params.commandActionCounts.read, 1)
+        XCTAssertEqual(params.exitCode, Int32(0))
     }
 
     func testRuntimeExecCommandEndWithoutBeginIsSuppressedLikeRust() async throws {
@@ -28920,6 +28942,7 @@ final class CodexAppServerTests: XCTestCase {
         feedback: CodexFeedback = CodexFeedback(),
         feedbackUploadTransport: any FeedbackUploadTransport = URLSessionFeedbackUploadTransport(),
         acceptedLineAnalyticsUploader: any AcceptedLineAnalyticsUploading = DisabledAcceptedLineAnalyticsUploader(),
+        codexAnalyticsUploader: any CodexAnalyticsUploading = DisabledCodexAnalyticsUploader(),
         accountRateLimitsFetcher: any AccountRateLimitsFetching = URLSessionAccountRateLimitsFetcher(),
         addCreditsNudgeEmailSender: any AddCreditsNudgeEmailSending = URLSessionAddCreditsNudgeEmailSender(),
         authRefreshTransport: AppServerAuthRefreshTransport? = nil,
@@ -28955,6 +28978,7 @@ final class CodexAppServerTests: XCTestCase {
             feedback: feedback,
             feedbackUploadTransport: feedbackUploadTransport,
             acceptedLineAnalyticsUploader: acceptedLineAnalyticsUploader,
+            codexAnalyticsUploader: codexAnalyticsUploader,
             accountRateLimitsFetcher: accountRateLimitsFetcher,
             addCreditsNudgeEmailSender: addCreditsNudgeEmailSender,
             authRefreshTransport: authRefreshTransport,
@@ -30029,6 +30053,14 @@ private actor AppServerRecordingAcceptedLineAnalyticsUploader: AcceptedLineAnaly
     private(set) var requests: [AcceptedLineAnalyticsUploadRequest] = []
 
     func upload(_ request: AcceptedLineAnalyticsUploadRequest) async throws {
+        requests.append(request)
+    }
+}
+
+private actor AppServerRecordingCodexAnalyticsUploader: CodexAnalyticsUploading {
+    private(set) var requests: [CodexTrackEventsRequest] = []
+
+    func upload(_ request: CodexTrackEventsRequest) async throws {
         requests.append(request)
     }
 }

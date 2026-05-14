@@ -183,6 +183,63 @@ public enum CodexAnalytics {
     }
 }
 
+public actor CodexToolItemAnalyticsClient {
+    private var commandExecutionReducer = CodexCommandExecutionAnalyticsReducer()
+    private var fileChangeReducer = CodexFileChangeAnalyticsReducer()
+    private var mcpToolCallReducer = CodexMcpToolCallAnalyticsReducer()
+    private var dynamicToolCallReducer = CodexDynamicToolCallAnalyticsReducer()
+    private var collabAgentToolCallReducer = CodexCollabAgentToolCallAnalyticsReducer()
+    private var webSearchReducer = CodexWebSearchAnalyticsReducer()
+    private var imageGenerationReducer = CodexImageGenerationAnalyticsReducer()
+    private let uploader: any CodexAnalyticsUploading
+
+    public init(uploader: any CodexAnalyticsUploading = DisabledCodexAnalyticsUploader()) {
+        self.uploader = uploader
+    }
+
+    public func trackItemStarted(_ notification: ItemStartedNotification) {
+        commandExecutionReducer.ingestStarted(notification)
+        fileChangeReducer.ingestStarted(notification)
+        mcpToolCallReducer.ingestStarted(notification)
+        dynamicToolCallReducer.ingestStarted(notification)
+        collabAgentToolCallReducer.ingestStarted(notification)
+        webSearchReducer.ingestStarted(notification)
+        imageGenerationReducer.ingestStarted(notification)
+    }
+
+    public func trackItemCompleted(
+        _ notification: ItemCompletedNotification,
+        context: CodexCommandExecutionAnalyticsContext
+    ) async {
+        var events: [CodexTrackEventRequest] = []
+        if let event = commandExecutionReducer.ingestCompleted(notification, context: context) {
+            events.append(.commandExecution(event))
+        }
+        if let event = fileChangeReducer.ingestCompleted(notification, context: context) {
+            events.append(.fileChange(event))
+        }
+        if let event = mcpToolCallReducer.ingestCompleted(notification, context: context) {
+            events.append(.mcpToolCall(event))
+        }
+        if let event = dynamicToolCallReducer.ingestCompleted(notification, context: context) {
+            events.append(.dynamicToolCall(event))
+        }
+        if let event = collabAgentToolCallReducer.ingestCompleted(notification, context: context) {
+            events.append(.collabAgentToolCall(event))
+        }
+        if let event = webSearchReducer.ingestCompleted(notification, context: context) {
+            events.append(.webSearch(event))
+        }
+        if let event = imageGenerationReducer.ingestCompleted(notification, context: context) {
+            events.append(.imageGeneration(event))
+        }
+
+        for batch in CodexAnalytics.trackEventRequestBatches(events) {
+            try? await uploader.upload(CodexTrackEventsRequest(events: batch))
+        }
+    }
+}
+
 public enum AppServerRpcTransport: String, Codable, Equatable, Sendable {
     case stdio
     case websocket
