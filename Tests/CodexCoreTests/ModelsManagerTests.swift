@@ -459,6 +459,36 @@ final class ModelsManagerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: ModelsManager.cachePath(codexHome: root).path))
     }
 
+    func testConstructModelFamilyMatchesHyphenatedProviderNamespaceSuffixLikeRust() {
+        let namespacedModel = "openai-codex/custom-gpt"
+        let remote = remoteModelMetadata(slug: "custom-gpt")
+
+        let family = ModelsManager.constructModelFamily(
+            model: namespacedModel,
+            remoteModels: [remote]
+        )
+
+        XCTAssertEqual(family.slug, namespacedModel)
+        XCTAssertEqual(family.contextWindow, 123_456)
+        XCTAssertEqual(family.defaultReasoningEffort, .high)
+        XCTAssertEqual(family.baseInstructions, "remote instructions")
+        XCTAssertTrue(family.supportsParallelToolCalls)
+        XCTAssertEqual(family.applyPatchToolType, .freeform)
+    }
+
+    func testConstructModelFamilyRejectsMultiSegmentProviderNamespaceSuffixLikeRust() {
+        let remote = remoteModelMetadata(slug: "custom-gpt")
+
+        let family = ModelsManager.constructModelFamily(
+            model: "org/team/custom-gpt",
+            remoteModels: [remote]
+        )
+
+        XCTAssertNotEqual(family.baseInstructions, remote.baseInstructions)
+        XCTAssertNotEqual(family.contextWindow, remote.resolvedContextWindow)
+        XCTAssertNotEqual(family.defaultReasoningEffort, remote.defaultReasoningLevel)
+    }
+
     func testMergePresetsKeepsExistingOnlyWhenRemoteDoesNotShadowIt() {
         let remote = preset(model: "remote", isDefault: false)
         let duplicate = preset(model: "remote", isDefault: true)
@@ -706,6 +736,30 @@ final class ModelsManagerTests: XCTestCase {
             truncationPolicy: .bytes(10_000),
             supportsParallelToolCalls: false,
             contextWindow: nil,
+            experimentalSupportedTools: []
+        )
+    }
+
+    private func remoteModelMetadata(slug: String) -> ModelInfo {
+        ModelInfo(
+            slug: slug,
+            displayName: "Custom GPT",
+            description: "\(slug) desc",
+            defaultReasoningLevel: .high,
+            supportedReasoningLevels: [
+                ReasoningEffortPreset(effort: .high, description: "high")
+            ],
+            shellType: .shellCommand,
+            visibility: .list,
+            supportedInAPI: true,
+            priority: 0,
+            baseInstructions: "remote instructions",
+            supportsReasoningSummaries: true,
+            supportVerbosity: false,
+            applyPatchToolType: .freeform,
+            truncationPolicy: .tokens(12_345),
+            supportsParallelToolCalls: true,
+            contextWindow: 123_456,
             experimentalSupportedTools: []
         )
     }
