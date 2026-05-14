@@ -89,6 +89,20 @@ final class ResponsesAPITests: XCTestCase {
         XCTAssertEqual(metadata[CodexRequestHeaders.turnMetadataHeaderName], #"{"turn_id":"turn-123"}"#)
     }
 
+    func testResponsesAPIRequestSkipsEmptyInstructionsLikeRust() throws {
+        let request = ResponsesAPIRequest(
+            model: "gpt-test",
+            instructions: "",
+            input: [.message(role: "user", content: [.inputText(text: "hi")])],
+            store: false
+        )
+
+        let object = try JSONObject(request)
+        XCTAssertNil(object["instructions"])
+        XCTAssertEqual(object["model"] as? String, "gpt-test")
+        XCTAssertEqual((object["input"] as? [[String: Any]])?.first?["type"] as? String, "message")
+    }
+
     func testResponseCreateWebSocketRequestMatchesRustWireShape() throws {
         let request = ResponsesWebSocketRequest.responseCreate(ResponseCreateWebSocketRequest(
             model: "gpt-test",

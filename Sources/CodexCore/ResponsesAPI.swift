@@ -148,6 +148,26 @@ public struct ResponsesAPIRequest: Equatable, Codable, Sendable {
         self.text = text
         self.clientMetadata = clientMetadata
     }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(model, forKey: .model)
+        if !instructions.isEmpty {
+            try container.encode(instructions, forKey: .instructions)
+        }
+        try container.encode(input, forKey: .input)
+        try container.encode(tools, forKey: .tools)
+        try container.encode(toolChoice, forKey: .toolChoice)
+        try container.encode(parallelToolCalls, forKey: .parallelToolCalls)
+        try container.encodeIfPresent(reasoning, forKey: .reasoning)
+        try container.encode(store, forKey: .store)
+        try container.encode(stream, forKey: .stream)
+        try container.encode(include, forKey: .include)
+        try container.encodeIfPresent(serviceTier, forKey: .serviceTier)
+        try container.encodeIfPresent(promptCacheKey, forKey: .promptCacheKey)
+        try container.encodeIfPresent(text, forKey: .text)
+        try container.encodeIfPresent(clientMetadata, forKey: .clientMetadata)
+    }
 }
 
 public struct ResponseProcessedWebSocketRequest: Equatable, Codable, Sendable {
