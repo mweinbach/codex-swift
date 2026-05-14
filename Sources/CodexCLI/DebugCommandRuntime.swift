@@ -482,13 +482,18 @@ public enum DebugCommandRuntime {
         dependencies: Dependencies
     ) async throws -> CodexCLI.CommandExecutionResult {
         let codexHome = try dependencies.findCodexHome()
-        let config = try dependencies.loadConfig(codexHome, configOverrides)
-        let statePath = stateDatabasePath(codexHome: codexHome, config: config)
+        let statePath: URL
+        let selectedModelProviderID: String
+        do {
+            let config = try dependencies.loadConfig(codexHome, configOverrides)
+            statePath = stateDatabasePath(codexHome: codexHome, config: config)
+            selectedModelProviderID = config.selectedModelProviderID
+        }
         await Task.yield()
 
         let clearedStateDB: Bool
         if FileManager.default.fileExists(atPath: statePath.path) {
-            let stateStore = try dependencies.makeStateStore(statePath, config.selectedModelProviderID)
+            let stateStore = try dependencies.makeStateStore(statePath, selectedModelProviderID)
             try await stateStore.clearMemoryData()
             clearedStateDB = true
         } else {

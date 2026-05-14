@@ -72,6 +72,25 @@ public struct TerminalResizeReflowConfig: Equatable, Sendable {
     }
 }
 
+public struct ConfigLockfileDebugConfig: Equatable, Sendable {
+    public var exportDir: String?
+    public var loadPath: String?
+    public var allowCodexVersionMismatch: Bool
+    public var saveFieldsResolvedFromModelCatalog: Bool
+
+    public init(
+        exportDir: String? = nil,
+        loadPath: String? = nil,
+        allowCodexVersionMismatch: Bool = false,
+        saveFieldsResolvedFromModelCatalog: Bool = true
+    ) {
+        self.exportDir = exportDir
+        self.loadPath = loadPath
+        self.allowCodexVersionMismatch = allowCodexVersionMismatch
+        self.saveFieldsResolvedFromModelCatalog = saveFieldsResolvedFromModelCatalog
+    }
+}
+
 public enum TuiAlternateScreenMode: String, Codable, Equatable, Sendable {
     case auto
     case always
@@ -373,6 +392,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var history: HistoryConfig
     public var agents: AgentRuntimeConfig
     public var multiAgentV2: MultiAgentV2Config
+    public var configLockfile: ConfigLockfileDebugConfig
     public var agentRoles: [String: AgentRoleConfig]
     public var startupWarnings: [String]
     public var fileOpener: UriBasedFileOpener
@@ -562,6 +582,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.history = HistoryConfig()
         self.agents = AgentRuntimeConfig()
         self.multiAgentV2 = MultiAgentV2Config()
+        self.configLockfile = ConfigLockfileDebugConfig()
         self.agentRoles = [:]
         self.startupWarnings = []
         self.fileOpener = .vsCode
@@ -1961,6 +1982,7 @@ private struct ParsedCodexConfigToml {
     var profileAppsMcpPathOverride: [String: [String: ConfigValue]] = [:]
     var multiAgentV2: [String: ConfigValue] = [:]
     var profileMultiAgentV2: [String: [String: ConfigValue]] = [:]
+    var debugConfigLockfile: [String: ConfigValue] = [:]
     var memories: [String: ConfigValue] = [:]
     var windows: [String: ConfigValue] = [:]
     var profileWindows: [String: [String: ConfigValue]] = [:]
@@ -2108,6 +2130,16 @@ private struct ParsedCodexConfigToml {
                     }
                     for (memoryKey, memoryValue) in table {
                         parsed.memories[canonicalMemoriesConfigKey(memoryKey)] = memoryValue
+                    }
+                    continue
+                }
+                if key == "debug" {
+                    let value = try ConfigValueParser.parseTomlLiteral(valueText)
+                    guard case let .table(table) = value else {
+                        throw CodexConfigLoadError.invalidConfigLine(key)
+                    }
+                    if case let .table(configLockfile)? = table["config_lockfile"] {
+                        try parsed.mergeDebugConfigLockfile(configLockfile, baseURL: baseURL)
                     }
                     continue
                 }
@@ -2263,6 +2295,11 @@ private struct ParsedCodexConfigToml {
                 )
             case .memories:
                 parsed.memories[canonicalMemoriesConfigKey(key)] = try ConfigValueParser.parseTomlLiteral(valueText)
+            case .debugConfigLockfile:
+                try parsed.mergeDebugConfigLockfile(
+                    [key: ConfigValueParser.parseTomlLiteral(valueText)],
+                    baseURL: baseURL
+                )
             case .sandboxWorkspaceWrite:
                 parsed.sandboxWorkspaceWrite[key] = try ConfigValueParser.parseTomlLiteral(valueText)
             case .history:
@@ -2551,6 +2588,28 @@ private struct ParsedCodexConfigToml {
         }
     }
 
+    mutating func mergeDebugConfigLockfile(_ table: [String: ConfigValue], baseURL: URL?) throws {
+        for (key, value) in table {
+            debugConfigLockfile[key] = try Self.normalizeConfigLockfilePathValue(value, key: key, baseURL: baseURL)
+        }
+    }
+
+    private static func normalizeConfigLockfilePathValue(
+        _ value: ConfigValue,
+        key: String,
+        baseURL: URL?
+    ) throws -> ConfigValue {
+        guard ["export_dir", "load_path"].contains(key),
+              let baseURL,
+              case let .string(path) = value,
+              !(path as NSString).isAbsolutePath
+        else {
+            return value
+        }
+
+        return .string(baseURL.appendingPathComponent(path).standardizedFileURL.path)
+    }
+
     mutating func mergeOtelSpanAttribute(key: String, value: ConfigValue) {
         var spanAttributes = otel["span_attributes"] ?? .table([:])
         spanAttributes.merge(overlay: .table([key: value]))
@@ -2596,6 +2655,11 @@ private struct ParsedCodexConfigToml {
 
             if parts.count == 2, parts[0] == "memories" {
                 memories[Self.canonicalMemoriesConfigKey(parts[1])] = value
+                continue
+            }
+
+            if parts.count == 3, parts[0] == "debug", parts[1] == "config_lockfile" {
+                debugConfigLockfile[parts[2]] = value
                 continue
             }
 
@@ -2988,6 +3052,10 @@ private struct ParsedCodexConfigToml {
             }
             profileMultiAgentV2[profileName] = mergedProfile
         }
+
+        for (key, value) in overlay.debugConfigLockfile {
+            debugConfigLockfile[key] = value
+        }
     }
 
     mutating func merge(_ layers: LoadedConfigLayers) throws {
@@ -3123,6 +3191,14 @@ private struct ParsedCodexConfigToml {
         if case let .table(memoriesTable) = table["memories"] {
             for (key, value) in memoriesTable {
                 memories[Self.canonicalMemoriesConfigKey(key)] = value
+            }
+        }
+
+        if case let .table(debugTable) = table["debug"],
+           case let .table(configLockfileTable)? = debugTable["config_lockfile"]
+        {
+            for (key, value) in configLockfileTable {
+                debugConfigLockfile[key] = value
             }
         }
 
@@ -3363,6 +3439,10 @@ private struct ParsedCodexConfigToml {
             base: multiAgentV2,
             profile: config.activeProfile.flatMap { profileMultiAgentV2[$0] },
             key: "features.multi_agent_v2"
+        )
+        config.configLockfile = try Self.configLockfileDebugConfigValue(
+            debugConfigLockfile,
+            key: "debug.config_lockfile"
         )
         if featureStates.isEnabled(.multiAgentV2) {
             if agentsMaxThreadsConfigured {
@@ -5079,6 +5159,33 @@ private struct ParsedCodexConfigToml {
         profile?[field] ?? base[field]
     }
 
+    private static func configLockfileDebugConfigValue(
+        _ table: [String: ConfigValue],
+        key: String
+    ) throws -> ConfigLockfileDebugConfig {
+        guard !table.isEmpty else {
+            return ConfigLockfileDebugConfig()
+        }
+        for field in table.keys where ![
+            "export_dir",
+            "load_path",
+            "allow_codex_version_mismatch",
+            "save_fields_resolved_from_model_catalog"
+        ].contains(field) {
+            throw CodexConfigLoadError.invalidConfigLine("\(key).\(field)")
+        }
+        return ConfigLockfileDebugConfig(
+            exportDir: try table["export_dir"].map { try stringValue($0, key: "\(key).export_dir") },
+            loadPath: try table["load_path"].map { try stringValue($0, key: "\(key).load_path") },
+            allowCodexVersionMismatch: try table["allow_codex_version_mismatch"].map {
+                try boolValue($0, key: "\(key).allow_codex_version_mismatch")
+            } ?? false,
+            saveFieldsResolvedFromModelCatalog: try table["save_fields_resolved_from_model_catalog"].map {
+                try boolValue($0, key: "\(key).save_fields_resolved_from_model_catalog")
+            } ?? true
+        )
+    }
+
     private static func isRelevantAgentKey(_ key: String) -> Bool {
         key == "max_threads"
             || key == "max_depth"
@@ -5751,6 +5858,9 @@ private struct ParsedCodexConfigToml {
         if parts.count == 2, parts[0] == "features", parts[1] == "apps_mcp_path_override" {
             return .featuresAppsMcpPathOverride
         }
+        if parts.count == 2, parts[0] == "debug", parts[1] == "config_lockfile" {
+            return .debugConfigLockfile
+        }
         if parts.count == 1, parts[0] == "memories" {
             return .memories
         }
@@ -6075,6 +6185,7 @@ private enum ConfigSection {
     case features
     case featuresMultiAgentV2
     case featuresAppsMcpPathOverride
+    case debugConfigLockfile
     case memories
     case sandboxWorkspaceWrite
     case history

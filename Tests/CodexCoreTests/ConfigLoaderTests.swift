@@ -94,6 +94,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.history, HistoryConfig())
         XCTAssertEqual(config.agents, AgentRuntimeConfig())
         XCTAssertEqual(config.multiAgentV2, MultiAgentV2Config())
+        XCTAssertEqual(config.configLockfile, ConfigLockfileDebugConfig())
         XCTAssertEqual(config.agentRoles, [:])
         XCTAssertEqual(config.fileOpener, .vsCode)
         XCTAssertEqual(config.tui, TuiRuntimeConfig())
@@ -294,6 +295,56 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.personality, .friendly)
         XCTAssertEqual(config.openAIBaseURL, "https://proxy.example/v1")
         XCTAssertEqual(config.modelProviders["openai"]?.baseURL, "https://proxy.example/v1")
+    }
+
+    func testDebugConfigLockfileSettingsLoadFromNestedTableLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [debug.config_lockfile]
+        export_dir = "locks"
+        load_path = "session.config.lock.toml"
+        allow_codex_version_mismatch = true
+        save_fields_resolved_from_model_catalog = false
+        """.write(
+            to: dir.url.appendingPathComponent("config.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.configLockfile, ConfigLockfileDebugConfig(
+            exportDir: dir.url.appendingPathComponent("locks", isDirectory: true).path,
+            loadPath: dir.url.appendingPathComponent("session.config.lock.toml").path,
+            allowCodexVersionMismatch: true,
+            saveFieldsResolvedFromModelCatalog: false
+        ))
+    }
+
+    func testDebugConfigLockfileInlineAndOverridesUseRustDefaults() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        debug = { config_lockfile = { export_dir = "locks" } }
+        """.write(
+            to: dir.url.appendingPathComponent("config.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let config = try CodexConfigLoader.load(
+            codexHome: dir.url,
+            overrides: CliConfigOverrides(rawOverrides: [
+                #"debug.config_lockfile.load_path="/tmp/replay.config.lock.toml""#
+            ]),
+            systemConfigFile: nil
+        )
+
+        XCTAssertEqual(config.configLockfile, ConfigLockfileDebugConfig(
+            exportDir: dir.url.appendingPathComponent("locks", isDirectory: true).path,
+            loadPath: "/tmp/replay.config.lock.toml",
+            allowCodexVersionMismatch: false,
+            saveFieldsResolvedFromModelCatalog: true
+        ))
     }
 
     func testModelCatalogJSONRejectsEmptyCatalogLikeRust() throws {

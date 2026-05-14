@@ -2927,10 +2927,11 @@ final class DebugCommandRuntimeTests: XCTestCase {
             ("2026-02-26", "America/Los_Angeles")
         }
     ) -> DebugCommandRuntime.Dependencies {
-        DebugCommandRuntime.Dependencies(
+        let configFixture = RuntimeConfigFixture(config)
+        return DebugCommandRuntime.Dependencies(
             findCodexHome: { codexHome },
             loadConfig: { _, _ in
-                config
+                configFixture.config
             },
             loadConfigLayerStack: { _, _ in
                 if let configLayerStack {
@@ -2946,6 +2947,14 @@ final class DebugCommandRuntimeTests: XCTestCase {
             currentExecutable: { URL(fileURLWithPath: "/tmp/codex-swift-test", isDirectory: false) },
             sendAppServerMessageV2: { _, _, _ in CodexCLI.CommandExecutionResult(exitCode: 0) }
         )
+    }
+
+    private final class RuntimeConfigFixture {
+        let config: CodexRuntimeConfig
+
+        init(_ config: CodexRuntimeConfig) {
+            self.config = config
+        }
     }
 
     private static func emptyConfigLayerStack(codexHome: URL) throws -> ConfigLayerStack {
