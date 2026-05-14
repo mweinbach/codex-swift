@@ -1455,6 +1455,36 @@ public enum CodexAppServer {
         table["include_apps_instructions"] = .bool(runtimeConfig.includeAppsInstructions)
         table["include_environment_context"] = .bool(runtimeConfig.includeEnvironmentContext)
         table["background_terminal_max_timeout"] = .integer(Int64(runtimeConfig.backgroundTerminalMaxTimeoutMS))
+        var agentsTable: [String: ConfigValue]
+        if case let .table(existingAgentsTable)? = table["agents"] {
+            agentsTable = existingAgentsTable
+        } else {
+            agentsTable = [:]
+        }
+        if runtimeConfig.features.isEnabled(.multiAgentV2) {
+            agentsTable.removeValue(forKey: "max_threads")
+        } else if let maxThreads = runtimeConfig.agents.maxThreads {
+            agentsTable["max_threads"] = .integer(Int64(maxThreads))
+        } else {
+            agentsTable.removeValue(forKey: "max_threads")
+        }
+        agentsTable["max_depth"] = .integer(Int64(runtimeConfig.agents.maxDepth))
+        if let jobMaxRuntimeSeconds = runtimeConfig.agents.jobMaxRuntimeSeconds {
+            agentsTable["job_max_runtime_seconds"] = .integer(Int64(jobMaxRuntimeSeconds))
+        } else {
+            agentsTable.removeValue(forKey: "job_max_runtime_seconds")
+        }
+        agentsTable["interrupt_message"] = .bool(runtimeConfig.agents.interruptMessageEnabled)
+        table["agents"] = .table(agentsTable)
+
+        var skillsTable: [String: ConfigValue]
+        if case let .table(existingSkillsTable)? = table["skills"] {
+            skillsTable = existingSkillsTable
+        } else {
+            skillsTable = [:]
+        }
+        skillsTable["include_instructions"] = .bool(runtimeConfig.includeSkillInstructions)
+        table["skills"] = .table(skillsTable)
         guard runtimeConfig.configLockfile.saveFieldsResolvedFromModelCatalog else {
             return .table(table)
         }

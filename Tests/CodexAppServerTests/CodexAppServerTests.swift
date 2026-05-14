@@ -948,6 +948,15 @@ final class CodexAppServerTests: XCTestCase {
         plan_mode_reasoning_effort = "high"
         model_verbosity = "low"
 
+        [agents]
+        max_threads = 4
+        max_depth = 3
+        job_max_runtime_seconds = 900
+        interrupt_message = false
+
+        [skills]
+        include_instructions = false
+
         [debug.config_lockfile]
         export_dir = "\(exportDir.path)"
         save_fields_resolved_from_model_catalog = false
@@ -974,6 +983,17 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(config["include_apps_instructions"], .bool(true))
         XCTAssertEqual(config["include_environment_context"], .bool(true))
         XCTAssertEqual(config["background_terminal_max_timeout"], .integer(300_000))
+        guard case let .table(agents)? = config["agents"] else {
+            return XCTFail("expected agents table")
+        }
+        XCTAssertEqual(agents["max_threads"], .integer(4))
+        XCTAssertEqual(agents["max_depth"], .integer(3))
+        XCTAssertEqual(agents["job_max_runtime_seconds"], .integer(900))
+        XCTAssertEqual(agents["interrupt_message"], .bool(false))
+        guard case let .table(skills)? = config["skills"] else {
+            return XCTFail("expected skills table")
+        }
+        XCTAssertEqual(skills["include_instructions"], .bool(false))
         XCTAssertEqual(config["model"], .string("gpt-user"))
         XCTAssertNil(config["approval_policy"])
         XCTAssertNil(config["approvals_reviewer"])
