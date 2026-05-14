@@ -7,6 +7,13 @@ final class SandboxSummaryTests: XCTestCase {
         XCTAssertEqual(SandboxSummary.summarize(.readOnly), "read-only")
     }
 
+    func testSummarizesReadOnlyWithEnabledNetworkLikeRust() {
+        XCTAssertEqual(
+            SandboxSummary.summarize(.readOnlyWithNetworkAccess),
+            "read-only (network access enabled)"
+        )
+    }
+
     func testSummarizesExternalSandboxWithoutNetworkAccessSuffix() {
         let summary = SandboxSummary.summarize(.externalSandbox(networkAccess: .restricted))
 

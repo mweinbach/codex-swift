@@ -5,8 +5,10 @@ public enum SandboxSummary {
         switch sandboxPolicy {
         case .dangerFullAccess:
             return "danger-full-access"
-        case .readOnly, .readOnlyWithNetworkAccess:
+        case .readOnly:
             return "read-only"
+        case .readOnlyWithNetworkAccess:
+            return "read-only (network access enabled)"
         case let .externalSandbox(networkAccess):
             var summary = "external-sandbox"
             if networkAccess == .enabled {
