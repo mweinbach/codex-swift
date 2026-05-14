@@ -88,6 +88,311 @@ final class AppServerPluginProtocolTests: XCTestCase {
         XCTAssertNil(decoded.marketplaceName)
     }
 
+    func testPluginListAndReadParamsEncodeExplicitNullOptionalsLikeRustProtocol() throws {
+        try XCTAssertJSONObjectEqual(PluginListParams(), [
+            "cwds": NSNull(),
+            "marketplaceKinds": NSNull()
+        ])
+
+        try XCTAssertJSONObjectEqual(
+            PluginListParams(
+                cwds: [try AbsolutePath(absolutePath: "/repo")],
+                marketplaceKinds: [.local, .workspaceDirectory, .sharedWithMe]
+            ),
+            [
+                "cwds": ["/repo"],
+                "marketplaceKinds": ["local", "workspace-directory", "shared-with-me"]
+            ]
+        )
+
+        try XCTAssertJSONObjectEqual(PluginReadParams(pluginName: "weather"), [
+            "marketplacePath": NSNull(),
+            "remoteMarketplaceName": NSNull(),
+            "pluginName": "weather"
+        ])
+
+        try XCTAssertJSONObjectEqual(
+            PluginReadParams(
+                marketplacePath: try AbsolutePath(absolutePath: "/repo/.agents/plugins/marketplace.json"),
+                pluginName: "weather"
+            ),
+            [
+                "marketplacePath": "/repo/.agents/plugins/marketplace.json",
+                "remoteMarketplaceName": NSNull(),
+                "pluginName": "weather"
+            ]
+        )
+    }
+
+    func testPluginListResponseShapesMatchRustProtocol() throws {
+        let summary = PluginSummary(
+            id: "weather@debug",
+            name: "weather",
+            source: .git(url: "https://example.test/weather.git", path: nil, refName: nil, sha: nil),
+            installed: true,
+            enabled: false,
+            installPolicy: .available,
+            authPolicy: .onInstall,
+            interface: PluginInterface(displayName: "Weather", capabilities: ["forecast"]),
+            keywords: ["weather"]
+        )
+
+        try XCTAssertJSONObjectEqual(
+            PluginListResponse(
+                marketplaces: [
+                    PluginMarketplaceEntry(
+                        name: "debug",
+                        path: try AbsolutePath(absolutePath: "/repo/.agents/plugins/marketplace.json"),
+                        interface: MarketplaceInterface(displayName: "Debug"),
+                        plugins: [summary]
+                    )
+                ],
+                marketplaceLoadErrors: [
+                    MarketplaceLoadErrorInfo(
+                        marketplacePath: try AbsolutePath(absolutePath: "/broken/marketplace.json"),
+                        message: "bad marketplace"
+                    )
+                ],
+                featuredPluginIDs: ["weather@debug"]
+            ),
+            [
+                "marketplaces": [[
+                    "name": "debug",
+                    "path": "/repo/.agents/plugins/marketplace.json",
+                    "interface": ["displayName": "Debug"],
+                    "plugins": [[
+                        "id": "weather@debug",
+                        "name": "weather",
+                        "shareContext": NSNull(),
+                        "source": [
+                            "type": "git",
+                            "url": "https://example.test/weather.git",
+                            "path": NSNull(),
+                            "refName": NSNull(),
+                            "sha": NSNull()
+                        ],
+                        "installed": true,
+                        "enabled": false,
+                        "installPolicy": "AVAILABLE",
+                        "authPolicy": "ON_INSTALL",
+                        "availability": "AVAILABLE",
+                        "interface": [
+                            "displayName": "Weather",
+                            "shortDescription": NSNull(),
+                            "longDescription": NSNull(),
+                            "developerName": NSNull(),
+                            "category": NSNull(),
+                            "capabilities": ["forecast"],
+                            "websiteUrl": NSNull(),
+                            "privacyPolicyUrl": NSNull(),
+                            "termsOfServiceUrl": NSNull(),
+                            "defaultPrompt": NSNull(),
+                            "brandColor": NSNull(),
+                            "composerIcon": NSNull(),
+                            "composerIconUrl": NSNull(),
+                            "logo": NSNull(),
+                            "logoUrl": NSNull(),
+                            "screenshots": [],
+                            "screenshotUrls": []
+                        ],
+                        "keywords": ["weather"]
+                    ]]
+                ]],
+                "marketplaceLoadErrors": [[
+                    "marketplacePath": "/broken/marketplace.json",
+                    "message": "bad marketplace"
+                ]],
+                "featuredPluginIds": ["weather@debug"]
+            ]
+        )
+    }
+
+    func testPluginDetailAndInstallShapesMatchRustProtocol() throws {
+        let summary = PluginSummary(
+            id: "plugins~Plugin_weather",
+            name: "plugins~Plugin_weather",
+            shareContext: PluginShareContext(
+                remotePluginID: "plugins~Plugin_weather",
+                shareURL: nil,
+                creatorAccountUserID: "user-1",
+                creatorName: nil,
+                shareTargets: [
+                    PluginSharePrincipal(principalType: .user, principalID: "user-1", name: "User")
+                ]
+            ),
+            source: .remote,
+            installed: false,
+            enabled: false,
+            installPolicy: .available,
+            authPolicy: .onUse,
+            availability: .disabledByAdmin,
+            interface: nil,
+            keywords: []
+        )
+        let detail = PluginDetail(
+            marketplaceName: "shared-with-me",
+            summary: summary,
+            description: nil,
+            skills: [
+                SkillSummary(
+                    name: "forecast",
+                    description: "Get forecast",
+                    interface: AppServerSkillInterface(displayName: "Forecast"),
+                    path: nil,
+                    enabled: true
+                )
+            ],
+            hooks: [
+                PluginHookSummary(key: "plugin:hooks.json:pre_tool_use:0:0", eventName: .preToolUse)
+            ],
+            apps: [
+                AppServerAppSummary(
+                    id: "weather-app",
+                    name: "Weather",
+                    description: nil,
+                    installURL: "https://example.test/install",
+                    needsAuth: true
+                )
+            ],
+            mcpServers: ["weather"]
+        )
+
+        try XCTAssertJSONObjectEqual(PluginReadResponse(plugin: detail), [
+            "plugin": [
+                "marketplaceName": "shared-with-me",
+                "marketplacePath": NSNull(),
+                "summary": [
+                    "id": "plugins~Plugin_weather",
+                    "name": "plugins~Plugin_weather",
+                    "shareContext": [
+                        "remotePluginId": "plugins~Plugin_weather",
+                        "shareUrl": NSNull(),
+                        "creatorAccountUserId": "user-1",
+                        "creatorName": NSNull(),
+                        "shareTargets": [[
+                            "principalType": "user",
+                            "principalId": "user-1",
+                            "name": "User"
+                        ]]
+                    ],
+                    "source": ["type": "remote"],
+                    "installed": false,
+                    "enabled": false,
+                    "installPolicy": "AVAILABLE",
+                    "authPolicy": "ON_USE",
+                    "availability": "DISABLED_BY_ADMIN",
+                    "interface": NSNull(),
+                    "keywords": []
+                ],
+                "description": NSNull(),
+                "skills": [[
+                    "name": "forecast",
+                    "description": "Get forecast",
+                    "shortDescription": NSNull(),
+                    "interface": [
+                        "displayName": "Forecast",
+                        "shortDescription": NSNull(),
+                        "iconSmall": NSNull(),
+                        "iconLarge": NSNull(),
+                        "brandColor": NSNull(),
+                        "defaultPrompt": NSNull()
+                    ],
+                    "path": NSNull(),
+                    "enabled": true
+                ]],
+                "hooks": [[
+                    "key": "plugin:hooks.json:pre_tool_use:0:0",
+                    "eventName": "pre_tool_use"
+                ]],
+                "apps": [[
+                    "id": "weather-app",
+                    "name": "Weather",
+                    "description": NSNull(),
+                    "installUrl": "https://example.test/install",
+                    "needsAuth": true
+                ]],
+                "mcpServers": ["weather"]
+            ]
+        ])
+
+        try XCTAssertJSONObjectEqual(PluginInstallParams(remoteMarketplaceName: "shared-with-me", pluginName: "plugins~Plugin_weather"), [
+            "marketplacePath": NSNull(),
+            "remoteMarketplaceName": "shared-with-me",
+            "pluginName": "plugins~Plugin_weather"
+        ])
+
+        try XCTAssertJSONObjectEqual(
+            PluginInstallResponse(
+                authPolicy: .onUse,
+                appsNeedingAuth: [
+                    AppServerAppSummary(id: "weather-app", name: "Weather", needsAuth: true)
+                ]
+            ),
+            [
+                "authPolicy": "ON_USE",
+                "appsNeedingAuth": [[
+                    "id": "weather-app",
+                    "name": "Weather",
+                    "description": NSNull(),
+                    "installUrl": NSNull(),
+                    "needsAuth": true
+                ]]
+            ]
+        )
+    }
+
+    func testPluginSkillConfigAndUninstallShapesMatchRustProtocol() throws {
+        try XCTAssertJSONObjectEqual(
+            PluginSkillReadParams(
+                remoteMarketplaceName: "shared-with-me",
+                remotePluginID: "plugins~Plugin_weather",
+                skillName: "forecast"
+            ),
+            [
+                "remoteMarketplaceName": "shared-with-me",
+                "remotePluginId": "plugins~Plugin_weather",
+                "skillName": "forecast"
+            ]
+        )
+
+        try XCTAssertJSONObjectEqual(PluginSkillReadResponse(), [
+            "contents": NSNull()
+        ])
+        try XCTAssertJSONObjectEqual(SkillsConfigWriteParams(enabled: false), [
+            "path": NSNull(),
+            "name": NSNull(),
+            "enabled": false
+        ])
+        try XCTAssertJSONObjectEqual(SkillsConfigWriteResponse(effectiveEnabled: true), [
+            "effectiveEnabled": true
+        ])
+        try XCTAssertJSONObjectEqual(PluginUninstallParams(pluginID: "weather@debug"), [
+            "pluginId": "weather@debug"
+        ])
+        try XCTAssertJSONObjectEqual(PluginUninstallResponse(), [:])
+
+        let decoded = try JSONDecoder().decode(
+            PluginSummary.self,
+            from: Data("""
+            {
+              "id": "remote",
+              "name": "remote",
+              "shareContext": null,
+              "source": { "type": "remote" },
+              "installed": false,
+              "enabled": false,
+              "installPolicy": "AVAILABLE",
+              "authPolicy": "ON_USE",
+              "availability": "ENABLED",
+              "interface": null,
+              "keywords": []
+            }
+            """.utf8)
+        )
+
+        XCTAssertEqual(decoded.availability, .available)
+    }
+
     func testPluginShareSaveParamsEncodeExplicitNullOptionalsLikeRustProtocol() throws {
         let params = PluginShareSaveParams(pluginPath: try AbsolutePath(absolutePath: "/repo/plugin"))
 
