@@ -276,6 +276,232 @@ extension ChatGPTAuthTokensRefreshResponse: Codable {
     }
 }
 
+public struct GetAccountRateLimitsResponse: Equatable, Sendable {
+    public let rateLimits: AccountRateLimitSnapshot
+    public let rateLimitsByLimitID: [String: AccountRateLimitSnapshot]?
+
+    private enum CodingKeys: String, CodingKey {
+        case rateLimits
+        case rateLimitsByLimitID = "rateLimitsByLimitId"
+    }
+
+    public init(
+        rateLimits: AccountRateLimitSnapshot,
+        rateLimitsByLimitID: [String: AccountRateLimitSnapshot]?
+    ) {
+        self.rateLimits = rateLimits
+        self.rateLimitsByLimitID = rateLimitsByLimitID
+    }
+}
+
+extension GetAccountRateLimitsResponse: Codable {
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        rateLimits = try container.decode(AccountRateLimitSnapshot.self, forKey: .rateLimits)
+        rateLimitsByLimitID = try container.decodeIfPresent(
+            [String: AccountRateLimitSnapshot].self,
+            forKey: .rateLimitsByLimitID
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(rateLimits, forKey: .rateLimits)
+        try container.encodeNilOrValue(rateLimitsByLimitID, forKey: .rateLimitsByLimitID)
+    }
+}
+
+public struct AccountRateLimitsUpdatedNotification: Equatable, Codable, Sendable {
+    public let rateLimits: AccountRateLimitSnapshot
+
+    public init(rateLimits: AccountRateLimitSnapshot) {
+        self.rateLimits = rateLimits
+    }
+}
+
+public struct AccountRateLimitSnapshot: Equatable, Sendable {
+    public let limitID: String?
+    public let limitName: String?
+    public let primary: AccountRateLimitWindow?
+    public let secondary: AccountRateLimitWindow?
+    public let credits: AccountCreditsSnapshot?
+    public let planType: PlanType?
+    public let rateLimitReachedType: RateLimitReachedType?
+
+    private enum CodingKeys: String, CodingKey {
+        case limitID = "limitId"
+        case limitName
+        case primary
+        case secondary
+        case credits
+        case planType
+        case rateLimitReachedType
+    }
+
+    public init(
+        limitID: String? = nil,
+        limitName: String? = nil,
+        primary: AccountRateLimitWindow?,
+        secondary: AccountRateLimitWindow?,
+        credits: AccountCreditsSnapshot?,
+        planType: PlanType?,
+        rateLimitReachedType: RateLimitReachedType? = nil
+    ) {
+        self.limitID = limitID
+        self.limitName = limitName
+        self.primary = primary
+        self.secondary = secondary
+        self.credits = credits
+        self.planType = planType
+        self.rateLimitReachedType = rateLimitReachedType
+    }
+
+    public init(core snapshot: RateLimitSnapshot) {
+        self.init(
+            limitID: snapshot.limitID,
+            limitName: snapshot.limitName,
+            primary: snapshot.primary.map(AccountRateLimitWindow.init(core:)),
+            secondary: snapshot.secondary.map(AccountRateLimitWindow.init(core:)),
+            credits: snapshot.credits.map(AccountCreditsSnapshot.init(core:)),
+            planType: snapshot.planType,
+            rateLimitReachedType: snapshot.rateLimitReachedType
+        )
+    }
+}
+
+extension AccountRateLimitSnapshot: Codable {
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        limitID = try container.decodeIfPresent(String.self, forKey: .limitID)
+        limitName = try container.decodeIfPresent(String.self, forKey: .limitName)
+        primary = try container.decodeIfPresent(AccountRateLimitWindow.self, forKey: .primary)
+        secondary = try container.decodeIfPresent(AccountRateLimitWindow.self, forKey: .secondary)
+        credits = try container.decodeIfPresent(AccountCreditsSnapshot.self, forKey: .credits)
+        planType = try container.decodeIfPresent(PlanType.self, forKey: .planType)
+        rateLimitReachedType = try container.decodeIfPresent(
+            RateLimitReachedType.self,
+            forKey: .rateLimitReachedType
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeNilOrValue(limitID, forKey: .limitID)
+        try container.encodeNilOrValue(limitName, forKey: .limitName)
+        try container.encodeNilOrValue(primary, forKey: .primary)
+        try container.encodeNilOrValue(secondary, forKey: .secondary)
+        try container.encodeNilOrValue(credits, forKey: .credits)
+        try container.encodeNilOrValue(planType, forKey: .planType)
+        try container.encodeNilOrValue(rateLimitReachedType, forKey: .rateLimitReachedType)
+    }
+}
+
+public struct AccountRateLimitWindow: Equatable, Sendable {
+    public let usedPercent: Int
+    public let windowDurationMinutes: Int64?
+    public let resetsAt: Int64?
+
+    private enum CodingKeys: String, CodingKey {
+        case usedPercent
+        case windowDurationMinutes = "windowDurationMins"
+        case resetsAt
+    }
+
+    public init(usedPercent: Int, windowDurationMinutes: Int64?, resetsAt: Int64?) {
+        self.usedPercent = usedPercent
+        self.windowDurationMinutes = windowDurationMinutes
+        self.resetsAt = resetsAt
+    }
+
+    public init(core window: RateLimitWindow) {
+        self.init(
+            usedPercent: Int(window.usedPercent.rounded()),
+            windowDurationMinutes: window.windowMinutes,
+            resetsAt: window.resetsAt
+        )
+    }
+}
+
+extension AccountRateLimitWindow: Codable {
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        usedPercent = try container.decode(Int.self, forKey: .usedPercent)
+        windowDurationMinutes = try container.decodeIfPresent(Int64.self, forKey: .windowDurationMinutes)
+        resetsAt = try container.decodeIfPresent(Int64.self, forKey: .resetsAt)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(usedPercent, forKey: .usedPercent)
+        try container.encodeNilOrValue(windowDurationMinutes, forKey: .windowDurationMinutes)
+        try container.encodeNilOrValue(resetsAt, forKey: .resetsAt)
+    }
+}
+
+public struct AccountCreditsSnapshot: Equatable, Sendable {
+    public let hasCredits: Bool
+    public let unlimited: Bool
+    public let balance: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case hasCredits
+        case unlimited
+        case balance
+    }
+
+    public init(hasCredits: Bool, unlimited: Bool, balance: String?) {
+        self.hasCredits = hasCredits
+        self.unlimited = unlimited
+        self.balance = balance
+    }
+
+    public init(core credits: CreditsSnapshot) {
+        self.init(hasCredits: credits.hasCredits, unlimited: credits.unlimited, balance: credits.balance)
+    }
+}
+
+extension AccountCreditsSnapshot: Codable {
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        hasCredits = try container.decode(Bool.self, forKey: .hasCredits)
+        unlimited = try container.decode(Bool.self, forKey: .unlimited)
+        balance = try container.decodeIfPresent(String.self, forKey: .balance)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(hasCredits, forKey: .hasCredits)
+        try container.encode(unlimited, forKey: .unlimited)
+        try container.encodeNilOrValue(balance, forKey: .balance)
+    }
+}
+
+public struct SendAddCreditsNudgeEmailParams: Equatable, Codable, Sendable {
+    public let creditType: AccountAddCreditsNudgeCreditType
+
+    public init(creditType: AccountAddCreditsNudgeCreditType) {
+        self.creditType = creditType
+    }
+}
+
+public enum AccountAddCreditsNudgeCreditType: String, Codable, Equatable, Sendable {
+    case credits
+    case usageLimit = "usage_limit"
+}
+
+public struct SendAddCreditsNudgeEmailResponse: Equatable, Codable, Sendable {
+    public let status: AccountAddCreditsNudgeEmailStatus
+
+    public init(status: AccountAddCreditsNudgeEmailStatus) {
+        self.status = status
+    }
+}
+
+public enum AccountAddCreditsNudgeEmailStatus: String, Codable, Equatable, Sendable {
+    case sent
+    case cooldownActive = "cooldown_active"
+}
+
 public struct GetAccountParams: Equatable, Sendable {
     public let refreshToken: Bool
 

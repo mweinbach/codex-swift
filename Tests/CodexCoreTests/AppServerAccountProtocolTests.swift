@@ -121,6 +121,147 @@ final class AppServerAccountProtocolTests: XCTestCase {
         )
     }
 
+    func testAccountRateLimitPayloadsEncodeRustCamelCaseShape() throws {
+        let primary = AccountRateLimitWindow(usedPercent: 43, windowDurationMinutes: nil, resetsAt: 1_717_000_000)
+        let snapshot = AccountRateLimitSnapshot(
+            limitID: "codex",
+            limitName: nil,
+            primary: primary,
+            secondary: nil,
+            credits: AccountCreditsSnapshot(hasCredits: true, unlimited: false, balance: nil),
+            planType: .pro,
+            rateLimitReachedType: .workspaceOwnerUsageLimitReached
+        )
+
+        try XCTAssertJSONObjectEqual(snapshot, [
+            "limitId": "codex",
+            "limitName": NSNull(),
+            "primary": [
+                "usedPercent": 43,
+                "windowDurationMins": NSNull(),
+                "resetsAt": 1_717_000_000
+            ],
+            "secondary": NSNull(),
+            "credits": [
+                "hasCredits": true,
+                "unlimited": false,
+                "balance": NSNull()
+            ],
+            "planType": "pro",
+            "rateLimitReachedType": "workspace_owner_usage_limit_reached"
+        ])
+
+        try XCTAssertJSONObjectEqual(
+            GetAccountRateLimitsResponse(rateLimits: snapshot, rateLimitsByLimitID: ["codex": snapshot]),
+            [
+                "rateLimits": [
+                    "limitId": "codex",
+                    "limitName": NSNull(),
+                    "primary": [
+                        "usedPercent": 43,
+                        "windowDurationMins": NSNull(),
+                        "resetsAt": 1_717_000_000
+                    ],
+                    "secondary": NSNull(),
+                    "credits": [
+                        "hasCredits": true,
+                        "unlimited": false,
+                        "balance": NSNull()
+                    ],
+                    "planType": "pro",
+                    "rateLimitReachedType": "workspace_owner_usage_limit_reached"
+                ],
+                "rateLimitsByLimitId": [
+                    "codex": [
+                        "limitId": "codex",
+                        "limitName": NSNull(),
+                        "primary": [
+                            "usedPercent": 43,
+                            "windowDurationMins": NSNull(),
+                            "resetsAt": 1_717_000_000
+                        ],
+                        "secondary": NSNull(),
+                        "credits": [
+                            "hasCredits": true,
+                            "unlimited": false,
+                            "balance": NSNull()
+                        ],
+                        "planType": "pro",
+                        "rateLimitReachedType": "workspace_owner_usage_limit_reached"
+                    ]
+                ]
+            ]
+        )
+
+        try XCTAssertJSONObjectEqual(
+            AccountRateLimitsUpdatedNotification(rateLimits: snapshot),
+            [
+                "rateLimits": [
+                    "limitId": "codex",
+                    "limitName": NSNull(),
+                    "primary": [
+                        "usedPercent": 43,
+                        "windowDurationMins": NSNull(),
+                        "resetsAt": 1_717_000_000
+                    ],
+                    "secondary": NSNull(),
+                    "credits": [
+                        "hasCredits": true,
+                        "unlimited": false,
+                        "balance": NSNull()
+                    ],
+                    "planType": "pro",
+                    "rateLimitReachedType": "workspace_owner_usage_limit_reached"
+                ]
+            ]
+        )
+    }
+
+    func testAccountRateLimitPayloadsConvertFromCoreSnakeCaseModels() throws {
+        let core = RateLimitSnapshot(
+            limitID: "codex",
+            limitName: "GPT-5.2 Codex",
+            primary: RateLimitWindow(usedPercent: 42.5, windowMinutes: 300, resetsAt: 1_717_000_000),
+            secondary: nil,
+            credits: CreditsSnapshot(hasCredits: true, unlimited: false, balance: "12"),
+            planType: .pro,
+            rateLimitReachedType: .rateLimitReached
+        )
+
+        try XCTAssertJSONObjectEqual(AccountRateLimitSnapshot(core: core), [
+            "limitId": "codex",
+            "limitName": "GPT-5.2 Codex",
+            "primary": [
+                "usedPercent": 43,
+                "windowDurationMins": 300,
+                "resetsAt": 1_717_000_000
+            ],
+            "secondary": NSNull(),
+            "credits": [
+                "hasCredits": true,
+                "unlimited": false,
+                "balance": "12"
+            ],
+            "planType": "pro",
+            "rateLimitReachedType": "rate_limit_reached"
+        ])
+    }
+
+    func testAddCreditsNudgePayloadsEncodeRustWireShapes() throws {
+        try XCTAssertJSONObjectEqual(
+            SendAddCreditsNudgeEmailParams(creditType: .usageLimit),
+            [
+                "creditType": "usage_limit"
+            ]
+        )
+        try XCTAssertJSONObjectEqual(
+            SendAddCreditsNudgeEmailResponse(status: .cooldownActive),
+            [
+                "status": "cooldown_active"
+            ]
+        )
+    }
+
     func testLoginAccountDecodeMatchesRustProtocol() throws {
         let missingStreamlinedFlag = try JSONDecoder().decode(
             LoginAccountParams.self,
