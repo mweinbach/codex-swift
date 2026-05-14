@@ -303,6 +303,45 @@ final class McpEventsTests: XCTestCase {
         ])
     }
 
+    func testMcpToolAnnotationsPreserveUnknownRustJsonMembers() throws {
+        let decoded = try JSONDecoder().decode(McpTool.self, from: Data("""
+        {
+          "name": "search",
+          "inputSchema": {"type": "object"},
+          "annotations": {
+            "readOnlyHint": true,
+            "progressiveDisclosure": {
+              "preview": true
+            },
+            "title": null
+          }
+        }
+        """.utf8))
+
+        XCTAssertEqual(decoded.annotations?.readOnlyHint, true)
+        XCTAssertEqual(decoded.annotations?.title, nil)
+        XCTAssertEqual(decoded.annotations?.additionalProperties, [
+            "progressiveDisclosure": .object([
+                "preview": .bool(true)
+            ]),
+            "title": .null
+        ])
+
+        try XCTAssertJSONObjectEqual(decoded, [
+            "annotations": [
+                "progressiveDisclosure": [
+                    "preview": true
+                ],
+                "readOnlyHint": true,
+                "title": NSNull()
+            ],
+            "inputSchema": [
+                "type": "object"
+            ],
+            "name": "search"
+        ])
+    }
+
     func testMcpResourceDecodesRustAliasesAndLossySizes() throws {
         let resource = try JSONDecoder().decode(McpResource.self, from: Data("""
         {
@@ -374,18 +413,63 @@ final class McpEventsTests: XCTestCase {
         ])
     }
 
+    func testMcpResourceAnnotationsPreserveUnknownRustJsonMembers() throws {
+        let decoded = try JSONDecoder().decode(McpResource.self, from: Data("""
+        {
+          "name": "readme",
+          "uri": "file:///tmp/README.md",
+          "annotations": {
+            "audience": ["assistant"],
+            "lastModified": null,
+            "experimental": {
+              "rank": 7
+            }
+          }
+        }
+        """.utf8))
+
+        XCTAssertEqual(decoded.annotations?.audience, [.assistant])
+        XCTAssertEqual(decoded.annotations?.lastModified, nil)
+        XCTAssertEqual(decoded.annotations?.additionalProperties, [
+            "experimental": .object([
+                "rank": .integer(7)
+            ]),
+            "lastModified": .null
+        ])
+
+        try XCTAssertJSONObjectEqual(decoded, [
+            "annotations": [
+                "audience": ["assistant"],
+                "experimental": [
+                    "rank": 7
+                ],
+                "lastModified": NSNull()
+            ],
+            "name": "readme",
+            "uri": "file:///tmp/README.md"
+        ])
+    }
+
     func testMcpResourceTemplateDecodesRustSnakeCaseAliases() throws {
         let decoded = try JSONDecoder().decode(McpResourceTemplate.self, from: Data("""
         {
           "name": "workspace-file",
           "uri_template": "file:///workspace/{path}",
-          "mime_type": "text/plain"
+          "mime_type": "text/plain",
+          "annotations": {
+            "priority": 0.25,
+            "custom": ["alpha", "beta"]
+          }
         }
         """.utf8))
 
         XCTAssertEqual(decoded.name, "workspace-file")
         XCTAssertEqual(decoded.uriTemplate, "file:///workspace/{path}")
         XCTAssertEqual(decoded.mimeType, "text/plain")
+        XCTAssertEqual(decoded.annotations?.priority, 0.25)
+        XCTAssertEqual(decoded.annotations?.additionalProperties, [
+            "custom": .array([.string("alpha"), .string("beta")])
+        ])
     }
 
     func testSplitQualifiedToolNameReturnsServerAndTool() throws {

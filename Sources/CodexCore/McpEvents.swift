@@ -198,20 +198,61 @@ public enum McpRole: String, Codable, Equatable, Sendable {
 }
 
 public struct McpAnnotations: Equatable, Codable, Sendable {
+    public let additionalProperties: [String: JSONValue]
     public let audience: [McpRole]?
     public let lastModified: String?
     public let priority: Double?
 
-    private enum CodingKeys: String, CodingKey {
+    private enum CodingKeys: String, CodingKey, CaseIterable {
         case audience
         case lastModified = "lastModified"
         case priority
     }
 
-    public init(audience: [McpRole]? = nil, lastModified: String? = nil, priority: Double? = nil) {
+    public init(
+        audience: [McpRole]? = nil,
+        lastModified: String? = nil,
+        priority: Double? = nil,
+        additionalProperties: [String: JSONValue] = [:]
+    ) {
+        self.additionalProperties = additionalProperties
         self.audience = audience
         self.lastModified = lastModified
         self.priority = priority
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let dynamicContainer = try decoder.container(keyedBy: McpDynamicCodingKey.self)
+        var additionalProperties: [String: JSONValue] = [:]
+        let knownKeys = Set(CodingKeys.allCases.map(\.rawValue))
+
+        audience = try? container.decodeIfPresent([McpRole].self, forKey: .audience)
+        lastModified = try? container.decodeIfPresent(String.self, forKey: .lastModified)
+        priority = try? container.decodeIfPresent(Double.self, forKey: .priority)
+
+        for key in dynamicContainer.allKeys {
+            let value = try dynamicContainer.decode(JSONValue.self, forKey: key)
+            if !knownKeys.contains(key.stringValue)
+                || (key.stringValue == CodingKeys.audience.rawValue && audience == nil)
+                || (key.stringValue == CodingKeys.lastModified.rawValue && lastModified == nil)
+                || (key.stringValue == CodingKeys.priority.rawValue && priority == nil) {
+                additionalProperties[key.stringValue] = value
+            }
+        }
+        self.additionalProperties = additionalProperties
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var dynamicContainer = encoder.container(keyedBy: McpDynamicCodingKey.self)
+        for key in additionalProperties.keys.sorted() {
+            try dynamicContainer.encode(additionalProperties[key], forKey: McpDynamicCodingKey(stringValue: key))
+        }
+
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(audience, forKey: .audience)
+        try container.encodeIfPresent(lastModified, forKey: .lastModified)
+        try container.encodeIfPresent(priority, forKey: .priority)
     }
 }
 
@@ -546,13 +587,14 @@ public struct McpToolOutputSchema: Equatable, Codable, Sendable {
 }
 
 public struct McpToolAnnotations: Equatable, Codable, Sendable {
+    public let additionalProperties: [String: JSONValue]
     public let destructiveHint: Bool?
     public let idempotentHint: Bool?
     public let openWorldHint: Bool?
     public let readOnlyHint: Bool?
     public let title: String?
 
-    private enum CodingKeys: String, CodingKey {
+    private enum CodingKeys: String, CodingKey, CaseIterable {
         case destructiveHint = "destructiveHint"
         case idempotentHint = "idempotentHint"
         case openWorldHint = "openWorldHint"
@@ -565,13 +607,68 @@ public struct McpToolAnnotations: Equatable, Codable, Sendable {
         idempotentHint: Bool? = nil,
         openWorldHint: Bool? = nil,
         readOnlyHint: Bool? = nil,
-        title: String? = nil
+        title: String? = nil,
+        additionalProperties: [String: JSONValue] = [:]
     ) {
+        self.additionalProperties = additionalProperties
         self.destructiveHint = destructiveHint
         self.idempotentHint = idempotentHint
         self.openWorldHint = openWorldHint
         self.readOnlyHint = readOnlyHint
         self.title = title
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let dynamicContainer = try decoder.container(keyedBy: McpDynamicCodingKey.self)
+        var additionalProperties: [String: JSONValue] = [:]
+        let knownKeys = Set(CodingKeys.allCases.map(\.rawValue))
+
+        destructiveHint = try? container.decodeIfPresent(Bool.self, forKey: .destructiveHint)
+        idempotentHint = try? container.decodeIfPresent(Bool.self, forKey: .idempotentHint)
+        openWorldHint = try? container.decodeIfPresent(Bool.self, forKey: .openWorldHint)
+        readOnlyHint = try? container.decodeIfPresent(Bool.self, forKey: .readOnlyHint)
+        title = try? container.decodeIfPresent(String.self, forKey: .title)
+
+        for key in dynamicContainer.allKeys {
+            let value = try dynamicContainer.decode(JSONValue.self, forKey: key)
+            if !knownKeys.contains(key.stringValue)
+                || (key.stringValue == CodingKeys.destructiveHint.rawValue && destructiveHint == nil)
+                || (key.stringValue == CodingKeys.idempotentHint.rawValue && idempotentHint == nil)
+                || (key.stringValue == CodingKeys.openWorldHint.rawValue && openWorldHint == nil)
+                || (key.stringValue == CodingKeys.readOnlyHint.rawValue && readOnlyHint == nil)
+                || (key.stringValue == CodingKeys.title.rawValue && title == nil) {
+                additionalProperties[key.stringValue] = value
+            }
+        }
+        self.additionalProperties = additionalProperties
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var dynamicContainer = encoder.container(keyedBy: McpDynamicCodingKey.self)
+        for key in additionalProperties.keys.sorted() {
+            try dynamicContainer.encode(additionalProperties[key], forKey: McpDynamicCodingKey(stringValue: key))
+        }
+
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(destructiveHint, forKey: .destructiveHint)
+        try container.encodeIfPresent(idempotentHint, forKey: .idempotentHint)
+        try container.encodeIfPresent(openWorldHint, forKey: .openWorldHint)
+        try container.encodeIfPresent(readOnlyHint, forKey: .readOnlyHint)
+        try container.encodeIfPresent(title, forKey: .title)
+    }
+}
+
+private struct McpDynamicCodingKey: CodingKey {
+    let stringValue: String
+    let intValue: Int? = nil
+
+    init(stringValue: String) {
+        self.stringValue = stringValue
+    }
+
+    init?(intValue: Int) {
+        nil
     }
 }
 
