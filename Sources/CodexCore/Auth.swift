@@ -522,6 +522,7 @@ public enum CodexAuthStorage {
     public static let keyringService = "Codex Auth"
     public static let openAIAPIKeyEnvironmentVariable = "OPENAI_API_KEY"
     public static let codexAPIKeyEnvironmentVariable = "CODEX_API_KEY"
+    public static let codexAccessTokenEnvironmentVariable = "CODEX_ACCESS_TOKEN"
     private static let ephemeralAuthStore = EphemeralAuthStore()
 
     public typealias RefreshTransport = (URLRequest) async throws -> AuthRefreshHTTPResponse
@@ -791,6 +792,12 @@ public enum CodexAuthStorage {
         trimmedEnvironmentValue(environment[codexAPIKeyEnvironmentVariable])
     }
 
+    public static func readCodexAccessTokenFromEnvironment(
+        _ environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String? {
+        trimmedEnvironmentValue(environment[codexAccessTokenEnvironmentVariable])
+    }
+
     public static func loadFreshTokenData(
         codexHome: URL,
         mode: AuthCredentialsStoreMode = .file,
@@ -1024,7 +1031,21 @@ public enum CodexAuthStorage {
             return .apiKey
         }
 
-        guard let auth = try loadEffectiveAuthDotJSON(
+        if let ephemeralAuth = try loadAuthDotJSON(
+            codexHome: codexHome,
+            mode: .ephemeral,
+            decoder: decoder,
+            keyringStore: keyringStore
+        ) {
+            return currentAuthMode(from: ephemeralAuth)
+        }
+
+        if mode != .ephemeral, readCodexAccessTokenFromEnvironment(environment) != nil {
+            return .chatGPT
+        }
+
+        guard mode != .ephemeral,
+              let auth = try loadAuthDotJSON(
             codexHome: codexHome,
             mode: mode,
             decoder: decoder,
@@ -1033,6 +1054,10 @@ public enum CodexAuthStorage {
             return nil
         }
 
+        return currentAuthMode(from: auth)
+    }
+
+    private static func currentAuthMode(from auth: AuthDotJSON) -> CurrentAuthMode {
         if auth.openAIAPIKey != nil {
             return .apiKey
         }

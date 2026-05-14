@@ -172,7 +172,7 @@ Source baseline inspected for this scaffold:
 - `codex-rs/core/src/config/profile.rs`
   - profile option wire shape, service-tier string field, feature-table flattening, `web_search` mode, legacy tool toggle fields, path-valued experimental prompt fields, OSS provider option, and app-server profile projection
 - `codex-rs/core/src/auth.rs` ChatGPT token refresh
-  - stale file-backed `auth.json` refresh using `last_refresh`, `CODEX_REFRESH_TOKEN_URL_OVERRIDE`, refresh-token request/response shapes, auth storage update, Rust-matching refresh failure messages, and login-restriction logout enforcement for forced method/workspace policies
+  - stale file-backed `auth.json` refresh using `last_refresh`, `CODEX_REFRESH_TOKEN_URL_OVERRIDE`, refresh-token request/response shapes, auth storage update, Rust-matching refresh failure messages, and login-restriction logout enforcement for forced method/workspace policies, including Rust's `CODEX_API_KEY` before `CODEX_ACCESS_TOKEN` before persistent auth precedence for forced-method checks
 - `codex-rs/core/src/auth/storage.rs`
   - CLI auth credential store modes for file, macOS Keychain-backed keyring, and auto fallback, including Rust-compatible keyring account hashing and fallback `auth.json` cleanup
 - `codex-rs/cli/src/login.rs`, `codex-rs/cli/src/main.rs`, and `codex-rs/core/src/auth.rs` API-key auth commands

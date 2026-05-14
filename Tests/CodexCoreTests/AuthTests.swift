@@ -522,6 +522,51 @@ final class AuthTests: XCTestCase {
         }
     }
 
+    func testEnforceLoginRestrictionsAllowsAccessTokenEnvironmentWhenChatGPTRequiredLikeRust() async throws {
+        let dir = try AuthTemporaryDirectory()
+
+        try await CodexAuthStorage.enforceLoginRestrictions(
+            codexHome: dir.url,
+            config: CodexRuntimeConfig(forcedLoginMethod: .chatgpt),
+            environment: [CodexAuthStorage.codexAccessTokenEnvironmentVariable: " agent-token\n"]
+        )
+    }
+
+    func testEnforceLoginRestrictionsKeepsAPIKeyEnvironmentPrecedenceOverAccessTokenLikeRust() async throws {
+        let dir = try AuthTemporaryDirectory()
+
+        await XCTAssertThrowsErrorAsync(try await CodexAuthStorage.enforceLoginRestrictions(
+            codexHome: dir.url,
+            config: CodexRuntimeConfig(forcedLoginMethod: .chatgpt),
+            environment: [
+                CodexAuthStorage.codexAPIKeyEnvironmentVariable: "sk-env",
+                CodexAuthStorage.codexAccessTokenEnvironmentVariable: "agent-token",
+            ]
+        )) { error in
+            XCTAssertEqual(
+                (error as? CodexAuthRestrictionError)?.description,
+                "ChatGPT login is required, but an API key is currently being used. Logging out."
+            )
+        }
+    }
+
+    func testEnforceLoginRestrictionsTreatsAccessTokenEnvironmentBeforeFileAuthLikeRust() async throws {
+        let dir = try AuthTemporaryDirectory()
+        try CodexAuthStorage.loginWithAPIKey(codexHome: dir.url, apiKey: "sk-file")
+
+        await XCTAssertThrowsErrorAsync(try await CodexAuthStorage.enforceLoginRestrictions(
+            codexHome: dir.url,
+            config: CodexRuntimeConfig(forcedLoginMethod: .api),
+            environment: [CodexAuthStorage.codexAccessTokenEnvironmentVariable: "agent-token"]
+        )) { error in
+            XCTAssertEqual(
+                (error as? CodexAuthRestrictionError)?.description,
+                "API key login is required, but ChatGPT is currently being used. Logging out."
+            )
+        }
+        XCTAssertNil(try CodexAuthStorage.loadAuthDotJSON(codexHome: dir.url, mode: .file))
+    }
+
     func testParsesIDTokenEmailPlanAndAccountID() throws {
         let jwt = Self.fakeJWT(plan: "pro", accountID: "acct-123")
 
