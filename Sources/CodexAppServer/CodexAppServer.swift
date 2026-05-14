@@ -1455,6 +1455,8 @@ public enum CodexAppServer {
         table["include_apps_instructions"] = .bool(runtimeConfig.includeAppsInstructions)
         table["include_environment_context"] = .bool(runtimeConfig.includeEnvironmentContext)
         table["background_terminal_max_timeout"] = .integer(Int64(runtimeConfig.backgroundTerminalMaxTimeoutMS))
+        table["features"] = configLockFeaturesTable(baseTable: table["features"], runtimeConfig: runtimeConfig)
+        table["memories"] = configLockMemoriesTable(runtimeConfig.memories)
         var agentsTable: [String: ConfigValue]
         if case let .table(existingAgentsTable)? = table["agents"] {
             agentsTable = existingAgentsTable
@@ -1513,6 +1515,79 @@ public enum CodexAppServer {
         }
         table["approval_policy"] = .string(approvalPolicy.rawValue)
         table["approvals_reviewer"] = .string(configRawValue(for: approvalsReviewer))
+        return .table(table)
+    }
+
+    private static func configLockFeaturesTable(
+        baseTable: ConfigValue?,
+        runtimeConfig: CodexRuntimeConfig
+    ) -> ConfigValue {
+        var featuresTable: [String: ConfigValue]
+        if case let .table(existingFeaturesTable)? = baseTable {
+            featuresTable = existingFeaturesTable
+        } else {
+            featuresTable = [:]
+        }
+
+        for alias in FeatureKeys.legacyAliases.keys {
+            featuresTable.removeValue(forKey: alias)
+        }
+        for spec in FeatureRegistry.specs {
+            switch spec.id {
+            case .multiAgentV2:
+                var multiAgentV2: [String: ConfigValue] = [
+                    "enabled": .bool(runtimeConfig.features.isEnabled(.multiAgentV2)),
+                    "max_concurrent_threads_per_session": .integer(
+                        Int64(runtimeConfig.multiAgentV2.maxConcurrentThreadsPerSession)
+                    ),
+                    "min_wait_timeout_ms": .integer(runtimeConfig.multiAgentV2.minWaitTimeoutMS),
+                    "usage_hint_enabled": .bool(runtimeConfig.multiAgentV2.usageHintEnabled),
+                    "hide_spawn_agent_metadata": .bool(runtimeConfig.multiAgentV2.hideSpawnAgentMetadata)
+                ]
+                if let usageHintText = runtimeConfig.multiAgentV2.usageHintText {
+                    multiAgentV2["usage_hint_text"] = .string(usageHintText)
+                }
+                if let rootUsageHintText = runtimeConfig.multiAgentV2.rootAgentUsageHintText {
+                    multiAgentV2["root_agent_usage_hint_text"] = .string(rootUsageHintText)
+                }
+                if let subagentUsageHintText = runtimeConfig.multiAgentV2.subagentUsageHintText {
+                    multiAgentV2["subagent_usage_hint_text"] = .string(subagentUsageHintText)
+                }
+                featuresTable[spec.key] = .table(multiAgentV2)
+            case .appsMcpPathOverride:
+                var appsMcpPathOverride: [String: ConfigValue] = [
+                    "enabled": .bool(runtimeConfig.features.isEnabled(.appsMcpPathOverride))
+                ]
+                if let path = runtimeConfig.appsMcpPathOverride {
+                    appsMcpPathOverride["path"] = .string(path)
+                }
+                featuresTable[spec.key] = .table(appsMcpPathOverride)
+            default:
+                featuresTable[spec.key] = .bool(runtimeConfig.features.isEnabled(spec.id))
+            }
+        }
+
+        return .table(featuresTable)
+    }
+
+    private static func configLockMemoriesTable(_ memories: MemoriesConfig) -> ConfigValue {
+        var table: [String: ConfigValue] = [
+            "disable_on_external_context": .bool(memories.disableOnExternalContext),
+            "generate_memories": .bool(memories.generateMemories),
+            "use_memories": .bool(memories.useMemories),
+            "max_raw_memories_for_consolidation": .integer(Int64(memories.maxRawMemoriesForConsolidation)),
+            "max_unused_days": .integer(memories.maxUnusedDays),
+            "max_rollout_age_days": .integer(memories.maxRolloutAgeDays),
+            "max_rollouts_per_startup": .integer(Int64(memories.maxRolloutsPerStartup)),
+            "min_rollout_idle_hours": .integer(memories.minRolloutIdleHours),
+            "min_rate_limit_remaining_percent": .integer(memories.minRateLimitRemainingPercent)
+        ]
+        if let extractModel = memories.extractModel {
+            table["extract_model"] = .string(extractModel)
+        }
+        if let consolidationModel = memories.consolidationModel {
+            table["consolidation_model"] = .string(consolidationModel)
+        }
         return .table(table)
     }
 

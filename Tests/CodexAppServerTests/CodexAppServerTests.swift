@@ -1000,6 +1000,103 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNil(config["service_tier"])
     }
 
+    func testThreadStartConfigLockfileMaterializesResolvedFeaturesAndMemoriesLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        retainedTemporaryDirectories.append(cwd)
+        let exportDir = temp.url.appendingPathComponent("locks", isDirectory: true)
+        try """
+        [features]
+        memory_tool = true
+        enable_fanout = true
+
+        [features.multi_agent_v2]
+        enabled = true
+        max_concurrent_threads_per_session = 5
+        min_wait_timeout_ms = 1234
+        usage_hint_enabled = false
+        usage_hint_text = "custom usage"
+        root_agent_usage_hint_text = "root usage"
+        subagent_usage_hint_text = "subagent usage"
+        hide_spawn_agent_metadata = true
+
+        [features.apps_mcp_path_override]
+        path = "/tmp/apps-mcp"
+
+        [memories]
+        no_memories_if_mcp_or_web_search = true
+        generate_memories = false
+        use_memories = false
+        max_raw_memories_for_consolidation = 0
+        max_unused_days = 21
+        max_rollout_age_days = 91
+        max_rollouts_per_startup = 0
+        min_rollout_idle_hours = 0
+        min_rate_limit_remaining_percent = 101
+        extract_model = "gpt-5-mini"
+        consolidation_model = "gpt-5.2"
+
+        [debug.config_lockfile]
+        export_dir = "\(exportDir.path)"
+        save_fields_resolved_from_model_catalog = false
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider","cwd":"\#(cwd.url.path)"}}"#.utf8
+        )))
+
+        let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+        let lockPath = exportDir.appendingPathComponent("\(threadID).config.lock.toml", isDirectory: false)
+        let lockfile = try ConfigLockfileStore.readConfigLockfile(from: lockPath.path)
+        guard case let .table(config) = lockfile.config else {
+            return XCTFail("expected config table")
+        }
+        guard case let .table(features)? = config["features"] else {
+            return XCTFail("expected features table")
+        }
+        XCTAssertNil(features["memory_tool"])
+        XCTAssertEqual(features["memories"], .bool(true))
+        XCTAssertEqual(features["enable_fanout"], .bool(true))
+        XCTAssertEqual(features["multi_agent"], .bool(true))
+        guard case let .table(multiAgentV2)? = features["multi_agent_v2"] else {
+            return XCTFail("expected multi_agent_v2 table")
+        }
+        XCTAssertEqual(multiAgentV2["enabled"], .bool(true))
+        XCTAssertEqual(multiAgentV2["max_concurrent_threads_per_session"], .integer(5))
+        XCTAssertEqual(multiAgentV2["min_wait_timeout_ms"], .integer(1234))
+        XCTAssertEqual(multiAgentV2["usage_hint_enabled"], .bool(false))
+        XCTAssertEqual(multiAgentV2["usage_hint_text"], .string("custom usage"))
+        XCTAssertEqual(multiAgentV2["root_agent_usage_hint_text"], .string("root usage"))
+        XCTAssertEqual(multiAgentV2["subagent_usage_hint_text"], .string("subagent usage"))
+        XCTAssertEqual(multiAgentV2["hide_spawn_agent_metadata"], .bool(true))
+        guard case let .table(appsMcpPathOverride)? = features["apps_mcp_path_override"] else {
+            return XCTFail("expected apps_mcp_path_override table")
+        }
+        XCTAssertEqual(appsMcpPathOverride["enabled"], .bool(true))
+        XCTAssertEqual(appsMcpPathOverride["path"], .string("/tmp/apps-mcp"))
+        guard case let .table(memories)? = config["memories"] else {
+            return XCTFail("expected memories table")
+        }
+        XCTAssertEqual(memories["disable_on_external_context"], .bool(true))
+        XCTAssertEqual(memories["generate_memories"], .bool(false))
+        XCTAssertEqual(memories["use_memories"], .bool(false))
+        XCTAssertEqual(memories["max_raw_memories_for_consolidation"], .integer(1))
+        XCTAssertEqual(memories["max_unused_days"], .integer(21))
+        XCTAssertEqual(memories["max_rollout_age_days"], .integer(90))
+        XCTAssertEqual(memories["max_rollouts_per_startup"], .integer(1))
+        XCTAssertEqual(memories["min_rollout_idle_hours"], .integer(1))
+        XCTAssertEqual(memories["min_rate_limit_remaining_percent"], .integer(100))
+        XCTAssertEqual(memories["extract_model"], .string("gpt-5-mini"))
+        XCTAssertEqual(memories["consolidation_model"], .string("gpt-5.2"))
+        guard case let .table(agents)? = config["agents"] else {
+            return XCTFail("expected agents table")
+        }
+        XCTAssertNil(agents["max_threads"])
+    }
+
     func testThreadStartPersistsThreadSourceInResponseNotificationAndMetadataLikeRust() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
