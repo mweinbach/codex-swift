@@ -806,7 +806,8 @@ private enum AttestationRequestHeaders {
                 ?? headers["conversation_id"]
                 ?? headers["session_id"]
                 ?? headers["session-id"],
-              let headerValue = await provider.header(for: Attestation.Context(threadID: threadID))
+              let headerValue = await provider.header(for: Attestation.Context(threadID: threadID)),
+              validHeaderValue(headerValue)
         else {
             return headers
         }
@@ -814,6 +815,12 @@ private enum AttestationRequestHeaders {
         var copy = headers
         copy[Attestation.headerName] = headerValue
         return copy
+    }
+
+    private static func validHeaderValue(_ value: String) -> Bool {
+        value.unicodeScalars.allSatisfy { scalar in
+            scalar.value == 0x09 || (0x20...0x7E).contains(scalar.value)
+        }
     }
 }
 

@@ -793,6 +793,31 @@ final class EndpointClientsTests: XCTestCase {
         XCTAssertEqual(calls, [])
     }
 
+    func testResponsesClientSkipsInvalidAttestationHeaderLikeRustHeaderValue() async {
+        let transport = CapturingTransport(
+            streamResults: [
+                .success(APIStreamResponse(statusCode: 200, sseText: """
+                data: {"type":"response.completed","response":{"id":"resp_1","usage":null}}
+
+                """))
+            ]
+        )
+        let attestation = StaticAttestationProvider(headerValue: "v1.invalid\nheader")
+        let client = ResponsesClient(
+            transport: transport,
+            provider: provider(),
+            auth: StaticAPIAuthProvider(bearerToken: "chatgpt-token", accountID: "acct"),
+            attestationProvider: attestation
+        )
+
+        _ = await client.stream(
+            body: .object(["model": .string("gpt-test")]),
+            extraHeaders: ["conversation_id": "thread-123"]
+        )
+
+        XCTAssertNil(transport.streamRequests.first?.headers[Attestation.headerName])
+    }
+
     func testResponsesWebSocketHandshakeHeadersIncludeAttestationForChatGPTAccountLikeRust() async {
         let attestation = CountingAttestationProvider()
         let client = ResponsesClient(
@@ -849,6 +874,22 @@ final class EndpointClientsTests: XCTestCase {
         XCTAssertEqual(calls, [])
     }
 
+    func testResponsesWebSocketHandshakeHeadersSkipInvalidAttestationLikeRustHeaderValue() async {
+        let client = ResponsesClient(
+            transport: CapturingTransport(),
+            provider: provider(),
+            auth: StaticAPIAuthProvider(bearerToken: "chatgpt-token", accountID: "acct"),
+            attestationProvider: StaticAttestationProvider(headerValue: "v1.invalid\nheader")
+        )
+
+        let headers = await client.websocketHandshakeHeaders(
+            sessionID: "session-123",
+            threadID: "thread-123"
+        )
+
+        XCTAssertNil(headers[Attestation.headerName])
+    }
+
     func testCompactClientAddsAttestationHeaderForChatGPTAuthAndThread() async throws {
         let output: [ResponseItem] = [
             .message(role: "assistant", content: [.outputText(text: "summary")])
@@ -877,6 +918,33 @@ final class EndpointClientsTests: XCTestCase {
         XCTAssertEqual(transport.executeRequests.first?.headers[Attestation.headerName], "v1.thread-456.1")
         let calls = await attestation.recordedCalls()
         XCTAssertEqual(calls, [Attestation.Context(threadID: "thread-456")])
+    }
+
+    func testCompactClientSkipsInvalidAttestationHeaderLikeRustHeaderValue() async throws {
+        let output: [ResponseItem] = [
+            .message(role: "assistant", content: [.outputText(text: "summary")])
+        ]
+        let transport = CapturingTransport(
+            executeResults: [
+                .success(APIResponse(
+                    statusCode: 200,
+                    body: try JSONEncoder().encode(CompactHistoryResponse(output: output))
+                ))
+            ]
+        )
+        let client = CompactClient(
+            transport: transport,
+            provider: provider(),
+            auth: StaticAPIAuthProvider(bearerToken: "chatgpt-token", accountID: "acct"),
+            attestationProvider: StaticAttestationProvider(headerValue: "v1.invalid\rheader")
+        )
+
+        _ = await client.compact(
+            body: .object(["input": .array([])]),
+            extraHeaders: ["conversation_id": "thread-456"]
+        )
+
+        XCTAssertNil(transport.executeRequests.first?.headers[Attestation.headerName])
     }
 
     func testAttestationAppServerEnvelopeMatchesRustStatusShape() {
@@ -1019,6 +1087,14 @@ private actor CountingAttestationProvider: AttestationProvider {
 
     func recordedCalls() -> [Attestation.Context] {
         calls
+    }
+}
+
+private struct StaticAttestationProvider: AttestationProvider {
+    let headerValue: String
+
+    func header(for _: Attestation.Context) async -> String? {
+        headerValue
     }
 }
 
