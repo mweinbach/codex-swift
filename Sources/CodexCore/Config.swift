@@ -3401,6 +3401,9 @@ private struct ParsedCodexConfigToml {
             environment: environment
         )
         guard config.selectedModelProvider != nil else {
+            if config.selectedModelProviderID == OSSProvider.legacyOllamaChatProviderID {
+                throw CodexConfigLoadError.invalidConfig(OSSProvider.legacyOllamaChatRemovedMessage)
+            }
             throw CodexConfigLoadError.modelProviderNotFound(config.selectedModelProviderID)
         }
 

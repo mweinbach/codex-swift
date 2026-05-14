@@ -2311,6 +2311,16 @@ final class ConfigLoaderTests: XCTestCase {
         }
     }
 
+    func testLegacyOllamaChatModelProviderMatchesRustError() throws {
+        let dir = try CoreTemporaryDirectory()
+        try #"model_provider = "ollama-chat""#
+            .write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual((error as? CodexConfigLoadError)?.description, OSSProvider.legacyOllamaChatRemovedMessage)
+        }
+    }
+
     func testMissingProfileModelProviderMatchesRustError() throws {
         let dir = try CoreTemporaryDirectory()
         try """

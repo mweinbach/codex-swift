@@ -3,6 +3,12 @@ import Foundation
 public enum OSSProvider {
     public static let lmStudioProviderID = "lmstudio"
     public static let ollamaProviderID = "ollama"
+    public static let legacyOllamaChatProviderID = "ollama-chat"
+    public static let legacyOllamaChatRemovedMessage = """
+    `ollama-chat` is no longer supported.
+    How to fix: replace `ollama-chat` with `ollama` in `model_provider`, `oss_provider`, or `--local-provider`.
+    More info: https://github.com/openai/codex/discussions/7782
+    """
     public static let missingProviderMessage = "No default OSS provider configured. Use --local-provider=provider or set oss_provider to one of: lmstudio, ollama in config.toml"
 
     public static let lmStudioDefaultModel = "openai/gpt-oss-20b"

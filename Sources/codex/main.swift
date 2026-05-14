@@ -1280,6 +1280,9 @@ private func resolveExecModelProvider(
     }
 
     guard let provider = providers[providerID] else {
+        if providerID == OSSProvider.legacyOllamaChatProviderID {
+            throw ExecRuntimeError(description: OSSProvider.legacyOllamaChatRemovedMessage)
+        }
         throw ExecRuntimeError(description: "Unknown model provider '\(providerID)'")
     }
     return ExecModelProviderResolution(id: providerID, info: provider, isOSS: ossEnabled)

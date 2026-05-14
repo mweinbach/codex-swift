@@ -20,6 +20,12 @@ final class OSSProviderTests: XCTestCase {
         XCTAssertNil(OSSProvider.defaultModel(for: "unknown-provider"))
     }
 
+    func testLegacyOllamaChatRemovedMessageMatchesRust() {
+        XCTAssertEqual(OSSProvider.legacyOllamaChatProviderID, "ollama-chat")
+        XCTAssertTrue(OSSProvider.legacyOllamaChatRemovedMessage.contains("replace `ollama-chat` with `ollama`"))
+        XCTAssertTrue(OSSProvider.legacyOllamaChatRemovedMessage.contains("https://github.com/openai/codex/discussions/7782"))
+    }
+
     func testResolveProviderIDPrefersExplicitOverConfigLikeRust() {
         let settings = CodexRuntimeConfig(ossProvider: "ollama")
 
