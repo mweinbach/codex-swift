@@ -556,6 +556,88 @@ final class AppServerThreadProtocolTests: XCTestCase {
         ))
     }
 
+    func testDynamicToolCallItemUsesRustThreadItemShape() throws {
+        let inProgressItem = AppServerThreadItem.dynamicToolCall(
+            id: "dynamic-1",
+            namespace: nil,
+            tool: "lookup",
+            arguments: .object(["city": .string("New York")]),
+            status: .inProgress
+        )
+
+        try XCTAssertJSONObjectEqual(inProgressItem, [
+            "type": "dynamicToolCall",
+            "id": "dynamic-1",
+            "namespace": NSNull(),
+            "tool": "lookup",
+            "arguments": ["city": "New York"],
+            "status": "inProgress",
+            "contentItems": NSNull(),
+            "success": NSNull(),
+            "durationMs": NSNull()
+        ])
+
+        let completedItem = AppServerThreadItem.dynamicToolCall(
+            id: "dynamic-2",
+            namespace: "codex_app",
+            tool: "render",
+            arguments: .object(["id": .integer(42)]),
+            status: .completed,
+            contentItems: [
+                .text("rendered"),
+                .imageURL("https://example.com/render.png")
+            ],
+            success: true,
+            durationMs: 37
+        )
+
+        try XCTAssertJSONObjectEqual(completedItem, [
+            "type": "dynamicToolCall",
+            "id": "dynamic-2",
+            "namespace": "codex_app",
+            "tool": "render",
+            "arguments": ["id": 42],
+            "status": "completed",
+            "contentItems": [
+                [
+                    "type": "inputText",
+                    "text": "rendered"
+                ],
+                [
+                    "type": "inputImage",
+                    "imageUrl": "https://example.com/render.png"
+                ]
+            ],
+            "success": true,
+            "durationMs": 37
+        ])
+
+        let decoded = try JSONDecoder().decode(AppServerThreadItem.self, from: Data(#"""
+        {
+          "type": "dynamicToolCall",
+          "id": "dynamic-3",
+          "namespace": "codex_app",
+          "tool": "lookup",
+          "arguments": {},
+          "status": "failed",
+          "contentItems": [],
+          "success": false,
+          "durationMs": 12
+        }
+        """#.utf8))
+
+        XCTAssertEqual(decoded, .dynamicToolCall(
+            id: "dynamic-3",
+            namespace: "codex_app",
+            tool: "lookup",
+            arguments: .object([:]),
+            status: .failed,
+            contentItems: [],
+            success: false,
+            durationMs: 12
+        ))
+    }
+
     func testAgentMessageItemCarriesMemoryCitationLikeRustProtocol() throws {
         let citation = AppServerMemoryCitation(
             entries: [
