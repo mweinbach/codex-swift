@@ -22191,7 +22191,7 @@ final class CodexAppServerTests: XCTestCase {
         let secondResult = try XCTUnwrap(second["result"] as? [String: Any])
         let secondData = try XCTUnwrap(secondResult["data"] as? [[String: Any]])
         XCTAssertEqual(secondData.map { $0["name"] as? String }, ["github"])
-        XCTAssertEqual(secondData[0]["authStatus"] as? String, "bearer_token")
+        XCTAssertEqual(secondData[0]["authStatus"] as? String, "bearerToken")
         XCTAssertNil(secondResult["nextCursor"])
 
         let toolsOnly = try appServerResponse(
@@ -22570,7 +22570,7 @@ final class CodexAppServerTests: XCTestCase {
         let data = try XCTUnwrap(result["data"] as? [[String: Any]])
         XCTAssertEqual(data.map { $0["name"] as? String }, [codexAppsMCPServerName])
         let status = try XCTUnwrap(data.first)
-        XCTAssertEqual(status["authStatus"] as? String, "bearer_token")
+        XCTAssertEqual(status["authStatus"] as? String, "bearerToken")
         let tools = try XCTUnwrap(status["tools"] as? [String: [String: Any]])
         XCTAssertEqual(Set(tools.keys), ["calendar_list_events"])
         XCTAssertEqual(capture.requests.map { $0.url?.absoluteString }, [

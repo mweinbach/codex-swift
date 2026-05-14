@@ -20986,8 +20986,21 @@ public enum CodexAppServer {
             "tools": tools,
             "resources": resources,
             "resourceTemplates": resourceTemplates,
-            "authStatus": authStatus.rawValue
+            "authStatus": mcpServerStatusAuthStatusValue(authStatus)
         ]
+    }
+
+    private static func mcpServerStatusAuthStatusValue(_ authStatus: McpAuthStatus) -> String {
+        switch authStatus {
+        case .unsupported:
+            return "unsupported"
+        case .notLoggedIn:
+            return "notLoggedIn"
+        case .bearerToken:
+            return "bearerToken"
+        case .oauth:
+            return "oauth"
+        }
     }
 
     fileprivate static func fuzzyFileSearch(query: String, root: String) -> [[String: Any]] {
