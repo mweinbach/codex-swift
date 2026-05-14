@@ -341,6 +341,120 @@ public enum AppServerCommandExecutionStatus: String, Codable, Equatable, Sendabl
     case declined
 }
 
+public struct AppServerFileUpdateChange: Equatable, Codable, Sendable {
+    public let path: String
+    public let kind: AppServerPatchChangeKind
+    public let diff: String
+
+    public init(path: String, kind: AppServerPatchChangeKind, diff: String) {
+        self.path = path
+        self.kind = kind
+        self.diff = diff
+    }
+
+    public init(path: String, change: FileChange) {
+        self.init(
+            path: path,
+            kind: AppServerPatchChangeKind(change),
+            diff: AppServerFileUpdateChange.diffText(for: change)
+        )
+    }
+
+    public static func converted(from changes: [String: FileChange]) -> [AppServerFileUpdateChange] {
+        changes
+            .map { path, change in AppServerFileUpdateChange(path: path, change: change) }
+            .sorted { $0.path < $1.path }
+    }
+
+    private static func diffText(for change: FileChange) -> String {
+        switch change {
+        case let .add(content), let .delete(content):
+            content
+        case let .update(unifiedDiff, movePath):
+            if let movePath {
+                "\(unifiedDiff)\n\nMoved to: \(movePath)"
+            } else {
+                unifiedDiff
+            }
+        }
+    }
+}
+
+public enum AppServerPatchChangeKind: Equatable, Sendable {
+    case add
+    case delete
+    case update(movePath: String?)
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case movePath
+    }
+
+    private enum KindType: String, Codable {
+        case add
+        case delete
+        case update
+    }
+
+    public init(_ change: FileChange) {
+        switch change {
+        case .add:
+            self = .add
+        case .delete:
+            self = .delete
+        case let .update(_, movePath):
+            self = .update(movePath: movePath)
+        }
+    }
+}
+
+extension AppServerPatchChangeKind: Codable {
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(KindType.self, forKey: .type) {
+        case .add:
+            self = .add
+        case .delete:
+            self = .delete
+        case .update:
+            self = .update(movePath: try container.decodeIfPresent(String.self, forKey: .movePath))
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .add:
+            try container.encode(KindType.add, forKey: .type)
+        case .delete:
+            try container.encode(KindType.delete, forKey: .type)
+        case let .update(movePath):
+            try container.encode(KindType.update, forKey: .type)
+            try container.encodeNilOrValue(movePath, forKey: .movePath)
+        }
+    }
+}
+
+public enum AppServerPatchApplyStatus: String, Codable, Equatable, Sendable {
+    case inProgress
+    case completed
+    case failed
+    case declined
+
+    public init(_ status: PatchApplyStatus?) {
+        switch status {
+        case .completed:
+            self = .completed
+        case .failed:
+            self = .failed
+        case .declined:
+            self = .declined
+        case nil:
+            self = .inProgress
+        }
+    }
+}
+
 public enum AppServerThreadItem: Equatable, Sendable {
     case userMessage(id: String, content: [AppServerUserInput])
     case hookPrompt(id: String, fragments: [HookPromptFragment])
@@ -359,6 +473,7 @@ public enum AppServerThreadItem: Equatable, Sendable {
         exitCode: Int32? = nil,
         durationMs: Int64? = nil
     )
+    case fileChange(id: String, changes: [AppServerFileUpdateChange], status: AppServerPatchApplyStatus)
     case webSearch(id: String, query: String, action: AppServerWebSearchAction? = nil)
     case imageView(id: String, path: AbsolutePath)
     case imageGeneration(id: String, status: String, revisedPrompt: String? = nil, result: String, savedPath: AbsolutePath? = nil)
@@ -391,6 +506,7 @@ public enum AppServerThreadItem: Equatable, Sendable {
         case aggregatedOutput
         case exitCode
         case durationMs
+        case changes
     }
 
     private enum ItemType: String, Codable {
@@ -400,6 +516,7 @@ public enum AppServerThreadItem: Equatable, Sendable {
         case plan
         case reasoning
         case commandExecution
+        case fileChange
         case webSearch
         case imageView
         case imageGeneration
@@ -416,6 +533,7 @@ public enum AppServerThreadItem: Equatable, Sendable {
              let .plan(id, _),
              let .reasoning(id, _, _),
              let .commandExecution(id, _, _, _, _, _, _, _, _, _),
+             let .fileChange(id, _, _),
              let .webSearch(id, _, _),
              let .imageView(id, _),
              let .imageGeneration(id, _, _, _, _),
@@ -471,6 +589,12 @@ extension AppServerThreadItem: Codable {
                 aggregatedOutput: try container.decodeIfPresent(String.self, forKey: .aggregatedOutput),
                 exitCode: try container.decodeIfPresent(Int32.self, forKey: .exitCode),
                 durationMs: try container.decodeIfPresent(Int64.self, forKey: .durationMs)
+            )
+        case .fileChange:
+            self = .fileChange(
+                id: try container.decode(String.self, forKey: .id),
+                changes: try container.decode([AppServerFileUpdateChange].self, forKey: .changes),
+                status: try container.decode(AppServerPatchApplyStatus.self, forKey: .status)
             )
         case .webSearch:
             self = .webSearch(
@@ -555,6 +679,11 @@ extension AppServerThreadItem: Codable {
             try container.encodeNilOrValue(aggregatedOutput, forKey: .aggregatedOutput)
             try container.encodeNilOrValue(exitCode, forKey: .exitCode)
             try container.encodeNilOrValue(durationMs, forKey: .durationMs)
+        case let .fileChange(id, changes, status):
+            try container.encode(ItemType.fileChange, forKey: .type)
+            try container.encode(id, forKey: .id)
+            try container.encode(changes, forKey: .changes)
+            try container.encode(status, forKey: .status)
         case let .webSearch(id, query, action):
             try container.encode(ItemType.webSearch, forKey: .type)
             try container.encode(id, forKey: .id)

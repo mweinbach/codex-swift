@@ -392,6 +392,81 @@ final class AppServerThreadProtocolTests: XCTestCase {
         ))
     }
 
+    func testFileChangeItemUsesRustThreadItemShape() throws {
+        let changes = AppServerFileUpdateChange.converted(from: [
+            "Sources/Renamed.swift": .update(
+                unifiedDiff: "@@ -1 +1 @@\n-old\n+new\n",
+                movePath: "Sources/New.swift"
+            ),
+            "Sources/Added.swift": .add(content: "let added = true\n"),
+            "Sources/Deleted.swift": .delete(content: "let deleted = true\n")
+        ])
+        let item = AppServerThreadItem.fileChange(
+            id: "patch-1",
+            changes: changes,
+            status: .inProgress
+        )
+
+        try XCTAssertJSONObjectEqual(item, [
+            "type": "fileChange",
+            "id": "patch-1",
+            "changes": [
+                [
+                    "path": "Sources/Added.swift",
+                    "kind": ["type": "add"],
+                    "diff": "let added = true\n"
+                ],
+                [
+                    "path": "Sources/Deleted.swift",
+                    "kind": ["type": "delete"],
+                    "diff": "let deleted = true\n"
+                ],
+                [
+                    "path": "Sources/Renamed.swift",
+                    "kind": [
+                        "type": "update",
+                        "movePath": "Sources/New.swift"
+                    ],
+                    "diff": "@@ -1 +1 @@\n-old\n+new\n\n\nMoved to: Sources/New.swift"
+                ]
+            ],
+            "status": "inProgress"
+        ])
+
+        let decoded = try JSONDecoder().decode(AppServerThreadItem.self, from: Data(#"""
+        {
+          "type": "fileChange",
+          "id": "patch-1",
+          "changes": [
+            {
+              "path": "Sources/Updated.swift",
+              "kind": {
+                "type": "update",
+                "movePath": null
+              },
+              "diff": "@@ -1 +1 @@\n-old\n+new\n"
+            }
+          ],
+          "status": "completed"
+        }
+        """#.utf8))
+
+        XCTAssertEqual(decoded, .fileChange(
+            id: "patch-1",
+            changes: [
+                AppServerFileUpdateChange(
+                    path: "Sources/Updated.swift",
+                    kind: .update(movePath: nil),
+                    diff: "@@ -1 +1 @@\n-old\n+new\n"
+                )
+            ],
+            status: .completed
+        ))
+        let missingPatchStatus: PatchApplyStatus? = nil
+        XCTAssertEqual(AppServerPatchApplyStatus(missingPatchStatus), .inProgress)
+        XCTAssertEqual(AppServerPatchApplyStatus(.failed), .failed)
+    }
+
     func testAgentMessageItemCarriesMemoryCitationLikeRustProtocol() throws {
         let citation = AppServerMemoryCitation(
             entries: [
