@@ -128,7 +128,7 @@ Recent upstream audit checkpoint:
   - lowercase ChatGPT plan wire values, usage-based plan variants, plan family helpers, auth-plan aliases, display names, and unknown-plan fallback
 - `codex-rs/protocol/src/models.rs`
   - sandbox permission values, response input items, optional message phases, content items, function-call namespace preservation, function/custom-call output payloads, shell tool call params, web-search actions including multi-query previews, hosted tool-search/image-generation response items, ghost snapshot response items, reasoning content encode filtering, compaction alias decoding, and context-compaction item optional payload encoding
-  - MCP image content used for function-call output conversion now accepts Rust's `mimeType`/`mime_type` spellings and defaults missing MIME types to `application/octet-stream`.
+  - MCP content blocks used for function-call output conversion now preserve Rust's `_meta` fields on text, image, audio, resource-link, embedded-resource, and embedded text/blob resource content; image content also accepts Rust's `mimeType`/`mime_type` spellings and defaults missing MIME types to `application/octet-stream`.
   - MCP tool/resource inventory decoding now accepts Rust's `input_schema`/`output_schema`, `mime_type`, and `uri_template` aliases, preserves tool/resource `icons` and `_meta` fields, and preserves Rust's lossy oversized resource-size behavior.
   - command prefix allow-list rendering now preserves Rust's prefix sort order, rendered-prefix cap, and truncation marker.
 - `codex-rs/protocol/src/items.rs` plus item legacy-event projections from `codex-rs/protocol/src/protocol.rs`

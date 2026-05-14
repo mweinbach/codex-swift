@@ -776,6 +776,190 @@ final class McpEventsTests: XCTestCase {
         ])
     }
 
+    func testMcpContentBlocksPreserveRustMetaFields() throws {
+        let result = try JSONDecoder().decode(McpCallToolResult.self, from: Data("""
+        {
+          "content": [
+            {
+              "type": "text",
+              "text": "caption",
+              "_meta": {
+                "textSource": "fixture"
+              }
+            },
+            {
+              "type": "audio",
+              "data": "AAAA",
+              "mimeType": "audio/wav",
+              "_meta": {
+                "duration": 1
+              }
+            },
+            {
+              "type": "resource_link",
+              "name": "readme",
+              "uri": "file:///tmp/README.md",
+              "icons": [
+                {
+                  "src": "file:///tmp/icon.svg"
+                }
+              ],
+              "_meta": {
+                "linkSource": "fixture"
+              }
+            },
+            {
+              "type": "resource",
+              "resource": {
+                "uri": "file:///tmp/text.txt",
+                "mimeType": "text/plain",
+                "text": "hello",
+                "_meta": {
+                  "textResource": true
+                }
+              },
+              "_meta": {
+                "embeddedSource": "text"
+              }
+            },
+            {
+              "type": "resource",
+              "resource": {
+                "uri": "file:///tmp/blob.bin",
+                "mimeType": "application/octet-stream",
+                "blob": "AAEC",
+                "_meta": {
+                  "blobResource": true
+                }
+              },
+              "_meta": {
+                "embeddedSource": "blob"
+              }
+            }
+          ]
+        }
+        """.utf8))
+
+        XCTAssertEqual(result.content, [
+            .text(McpTextContent(
+                text: "caption",
+                meta: .object(["textSource": .string("fixture")])
+            )),
+            .image(McpImageContent(
+                data: "AAAA",
+                mimeType: "audio/wav",
+                type: "audio",
+                meta: .object(["duration": .integer(1)])
+            )),
+            .resourceLink(McpResourceLink(
+                name: "readme",
+                uri: "file:///tmp/README.md",
+                icons: [
+                    .object(["src": .string("file:///tmp/icon.svg")])
+                ],
+                meta: .object(["linkSource": .string("fixture")])
+            )),
+            .embeddedResource(McpEmbeddedResource(
+                resource: .text(McpTextResourceContents(
+                    text: "hello",
+                    uri: "file:///tmp/text.txt",
+                    mimeType: "text/plain",
+                    meta: .object(["textResource": .bool(true)])
+                )),
+                meta: .object(["embeddedSource": .string("text")])
+            )),
+            .embeddedResource(McpEmbeddedResource(
+                resource: .blob(McpBlobResourceContents(
+                    blob: "AAEC",
+                    uri: "file:///tmp/blob.bin",
+                    mimeType: "application/octet-stream",
+                    meta: .object(["blobResource": .bool(true)])
+                )),
+                meta: .object(["embeddedSource": .string("blob")])
+            ))
+        ])
+
+        try XCTAssertJSONObjectEqual(result, [
+            "content": [
+                [
+                    "_meta": [
+                        "textSource": "fixture"
+                    ],
+                    "text": "caption",
+                    "type": "text"
+                ],
+                [
+                    "_meta": [
+                        "duration": 1
+                    ],
+                    "data": "AAAA",
+                    "mimeType": "audio/wav",
+                    "type": "audio"
+                ],
+                [
+                    "_meta": [
+                        "linkSource": "fixture"
+                    ],
+                    "icons": [
+                        [
+                            "src": "file:///tmp/icon.svg"
+                        ]
+                    ],
+                    "name": "readme",
+                    "type": "resource_link",
+                    "uri": "file:///tmp/README.md"
+                ],
+                [
+                    "_meta": [
+                        "embeddedSource": "text"
+                    ],
+                    "resource": [
+                        "_meta": [
+                            "textResource": true
+                        ],
+                        "mimeType": "text/plain",
+                        "text": "hello",
+                        "uri": "file:///tmp/text.txt"
+                    ],
+                    "type": "resource"
+                ],
+                [
+                    "_meta": [
+                        "embeddedSource": "blob"
+                    ],
+                    "resource": [
+                        "_meta": [
+                            "blobResource": true
+                        ],
+                        "blob": "AAEC",
+                        "mimeType": "application/octet-stream",
+                        "uri": "file:///tmp/blob.bin"
+                    ],
+                    "type": "resource"
+                ]
+            ]
+        ])
+
+        try XCTAssertJSONObjectEqual(McpCallToolResult(content: [
+            .audio(McpAudioContent(
+                data: "BBBB",
+                mimeType: "audio/mpeg",
+                meta: .object(["codec": .string("mp3")])
+            ))
+        ]), [
+            "content": [
+                [
+                    "_meta": [
+                        "codec": "mp3"
+                    ],
+                    "data": "BBBB",
+                    "mimeType": "audio/mpeg",
+                    "type": "audio"
+                ]
+            ]
+        ])
+    }
+
     func testMcpContentBlockDecodingFollowsRustUntaggedOrder() throws {
         let block = try JSONDecoder().decode(McpContentBlock.self, from: Data("""
         {

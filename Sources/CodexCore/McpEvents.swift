@@ -814,11 +814,20 @@ public enum McpContentBlock: Equatable, Codable, Sendable {
 
 public struct McpTextContent: Equatable, Codable, Sendable {
     public let annotations: McpAnnotations?
+    public let meta: JSONValue?
     public let text: String
     public let type: String
 
-    public init(text: String, type: String = "text", annotations: McpAnnotations? = nil) {
+    private enum CodingKeys: String, CodingKey {
+        case annotations
+        case meta = "_meta"
+        case text
+        case type
+    }
+
+    public init(text: String, type: String = "text", annotations: McpAnnotations? = nil, meta: JSONValue? = nil) {
         self.annotations = annotations
+        self.meta = meta
         self.text = text
         self.type = type
     }
@@ -880,19 +889,28 @@ public struct McpImageContent: Equatable, Codable, Sendable {
 public struct McpAudioContent: Equatable, Codable, Sendable {
     public let annotations: McpAnnotations?
     public let data: String
+    public let meta: JSONValue?
     public let mimeType: String
     public let type: String
 
     private enum CodingKeys: String, CodingKey {
         case annotations
         case data
+        case meta = "_meta"
         case mimeType = "mimeType"
         case type
     }
 
-    public init(data: String, mimeType: String, type: String = "audio", annotations: McpAnnotations? = nil) {
+    public init(
+        data: String,
+        mimeType: String,
+        type: String = "audio",
+        annotations: McpAnnotations? = nil,
+        meta: JSONValue? = nil
+    ) {
         self.annotations = annotations
         self.data = data
+        self.meta = meta
         self.mimeType = mimeType
         self.type = type
     }
@@ -901,6 +919,8 @@ public struct McpAudioContent: Equatable, Codable, Sendable {
 public struct McpResourceLink: Equatable, Codable, Sendable {
     public let annotations: McpAnnotations?
     public let description: String?
+    public let icons: [JSONValue]?
+    public let meta: JSONValue?
     public let mimeType: String?
     public let name: String
     public let size: Int64?
@@ -911,6 +931,8 @@ public struct McpResourceLink: Equatable, Codable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case annotations
         case description
+        case icons
+        case meta = "_meta"
         case mimeType = "mimeType"
         case name
         case size
@@ -925,12 +947,16 @@ public struct McpResourceLink: Equatable, Codable, Sendable {
         type: String = "resource_link",
         annotations: McpAnnotations? = nil,
         description: String? = nil,
+        icons: [JSONValue]? = nil,
+        meta: JSONValue? = nil,
         mimeType: String? = nil,
         size: Int64? = nil,
         title: String? = nil
     ) {
         self.annotations = annotations
         self.description = description
+        self.icons = icons
+        self.meta = meta
         self.mimeType = mimeType
         self.name = name
         self.size = size
@@ -942,11 +968,25 @@ public struct McpResourceLink: Equatable, Codable, Sendable {
 
 public struct McpEmbeddedResource: Equatable, Codable, Sendable {
     public let annotations: McpAnnotations?
+    public let meta: JSONValue?
     public let resource: McpEmbeddedResourceResource
     public let type: String
 
-    public init(resource: McpEmbeddedResourceResource, type: String = "resource", annotations: McpAnnotations? = nil) {
+    private enum CodingKeys: String, CodingKey {
+        case annotations
+        case meta = "_meta"
+        case resource
+        case type
+    }
+
+    public init(
+        resource: McpEmbeddedResourceResource,
+        type: String = "resource",
+        annotations: McpAnnotations? = nil,
+        meta: JSONValue? = nil
+    ) {
         self.annotations = annotations
+        self.meta = meta
         self.resource = resource
         self.type = type
     }
@@ -985,17 +1025,20 @@ public enum McpEmbeddedResourceResource: Equatable, Codable, Sendable {
 }
 
 public struct McpTextResourceContents: Equatable, Codable, Sendable {
+    public let meta: JSONValue?
     public let mimeType: String?
     public let text: String
     public let uri: String
 
     private enum CodingKeys: String, CodingKey {
+        case meta = "_meta"
         case mimeType = "mimeType"
         case text
         case uri
     }
 
-    public init(text: String, uri: String, mimeType: String? = nil) {
+    public init(text: String, uri: String, mimeType: String? = nil, meta: JSONValue? = nil) {
+        self.meta = meta
         self.mimeType = mimeType
         self.text = text
         self.uri = uri
@@ -1004,17 +1047,20 @@ public struct McpTextResourceContents: Equatable, Codable, Sendable {
 
 public struct McpBlobResourceContents: Equatable, Codable, Sendable {
     public let blob: String
+    public let meta: JSONValue?
     public let mimeType: String?
     public let uri: String
 
     private enum CodingKeys: String, CodingKey {
         case blob
+        case meta = "_meta"
         case mimeType = "mimeType"
         case uri
     }
 
-    public init(blob: String, uri: String, mimeType: String? = nil) {
+    public init(blob: String, uri: String, mimeType: String? = nil, meta: JSONValue? = nil) {
         self.blob = blob
+        self.meta = meta
         self.mimeType = mimeType
         self.uri = uri
     }
