@@ -659,6 +659,108 @@ public struct CodexMcpToolCallEventRequest: Equatable, Encodable, Sendable {
     }
 }
 
+public struct CodexDynamicToolCallContentCounts: Equatable, Sendable {
+    public let total: UInt64
+    public let text: UInt64
+    public let image: UInt64
+
+    public init(total: UInt64, text: UInt64, image: UInt64) {
+        self.total = total
+        self.text = text
+        self.image = image
+    }
+
+    public init(contentItems: [DynamicToolCallOutputContentItem]) {
+        var text: UInt64 = 0
+        var image: UInt64 = 0
+
+        for item in contentItems {
+            switch item {
+            case .text:
+                text += 1
+            case .imageURL:
+                image += 1
+            }
+        }
+
+        self.init(total: UInt64(contentItems.count), text: text, image: image)
+    }
+}
+
+public struct CodexDynamicToolCallEventParams: Equatable, Encodable, Sendable {
+    public let base: CodexToolItemEventBase
+    public let dynamicToolName: String
+    public let success: Bool?
+    public let outputContentItemCount: UInt64?
+    public let outputTextItemCount: UInt64?
+    public let outputImageItemCount: UInt64?
+
+    public init(
+        base: CodexToolItemEventBase,
+        dynamicToolName: String,
+        success: Bool? = nil,
+        outputContentItemCount: UInt64? = nil,
+        outputTextItemCount: UInt64? = nil,
+        outputImageItemCount: UInt64? = nil
+    ) {
+        self.base = base
+        self.dynamicToolName = dynamicToolName
+        self.success = success
+        self.outputContentItemCount = outputContentItemCount
+        self.outputTextItemCount = outputTextItemCount
+        self.outputImageItemCount = outputImageItemCount
+    }
+
+    public init(
+        base: CodexToolItemEventBase,
+        dynamicToolName: String,
+        success: Bool? = nil,
+        contentCounts: CodexDynamicToolCallContentCounts?
+    ) {
+        self.init(
+            base: base,
+            dynamicToolName: dynamicToolName,
+            success: success,
+            outputContentItemCount: contentCounts?.total,
+            outputTextItemCount: contentCounts?.text,
+            outputImageItemCount: contentCounts?.image
+        )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case dynamicToolName = "dynamic_tool_name"
+        case success
+        case outputContentItemCount = "output_content_item_count"
+        case outputTextItemCount = "output_text_item_count"
+        case outputImageItemCount = "output_image_item_count"
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        try base.encode(to: encoder)
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(dynamicToolName, forKey: .dynamicToolName)
+        try container.encodeNilOrValue(success, forKey: .success)
+        try container.encodeNilOrValue(outputContentItemCount, forKey: .outputContentItemCount)
+        try container.encodeNilOrValue(outputTextItemCount, forKey: .outputTextItemCount)
+        try container.encodeNilOrValue(outputImageItemCount, forKey: .outputImageItemCount)
+    }
+}
+
+public struct CodexDynamicToolCallEventRequest: Equatable, Encodable, Sendable {
+    public let eventType: String
+    public let eventParams: CodexDynamicToolCallEventParams
+
+    public init(eventType: String, eventParams: CodexDynamicToolCallEventParams) {
+        self.eventType = eventType
+        self.eventParams = eventParams
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case eventType = "event_type"
+        case eventParams = "event_params"
+    }
+}
+
 public struct CodexCommandExecutionAnalyticsContext: Equatable, Sendable {
     public let appServerClient: CodexAppServerClientMetadata
     public let runtime: CodexRuntimeMetadata
@@ -683,6 +785,7 @@ public struct CodexCommandExecutionAnalyticsContext: Equatable, Sendable {
 
 public typealias CodexFileChangeAnalyticsContext = CodexCommandExecutionAnalyticsContext
 public typealias CodexMcpToolCallAnalyticsContext = CodexCommandExecutionAnalyticsContext
+public typealias CodexDynamicToolCallAnalyticsContext = CodexCommandExecutionAnalyticsContext
 
 public struct CodexCommandExecutionAnalyticsReducer: Sendable {
     private var startedAtMilliseconds: [CommandExecutionItemKey: UInt64] = [:]
@@ -982,6 +1085,103 @@ public struct CodexMcpToolCallAnalyticsReducer: Sendable {
     }
 }
 
+public struct CodexDynamicToolCallAnalyticsReducer: Sendable {
+    private var startedAtMilliseconds: [DynamicToolCallItemKey: UInt64] = [:]
+
+    public init() {}
+
+    public mutating func ingestStarted(_ notification: ItemStartedNotification) {
+        guard case .dynamicToolCall = notification.item,
+              let startedAtMilliseconds = Self.unsignedMilliseconds(notification.startedAtMilliseconds)
+        else {
+            return
+        }
+
+        self.startedAtMilliseconds[DynamicToolCallItemKey(notification)] = startedAtMilliseconds
+    }
+
+    public mutating func ingestCompleted(
+        _ notification: ItemCompletedNotification,
+        context: CodexDynamicToolCallAnalyticsContext
+    ) -> CodexDynamicToolCallEventRequest? {
+        let key = DynamicToolCallItemKey(notification)
+        guard let startedAtMilliseconds = startedAtMilliseconds.removeValue(forKey: key),
+              let completedAtMilliseconds = Self.unsignedMilliseconds(notification.completedAtMilliseconds)
+        else {
+            return nil
+        }
+
+        guard case let .dynamicToolCall(
+            id,
+            _,
+            tool,
+            _,
+            status,
+            contentItems,
+            success,
+            durationMs
+        ) = notification.item,
+            let outcome = Self.outcome(for: status)
+        else {
+            return nil
+        }
+
+        return CodexDynamicToolCallEventRequest(
+            eventType: "codex_dynamic_tool_call_event",
+            eventParams: CodexDynamicToolCallEventParams(
+                base: CodexToolItemEventBase(
+                    threadID: notification.threadID,
+                    turnID: notification.turnID,
+                    itemID: id,
+                    appServerClient: context.appServerClient,
+                    runtime: context.runtime,
+                    threadSource: context.threadSource,
+                    subagentSource: context.subagentSource,
+                    parentThreadID: context.parentThreadID,
+                    toolName: tool,
+                    startedAtMilliseconds: startedAtMilliseconds,
+                    completedAtMilliseconds: completedAtMilliseconds,
+                    durationMilliseconds: completedAtMilliseconds >= startedAtMilliseconds
+                        ? completedAtMilliseconds - startedAtMilliseconds
+                        : nil,
+                    executionDurationMilliseconds: Self.unsignedMilliseconds(durationMs),
+                    reviewCount: 0,
+                    guardianReviewCount: 0,
+                    userReviewCount: 0,
+                    finalApprovalOutcome: .unknown,
+                    terminalStatus: outcome.terminalStatus,
+                    failureKind: outcome.failureKind,
+                    requestedAdditionalPermissions: false,
+                    requestedNetworkAccess: false
+                ),
+                dynamicToolName: tool,
+                success: success,
+                contentCounts: contentItems.map(CodexDynamicToolCallContentCounts.init(contentItems:))
+            )
+        )
+    }
+
+    private static func outcome(
+        for status: AppServerDynamicToolCallStatus
+    ) -> (terminalStatus: ToolItemTerminalStatus, failureKind: ToolItemFailureKind?)? {
+        switch status {
+        case .inProgress:
+            return nil
+        case .completed:
+            return (.completed, nil)
+        case .failed:
+            return (.failed, .toolError)
+        }
+    }
+
+    private static func unsignedMilliseconds(_ milliseconds: Int64?) -> UInt64? {
+        guard let milliseconds, milliseconds >= 0 else {
+            return nil
+        }
+        return UInt64(milliseconds)
+    }
+}
+
 private struct CommandExecutionItemKey: Hashable {
     let threadID: String
     let turnID: String
@@ -1019,6 +1219,24 @@ private struct FileChangeItemKey: Hashable {
 }
 
 private struct McpToolCallItemKey: Hashable {
+    let threadID: String
+    let turnID: String
+    let itemID: String
+
+    init(_ notification: ItemStartedNotification) {
+        self.threadID = notification.threadID
+        self.turnID = notification.turnID
+        self.itemID = notification.item.id
+    }
+
+    init(_ notification: ItemCompletedNotification) {
+        self.threadID = notification.threadID
+        self.turnID = notification.turnID
+        self.itemID = notification.item.id
+    }
+}
+
+private struct DynamicToolCallItemKey: Hashable {
     let threadID: String
     let turnID: String
     let itemID: String

@@ -2,6 +2,147 @@ import CodexCore
 import XCTest
 
 final class ReviewAnalyticsTests: XCTestCase {
+    func testDynamicToolCallAnalyticsReducerEmitsLifecycleEventLikeRust() throws {
+        var reducer = CodexDynamicToolCallAnalyticsReducer()
+        let startedItem = AppServerThreadItem.dynamicToolCall(
+            id: "dynamic-1",
+            namespace: "ui",
+            tool: "pick_color",
+            arguments: .object(["prompt": .string("accent")]),
+            status: .inProgress
+        )
+        let completedItem = AppServerThreadItem.dynamicToolCall(
+            id: "dynamic-1",
+            namespace: "ui",
+            tool: "pick_color",
+            arguments: .object(["prompt": .string("accent")]),
+            status: .completed,
+            contentItems: [
+                .text("blue"),
+                .imageURL("https://example.com/swatch.png"),
+                .text("navy")
+            ],
+            success: true,
+            durationMs: 75
+        )
+
+        reducer.ingestStarted(ItemStartedNotification(
+            item: startedItem,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 4_000
+        ))
+        let event = try XCTUnwrap(reducer.ingestCompleted(
+            ItemCompletedNotification(
+                item: completedItem,
+                threadID: "thread-1",
+                turnID: "turn-1",
+                completedAtMilliseconds: 4_120
+            ),
+            context: Self.analyticsContext
+        ))
+
+        try XCTAssertJSONObjectEqual(event, [
+            "event_type": "codex_dynamic_tool_call_event",
+            "event_params": [
+                "thread_id": "thread-1",
+                "turn_id": "turn-1",
+                "item_id": "dynamic-1",
+                "app_server_client": [
+                    "product_client_id": "codex_tui",
+                    "client_name": "codex-tui",
+                    "client_version": "1.2.3",
+                    "rpc_transport": "websocket",
+                    "experimental_api_enabled": true
+                ],
+                "runtime": [
+                    "codex_rs_version": "0.99.0",
+                    "runtime_os": "macos",
+                    "runtime_os_version": "15.3.1",
+                    "runtime_arch": "aarch64"
+                ],
+                "thread_source": "user",
+                "subagent_source": nil,
+                "parent_thread_id": nil,
+                "tool_name": "pick_color",
+                "started_at_ms": 4_000,
+                "completed_at_ms": 4_120,
+                "duration_ms": 120,
+                "execution_duration_ms": 75,
+                "review_count": 0,
+                "guardian_review_count": 0,
+                "user_review_count": 0,
+                "final_approval_outcome": "unknown",
+                "terminal_status": "completed",
+                "failure_kind": nil,
+                "requested_additional_permissions": false,
+                "requested_network_access": false,
+                "dynamic_tool_name": "pick_color",
+                "success": true,
+                "output_content_item_count": 3,
+                "output_text_item_count": 2,
+                "output_image_item_count": 1
+            ]
+        ])
+    }
+
+    func testDynamicToolCallAnalyticsReducerMapsFailedAndNilContentLikeRust() throws {
+        var reducer = CodexDynamicToolCallAnalyticsReducer()
+        let event = try Self.reduceDynamicToolCall(
+            status: .failed,
+            contentItems: nil,
+            success: false,
+            reducer: &reducer
+        )
+
+        XCTAssertEqual(event.eventParams.base.terminalStatus, .failed)
+        XCTAssertEqual(event.eventParams.base.failureKind, .toolError)
+        XCTAssertEqual(event.eventParams.dynamicToolName, "lookup")
+        XCTAssertEqual(event.eventParams.success, false)
+        XCTAssertNil(event.eventParams.outputContentItemCount)
+        XCTAssertNil(event.eventParams.outputTextItemCount)
+        XCTAssertNil(event.eventParams.outputImageItemCount)
+    }
+
+    func testDynamicToolCallAnalyticsReducerSuppressesMissingStartDoubleCompletionAndInProgressLikeRust() {
+        var reducer = CodexDynamicToolCallAnalyticsReducer()
+        let completedItem = Self.dynamicToolCallItem(status: .completed)
+        let inProgressItem = Self.dynamicToolCallItem(status: .inProgress)
+        let completed = ItemCompletedNotification(
+            item: completedItem,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            completedAtMilliseconds: 20
+        )
+
+        XCTAssertNil(reducer.ingestCompleted(completed, context: Self.analyticsContext))
+
+        reducer.ingestStarted(ItemStartedNotification(
+            item: completedItem,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 10
+        ))
+        XCTAssertNotNil(reducer.ingestCompleted(completed, context: Self.analyticsContext))
+        XCTAssertNil(reducer.ingestCompleted(completed, context: Self.analyticsContext))
+
+        reducer.ingestStarted(ItemStartedNotification(
+            item: inProgressItem,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 10
+        ))
+        XCTAssertNil(reducer.ingestCompleted(
+            ItemCompletedNotification(
+                item: inProgressItem,
+                threadID: "thread-1",
+                turnID: "turn-1",
+                completedAtMilliseconds: 20
+            ),
+            context: Self.analyticsContext
+        ))
+    }
+
     func testMcpToolCallAnalyticsReducerEmitsLifecycleEventLikeRust() throws {
         var reducer = CodexMcpToolCallAnalyticsReducer()
         let startedItem = AppServerThreadItem.mcpToolCall(
@@ -613,6 +754,47 @@ final class ReviewAnalyticsTests: XCTestCase {
         reducer: inout CodexMcpToolCallAnalyticsReducer
     ) throws -> CodexMcpToolCallEventRequest {
         let item = mcpToolCallItem(status: status, error: error)
+        reducer.ingestStarted(ItemStartedNotification(
+            item: item,
+            threadID: "thread-1",
+            turnID: "turn-1",
+            startedAtMilliseconds: 10
+        ))
+        return try XCTUnwrap(reducer.ingestCompleted(
+            ItemCompletedNotification(
+                item: item,
+                threadID: "thread-1",
+                turnID: "turn-1",
+                completedAtMilliseconds: 20
+            ),
+            context: analyticsContext
+        ))
+    }
+
+    private static func dynamicToolCallItem(
+        status: AppServerDynamicToolCallStatus,
+        contentItems: [DynamicToolCallOutputContentItem]? = [.text("ok")],
+        success: Bool? = true
+    ) -> AppServerThreadItem {
+        .dynamicToolCall(
+            id: "dynamic-\(status.rawValue)",
+            namespace: "docs",
+            tool: "lookup",
+            arguments: .object([:]),
+            status: status,
+            contentItems: contentItems,
+            success: success,
+            durationMs: 10
+        )
+    }
+
+    private static func reduceDynamicToolCall(
+        status: AppServerDynamicToolCallStatus,
+        contentItems: [DynamicToolCallOutputContentItem]?,
+        success: Bool?,
+        reducer: inout CodexDynamicToolCallAnalyticsReducer
+    ) throws -> CodexDynamicToolCallEventRequest {
+        let item = dynamicToolCallItem(status: status, contentItems: contentItems, success: success)
         reducer.ingestStarted(ItemStartedNotification(
             item: item,
             threadID: "thread-1",
