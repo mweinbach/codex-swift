@@ -185,6 +185,203 @@ final class AppServerThreadProtocolTests: XCTestCase {
         XCTAssertEqual(decoded, .active(activeFlags: [.waitingOnApproval]))
     }
 
+    func testThreadNotificationModelsRoundTripLikeRustProtocol() throws {
+        let tokenBreakdown = TokenUsageBreakdown(
+            totalTokens: 30,
+            inputTokens: 20,
+            cachedInputTokens: 5,
+            outputTokens: 8,
+            reasoningOutputTokens: 2
+        )
+        let tokenUsage = ThreadTokenUsage(total: tokenBreakdown, last: tokenBreakdown, modelContextWindow: nil)
+
+        try XCTAssertJSONObjectEqual(
+            ThreadTokenUsageUpdatedNotification(
+                threadID: "thread-1",
+                turnID: "turn-1",
+                tokenUsage: tokenUsage
+            ),
+            [
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "tokenUsage": [
+                    "total": [
+                        "totalTokens": 30,
+                        "inputTokens": 20,
+                        "cachedInputTokens": 5,
+                        "outputTokens": 8,
+                        "reasoningOutputTokens": 2
+                    ],
+                    "last": [
+                        "totalTokens": 30,
+                        "inputTokens": 20,
+                        "cachedInputTokens": 5,
+                        "outputTokens": 8,
+                        "reasoningOutputTokens": 2
+                    ],
+                    "modelContextWindow": NSNull()
+                ]
+            ]
+        )
+
+        try XCTAssertJSONObjectEqual(
+            ThreadStartedNotification(
+                thread: AppServerThread(
+                    id: "thread-1",
+                    turns: [
+                        AppServerTurn(id: "turn-1", items: [.contextCompaction(id: "item-1")], status: .completed)
+                    ]
+                )
+            ),
+            [
+                "thread": [
+                    "id": "thread-1",
+                    "turns": [
+                        [
+                            "id": "turn-1",
+                            "items": [
+                                [
+                                    "type": "contextCompaction",
+                                    "id": "item-1"
+                                ]
+                            ],
+                            "itemsView": "full",
+                            "status": "completed"
+                        ]
+                    ]
+                ]
+            ]
+        )
+
+        try XCTAssertJSONObjectEqual(
+            ThreadStatusChangedNotification(
+                threadID: "thread-1",
+                status: .active(activeFlags: [.waitingOnApproval])
+            ),
+            [
+                "threadId": "thread-1",
+                "status": [
+                    "type": "active",
+                    "activeFlags": ["waitingOnApproval"]
+                ]
+            ]
+        )
+
+        try XCTAssertJSONObjectEqual(ThreadArchivedNotification(threadID: "thread-1"), [
+            "threadId": "thread-1"
+        ])
+        try XCTAssertJSONObjectEqual(ThreadUnarchivedNotification(threadID: "thread-1"), [
+            "threadId": "thread-1"
+        ])
+        try XCTAssertJSONObjectEqual(ThreadClosedNotification(threadID: "thread-1"), [
+            "threadId": "thread-1"
+        ])
+        try XCTAssertJSONObjectEqual(ThreadGoalClearedNotification(threadID: "thread-1"), [
+            "threadId": "thread-1"
+        ])
+        try XCTAssertJSONObjectEqual(ContextCompactedNotification(threadID: "thread-1", turnID: "turn-1"), [
+            "threadId": "thread-1",
+            "turnId": "turn-1"
+        ])
+
+        let decodedUsage = try JSONDecoder().decode(
+            ThreadTokenUsage.self,
+            from: Data(#"""
+            {
+              "total": {
+                "totalTokens": 1,
+                "inputTokens": 2,
+                "cachedInputTokens": 3,
+                "outputTokens": 4,
+                "reasoningOutputTokens": 5
+              },
+              "last": {
+                "totalTokens": 6,
+                "inputTokens": 7,
+                "cachedInputTokens": 8,
+                "outputTokens": 9,
+                "reasoningOutputTokens": 10
+              },
+              "modelContextWindow": 128000
+            }
+            """#.utf8)
+        )
+        XCTAssertEqual(decodedUsage.modelContextWindow, 128_000)
+        XCTAssertEqual(decodedUsage.total.totalTokens, 1)
+        XCTAssertEqual(decodedUsage.last.reasoningOutputTokens, 10)
+    }
+
+    func testThreadNameAndGoalNotificationsPreserveRustNullSemantics() throws {
+        let threadID = try ThreadId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
+        let goal = ThreadGoal(
+            threadID: threadID,
+            objective: "ship parity",
+            status: .active,
+            tokenBudget: nil,
+            tokensUsed: 12,
+            timeUsedSeconds: 34,
+            createdAt: 100,
+            updatedAt: 200
+        )
+
+        try XCTAssertJSONObjectEqual(ThreadNameUpdatedNotification(threadID: threadID.description), [
+            "threadId": threadID.description
+        ])
+        try XCTAssertJSONObjectEqual(
+            ThreadNameUpdatedNotification(threadID: threadID.description, threadName: "Fresh name"),
+            [
+                "threadId": threadID.description,
+                "threadName": "Fresh name"
+            ]
+        )
+
+        let decodedMissingName = try JSONDecoder().decode(
+            ThreadNameUpdatedNotification.self,
+            from: Data(#"{"threadId":"\#(threadID.description)"}"#.utf8)
+        )
+        XCTAssertNil(decodedMissingName.threadName)
+
+        try XCTAssertJSONObjectEqual(
+            ThreadGoalUpdatedNotification(threadID: threadID.description, turnID: nil, goal: goal),
+            [
+                "threadId": threadID.description,
+                "turnId": NSNull(),
+                "goal": [
+                    "threadId": threadID.description,
+                    "objective": "ship parity",
+                    "status": "active",
+                    "tokenBudget": NSNull(),
+                    "tokensUsed": 12,
+                    "timeUsedSeconds": 34,
+                    "createdAt": 100,
+                    "updatedAt": 200
+                ]
+            ]
+        )
+
+        let decodedGoalNotification = try JSONDecoder().decode(
+            ThreadGoalUpdatedNotification.self,
+            from: Data(#"""
+            {
+              "threadId": "\#(threadID.description)",
+              "turnId": null,
+              "goal": {
+                "threadId": "\#(threadID.description)",
+                "objective": "ship parity",
+                "status": "active",
+                "tokenBudget": null,
+                "tokensUsed": 12,
+                "timeUsedSeconds": 34,
+                "createdAt": 100,
+                "updatedAt": 200
+              }
+            }
+            """#.utf8)
+        )
+        XCTAssertNil(decodedGoalNotification.turnID)
+        XCTAssertEqual(decodedGoalNotification.goal, goal)
+    }
+
     func testThreadInjectItemsRoundTripsLikeRustProtocol() throws {
         let item: JSONValue = .object([
             "type": .string("message"),

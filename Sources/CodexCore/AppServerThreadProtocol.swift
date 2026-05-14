@@ -266,7 +266,7 @@ public struct AppServerTurn: Equatable, Codable, Sendable {
     }
 }
 
-public struct AppServerThread: Equatable, Sendable {
+public struct AppServerThread: Equatable, Codable, Sendable {
     public let id: String
     public var turns: [AppServerTurn]
 
@@ -277,6 +277,211 @@ public struct AppServerThread: Equatable, Sendable {
 
     public func items(forTurnID turnID: String) -> [AppServerThreadItem]? {
         turns.first { $0.id == turnID }?.items
+    }
+}
+
+public struct TokenUsageBreakdown: Equatable, Codable, Sendable {
+    public let totalTokens: Int64
+    public let inputTokens: Int64
+    public let cachedInputTokens: Int64
+    public let outputTokens: Int64
+    public let reasoningOutputTokens: Int64
+
+    public init(
+        totalTokens: Int64,
+        inputTokens: Int64,
+        cachedInputTokens: Int64,
+        outputTokens: Int64,
+        reasoningOutputTokens: Int64
+    ) {
+        self.totalTokens = totalTokens
+        self.inputTokens = inputTokens
+        self.cachedInputTokens = cachedInputTokens
+        self.outputTokens = outputTokens
+        self.reasoningOutputTokens = reasoningOutputTokens
+    }
+}
+
+public struct ThreadTokenUsage: Equatable, Codable, Sendable {
+    public let total: TokenUsageBreakdown
+    public let last: TokenUsageBreakdown
+    public let modelContextWindow: Int64?
+
+    private enum CodingKeys: String, CodingKey {
+        case total
+        case last
+        case modelContextWindow
+    }
+
+    public init(total: TokenUsageBreakdown, last: TokenUsageBreakdown, modelContextWindow: Int64?) {
+        self.total = total
+        self.last = last
+        self.modelContextWindow = modelContextWindow
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(total, forKey: .total)
+        try container.encode(last, forKey: .last)
+        if let modelContextWindow {
+            try container.encode(modelContextWindow, forKey: .modelContextWindow)
+        } else {
+            try container.encodeNil(forKey: .modelContextWindow)
+        }
+    }
+}
+
+public struct ThreadTokenUsageUpdatedNotification: Equatable, Codable, Sendable {
+    public let threadID: String
+    public let turnID: String
+    public let tokenUsage: ThreadTokenUsage
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+        case turnID = "turnId"
+        case tokenUsage
+    }
+
+    public init(threadID: String, turnID: String, tokenUsage: ThreadTokenUsage) {
+        self.threadID = threadID
+        self.turnID = turnID
+        self.tokenUsage = tokenUsage
+    }
+}
+
+public struct ThreadStartedNotification: Equatable, Codable, Sendable {
+    public let thread: AppServerThread
+
+    public init(thread: AppServerThread) {
+        self.thread = thread
+    }
+}
+
+public struct ThreadStatusChangedNotification: Equatable, Codable, Sendable {
+    public let threadID: String
+    public let status: AppServerThreadStatus
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+        case status
+    }
+
+    public init(threadID: String, status: AppServerThreadStatus) {
+        self.threadID = threadID
+        self.status = status
+    }
+}
+
+public struct ThreadArchivedNotification: Equatable, Codable, Sendable {
+    public let threadID: String
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+    }
+
+    public init(threadID: String) {
+        self.threadID = threadID
+    }
+}
+
+public struct ThreadUnarchivedNotification: Equatable, Codable, Sendable {
+    public let threadID: String
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+    }
+
+    public init(threadID: String) {
+        self.threadID = threadID
+    }
+}
+
+public struct ThreadClosedNotification: Equatable, Codable, Sendable {
+    public let threadID: String
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+    }
+
+    public init(threadID: String) {
+        self.threadID = threadID
+    }
+}
+
+public struct ThreadNameUpdatedNotification: Equatable, Codable, Sendable {
+    public let threadID: String
+    public let threadName: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+        case threadName
+    }
+
+    public init(threadID: String, threadName: String? = nil) {
+        self.threadID = threadID
+        self.threadName = threadName
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(threadID, forKey: .threadID)
+        try container.encodeIfPresent(threadName, forKey: .threadName)
+    }
+}
+
+public struct ThreadGoalUpdatedNotification: Equatable, Codable, Sendable {
+    public let threadID: String
+    public let turnID: String?
+    public let goal: ThreadGoal
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+        case turnID = "turnId"
+        case goal
+    }
+
+    public init(threadID: String, turnID: String? = nil, goal: ThreadGoal) {
+        self.threadID = threadID
+        self.turnID = turnID
+        self.goal = goal
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(threadID, forKey: .threadID)
+        if let turnID {
+            try container.encode(turnID, forKey: .turnID)
+        } else {
+            try container.encodeNil(forKey: .turnID)
+        }
+        try container.encode(goal, forKey: .goal)
+    }
+}
+
+public struct ThreadGoalClearedNotification: Equatable, Codable, Sendable {
+    public let threadID: String
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+    }
+
+    public init(threadID: String) {
+        self.threadID = threadID
+    }
+}
+
+public struct ContextCompactedNotification: Equatable, Codable, Sendable {
+    public let threadID: String
+    public let turnID: String
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+        case turnID = "turnId"
+    }
+
+    public init(threadID: String, turnID: String) {
+        self.threadID = threadID
+        self.turnID = turnID
     }
 }
 
