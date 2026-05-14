@@ -819,6 +819,49 @@ final class ConfigRequirementsTests: XCTestCase {
         XCTAssertTrue(message.hasPrefix("Cloud requirements (workspace-managed policies) are invalid and could not be parsed. Please contact your workspace admin.\n\nDetails:\n"))
         XCTAssertTrue(message.contains("Invalid approval policy requirement: sometimes"))
     }
+
+    func testCloudRequirementsLoaderSharesSingleResultLikeRust() async throws {
+        let counter = Counter()
+        let loader = CloudRequirementsLoader {
+            await counter.increment()
+            return .success(ConfigRequirementsToml())
+        }
+
+        async let first = loader.get()
+        async let second = loader.get()
+
+        _ = try await (first, second)
+        let invocationCount = await counter.value
+        XCTAssertEqual(invocationCount, 1)
+    }
+
+    func testCloudRequirementsLoaderDefaultReturnsNoRequirementsLikeRust() async throws {
+        let loader = CloudRequirementsLoader()
+
+        let requirements = try await loader.get()
+
+        XCTAssertNil(requirements)
+    }
+
+    func testCloudRequirementsLoadErrorCodesMatchRustSet() {
+        XCTAssertEqual(CloudRequirementsLoadErrorCode.auth.rawValue, "Auth")
+        XCTAssertEqual(CloudRequirementsLoadErrorCode.timeout.rawValue, "Timeout")
+        XCTAssertEqual(CloudRequirementsLoadErrorCode.parse.rawValue, "Parse")
+        XCTAssertEqual(CloudRequirementsLoadErrorCode.requestFailed.rawValue, "RequestFailed")
+        XCTAssertEqual(CloudRequirementsLoadErrorCode.internalError.rawValue, "Internal")
+    }
+}
+
+private actor Counter {
+    private var count = 0
+
+    var value: Int {
+        count
+    }
+
+    func increment() {
+        count += 1
+    }
 }
 
 private func XCTAssertConstraintFailure(

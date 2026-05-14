@@ -12,6 +12,7 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-14: rechecked Rust's shared cloud requirements loader from `codex-rs/config/src/cloud_requirements.rs`. Swift now exposes the same completed error-code set and a run-once async `CloudRequirementsLoader` whose concurrent callers share a single underlying result, with the default loader returning no requirements.
 - 2026-05-14: rechecked Rust's cloud-requirements TOML parsing helper from `codex-rs/cloud-requirements/src/lib.rs`. Swift now has the same pure parsing boundary for workspace-managed requirements: blank or empty requirements return no requirements, populated requirements reuse the shared `ConfigRequirementsToml` parser, and parse failures use Rust's fixed admin-facing prefix plus details.
 - 2026-05-14: rechecked Rust's `codex_git_commit` commit-attribution helper from `codex-rs/core/src/commit_attribution.rs` and session prompt assembly. Swift now resolves the default/custom/blank `commit_attribution` values into Rust's exact `Co-authored-by:` trailer instruction and includes it in non-interactive/debug prompt input only when the `codex_git_commit` feature is enabled.
 - 2026-05-14: rechecked Rust's `[tui.keymap]` config schema from `codex-rs/config/src/tui_keymap.rs`. Swift config loading now accepts Rust-shaped keymap contexts and string/list bindings, preserves empty-list unbinding, normalizes key aliases and modifier ordering, and rejects misplaced or misspelled keymap actions instead of silently ignoring them.
