@@ -24484,6 +24484,9 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         let modelSlug: String
         let cwd: URL
         let approvalPolicy: AskForApproval?
+        let threadSource: ThreadSource?
+        let subagentSource: String?
+        let parentThreadID: String?
     }
 
     private struct FeaturedPluginIDsCache {
@@ -24840,8 +24843,32 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         threadAnalyticsMetadata[threadID] = ThreadAnalyticsMetadata(
             modelSlug: modelSlug,
             cwd: URL(fileURLWithPath: cwd, isDirectory: true),
-            approvalPolicy: (result["approvalPolicy"] as? String).flatMap(AskForApproval.init(rawValue:))
+            approvalPolicy: (result["approvalPolicy"] as? String).flatMap(AskForApproval.init(rawValue:)),
+            threadSource: (result["thread"] as? [String: Any])
+                .flatMap { CodexAppServer.stringParam($0["threadSource"]) }
+                .flatMap(ThreadSource.init(rawValue:)),
+            subagentSource: Self.analyticsSubagentSource(configuration.sessionSource),
+            parentThreadID: Self.analyticsParentThreadID(configuration.sessionSource)
         )
+    }
+
+    private static func analyticsSubagentSource(_ sessionSource: SessionSource) -> String? {
+        guard case let .subagent(source) = sessionSource else {
+            return nil
+        }
+        switch source {
+        case .review, .compact, .memoryConsolidation, .other:
+            return source.description
+        case .threadSpawn:
+            return "thread_spawn"
+        }
+    }
+
+    private static func analyticsParentThreadID(_ sessionSource: SessionSource) -> String? {
+        guard case let .subagent(.threadSpawn(parentThreadID, _, _, _, _)) = sessionSource else {
+            return nil
+        }
+        return parentThreadID.description
     }
 
     private func rememberLoadedThreadFeatureState(threadID: String) {
@@ -25053,7 +25080,8 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
     }
 
     private func analyticsContext(threadID: String) -> CodexCommandExecutionAnalyticsContext {
-        CodexCommandExecutionAnalyticsContext(
+        let metadata = threadAnalyticsMetadata[threadID]
+        return CodexCommandExecutionAnalyticsContext(
             appServerClient: CodexAppServerClientMetadata(
                 productClientID: configuration.originator,
                 clientVersion: configuration.version,
@@ -25066,9 +25094,9 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                 runtimeOSVersion: ProcessInfo.processInfo.operatingSystemVersionString,
                 runtimeArch: CodexAppServer.runtimeArch
             ),
-            threadSource: nil,
-            subagentSource: nil,
-            parentThreadID: nil
+            threadSource: metadata?.threadSource,
+            subagentSource: metadata?.subagentSource,
+            parentThreadID: metadata?.parentThreadID
         )
     }
 

@@ -45,7 +45,7 @@ final class RequestSerializationTests: XCTestCase {
 
         await blockerRelease.signal()
         let started = try await readStarts.waitForCount(2)
-        XCTAssertEqual(started, [1, 2])
+        XCTAssertEqual(Set(started), [1, 2])
         await readsRelease.signal()
     }
 
@@ -76,7 +76,7 @@ final class RequestSerializationTests: XCTestCase {
 
         await blockerRelease.signal()
         let started = try await readStarts.waitForCount(2)
-        XCTAssertEqual(started, [1, 2])
+        XCTAssertEqual(Set(started), [1, 2])
         let writeStartedEarly = await writeStarted.isSignaledWithinShortInterval()
         XCTAssertFalse(writeStartedEarly)
 

@@ -4740,6 +4740,77 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(params.exitCode, Int32(0))
     }
 
+    func testRuntimeToolAnalyticsIncludesThreadAndSubagentMetadataLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let analyticsUploader = AppServerRecordingCodexAnalyticsUploader()
+        let notificationCapture = AppServerNotificationCapture()
+        let parentThreadID = try ThreadId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                sessionSource: .subagent(.threadSpawn(parentThreadID: parentThreadID, depth: 1)),
+                codexAnalyticsUploader: analyticsUploader
+            ),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider","threadSource":"subagent"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let command = ["/bin/sh", "-lc", "true"]
+        await processor.handleRuntimeEvent(
+            threadID: threadID,
+            turnID: "turn-1",
+            event: .execCommandBegin(ExecCommandBeginEvent(
+                callID: "cmd-1",
+                processID: "proc-1",
+                turnID: "runtime-turn",
+                startedAtMilliseconds: 43,
+                command: command,
+                cwd: "/tmp/project",
+                parsedCmd: [],
+                source: .agent
+            ))
+        )
+        _ = try await nextNotificationPayload(notificationCapture)
+
+        await processor.handleRuntimeEvent(
+            threadID: threadID,
+            turnID: "turn-1",
+            event: .execCommandEnd(ExecCommandEndEvent(
+                callID: "cmd-1",
+                processID: "proc-1",
+                turnID: "runtime-turn",
+                completedAtMilliseconds: 99,
+                command: command,
+                cwd: "/tmp/project",
+                parsedCmd: [],
+                source: .agent,
+                stdout: "",
+                stderr: "",
+                aggregatedOutput: "",
+                exitCode: 0,
+                duration: ProtocolDuration(secs: 0, nanos: 0),
+                formattedOutput: "",
+                status: .completed
+            ))
+        )
+        _ = try await nextNotificationPayload(notificationCapture)
+
+        let analyticsRequests = await analyticsUploader.requests
+        let analyticsEvent = try XCTUnwrap(analyticsRequests.first?.events.first)
+        guard case let .commandExecution(commandEvent) = analyticsEvent else {
+            return XCTFail("expected command execution analytics event")
+        }
+        XCTAssertEqual(commandEvent.eventParams.base.threadSource, .subagent)
+        XCTAssertEqual(commandEvent.eventParams.base.subagentSource, "thread_spawn")
+        XCTAssertEqual(commandEvent.eventParams.base.parentThreadID, parentThreadID.description)
+    }
+
     func testRuntimeExecCommandEndWithoutBeginIsSuppressedLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()
@@ -28939,6 +29010,7 @@ final class CodexAppServerTests: XCTestCase {
         codexHome: URL,
         cwd: URL? = nil,
         requiresOpenAIAuth: Bool = true,
+        sessionSource: SessionSource = .mcp,
         feedback: CodexFeedback = CodexFeedback(),
         feedbackUploadTransport: any FeedbackUploadTransport = URLSessionFeedbackUploadTransport(),
         acceptedLineAnalyticsUploader: any AcceptedLineAnalyticsUploading = DisabledAcceptedLineAnalyticsUploader(),
@@ -28974,6 +29046,7 @@ final class CodexAppServerTests: XCTestCase {
             codexHome: codexHome,
             cwd: cwd ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true),
             requiresOpenAIAuth: requiresOpenAIAuth,
+            sessionSource: sessionSource,
             environment: mergedEnvironment,
             feedback: feedback,
             feedbackUploadTransport: feedbackUploadTransport,
