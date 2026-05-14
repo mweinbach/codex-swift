@@ -392,6 +392,33 @@ final class CommandSurfaceCLITests: XCTestCase {
         }
     }
 
+    func testRunAsyncRejectsDuplicateRootProfileBeforeRunner() async {
+        let cases = [
+            ["--profile", "first", "--profile", "second", "exec", "ship it"],
+            ["-pfirst", "--profile=second", "resume", "--last"]
+        ]
+
+        for arguments in cases {
+            var stderr: [String] = []
+            let exitCode = await CodexCLI().runAsync(
+                arguments: arguments,
+                stdout: { _ in XCTFail("stdout should not be written for \(arguments)") },
+                stderr: { stderr.append($0) },
+                execRunner: { _ in
+                    XCTFail("exec runner should not be called for \(arguments)")
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                },
+                resumeRunner: { _ in
+                    XCTFail("resume runner should not be called for \(arguments)")
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                }
+            )
+
+            XCTAssertEqual(exitCode, 64, "\(arguments)")
+            XCTAssertEqual(stderr, ["codex-swift: duplicate option at top level: --profile"], "\(arguments)")
+        }
+    }
+
     func testRunAsyncComputerUseParsesGuiFlagAndDelegatesExecArguments() async {
         var receivedRequest: CodexCLI.ComputerUseCommandRequest?
 

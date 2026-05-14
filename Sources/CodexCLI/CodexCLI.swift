@@ -833,6 +833,10 @@ public struct CodexCLI: Sendable {
         updateRunner: UpdateCommandRunner? = nil
     ) async -> Int32 {
         let invocation = parseInvocation(arguments: arguments)
+        if let message = rootDuplicateProfileRejectionMessage(invocation: invocation, arguments: arguments) {
+            stderr(message)
+            return 64
+        }
         if let message = rootRemovedFullAutoRejectionMessage(invocation: invocation, arguments: arguments) {
             stderr(message)
             return 64
@@ -3237,6 +3241,43 @@ public struct CodexCLI: Sendable {
                 ? "codex-swift: unsupported option at top level: --full-auto"
                 : nil
         }
+    }
+
+    private func rootDuplicateProfileRejectionMessage(invocation: Invocation, arguments: [String]) -> String? {
+        let commandNames: [String] = switch invocation {
+        case let .command(spec, _):
+            [spec.name] + spec.aliases
+        case .version, .help, .interactive, .unknown:
+            []
+        }
+
+        var seenProfile = false
+        var index = 0
+        while index < arguments.count {
+            let argument = arguments[index]
+            if argument == "--" || commandNames.contains(argument) {
+                return nil
+            }
+
+            if argument == "--profile" || argument == "-p" ||
+                argument.hasPrefix("--profile=") ||
+                argument.hasPrefix("-p") && argument.count > 2 && !argument.hasPrefix("--") {
+                guard !seenProfile else {
+                    return "codex-swift: duplicate option at top level: --profile"
+                }
+                seenProfile = true
+                index += (argument == "--profile" || argument == "-p") ? 2 : 1
+                continue
+            }
+
+            if optionConsumesValue(argument) {
+                index += 2
+            } else {
+                index += 1
+            }
+        }
+
+        return nil
     }
 
     private func rootInteractivePermissionConflictRejectionMessage(
