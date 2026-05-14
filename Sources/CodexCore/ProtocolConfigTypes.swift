@@ -102,6 +102,17 @@ public enum CollaborationModeKind: String, Codable, CaseIterable, Equatable, Sen
             return "Default"
         }
     }
+
+    public var isTUIVisible: Bool {
+        switch self {
+        case .plan, .defaultMode:
+            return true
+        }
+    }
+
+    public var allowsRequestUserInput: Bool {
+        self == .plan
+    }
 }
 
 public struct CollaborationModeSettings: Codable, Equatable, Sendable {

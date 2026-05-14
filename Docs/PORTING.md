@@ -119,6 +119,7 @@ Recent upstream audit checkpoint:
   - approval response wire strings, timeout decision, externally tagged execpolicy/network-policy amendment approval payloads, and denied default
 - `codex-rs/protocol/src/user_input.rs`
   - tagged user input variants for text, images, local images, skills, and structured mentions, including `text_elements` byte ranges/placeholders
+  - request-user-input argument helpers now preserve Rust's available-mode gating, model-facing description/unavailable text, non-empty options requirement, and normalization that enables the client-provided `Other` option for every question.
 - `codex-rs/protocol/src/plan_tool.rs`
   - update-plan argument wire shapes
 - `codex-rs/protocol/src/custom_prompts.rs`

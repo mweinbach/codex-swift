@@ -54,6 +54,69 @@ final class RequestResponseOperationTests: XCTestCase {
         XCTAssertEqual(event.turnID, "")
     }
 
+    func testRequestUserInputAvailableModesAndDescriptionsMatchRust() {
+        let defaultModes = RequestUserInputToolConfig.availableModes(features: .withDefaults())
+        XCTAssertEqual(defaultModes, [.plan])
+        XCTAssertNil(RequestUserInputToolConfig.unavailableMessage(mode: .plan, availableModes: defaultModes))
+        XCTAssertEqual(
+            RequestUserInputToolConfig.unavailableMessage(mode: .defaultMode, availableModes: defaultModes),
+            "request_user_input is unavailable in Default mode"
+        )
+        XCTAssertEqual(
+            RequestUserInputToolConfig.toolDescription(availableModes: defaultModes),
+            "Request user input for one to three short questions and wait for the response. This tool is only available in Plan mode."
+        )
+
+        var features = FeatureStates.withDefaults()
+        features.set(.defaultModeRequestUserInput, enabled: true)
+        let defaultModeEnabled = RequestUserInputToolConfig.availableModes(features: features)
+        XCTAssertEqual(defaultModeEnabled, [.defaultMode, .plan])
+        XCTAssertNil(RequestUserInputToolConfig.unavailableMessage(mode: .defaultMode, availableModes: defaultModeEnabled))
+        XCTAssertEqual(
+            RequestUserInputToolConfig.toolDescription(availableModes: defaultModeEnabled),
+            "Request user input for one to three short questions and wait for the response. This tool is only available in Default or Plan mode."
+        )
+    }
+
+    func testRequestUserInputNormalizationRequiresOptionsAndEnablesOtherLikeRust() throws {
+        let args = RequestUserInputArgs(questions: [
+            RequestUserInputQuestion(
+                id: "choice",
+                header: "Choice",
+                question: "Pick one",
+                isOther: false,
+                isSecret: true,
+                options: [RequestUserInputQuestionOption(label: "Manual", description: "Type it")]
+            )
+        ])
+
+        let normalized = try args.normalized()
+        XCTAssertEqual(normalized.questions.count, 1)
+        XCTAssertTrue(normalized.questions[0].isOther)
+        XCTAssertTrue(normalized.questions[0].isSecret)
+        XCTAssertEqual(normalized.questions[0].options, args.questions[0].options)
+
+        XCTAssertThrowsError(try RequestUserInputArgs(questions: [
+            RequestUserInputQuestion(id: "missing", header: "Missing", question: "No options")
+        ]).normalized()) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "request_user_input requires non-empty options for every question"
+            )
+        }
+
+        XCTAssertThrowsError(try RequestUserInputArgs(questions: [
+            RequestUserInputQuestion(
+                id: "empty",
+                header: "Empty",
+                question: "No options",
+                options: []
+            )
+        ]).normalized()) { error in
+            XCTAssertEqual(error as? RequestUserInputNormalizationError, .missingOptions)
+        }
+    }
+
     func testResponseOperationsWireShapes() throws {
         let userInput = Op.userInputAnswer(
             id: "turn-1",

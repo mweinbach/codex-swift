@@ -1,5 +1,53 @@
 import Foundation
 
+public enum RequestUserInputNormalizationError: Error, Equatable, CustomStringConvertible, Sendable {
+    case missingOptions
+
+    public var description: String {
+        switch self {
+        case .missingOptions:
+            return "request_user_input requires non-empty options for every question"
+        }
+    }
+}
+
+public enum RequestUserInputToolConfig {
+    public static func availableModes(features: FeatureStates) -> [CollaborationModeKind] {
+        CollaborationModeRegistry.tuiVisibleModes.filter { mode in
+            mode.allowsRequestUserInput
+                || (features.isEnabled(.defaultModeRequestUserInput) && mode == .defaultMode)
+        }
+    }
+
+    public static func unavailableMessage(
+        mode: CollaborationModeKind,
+        availableModes: [CollaborationModeKind]
+    ) -> String? {
+        guard !availableModes.contains(mode) else {
+            return nil
+        }
+        return "request_user_input is unavailable in \(mode.displayName) mode"
+    }
+
+    public static func toolDescription(availableModes: [CollaborationModeKind]) -> String {
+        "Request user input for one to three short questions and wait for the response. This tool is only available in \(formattedAllowedModes(availableModes))."
+    }
+
+    private static func formattedAllowedModes(_ availableModes: [CollaborationModeKind]) -> String {
+        let modeNames = availableModes.map(\.displayName)
+        switch modeNames.count {
+        case 0:
+            return "no modes"
+        case 1:
+            return "\(modeNames[0]) mode"
+        case 2:
+            return "\(modeNames[0]) or \(modeNames[1]) mode"
+        default:
+            return "modes: \(modeNames.joined(separator: ","))"
+        }
+    }
+}
+
 public struct RequestUserInputQuestionOption: Codable, Equatable, Sendable {
     public let label: String
     public let description: String
@@ -69,6 +117,25 @@ public struct RequestUserInputArgs: Codable, Equatable, Sendable {
 
     public init(questions: [RequestUserInputQuestion]) {
         self.questions = questions
+    }
+
+    public func normalized() throws -> RequestUserInputArgs {
+        guard questions.allSatisfy({ question in
+            question.options?.isEmpty == false
+        }) else {
+            throw RequestUserInputNormalizationError.missingOptions
+        }
+
+        return RequestUserInputArgs(questions: questions.map { question in
+            RequestUserInputQuestion(
+                id: question.id,
+                header: question.header,
+                question: question.question,
+                isOther: true,
+                isSecret: question.isSecret,
+                options: question.options
+            )
+        })
     }
 }
 
