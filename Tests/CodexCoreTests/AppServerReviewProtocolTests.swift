@@ -92,6 +92,33 @@ final class AppServerReviewProtocolTests: XCTestCase {
         XCTAssertNil(decoded.delivery)
     }
 
+    func testReviewStartPayloadsDecodeRustOmittedDeliveryDefault() throws {
+        let decoded = try JSONDecoder().decode(
+            ReviewStartParams.self,
+            from: Data(
+                #"""
+                {
+                  "threadId": "thread-1",
+                  "target": {
+                    "type": "uncommittedChanges"
+                  }
+                }
+                """#.utf8
+            )
+        )
+
+        XCTAssertEqual(decoded.threadID, "thread-1")
+        XCTAssertEqual(decoded.target, .uncommittedChanges)
+        XCTAssertNil(decoded.delivery)
+        try XCTAssertJSONObjectEqual(decoded, [
+            "threadId": "thread-1",
+            "target": [
+                "type": "uncommittedChanges"
+            ],
+            "delivery": NSNull()
+        ])
+    }
+
     func testReviewStartResponseEncodesRustWireShape() throws {
         let turn = AppServerTurn(
             id: "turn-1",
