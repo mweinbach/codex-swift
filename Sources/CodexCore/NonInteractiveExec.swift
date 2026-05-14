@@ -770,9 +770,10 @@ public enum NonInteractiveExec {
         approvalGranted: Bool
     ) async -> ResponseItem {
         switch item {
-        case let .functionCall(_, name, _, arguments, callID):
+        case let .functionCall(_, name, namespace, arguments, callID):
             return await executeFunctionCall(
                 name: name,
+                namespace: namespace,
                 arguments: arguments,
                 callID: callID,
                 cwd: cwd,
@@ -1333,6 +1334,7 @@ public enum NonInteractiveExec {
 
     private static func executeFunctionCall(
         name: String,
+        namespace: String?,
         arguments: String,
         callID: String,
         cwd: URL,
@@ -1485,6 +1487,19 @@ public enum NonInteractiveExec {
                     context: agentJobContext
                 ) {
                     return agentJobOutput
+                }
+                if features.isEnabled(.unavailableDummyTools),
+                   ToolSpecFactory.shouldCollectUnavailableTool(name: name, namespace: namespace)
+                {
+                    let toolName = UnavailableToolName(namespace: namespace, name: name).flatName
+                    return functionOutput(
+                        callID: callID,
+                        content: ToolSpecFactory.unavailableToolMessage(
+                            toolName: toolName,
+                            nextStep: "Retry after the tool becomes available or ask the user to re-enable it."
+                        ),
+                        success: false
+                    )
                 }
                 return functionOutput(
                     callID: callID,

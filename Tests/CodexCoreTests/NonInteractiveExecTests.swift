@@ -2317,6 +2317,61 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("created.txt").path))
     }
 
+    func testUnavailableMcpToolCallUsesRustPlaceholderMessage() async throws {
+        let output = await NonInteractiveExec.executeFunctionCall(
+            .functionCall(
+                name: "_create_event",
+                namespace: "mcp__codex_apps__calendar",
+                arguments: "{}",
+                callID: "call-mcp"
+            ),
+            cwd: URL(fileURLWithPath: "/tmp", isDirectory: true),
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: [:]
+        )
+
+        guard case let .functionCallOutput(callID, payload) = output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-mcp")
+        XCTAssertEqual(payload.success, false)
+        XCTAssertEqual(
+            payload.content,
+            "Tool `mcp__codex_apps__calendar_create_event` is not currently available. It appeared in earlier tool calls in this conversation, but its implementation is not available in the current request. Retry after the tool becomes available or ask the user to re-enable it."
+        )
+    }
+
+    func testUnavailableMcpToolCallFallsBackToUnsupportedWhenFeatureDisabled() async throws {
+        var features = FeatureStates.withDefaults()
+        features.set(.unavailableDummyTools, enabled: false)
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            .functionCall(
+                name: "_create_event",
+                namespace: "mcp__codex_apps__calendar",
+                arguments: "{}",
+                callID: "call-mcp"
+            ),
+            cwd: URL(fileURLWithPath: "/tmp", isDirectory: true),
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: [:],
+            features: features
+        )
+
+        guard case let .functionCallOutput(callID, payload) = output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-mcp")
+        XCTAssertEqual(payload.success, false)
+        XCTAssertEqual(payload.content, "unsupported call: _create_event")
+    }
+
     func testReportAgentJobResultRequiresAgentJobContext() async throws {
         let output = await NonInteractiveExec.executeFunctionCall(
             .functionCall(
