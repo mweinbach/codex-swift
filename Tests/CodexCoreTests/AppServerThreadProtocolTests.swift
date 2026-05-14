@@ -84,6 +84,64 @@ final class AppServerThreadProtocolTests: XCTestCase {
         XCTAssertEqual(params.itemsView, .notLoaded)
     }
 
+    func testAgentMessageItemCarriesMemoryCitationLikeRustProtocol() throws {
+        let citation = AppServerMemoryCitation(
+            entries: [
+                AppServerMemoryCitationEntry(
+                    path: "MEMORY.md",
+                    lineStart: 12,
+                    lineEnd: 14,
+                    note: "port checkpoint"
+                )
+            ],
+            threadIDs: ["019cc2ea-1dff-7902-8d40-c8f6e5d83cc4"]
+        )
+        let item = AppServerThreadItem.agentMessage(
+            id: "item-1",
+            text: "Ready",
+            phase: .finalAnswer,
+            memoryCitation: citation
+        )
+
+        try XCTAssertJSONObjectEqual(item, [
+            "type": "agentMessage",
+            "id": "item-1",
+            "text": "Ready",
+            "phase": "final_answer",
+            "memoryCitation": [
+                "entries": [[
+                    "path": "MEMORY.md",
+                    "lineStart": 12,
+                    "lineEnd": 14,
+                    "note": "port checkpoint"
+                ]],
+                "threadIds": ["019cc2ea-1dff-7902-8d40-c8f6e5d83cc4"]
+            ]
+        ])
+
+        let decoded = try JSONDecoder().decode(
+            AppServerThreadItem.self,
+            from: Data(#"""
+            {
+              "type": "agentMessage",
+              "id": "item-1",
+              "text": "Ready",
+              "phase": "final_answer",
+              "memoryCitation": {
+                "entries": [{
+                  "path": "MEMORY.md",
+                  "lineStart": 12,
+                  "lineEnd": 14,
+                  "note": "port checkpoint"
+                }],
+                "threadIds": ["019cc2ea-1dff-7902-8d40-c8f6e5d83cc4"]
+              }
+            }
+            """#.utf8)
+        )
+        XCTAssertEqual(decoded, item)
+    }
+
     func testThreadLoadedListRoundTripsLikeRustProtocol() throws {
         let params = ThreadLoadedListParams(cursor: "thread-1", limit: 25)
 

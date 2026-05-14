@@ -215,8 +215,53 @@ public struct AppServerTurnError: Equatable, Codable, Sendable {
     }
 }
 
+public struct AppServerMemoryCitation: Equatable, Codable, Sendable {
+    public let entries: [AppServerMemoryCitationEntry]
+    public let threadIDs: [String]
+
+    private enum CodingKeys: String, CodingKey {
+        case entries
+        case threadIDs = "threadIds"
+    }
+
+    public init(entries: [AppServerMemoryCitationEntry] = [], threadIDs: [String] = []) {
+        self.entries = entries
+        self.threadIDs = threadIDs
+    }
+
+    public init(_ citation: MemoryCitation) {
+        self.init(
+            entries: citation.entries.map(AppServerMemoryCitationEntry.init),
+            threadIDs: citation.rolloutIDs
+        )
+    }
+}
+
+public struct AppServerMemoryCitationEntry: Equatable, Codable, Sendable {
+    public let path: String
+    public let lineStart: UInt32
+    public let lineEnd: UInt32
+    public let note: String
+
+    public init(path: String, lineStart: UInt32, lineEnd: UInt32, note: String) {
+        self.path = path
+        self.lineStart = lineStart
+        self.lineEnd = lineEnd
+        self.note = note
+    }
+
+    public init(_ entry: MemoryCitationEntry) {
+        self.init(
+            path: entry.path,
+            lineStart: entry.lineStart,
+            lineEnd: entry.lineEnd,
+            note: entry.note
+        )
+    }
+}
+
 public enum AppServerThreadItem: Equatable, Sendable {
-    case agentMessage(id: String, text: String, phase: MessagePhase? = nil)
+    case agentMessage(id: String, text: String, phase: MessagePhase? = nil, memoryCitation: AppServerMemoryCitation? = nil)
     case plan(id: String, text: String)
     case reasoning(id: String, summary: [String] = [], content: [String] = [])
     case contextCompaction(id: String)
@@ -226,6 +271,7 @@ public enum AppServerThreadItem: Equatable, Sendable {
         case id
         case text
         case phase
+        case memoryCitation
         case summary
         case content
     }
@@ -239,7 +285,7 @@ public enum AppServerThreadItem: Equatable, Sendable {
 
     public var id: String {
         switch self {
-        case let .agentMessage(id, _, _),
+        case let .agentMessage(id, _, _, _),
              let .plan(id, _),
              let .reasoning(id, _, _),
              let .contextCompaction(id):
@@ -256,7 +302,8 @@ extension AppServerThreadItem: Codable {
             self = .agentMessage(
                 id: try container.decode(String.self, forKey: .id),
                 text: try container.decode(String.self, forKey: .text),
-                phase: try container.decodeIfPresent(MessagePhase.self, forKey: .phase)
+                phase: try container.decodeIfPresent(MessagePhase.self, forKey: .phase),
+                memoryCitation: try container.decodeIfPresent(AppServerMemoryCitation.self, forKey: .memoryCitation)
             )
         case .plan:
             self = .plan(
@@ -277,11 +324,12 @@ extension AppServerThreadItem: Codable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case let .agentMessage(id, text, phase):
+        case let .agentMessage(id, text, phase, memoryCitation):
             try container.encode(ItemType.agentMessage, forKey: .type)
             try container.encode(id, forKey: .id)
             try container.encode(text, forKey: .text)
             try container.encodeIfPresent(phase, forKey: .phase)
+            try container.encodeIfPresent(memoryCitation, forKey: .memoryCitation)
         case let .plan(id, text):
             try container.encode(ItemType.plan, forKey: .type)
             try container.encode(id, forKey: .id)
