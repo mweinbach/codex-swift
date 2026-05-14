@@ -1313,6 +1313,12 @@ public enum CodexAppServer {
             configuration: configuration
         )
         let conversationID = ConversationId()
+        try exportConfigLockForThreadStartIfConfigured(
+            runtimeConfig: runtimeConfig,
+            cwd: cwd,
+            conversationID: conversationID,
+            configuration: configuration
+        )
         if try rustOptionalBoolParam(params?["ephemeral"], defaultValue: false) {
             return AppServerStartedConversation(
                 conversationID: conversationID,
@@ -1373,6 +1379,34 @@ public enum CodexAppServer {
             instructionSources: instructionSources,
             ephemeral: false,
             runtimeConfig: runtimeConfig
+        )
+    }
+
+    private static func exportConfigLockForThreadStartIfConfigured(
+        runtimeConfig: CodexRuntimeConfig,
+        cwd: URL,
+        conversationID: ConversationId,
+        configuration: CodexAppServerConfiguration
+    ) throws {
+        guard let exportDir = runtimeConfig.configLockfile.exportDir else {
+            return
+        }
+        let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: configuration.codexHome,
+            cwd: cwd,
+            cliOverrides: configuration.cliConfigOverrides,
+            threadConfigSources: configuration.threadConfigSources,
+            overrides: configuration.configLayerOverrides,
+            environment: configuration.environment
+        )
+        let lockfile = ConfigLockfile.current(
+            config: ConfigLockfileStore.configWithoutLockControls(stack.effectiveConfig()),
+            codexVersion: configuration.version
+        )
+        try ConfigLockfileStore.exportConfigLockfile(
+            lockfile,
+            to: URL(fileURLWithPath: exportDir, isDirectory: true),
+            threadID: ThreadId(uuid: conversationID.uuid)
         )
     }
 

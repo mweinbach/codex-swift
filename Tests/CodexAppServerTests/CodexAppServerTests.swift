@@ -903,6 +903,37 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(rollout.contains(#""instructions":"dev notes""#))
     }
 
+    func testThreadStartExportsConfigLockfileWhenConfiguredLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        retainedTemporaryDirectories.append(cwd)
+        let exportDir = temp.url.appendingPathComponent("locks", isDirectory: true)
+        try """
+        model = "gpt-user"
+
+        [debug.config_lockfile]
+        export_dir = "\(exportDir.path)"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider","cwd":"\#(cwd.url.path)"}}"#.utf8
+        )))
+
+        let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+        let lockPath = exportDir.appendingPathComponent("\(threadID).config.lock.toml", isDirectory: false)
+        let lockfile = try ConfigLockfileStore.readConfigLockfile(from: lockPath.path)
+        XCTAssertEqual(lockfile.version, configLockfileVersion)
+        XCTAssertEqual(lockfile.codexVersion, "0.0.0")
+        guard case let .table(config) = lockfile.config else {
+            return XCTFail("expected config table")
+        }
+        XCTAssertEqual(config["model"], .string("gpt-user"))
+        XCTAssertNil(config["debug"])
+    }
+
     func testThreadStartPersistsThreadSourceInResponseNotificationAndMetadataLikeRust() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
