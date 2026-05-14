@@ -393,6 +393,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var agents: AgentRuntimeConfig
     public var multiAgentV2: MultiAgentV2Config
     public var configLockfile: ConfigLockfileDebugConfig
+    public var configLockToml: ConfigLockfile?
     public var agentRoles: [String: AgentRoleConfig]
     public var startupWarnings: [String]
     public var fileOpener: UriBasedFileOpener
@@ -583,6 +584,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.agents = AgentRuntimeConfig()
         self.multiAgentV2 = MultiAgentV2Config()
         self.configLockfile = ConfigLockfileDebugConfig()
+        self.configLockToml = nil
         self.agentRoles = [:]
         self.startupWarnings = []
         self.fileOpener = .vsCode
@@ -1286,6 +1288,12 @@ public enum CodexConfigLoader {
             cwd: cwd ?? codexHome
         )
         applyNetworkRequirements(requirements, to: &config)
+        if let loadPath = config.configLockfile.loadPath {
+            config.configLockToml = try ConfigLockfileStore.readConfigLockfile(
+                from: loadPath,
+                fileManager: fileManager
+            )
+        }
         return config
     }
 

@@ -1725,18 +1725,20 @@ final class CommandSurfaceCLITests: XCTestCase {
     }
 
     func testDebugRuntimeModelsOnlineUsesRawCatalogLoader() async throws {
-        let expected = ModelsResponse(models: [])
         let result = try await DebugCommandRuntime.run(CodexCLI.DebugCommandRequest(
             action: .models(bundled: false)
         ), dependencies: Self.debugModelDependencies(
-            loadRawModelCatalog: { _, _ in expected }
+            loadRawModelCatalog: { _, _ in ModelsResponse(models: [], etag: "online-fixture") }
         ))
 
         XCTAssertEqual(result.exitCode, 0)
         XCTAssertNil(result.stderrMessage)
         let output = try XCTUnwrap(result.stdoutMessage)
         XCTAssertTrue(output.hasSuffix("\n"))
-        XCTAssertEqual(try JSONDecoder().decode(ModelsResponse.self, from: Data(output.utf8)), expected)
+        XCTAssertEqual(
+            try JSONDecoder().decode(ModelsResponse.self, from: Data(output.utf8)),
+            ModelsResponse(models: [], etag: "online-fixture")
+        )
     }
 
     func testRunAsyncNewCommandHooksWithoutRunnersStillReportUnimplemented() async {

@@ -95,6 +95,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.agents, AgentRuntimeConfig())
         XCTAssertEqual(config.multiAgentV2, MultiAgentV2Config())
         XCTAssertEqual(config.configLockfile, ConfigLockfileDebugConfig())
+        XCTAssertNil(config.configLockToml)
         XCTAssertEqual(config.agentRoles, [:])
         XCTAssertEqual(config.fileOpener, .vsCode)
         XCTAssertEqual(config.tui, TuiRuntimeConfig())
@@ -299,6 +300,13 @@ final class ConfigLoaderTests: XCTestCase {
 
     func testDebugConfigLockfileSettingsLoadFromNestedTableLikeRust() throws {
         let dir = try CoreTemporaryDirectory()
+        let lockPath = dir.url.appendingPathComponent("session.config.lock.toml")
+        try """
+        version = 1
+        codex_version = "older-version"
+
+        [config]
+        """.write(to: lockPath, atomically: true, encoding: .utf8)
         try """
         [debug.config_lockfile]
         export_dir = "locks"
@@ -319,10 +327,22 @@ final class ConfigLoaderTests: XCTestCase {
             allowCodexVersionMismatch: true,
             saveFieldsResolvedFromModelCatalog: false
         ))
+        XCTAssertEqual(config.configLockToml, ConfigLockfile(
+            version: 1,
+            codexVersion: "older-version",
+            config: .table([:])
+        ))
     }
 
     func testDebugConfigLockfileInlineAndOverridesUseRustDefaults() throws {
         let dir = try CoreTemporaryDirectory()
+        let lockPath = dir.url.appendingPathComponent("replay.config.lock.toml")
+        try """
+        version = 1
+        codex_version = "older-version"
+
+        [config]
+        """.write(to: lockPath, atomically: true, encoding: .utf8)
         try """
         debug = { config_lockfile = { export_dir = "locks" } }
         """.write(
@@ -334,16 +354,52 @@ final class ConfigLoaderTests: XCTestCase {
         let config = try CodexConfigLoader.load(
             codexHome: dir.url,
             overrides: CliConfigOverrides(rawOverrides: [
-                #"debug.config_lockfile.load_path="/tmp/replay.config.lock.toml""#
+                #"debug.config_lockfile.load_path="\#(lockPath.path)""#
             ]),
             systemConfigFile: nil
         )
 
         XCTAssertEqual(config.configLockfile, ConfigLockfileDebugConfig(
             exportDir: dir.url.appendingPathComponent("locks", isDirectory: true).path,
-            loadPath: "/tmp/replay.config.lock.toml",
+            loadPath: lockPath.path,
             allowCodexVersionMismatch: false,
             saveFieldsResolvedFromModelCatalog: true
+        ))
+        XCTAssertEqual(config.configLockToml, ConfigLockfile(
+            version: 1,
+            codexVersion: "older-version",
+            config: .table([:])
+        ))
+    }
+
+    func testDebugConfigLockfileLoadPathReadsLockLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let lockPath = dir.url.appendingPathComponent("session.config.lock.toml")
+        try """
+        version = 1
+        codex_version = "older-version"
+
+        [config]
+        model = "gpt-5.1-codex-max"
+        """.write(to: lockPath, atomically: true, encoding: .utf8)
+        try """
+        [debug.config_lockfile]
+        load_path = "session.config.lock.toml"
+        allow_codex_version_mismatch = true
+        save_fields_resolved_from_model_catalog = false
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.configLockfile, ConfigLockfileDebugConfig(
+            loadPath: lockPath.path,
+            allowCodexVersionMismatch: true,
+            saveFieldsResolvedFromModelCatalog: false
+        ))
+        XCTAssertEqual(config.configLockToml, ConfigLockfile(
+            version: 1,
+            codexVersion: "older-version",
+            config: .table(["model": .string("gpt-5.1-codex-max")])
         ))
     }
 
