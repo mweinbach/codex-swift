@@ -107,6 +107,20 @@ public struct McpListToolsResponseEvent: Equatable, Codable, Sendable {
     }
 }
 
+public struct McpToolInfo: Equatable, Sendable {
+    public let serverName: String
+    public let tool: McpTool
+
+    public init(serverName: String, tool: McpTool) {
+        self.serverName = serverName
+        self.tool = tool
+    }
+
+    public var canonicalToolName: String {
+        McpToolName.qualifiedToolName(serverName: serverName, toolName: tool.name)
+    }
+}
+
 public enum McpToolName {
     public static let prefix = "mcp"
     public static let delimiter = "__"
@@ -162,6 +176,20 @@ public enum McpToolName {
             qualifiedTools[qualifiedName] = entry.tool
         }
         return qualifiedTools
+    }
+
+    public static func normalizeToolsForModel(_ tools: [McpToolInfo]) -> [McpToolInfo] {
+        var normalizedTools: [McpToolInfo] = []
+        var usedNames = Set<String>()
+        for tool in tools {
+            let qualifiedName = tool.canonicalToolName
+            guard !usedNames.contains(qualifiedName) else {
+                continue
+            }
+            usedNames.insert(qualifiedName)
+            normalizedTools.append(tool)
+        }
+        return normalizedTools
     }
 }
 

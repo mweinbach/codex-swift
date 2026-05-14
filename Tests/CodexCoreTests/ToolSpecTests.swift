@@ -1309,8 +1309,8 @@ final class ToolSpecTests: XCTestCase {
 
     func testToolSearchIndexReturnsCoalescedDeferredMCPNamespace() throws {
         let index = ToolSearchIndex.mcpIndex(from: [
-            "mcp__calendar__create_event": makeMcpTool(name: "create_event", description: "Create events"),
-            "mcp__calendar__list_events": makeMcpTool(name: "list_events", description: "List events")
+            McpToolInfo(serverName: "calendar", tool: makeMcpTool(name: "create_event", description: "Create events")),
+            McpToolInfo(serverName: "calendar", tool: makeMcpTool(name: "list_events", description: "List events"))
         ])
 
         let tools = try index.search(arguments: .object([
@@ -1329,6 +1329,33 @@ final class ToolSpecTests: XCTestCase {
         XCTAssertEqual(children.count, 2)
         XCTAssertEqual(Set(children.compactMap(toolName)), Set(["create_event", "list_events"]))
         XCTAssertEqual(children.compactMap(deferLoading), [true, true])
+    }
+
+    func testToolSearchIndexDerivesMCPIdentityFromToolInfoLikeRust() throws {
+        let index = ToolSearchIndex.deferredToolIndex(
+            mcpTools: [
+                McpToolInfo(serverName: "docs", tool: makeMcpTool(name: "search", description: "Search docs")),
+                McpToolInfo(serverName: "docs", tool: makeMcpTool(name: "search", description: "Duplicate docs")),
+                McpToolInfo(serverName: "calendar", tool: makeMcpTool(name: "list_events", description: "List events"))
+            ],
+            dynamicTools: []
+        )
+
+        XCTAssertEqual(index.sourceInfos.map(\.name), ["calendar", "docs"])
+
+        let tools = try index.search(arguments: .object([
+            "query": .string("docs search"),
+            "limit": .integer(8)
+        ]))
+
+        XCTAssertEqual(tools.count, 1)
+        guard case let .object(namespace) = tools[0],
+              case let .array(children)? = namespace["tools"]
+        else {
+            return XCTFail("expected namespace result")
+        }
+        XCTAssertEqual(namespace["name"], .string("mcp__docs__"))
+        XCTAssertEqual(children.compactMap(toolName), ["search"])
     }
 
     func testToolSearchIndexRejectsEmptyQueryAndZeroLimitLikeRust() throws {

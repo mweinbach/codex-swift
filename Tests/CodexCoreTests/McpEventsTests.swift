@@ -536,6 +536,26 @@ final class McpEventsTests: XCTestCase {
         XCTAssertEqual(tools["mcp__server1__unique_tool"], makeMcpTool(name: "unique_tool"))
     }
 
+    func testNormalizeToolsForModelDedupesByCanonicalToolNameLikeRust() {
+        let tools = McpToolName.normalizeToolsForModel([
+            McpToolInfo(
+                serverName: "server",
+                tool: McpTool(name: "lookup", inputSchema: McpToolInputSchema(), description: "first")
+            ),
+            McpToolInfo(
+                serverName: "server",
+                tool: McpTool(name: "lookup", inputSchema: McpToolInputSchema(), description: "second")
+            ),
+            McpToolInfo(serverName: "server", tool: makeMcpTool(name: "search"))
+        ])
+
+        XCTAssertEqual(tools.map(\.canonicalToolName), [
+            "mcp__server__lookup",
+            "mcp__server__search"
+        ])
+        XCTAssertEqual(tools.first?.tool.description, "first")
+    }
+
     func testToolFilterAllowsByDefault() {
         XCTAssertTrue(McpToolFilter().allows("any"))
     }
