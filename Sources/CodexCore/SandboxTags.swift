@@ -41,6 +41,27 @@ public enum SandboxTags {
         return PatchSafety.getPlatformSandbox()?.metricTag ?? "none"
     }
 
+    public static func permissionProfilePolicyTag(
+        profile: PermissionProfile,
+        cwd: String
+    ) -> String {
+        switch profile {
+        case .disabled:
+            return "danger-full-access"
+        case .external:
+            return "external-sandbox"
+        case .managed:
+            let fileSystemPolicy = profile.fileSystemSandboxPolicy
+            if fileSystemPolicy.hasFullDiskWriteAccess {
+                return "danger-full-access"
+            }
+            if fileSystemPolicy.getWritableRootsWithCwd(cwd).isEmpty {
+                return "read-only"
+            }
+            return "workspace-write"
+        }
+    }
+
     private static func shouldRequirePlatformSandbox(
         fileSystemPolicy: FileSystemSandboxPolicy,
         networkPolicy: NetworkSandboxPolicy,

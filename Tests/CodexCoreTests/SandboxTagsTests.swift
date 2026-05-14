@@ -94,4 +94,38 @@ final class SandboxTagsTests: XCTestCase {
             PatchSafety.getPlatformSandbox()?.metricTag ?? "none"
         )
     }
+
+    func testPermissionProfilePolicyTagReportsClosestLegacyModeLikeRust() throws {
+        let cwd = "/tmp/codex"
+        let writableRoot = try AbsolutePath(absolutePath: "/tmp/codex/work")
+        let profile = PermissionProfile.fromRuntimePermissions(
+            fileSystem: .restricted(entries: [
+                FileSystemSandboxEntry(path: .path(writableRoot.path), access: .write)
+            ]),
+            network: .restricted
+        )
+
+        XCTAssertEqual(
+            SandboxTags.permissionProfilePolicyTag(profile: profile, cwd: cwd),
+            "workspace-write"
+        )
+    }
+
+    func testPermissionProfilePolicyTagDistinguishesDisabledExternalAndReadOnlyLikeRust() {
+        XCTAssertEqual(
+            SandboxTags.permissionProfilePolicyTag(profile: .disabled, cwd: "/tmp/codex"),
+            "danger-full-access"
+        )
+        XCTAssertEqual(
+            SandboxTags.permissionProfilePolicyTag(
+                profile: .external(network: .restricted),
+                cwd: "/tmp/codex"
+            ),
+            "external-sandbox"
+        )
+        XCTAssertEqual(
+            SandboxTags.permissionProfilePolicyTag(profile: .readOnly(), cwd: "/tmp/codex"),
+            "read-only"
+        )
+    }
 }
