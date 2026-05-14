@@ -1217,6 +1217,7 @@ final class AppServerThreadProtocolTests: XCTestCase {
 
         try XCTAssertJSONObjectEqual(
             ThreadForkResponse(
+                sessionID: "thread-1",
                 thread: thread,
                 model: "gpt-5",
                 modelProvider: "mock_provider",
@@ -1230,7 +1231,7 @@ final class AppServerThreadProtocolTests: XCTestCase {
                 activePermissionProfile: activePermissionProfile,
                 reasoningEffort: .high
             ),
-            expectedConfiguredRuntime
+            expectedConfiguredRuntime.merging(["sessionId": "thread-1"]) { current, _ in current }
         )
     }
 

@@ -1834,6 +1834,7 @@ public struct ThreadResumeResponse: Equatable, Codable, Sendable {
 }
 
 public struct ThreadForkResponse: Equatable, Codable, Sendable {
+    public let sessionID: String
     public let thread: AppServerThread
     public let model: String
     public let modelProvider: String
@@ -1848,6 +1849,7 @@ public struct ThreadForkResponse: Equatable, Codable, Sendable {
     public let reasoningEffort: ReasoningEffort?
 
     private enum CodingKeys: String, CodingKey {
+        case sessionID = "sessionId"
         case thread
         case model
         case modelProvider
@@ -1863,6 +1865,7 @@ public struct ThreadForkResponse: Equatable, Codable, Sendable {
     }
 
     public init(
+        sessionID: String = "",
         thread: AppServerThread,
         model: String,
         modelProvider: String,
@@ -1876,6 +1879,7 @@ public struct ThreadForkResponse: Equatable, Codable, Sendable {
         activePermissionProfile: AppServerActivePermissionProfile?,
         reasoningEffort: ReasoningEffort?
     ) {
+        self.sessionID = sessionID
         self.thread = thread
         self.model = model
         self.modelProvider = modelProvider
@@ -1892,6 +1896,7 @@ public struct ThreadForkResponse: Equatable, Codable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        sessionID = try container.decodeIfPresent(String.self, forKey: .sessionID) ?? ""
         thread = try container.decode(AppServerThread.self, forKey: .thread)
         model = try container.decode(String.self, forKey: .model)
         modelProvider = try container.decode(String.self, forKey: .modelProvider)
@@ -1911,6 +1916,7 @@ public struct ThreadForkResponse: Equatable, Codable, Sendable {
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sessionID, forKey: .sessionID)
         try container.encode(thread, forKey: .thread)
         try container.encode(model, forKey: .model)
         try container.encode(modelProvider, forKey: .modelProvider)
