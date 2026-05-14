@@ -2410,7 +2410,10 @@ public enum NonInteractiveExec {
     ) -> PostToolHookPayload? {
         switch output {
         case let .functionCallOutput(_, payload):
-            return PostToolHookPayload(prePayload: prePayload, toolResponse: .string(payload.content))
+            guard let toolResponse = postToolUseResponse(for: item, output: payload) else {
+                return nil
+            }
+            return PostToolHookPayload(prePayload: prePayload, toolResponse: toolResponse)
         case let .customToolCallOutput(_, _, output):
             return PostToolHookPayload(prePayload: prePayload, toolResponse: .string(output.content))
         default:
@@ -2419,6 +2422,57 @@ public enum NonInteractiveExec {
             }
             return nil
         }
+    }
+
+    private static func postToolUseResponse(
+        for item: ResponseItem,
+        output: FunctionCallOutputPayload
+    ) -> JSONValue? {
+        switch item {
+        case let .functionCall(_, name, _, _, _):
+            switch name {
+            case "exec_command":
+                guard !unifiedExecOutputIsStillRunning(output.content) else {
+                    return nil
+                }
+                return .string(outputTextAfterHeader(in: output.content))
+            case "shell_command":
+                return .string(outputTextAfterHeader(in: output.content))
+            case "shell", "container.exec":
+                return .string(structuredShellOutputText(output.content))
+            default:
+                return .string(output.content)
+            }
+
+        case .localShellCall:
+            return .string(structuredShellOutputText(output.content))
+
+        default:
+            return .string(output.content)
+        }
+    }
+
+    private static func unifiedExecOutputIsStillRunning(_ content: String) -> Bool {
+        content.hasPrefix("Process running with session ID ")
+            || content.contains("\nProcess running with session ID ")
+    }
+
+    private static func outputTextAfterHeader(in content: String) -> String {
+        let marker = "\nOutput:\n"
+        guard let range = content.range(of: marker) else {
+            return content
+        }
+        return String(content[range.upperBound...])
+    }
+
+    private static func structuredShellOutputText(_ content: String) -> String {
+        guard let data = content.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let output = object["output"] as? String
+        else {
+            return content
+        }
+        return output
     }
 
     private static func toolOutputSucceeded(_ output: ResponseItem) -> Bool {
