@@ -206,6 +206,13 @@ public struct AppServerTurnError: Equatable, Codable, Sendable {
         self.codexErrorInfo = codexErrorInfo
         self.additionalDetails = additionalDetails
     }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(message, forKey: .message)
+        try container.encodeNilOrValue(codexErrorInfo, forKey: .codexErrorInfo)
+        try container.encodeNilOrValue(additionalDetails, forKey: .additionalDetails)
+    }
 }
 
 public enum AppServerThreadItem: Equatable, Sendable {

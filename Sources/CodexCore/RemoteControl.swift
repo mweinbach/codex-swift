@@ -60,7 +60,7 @@ public struct RemoteControlConnectionAuth<Auth: APIAuthProvider>: Sendable {
     }
 }
 
-public enum RemoteControlConnectionStatus: String, Equatable, Sendable {
+public enum RemoteControlConnectionStatus: String, Codable, Equatable, Sendable {
     case disabled
     case connecting
     case connected
