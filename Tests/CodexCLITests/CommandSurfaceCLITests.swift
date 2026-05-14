@@ -1625,6 +1625,10 @@ final class CommandSurfaceCLITests: XCTestCase {
             (
                 ["debug", "trace-reduce"],
                 "codex-swift: missing required argument for command 'debug trace-reduce': <TRACE_BUNDLE>"
+            ),
+            (
+                ["debug", "trace-reduce", "/tmp/trace", "--output", "/tmp/a.json", "-o/tmp/b.json"],
+                "codex-swift: duplicate option for command 'debug trace-reduce': --output"
             )
         ]
 

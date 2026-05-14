@@ -4337,11 +4337,26 @@ public struct CodexCLI: Sendable {
     private func parseDebugTraceReduce(_ arguments: [String]) -> ParseResult<DebugCommandAction> {
         var traceBundle: String?
         var output: String?
+        var sawOutput = false
         var index = 0
+
+        func markOutputOption() -> ParseResult<Void> {
+            guard !sawOutput else {
+                return .failure("codex-swift: duplicate option for command 'debug trace-reduce': --output", 64)
+            }
+            sawOutput = true
+            return .success(())
+        }
 
         while index < arguments.count {
             let argument = arguments[index]
             if argument == "--output" || argument == "-o" {
+                switch markOutputOption() {
+                case .success:
+                    break
+                case let .failure(message, code):
+                    return .failure(message, code)
+                }
                 guard index + 1 < arguments.count else {
                     return .failure("codex-swift: missing value for \(argument)", 64)
                 }
@@ -4350,11 +4365,23 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("--output=") {
+                switch markOutputOption() {
+                case .success:
+                    break
+                case let .failure(message, code):
+                    return .failure(message, code)
+                }
                 output = String(argument.dropFirst("--output=".count))
                 index += 1
                 continue
             }
             if argument.hasPrefix("-o"), argument.count > 2, !argument.hasPrefix("--") {
+                switch markOutputOption() {
+                case .success:
+                    break
+                case let .failure(message, code):
+                    return .failure(message, code)
+                }
                 output = String(argument.dropFirst(2))
                 index += 1
                 continue
