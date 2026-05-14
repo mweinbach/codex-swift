@@ -315,6 +315,21 @@ final class ConfiguredEnvironmentsTests: XCTestCase {
         }
     }
 
+    func testEnvironmentIDLengthUsesRustByteLimitBeforeASCIIValidation() throws {
+        let overlongMultiByteID = String(repeating: "é", count: 33)
+
+        XCTAssertThrowsError(try ConfiguredEnvironmentLoader.snapshot(fromToml: """
+        [[environments]]
+        id = "\(overlongMultiByteID)"
+        url = "ws://127.0.0.1:8765"
+        """)) { error in
+            XCTAssertEqual(
+                (error as? ConfiguredEnvironmentLoadError)?.description,
+                "exec-server protocol error: environment id `\(overlongMultiByteID)` cannot be longer than \(ConfiguredEnvironmentLoader.maxEnvironmentIDLength) characters"
+            )
+        }
+    }
+
     func testLoadEnvironmentsTomlWrapsUnknownFieldAsParseError() throws {
         let temp = try ConfiguredEnvironmentTemporaryDirectory()
         try """

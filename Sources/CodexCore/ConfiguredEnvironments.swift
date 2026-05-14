@@ -438,7 +438,7 @@ private extension ConfiguredEnvironmentLoader {
         guard id != localEnvironmentID, !id.caseInsensitiveCompare("none").isOrderedSame else {
             throw ConfiguredEnvironmentLoadError.protocolError("environment id `\(id)` is reserved")
         }
-        guard id.count <= maxEnvironmentIDLength else {
+        guard id.utf8.count <= maxEnvironmentIDLength else {
             throw ConfiguredEnvironmentLoadError.protocolError(
                 "environment id `\(id)` cannot be longer than \(maxEnvironmentIDLength) characters"
             )
