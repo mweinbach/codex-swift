@@ -173,6 +173,110 @@ final class AppServerThreadProtocolTests: XCTestCase {
         XCTAssertEqual(decoded.map(\.id), ["item-user", "item-hook"])
     }
 
+    func testMediaAndSearchItemsUseRustThreadItemShape() throws {
+        let imagePath = try AbsolutePath(absolutePath: "/repo/screenshot.png")
+        let savedPath = try AbsolutePath(absolutePath: "/repo/generated.png")
+        let items: [AppServerThreadItem] = [
+            .webSearch(
+                id: "search-1",
+                query: "swift docs",
+                action: .findInPage(url: "https://swift.org/docs", pattern: "Package")
+            ),
+            .imageView(id: "view-1", path: imagePath),
+            .imageGeneration(
+                id: "image-1",
+                status: "completed",
+                revisedPrompt: nil,
+                result: "base64",
+                savedPath: savedPath
+            )
+        ]
+
+        try XCTAssertJSONObjectEqual(items[0], [
+            "type": "webSearch",
+            "id": "search-1",
+            "query": "swift docs",
+            "action": [
+                "type": "findInPage",
+                "url": "https://swift.org/docs",
+                "pattern": "Package"
+            ]
+        ])
+        try XCTAssertJSONObjectEqual(items[1], [
+            "type": "imageView",
+            "id": "view-1",
+            "path": "/repo/screenshot.png"
+        ])
+        try XCTAssertJSONObjectEqual(items[2], [
+            "type": "imageGeneration",
+            "id": "image-1",
+            "status": "completed",
+            "revisedPrompt": NSNull(),
+            "result": "base64",
+            "savedPath": "/repo/generated.png"
+        ])
+
+        let decoded = try JSONDecoder().decode([AppServerThreadItem].self, from: Data(#"""
+        [
+          {
+            "type": "webSearch",
+            "id": "search-1",
+            "query": "swift docs",
+            "action": {
+              "type": "findInPage",
+              "url": "https://swift.org/docs",
+              "pattern": "Package"
+            }
+          },
+          {
+            "type": "imageView",
+            "id": "view-1",
+            "path": "/repo/screenshot.png"
+          },
+          {
+            "type": "imageGeneration",
+            "id": "image-1",
+            "status": "completed",
+            "revisedPrompt": null,
+            "result": "base64",
+            "savedPath": "/repo/generated.png"
+          }
+        ]
+        """#.utf8))
+        XCTAssertEqual(decoded, items)
+        XCTAssertEqual(decoded.map(\.id), ["search-1", "view-1", "image-1"])
+    }
+
+    func testMediaAndSearchItemsPreserveRustNullAndOmittedOptionals() throws {
+        try XCTAssertJSONObjectEqual(AppServerThreadItem.webSearch(
+            id: "search-1",
+            query: "swift docs"
+        ), [
+            "type": "webSearch",
+            "id": "search-1",
+            "query": "swift docs",
+            "action": NSNull()
+        ])
+
+        try XCTAssertJSONObjectEqual(AppServerWebSearchAction.search(query: nil, queries: nil), [
+            "type": "search",
+            "query": NSNull(),
+            "queries": NSNull()
+        ])
+
+        try XCTAssertJSONObjectEqual(AppServerThreadItem.imageGeneration(
+            id: "image-1",
+            status: "in_progress",
+            result: ""
+        ), [
+            "type": "imageGeneration",
+            "id": "image-1",
+            "status": "in_progress",
+            "revisedPrompt": NSNull(),
+            "result": ""
+        ])
+    }
+
     func testAgentMessageItemCarriesMemoryCitationLikeRustProtocol() throws {
         let citation = AppServerMemoryCitation(
             entries: [

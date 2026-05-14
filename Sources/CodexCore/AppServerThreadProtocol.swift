@@ -260,12 +260,82 @@ public struct AppServerMemoryCitationEntry: Equatable, Codable, Sendable {
     }
 }
 
+public enum AppServerWebSearchAction: Equatable, Sendable {
+    case search(query: String?, queries: [String]? = nil)
+    case openPage(url: String?)
+    case findInPage(url: String?, pattern: String?)
+    case other
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case query
+        case queries
+        case url
+        case pattern
+    }
+
+    private enum ActionType: String, Codable {
+        case search
+        case openPage
+        case findInPage
+        case other
+    }
+}
+
+extension AppServerWebSearchAction: Codable {
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        guard let type = try? container.decode(ActionType.self, forKey: .type) else {
+            self = .other
+            return
+        }
+        switch type {
+        case .search:
+            self = .search(
+                query: try container.decodeIfPresent(String.self, forKey: .query),
+                queries: try container.decodeIfPresent([String].self, forKey: .queries)
+            )
+        case .openPage:
+            self = .openPage(url: try container.decodeIfPresent(String.self, forKey: .url))
+        case .findInPage:
+            self = .findInPage(
+                url: try container.decodeIfPresent(String.self, forKey: .url),
+                pattern: try container.decodeIfPresent(String.self, forKey: .pattern)
+            )
+        case .other:
+            self = .other
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .search(query, queries):
+            try container.encode(ActionType.search, forKey: .type)
+            try container.encodeNilOrValue(query, forKey: .query)
+            try container.encodeNilOrValue(queries, forKey: .queries)
+        case let .openPage(url):
+            try container.encode(ActionType.openPage, forKey: .type)
+            try container.encodeNilOrValue(url, forKey: .url)
+        case let .findInPage(url, pattern):
+            try container.encode(ActionType.findInPage, forKey: .type)
+            try container.encodeNilOrValue(url, forKey: .url)
+            try container.encodeNilOrValue(pattern, forKey: .pattern)
+        case .other:
+            try container.encode(ActionType.other, forKey: .type)
+        }
+    }
+}
+
 public enum AppServerThreadItem: Equatable, Sendable {
     case userMessage(id: String, content: [AppServerUserInput])
     case hookPrompt(id: String, fragments: [HookPromptFragment])
     case agentMessage(id: String, text: String, phase: MessagePhase? = nil, memoryCitation: AppServerMemoryCitation? = nil)
     case plan(id: String, text: String)
     case reasoning(id: String, summary: [String] = [], content: [String] = [])
+    case webSearch(id: String, query: String, action: AppServerWebSearchAction? = nil)
+    case imageView(id: String, path: AbsolutePath)
+    case imageGeneration(id: String, status: String, revisedPrompt: String? = nil, result: String, savedPath: AbsolutePath? = nil)
     case contextCompaction(id: String)
 
     private enum CodingKeys: String, CodingKey {
@@ -273,6 +343,13 @@ public enum AppServerThreadItem: Equatable, Sendable {
         case id
         case fragments
         case text
+        case query
+        case action
+        case path
+        case status
+        case revisedPrompt
+        case result
+        case savedPath
         case phase
         case memoryCitation
         case summary
@@ -285,6 +362,9 @@ public enum AppServerThreadItem: Equatable, Sendable {
         case agentMessage
         case plan
         case reasoning
+        case webSearch
+        case imageView
+        case imageGeneration
         case contextCompaction
     }
 
@@ -295,6 +375,9 @@ public enum AppServerThreadItem: Equatable, Sendable {
              let .agentMessage(id, _, _, _),
              let .plan(id, _),
              let .reasoning(id, _, _),
+             let .webSearch(id, _, _),
+             let .imageView(id, _),
+             let .imageGeneration(id, _, _, _, _),
              let .contextCompaction(id):
             id
         }
@@ -333,6 +416,25 @@ extension AppServerThreadItem: Codable {
                 summary: try container.decodeIfPresent([String].self, forKey: .summary) ?? [],
                 content: try container.decodeIfPresent([String].self, forKey: .content) ?? []
             )
+        case .webSearch:
+            self = .webSearch(
+                id: try container.decode(String.self, forKey: .id),
+                query: try container.decode(String.self, forKey: .query),
+                action: try container.decodeIfPresent(AppServerWebSearchAction.self, forKey: .action)
+            )
+        case .imageView:
+            self = .imageView(
+                id: try container.decode(String.self, forKey: .id),
+                path: try container.decode(AbsolutePath.self, forKey: .path)
+            )
+        case .imageGeneration:
+            self = .imageGeneration(
+                id: try container.decode(String.self, forKey: .id),
+                status: try container.decode(String.self, forKey: .status),
+                revisedPrompt: try container.decodeIfPresent(String.self, forKey: .revisedPrompt),
+                result: try container.decode(String.self, forKey: .result),
+                savedPath: try container.decodeIfPresent(AbsolutePath.self, forKey: .savedPath)
+            )
         case .contextCompaction:
             self = .contextCompaction(id: try container.decode(String.self, forKey: .id))
         }
@@ -364,6 +466,22 @@ extension AppServerThreadItem: Codable {
             try container.encode(id, forKey: .id)
             try container.encode(summary, forKey: .summary)
             try container.encode(content, forKey: .content)
+        case let .webSearch(id, query, action):
+            try container.encode(ItemType.webSearch, forKey: .type)
+            try container.encode(id, forKey: .id)
+            try container.encode(query, forKey: .query)
+            try container.encodeNilOrValue(action, forKey: .action)
+        case let .imageView(id, path):
+            try container.encode(ItemType.imageView, forKey: .type)
+            try container.encode(id, forKey: .id)
+            try container.encode(path, forKey: .path)
+        case let .imageGeneration(id, status, revisedPrompt, result, savedPath):
+            try container.encode(ItemType.imageGeneration, forKey: .type)
+            try container.encode(id, forKey: .id)
+            try container.encode(status, forKey: .status)
+            try container.encodeNilOrValue(revisedPrompt, forKey: .revisedPrompt)
+            try container.encode(result, forKey: .result)
+            try container.encodeIfPresent(savedPath, forKey: .savedPath)
         case let .contextCompaction(id):
             try container.encode(ItemType.contextCompaction, forKey: .type)
             try container.encode(id, forKey: .id)
