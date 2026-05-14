@@ -36,6 +36,26 @@ final class ReviewAnalyticsTests: XCTestCase {
 
         let request = CodexTrackEventsRequest(events: [
             .commandExecution(command),
+            .turnEvent(CodexTurnEventRequest(
+                eventType: "codex_turn_event",
+                eventParams: CodexTurnEventParams(
+                    threadID: "thread-1",
+                    turnID: "turn-1",
+                    appServerClient: Self.analyticsContext.appServerClient,
+                    runtime: Self.analyticsContext.runtime,
+                    ephemeral: false,
+                    threadSource: .user,
+                    initializationMode: .new,
+                    model: "gpt-5.5",
+                    modelProvider: "openai",
+                    serviceTier: "default",
+                    approvalPolicy: "on-request",
+                    approvalsReviewer: "user",
+                    sandboxNetworkAccess: false,
+                    numInputImages: 0,
+                    isFirstTurn: true
+                )
+            )),
             .turnSteer(CodexTurnSteerEventRequest(
                 eventType: "codex_turn_steer",
                 eventParams: CodexTurnSteerEventParams(
@@ -59,6 +79,7 @@ final class ReviewAnalyticsTests: XCTestCase {
         let events = try XCTUnwrap(object["events"] as? [[String: Any]])
         XCTAssertEqual(events.compactMap { $0["event_type"] as? String }, [
             "codex_command_execution_event",
+            "codex_turn_event",
             "codex_turn_steer",
             "codex_collab_agent_tool_call_event",
             "codex_accepted_line_fingerprints"
@@ -67,6 +88,7 @@ final class ReviewAnalyticsTests: XCTestCase {
         XCTAssertNotNil(events[1]["event_params"])
         XCTAssertNotNil(events[2]["event_params"])
         XCTAssertNotNil(events[3]["event_params"])
+        XCTAssertNotNil(events[4]["event_params"])
     }
 
     func testTrackEventRequestBatchesIsolateAcceptedLineEventsLikeRust() throws {
@@ -1316,6 +1338,203 @@ final class ReviewAnalyticsTests: XCTestCase {
         XCTAssertEqual(event.eventParams.threadID, "thread-1")
         XCTAssertEqual(event.eventParams.threadSource, .user)
         XCTAssertEqual(event.eventParams.status, .completed)
+    }
+
+    func testTurnAnalyticsReducerIngestsCompletedTurnLikeRust() throws {
+        let event = CodexTurnAnalyticsReducer().ingest(
+            CodexTurnAnalyticsFact(
+                threadID: "thread-turn",
+                turnID: "turn-complete",
+                submissionType: .queued,
+                ephemeral: false,
+                threadSource: .subagent,
+                initializationMode: .resumed,
+                subagentSource: "thread_spawn",
+                parentThreadID: "parent-thread",
+                model: "gpt-5.5",
+                modelProvider: "openai",
+                sandboxPolicy: "workspace_write",
+                reasoningEffort: "medium",
+                reasoningSummary: "auto",
+                serviceTier: "priority",
+                approvalPolicy: "on-request",
+                approvalsReviewer: "guardian_subagent",
+                sandboxNetworkAccess: true,
+                collaborationMode: "plan",
+                personality: "friendly",
+                numInputImages: 2,
+                isFirstTurn: false,
+                status: .completed,
+                steerCount: 3,
+                tokenUsage: TokenUsage(
+                    inputTokens: 100,
+                    cachedInputTokens: 40,
+                    outputTokens: 30,
+                    reasoningOutputTokens: 10,
+                    totalTokens: 130
+                ),
+                durationMilliseconds: 1_234,
+                startedAt: 100,
+                completedAt: 105
+            ),
+            context: Self.analyticsContext
+        )
+
+        try XCTAssertJSONObjectEqual(event, [
+            "event_type": "codex_turn_event",
+            "event_params": [
+                "thread_id": "thread-turn",
+                "turn_id": "turn-complete",
+                "submission_type": "queued",
+                "app_server_client": Self.analyticsContextAppServerClientJSON(),
+                "runtime": Self.analyticsContextRuntimeJSON(),
+                "ephemeral": false,
+                "thread_source": "subagent",
+                "initialization_mode": "resumed",
+                "subagent_source": "thread_spawn",
+                "parent_thread_id": "parent-thread",
+                "model": "gpt-5.5",
+                "model_provider": "openai",
+                "sandbox_policy": "workspace_write",
+                "reasoning_effort": "medium",
+                "reasoning_summary": "auto",
+                "service_tier": "priority",
+                "approval_policy": "on-request",
+                "approvals_reviewer": "guardian_subagent",
+                "sandbox_network_access": true,
+                "collaboration_mode": "plan",
+                "personality": "friendly",
+                "num_input_images": 2,
+                "is_first_turn": false,
+                "status": "completed",
+                "turn_error": nil,
+                "steer_count": 3,
+                "total_tool_call_count": nil,
+                "shell_command_count": nil,
+                "file_change_count": nil,
+                "mcp_tool_call_count": nil,
+                "dynamic_tool_call_count": nil,
+                "subagent_tool_call_count": nil,
+                "web_search_count": nil,
+                "image_generation_count": nil,
+                "input_tokens": 100,
+                "cached_input_tokens": 40,
+                "output_tokens": 30,
+                "reasoning_output_tokens": 10,
+                "total_tokens": 130,
+                "duration_ms": 1_234,
+                "started_at": 100,
+                "completed_at": 105
+            ]
+        ])
+    }
+
+    func testTurnAnalyticsReducerPreservesRustNullFieldsAndErrorInfo() throws {
+        let event = CodexTurnAnalyticsReducer().ingest(
+            CodexTurnAnalyticsFact(
+                threadID: "thread-turn",
+                turnID: "turn-failed",
+                ephemeral: true,
+                initializationMode: .new,
+                modelProvider: "openai",
+                approvalPolicy: "never",
+                approvalsReviewer: "user",
+                sandboxNetworkAccess: false,
+                numInputImages: 0,
+                isFirstTurn: true,
+                status: .failed,
+                turnError: .contextWindowExceeded,
+                completedAt: 900
+            ),
+            context: Self.analyticsContext
+        )
+
+        try XCTAssertJSONObjectEqual(event, [
+            "event_type": "codex_turn_event",
+            "event_params": [
+                "thread_id": "thread-turn",
+                "turn_id": "turn-failed",
+                "submission_type": nil,
+                "app_server_client": Self.analyticsContextAppServerClientJSON(),
+                "runtime": Self.analyticsContextRuntimeJSON(),
+                "ephemeral": true,
+                "thread_source": nil,
+                "initialization_mode": "new",
+                "subagent_source": nil,
+                "parent_thread_id": nil,
+                "model": nil,
+                "model_provider": "openai",
+                "sandbox_policy": nil,
+                "reasoning_effort": nil,
+                "reasoning_summary": nil,
+                "service_tier": "default",
+                "approval_policy": "never",
+                "approvals_reviewer": "user",
+                "sandbox_network_access": false,
+                "collaboration_mode": nil,
+                "personality": nil,
+                "num_input_images": 0,
+                "is_first_turn": true,
+                "status": "failed",
+                "turn_error": "context_window_exceeded",
+                "steer_count": nil,
+                "total_tool_call_count": nil,
+                "shell_command_count": nil,
+                "file_change_count": nil,
+                "mcp_tool_call_count": nil,
+                "dynamic_tool_call_count": nil,
+                "subagent_tool_call_count": nil,
+                "web_search_count": nil,
+                "image_generation_count": nil,
+                "input_tokens": nil,
+                "cached_input_tokens": nil,
+                "output_tokens": nil,
+                "reasoning_output_tokens": nil,
+                "total_tokens": nil,
+                "duration_ms": nil,
+                "started_at": nil,
+                "completed_at": 900
+            ]
+        ])
+    }
+
+    func testCodexAnalyticsClientUploadsTurnEventLikeRust() async throws {
+        let uploader = RecordingCodexAnalyticsUploader()
+        let client = CodexToolItemAnalyticsClient(uploader: uploader)
+
+        await client.trackTurn(
+            CodexTurnAnalyticsFact(
+                threadID: "thread-turn",
+                turnID: "turn-upload",
+                ephemeral: false,
+                threadSource: .user,
+                initializationMode: .new,
+                model: "gpt-5",
+                modelProvider: "openai",
+                sandboxPolicy: "read_only",
+                serviceTier: "default",
+                approvalPolicy: "on-failure",
+                approvalsReviewer: "user",
+                sandboxNetworkAccess: false,
+                collaborationMode: "default",
+                numInputImages: 0,
+                isFirstTurn: true,
+                status: .interrupted,
+                steerCount: 0,
+                completedAt: 222
+            ),
+            context: Self.analyticsContext
+        )
+
+        let requests = await uploader.requests
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests[0].events.count, 1)
+        guard case let .turnEvent(event) = requests[0].events[0] else {
+            return XCTFail("expected turn analytics event")
+        }
+        XCTAssertEqual(event.eventType, "codex_turn_event")
+        XCTAssertEqual(event.eventParams.threadID, "thread-turn")
+        XCTAssertEqual(event.eventParams.status, .interrupted)
     }
 
     func testTurnSteerAnalyticsReducerIngestsCustomFactLikeRust() throws {

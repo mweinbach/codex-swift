@@ -10,6 +10,7 @@ public struct CodexTrackEventsRequest: Equatable, Encodable, Sendable {
 
 public enum CodexTrackEventRequest: Equatable, Encodable, Sendable {
     case compaction(CodexCompactionEventRequest)
+    case turnEvent(CodexTurnEventRequest)
     case turnSteer(CodexTurnSteerEventRequest)
     case guardianReview(CodexGuardianReviewEventRequest)
     case commandExecution(CodexCommandExecutionEventRequest)
@@ -27,6 +28,7 @@ public enum CodexTrackEventRequest: Equatable, Encodable, Sendable {
         case .acceptedLineFingerprints:
             return true
         case .compaction,
+             .turnEvent,
              .turnSteer,
              .guardianReview,
              .commandExecution,
@@ -44,6 +46,8 @@ public enum CodexTrackEventRequest: Equatable, Encodable, Sendable {
     public func encode(to encoder: Encoder) throws {
         switch self {
         case let .compaction(event):
+            try event.encode(to: encoder)
+        case let .turnEvent(event):
             try event.encode(to: encoder)
         case let .turnSteer(event):
             try event.encode(to: encoder)
@@ -193,6 +197,7 @@ public enum CodexAnalytics {
 
 public actor CodexToolItemAnalyticsClient {
     private var compactionReducer = CodexCompactionAnalyticsReducer()
+    private var turnEventReducer = CodexTurnAnalyticsReducer()
     private var turnSteerReducer = CodexTurnSteerAnalyticsReducer()
     private var guardianReviewReducer = CodexGuardianReviewAnalyticsReducer()
     private var commandExecutionReducer = CodexCommandExecutionAnalyticsReducer()
@@ -256,6 +261,14 @@ public actor CodexToolItemAnalyticsClient {
     ) async {
         let event = compactionReducer.ingest(fact, context: context)
         try? await uploader.upload(CodexTrackEventsRequest(events: [.compaction(event)]))
+    }
+
+    public func trackTurn(
+        _ fact: CodexTurnAnalyticsFact,
+        context: CodexTurnAnalyticsContext
+    ) async {
+        let event = turnEventReducer.ingest(fact, context: context)
+        try? await uploader.upload(CodexTrackEventsRequest(events: [.turnEvent(event)]))
     }
 
     public func trackTurnSteer(
@@ -677,6 +690,412 @@ public struct CodexCompactionAnalyticsReducer: Sendable {
                 startedAt: fact.startedAt,
                 completedAt: fact.completedAt,
                 durationMilliseconds: fact.durationMilliseconds
+            )
+        )
+    }
+}
+
+public enum TurnSubmissionType: String, Codable, Equatable, Sendable {
+    case `default`
+    case queued
+}
+
+public enum ThreadInitializationMode: String, Codable, Equatable, Sendable {
+    case new
+    case forked
+    case resumed
+}
+
+public enum CodexTurnStatus: String, Codable, Equatable, Sendable {
+    case completed
+    case failed
+    case interrupted
+}
+
+public struct CodexTurnEventParams: Equatable, Encodable, Sendable {
+    public let threadID: String
+    public let turnID: String
+    public let submissionType: TurnSubmissionType?
+    public let appServerClient: CodexAppServerClientMetadata
+    public let runtime: CodexRuntimeMetadata
+    public let ephemeral: Bool
+    public let threadSource: ThreadSource?
+    public let initializationMode: ThreadInitializationMode
+    public let subagentSource: String?
+    public let parentThreadID: String?
+    public let model: String?
+    public let modelProvider: String
+    public let sandboxPolicy: String?
+    public let reasoningEffort: String?
+    public let reasoningSummary: String?
+    public let serviceTier: String
+    public let approvalPolicy: String
+    public let approvalsReviewer: String
+    public let sandboxNetworkAccess: Bool
+    public let collaborationMode: String?
+    public let personality: String?
+    public let numInputImages: UInt64
+    public let isFirstTurn: Bool
+    public let status: CodexTurnStatus?
+    public let turnError: CodexErrorInfo?
+    public let steerCount: UInt64?
+    public let totalToolCallCount: UInt64?
+    public let shellCommandCount: UInt64?
+    public let fileChangeCount: UInt64?
+    public let mcpToolCallCount: UInt64?
+    public let dynamicToolCallCount: UInt64?
+    public let subagentToolCallCount: UInt64?
+    public let webSearchCount: UInt64?
+    public let imageGenerationCount: UInt64?
+    public let inputTokens: Int64?
+    public let cachedInputTokens: Int64?
+    public let outputTokens: Int64?
+    public let reasoningOutputTokens: Int64?
+    public let totalTokens: Int64?
+    public let durationMilliseconds: UInt64?
+    public let startedAt: UInt64?
+    public let completedAt: UInt64?
+
+    public init(
+        threadID: String,
+        turnID: String,
+        submissionType: TurnSubmissionType? = nil,
+        appServerClient: CodexAppServerClientMetadata,
+        runtime: CodexRuntimeMetadata,
+        ephemeral: Bool,
+        threadSource: ThreadSource? = nil,
+        initializationMode: ThreadInitializationMode,
+        subagentSource: String? = nil,
+        parentThreadID: String? = nil,
+        model: String? = nil,
+        modelProvider: String,
+        sandboxPolicy: String? = nil,
+        reasoningEffort: String? = nil,
+        reasoningSummary: String? = nil,
+        serviceTier: String,
+        approvalPolicy: String,
+        approvalsReviewer: String,
+        sandboxNetworkAccess: Bool,
+        collaborationMode: String? = nil,
+        personality: String? = nil,
+        numInputImages: UInt64,
+        isFirstTurn: Bool,
+        status: CodexTurnStatus? = nil,
+        turnError: CodexErrorInfo? = nil,
+        steerCount: UInt64? = nil,
+        totalToolCallCount: UInt64? = nil,
+        shellCommandCount: UInt64? = nil,
+        fileChangeCount: UInt64? = nil,
+        mcpToolCallCount: UInt64? = nil,
+        dynamicToolCallCount: UInt64? = nil,
+        subagentToolCallCount: UInt64? = nil,
+        webSearchCount: UInt64? = nil,
+        imageGenerationCount: UInt64? = nil,
+        inputTokens: Int64? = nil,
+        cachedInputTokens: Int64? = nil,
+        outputTokens: Int64? = nil,
+        reasoningOutputTokens: Int64? = nil,
+        totalTokens: Int64? = nil,
+        durationMilliseconds: UInt64? = nil,
+        startedAt: UInt64? = nil,
+        completedAt: UInt64? = nil
+    ) {
+        self.threadID = threadID
+        self.turnID = turnID
+        self.submissionType = submissionType
+        self.appServerClient = appServerClient
+        self.runtime = runtime
+        self.ephemeral = ephemeral
+        self.threadSource = threadSource
+        self.initializationMode = initializationMode
+        self.subagentSource = subagentSource
+        self.parentThreadID = parentThreadID
+        self.model = model
+        self.modelProvider = modelProvider
+        self.sandboxPolicy = sandboxPolicy
+        self.reasoningEffort = reasoningEffort
+        self.reasoningSummary = reasoningSummary
+        self.serviceTier = serviceTier
+        self.approvalPolicy = approvalPolicy
+        self.approvalsReviewer = approvalsReviewer
+        self.sandboxNetworkAccess = sandboxNetworkAccess
+        self.collaborationMode = collaborationMode
+        self.personality = personality
+        self.numInputImages = numInputImages
+        self.isFirstTurn = isFirstTurn
+        self.status = status
+        self.turnError = turnError
+        self.steerCount = steerCount
+        self.totalToolCallCount = totalToolCallCount
+        self.shellCommandCount = shellCommandCount
+        self.fileChangeCount = fileChangeCount
+        self.mcpToolCallCount = mcpToolCallCount
+        self.dynamicToolCallCount = dynamicToolCallCount
+        self.subagentToolCallCount = subagentToolCallCount
+        self.webSearchCount = webSearchCount
+        self.imageGenerationCount = imageGenerationCount
+        self.inputTokens = inputTokens
+        self.cachedInputTokens = cachedInputTokens
+        self.outputTokens = outputTokens
+        self.reasoningOutputTokens = reasoningOutputTokens
+        self.totalTokens = totalTokens
+        self.durationMilliseconds = durationMilliseconds
+        self.startedAt = startedAt
+        self.completedAt = completedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "thread_id"
+        case turnID = "turn_id"
+        case submissionType = "submission_type"
+        case appServerClient = "app_server_client"
+        case runtime
+        case ephemeral
+        case threadSource = "thread_source"
+        case initializationMode = "initialization_mode"
+        case subagentSource = "subagent_source"
+        case parentThreadID = "parent_thread_id"
+        case model
+        case modelProvider = "model_provider"
+        case sandboxPolicy = "sandbox_policy"
+        case reasoningEffort = "reasoning_effort"
+        case reasoningSummary = "reasoning_summary"
+        case serviceTier = "service_tier"
+        case approvalPolicy = "approval_policy"
+        case approvalsReviewer = "approvals_reviewer"
+        case sandboxNetworkAccess = "sandbox_network_access"
+        case collaborationMode = "collaboration_mode"
+        case personality
+        case numInputImages = "num_input_images"
+        case isFirstTurn = "is_first_turn"
+        case status
+        case turnError = "turn_error"
+        case steerCount = "steer_count"
+        case totalToolCallCount = "total_tool_call_count"
+        case shellCommandCount = "shell_command_count"
+        case fileChangeCount = "file_change_count"
+        case mcpToolCallCount = "mcp_tool_call_count"
+        case dynamicToolCallCount = "dynamic_tool_call_count"
+        case subagentToolCallCount = "subagent_tool_call_count"
+        case webSearchCount = "web_search_count"
+        case imageGenerationCount = "image_generation_count"
+        case inputTokens = "input_tokens"
+        case cachedInputTokens = "cached_input_tokens"
+        case outputTokens = "output_tokens"
+        case reasoningOutputTokens = "reasoning_output_tokens"
+        case totalTokens = "total_tokens"
+        case durationMilliseconds = "duration_ms"
+        case startedAt = "started_at"
+        case completedAt = "completed_at"
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(threadID, forKey: .threadID)
+        try container.encode(turnID, forKey: .turnID)
+        try container.encodeNilOrValue(submissionType, forKey: .submissionType)
+        try container.encode(appServerClient, forKey: .appServerClient)
+        try container.encode(runtime, forKey: .runtime)
+        try container.encode(ephemeral, forKey: .ephemeral)
+        try container.encodeNilOrValue(threadSource, forKey: .threadSource)
+        try container.encode(initializationMode, forKey: .initializationMode)
+        try container.encodeNilOrValue(subagentSource, forKey: .subagentSource)
+        try container.encodeNilOrValue(parentThreadID, forKey: .parentThreadID)
+        try container.encodeNilOrValue(model, forKey: .model)
+        try container.encode(modelProvider, forKey: .modelProvider)
+        try container.encodeNilOrValue(sandboxPolicy, forKey: .sandboxPolicy)
+        try container.encodeNilOrValue(reasoningEffort, forKey: .reasoningEffort)
+        try container.encodeNilOrValue(reasoningSummary, forKey: .reasoningSummary)
+        try container.encode(serviceTier, forKey: .serviceTier)
+        try container.encode(approvalPolicy, forKey: .approvalPolicy)
+        try container.encode(approvalsReviewer, forKey: .approvalsReviewer)
+        try container.encode(sandboxNetworkAccess, forKey: .sandboxNetworkAccess)
+        try container.encodeNilOrValue(collaborationMode, forKey: .collaborationMode)
+        try container.encodeNilOrValue(personality, forKey: .personality)
+        try container.encode(numInputImages, forKey: .numInputImages)
+        try container.encode(isFirstTurn, forKey: .isFirstTurn)
+        try container.encodeNilOrValue(status, forKey: .status)
+        try container.encodeNilOrValue(turnError, forKey: .turnError)
+        try container.encodeNilOrValue(steerCount, forKey: .steerCount)
+        try container.encodeNilOrValue(totalToolCallCount, forKey: .totalToolCallCount)
+        try container.encodeNilOrValue(shellCommandCount, forKey: .shellCommandCount)
+        try container.encodeNilOrValue(fileChangeCount, forKey: .fileChangeCount)
+        try container.encodeNilOrValue(mcpToolCallCount, forKey: .mcpToolCallCount)
+        try container.encodeNilOrValue(dynamicToolCallCount, forKey: .dynamicToolCallCount)
+        try container.encodeNilOrValue(subagentToolCallCount, forKey: .subagentToolCallCount)
+        try container.encodeNilOrValue(webSearchCount, forKey: .webSearchCount)
+        try container.encodeNilOrValue(imageGenerationCount, forKey: .imageGenerationCount)
+        try container.encodeNilOrValue(inputTokens, forKey: .inputTokens)
+        try container.encodeNilOrValue(cachedInputTokens, forKey: .cachedInputTokens)
+        try container.encodeNilOrValue(outputTokens, forKey: .outputTokens)
+        try container.encodeNilOrValue(reasoningOutputTokens, forKey: .reasoningOutputTokens)
+        try container.encodeNilOrValue(totalTokens, forKey: .totalTokens)
+        try container.encodeNilOrValue(durationMilliseconds, forKey: .durationMilliseconds)
+        try container.encodeNilOrValue(startedAt, forKey: .startedAt)
+        try container.encodeNilOrValue(completedAt, forKey: .completedAt)
+    }
+}
+
+public struct CodexTurnEventRequest: Equatable, Encodable, Sendable {
+    public let eventType: String
+    public let eventParams: CodexTurnEventParams
+
+    public init(eventType: String, eventParams: CodexTurnEventParams) {
+        self.eventType = eventType
+        self.eventParams = eventParams
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case eventType = "event_type"
+        case eventParams = "event_params"
+    }
+}
+
+public struct CodexTurnAnalyticsFact: Equatable, Sendable {
+    public let threadID: String
+    public let turnID: String
+    public let submissionType: TurnSubmissionType?
+    public let ephemeral: Bool
+    public let threadSource: ThreadSource?
+    public let initializationMode: ThreadInitializationMode
+    public let subagentSource: String?
+    public let parentThreadID: String?
+    public let model: String?
+    public let modelProvider: String
+    public let sandboxPolicy: String?
+    public let reasoningEffort: String?
+    public let reasoningSummary: String?
+    public let serviceTier: String
+    public let approvalPolicy: String
+    public let approvalsReviewer: String
+    public let sandboxNetworkAccess: Bool
+    public let collaborationMode: String?
+    public let personality: String?
+    public let numInputImages: UInt64
+    public let isFirstTurn: Bool
+    public let status: CodexTurnStatus?
+    public let turnError: CodexErrorInfo?
+    public let steerCount: UInt64?
+    public let tokenUsage: TokenUsage?
+    public let durationMilliseconds: UInt64?
+    public let startedAt: UInt64?
+    public let completedAt: UInt64?
+
+    public init(
+        threadID: String,
+        turnID: String,
+        submissionType: TurnSubmissionType? = nil,
+        ephemeral: Bool,
+        threadSource: ThreadSource? = nil,
+        initializationMode: ThreadInitializationMode,
+        subagentSource: String? = nil,
+        parentThreadID: String? = nil,
+        model: String? = nil,
+        modelProvider: String,
+        sandboxPolicy: String? = nil,
+        reasoningEffort: String? = nil,
+        reasoningSummary: String? = nil,
+        serviceTier: String = "default",
+        approvalPolicy: String,
+        approvalsReviewer: String,
+        sandboxNetworkAccess: Bool,
+        collaborationMode: String? = nil,
+        personality: String? = nil,
+        numInputImages: UInt64,
+        isFirstTurn: Bool,
+        status: CodexTurnStatus? = nil,
+        turnError: CodexErrorInfo? = nil,
+        steerCount: UInt64? = nil,
+        tokenUsage: TokenUsage? = nil,
+        durationMilliseconds: UInt64? = nil,
+        startedAt: UInt64? = nil,
+        completedAt: UInt64? = nil
+    ) {
+        self.threadID = threadID
+        self.turnID = turnID
+        self.submissionType = submissionType
+        self.ephemeral = ephemeral
+        self.threadSource = threadSource
+        self.initializationMode = initializationMode
+        self.subagentSource = subagentSource
+        self.parentThreadID = parentThreadID
+        self.model = model
+        self.modelProvider = modelProvider
+        self.sandboxPolicy = sandboxPolicy
+        self.reasoningEffort = reasoningEffort
+        self.reasoningSummary = reasoningSummary
+        self.serviceTier = serviceTier
+        self.approvalPolicy = approvalPolicy
+        self.approvalsReviewer = approvalsReviewer
+        self.sandboxNetworkAccess = sandboxNetworkAccess
+        self.collaborationMode = collaborationMode
+        self.personality = personality
+        self.numInputImages = numInputImages
+        self.isFirstTurn = isFirstTurn
+        self.status = status
+        self.turnError = turnError
+        self.steerCount = steerCount
+        self.tokenUsage = tokenUsage
+        self.durationMilliseconds = durationMilliseconds
+        self.startedAt = startedAt
+        self.completedAt = completedAt
+    }
+}
+
+public typealias CodexTurnAnalyticsContext = CodexCommandExecutionAnalyticsContext
+
+public struct CodexTurnAnalyticsReducer: Sendable {
+    public init() {}
+
+    public func ingest(
+        _ fact: CodexTurnAnalyticsFact,
+        context: CodexTurnAnalyticsContext
+    ) -> CodexTurnEventRequest {
+        CodexTurnEventRequest(
+            eventType: "codex_turn_event",
+            eventParams: CodexTurnEventParams(
+                threadID: fact.threadID,
+                turnID: fact.turnID,
+                submissionType: fact.submissionType,
+                appServerClient: context.appServerClient,
+                runtime: context.runtime,
+                ephemeral: fact.ephemeral,
+                threadSource: fact.threadSource,
+                initializationMode: fact.initializationMode,
+                subagentSource: fact.subagentSource,
+                parentThreadID: fact.parentThreadID,
+                model: fact.model,
+                modelProvider: fact.modelProvider,
+                sandboxPolicy: fact.sandboxPolicy,
+                reasoningEffort: fact.reasoningEffort,
+                reasoningSummary: fact.reasoningSummary,
+                serviceTier: fact.serviceTier,
+                approvalPolicy: fact.approvalPolicy,
+                approvalsReviewer: fact.approvalsReviewer,
+                sandboxNetworkAccess: fact.sandboxNetworkAccess,
+                collaborationMode: fact.collaborationMode,
+                personality: fact.personality,
+                numInputImages: fact.numInputImages,
+                isFirstTurn: fact.isFirstTurn,
+                status: fact.status,
+                turnError: fact.turnError,
+                steerCount: fact.steerCount,
+                totalToolCallCount: nil,
+                shellCommandCount: nil,
+                fileChangeCount: nil,
+                mcpToolCallCount: nil,
+                dynamicToolCallCount: nil,
+                subagentToolCallCount: nil,
+                webSearchCount: nil,
+                imageGenerationCount: nil,
+                inputTokens: fact.tokenUsage?.inputTokens,
+                cachedInputTokens: fact.tokenUsage?.cachedInputTokens,
+                outputTokens: fact.tokenUsage?.outputTokens,
+                reasoningOutputTokens: fact.tokenUsage?.reasoningOutputTokens,
+                totalTokens: fact.tokenUsage?.totalTokens,
+                durationMilliseconds: fact.durationMilliseconds,
+                startedAt: fact.startedAt,
+                completedAt: fact.completedAt
             )
         )
     }
