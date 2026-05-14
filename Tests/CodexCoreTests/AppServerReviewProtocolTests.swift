@@ -112,7 +112,9 @@ final class AppServerReviewProtocolTests: XCTestCase {
                         [
                             "type": "agentMessage",
                             "id": "item-1",
-                            "text": "Review started"
+                            "text": "Review started",
+                            "phase": NSNull(),
+                            "memoryCitation": NSNull()
                         ]
                     ],
                     "itemsView": "summary",

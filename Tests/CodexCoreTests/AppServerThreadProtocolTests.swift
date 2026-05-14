@@ -230,6 +230,33 @@ final class AppServerThreadProtocolTests: XCTestCase {
         ])
     }
 
+    func testAgentMessageItemPreservesRustNullDefaults() throws {
+        let item = AppServerThreadItem.agentMessage(
+            id: "item-agent",
+            text: "Working on it"
+        )
+
+        try XCTAssertJSONObjectEqual(item, [
+            "type": "agentMessage",
+            "id": "item-agent",
+            "text": "Working on it",
+            "phase": NSNull(),
+            "memoryCitation": NSNull()
+        ])
+
+        let decoded = try JSONDecoder().decode(
+            AppServerThreadItem.self,
+            from: Data(#"""
+            {
+              "type": "agentMessage",
+              "id": "item-agent",
+              "text": "Working on it"
+            }
+            """#.utf8)
+        )
+        XCTAssertEqual(decoded, item)
+    }
+
     func testMediaAndSearchItemsUseRustThreadItemShape() throws {
         let imagePath = try AbsolutePath(absolutePath: "/repo/screenshot.png")
         let savedPath = try AbsolutePath(absolutePath: "/repo/generated.png")
@@ -989,7 +1016,9 @@ final class AppServerThreadProtocolTests: XCTestCase {
                         "items": [[
                             "type": "agentMessage",
                             "id": "item-1",
-                            "text": "Ready"
+                            "text": "Ready",
+                            "phase": NSNull(),
+                            "memoryCitation": NSNull()
                         ]],
                         "itemsView": "summary",
                         "status": "completed",
@@ -1035,7 +1064,9 @@ final class AppServerThreadProtocolTests: XCTestCase {
                     "items": [[
                         "type": "agentMessage",
                         "id": "item-1",
-                        "text": "Ready"
+                        "text": "Ready",
+                        "phase": NSNull(),
+                        "memoryCitation": NSNull()
                     ]],
                     "itemsView": "summary",
                     "status": "completed",

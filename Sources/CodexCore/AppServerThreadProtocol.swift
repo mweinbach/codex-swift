@@ -803,8 +803,8 @@ extension AppServerThreadItem: Codable {
             try container.encode(ItemType.agentMessage, forKey: .type)
             try container.encode(id, forKey: .id)
             try container.encode(text, forKey: .text)
-            try container.encodeIfPresent(phase, forKey: .phase)
-            try container.encodeIfPresent(memoryCitation, forKey: .memoryCitation)
+            try container.encodeNilOrValue(phase, forKey: .phase)
+            try container.encodeNilOrValue(memoryCitation, forKey: .memoryCitation)
         case let .plan(id, text):
             try container.encode(ItemType.plan, forKey: .type)
             try container.encode(id, forKey: .id)
