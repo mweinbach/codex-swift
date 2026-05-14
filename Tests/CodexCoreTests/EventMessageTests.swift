@@ -452,21 +452,6 @@ final class EventMessageTests: XCTestCase {
             ]
         ])
 
-        try XCTAssertJSONObjectEqual(EventMessage.mcpListToolsResponse(McpListToolsResponseEvent(
-            tools: [:],
-            resources: [:],
-            resourceTemplates: [:],
-            authStatuses: ["filesystem": .oauth]
-        )), [
-            "type": "mcp_list_tools_response",
-            "tools": [:],
-            "resources": [:],
-            "resource_templates": [:],
-            "auth_statuses": [
-                "filesystem": "oauth"
-            ]
-        ])
-
         try XCTAssertJSONObjectEqual(EventMessage.imageGenerationBegin(ImageGenerationBeginEvent(
             callID: "ig-1"
         )), [
@@ -678,6 +663,16 @@ final class EventMessageTests: XCTestCase {
         XCTAssertThrowsError(try JSONDecoder().decode(
             EventMessage.self,
             from: Data(#"{"type":"future_unported_event"}"#.utf8)
+        ))
+
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            EventMessage.self,
+            from: Data(#"{"type":"mcp_list_tools_response","tools":{},"resources":{},"resource_templates":{},"auth_statuses":{}}"#.utf8)
+        ))
+
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            EventMessage.self,
+            from: Data(#"{"type":"list_skills_response","skills":[]}"#.utf8)
         ))
     }
 }

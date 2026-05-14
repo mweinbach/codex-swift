@@ -273,26 +273,6 @@ public struct SkillLoadOutcome: Codable, Equatable, Sendable {
     }
 }
 
-public struct SkillsListEntry: Codable, Equatable, Sendable {
-    public let cwd: String
-    public let skills: [SkillMetadata]
-    public let errors: [SkillErrorInfo]
-
-    public init(cwd: String, skills: [SkillMetadata], errors: [SkillErrorInfo]) {
-        self.cwd = cwd
-        self.skills = skills
-        self.errors = errors
-    }
-}
-
-public struct ListSkillsResponseEvent: Codable, Equatable, Sendable {
-    public let skills: [SkillsListEntry]
-
-    public init(skills: [SkillsListEntry]) {
-        self.skills = skills
-    }
-}
-
 public struct SkillInjections: Equatable, Sendable {
     public var items: [ResponseItem]
     public var warnings: [String]

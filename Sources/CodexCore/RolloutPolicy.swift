@@ -55,9 +55,7 @@ public enum RolloutEventMessageKind: String, Codable, CaseIterable, Equatable, S
     case turnDiff = "turn_diff"
     case guardianAssessment = "guardian_assessment"
     case getHistoryEntryResponse = "get_history_entry_response"
-    case mcpListToolsResponse = "mcp_list_tools_response"
     case listCustomPromptsResponse = "list_custom_prompts_response"
-    case listSkillsResponse = "list_skills_response"
     case skillsUpdateAvailable = "skills_update_available"
     case planUpdate = "plan_update"
     case turnAborted = "turn_aborted"
@@ -157,8 +155,6 @@ public enum RolloutPolicy {
             return .mcpToolCallBegin
         case .mcpToolCallEnd:
             return .mcpToolCallEnd
-        case .mcpListToolsResponse:
-            return .mcpListToolsResponse
         case .webSearchBegin:
             return .webSearchBegin
         case .webSearchEnd:
@@ -213,8 +209,6 @@ public enum RolloutPolicy {
             return .guardianAssessment
         case .getHistoryEntryResponse:
             return .getHistoryEntryResponse
-        case .listSkillsResponse:
-            return .listSkillsResponse
         case .listCustomPromptsResponse:
             return .listCustomPromptsResponse
         case .skillsUpdateAvailable:
@@ -423,11 +417,9 @@ public enum RolloutPolicy {
              .turnDiff,
              .getHistoryEntryResponse,
              .undoStarted,
-             .mcpListToolsResponse,
              .mcpStartupUpdate,
              .mcpStartupComplete,
              .listCustomPromptsResponse,
-             .listSkillsResponse,
              .planUpdate,
              .shutdownComplete,
              .deprecationNotice,

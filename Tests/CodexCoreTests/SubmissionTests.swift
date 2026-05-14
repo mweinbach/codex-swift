@@ -106,13 +106,11 @@ final class SubmissionTests: XCTestCase {
         let cases: [(Op, [String: Any])] = [
             (.interrupt, ["type": "interrupt"]),
             (.cleanBackgroundTerminals, ["type": "clean_background_terminals"]),
-            (.listMcpTools, ["type": "list_mcp_tools"]),
             (.listCustomPrompts, ["type": "list_custom_prompts"]),
             (.compact, ["type": "compact"]),
             (.reloadUserConfig, ["type": "reload_user_config"]),
             (.undo, ["type": "undo"]),
-            (.shutdown, ["type": "shutdown"]),
-            (.listModels, ["type": "list_models"])
+            (.shutdown, ["type": "shutdown"])
         ]
 
         for (op, expected) in cases {
@@ -1560,16 +1558,6 @@ final class SubmissionTests: XCTestCase {
             "log_id": 99
         ])
 
-        try XCTAssertJSONObjectEqual(Op.listSkills(cwds: [], forceReload: false), [
-            "type": "list_skills"
-        ])
-
-        try XCTAssertJSONObjectEqual(Op.listSkills(cwds: ["/repo"], forceReload: true), [
-            "type": "list_skills",
-            "cwds": ["/repo"],
-            "force_reload": true
-        ])
-
         try XCTAssertJSONObjectEqual(Op.review(reviewRequest: ReviewRequest(target: .uncommittedChanges)), [
             "type": "review",
             "review_request": [
@@ -1610,9 +1598,10 @@ final class SubmissionTests: XCTestCase {
         }
     }
 
-    func testListSkillsDefaultsDecodeLikeSerdeDefaults() throws {
-        let decoded = try JSONDecoder().decode(Op.self, from: Data(#"{"type":"list_skills"}"#.utf8))
-        XCTAssertEqual(decoded, .listSkills(cwds: [], forceReload: false))
+    func testRemovedCoreListOpsRejectLikeRustProtocol() throws {
+        for type in ["list_mcp_tools", "list_skills", "list_models"] {
+            XCTAssertThrowsError(try JSONDecoder().decode(Op.self, from: Data(#"{"type":"\#(type)"}"#.utf8)))
+        }
     }
 
     private func rustEffectiveTopLevelAliasPath(_ path: AbsolutePath) throws -> AbsolutePath {

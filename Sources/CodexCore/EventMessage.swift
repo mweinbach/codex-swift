@@ -54,7 +54,6 @@ public enum EventMessage: Equatable, Codable, Sendable {
     case mcpStartupComplete(McpStartupCompleteEvent)
     case mcpToolCallBegin(McpToolCallBeginEvent)
     case mcpToolCallEnd(McpToolCallEndEvent)
-    case mcpListToolsResponse(McpListToolsResponseEvent)
     case webSearchBegin(WebSearchBeginEvent)
     case webSearchEnd(WebSearchEndEvent)
     case imageGenerationBegin(ImageGenerationBeginEvent)
@@ -82,7 +81,6 @@ public enum EventMessage: Equatable, Codable, Sendable {
     case turnDiff(TurnDiffEvent)
     case guardianAssessment(GuardianAssessmentEvent)
     case getHistoryEntryResponse(GetHistoryEntryResponseEvent)
-    case listSkillsResponse(ListSkillsResponseEvent)
     case listCustomPromptsResponse(ListCustomPromptsResponseEvent)
     case skillsUpdateAvailable
     case planUpdate(UpdatePlanArguments)
@@ -144,7 +142,6 @@ public enum EventMessage: Equatable, Codable, Sendable {
         case mcpStartupComplete = "mcp_startup_complete"
         case mcpToolCallBegin = "mcp_tool_call_begin"
         case mcpToolCallEnd = "mcp_tool_call_end"
-        case mcpListToolsResponse = "mcp_list_tools_response"
         case webSearchBegin = "web_search_begin"
         case webSearchEnd = "web_search_end"
         case imageGenerationBegin = "image_generation_begin"
@@ -172,7 +169,6 @@ public enum EventMessage: Equatable, Codable, Sendable {
         case turnDiff = "turn_diff"
         case guardianAssessment = "guardian_assessment"
         case getHistoryEntryResponse = "get_history_entry_response"
-        case listSkillsResponse = "list_skills_response"
         case listCustomPromptsResponse = "list_custom_prompts_response"
         case skillsUpdateAvailable = "skills_update_available"
         case planUpdate = "plan_update"
@@ -284,8 +280,6 @@ public enum EventMessage: Equatable, Codable, Sendable {
             self = .mcpToolCallBegin(try McpToolCallBeginEvent(from: decoder))
         case .mcpToolCallEnd:
             self = .mcpToolCallEnd(try McpToolCallEndEvent(from: decoder))
-        case .mcpListToolsResponse:
-            self = .mcpListToolsResponse(try McpListToolsResponseEvent(from: decoder))
         case .webSearchBegin:
             self = .webSearchBegin(try WebSearchBeginEvent(from: decoder))
         case .webSearchEnd:
@@ -340,8 +334,6 @@ public enum EventMessage: Equatable, Codable, Sendable {
             self = .guardianAssessment(try GuardianAssessmentEvent(from: decoder))
         case .getHistoryEntryResponse:
             self = .getHistoryEntryResponse(try GetHistoryEntryResponseEvent(from: decoder))
-        case .listSkillsResponse:
-            self = .listSkillsResponse(try ListSkillsResponseEvent(from: decoder))
         case .listCustomPromptsResponse:
             self = .listCustomPromptsResponse(try ListCustomPromptsResponseEvent(from: decoder))
         case .skillsUpdateAvailable:
@@ -485,9 +477,6 @@ public enum EventMessage: Equatable, Codable, Sendable {
         case let .mcpToolCallEnd(event):
             try container.encode(EventType.mcpToolCallEnd, forKey: .type)
             try event.encode(to: encoder)
-        case let .mcpListToolsResponse(event):
-            try container.encode(EventType.mcpListToolsResponse, forKey: .type)
-            try event.encode(to: encoder)
         case let .webSearchBegin(event):
             try container.encode(EventType.webSearchBegin, forKey: .type)
             try event.encode(to: encoder)
@@ -568,9 +557,6 @@ public enum EventMessage: Equatable, Codable, Sendable {
             try event.encode(to: encoder)
         case let .getHistoryEntryResponse(event):
             try container.encode(EventType.getHistoryEntryResponse, forKey: .type)
-            try event.encode(to: encoder)
-        case let .listSkillsResponse(event):
-            try container.encode(EventType.listSkillsResponse, forKey: .type)
             try event.encode(to: encoder)
         case let .listCustomPromptsResponse(event):
             try container.encode(EventType.listCustomPromptsResponse, forKey: .type)

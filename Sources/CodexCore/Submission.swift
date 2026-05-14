@@ -145,9 +145,7 @@ public enum Op: Equatable, Sendable {
     case refreshMcpServers(config: McpServerRefreshConfig)
     case addToHistory(text: String)
     case getHistoryEntryRequest(offset: Int, logID: UInt64)
-    case listMcpTools
     case listCustomPrompts
-    case listSkills(cwds: [String], forceReload: Bool)
     case reloadUserConfig
     case refreshRuntimeConfig(config: ConfigValue)
     case compact
@@ -158,7 +156,6 @@ public enum Op: Equatable, Sendable {
     case approveGuardianDeniedAction(event: GuardianAssessmentEvent)
     case shutdown
     case runUserShellCommand(command: String)
-    case listModels
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -196,8 +193,6 @@ public enum Op: Equatable, Sendable {
         case text
         case offset
         case logID = "log_id"
-        case cwds
-        case forceReload = "force_reload"
         case mode
         case numTurns = "num_turns"
         case reviewRequest = "review_request"
@@ -230,9 +225,7 @@ public enum Op: Equatable, Sendable {
         case refreshMcpServers = "refresh_mcp_servers"
         case addToHistory = "add_to_history"
         case getHistoryEntryRequest = "get_history_entry_request"
-        case listMcpTools = "list_mcp_tools"
         case listCustomPrompts = "list_custom_prompts"
-        case listSkills = "list_skills"
         case reloadUserConfig = "reload_user_config"
         case refreshRuntimeConfig = "refresh_runtime_config"
         case compact
@@ -243,7 +236,6 @@ public enum Op: Equatable, Sendable {
         case approveGuardianDeniedAction = "approve_guardian_denied_action"
         case shutdown
         case runUserShellCommand = "run_user_shell_command"
-        case listModels = "list_models"
     }
 }
 
@@ -361,15 +353,8 @@ extension Op: Codable {
                 offset: try container.decode(Int.self, forKey: .offset),
                 logID: try container.decode(UInt64.self, forKey: .logID)
             )
-        case .listMcpTools:
-            self = .listMcpTools
         case .listCustomPrompts:
             self = .listCustomPrompts
-        case .listSkills:
-            self = .listSkills(
-                cwds: try container.decodeIfPresent([String].self, forKey: .cwds) ?? [],
-                forceReload: try container.decodeIfPresent(Bool.self, forKey: .forceReload) ?? false
-            )
         case .reloadUserConfig:
             self = .reloadUserConfig
         case .refreshRuntimeConfig:
@@ -390,8 +375,6 @@ extension Op: Codable {
             self = .shutdown
         case .runUserShellCommand:
             self = .runUserShellCommand(command: try container.decode(String.self, forKey: .command))
-        case .listModels:
-            self = .listModels
         }
     }
 
@@ -525,18 +508,8 @@ extension Op: Codable {
             try container.encode(OperationType.getHistoryEntryRequest, forKey: .type)
             try container.encode(offset, forKey: .offset)
             try container.encode(logID, forKey: .logID)
-        case .listMcpTools:
-            try container.encode(OperationType.listMcpTools, forKey: .type)
         case .listCustomPrompts:
             try container.encode(OperationType.listCustomPrompts, forKey: .type)
-        case let .listSkills(cwds, forceReload):
-            try container.encode(OperationType.listSkills, forKey: .type)
-            if !cwds.isEmpty {
-                try container.encode(cwds, forKey: .cwds)
-            }
-            if forceReload {
-                try container.encode(forceReload, forKey: .forceReload)
-            }
         case .reloadUserConfig:
             try container.encode(OperationType.reloadUserConfig, forKey: .type)
         case let .refreshRuntimeConfig(config):
@@ -563,8 +536,6 @@ extension Op: Codable {
         case let .runUserShellCommand(command):
             try container.encode(OperationType.runUserShellCommand, forKey: .type)
             try container.encode(command, forKey: .command)
-        case .listModels:
-            try container.encode(OperationType.listModels, forKey: .type)
         }
     }
 

@@ -81,32 +81,6 @@ public struct McpStartupFailure: Equatable, Codable, Sendable {
     }
 }
 
-public struct McpListToolsResponseEvent: Equatable, Codable, Sendable {
-    public let tools: [String: McpTool]
-    public let resources: [String: [McpResource]]
-    public let resourceTemplates: [String: [McpResourceTemplate]]
-    public let authStatuses: [String: McpAuthStatus]
-
-    private enum CodingKeys: String, CodingKey {
-        case tools
-        case resources
-        case resourceTemplates = "resource_templates"
-        case authStatuses = "auth_statuses"
-    }
-
-    public init(
-        tools: [String: McpTool],
-        resources: [String: [McpResource]],
-        resourceTemplates: [String: [McpResourceTemplate]],
-        authStatuses: [String: McpAuthStatus]
-    ) {
-        self.tools = tools
-        self.resources = resources
-        self.resourceTemplates = resourceTemplates
-        self.authStatuses = authStatuses
-    }
-}
-
 public struct McpToolInfo: Equatable, Sendable {
     public let serverName: String
     public let tool: McpTool

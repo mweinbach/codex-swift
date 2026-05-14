@@ -59,44 +59,6 @@ final class SkillsTests: XCTestCase {
         )
     }
 
-    func testListSkillsResponseWireShape() throws {
-        try XCTAssertJSONObjectEqual(
-            ListSkillsResponseEvent(skills: [
-                SkillsListEntry(
-                    cwd: "/repo",
-                    skills: [
-                        SkillMetadata(
-                            name: "demo",
-                            description: "Demo skill",
-                            shortDescription: "Demo",
-                            path: "/skills/demo/SKILL.md",
-                            scope: .system
-                        )
-                    ],
-                    errors: [
-                        SkillErrorInfo(path: "/bad/SKILL.md", message: "missing description")
-                    ]
-                )
-            ]),
-            [
-                "skills": [[
-                    "cwd": "/repo",
-                    "skills": [[
-                        "name": "demo",
-                        "description": "Demo skill",
-                        "short_description": "Demo",
-                        "path": "/skills/demo/SKILL.md",
-                        "scope": "system"
-                    ]],
-                    "errors": [[
-                        "path": "/bad/SKILL.md",
-                        "message": "missing description"
-                    ]]
-                ]]
-            ]
-        )
-    }
-
     func testRenderSkillsSectionReturnsNilForEmptySkills() {
         XCTAssertNil(Skills.renderSkillsSection([]))
     }
