@@ -4,6 +4,36 @@ import Foundation
 import XCTest
 
 final class ResponsesAPIProxyTests: XCTestCase {
+    func testCommandLineParserAcceptsDumpDirLikeRustProxy() throws {
+        let parsed = ResponsesAPIProxyCommandLine.parseArguments([
+            "--port", "3456",
+            "--server-info=/tmp/proxy-info.json",
+            "--http-shutdown",
+            "--upstream-url", "http://127.0.0.1:8080/v1/responses",
+            "--dump-dir=/tmp/proxy-dumps"
+        ])
+
+        XCTAssertEqual(parsed, .run(ResponsesAPIProxyOptions(
+            port: 3456,
+            serverInfoPath: URL(fileURLWithPath: "/tmp/proxy-info.json"),
+            httpShutdown: true,
+            upstreamURL: "http://127.0.0.1:8080/v1/responses",
+            dumpDir: URL(fileURLWithPath: "/tmp/proxy-dumps")
+        )))
+    }
+
+    func testCommandLineParserReportsDumpDirMissingValueLikeRustProxy() {
+        XCTAssertEqual(
+            ResponsesAPIProxyCommandLine.parseArguments(["--dump-dir"]),
+            .failure("codex-responses-api-proxy: missing value for --dump-dir", 2)
+        )
+    }
+
+    func testCommandLineHelpIncludesDumpDirLikeRustProxy() {
+        XCTAssertTrue(ResponsesAPIProxyCommandLine.helpText().contains("[--dump-dir <DIR>]"))
+        XCTAssertTrue(ResponsesAPIProxyCommandLine.helpText().contains("--dump-dir <DIR>"))
+    }
+
     func testAuthHeaderReaderReadsKeyWithNoNewline() throws {
         var sent = false
         let header = try ResponsesAPIProxyAuth.readAuthHeader { buffer in
