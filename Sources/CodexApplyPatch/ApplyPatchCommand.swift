@@ -60,7 +60,7 @@ public enum ApplyPatchCommand {
                 return ApplyPatchCommandResult(
                     exitCode: 2,
                     stdout: "",
-                    stderr: "Usage: apply_patch 'PATCH'\n       echo 'PATCH' | apply-patch\n"
+                    stderr: "Usage: apply_patch 'PATCH'\n       echo 'PATCH' | apply_patch\n"
                 )
             }
         case 1:

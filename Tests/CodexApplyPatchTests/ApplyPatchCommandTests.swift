@@ -24,7 +24,7 @@ final class ApplyPatchCommandTests: XCTestCase {
 
         XCTAssertEqual(result.exitCode, 2)
         XCTAssertEqual(result.stdout, "")
-        XCTAssertEqual(result.stderr, "Usage: apply_patch 'PATCH'\n       echo 'PATCH' | apply-patch\n")
+        XCTAssertEqual(result.stderr, "Usage: apply_patch 'PATCH'\n       echo 'PATCH' | apply_patch\n")
     }
 
     func testStandaloneRejectsExtraArgumentsLikeRust() {
