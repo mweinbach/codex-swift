@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's apply-patch safety matrix in
+  `codex-rs/core/src/safety.rs`. Swift `PatchSafety` now treats granular
+  approval configs with `sandbox_approval = false` like Rust's
+  sandbox-approval-rejecting mode and returns Rust's read-only patch rejection
+  reason when a read-only sandbox blocks writes.
 - 2026-05-15: rechecked Rust's app-server v2 `ThreadStartParams`,
   `ThreadResumeParams`, and `ThreadForkParams` in
   `codex-rs/app-server-protocol/src/protocol/v2/thread.rs`. Swift shared

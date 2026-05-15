@@ -68,6 +68,8 @@ public enum PatchSafety {
             return .askUser
         }
 
+        let rejectsSandboxApproval = approvalPolicy.rejectsSandboxApproval
+
         if isWritePatchConstrainedToWritablePaths(
             hunks: hunks,
             sandboxPolicy: sandboxPolicy,
@@ -83,14 +85,17 @@ public enum PatchSafety {
                  .readOnlyWithNetworkAccess,
                  .workspaceWrite:
                 guard let sandboxType = getPlatformSandbox() else {
+                    if rejectsSandboxApproval {
+                        return .reject(reason: patchRejectionReason(sandboxPolicy: sandboxPolicy))
+                    }
                     return .askUser
                 }
                 return .autoApprove(sandboxType: sandboxType, userExplicitlyApproved: false)
             }
         }
 
-        if approvalPolicy == .never {
-            return .reject(reason: "writing outside of the project; rejected by user approval settings")
+        if rejectsSandboxApproval {
+            return .reject(reason: patchRejectionReason(sandboxPolicy: sandboxPolicy))
         }
 
         return .askUser
@@ -222,6 +227,28 @@ public enum PatchSafety {
                 return nil
             }
             return child
+        }
+    }
+
+    private static func patchRejectionReason(sandboxPolicy: SandboxPolicy) -> String {
+        switch sandboxPolicy {
+        case .readOnly, .readOnlyWithNetworkAccess:
+            return "writing is blocked by read-only sandbox; rejected by user approval settings"
+        case .dangerFullAccess, .externalSandbox, .workspaceWrite:
+            return "writing outside of the project; rejected by user approval settings"
+        }
+    }
+}
+
+private extension AskForApproval {
+    var rejectsSandboxApproval: Bool {
+        switch self {
+        case .never:
+            return true
+        case let .granular(config):
+            return !config.allowsSandboxApproval
+        case .unlessTrusted, .onFailure, .onRequest:
+            return false
         }
     }
 }

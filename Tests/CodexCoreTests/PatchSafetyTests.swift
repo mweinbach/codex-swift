@@ -184,6 +184,64 @@ final class PatchSafetyTests: XCTestCase {
         )
     }
 
+    func testGranularSandboxApprovalDisabledRejectsOutsidePatchLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try AbsolutePath(absolutePath: temp.url.path)
+        let parent = try XCTUnwrap(cwd.parent)
+        let policy = SandboxPolicy.workspaceWrite(
+            writableRoots: [],
+            networkAccess: false,
+            excludeTmpdirEnvVar: true,
+            excludeSlashTmp: true
+        )
+        let outsidePath = try parent.joined("outside.txt").path
+
+        XCTAssertEqual(
+            PatchSafety.assessPatchSafety(
+                hunks: [.addFile(path: outsidePath, contents: "")],
+                approvalPolicy: .granular(GranularApprovalConfig(
+                    sandboxApproval: false,
+                    rules: true,
+                    mcpElicitations: true
+                )),
+                sandboxPolicy: policy,
+                cwd: cwd,
+                environment: [:]
+            ),
+            .reject(reason: "writing outside of the project; rejected by user approval settings")
+        )
+    }
+
+    func testReadOnlySandboxRejectionUsesRustReason() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try AbsolutePath(absolutePath: temp.url.path)
+
+        XCTAssertEqual(
+            PatchSafety.assessPatchSafety(
+                hunks: [.addFile(path: "inner.txt", contents: "")],
+                approvalPolicy: .never,
+                sandboxPolicy: .readOnly,
+                cwd: cwd,
+                environment: [:]
+            ),
+            .reject(reason: "writing is blocked by read-only sandbox; rejected by user approval settings")
+        )
+        XCTAssertEqual(
+            PatchSafety.assessPatchSafety(
+                hunks: [.addFile(path: "inner.txt", contents: "")],
+                approvalPolicy: .granular(GranularApprovalConfig(
+                    sandboxApproval: false,
+                    rules: true,
+                    mcpElicitations: true
+                )),
+                sandboxPolicy: .readOnlyWithNetworkAccess,
+                cwd: cwd,
+                environment: [:]
+            ),
+            .reject(reason: "writing is blocked by read-only sandbox; rejected by user approval settings")
+        )
+    }
+
     func testExternalSandboxAutoApprovesInOnRequestWithoutNestedSandbox() throws {
         let temp = try TemporaryDirectory()
         let cwd = try AbsolutePath(absolutePath: temp.url.path)

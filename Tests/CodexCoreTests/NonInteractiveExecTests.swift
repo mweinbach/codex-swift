@@ -2898,7 +2898,7 @@ final class NonInteractiveExecTests: XCTestCase {
             output,
             .customToolCallOutput(
                 callID: "custom-patch",
-                output: "apply_patch rejected: writing outside of the project; rejected by user approval settings"
+                output: "apply_patch rejected: writing is blocked by read-only sandbox; rejected by user approval settings"
             )
         )
         XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("blocked.txt").path))
