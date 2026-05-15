@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust commit `99016ec732` and protocol-native
+  approval timing in `codex-rs/app-server-protocol/src/protocol/v2/item.rs`
+  and `permissions.rs`. Swift already threaded `startedAtMs`; focused
+  coverage now pins Rust's required-field boundary so file-change,
+  command-execution, and permissions approval requests reject omitted or
+  explicit-`null` timing payloads.
 - 2026-05-15: rechecked Rust configured-environment stdio cwd normalization in
   `codex-rs/exec-server/src/environment_toml.rs`. Swift now preserves Rust's
   literal `config_dir.join(cwd)` behavior for relative stdio `cwd` values

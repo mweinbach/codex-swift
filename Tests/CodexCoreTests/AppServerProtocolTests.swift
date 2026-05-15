@@ -889,6 +889,24 @@ final class AppServerProtocolTests: XCTestCase {
         )
     }
 
+    func testApprovalRequestsRequireProtocolNativeStartedAtMillisecondsLikeRust() {
+        let payloads = [
+            #"{"method":"item/fileChange/requestApproval","id":1,"params":{"threadId":"thr_123","turnId":"turn_123","itemId":"item_123","reason":null,"grantRoot":null}}"#,
+            #"{"method":"item/fileChange/requestApproval","id":1,"params":{"threadId":"thr_123","turnId":"turn_123","itemId":"item_123","startedAtMs":null,"reason":null,"grantRoot":null}}"#,
+            #"{"method":"item/commandExecution/requestApproval","id":1,"params":{"threadId":"thr_123","turnId":"turn_123","itemId":"item_123"}}"#,
+            #"{"method":"item/commandExecution/requestApproval","id":1,"params":{"threadId":"thr_123","turnId":"turn_123","itemId":"item_123","startedAtMs":null}}"#,
+            #"{"method":"item/permissions/requestApproval","id":1,"params":{"threadId":"thr_123","turnId":"turn_123","itemId":"item_123","cwd":"/tmp/project","permissions":{}}}"#,
+            #"{"method":"item/permissions/requestApproval","id":1,"params":{"threadId":"thr_123","turnId":"turn_123","itemId":"item_123","startedAtMs":null,"cwd":"/tmp/project","permissions":{}}}"#,
+        ]
+
+        for payload in payloads {
+            XCTAssertThrowsError(
+                try JSONDecoder().decode(AppServerProtocol.ServerRequest.self, from: Data(payload.utf8)),
+                "Rust requires protocol-native startedAtMs on approval request payloads: \(payload)"
+            )
+        }
+    }
+
     func testPermissionsRequestApprovalServerResponseMatchesRustWireShapeAndDefaults() throws {
         let response = AppServerProtocol.ServerResponse.permissionsRequestApproval(
             requestID: .integer(1),
