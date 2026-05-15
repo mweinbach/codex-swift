@@ -113,6 +113,30 @@ final class AppServerProcessProtocolTests: XCTestCase {
         XCTAssertEqual(limited.timeoutMs, .milliseconds(500))
     }
 
+    func testProcessSpawnParamsRoundTripsWithoutSandboxPolicyLikeRustProtocol() throws {
+        let params = ProcessSpawnParams(
+            command: ["sleep", "30"],
+            processHandle: "sleep-1",
+            cwd: try AbsolutePath(absolutePath: "/tmp/codex-process/readable")
+        )
+
+        try XCTAssertJSONObjectEqual(params, [
+            "command": ["sleep", "30"],
+            "processHandle": "sleep-1",
+            "cwd": "/tmp/codex-process/readable",
+            "env": NSNull(),
+            "size": NSNull()
+        ])
+
+        let decoded = try JSONDecoder().decode(
+            ProcessSpawnParams.self,
+            from: Data(
+                #"{"command":["sleep","30"],"processHandle":"sleep-1","cwd":"/tmp/codex-process/readable","env":null,"size":null}"#.utf8
+            )
+        )
+        XCTAssertEqual(decoded, params)
+    }
+
     func testProcessSpawnParamsRejectsNegativeOutputBytesCapLikeRustUsize() {
         XCTAssertThrowsError(
             try JSONDecoder().decode(

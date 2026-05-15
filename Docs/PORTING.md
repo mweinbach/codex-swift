@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `process/spawn` default
+  request round trip in
+  `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now pins
+  the no-sandbox-policy fixture where default false flags and server-default
+  limits are omitted while nullable `env` and `size` stay explicit nulls.
 - 2026-05-15: rechecked Rust app-server v2 `thread/shellCommand` request
   and response round trips in
   `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now pins
