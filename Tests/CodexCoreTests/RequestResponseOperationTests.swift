@@ -54,6 +54,40 @@ final class RequestResponseOperationTests: XCTestCase {
         XCTAssertEqual(event.turnID, "")
     }
 
+    func testRequestUserInputModelsRejectExplicitNullForRustDefaultedFields() {
+        XCTAssertThrowsError(try JSONDecoder().decode(RequestUserInputQuestion.self, from: Data(#"""
+        {
+          "id": "choice",
+          "header": "Choice",
+          "question": "Pick one",
+          "isOther": null
+        }
+        """#.utf8)))
+
+        XCTAssertThrowsError(try JSONDecoder().decode(RequestUserInputQuestion.self, from: Data(#"""
+        {
+          "id": "choice",
+          "header": "Choice",
+          "question": "Pick one",
+          "isSecret": null
+        }
+        """#.utf8)))
+
+        XCTAssertThrowsError(try JSONDecoder().decode(RequestUserInputEvent.self, from: Data(#"""
+        {
+          "call_id": "call-1",
+          "turn_id": null,
+          "questions": [
+            {
+              "id": "name",
+              "header": "Name",
+              "question": "What name?"
+            }
+          ]
+        }
+        """#.utf8)))
+    }
+
     func testRequestUserInputAvailableModesAndDescriptionsMatchRust() {
         let defaultModes = RequestUserInputToolConfig.availableModes(features: .withDefaults())
         XCTAssertEqual(defaultModes, [.plan])
@@ -212,6 +246,43 @@ final class RequestResponseOperationTests: XCTestCase {
             ],
             "scope": "turn"
         ])
+    }
+
+    func testRequestPermissionModelsRejectExplicitNullForRustDefaultedFields() {
+        XCTAssertThrowsError(try JSONDecoder().decode(RequestPermissionsResponse.self, from: Data(#"""
+        {
+          "permissions": {
+            "network": {
+              "enabled": false
+            }
+          },
+          "scope": null
+        }
+        """#.utf8)))
+
+        XCTAssertThrowsError(try JSONDecoder().decode(RequestPermissionsResponse.self, from: Data(#"""
+        {
+          "permissions": {
+            "network": {
+              "enabled": false
+            }
+          },
+          "strict_auto_review": null
+        }
+        """#.utf8)))
+
+        XCTAssertThrowsError(try JSONDecoder().decode(RequestPermissionsEvent.self, from: Data(#"""
+        {
+          "call_id": "perm-1",
+          "turn_id": null,
+          "started_at_ms": 1000,
+          "permissions": {
+            "network": {
+              "enabled": true
+            }
+          }
+        }
+        """#.utf8)))
     }
 
     func testDynamicToolModelsUseCamelCaseWireShapeAndCompatibilityFlag() throws {

@@ -96,8 +96,8 @@ public struct RequestUserInputQuestion: Codable, Equatable, Sendable {
         id = try container.decode(String.self, forKey: .id)
         header = try container.decode(String.self, forKey: .header)
         question = try container.decode(String.self, forKey: .question)
-        isOther = try container.decodeIfPresent(Bool.self, forKey: .isOther) ?? false
-        isSecret = try container.decodeIfPresent(Bool.self, forKey: .isSecret) ?? false
+        isOther = try container.decodeRustDefaulted(Bool.self, forKey: .isOther, defaultValue: false)
+        isSecret = try container.decodeRustDefaulted(Bool.self, forKey: .isSecret, defaultValue: false)
         options = try container.decodeIfPresent([RequestUserInputQuestionOption].self, forKey: .options)
     }
 
@@ -175,7 +175,7 @@ public struct RequestUserInputEvent: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         callID = try container.decode(String.self, forKey: .callID)
-        turnID = try container.decodeIfPresent(String.self, forKey: .turnID) ?? ""
+        turnID = try container.decodeRustDefaulted(String.self, forKey: .turnID, defaultValue: "")
         questions = try container.decode([RequestUserInputQuestion].self, forKey: .questions)
     }
 

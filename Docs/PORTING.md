@@ -12,6 +12,13 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's core `request_user_input` and
+  `request_permissions` protocol models in
+  `codex-rs/protocol/src/{request_user_input,request_permissions}.rs`.
+  Swift now keeps Rust's omitted-field defaults for request-user-input
+  `isOther` / `isSecret`, request-user-input and request-permissions
+  `turn_id`, and permission response `scope` / `strict_auto_review` while
+  rejecting explicit `null` for those non-optional Serde defaulted fields.
 - 2026-05-15: rechecked Rust's exec-server protocol defaults in
   `codex-rs/exec-server/src/protocol.rs` and
   `codex-rs/file-system/src/lib.rs`. Swift now keeps omitted-field defaults

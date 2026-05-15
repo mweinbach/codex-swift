@@ -2385,8 +2385,12 @@ public struct RequestPermissionsResponse: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         permissions = try container.decode(RequestPermissionProfile.self, forKey: .permissions)
-        scope = try container.decodeIfPresent(PermissionGrantScope.self, forKey: .scope) ?? .turn
-        strictAutoReview = try container.decodeIfPresent(Bool.self, forKey: .strictAutoReview) ?? false
+        scope = try container.decodeRustDefaulted(PermissionGrantScope.self, forKey: .scope, defaultValue: .turn)
+        strictAutoReview = try container.decodeRustDefaulted(
+            Bool.self,
+            forKey: .strictAutoReview,
+            defaultValue: false
+        )
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -2435,7 +2439,7 @@ public struct RequestPermissionsEvent: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         callID = try container.decode(String.self, forKey: .callID)
-        turnID = try container.decodeIfPresent(String.self, forKey: .turnID) ?? ""
+        turnID = try container.decodeRustDefaulted(String.self, forKey: .turnID, defaultValue: "")
         startedAtMilliseconds = try container.decodeIfPresent(Int64.self, forKey: .startedAtMilliseconds) ?? 0
         reason = try container.decodeIfPresent(String.self, forKey: .reason)
         permissions = try container.decode(RequestPermissionProfile.self, forKey: .permissions)
