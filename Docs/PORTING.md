@@ -2252,6 +2252,8 @@ Recent upstream audit checkpoint:
   - pinned Swift `thread/list`, `thread/loaded/list`, `thread/turns/list`, and `thread/turns/items/list` params to Rust's serde shape where nullable cursor/filter/page fields encode as explicit `null`, while `thread/list` continues to skip false `useStateDbOnly`.
 - `codex-rs/app-server-protocol/src/protocol/v2/tests.rs` turn/start environments
   - pinned Swift `turn/start.environments` protocol parity for Rust's environment payload edge cases: absolute `cwd` round trips, empty arrays are preserved, `null` and omission decode to the default unset state, and relative environment working directories are rejected through the shared `AbsolutePath` contract.
+- `codex-rs/app-server-protocol/src/protocol/v2/tests.rs` thread lifecycle response defaults
+  - pinned Swift `thread/start`, `thread/resume`, and `thread/fork` response decoding for Rust's missing optional lifecycle fields: absent `instructionSources` defaults to an empty list while absent `permissionProfile` and `activePermissionProfile` decode as `nil`; explicit `null` remains rejected for the Rust-defaulted `instructionSources` vector.
 
 ## Known Gaps
 

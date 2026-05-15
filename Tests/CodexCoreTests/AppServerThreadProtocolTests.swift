@@ -1615,6 +1615,38 @@ final class AppServerThreadProtocolTests: XCTestCase {
         )
     }
 
+    func testThreadLifecycleResponsesDefaultMissingOptionalFieldsLikeRustProtocol() throws {
+        let response: [String: Any] = [
+            "thread": expectedRuntimeThreadJSON(),
+            "model": "gpt-5",
+            "modelProvider": "openai",
+            "serviceTier": NSNull(),
+            "cwd": "/repo",
+            "approvalPolicy": "on-failure",
+            "approvalsReviewer": "user",
+            "sandbox": [
+                "type": "dangerFullAccess"
+            ],
+            "reasoningEffort": NSNull()
+        ]
+        let data = try JSONSerialization.data(withJSONObject: response)
+
+        let start = try JSONDecoder().decode(ThreadStartResponse.self, from: data)
+        XCTAssertEqual(start.instructionSources, [])
+        XCTAssertNil(start.permissionProfile)
+        XCTAssertNil(start.activePermissionProfile)
+
+        let resume = try JSONDecoder().decode(ThreadResumeResponse.self, from: data)
+        XCTAssertEqual(resume.instructionSources, [])
+        XCTAssertNil(resume.permissionProfile)
+        XCTAssertNil(resume.activePermissionProfile)
+
+        let fork = try JSONDecoder().decode(ThreadForkResponse.self, from: data)
+        XCTAssertEqual(fork.instructionSources, [])
+        XCTAssertNil(fork.permissionProfile)
+        XCTAssertNil(fork.activePermissionProfile)
+    }
+
     func testThreadRuntimeResponsesRejectExplicitNullForRustDefaultedInstructionSources() throws {
         let base: [String: Any] = [
             "thread": expectedRuntimeThreadJSON(),
