@@ -190,6 +190,12 @@ Recent upstream audit checkpoint:
   coverage now pins Rust's required-field boundary so file-change,
   command-execution, and permissions approval requests reject omitted or
   explicit-`null` timing payloads.
+- 2026-05-15: rechecked Rust commit `31b233c7c6` and the configurable
+  tracestate propagation helper in `codex-rs/otel/src/trace_context.rs`.
+  Swift now has a focused helper/test for Rust's W3C tracestate merge rule:
+  invalid existing headers are ignored, configured members are inserted in
+  deterministic order, same-member fields are upserted, unrelated fields are
+  preserved, and new configured fields are appended in sorted order.
 - 2026-05-15: rechecked Rust configured-environment stdio cwd normalization in
   `codex-rs/exec-server/src/environment_toml.rs`. Swift now preserves Rust's
   literal `config_dir.join(cwd)` behavior for relative stdio `cwd` values

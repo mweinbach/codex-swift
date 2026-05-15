@@ -64,6 +64,33 @@ public struct OtelConfig: Equatable, Sendable {
         try Self.validateTracestateEntries(tracestate)
     }
 
+    public func mergedTracestateHeader(existing: String? = nil) -> String? {
+        Self.mergedTracestateHeader(existing: existing, configuredEntries: tracestate)
+    }
+
+    static func mergedTracestateHeader(
+        existing: String?,
+        configuredEntries: [String: [String: String]]
+    ) -> String? {
+        var members = parseTracestateHeader(existing)
+
+        for memberKey in configuredEntries.keys.sorted().reversed() {
+            let mergedValue = mergeTracestateMemberFields(
+                existing: members.first { $0.key == memberKey }?.value,
+                configuredFields: configuredEntries[memberKey] ?? [:]
+            )
+            if let index = members.firstIndex(where: { $0.key == memberKey }) {
+                members.remove(at: index)
+            }
+            members.insert((key: memberKey, value: mergedValue), at: 0)
+        }
+
+        guard !members.isEmpty else {
+            return nil
+        }
+        return members.map { "\($0.key)=\($0.value)" }.joined(separator: ",")
+    }
+
     static func validateSpanAttributes(_ attributes: [String: String]) throws {
         if attributes.keys.contains("") {
             throw OtelConfigValidationError(message: "configured span attribute key must not be empty")
@@ -184,6 +211,66 @@ public struct OtelConfig: Equatable, Sendable {
                 || byte == 42
                 || byte == 47
         }
+    }
+
+    private static func parseTracestateHeader(_ header: String?) -> [(key: String, value: String)] {
+        guard let header, !header.isEmpty else {
+            return []
+        }
+        let members = header.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
+        guard members.count <= 32 else {
+            return []
+        }
+
+        var seen = Set<String>()
+        var parsed: [(key: String, value: String)] = []
+        for member in members {
+            let parts = member.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            guard parts.count == 2 else {
+                return []
+            }
+            let key = String(parts[0]).trimmingCharacters(in: .whitespaces)
+            let value = String(parts[1]).trimmingCharacters(in: .whitespaces)
+            guard isTracestateMemberKey(key),
+                  isHeaderSafeTracestateMemberValue(value),
+                  seen.insert(key).inserted
+            else {
+                return []
+            }
+            parsed.append((key: key, value: value))
+        }
+        return parsed
+    }
+
+    private static func mergeTracestateMemberFields(
+        existing: String?,
+        configuredFields: [String: String]
+    ) -> String {
+        var fields: [String] = []
+        var seen = Set<String>()
+
+        if let existing {
+            for field in existing.split(separator: ";", omittingEmptySubsequences: true).map(String.init) {
+                if let separator = field.firstIndex(of: ":") {
+                    let fieldKey = String(field[..<separator])
+                    if let value = configuredFields[fieldKey] {
+                        if seen.insert(fieldKey).inserted {
+                            fields.append("\(fieldKey):\(value)")
+                        }
+                        continue
+                    }
+                    seen.insert(fieldKey)
+                }
+                fields.append(field)
+            }
+        }
+
+        fields.append(
+            contentsOf: configuredFields.keys.sorted()
+                .filter { !seen.contains($0) }
+                .map { "\($0):\(configuredFields[$0] ?? "")" }
+        )
+        return fields.joined(separator: ";")
     }
 }
 

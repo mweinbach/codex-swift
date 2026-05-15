@@ -3677,6 +3677,28 @@ final class ConfigLoaderTests: XCTestCase {
         }
     }
 
+    func testOtelTracestateHeaderMergeMatchesRustPropagationOrder() {
+        let config = OtelConfig(tracestate: [
+            "alpha": [
+                "feature": "enabled",
+                "sample": "kept"
+            ],
+            "vendor": [
+                "bar": "new",
+                "baz": "added"
+            ]
+        ])
+
+        XCTAssertEqual(
+            config.mergedTracestateHeader(existing: "vendor=foo:old;bar:old;loose,other=value"),
+            "alpha=feature:enabled;sample:kept,vendor=foo:old;bar:new;loose;baz:added,other=value"
+        )
+        XCTAssertEqual(
+            config.mergedTracestateHeader(existing: "not a member"),
+            "alpha=feature:enabled;sample:kept,vendor=bar:new;baz:added"
+        )
+    }
+
     func testToolSuggestDiscoverablesLoadFromConfigTomlLikeRust() throws {
         let dir = try CoreTemporaryDirectory()
         try """
