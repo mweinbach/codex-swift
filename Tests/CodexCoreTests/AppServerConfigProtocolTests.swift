@@ -254,6 +254,12 @@ final class AppServerConfigProtocolTests: XCTestCase {
             "askForApproval.granular"
         )
         XCTAssertEqual(
+            AppServerProtocol.Config(profiles: [
+                "default": AppServerProtocol.ProfileV2(approvalsReviewer: .autoReview)
+            ]).appServerExperimentalReason,
+            "config/read.approvalsReviewer"
+        )
+        XCTAssertEqual(
             AppServerProtocol.ConfigReadResponse(
                 config: AppServerProtocol.Config(apps: AppServerProtocol.AppsConfig()),
                 origins: [:]
