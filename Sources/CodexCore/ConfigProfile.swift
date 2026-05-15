@@ -18,6 +18,19 @@ public struct FeaturesToml: Codable, Equatable, Sendable {
     }
 }
 
+private struct ConfigProfileAnyCodingKey: CodingKey {
+    let stringValue: String
+    let intValue: Int? = nil
+
+    init?(stringValue: String) {
+        self.stringValue = stringValue
+    }
+
+    init?(intValue: Int) {
+        nil
+    }
+}
+
 public struct ConfigProfile: Codable, Equatable, Sendable {
     public var model: String?
     public var modelProvider: String?
@@ -44,7 +57,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
     public var features: FeaturesToml?
     public var ossProvider: String?
 
-    private enum CodingKeys: String, CodingKey {
+    private enum CodingKeys: String, CodingKey, CaseIterable {
         case model
         case modelProvider = "model_provider"
         case approvalPolicy = "approval_policy"
@@ -124,6 +137,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
     }
 
     public init(from decoder: Decoder) throws {
+        try Self.rejectUnknownKeys(in: decoder)
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.model = try container.decodeIfPresent(String.self, forKey: .model)
         self.modelProvider = try container.decodeIfPresent(String.self, forKey: .modelProvider)
@@ -149,6 +163,19 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         self.toolsViewImage = try container.decodeIfPresent(Bool.self, forKey: .toolsViewImage)
         self.features = try container.decodeIfPresent(FeaturesToml.self, forKey: .features)
         self.ossProvider = try container.decodeIfPresent(String.self, forKey: .ossProvider)
+    }
+
+    private static func rejectUnknownKeys(in decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: ConfigProfileAnyCodingKey.self)
+        let allowedKeys = Set(CodingKeys.allCases.map(\.stringValue))
+        if let unknown = container.allKeys.first(where: { !allowedKeys.contains($0.stringValue) }) {
+            throw DecodingError.dataCorrupted(
+                DecodingError.Context(
+                    codingPath: decoder.codingPath + [unknown],
+                    debugDescription: "Unknown field '\(unknown.stringValue)'"
+                )
+            )
+        }
     }
 
     public func encode(to encoder: Encoder) throws {

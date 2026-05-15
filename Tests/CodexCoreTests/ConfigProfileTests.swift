@@ -121,6 +121,23 @@ final class ConfigProfileTests: XCTestCase {
         ]))
     }
 
+    func testConfigProfileRejectsUnknownFieldsLikeRustDenyUnknownFields() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(ConfigProfile.self, from: Data("""
+            {
+              "model": "gpt-5.4",
+              "modell": "typo"
+            }
+            """.utf8))
+        ) { error in
+            let decodingError = error as? DecodingError
+            guard case let .dataCorrupted(context)? = decodingError else {
+                return XCTFail("expected dataCorrupted error, got \(error)")
+            }
+            XCTAssertEqual(context.debugDescription, "Unknown field 'modell'")
+        }
+    }
+
     func testAppServerProfileConversionKeepsOnlyRustForwardedFields() throws {
         let profile = ConfigProfile(
             model: "gpt-5.4",

@@ -2271,7 +2271,6 @@ final class ConfigLoaderTests: XCTestCase {
         model_reasoning_summary = "auto"
         model_verbosity = "high"
         service_tier = "flex"
-        notify = ["notify-send", "profile"]
         experimental_instructions_file = "profile-instructions.md"
         experimental_compact_prompt_file = "profile-compact.md"
         include_apply_patch_tool = false
@@ -2896,6 +2895,23 @@ final class ConfigLoaderTests: XCTestCase {
 
         XCTAssertEqual(config.activeProfile, "quoted.profile")
         XCTAssertEqual(config.chatgptBaseURL, "https://quoted.example/backend-api/#fragment")
+    }
+
+    func testProfilesRejectUnknownFieldsLikeRustDenyUnknownFields() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        profile = "work"
+
+        [profiles.work]
+        modell = "typo"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual(
+                (error as? CodexConfigLoadError)?.description,
+                "Invalid config line: profiles.work.modell"
+            )
+        }
     }
 
     func testLayeredConfigUsesSystemUserAndProjectDotCodexOrder() throws {

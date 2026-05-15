@@ -4963,11 +4963,11 @@ public struct CodexCLI: Sendable {
                 }
                 continue
             }
-            if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'cloud exec': \(argument)", 64)
-            }
             if query != nil {
                 return .failure("codex-swift: unexpected argument for command 'cloud exec': \(argument)", 64)
+            }
+            if argument.hasPrefix("-"), argument != "-" {
+                return .failure("codex-swift: unsupported option for command 'cloud exec': \(argument)", 64)
             }
             query = argument
         }

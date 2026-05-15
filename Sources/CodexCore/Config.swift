@@ -2284,7 +2284,9 @@ private struct ParsedCodexConfigToml {
                     }
                     continue
                 }
-                guard isRelevantProfileKey(key) else { continue }
+                guard isRelevantProfileKey(key) else {
+                    throw CodexConfigLoadError.invalidConfigLine("profiles.\(name).\(key)")
+                }
                 parsed.profiles[name, default: [:]][key] = try normalizePathLikeValue(
                     ConfigValueParser.parseTomlLiteral(valueText),
                     key: key,
@@ -2907,6 +2909,7 @@ private struct ParsedCodexConfigToml {
 
             if parts.count == 3, parts[0] == "profiles", Self.isRelevantProfileKey(parts[2]) {
                 profiles[parts[1], default: [:]][parts[2]] = value
+                continue
             }
 
             if parts.count == 4, parts[0] == "profiles", parts[2] == "features" {
@@ -2940,6 +2943,11 @@ private struct ParsedCodexConfigToml {
                     value: value,
                     into: &profiles[parts[1], default: [:]]
                 )
+                continue
+            }
+
+            if parts.first == "profiles" {
+                throw CodexConfigLoadError.invalidConfigLine(path)
             }
         }
     }
@@ -3313,6 +3321,7 @@ private struct ParsedCodexConfigToml {
                                 profileName: profileName
                             )
                         }
+                        continue
                     }
 
                     if key == "tools",
@@ -3320,25 +3329,31 @@ private struct ParsedCodexConfigToml {
                        let webSearchValue = toolsTable["web_search"]
                     {
                         Self.mergeWebSearchToolConfig(value: webSearchValue, into: &profiles[profileName, default: [:]])
+                        continue
                     }
 
                     if key == "tui", case let .table(tuiTable) = value {
                         for (tuiKey, tuiValue) in tuiTable {
                             profileTui[profileName, default: [:]][tuiKey] = tuiValue
                         }
+                        continue
                     }
 
                     if key == "analytics", case let .table(analyticsTable) = value {
                         for (analyticsKey, analyticsValue) in analyticsTable {
                             profileAnalytics[profileName, default: [:]][analyticsKey] = analyticsValue
                         }
+                        continue
                     }
 
                     if key == "windows", case let .table(windowsTable) = value {
                         for (windowsKey, windowsValue) in windowsTable {
                             profileWindows[profileName, default: [:]][windowsKey] = windowsValue
                         }
+                        continue
                     }
+
+                    throw CodexConfigLoadError.invalidConfigLine("profiles.\(profileName).\(key)")
                 }
             }
         }

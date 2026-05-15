@@ -829,6 +829,22 @@ final class CodexCLITests: XCTestCase {
         XCTAssertEqual(receivedRequest?.action, .exec(query: nil, environment: "env_123", branch: nil, attempts: 1))
     }
 
+    func testRunAsyncCloudExecAllowsDashQueryForForcedStdinLikeRust() async {
+        var receivedRequest: CodexCLI.CloudCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["cloud", "exec", "--env=env_123", "-"],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            cloudRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(receivedRequest?.action, .exec(query: "-", environment: "env_123", branch: nil, attempts: 1))
+    }
+
     func testRunAsyncCloudExecRequiresEnvAndRejectsInvalidAttemptsBeforeRunner() async {
         var missingEnvStderr: [String] = []
         let missingEnvExit = await CodexCLI().runAsync(
