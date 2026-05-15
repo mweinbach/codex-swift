@@ -1338,21 +1338,23 @@ public struct CodexCLI: Sendable {
                 stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
                 return 78
             }
-            guard let action = parseFeaturesCommandAction(commandArguments) else {
-                stderr("codex-swift: missing required subcommand for command 'features': list, enable, or disable")
-                return 64
-            }
-            do {
-                let result = try await featuresRunner(FeaturesCommandRequest(
-                    action: action,
-                    configProfile: configProfileToken(arguments),
-                    configOverrides: CliConfigOverrides(rawOverrides: try configOverrideTokens(arguments))
-                ))
-                emit(result, stdout: stdout, stderr: stderr)
-                return result.exitCode
-            } catch {
-                stderr(describe(error))
-                return 1
+            switch parseFeaturesCommandAction(commandArguments) {
+            case let .success(action):
+                do {
+                    let result = try await featuresRunner(FeaturesCommandRequest(
+                        action: action,
+                        configProfile: configProfileToken(arguments),
+                        configOverrides: CliConfigOverrides(rawOverrides: try configOverrideTokens(arguments))
+                    ))
+                    emit(result, stdout: stdout, stderr: stderr)
+                    return result.exitCode
+                } catch {
+                    stderr(describe(error))
+                    return 1
+                }
+            case let .failure(message, exitCode):
+                stderr(message)
+                return exitCode
             }
         case let .command(spec, _):
             stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
@@ -1609,21 +1611,43 @@ public struct CodexCLI: Sendable {
         return nil
     }
 
-    private func parseFeaturesCommandAction(_ arguments: [String]) -> FeaturesCommandAction? {
+    private func parseFeaturesCommandAction(_ arguments: [String]) -> ParseResult<FeaturesCommandAction> {
         guard let subcommand = arguments.first else {
-            return nil
+            return .failure(
+                "codex-swift: missing required subcommand for command 'features': list, enable, or disable",
+                64
+            )
         }
         switch subcommand {
         case "list":
-            return arguments.count == 1 ? .list : nil
+            guard arguments.count == 1 else {
+                return .failure("codex-swift: unexpected argument for command 'features list': \(arguments[1])", 64)
+            }
+            return .success(.list)
         case "enable":
-            guard arguments.count == 2 else { return nil }
-            return .enable(feature: arguments[1])
+            guard arguments.count >= 2 else {
+                return .failure(
+                    "codex-swift: missing required argument for command 'features enable': <FEATURE>",
+                    64
+                )
+            }
+            guard arguments.count == 2 else {
+                return .failure("codex-swift: unexpected argument for command 'features enable': \(arguments[2])", 64)
+            }
+            return .success(.enable(feature: arguments[1]))
         case "disable":
-            guard arguments.count == 2 else { return nil }
-            return .disable(feature: arguments[1])
+            guard arguments.count >= 2 else {
+                return .failure(
+                    "codex-swift: missing required argument for command 'features disable': <FEATURE>",
+                    64
+                )
+            }
+            guard arguments.count == 2 else {
+                return .failure("codex-swift: unexpected argument for command 'features disable': \(arguments[2])", 64)
+            }
+            return .success(.disable(feature: arguments[1]))
         default:
-            return nil
+            return .failure("codex-swift: unsupported features subcommand: \(subcommand)", 64)
         }
     }
 

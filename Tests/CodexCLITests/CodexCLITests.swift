@@ -566,6 +566,51 @@ final class CodexCLITests: XCTestCase {
         XCTAssertEqual(stderr, ["codex-swift: missing required subcommand for command 'features': list, enable, or disable"])
     }
 
+    func testRunAsyncFeaturesRejectsInvalidFormsBeforeRunner() async {
+        let cases: [([String], String)] = [
+            (
+                ["features", "bogus"],
+                "codex-swift: unsupported features subcommand: bogus"
+            ),
+            (
+                ["features", "list", "extra"],
+                "codex-swift: unexpected argument for command 'features list': extra"
+            ),
+            (
+                ["features", "enable"],
+                "codex-swift: missing required argument for command 'features enable': <FEATURE>"
+            ),
+            (
+                ["features", "enable", "runtime_metrics", "extra"],
+                "codex-swift: unexpected argument for command 'features enable': extra"
+            ),
+            (
+                ["features", "disable"],
+                "codex-swift: missing required argument for command 'features disable': <FEATURE>"
+            ),
+            (
+                ["features", "disable", "shell_tool", "extra"],
+                "codex-swift: unexpected argument for command 'features disable': extra"
+            )
+        ]
+
+        for (arguments, expectedMessage) in cases {
+            var stderr: [String] = []
+            let exitCode = await CodexCLI().runAsync(
+                arguments: arguments,
+                stdout: { _ in XCTFail("stdout should not be written for \(arguments)") },
+                stderr: { stderr.append($0) },
+                featuresRunner: { _ in
+                    XCTFail("runner should not be called for \(arguments)")
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                }
+            )
+
+            XCTAssertEqual(exitCode, 64, "\(arguments)")
+            XCTAssertEqual(stderr, [expectedMessage], "\(arguments)")
+        }
+    }
+
     func testRunAsyncFeaturesEnableDelegatesToRunner() async {
         var stdout: [String] = []
         var stderr: [String] = []

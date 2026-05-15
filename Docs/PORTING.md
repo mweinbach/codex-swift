@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust `features` CLI parsing from
+  `codex-rs/cli/src/main.rs`. Swift now validates `features list`,
+  `features enable <FEATURE>`, and `features disable <FEATURE>` before
+  invoking the runtime, preserving distinct missing-argument,
+  unexpected-argument, and unsupported-subcommand failures instead of collapsing
+  all invalid forms into the generic missing-subcommand error.
 - 2026-05-15: rechecked current Rust `models-manager/models.json` at
   `7c9731c9af`. Swift's bundled raw catalog now carries the same
   `reasoning_summary_format` metadata for the six current model entries while
