@@ -151,6 +151,12 @@ Recent upstream audit checkpoint:
   app plugin display names, external-agent migration detail arrays, model input
   modalities/speed tiers/service tiers, and plugin keywords: omitted fields use
   the Rust defaults, while explicit `null` is rejected.
+- 2026-05-15: rechecked Rust's `ConfigWarningNotification`, `TextRange`, and
+  `TextPosition` models in
+  `codex-rs/app-server-protocol/src/protocol/v2/config.rs`. Swift's shared
+  app-server config protocol now carries the typed `configWarning`
+  notification payload, including explicit nullable `details` and omitted
+  `path` / `range` when absent.
 - 2026-05-15: rechecked the remaining Rust app-server shared protocol
   `#[serde(default)]` booleans in `v1.rs` and
   `v2/{account.rs,config.rs,fs.rs,model.rs,thread.rs}`. Swift typed protocol

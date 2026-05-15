@@ -1,5 +1,73 @@
 import Foundation
 
+public struct TextPosition: Codable, Equatable, Sendable {
+    public let line: Int
+    public let column: Int
+
+    public init(line: Int, column: Int) {
+        self.line = line
+        self.column = column
+    }
+}
+
+public struct TextRange: Codable, Equatable, Sendable {
+    public let start: TextPosition
+    public let end: TextPosition
+
+    public init(start: TextPosition, end: TextPosition) {
+        self.start = start
+        self.end = end
+    }
+}
+
+public struct ConfigWarningNotification: Equatable, Sendable {
+    public let summary: String
+    public let details: String?
+    public let path: String?
+    public let range: TextRange?
+
+    public init(
+        summary: String,
+        details: String? = nil,
+        path: String? = nil,
+        range: TextRange? = nil
+    ) {
+        self.summary = summary
+        self.details = details
+        self.path = path
+        self.range = range
+    }
+}
+
+extension ConfigWarningNotification: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case summary
+        case details
+        case path
+        case range
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        summary = try container.decode(String.self, forKey: .summary)
+        details = try container.decodeIfPresent(String.self, forKey: .details)
+        path = try container.decodeIfPresent(String.self, forKey: .path)
+        range = try container.decodeIfPresent(TextRange.self, forKey: .range)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(summary, forKey: .summary)
+        try container.encodeNilOrValue(details, forKey: .details)
+        if let path {
+            try container.encode(path, forKey: .path)
+        }
+        if let range {
+            try container.encode(range, forKey: .range)
+        }
+    }
+}
+
 extension AppServerProtocol {
     public struct ConfigReadParams: Codable, Equatable, Sendable {
         public let includeLayers: Bool

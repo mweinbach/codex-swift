@@ -170,6 +170,48 @@ final class AppServerConfigProtocolTests: XCTestCase {
         )
     }
 
+    func testConfigWarningNotificationMatchesRustWireShape() throws {
+        let warning = ConfigWarningNotification(
+            summary: "Invalid config.",
+            details: "Unexpected field.",
+            path: "/repo/.codex/config.toml",
+            range: TextRange(
+                start: TextPosition(line: 2, column: 3),
+                end: TextPosition(line: 2, column: 8)
+            )
+        )
+
+        try XCTAssertJSONObjectEqual(warning, [
+            "summary": "Invalid config.",
+            "details": "Unexpected field.",
+            "path": "/repo/.codex/config.toml",
+            "range": [
+                "start": [
+                    "line": 2,
+                    "column": 3
+                ],
+                "end": [
+                    "line": 2,
+                    "column": 8
+                ]
+            ]
+        ])
+
+        try XCTAssertJSONObjectEqual(
+            ConfigWarningNotification(summary: "Project config ignored."),
+            [
+                "summary": "Project config ignored.",
+                "details": NSNull()
+            ]
+        )
+
+        let decoded = try JSONDecoder().decode(
+            ConfigWarningNotification.self,
+            from: Data(#"{"summary":"Project config ignored."}"#.utf8)
+        )
+        XCTAssertEqual(decoded, ConfigWarningNotification(summary: "Project config ignored."))
+    }
+
     func testConfigValueWriteParamsUseExplicitNullOptionalFields() throws {
         let params = AppServerProtocol.ConfigValueWriteParams(
             keyPath: "model",
