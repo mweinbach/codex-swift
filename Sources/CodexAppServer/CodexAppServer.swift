@@ -18157,9 +18157,7 @@ public enum CodexAppServer {
     }
 
     fileprivate static func cancelLoginAccountResult(params: [String: Any]?) throws -> [String: Any] {
-        guard let loginID = stringParam(params?["loginId"]) else {
-            throw AppServerError.invalidRequest("missing loginId")
-        }
+        let loginID = try rustRequiredStringParam(params?["loginId"], field: "loginId")
         guard UUID(uuidString: loginID) != nil else {
             throw AppServerError.invalidRequest("invalid login id: \(loginID)")
         }
@@ -27078,9 +27076,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
     }
 
     private func cancelLoginAccountResult(params: [String: Any]?) throws -> [String: Any] {
-        guard let loginIDString = CodexAppServer.stringParam(params?["loginId"]) else {
-            throw AppServerError.invalidRequest("missing loginId")
-        }
+        let loginIDString = try CodexAppServer.rustRequiredStringParam(params?["loginId"], field: "loginId")
         guard let loginID = UUID(uuidString: loginIDString) else {
             throw AppServerError.invalidRequest("invalid login id: \(loginIDString)")
         }
