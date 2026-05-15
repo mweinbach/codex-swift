@@ -86,6 +86,28 @@ final class ModelFamilyTests: XCTestCase {
         XCTAssertTrue(unknown.baseInstructions.hasPrefix("You are a coding agent running in the Codex CLI"))
     }
 
+    func testBundledModelPromptsDoNotCarryLegacySandboxPrimerLikeRust() {
+        let families = [
+            ModelsManager.findFamilyForModel("unknown-model"),
+            ModelsManager.findFamilyForModel("gpt-5-codex"),
+            ModelsManager.findFamilyForModel("gpt-5.1"),
+            ModelsManager.findFamilyForModel("gpt-5.2"),
+            ModelsManager.findFamilyForModel("gpt-5.1-codex-max"),
+            ModelsManager.findFamilyForModel("gpt-5.2-codex")
+        ]
+
+        for family in families {
+            XCTAssertFalse(
+                family.baseInstructions.contains("## Sandbox and approvals"),
+                "\(family.slug) should match Rust's current bundled prompt"
+            )
+            XCTAssertFalse(
+                family.baseInstructions.contains("## Codex CLI harness, sandboxing, and approvals"),
+                "\(family.slug) should match Rust's current bundled prompt"
+            )
+        }
+    }
+
     func testRemoteOverridesApplyWhenSlugMatches() {
         let family = ModelFamily(slug: "gpt-4o-mini", family: "gpt-4o-mini")
         XCTAssertNotEqual(family.defaultReasoningEffort, .high)
