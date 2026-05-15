@@ -2728,6 +2728,14 @@ final class ExecPolicyTests: XCTestCase {
         """))
     }
 
+    func testParserRejectsRustUnsupportedStarlarkListCountMethod() {
+        XCTAssertThrowsError(try parsePolicy("""
+        COMMANDS = ["status", "diff", "status"]
+        if COMMANDS.count("status") == 2:
+            prefix_rule(["git", "status"], "allow")
+        """))
+    }
+
     func testParserEvaluatesRustStarlarkAugmentedAdditionAssignments() throws {
         let policy = try parsePolicy("""
         COMMANDS = [("git", "status")]

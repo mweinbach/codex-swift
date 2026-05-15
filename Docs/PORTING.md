@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust Starlark sequence method support with
+  `codex-rs/execpolicy`. Swift now has focused coverage that Python-style
+  `list.count(...)` remains unsupported like Rust, preserving the existing
+  narrower `list.index(...)` method boundary.
 - 2026-05-15: rechecked Rust Starlark policy parsing with
   `codex-rs/execpolicy`. Swift now treats top-level and branch-body `pass`
   statements as no-op policy statements instead of falling through to an
