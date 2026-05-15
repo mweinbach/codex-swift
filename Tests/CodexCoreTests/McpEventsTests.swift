@@ -283,6 +283,17 @@ final class McpEventsTests: XCTestCase {
         XCTAssertNil(tooBig.size)
     }
 
+    func testMcpResourceRejectsDuplicateRustMimeTypeAliases() throws {
+        XCTAssertThrowsError(try JSONDecoder().decode(McpResource.self, from: Data("""
+        {
+          "name": "readme",
+          "uri": "file:///tmp/README.md",
+          "mimeType": "text/plain",
+          "mime_type": "text/markdown"
+        }
+        """.utf8)))
+    }
+
     func testMcpResourcePreservesRustIconsAndMetaFields() throws {
         let decoded = try JSONDecoder().decode(McpResource.self, from: Data("""
         {
@@ -379,6 +390,25 @@ final class McpEventsTests: XCTestCase {
         XCTAssertEqual(decoded.annotations?.additionalProperties, [
             "custom": .array([.string("alpha"), .string("beta")])
         ])
+    }
+
+    func testMcpResourceTemplateRejectsDuplicateRustAliases() throws {
+        XCTAssertThrowsError(try JSONDecoder().decode(McpResourceTemplate.self, from: Data("""
+        {
+          "name": "workspace-file",
+          "uriTemplate": "file:///workspace/{path}",
+          "uri_template": "file:///other/{path}"
+        }
+        """.utf8)))
+
+        XCTAssertThrowsError(try JSONDecoder().decode(McpResourceTemplate.self, from: Data("""
+        {
+          "name": "workspace-file",
+          "uriTemplate": "file:///workspace/{path}",
+          "mimeType": "text/plain",
+          "mime_type": null
+        }
+        """.utf8)))
     }
 
     func testSplitQualifiedToolNameReturnsServerAndTool() throws {

@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust MCP resource aliases in
+  `codex-rs/protocol/src/mcp.rs`. Swift `McpResource` and
+  `McpResourceTemplate` decoding now rejects duplicate camelCase/snake_case
+  alias spellings for `mimeType`/`mime_type` and
+  `uriTemplate`/`uri_template` like Serde's single-field alias handling.
 - 2026-05-15: rechecked Rust MCP tool schema aliases in
   `codex-rs/protocol/src/mcp.rs`. Swift `McpTool` decoding now rejects
   payloads that provide both camelCase and snake_case schema spellings for the

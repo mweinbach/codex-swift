@@ -472,6 +472,13 @@ public struct McpResource: Equatable, Codable, Sendable {
         description = try container.decodeIfPresent(String.self, forKey: .description)
         icons = try container.decodeIfPresent([JSONValue].self, forKey: .icons)
         meta = try container.decodeIfPresent(JSONValue.self, forKey: .meta)
+        if container.contains(.mimeType), container.contains(.mimeTypeSnake) {
+            throw DecodingError.dataCorruptedError(
+                forKey: .mimeType,
+                in: container,
+                debugDescription: "duplicate MCP resource mimeType field"
+            )
+        }
         mimeType = try container.decodeIfPresent(String.self, forKey: .mimeType)
             ?? container.decodeIfPresent(String.self, forKey: .mimeTypeSnake)
         name = try container.decode(String.self, forKey: .name)
@@ -558,10 +565,24 @@ public struct McpResourceTemplate: Equatable, Codable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         annotations = try container.decodeIfPresent(McpAnnotations.self, forKey: .annotations)
         description = try container.decodeIfPresent(String.self, forKey: .description)
+        if container.contains(.mimeType), container.contains(.mimeTypeSnake) {
+            throw DecodingError.dataCorruptedError(
+                forKey: .mimeType,
+                in: container,
+                debugDescription: "duplicate MCP resource template mimeType field"
+            )
+        }
         mimeType = try container.decodeIfPresent(String.self, forKey: .mimeType)
             ?? container.decodeIfPresent(String.self, forKey: .mimeTypeSnake)
         name = try container.decode(String.self, forKey: .name)
         title = try container.decodeIfPresent(String.self, forKey: .title)
+        if container.contains(.uriTemplate), container.contains(.uriTemplateSnake) {
+            throw DecodingError.dataCorruptedError(
+                forKey: .uriTemplate,
+                in: container,
+                debugDescription: "duplicate MCP resource template uriTemplate field"
+            )
+        }
         uriTemplate = try container.decodeIfPresent(String.self, forKey: .uriTemplate)
             ?? container.decode(String.self, forKey: .uriTemplateSnake)
     }
