@@ -22519,6 +22519,31 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(result["webSearch"] as? Bool, false)
     }
 
+    func testModelProviderCapabilitiesReadRejectsMalformedEmptyStructParamsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cases: [(String, String)] = [
+            (
+                #"{"id":1,"method":"modelProvider/capabilities/read"}"#,
+                "missing field `params`"
+            ),
+            (
+                #"{"id":2,"method":"modelProvider/capabilities/read","params":null}"#,
+                "Invalid request: invalid type: null, expected struct ModelProviderCapabilitiesReadParams"
+            ),
+            (
+                #"{"id":3,"method":"modelProvider/capabilities/read","params":1}"#,
+                "Invalid request: invalid type: integer `1`, expected struct ModelProviderCapabilitiesReadParams"
+            )
+        ]
+
+        for (request, expectedMessage) in cases {
+            let response = try appServerResponse(request, codexHome: temp.url)
+            let error = try XCTUnwrap(response["error"] as? [String: Any], request)
+            XCTAssertEqual(error["code"] as? Int, -32600, request)
+            XCTAssertEqual(error["message"] as? String, expectedMessage, request)
+        }
+    }
+
     func testWindowsSandboxReadinessReportsNotConfiguredOffWindows() throws {
         let temp = try TemporaryDirectory()
 
@@ -23110,6 +23135,31 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(error["message"] as? String, "collaborationMode/list requires experimentalApi capability")
     }
 
+    func testCollaborationModeListRejectsMalformedEmptyStructParamsBeforeFeatureGateLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cases: [(String, String)] = [
+            (
+                #"{"id":1,"method":"collaborationMode/list"}"#,
+                "missing field `params`"
+            ),
+            (
+                #"{"id":2,"method":"collaborationMode/list","params":null}"#,
+                "Invalid request: invalid type: null, expected struct CollaborationModeListParams"
+            ),
+            (
+                #"{"id":3,"method":"collaborationMode/list","params":true}"#,
+                "Invalid request: invalid type: boolean `true`, expected struct CollaborationModeListParams"
+            )
+        ]
+
+        for (request, expectedMessage) in cases {
+            let response = try appServerResponse(request, codexHome: temp.url)
+            let error = try XCTUnwrap(response["error"] as? [String: Any], request)
+            XCTAssertEqual(error["code"] as? Int, -32600, request)
+            XCTAssertEqual(error["message"] as? String, expectedMessage, request)
+        }
+    }
+
     func testMockExperimentalMethodRequiresExperimentalAPI() throws {
         let temp = try TemporaryDirectory()
 
@@ -23185,6 +23235,31 @@ final class CodexAppServerTests: XCTestCase {
         )
         XCTAssertEqual(voices["defaultV1"] as? String, "cove")
         XCTAssertEqual(voices["defaultV2"] as? String, "marin")
+    }
+
+    func testRealtimeListVoicesRejectsMalformedEmptyStructParamsBeforeFeatureGateLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cases: [(String, String)] = [
+            (
+                #"{"id":1,"method":"thread/realtime/listVoices"}"#,
+                "missing field `params`"
+            ),
+            (
+                #"{"id":2,"method":"thread/realtime/listVoices","params":null}"#,
+                "Invalid request: invalid type: null, expected struct ThreadRealtimeListVoicesParams"
+            ),
+            (
+                #"{"id":3,"method":"thread/realtime/listVoices","params":"bad"}"#,
+                #"Invalid request: invalid type: string "bad", expected struct ThreadRealtimeListVoicesParams"#
+            )
+        ]
+
+        for (request, expectedMessage) in cases {
+            let response = try appServerResponse(request, codexHome: temp.url)
+            let error = try XCTUnwrap(response["error"] as? [String: Any], request)
+            XCTAssertEqual(error["code"] as? Int, -32600, request)
+            XCTAssertEqual(error["message"] as? String, expectedMessage, request)
+        }
     }
 
     func testRealtimeConversationRoutesReturnRustDisabledThreadError() throws {

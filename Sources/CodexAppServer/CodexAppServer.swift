@@ -12911,8 +12911,10 @@ public enum CodexAppServer {
     }
 
     fileprivate static func modelProviderCapabilitiesReadResult(
+        rawParams: Any?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
+        try requireRustEmptyStructParams(rawParams, structName: "ModelProviderCapabilitiesReadParams")
         let runtimeConfig: CodexRuntimeConfig
         do {
             runtimeConfig = try CodexConfigLoader.load(
@@ -16732,8 +16734,9 @@ public enum CodexAppServer {
         return ["enablement": enablement]
     }
 
-    fileprivate static func collaborationModeListResult() -> [String: Any] {
-        [
+    fileprivate static func collaborationModeListResult(rawParams: Any?) throws -> [String: Any] {
+        try requireRustEmptyStructParams(rawParams, structName: "CollaborationModeListParams")
+        return [
             "data": CollaborationModeRegistry.builtinPresets.map { preset in
                 [
                     "name": preset.name,
@@ -16745,8 +16748,9 @@ public enum CodexAppServer {
         ]
     }
 
-    fileprivate static func realtimeListVoicesResult() -> [String: Any] {
-        [
+    fileprivate static func realtimeListVoicesResult(rawParams: Any?) throws -> [String: Any] {
+        try requireRustEmptyStructParams(rawParams, structName: "ThreadRealtimeListVoicesParams")
+        return [
             "voices": [
                 "v1": ["juniper", "maple", "spruce", "ember", "vale", "breeze", "arbor", "sol", "cove"],
                 "v2": ["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar"],
@@ -20875,6 +20879,20 @@ public enum CodexAppServer {
         if let rawParams, !(rawParams is NSNull) {
             throw AppServerError.invalidRequest(
                 "Invalid request: \(rustInvalidTypeDescription(rawParams)), expected unit"
+            )
+        }
+    }
+
+    fileprivate static func requireRustEmptyStructParams(_ rawParams: Any?, structName: String) throws {
+        guard let rawParams else {
+            throw AppServerError.invalidRequest("missing field `params`")
+        }
+        guard !(rawParams is NSNull) else {
+            throw AppServerError.invalidRequest("Invalid request: invalid type: null, expected struct \(structName)")
+        }
+        guard rawParams is [String: Any] else {
+            throw AppServerError.invalidRequest(
+                "Invalid request: \(rustInvalidTypeDescription(rawParams)), expected struct \(structName)"
             )
         }
     }
@@ -28295,7 +28313,10 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                 case "modelProvider/capabilities/read":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.modelProviderCapabilitiesReadResult(configuration: configuration)
+                        result: try CodexAppServer.modelProviderCapabilitiesReadResult(
+                            rawParams: object["params"],
+                            configuration: configuration
+                        )
                     )
                 case "windowsSandbox/readiness":
                     response = CodexAppServer.responseObject(
@@ -28417,22 +28438,24 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                         notifications.append(notification)
                     }
                 case "collaborationMode/list":
+                    let result = try CodexAppServer.collaborationModeListResult(rawParams: object["params"])
                     try CodexAppServer.requireExperimentalAPI(
                         method: "collaborationMode/list",
                         experimentalAPIEnabled: experimentalAPIEnabled
                     )
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: CodexAppServer.collaborationModeListResult()
+                        result: result
                     )
                 case "thread/realtime/listVoices":
+                    let result = try CodexAppServer.realtimeListVoicesResult(rawParams: object["params"])
                     try CodexAppServer.requireExperimentalAPI(
                         method: "thread/realtime/listVoices",
                         experimentalAPIEnabled: experimentalAPIEnabled
                     )
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: CodexAppServer.realtimeListVoicesResult()
+                        result: result
                     )
                 case "thread/realtime/start",
                      "thread/realtime/appendAudio",
