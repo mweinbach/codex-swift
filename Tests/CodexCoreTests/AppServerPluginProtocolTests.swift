@@ -747,6 +747,41 @@ final class AppServerPluginProtocolTests: XCTestCase {
         )
 
         try XCTAssertJSONObjectEqual(PluginShareListParams(), [:])
+        try XCTAssertJSONObjectEqual(
+            PluginShareListResponse(data: [
+                PluginShareListItem(
+                    plugin: PluginSummary(
+                        id: "plugins~Plugin_00000000000000000000000000000000",
+                        name: "gmail",
+                        source: .remote,
+                        installed: false,
+                        enabled: false,
+                        installPolicy: .available,
+                        authPolicy: .onUse
+                    ),
+                    shareURL: "https://chatgpt.example/plugins/share/share-key-1"
+                )
+            ]),
+            [
+                "data": [[
+                    "plugin": [
+                        "id": "plugins~Plugin_00000000000000000000000000000000",
+                        "name": "gmail",
+                        "shareContext": NSNull(),
+                        "source": ["type": "remote"],
+                        "installed": false,
+                        "enabled": false,
+                        "installPolicy": "AVAILABLE",
+                        "authPolicy": "ON_USE",
+                        "availability": "AVAILABLE",
+                        "interface": NSNull(),
+                        "keywords": []
+                    ],
+                    "shareUrl": "https://chatgpt.example/plugins/share/share-key-1",
+                    "localPluginPath": NSNull()
+                ]]
+            ]
+        )
         try XCTAssertJSONObjectEqual(PluginShareDeleteParams(remotePluginID: "plugins~Plugin_123"), [
             "remotePluginId": "plugins~Plugin_123"
         ])

@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `PluginShareListResponse` and
+  `PluginShareListItem` in `codex-rs/app-server-protocol/src/protocol/v2/plugin.rs`.
+  Swift now carries the typed share-list response surface and pins Rust's
+  camelCase `data` item shape, including explicit `null` for absent
+  `localPluginPath`.
 - 2026-05-15: rechecked Rust app-server v2 plugin params in
   `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now pins the
   removed `forceRemoteSync` compatibility boundary across `plugin/list`,

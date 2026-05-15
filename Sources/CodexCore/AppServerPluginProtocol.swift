@@ -1275,6 +1275,48 @@ public struct PluginShareListParams: Equatable, Codable, Sendable {
     public init() {}
 }
 
+public struct PluginShareListResponse: Equatable, Codable, Sendable {
+    public let data: [PluginShareListItem]
+
+    public init(data: [PluginShareListItem]) {
+        self.data = data
+    }
+}
+
+public struct PluginShareListItem: Equatable, Sendable {
+    public let plugin: PluginSummary
+    public let shareURL: String
+    public let localPluginPath: AbsolutePath?
+
+    public init(plugin: PluginSummary, shareURL: String, localPluginPath: AbsolutePath? = nil) {
+        self.plugin = plugin
+        self.shareURL = shareURL
+        self.localPluginPath = localPluginPath
+    }
+}
+
+extension PluginShareListItem: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case plugin
+        case shareURL = "shareUrl"
+        case localPluginPath
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        plugin = try container.decode(PluginSummary.self, forKey: .plugin)
+        shareURL = try container.decode(String.self, forKey: .shareURL)
+        localPluginPath = try container.decodeIfPresent(AbsolutePath.self, forKey: .localPluginPath)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(plugin, forKey: .plugin)
+        try container.encode(shareURL, forKey: .shareURL)
+        try container.encodeNilOrValue(localPluginPath, forKey: .localPluginPath)
+    }
+}
+
 public struct PluginShareDeleteParams: Equatable, Codable, Sendable {
     public let remotePluginID: String
 
