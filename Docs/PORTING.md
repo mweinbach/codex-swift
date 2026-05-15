@@ -12,6 +12,16 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's tmux client terminal-name fallback in
+  `codex-rs/terminal-detection/src/lib.rs`. Swift now classifies a tmux
+  `client_termname` through the same `TERM` fallback path, so values like
+  `wezterm-mux` preserve the WezTerm terminal category instead of being
+  reported as unknown.
+- 2026-05-15: rechecked Rust's `ConfigRequirementsReadResponse` in
+  `codex-rs/app-server-protocol/src/protocol/v2/config.rs`. Swift's shared
+  app-server config protocol now carries the typed `configRequirements/read`
+  response wrapper, preserving Rust's explicit nullable `requirements` field
+  for absent or populated managed requirements.
 - 2026-05-15: rechecked Rust's global message-history record schema in
   `codex-rs/message-history/src/lib.rs`. Swift `HistoryEntry` now uses the
   Rust `session_id` JSON key and rejects the stale Swift-only

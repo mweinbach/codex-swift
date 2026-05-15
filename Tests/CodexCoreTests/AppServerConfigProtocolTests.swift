@@ -100,6 +100,67 @@ final class AppServerConfigProtocolTests: XCTestCase {
         ])
     }
 
+    func testConfigRequirementsReadResponseMatchesRustOptionShape() throws {
+        try XCTAssertJSONObjectEqual(
+            AppServerProtocol.ConfigRequirementsReadResponse(requirements: nil),
+            [
+                "requirements": NSNull()
+            ]
+        )
+
+        let requirements: JSONValue = .object([
+            "allowedApprovalPolicies": .array([.string("on-request")]),
+            "allowedApprovalsReviewers": .array([.string("guardian_subagent")]),
+            "allowedSandboxModes": .array([.string("workspace-write")]),
+            "allowedWebSearchModes": .array([.string("enabled"), .string("disabled")]),
+            "featureRequirements": .null,
+            "hooks": .null,
+            "enforceResidency": .string("us"),
+            "network": .object([
+                "enabled": .bool(true),
+                "domains": .array([.object([
+                    "domain": .string("api.example.com"),
+                    "value": .string("allow")
+                ])])
+            ])
+        ])
+        let response = AppServerProtocol.ConfigRequirementsReadResponse(requirements: requirements)
+
+        try XCTAssertJSONObjectEqual(response, [
+            "requirements": [
+                "allowedApprovalPolicies": ["on-request"],
+                "allowedApprovalsReviewers": ["guardian_subagent"],
+                "allowedSandboxModes": ["workspace-write"],
+                "allowedWebSearchModes": ["enabled", "disabled"],
+                "featureRequirements": NSNull(),
+                "hooks": NSNull(),
+                "enforceResidency": "us",
+                "network": [
+                    "enabled": true,
+                    "domains": [[
+                        "domain": "api.example.com",
+                        "value": "allow"
+                    ]]
+                ]
+            ]
+        ])
+
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                AppServerProtocol.ConfigRequirementsReadResponse.self,
+                from: Data(#"{"requirements":null}"#.utf8)
+            ),
+            AppServerProtocol.ConfigRequirementsReadResponse(requirements: nil)
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                AppServerProtocol.ConfigRequirementsReadResponse.self,
+                from: try JSONEncoder().encode(response)
+            ),
+            response
+        )
+    }
+
     func testConfigValueWriteParamsUseExplicitNullOptionalFields() throws {
         let params = AppServerProtocol.ConfigValueWriteParams(
             keyPath: "model",

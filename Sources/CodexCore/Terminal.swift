@@ -310,7 +310,7 @@ public enum Terminal {
 
         if let termname {
             return TerminalInfo(
-                name: .unknown,
+                name: terminalName(fromTerm: termname),
                 term: termname,
                 multiplexer: multiplexer
             )

@@ -67,6 +67,23 @@ extension AppServerProtocol {
         }
     }
 
+    public struct ConfigRequirementsReadResponse: Codable, Equatable, Sendable {
+        public let requirements: JSONValue?
+
+        private enum CodingKeys: String, CodingKey {
+            case requirements
+        }
+
+        public init(requirements: JSONValue?) {
+            self.requirements = requirements
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encodeNilOrValue(requirements, forKey: .requirements)
+        }
+    }
+
     public enum ConfigMergeStrategy: String, Codable, Equatable, Sendable {
         case replace
         case upsert

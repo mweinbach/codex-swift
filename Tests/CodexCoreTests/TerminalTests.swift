@@ -104,6 +104,19 @@ final class TerminalTests: XCTestCase {
             info(.unknown, term: "xterm-256color", multiplexer: .tmux(version: nil))
         )
         XCTAssertEqual(terminal.userAgentToken, "xterm-256color")
+
+        terminal = detect(
+            [
+                "TMUX": "/tmp/tmux-1000/default,123,0",
+                "TERM_PROGRAM": "tmux"
+            ],
+            tmuxClientInfo: TmuxClientInfo(termname: "wezterm-mux")
+        )
+        XCTAssertEqual(
+            terminal,
+            info(.wezTerm, term: "wezterm-mux", multiplexer: .tmux(version: nil))
+        )
+        XCTAssertEqual(terminal.userAgentToken, "wezterm-mux")
     }
 
     func testDetectsTmuxTermProgramVersionAndZellij() {
