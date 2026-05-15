@@ -2671,56 +2671,24 @@ final class ExecPolicyTests: XCTestCase {
         """))
     }
 
-    func testParserEvaluatesRustStarlarkListOrderingMethods() throws {
-        let policy = try parsePolicy("""
+    func testParserRejectsUnsupportedRustStarlarkListOrderingMethods() throws {
+        XCTAssertThrowsError(try parsePolicy("""
         TOOLS = ["pnpm", "git", "node"]
         TOOLS.sort()
-        SORT_RESULT = TOOLS.sort(key = None, reverse = True)
-        prefix_rule([TOOLS[2], "status"], "allow", justification = "sorted " + TOOLS[0])
+        prefix_rule([TOOLS[0], "status"], "allow")
+        """))
 
-        COMMANDS = ["log", "status", "diff"]
-        COMMANDS.sort(key = len, reverse = True)
-        prefix_rule(["git", COMMANDS[0]], "prompt", justification = "length " + COMMANDS[-1])
+        XCTAssertThrowsError(try parsePolicy("""
+        TOOLS = ["pnpm", "git", "node"]
+        TOOLS.reverse()
+        prefix_rule([TOOLS[0], "status"], "allow")
+        """))
 
-        PAIRS = [["pnpm", "install"], ["git", "diff"], ["git", "status"]]
-        PAIRS.sort(key = lambda pair: [pair[0], pair[1]])
-        PAIRS.reverse()
-        prefix_rule(PAIRS[0], "allow", justification = "pair " + PAIRS[-1][1])
-
-        PATHS = ["/opt/homebrew/bin/git", "/usr/bin/git"]
-        PATHS.sort()
-        PATHS.reverse()
-        host_executable("git", PATHS)
-
-        if SORT_RESULT == None:
-            network_rule(TOOLS[2] + ".example.com", "https", "allow")
-        """)
-
-        XCTAssertEqual(policy.rules(for: "git"), [
-            PrefixRule(
-                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
-                decision: .allow,
-                justification: "sorted pnpm"
-            ),
-            PrefixRule(
-                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
-                decision: .prompt,
-                justification: "length log"
-            ),
-        ])
-        XCTAssertEqual(policy.rules(for: "pnpm"), [
-            PrefixRule(
-                pattern: PrefixPattern(first: "pnpm", rest: [.single("install")]),
-                decision: .allow,
-                justification: "pair diff"
-            )
-        ])
-        XCTAssertEqual(policy.hostExecutables(), [
-            "git": ["/usr/bin/git", "/opt/homebrew/bin/git"]
-        ])
-        XCTAssertEqual(policy.networkRules(), [
-            NetworkRule(host: "git.example.com", protocol: .https, decision: .allow)
-        ])
+        XCTAssertThrowsError(try parsePolicy("""
+        TOOLS = ["pnpm", "git", "node"]
+        SORTED = getattr(TOOLS, "sort")()
+        prefix_rule([TOOLS[0], "status"], "allow")
+        """))
     }
 
     func testParserEvaluatesRustStarlarkListIndexMethod() throws {
@@ -4112,7 +4080,7 @@ final class ExecPolicyTests: XCTestCase {
         if "startswith" in STRING_ATTRS and "split" in STRING_ATTRS and hasattr(TOOL, "removeprefix"):
             prefix_rule([TOOL, "string-" + str(len(STRING_ATTRS))], "allow", justification = ",".join(sorted(["split", "startswith"])))
 
-        if "append" in LIST_ATTRS and "remove" in LIST_ATTRS and hasattr(COMMANDS, "sort") and hasattr(COMMANDS, "reverse") and not hasattr(COMMANDS, "keys"):
+        if "append" in LIST_ATTRS and "remove" in LIST_ATTRS and not hasattr(COMMANDS, "sort") and not hasattr(COMMANDS, "reverse") and not hasattr(COMMANDS, "keys"):
             network_rule("list-" + str(len(LIST_ATTRS)) + ".github.com", "https", "allow")
 
         if "items" in DICT_ATTRS and hasattr(METADATA, "setdefault") and not hasattr(1, "split"):
@@ -4127,7 +4095,7 @@ final class ExecPolicyTests: XCTestCase {
             )
         ])
         XCTAssertEqual(policy.networkRules(), [
-            NetworkRule(host: "list-9.github.com", protocol: .https, decision: .allow)
+            NetworkRule(host: "list-7.github.com", protocol: .https, decision: .allow)
         ])
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/opt/dict-9/git"]])
     }
@@ -4186,8 +4154,6 @@ final class ExecPolicyTests: XCTestCase {
         getattr(COMMANDS, "append")("diff")
         APPENDED = getattr(COMMANDS, "append")("branch")
         INSERTED = getattr(COMMANDS, "insert")(0, "show")
-        SORTED = getattr(COMMANDS, "sort")(reverse = True)
-        REVERSED = getattr(COMMANDS, "reverse")()
         REMOVED = getattr(COMMANDS, "pop")()
         SETTINGS = {"tool": "git", "remove": "gone"}
         getattr(SETTINGS, "update")({"command": COMMANDS[0]})
@@ -4207,15 +4173,15 @@ final class ExecPolicyTests: XCTestCase {
             changed = getattr(table, "update")({"tail": popped})
             return repr(added) + ":" + table["command"] + ":" + table["tail"]
 
-        if APPENDED == None and INSERTED == None and SORTED == None and REVERSED == None and UPDATED == None and CLEARED == None and REMOVED == "status" and REMOVED_SETTING == "gone" and DEFAULT_SETTING == "show" and len(SCRATCH) == 0:
+        if APPENDED == None and INSERTED == None and UPDATED == None and CLEARED == None and REMOVED == "branch" and REMOVED_SETTING == "gone" and DEFAULT_SETTING == "diff" and len(SCRATCH) == 0:
             prefix_rule([SETTINGS["tool"], SETTINGS["command"]], "allow", justification = repr(APPENDED) + "/" + SETTINGS["extra"] + "/" + helper())
         """)
 
         XCTAssertEqual(policy.rules(for: "git"), [
             PrefixRule(
-                pattern: PrefixPattern(first: "git", rest: [.single("branch")]),
+                pattern: PrefixPattern(first: "git", rest: [.single("show")]),
                 decision: .allow,
-                justification: "None/diff/None:branch:tree"
+                justification: "None/status/None:branch:tree"
             )
         ])
     }

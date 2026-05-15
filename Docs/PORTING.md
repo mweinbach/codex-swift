@@ -989,7 +989,7 @@ Recent upstream audit checkpoint:
   - apply-patch safety assessment, platform sandbox selection, writable-root containment, cwd/default tmp writable roots, `.git`/`.codex` read-only subpaths, and approval-policy decision matrix
 - `codex-rs/execpolicy` and `codex-rs/core/src/exec_policy.rs`
   - Swift-native prefix-rule policy model, comment-safe parser for `prefix_rule(...)` rules, policy evaluation strictness, heuristic fallback matches, config-layer `rules/*.rules` discovery/loading including Rust's user/project rule skip flag, `ignore_user_config` retaining user policy files, managed requirements exec-policy overlays, parent/child exec-policy inheritance reuse checks, exec approval requirement derivation, requested prefix-rule approval hint filtering with Rust's banned-prefix and all-segment validation rules, heredoc single-command prefix matching without auto-amendments, multi-segment sandbox bypass requiring every parsed command to match an allow policy rule, amendment proposals, and default allow-prefix file appending
-  - Starlark policy list ordering mutations now evaluate `list.sort(...)` and `list.reverse()` in place, including `key`, `reverse`, `key = None`, stable ordering, and `None` return assignment behavior used by Rust policy files to build prefix rules and host executable paths.
+  - Starlark policy list method introspection now matches Rust's supported list attribute set and rejects unsupported `list.sort(...)` / `list.reverse()` method calls, while keeping the Rust-supported `sorted(...)` and `reversed(...)` builtins available for generated policy data.
 - `codex-rs/core/src/token_data.rs`
   - ID-token JWT payload parsing, base64url decoding, email/account claims, known/unknown ChatGPT plan mapping including usage-based plans and auth aliases, raw JWT preservation, and strict `auth.json` token decoding with raw-string serialization
 - `codex-rs/core/src/shell.rs`
@@ -1688,8 +1688,8 @@ Recent upstream audit checkpoint:
   - Added Swift execpolicy parser support for dictionary `.setdefault(key[, default])` statements and return-value assignments in top-level and helper-function local scopes, including existing-value returns, default insertion, no-default `None` insertion, `None` truthiness, and `str`/`repr`/`type` handling. Temporary dictionary `.setdefault(...)` expressions now match Rust Starlark return values, including no-default `None`.
 - `codex-rs/execpolicy/src/parser.rs` Starlark list pop return values
   - Added Swift execpolicy parser support for assigning the return value of list `.pop([index])`, including mutation of the source list in top-level and helper-function scopes, default last-item removal, and Rust's rejection of explicit negative or out-of-range pop indexes.
-- `codex-rs/execpolicy/src/parser.rs` Starlark list ordering methods
-  - Added Swift execpolicy parser support for list `.sort(...)` and `.reverse()` methods, including in-place mutations through `getattr(...)`, Rust Starlark's `None` return behavior, and list `dir(...)`/`hasattr(...)` results that expose `sort` and `reverse` alongside the other supported list methods.
+- `codex-rs/execpolicy/src/parser.rs` unsupported Starlark list ordering methods
+  - Tightened Swift execpolicy parser behavior to match current Rust Starlark by rejecting list `.sort(...)` and `.reverse()` method calls, including `getattr(...)` calls, and by omitting those methods from list `dir(...)` / `hasattr(...)` introspection.
 - `codex-rs/execpolicy/src/parser.rs` Starlark augmented assignments
   - Added Swift execpolicy parser support for identifier-target `+=`, `-=`, `*=`, `/=`, `//=`, `%=`, `|=`, `&=`, `^=`, `<<=`, and `>>=` statements using the same supported Starlark operator semantics as expressions, covering incrementally updated numbers, strings, lists, tuple-backed lists, dictionaries, and bit flags used by rules, network hosts, and host executable paths.
 - `codex-rs/execpolicy/src/parser.rs` Starlark indexed assignments

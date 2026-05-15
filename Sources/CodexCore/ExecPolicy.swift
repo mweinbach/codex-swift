@@ -2063,8 +2063,6 @@ public final class PolicyParser {
         "clear",
         "pop",
         "remove",
-        "sort",
-        "reverse",
     ]
 
     private static func applyStarlarkListMutation(
@@ -2143,29 +2141,6 @@ public final class PolicyParser {
                 throw ConfigOverrideError.invalidLiteral(expression)
             }
             items.remove(at: removalIndex)
-        case "sort":
-            let arguments = try parseStarlarkSortArguments(
-                rawArguments,
-                expression: expression,
-                constants: constants,
-                functions: functions
-            )
-            guard arguments.positionalArguments.isEmpty else {
-                throw ConfigOverrideError.invalidLiteral(expression)
-            }
-            items = try sortedStarlarkItems(
-                items,
-                keyFunction: arguments.keyFunction,
-                reverse: arguments.reverse,
-                constants: constants,
-                functions: functions,
-                expression: expression
-            )
-        case "reverse":
-            guard rawArguments.isEmpty else {
-                throw ConfigOverrideError.invalidLiteral(expression)
-            }
-            items.reverse()
         default:
             throw ConfigOverrideError.invalidLiteral(expression)
         }
@@ -6858,7 +6833,7 @@ public final class PolicyParser {
                 "upper"
             ]
         case .array:
-            names = ["append", "clear", "extend", "index", "insert", "pop", "remove", "reverse", "sort"]
+            names = ["append", "clear", "extend", "index", "insert", "pop", "remove"]
         case .table:
             names = ["clear", "get", "items", "keys", "pop", "popitem", "setdefault", "update", "values"]
         case .range:
