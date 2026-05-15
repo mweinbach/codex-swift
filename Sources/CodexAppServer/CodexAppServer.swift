@@ -1227,7 +1227,7 @@ public enum CodexAppServer {
             "serviceTier": nullable(started.serviceTier),
             "cwd": started.cwd.path,
             "instructionSources": started.instructionSources,
-            "approvalPolicy": started.approvalPolicy.rawValue,
+            "approvalPolicy": try appServerApprovalPolicyObject(started.approvalPolicy),
             "approvalsReviewer": started.approvalsReviewer.appServerRawValue,
             "sandbox": try jsonObject(AppServerSandboxPolicy(core: started.sandbox)),
             "permissionProfile": try jsonObject(permissionProfile),
@@ -2156,7 +2156,7 @@ public enum CodexAppServer {
                 runtimeConfig: runtimeConfig,
                 cwd: resumeCwd
             ),
-            "approvalPolicy": approvalPolicy.rawValue,
+            "approvalPolicy": try appServerApprovalPolicyObject(approvalPolicy),
             "approvalsReviewer": approvalsReviewer.appServerRawValue,
             "sandbox": try jsonObject(AppServerSandboxPolicy(core: sandbox)),
             "permissionProfile": try jsonObject(permissionProfile),
@@ -2315,7 +2315,7 @@ public enum CodexAppServer {
                 runtimeConfig: runtimeConfig,
                 cwd: cwd
             ),
-            "approvalPolicy": approvalPolicy.rawValue,
+            "approvalPolicy": try appServerApprovalPolicyObject(approvalPolicy),
             "approvalsReviewer": approvalsReviewer.appServerRawValue,
             "sandbox": try jsonObject(AppServerSandboxPolicy(core: sandbox)),
             "permissionProfile": try jsonObject(permissionProfile),
@@ -19430,7 +19430,11 @@ public enum CodexAppServer {
 
     private static func jsonObject<T: Encodable>(_ value: T) throws -> Any {
         let data = try JSONEncoder().encode(value)
-        return try JSONSerialization.jsonObject(with: data)
+        return try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+    }
+
+    private static func appServerApprovalPolicyObject(_ approvalPolicy: AskForApproval) throws -> Any {
+        try jsonObject(approvalPolicy)
     }
 
     private static func activePermissionProfileObject(_ profile: ActivePermissionProfile?) -> Any {

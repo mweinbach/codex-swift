@@ -903,6 +903,39 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(rollout.contains(#""instructions":"dev notes""#))
     }
 
+    func testThreadStartReturnsGranularApprovalPolicyObjectLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
+        )
+        let request: [String: Any] = [
+            "id": 1,
+            "method": "thread/start",
+            "params": [
+                "modelProvider": "mock_provider",
+                "approvalPolicy": [
+                    "type": "granular",
+                    "sandboxApproval": true,
+                    "rules": false,
+                    "requestPermissions": true,
+                    "mcpElicitations": false
+                ]
+            ]
+        ]
+
+        let messages = try decodeMessages(processor.processLine(try JSONSerialization.data(withJSONObject: request)))
+
+        let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
+        let approvalPolicy = try XCTUnwrap(result["approvalPolicy"] as? [String: Any])
+        let granular = try XCTUnwrap(approvalPolicy["granular"] as? [String: Any])
+        XCTAssertEqual(granular["sandbox_approval"] as? Bool, true)
+        XCTAssertEqual(granular["rules"] as? Bool, false)
+        XCTAssertEqual(granular["skill_approval"] as? Bool, false)
+        XCTAssertEqual(granular["request_permissions"] as? Bool, true)
+        XCTAssertEqual(granular["mcp_elicitations"] as? Bool, false)
+    }
+
     func testThreadStartExportsConfigLockfileWhenConfiguredLikeRust() throws {
         let temp = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
@@ -7838,6 +7871,46 @@ final class CodexAppServerTests: XCTestCase {
 
         let afterContents = try String(contentsOfFile: sourcePath, encoding: .utf8)
         XCTAssertEqual(afterContents, sourceContents)
+    }
+
+    func testThreadForkReturnsGranularApprovalPolicyObjectLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let sourceID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "Saved user message",
+            provider: "mock_provider"
+        )
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
+        )
+        let request: [String: Any] = [
+            "id": 1,
+            "method": "thread/fork",
+            "params": [
+                "threadId": sourceID,
+                "approvalPolicy": [
+                    "type": "granular",
+                    "sandboxApproval": false,
+                    "rules": true,
+                    "skillApproval": true,
+                    "mcpElicitations": true
+                ]
+            ]
+        ]
+
+        let messages = try decodeMessages(processor.processLine(try JSONSerialization.data(withJSONObject: request)))
+
+        let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
+        let approvalPolicy = try XCTUnwrap(result["approvalPolicy"] as? [String: Any])
+        let granular = try XCTUnwrap(approvalPolicy["granular"] as? [String: Any])
+        XCTAssertEqual(granular["sandbox_approval"] as? Bool, false)
+        XCTAssertEqual(granular["rules"] as? Bool, true)
+        XCTAssertEqual(granular["skill_approval"] as? Bool, true)
+        XCTAssertEqual(granular["request_permissions"] as? Bool, false)
+        XCTAssertEqual(granular["mcp_elicitations"] as? Bool, true)
     }
 
     func testThreadReadCanIncludeTurns() throws {

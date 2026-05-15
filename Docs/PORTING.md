@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 thread lifecycle
+  `approval_policy: AskForApproval` response fields in
+  `codex-rs/app-server-protocol/src/protocol/v2/thread.rs`. Swift now projects
+  lifecycle response `approvalPolicy` values through the Rust enum encoder so
+  granular approval policies return the `{ "granular": ... }` object instead
+  of the lossy `"granular"` raw string.
 - 2026-05-15: rechecked Rust app-server v2 `SandboxPolicy`
   core-bridge fixtures in
   `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now pins
