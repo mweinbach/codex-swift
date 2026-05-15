@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust commit `46e2250bcf` (removed legacy
+  `AfterToolUse` dispatch and hook payload types). Swift plugin hook discovery
+  now has focused coverage that legacy `AfterToolUse` / `after_tool_use`
+  plugin entries are ignored while supported `PostToolUse` entries still load.
 - 2026-05-15: rechecked Rust app-server v2 `ReviewStartParams.delivery` in
   `codex-rs/app-server-protocol/src/protocol/v2/review.rs`. Swift
   `review/start` now has focused coverage that omitted and explicit `null`

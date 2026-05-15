@@ -322,6 +322,80 @@ final class HookConfigTests: XCTestCase {
         XCTAssertEqual(HookConfig.configuredHandlers(from: stack, codexHome: codexHome.url), [])
     }
 
+    func testConfiguredHandlersIgnoreLegacyPluginAfterToolUseHooksLikeRust() throws {
+        let codexHome = try HookConfigTemporaryDirectory()
+        let pluginRoot = codexHome.url.appendingPathComponent("plugins/cache/test/demo/local", isDirectory: true)
+        let hooksRoot = pluginRoot.appendingPathComponent("hooks", isDirectory: true)
+        try FileManager.default.createDirectory(at: hooksRoot, withIntermediateDirectories: true)
+        try """
+        {
+          "hooks": {
+            "AfterToolUse": [
+              {
+                "hooks": [{"type": "command", "command": "echo legacy"}]
+              }
+            ],
+            "after_tool_use": [
+              {
+                "hooks": [{"type": "command", "command": "echo legacy raw"}]
+              }
+            ],
+            "PostToolUse": [
+              {
+                "matcher": "Bash",
+                "hooks": [{"type": "command", "command": "echo supported"}]
+              }
+            ]
+          }
+        }
+        """.write(to: hooksRoot.appendingPathComponent("hooks.json", isDirectory: false), atomically: true, encoding: .utf8)
+        let key = HookConfig.pluginHookKey(
+            pluginID: "demo@test",
+            sourcePath: "hooks/hooks.json",
+            eventName: .postToolUse,
+            groupIndex: 0,
+            handlerIndex: 0
+        )
+        let hash = HookConfig.commandHookHash(
+            eventName: .postToolUse,
+            matcher: "Bash",
+            command: "echo supported",
+            timeoutSec: 600,
+            statusMessage: nil
+        )
+        let stack = try ConfigLayerStack(layers: [
+            ConfigLayerEntry(name: .user(file: try path(codexHome.url.appendingPathComponent("config.toml").path)), config: .table([
+                "features": .table([
+                    "hooks": .bool(true),
+                    "plugins": .bool(true),
+                    "plugin_hooks": .bool(true)
+                ]),
+                "plugins": .table([
+                    "demo@test": .table(["enabled": .bool(true)])
+                ]),
+                "hooks": .table([
+                    "state": .table([
+                        key: .table(["trusted_hash": .string(hash)])
+                    ])
+                ])
+            ]))
+        ])
+
+        let handlers = HookConfig.configuredHandlers(from: stack, codexHome: codexHome.url)
+
+        XCTAssertEqual(handlers, [
+            ConfiguredHookHandler(
+                eventName: .postToolUse,
+                matcher: "Bash",
+                command: "echo supported",
+                timeoutSec: 600,
+                sourcePath: try path(hooksRoot.appendingPathComponent("hooks.json").standardizedFileURL.path),
+                source: .plugin,
+                displayOrder: 0
+            )
+        ])
+    }
+
     private func hookConfig(
         command: String,
         timeoutSec: UInt64 = 600,
