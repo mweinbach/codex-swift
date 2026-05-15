@@ -76,6 +76,21 @@ final class AppServerTurnProtocolTests: XCTestCase {
         ])
     }
 
+    func testUserInputRejectsExplicitNullForRustDefaultedTextElements() throws {
+        let omitted = try JSONDecoder().decode(
+            AppServerUserInput.self,
+            from: Data(#"{"type":"text","text":"hello"}"#.utf8)
+        )
+        XCTAssertEqual(omitted, .text("hello"))
+
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AppServerUserInput.self,
+                from: Data(#"{"type":"text","text":"hello","textElements":null}"#.utf8)
+            )
+        )
+    }
+
     func testTurnStartParamsPreserveServiceTierOverrideSemantics() throws {
         let params = AppServerTurnStartParams(
             threadID: "thread_123",

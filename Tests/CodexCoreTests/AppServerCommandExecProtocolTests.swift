@@ -157,6 +157,12 @@ final class AppServerCommandExecProtocolTests: XCTestCase {
         XCTAssertThrowsError(
             try JSONDecoder().decode(
                 AppServerCommandExecSandboxPolicy.self,
+                from: Data(#"{"type":"workspaceWrite","writableRoots":null}"#.utf8)
+            )
+        )
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AppServerCommandExecSandboxPolicy.self,
                 from: Data(#"{"type":"workspaceWrite","excludeTmpdirEnvVar":null}"#.utf8)
             )
         )

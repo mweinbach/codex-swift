@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked more Rust app-server `#[serde(default)]` fields in
+  `codex-rs/app-server-protocol/src/protocol/v2/{turn.rs,item.rs,thread_data.rs,permissions.rs}`.
+  Swift now rejects explicit `null` for defaulted text elements, reasoning
+  summary/content arrays, command-execution source, turn `itemsView`, and
+  workspace-write writable roots while preserving Rust's omitted-field defaults.
 - 2026-05-15: rechecked Rust's remaining app-server shared protocol
   `#[serde(default)]` array fields in
   `v2/{apps.rs,config.rs,plugin.rs}`. Swift typed protocol decoding now
@@ -1559,6 +1564,8 @@ Recent upstream audit checkpoint:
   - expanded Swift's app-server request serialization scope mapper to match Rust's keyed/global request families across thread lifecycle and turn routes, optional MCP resource reads, MCP OAuth, command/process sessions, fs-watch, fuzzy search sessions, config/plugin/skill mutations, MCP registry refresh/status reads, account-auth mutations/reads, memory reset, and Windows sandbox setup/readiness while preserving explicit concurrent/no-scope representatives such as `thread/start`, fs reads, account rate-limit reads, and legacy fuzzy search.
 - `codex-rs/protocol/src/models.rs` MCP tool output content fallback
   - aligned Swift MCP content-block decoding with Rust's tagged content handling for function-call output conversion: unknown or missing MCP content `type` values now round-trip as raw JSON instead of shape-decoding as text/image blocks, and image-bearing tool outputs stringify those unknown blocks into `input_text` fallback entries like Rust's `convert_mcp_content_to_items`.
+- `codex-rs/app-server-protocol/src/protocol/v2/thread.rs` list params optional serialization
+  - pinned Swift `thread/list`, `thread/loaded/list`, `thread/turns/list`, and `thread/turns/items/list` params to Rust's serde shape where nullable cursor/filter/page fields encode as explicit `null`, while `thread/list` continues to skip false `useStateDbOnly`.
 
 ## Known Gaps
 

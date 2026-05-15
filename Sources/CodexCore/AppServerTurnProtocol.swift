@@ -356,7 +356,11 @@ extension AppServerUserInput: Codable {
         case .text:
             self = .text(
                 try container.decode(String.self, forKey: .text),
-                textElements: try container.decodeIfPresent([AppServerTextElement].self, forKey: .textElements) ?? []
+                textElements: try container.decodeRustDefaulted(
+                    [AppServerTextElement].self,
+                    forKey: .textElements,
+                    defaultValue: []
+                )
             )
         case .image:
             self = .image(url: try container.decode(String.self, forKey: .url))

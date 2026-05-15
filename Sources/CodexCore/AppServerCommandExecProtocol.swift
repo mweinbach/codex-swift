@@ -60,7 +60,11 @@ extension AppServerSandboxPolicy: Codable {
                 )
             )
         case .workspaceWrite:
-            let writableRoots = try container.decodeIfPresent([AbsolutePath].self, forKey: .writableRoots) ?? []
+            let writableRoots = try container.decodeRustDefaulted(
+                [AbsolutePath].self,
+                forKey: .writableRoots,
+                defaultValue: []
+            )
             self = .workspaceWrite(
                 writableRoots: writableRoots.map(\.path),
                 networkAccess: try container.decodeRustDefaulted(

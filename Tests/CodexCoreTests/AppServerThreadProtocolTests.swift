@@ -27,6 +27,50 @@ final class AppServerThreadProtocolTests: XCTestCase {
         XCTAssertNil(turn.error)
     }
 
+    func testTurnRejectsExplicitNullForRustDefaultedItemsView() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AppServerTurn.self,
+                from: Data(#"""
+                {
+                  "id": "turn_123",
+                  "items": [],
+                  "itemsView": null,
+                  "status": "completed",
+                  "error": null,
+                  "startedAt": null,
+                  "completedAt": null,
+                  "durationMs": null
+                }
+                """#.utf8)
+            )
+        )
+    }
+
+    func testThreadItemsRejectExplicitNullForRustDefaultedFields() {
+        let nullReasoningSummary = Data(#"{"type":"reasoning","id":"item-1","summary":null,"content":[]}"#.utf8)
+        let nullReasoningContent = Data(#"{"type":"reasoning","id":"item-1","summary":[],"content":null}"#.utf8)
+        let nullCommandSource = Data(#"""
+        {
+          "type": "commandExecution",
+          "id": "item-2",
+          "command": "pwd",
+          "cwd": "/repo",
+          "processId": null,
+          "source": null,
+          "status": "completed",
+          "commandActions": [],
+          "aggregatedOutput": null,
+          "exitCode": 0,
+          "durationMs": null
+        }
+        """#.utf8)
+
+        for payload in [nullReasoningSummary, nullReasoningContent, nullCommandSource] {
+            XCTAssertThrowsError(try JSONDecoder().decode(AppServerThreadItem.self, from: payload))
+        }
+    }
+
     func testThreadStartSourceAndMockExperimentalMethodRoundTripLikeRustProtocol() throws {
         XCTAssertEqual(
             String(data: try JSONEncoder().encode(ThreadStartSource.startup), encoding: .utf8),
@@ -68,6 +112,14 @@ final class AppServerThreadProtocolTests: XCTestCase {
     }
 
     func testThreadTurnsListParamsAcceptsItemsViewLikeRustProtocol() throws {
+        try XCTAssertJSONObjectEqual(ThreadTurnsListParams(threadID: "thr_123"), [
+            "threadId": "thr_123",
+            "cursor": NSNull(),
+            "limit": NSNull(),
+            "sortDirection": NSNull(),
+            "itemsView": NSNull()
+        ])
+
         let json = """
         {
           "threadId": "thr_123",
@@ -878,6 +930,11 @@ final class AppServerThreadProtocolTests: XCTestCase {
     }
 
     func testThreadLoadedListRoundTripsLikeRustProtocol() throws {
+        try XCTAssertJSONObjectEqual(ThreadLoadedListParams(), [
+            "cursor": NSNull(),
+            "limit": NSNull()
+        ])
+
         let params = ThreadLoadedListParams(cursor: "thread-1", limit: 25)
 
         try XCTAssertJSONObjectEqual(params, [
@@ -901,7 +958,17 @@ final class AppServerThreadProtocolTests: XCTestCase {
     }
 
     func testThreadListParamsRoundTripLikeRustProtocol() throws {
-        try XCTAssertJSONObjectEqual(ThreadListParams(), [:])
+        try XCTAssertJSONObjectEqual(ThreadListParams(), [
+            "cursor": NSNull(),
+            "limit": NSNull(),
+            "sortKey": NSNull(),
+            "sortDirection": NSNull(),
+            "modelProviders": NSNull(),
+            "sourceKinds": NSNull(),
+            "archived": NSNull(),
+            "cwd": NSNull(),
+            "searchTerm": NSNull()
+        ])
 
         try XCTAssertJSONObjectEqual(
             ThreadListParams(
@@ -931,7 +998,15 @@ final class AppServerThreadProtocolTests: XCTestCase {
         )
 
         try XCTAssertJSONObjectEqual(ThreadListParams(cwd: .one("/repo")), [
-            "cwd": "/repo"
+            "cursor": NSNull(),
+            "limit": NSNull(),
+            "sortKey": NSNull(),
+            "sortDirection": NSNull(),
+            "modelProviders": NSNull(),
+            "sourceKinds": NSNull(),
+            "archived": NSNull(),
+            "cwd": "/repo",
+            "searchTerm": NSNull()
         ])
 
         let decoded = try JSONDecoder().decode(
@@ -2170,6 +2245,17 @@ final class AppServerThreadProtocolTests: XCTestCase {
     }
 
     func testThreadTurnsItemsListRoundTripsLikeRustProtocol() throws {
+        try XCTAssertJSONObjectEqual(
+            ThreadTurnsItemsListParams(threadID: "thr_123", turnID: "turn_456"),
+            [
+                "threadId": "thr_123",
+                "turnId": "turn_456",
+                "cursor": NSNull(),
+                "limit": NSNull(),
+                "sortDirection": NSNull()
+            ]
+        )
+
         let params = ThreadTurnsItemsListParams(
             threadID: "thr_123",
             turnID: "turn_456",

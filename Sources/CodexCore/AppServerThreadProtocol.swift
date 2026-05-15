@@ -878,8 +878,8 @@ extension AppServerThreadItem: Codable {
         case .reasoning:
             self = .reasoning(
                 id: try container.decode(String.self, forKey: .id),
-                summary: try container.decodeIfPresent([String].self, forKey: .summary) ?? [],
-                content: try container.decodeIfPresent([String].self, forKey: .content) ?? []
+                summary: try container.decodeRustDefaulted([String].self, forKey: .summary, defaultValue: []),
+                content: try container.decodeRustDefaulted([String].self, forKey: .content, defaultValue: [])
             )
         case .commandExecution:
             self = .commandExecution(
@@ -887,7 +887,11 @@ extension AppServerThreadItem: Codable {
                 command: try container.decode(String.self, forKey: .command),
                 cwd: try container.decode(AbsolutePath.self, forKey: .cwd),
                 processID: try container.decodeIfPresent(String.self, forKey: .processID),
-                source: try container.decodeIfPresent(AppServerCommandExecutionSource.self, forKey: .source) ?? .agent,
+                source: try container.decodeRustDefaulted(
+                    AppServerCommandExecutionSource.self,
+                    forKey: .source,
+                    defaultValue: .agent
+                ),
                 status: try container.decode(AppServerCommandExecutionStatus.self, forKey: .status),
                 commandActions: try container.decode([AppServerProtocol.CommandAction].self, forKey: .commandActions),
                 aggregatedOutput: try container.decodeIfPresent(String.self, forKey: .aggregatedOutput),
@@ -1153,7 +1157,7 @@ public struct AppServerTurn: Equatable, Codable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         items = try container.decode([AppServerThreadItem].self, forKey: .items)
-        itemsView = try container.decodeIfPresent(AppServerTurnItemsView.self, forKey: .itemsView) ?? .full
+        itemsView = try container.decodeRustDefaulted(AppServerTurnItemsView.self, forKey: .itemsView, defaultValue: .full)
         status = try container.decode(AppServerTurnStatus.self, forKey: .status)
         error = try container.decodeIfPresent(AppServerTurnError.self, forKey: .error)
         startedAt = try container.decodeIfPresent(Int64.self, forKey: .startedAt)
@@ -2166,18 +2170,18 @@ public struct ThreadListParams: Equatable, Codable, Sendable {
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encodeIfPresent(cursor, forKey: .cursor)
-        try container.encodeIfPresent(limit, forKey: .limit)
-        try container.encodeIfPresent(sortKey, forKey: .sortKey)
-        try container.encodeIfPresent(sortDirection, forKey: .sortDirection)
-        try container.encodeIfPresent(modelProviders, forKey: .modelProviders)
-        try container.encodeIfPresent(sourceKinds, forKey: .sourceKinds)
-        try container.encodeIfPresent(archived, forKey: .archived)
-        try container.encodeIfPresent(cwd, forKey: .cwd)
+        try container.encodeNilOrValue(cursor, forKey: .cursor)
+        try container.encodeNilOrValue(limit, forKey: .limit)
+        try container.encodeNilOrValue(sortKey, forKey: .sortKey)
+        try container.encodeNilOrValue(sortDirection, forKey: .sortDirection)
+        try container.encodeNilOrValue(modelProviders, forKey: .modelProviders)
+        try container.encodeNilOrValue(sourceKinds, forKey: .sourceKinds)
+        try container.encodeNilOrValue(archived, forKey: .archived)
+        try container.encodeNilOrValue(cwd, forKey: .cwd)
         if useStateDBOnly {
             try container.encode(useStateDBOnly, forKey: .useStateDBOnly)
         }
-        try container.encodeIfPresent(searchTerm, forKey: .searchTerm)
+        try container.encodeNilOrValue(searchTerm, forKey: .searchTerm)
     }
 }
 
@@ -2260,6 +2264,12 @@ public struct ThreadLoadedListParams: Equatable, Codable, Sendable {
     public init(cursor: String? = nil, limit: UInt32? = nil) {
         self.cursor = cursor
         self.limit = limit
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeNilOrValue(cursor, forKey: .cursor)
+        try container.encodeNilOrValue(limit, forKey: .limit)
     }
 }
 
@@ -2834,6 +2844,15 @@ public struct ThreadTurnsListParams: Equatable, Codable, Sendable {
         self.sortDirection = sortDirection
         self.itemsView = itemsView
     }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(threadID, forKey: .threadID)
+        try container.encodeNilOrValue(cursor, forKey: .cursor)
+        try container.encodeNilOrValue(limit, forKey: .limit)
+        try container.encodeNilOrValue(sortDirection, forKey: .sortDirection)
+        try container.encodeNilOrValue(itemsView, forKey: .itemsView)
+    }
 }
 
 public struct ThreadTurnsListResponse: Equatable, Codable, Sendable {
@@ -2896,6 +2915,15 @@ public struct ThreadTurnsItemsListParams: Equatable, Codable, Sendable {
         self.cursor = cursor
         self.limit = limit
         self.sortDirection = sortDirection
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(threadID, forKey: .threadID)
+        try container.encode(turnID, forKey: .turnID)
+        try container.encodeNilOrValue(cursor, forKey: .cursor)
+        try container.encodeNilOrValue(limit, forKey: .limit)
+        try container.encodeNilOrValue(sortDirection, forKey: .sortDirection)
     }
 }
 
