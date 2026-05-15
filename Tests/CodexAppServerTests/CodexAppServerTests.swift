@@ -2207,6 +2207,48 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(page.items.count, 0)
     }
 
+    func testThreadStartRejectsMalformedEnvironmentParamsBeforeCreatingThreadLikeRust() throws {
+        let cases: [(request: String, message: String)] = [
+            (
+                #"{"id":1,"method":"thread/start","params":{"environments":[{"cwd":"/tmp"}]}}"#,
+                "missing field `environmentId`"
+            ),
+            (
+                #"{"id":1,"method":"thread/start","params":{"environments":[{"environmentId":"local"}]}}"#,
+                "missing field `cwd`"
+            ),
+            (
+                #"{"id":1,"method":"thread/start","params":{"environments":[{"environmentId":"local","cwd":"relative"}]}}"#,
+                "Invalid request: AbsolutePathBuf deserialized without a base path"
+            ),
+            (
+                #"{"id":1,"method":"thread/start","params":{"environments":{"environmentId":"local","cwd":"/tmp"}}}"#,
+                "Invalid request: invalid type: map, expected a sequence"
+            )
+        ]
+
+        for testCase in cases {
+            let temp = try TemporaryDirectory()
+            let processor = try initializedProcessor(
+                configuration: testConfiguration(codexHome: temp.url),
+                experimentalAPIEnabled: true
+            )
+
+            let messages = try decodeMessages(processor.processLine(Data(testCase.request.utf8)))
+
+            XCTAssertEqual(messages.count, 1)
+            let error = try XCTUnwrap(messages[0]["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, testCase.message)
+            let page = try RolloutListing.getConversations(
+                codexHome: temp.url,
+                pageSize: 10,
+                defaultProvider: "openai"
+            )
+            XCTAssertEqual(page.items.count, 0)
+        }
+    }
+
     func testThreadStartRejectsPermissionsWithSandbox() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(
@@ -3195,6 +3237,50 @@ final class CodexAppServerTests: XCTestCase {
         let error = try XCTUnwrap(messages[0]["error"] as? [String: Any])
         XCTAssertEqual(error["code"] as? Int, -32600)
         XCTAssertEqual(error["message"] as? String, "duplicate turn environment id `local`")
+    }
+
+    func testTurnStartRejectsMalformedEnvironmentParamsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
+        )
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let cases: [(params: String, message: String)] = [
+            (
+                #""environments":[{"cwd":"/tmp"}]"#,
+                "missing field `environmentId`"
+            ),
+            (
+                #""environments":[{"environmentId":"local"}]"#,
+                "missing field `cwd`"
+            ),
+            (
+                #""environments":[{"environmentId":"local","cwd":"relative"}]"#,
+                "Invalid request: AbsolutePathBuf deserialized without a base path"
+            ),
+            (
+                #""environments":{"environmentId":"local","cwd":"/tmp"}"#,
+                "Invalid request: invalid type: map, expected a sequence"
+            )
+        ]
+
+        for testCase in cases {
+            let messages = try decodeMessages(processor.processLine(Data(
+                #"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Hello"}],\#(testCase.params)}}"#.utf8
+            )))
+
+            XCTAssertEqual(messages.count, 1)
+            let error = try XCTUnwrap(messages[0]["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, testCase.message)
+        }
     }
 
     func testTurnStartExperimentalFieldsRequireExperimentalAPI() throws {

@@ -3119,10 +3119,13 @@ public enum CodexAppServer {
         _ rawEnvironments: Any?,
         configuration: CodexAppServerConfiguration
     ) throws -> [TurnEnvironmentSelection]? {
-        guard let rawEnvironments, !(rawEnvironments is NSNull),
-              let environments = rawEnvironments as? [[String: Any]]
-        else {
+        guard let rawEnvironments, !(rawEnvironments is NSNull) else {
             return nil
+        }
+        guard let environments = rawEnvironments as? [Any] else {
+            throw AppServerError.invalidRequest(
+                "Invalid request: \(rustInvalidTypeDescription(rawEnvironments)), expected a sequence"
+            )
         }
 
         let snapshot = try ConfiguredEnvironmentLoader.load(
@@ -3131,8 +3134,14 @@ public enum CodexAppServer {
         )
         var seenEnvironmentIDs = Set<String>()
         var selections: [TurnEnvironmentSelection] = []
-        for environment in environments {
-            let environmentID = stringParam(environment["environmentId"]) ?? ""
+        for rawEnvironment in environments {
+            guard let environment = rawEnvironment as? [String: Any] else {
+                throw AppServerError.invalidRequest(
+                    "Invalid request: \(rustInvalidTypeDescription(rawEnvironment)), expected struct TurnEnvironmentParams"
+                )
+            }
+            let environmentID = try rustRequiredStringParam(environment["environmentId"], field: "environmentId")
+            let cwd = try rustRequiredAbsolutePathParam(environment["cwd"], field: "cwd")
             guard seenEnvironmentIDs.insert(environmentID).inserted else {
                 throw AppServerError.invalidRequest("duplicate turn environment id `\(environmentID)`")
             }
@@ -3141,7 +3150,7 @@ public enum CodexAppServer {
             }
             selections.append(TurnEnvironmentSelection(
                 environmentID: environmentID,
-                cwd: stringParam(environment["cwd"]) ?? configuration.cwd.path
+                cwd: cwd
             ))
         }
         return selections

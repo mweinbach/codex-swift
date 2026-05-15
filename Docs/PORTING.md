@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust v2 `TurnEnvironmentParams` typed decoding from
+  `codex-rs/app-server-protocol/src/protocol/v2/turn.rs`. Swift app-server
+  raw `thread/start` and `turn/start` validation now rejects malformed
+  environment selections before rollout or turn side effects, including missing
+  `environmentId`, missing `cwd`, non-sequence `environments`, and relative
+  environment cwd values.
 - 2026-05-15: rechecked Rust review prompt rendering in
   `codex-rs/core/src/review_prompts.rs`. Swift review prompt interpolation now
   mirrors Rust's template-rendering boundary by substituting prompt variables
