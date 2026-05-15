@@ -3819,6 +3819,72 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(metadata, ["fiber_run_id": "fiber-live-123"])
     }
 
+    func testTurnStartOutputSchemaDoesNotLeakToNextRuntimeTurn() async throws {
+        let temp = try TemporaryDirectory()
+        let capture = AppServerCoreOpCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            coreOpSubmitter: capture.submit,
+            experimentalAPIEnabled: true
+        )
+        let startMessages = try decodeMessages(processor.processLine(Data(#"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let firstRequest: [String: Any] = [
+            "id": 2,
+            "method": "turn/start",
+            "params": [
+                "threadId": threadID,
+                "input": [["type": "text", "text": "Schema turn"]],
+                "outputSchema": [
+                    "type": "object",
+                    "properties": [
+                        "answer": ["type": "string"]
+                    ],
+                    "required": ["answer"],
+                    "additionalProperties": false
+                ]
+            ]
+        ]
+        let firstMessages = try decodeMessages(processor.processLine(try JSONSerialization.data(withJSONObject: firstRequest)))
+        let firstResult = try XCTUnwrap(firstMessages[0]["result"] as? [String: Any])
+        let firstTurn = try XCTUnwrap(firstResult["turn"] as? [String: Any])
+        let firstTurnID = try XCTUnwrap(firstTurn["id"] as? String)
+
+        await processor.handleRuntimeEvent(
+            threadID: threadID,
+            turnID: "fallback-turn",
+            event: .taskComplete(TaskCompleteEvent(
+                turnID: firstTurnID,
+                lastAgentMessage: nil
+            ))
+        )
+
+        let secondMessages = try decodeMessages(processor.processLine(Data(#"{"id":3,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Plain turn"}]}}"#.utf8)))
+        XCTAssertEqual(secondMessages.count, 1)
+        XCTAssertEqual(capture.submissions.map(\.requestID), [.integer(2), .integer(3)])
+
+        guard case let .userInput(_, _, firstSchema, _) = capture.submissions[0].op else {
+            XCTFail("expected first turn to submit user input")
+            return
+        }
+        guard case let .userInput(_, _, secondSchema, _) = capture.submissions[1].op else {
+            XCTFail("expected second turn to submit user input")
+            return
+        }
+        XCTAssertEqual(firstSchema, .object([
+            "type": .string("object"),
+            "properties": .object([
+                "answer": .object(["type": .string("string")])
+            ]),
+            "required": .array([.string("answer")]),
+            "additionalProperties": .bool(false)
+        ]))
+        XCTAssertNil(secondSchema)
+    }
+
     func testTurnStartLiveRuntimeSubmitterProjectsRustStreamTurnCompletion() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()
