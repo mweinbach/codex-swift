@@ -12,6 +12,13 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's exec-server protocol defaults in
+  `codex-rs/exec-server/src/protocol.rs` and
+  `codex-rs/file-system/src/lib.rs`. Swift now keeps omitted-field defaults
+  for process `pipeStdin`, HTTP `headers` / `streamResponse`, streamed
+  body-delta `done`, and sandbox-context Windows/Landlock flags while
+  rejecting explicit `null` for those Rust `#[serde(default)]` non-optional
+  fields.
 - 2026-05-15: rechecked Rust's core `SandboxPolicy` in
   `codex-rs/protocol/src/protocol.rs`. Swift now keeps the Rust
   `#[serde(default)]` behavior for omitted `read-only`, `external-sandbox`,

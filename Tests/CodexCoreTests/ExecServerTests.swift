@@ -2089,6 +2089,70 @@ final class ExecServerTests: XCTestCase {
         XCTAssertNil(defaulted.arg0)
     }
 
+    func testExecServerProtocolRejectsExplicitNullForRustDefaultedFields() {
+        let execNullPipeStdin = Data(#"""
+        {
+          "processId": "proc-null",
+          "argv": ["pwd"],
+          "cwd": "/repo",
+          "env": {},
+          "tty": false,
+          "pipeStdin": null
+        }
+        """#.utf8)
+        XCTAssertThrowsError(try JSONDecoder().decode(ExecServerExecParams.self, from: execNullPipeStdin))
+
+        let sandboxNullPrivateDesktop = Data(#"""
+        {
+          "permissions": { "type": "disabled" },
+          "windowsSandboxLevel": "disabled",
+          "windowsSandboxPrivateDesktop": null
+        }
+        """#.utf8)
+        XCTAssertThrowsError(try JSONDecoder().decode(FileSystemSandboxContext.self, from: sandboxNullPrivateDesktop))
+
+        let sandboxNullLegacyLandlock = Data(#"""
+        {
+          "permissions": { "type": "disabled" },
+          "windowsSandboxLevel": "disabled",
+          "useLegacyLandlock": null
+        }
+        """#.utf8)
+        XCTAssertThrowsError(try JSONDecoder().decode(FileSystemSandboxContext.self, from: sandboxNullLegacyLandlock))
+
+        let httpNullHeaders = Data(#"""
+        {
+          "method": "GET",
+          "url": "https://example.test",
+          "requestId": "req-null-headers",
+          "headers": null
+        }
+        """#.utf8)
+        XCTAssertThrowsError(try JSONDecoder().decode(ExecServerHttpRequestParams.self, from: httpNullHeaders))
+
+        let httpNullStreamResponse = Data(#"""
+        {
+          "method": "GET",
+          "url": "https://example.test",
+          "requestId": "req-null-stream",
+          "streamResponse": null
+        }
+        """#.utf8)
+        XCTAssertThrowsError(try JSONDecoder().decode(ExecServerHttpRequestParams.self, from: httpNullStreamResponse))
+
+        let bodyDeltaNullDone = Data(#"""
+        {
+          "requestId": "req-1",
+          "seq": 1,
+          "deltaBase64": "aGk=",
+          "done": null
+        }
+        """#.utf8)
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(ExecServerHttpRequestBodyDeltaNotification.self, from: bodyDeltaNullDone)
+        )
+    }
+
     func testReadAndNotificationWireShapesCarryBase64Chunks() throws {
         let readResponse = ExecServerReadResponse(
             chunks: [

@@ -93,8 +93,16 @@ public struct FileSystemSandboxContext: Codable, Equatable, Sendable {
         permissions = try container.decode(PermissionProfile.self, forKey: .permissions)
         cwd = try container.decodeIfPresent(AbsolutePath.self, forKey: .cwd)
         windowsSandboxLevel = try container.decode(WindowsSandboxLevel.self, forKey: .windowsSandboxLevel)
-        windowsSandboxPrivateDesktop = try container.decodeIfPresent(Bool.self, forKey: .windowsSandboxPrivateDesktop) ?? false
-        useLegacyLandlock = try container.decodeIfPresent(Bool.self, forKey: .useLegacyLandlock) ?? false
+        windowsSandboxPrivateDesktop = try container.decodeRustDefaulted(
+            Bool.self,
+            forKey: .windowsSandboxPrivateDesktop,
+            defaultValue: false
+        )
+        useLegacyLandlock = try container.decodeRustDefaulted(
+            Bool.self,
+            forKey: .useLegacyLandlock,
+            defaultValue: false
+        )
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -185,7 +193,7 @@ public struct ExecServerExecParams: Codable, Equatable, Sendable {
         envPolicy = try container.decodeIfPresent(ExecServerExecEnvPolicy.self, forKey: .envPolicy)
         env = try container.decode([String: String].self, forKey: .env)
         tty = try container.decode(Bool.self, forKey: .tty)
-        pipeStdin = try container.decodeIfPresent(Bool.self, forKey: .pipeStdin) ?? false
+        pipeStdin = try container.decodeRustDefaulted(Bool.self, forKey: .pipeStdin, defaultValue: false)
         arg0 = try container.decodeIfPresent(String.self, forKey: .arg0)
     }
 }
@@ -489,11 +497,11 @@ public struct ExecServerHttpRequestParams: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         method = try container.decode(String.self, forKey: .method)
         url = try container.decode(String.self, forKey: .url)
-        headers = try container.decodeIfPresent([ExecServerHttpHeader].self, forKey: .headers) ?? []
+        headers = try container.decodeRustDefaulted([ExecServerHttpHeader].self, forKey: .headers, defaultValue: [])
         body = try container.decodeIfPresent(ExecServerByteChunk.self, forKey: .body)
         timeoutMs = try container.decodeIfPresent(UInt64.self, forKey: .timeoutMs)
         requestId = try container.decode(String.self, forKey: .requestId)
-        streamResponse = try container.decodeIfPresent(Bool.self, forKey: .streamResponse) ?? false
+        streamResponse = try container.decodeRustDefaulted(Bool.self, forKey: .streamResponse, defaultValue: false)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -560,7 +568,7 @@ public struct ExecServerHttpRequestBodyDeltaNotification: Codable, Equatable, Se
         requestId = try container.decode(String.self, forKey: .requestId)
         seq = try container.decode(UInt64.self, forKey: .seq)
         delta = try container.decode(ExecServerByteChunk.self, forKey: .delta)
-        done = try container.decodeIfPresent(Bool.self, forKey: .done) ?? false
+        done = try container.decodeRustDefaulted(Bool.self, forKey: .done, defaultValue: false)
         error = try container.decodeIfPresent(String.self, forKey: .error)
     }
 }
