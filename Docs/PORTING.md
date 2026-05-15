@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's current app-server request serialization table
+  in `codex-rs/app-server-protocol/src/protocol/common.rs`. Swift now has
+  focused coverage that the remaining explicitly concurrent/no-scope v2
+  families stay unqueued like Rust, including app/model/config-adjacent reads,
+  local file-system requests, feedback upload, realtime voice listing, account
+  rate-limit reads, and optional command/MCP request scopes.
 - 2026-05-15: rechecked Rust apply-patch `seek_sequence` matching in
   `codex-rs/apply-patch/src/seek_sequence.rs`. Swift apply-patch lookup now
   mirrors Rust's staged exact, trailing-whitespace, trimmed, and Unicode

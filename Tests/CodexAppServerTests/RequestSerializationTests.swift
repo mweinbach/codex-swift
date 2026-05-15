@@ -126,6 +126,37 @@ final class RequestSerializationTests: XCTestCase {
         }
     }
 
+    func testRustRequestScopeTableLeavesConcurrentFamiliesUnscoped() {
+        for method in [
+            "app/list",
+            "fs/readFile",
+            "fs/writeFile",
+            "fs/createDirectory",
+            "fs/getMetadata",
+            "fs/readDirectory",
+            "fs/remove",
+            "fs/copy",
+            "feedback/upload",
+            "model/list",
+            "modelProvider/capabilities/read",
+            "collaborationMode/list",
+            "mock/experimentalMethod",
+            "thread/realtime/listVoices",
+            "account/rateLimits/read"
+        ] {
+            XCTAssertNil(CodexAppServer.requestSerializationScope(forMethod: method), method)
+        }
+
+        XCTAssertNil(
+            CodexAppServer.requestSerializationScope(forMethod: "command/exec", params: [:]),
+            "command/exec only serializes when processId is present"
+        )
+        XCTAssertNil(
+            CodexAppServer.requestSerializationScope(forMethod: "mcpServer/resource/read", params: [:]),
+            "mcpServer/resource/read only serializes when threadId is present"
+        )
+    }
+
     func testGlobalSharedReadScopeUsesSameQueueKeyWithSharedAccessLikeRust() {
         let shared = RequestSerializationQueueKey.from(scope: .globalSharedRead("config"))
         let exclusive = RequestSerializationQueueKey.from(scope: .global("config"))
