@@ -25,6 +25,8 @@ public enum AppServerSandboxPolicy: Equatable, Sendable {
 extension AppServerSandboxPolicy: Codable {
     private enum CodingKeys: String, CodingKey {
         case type
+        case access
+        case readOnlyAccess
         case networkAccess
         case writableRoots
         case excludeTmpdirEnvVar
@@ -38,12 +40,43 @@ extension AppServerSandboxPolicy: Codable {
         case workspaceWrite
     }
 
+    private enum LegacyReadOnlyAccess: String, Decodable {
+        case fullAccess
+        case restricted
+
+        private enum CodingKeys: String, CodingKey {
+            case type
+        }
+
+        private enum LegacyType: String, Decodable {
+            case fullAccess
+            case restricted
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            switch try container.decode(LegacyType.self, forKey: .type) {
+            case .fullAccess:
+                self = .fullAccess
+            case .restricted:
+                self = .restricted
+            }
+        }
+    }
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         switch try container.decode(PolicyType.self, forKey: .type) {
         case .dangerFullAccess:
             self = .dangerFullAccess
         case .readOnly:
+            if try container.decodeIfPresent(LegacyReadOnlyAccess.self, forKey: .access) == .restricted {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .access,
+                    in: container,
+                    debugDescription: "readOnly.access is no longer supported; use permissionProfile for restricted reads"
+                )
+            }
             self = .readOnly(
                 networkAccess: try container.decodeRustDefaulted(
                     Bool.self,
@@ -60,6 +93,13 @@ extension AppServerSandboxPolicy: Codable {
                 )
             )
         case .workspaceWrite:
+            if try container.decodeIfPresent(LegacyReadOnlyAccess.self, forKey: .readOnlyAccess) == .restricted {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .readOnlyAccess,
+                    in: container,
+                    debugDescription: "workspaceWrite.readOnlyAccess is no longer supported; use permissionProfile for restricted reads"
+                )
+            }
             let writableRoots = try container.decodeRustDefaulted(
                 [AbsolutePath].self,
                 forKey: .writableRoots,

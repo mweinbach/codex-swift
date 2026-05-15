@@ -183,6 +183,62 @@ final class AppServerCommandExecProtocolTests: XCTestCase {
         )
     }
 
+    func testCommandExecSandboxPolicyIgnoresLegacyReadOnlyFullAccessField() throws {
+        let decoded = try JSONDecoder().decode(
+            AppServerCommandExecSandboxPolicy.self,
+            from: Data(
+                #"{"type":"readOnly","access":{"type":"fullAccess"},"networkAccess":true}"#.utf8
+            )
+        )
+
+        XCTAssertEqual(decoded, .readOnly(networkAccess: true))
+    }
+
+    func testCommandExecSandboxPolicyIgnoresLegacyWorkspaceWriteFullAccessField() throws {
+        let decoded = try JSONDecoder().decode(
+            AppServerCommandExecSandboxPolicy.self,
+            from: Data(
+                #"{"type":"workspaceWrite","writableRoots":["/workspace"],"readOnlyAccess":{"type":"fullAccess"},"networkAccess":true,"excludeTmpdirEnvVar":true,"excludeSlashTmp":true}"#.utf8
+            )
+        )
+
+        XCTAssertEqual(
+            decoded,
+            .workspaceWrite(
+                writableRoots: ["/workspace"],
+                networkAccess: true,
+                excludeTmpdirEnvVar: true,
+                excludeSlashTmp: true
+            )
+        )
+    }
+
+    func testCommandExecSandboxPolicyRejectsLegacyReadOnlyRestrictedAccessField() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AppServerCommandExecSandboxPolicy.self,
+                from: Data(
+                    #"{"type":"readOnly","access":{"type":"restricted","includePlatformDefaults":false,"readableRoots":[]}}"#.utf8
+                )
+            )
+        ) { error in
+            XCTAssertTrue(String(describing: error).contains("readOnly.access"))
+        }
+    }
+
+    func testCommandExecSandboxPolicyRejectsLegacyWorkspaceWriteRestrictedReadOnlyAccessField() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AppServerCommandExecSandboxPolicy.self,
+                from: Data(
+                    #"{"type":"workspaceWrite","writableRoots":[],"readOnlyAccess":{"type":"restricted","includePlatformDefaults":false,"readableRoots":[]},"networkAccess":false,"excludeTmpdirEnvVar":false,"excludeSlashTmp":false}"#.utf8
+                )
+            )
+        ) { error in
+            XCTAssertTrue(String(describing: error).contains("workspaceWrite.readOnlyAccess"))
+        }
+    }
+
     func testCommandExecResponsesControlsAndNotificationsEncodeRustShapes() throws {
         try XCTAssertJSONObjectEqual(CommandExecResponse(exitCode: 7, stdout: "out", stderr: "err"), [
             "exitCode": 7,

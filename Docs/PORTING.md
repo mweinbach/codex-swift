@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `SandboxPolicy` decoding in
+  `codex-rs/app-server-protocol/src/protocol/v2/permissions.rs`. Swift now
+  matches the legacy read-only access boundary: removed `access` /
+  `readOnlyAccess` fields are ignored when they contain `fullAccess`, but
+  rejected with the Rust field-specific error when they try to carry
+  `restricted` read rules.
 - 2026-05-15: rechecked Rust app-server v2 `RequestPermissionProfile`
   decoding in `codex-rs/app-server-protocol/src/protocol/v2/permissions.rs`.
   Swift app-server permission approval requests now reject unknown permission
