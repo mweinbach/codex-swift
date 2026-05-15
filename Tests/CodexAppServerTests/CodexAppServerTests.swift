@@ -24746,9 +24746,12 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(skills.map { $0["name"] as? String }, ["alpha", "duplicate", "system"])
         XCTAssertEqual(skills[0]["scope"] as? String, "user")
         XCTAssertEqual(skills[0]["shortDescription"] as? String, "short user")
+        XCTAssertEqual(skills[0]["enabled"] as? Bool, true)
         XCTAssertEqual(skills[1]["description"] as? String, "repo wins")
         XCTAssertEqual(skills[1]["scope"] as? String, "repo")
+        XCTAssertEqual(skills[1]["enabled"] as? Bool, true)
         XCTAssertEqual(skills[2]["scope"] as? String, "system")
+        XCTAssertEqual(skills[2]["enabled"] as? Bool, true)
         XCTAssertEqual((data[0]["errors"] as? [Any])?.count, 0)
     }
 
@@ -24818,6 +24821,9 @@ final class CodexAppServerTests: XCTestCase {
         let expectedSkillPath = try XCTUnwrap(skill["path"] as? String)
         let expectedSkillDirectory = URL(fileURLWithPath: expectedSkillPath).deletingLastPathComponent()
         XCTAssertEqual(interface["displayName"] as? String, "Alpha")
+        XCTAssertTrue(interface["shortDescription"] is NSNull)
+        XCTAssertTrue(interface["iconLarge"] is NSNull)
+        XCTAssertTrue(interface["defaultPrompt"] is NSNull)
         XCTAssertEqual(
             (interface["iconSmall"] as? String)?.replacingOccurrences(of: "/private/var/", with: "/var/"),
             expectedSkillDirectory.appendingPathComponent("assets/small.png").path
@@ -25425,7 +25431,10 @@ final class CodexAppServerTests: XCTestCase {
             codexHome: codexHome.url
         )
         let disabledData = try XCTUnwrap((disabledList["result"] as? [String: Any])?["data"] as? [[String: Any]])
-        XCTAssertEqual((disabledData[0]["skills"] as? [[String: Any]])?.count, 0)
+        let disabledSkills = try XCTUnwrap(disabledData[0]["skills"] as? [[String: Any]])
+        XCTAssertEqual(disabledSkills.count, 1)
+        XCTAssertEqual(disabledSkills[0]["name"] as? String, "demo")
+        XCTAssertEqual(disabledSkills[0]["enabled"] as? Bool, false)
 
         let enable = try appServerResponse(
             #"{"id":3,"method":"skills/config/write","params":{"path":"\#(skill.path)","enabled":true}}"#,
@@ -25464,7 +25473,10 @@ final class CodexAppServerTests: XCTestCase {
             codexHome: codexHome.url
         )
         let disabledData = try XCTUnwrap((disabledList["result"] as? [String: Any])?["data"] as? [[String: Any]])
-        XCTAssertEqual((disabledData[0]["skills"] as? [[String: Any]])?.count, 0)
+        let disabledSkills = try XCTUnwrap(disabledData[0]["skills"] as? [[String: Any]])
+        XCTAssertEqual(disabledSkills.count, 1)
+        XCTAssertEqual(disabledSkills[0]["name"] as? String, "github:yeet")
+        XCTAssertEqual(disabledSkills[0]["enabled"] as? Bool, false)
 
         for (index, params) in [
             #"{"path":"\#(skill.path)","name":"github:yeet","enabled":false}"#,

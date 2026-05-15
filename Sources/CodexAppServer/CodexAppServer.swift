@@ -16484,10 +16484,11 @@ public enum CodexAppServer {
                     )
                     cacheOutcome?(cacheKey, outcome)
                 }
-                outcome.skills = outcome.skills.filter { isSkillEnabled($0, rules: configRules) }
                 return [
                     "cwd": cwd,
-                    "skills": outcome.skills.map(skillObject),
+                    "skills": outcome.skills.map { skill in
+                        skillObject(skill, enabled: isSkillEnabled(skill, rules: configRules))
+                    },
                     "errors": outcome.errors.map(skillErrorObject)
                 ]
             }
@@ -22117,7 +22118,7 @@ public enum CodexAppServer {
         return parentName
     }
 
-    private static func skillObject(_ skill: SkillMetadata) -> [String: Any] {
+    private static func skillObject(_ skill: SkillMetadata, enabled: Bool = true) -> [String: Any] {
         [
             "name": skill.name,
             "description": skill.description,
@@ -22125,7 +22126,8 @@ public enum CodexAppServer {
             "interface": skillInterfaceObject(skill.interface) as Any,
             "dependencies": skillDependenciesObject(skill.dependencies) as Any,
             "path": skill.path,
-            "scope": skill.scope.rawValue
+            "scope": skill.scope.rawValue,
+            "enabled": enabled
         ].nullStripped()
     }
 
@@ -22134,13 +22136,13 @@ public enum CodexAppServer {
             return nil
         }
         return [
-            "displayName": interface.displayName as Any,
-            "shortDescription": interface.shortDescription as Any,
-            "iconSmall": interface.iconSmall as Any,
-            "iconLarge": interface.iconLarge as Any,
-            "brandColor": interface.brandColor as Any,
-            "defaultPrompt": interface.defaultPrompt as Any
-        ].nullStripped()
+            "displayName": nullable(interface.displayName),
+            "shortDescription": nullable(interface.shortDescription),
+            "iconSmall": nullable(interface.iconSmall),
+            "iconLarge": nullable(interface.iconLarge),
+            "brandColor": nullable(interface.brandColor),
+            "defaultPrompt": nullable(interface.defaultPrompt)
+        ].nullStripped(keepNulls: true)
     }
 
     private static func skillDependenciesObject(_ dependencies: SkillDependencies?) -> [String: Any]? {

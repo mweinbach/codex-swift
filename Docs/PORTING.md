@@ -445,6 +445,14 @@ Recent upstream audit checkpoint:
   `MigrationDetails.{plugins,sessions,mcpServers,hooks,subagents,commands}`,
   and `PluginSummary.keywords` to empty arrays while rejecting explicit `null`
   like Serde's defaulted `Vec` fields.
+- 2026-05-15: rechecked Rust's `skills/list` projection in
+  `codex-rs/app-server/src/request_processors/catalog_processor.rs` and the
+  `SkillMetadata` protocol model in
+  `codex-rs/app-server-protocol/src/protocol/v2/plugin.rs`. Swift now keeps
+  disabled skills in the app-server response with `"enabled": false` instead
+  of filtering them out, emits `"enabled": true` for active skills, and
+  preserves Rust's nested `SkillInterface` null fields when the interface
+  object is present while still omitting absent top-level optional skill fields.
 - 2026-05-15: rechecked Rust app-server collection defaults in
   `codex-rs/app-server-protocol/src/protocol/v2/{apps.rs,config.rs,model.rs,plugin.rs}`.
   Swift decoding now preserves the Rust `#[serde(default)]` boundary for
