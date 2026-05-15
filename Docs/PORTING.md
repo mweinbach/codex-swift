@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `PluginMarketplaceEntry` remote-only
+  serialization in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`.
+  Swift now pins Rust's explicit `null` encoding for absent marketplace `path`
+  and `interface` fields while preserving the required empty `plugins` vector.
 - 2026-05-15: rechecked Rust app-server v2 `PluginInterface` asset fields in
   `codex-rs/app-server-protocol/src/protocol/v2/plugin.rs`. Swift now pins the
   Rust split between local asset paths (`composerIcon`, `logo`, `screenshots`)

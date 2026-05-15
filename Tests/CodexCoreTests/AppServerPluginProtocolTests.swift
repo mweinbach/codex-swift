@@ -250,6 +250,18 @@ final class AppServerPluginProtocolTests: XCTestCase {
         )
     }
 
+    func testPluginMarketplaceEntrySerializesRemoteOnlyPathAsNullLikeRustProtocol() throws {
+        try XCTAssertJSONObjectEqual(
+            PluginMarketplaceEntry(name: "openai-curated", plugins: []),
+            [
+                "name": "openai-curated",
+                "path": NSNull(),
+                "interface": NSNull(),
+                "plugins": []
+            ]
+        )
+    }
+
     func testPluginSourceSerializesLocalGitAndRemoteVariantsLikeRustProtocol() throws {
         try XCTAssertJSONObjectEqual(PluginSource.local(path: try AbsolutePath(absolutePath: "/plugins/linear")), [
             "type": "local",
