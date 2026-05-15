@@ -84,6 +84,13 @@ final class GitInfoCollectorTests: XCTestCase {
         )
     }
 
+    func testCanonicalizeGitRemoteURLStripsUserInfoAtLastAtLikeRust() {
+        XCTAssertEqual(
+            GitInfoCollector.canonicalizeGitRemoteURL("ssh://token@user@github.com/openai/codex.git"),
+            "github.com/openai/codex"
+        )
+    }
+
     func testCanonicalizeGitRemoteURLRejectsNonRepositoryValues() {
         for remote in [
             "",

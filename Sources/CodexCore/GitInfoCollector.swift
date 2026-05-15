@@ -581,9 +581,8 @@ public enum GitInfoCollector {
         path: String,
         defaultPort: String?
     ) -> String? {
-        let hostWithoutUser = hostPart.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false)
-            .last
-            .map(String.init)
+        let hostWithoutUser = hostPart.lastIndex(of: "@")
+            .map { String(hostPart[hostPart.index(after: $0)...]) }
             ?? hostPart
         let host = normalizeRemoteHost(
             hostWithoutUser
