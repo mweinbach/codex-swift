@@ -227,6 +227,7 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
     public static let defaultStreamIdleTimeoutMilliseconds: UInt64 = 300_000
     public static let defaultStreamMaxRetries: UInt64 = 5
     public static let defaultRequestMaxRetries: UInt64 = 4
+    public static let defaultWebsocketConnectTimeoutMilliseconds: UInt64 = 15_000
     public static let maxStreamMaxRetries: UInt64 = 100
     public static let maxRequestMaxRetries: UInt64 = 100
     public static let chatWireAPIDeprecationSummary =
@@ -412,7 +413,7 @@ More info: https://github.com/openai/codex/discussions/7782
     }
 
     public func websocketConnectTimeoutMS() -> UInt64 {
-        websocketConnectTimeoutMilliseconds ?? 10_000
+        websocketConnectTimeoutMilliseconds ?? Self.defaultWebsocketConnectTimeoutMilliseconds
     }
 
     public func validate() throws {

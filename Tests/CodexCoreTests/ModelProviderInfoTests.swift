@@ -128,7 +128,7 @@ final class ModelProviderInfoTests: XCTestCase {
         XCTAssertEqual(defaults.requestMaxRetryCount(), 4)
         XCTAssertEqual(defaults.streamMaxRetryCount(), 5)
         XCTAssertEqual(defaults.streamIdleTimeoutMS(), 300_000)
-        XCTAssertEqual(defaults.websocketConnectTimeoutMS(), 10_000)
+        XCTAssertEqual(defaults.websocketConnectTimeoutMS(), 15_000)
 
         let capped = ModelProviderInfo(
             name: "capped",
