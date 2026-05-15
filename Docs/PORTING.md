@@ -618,8 +618,9 @@ Recent upstream audit checkpoint:
 - 2026-05-15: rechecked Rust's `cloud exec` query parsing from `codex-rs/cloud-tasks/src/cli.rs` and `resolve_query_input` in `codex-rs/cloud-tasks/src/lib.rs`. Swift CLI parsing now accepts a lone `-` as the `cloud exec` positional query sentinel so the existing prompt resolver can force stdin without treating it as an unsupported option.
 - 2026-05-15: rechecked Rust cloud-task Clap delimiter parsing in
   `codex-rs/cloud-tasks/src/cli.rs`. Swift now treats `--` as the end of
-  cloud subcommand options for `status`, `diff`, `apply`, and `exec`, allowing
-  dash-prefixed task IDs and exec prompts to pass through as positionals.
+  cloud subcommand options for `status`, `list`, `diff`, `apply`, and `exec`,
+  allowing dash-prefixed task IDs and exec prompts to pass through as
+  positionals while accepting a bare delimiter for `list`.
 - 2026-05-15: rechecked Rust's MCP model-visible tool normalization from `codex-rs/codex-mcp/src/tools.rs` and `codex-rs/codex-mcp/src/mcp/mod.rs`. Swift MCP tool planning now preserves raw server/tool identity while exposing Rust-sanitized callable namespaces and names, disambiguating sanitized namespace/tool collisions with SHA-1 suffixes, fitting full model-visible names to 64 characters, and using those callable names in namespace specs and deferred `tool_search` results.
 - 2026-05-15: rechecked Rust's `update_plan` argument models in `codex-rs/protocol/src/plan_tool.rs`. Swift `UpdatePlanArguments` / `PlanItemArgument` now reject unknown top-level or item fields like Rust's `deny_unknown_fields`, preserve the backwards-compatible default for missing `explanation`, and encode a nil explanation as explicit `null` like Rust's ordinary `Option`.
 - 2026-05-15: rechecked Rust's `DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS` in `codex-rs/model-provider-info/src/lib.rs`. Swift model-provider helpers now use Rust's 15-second default websocket connect timeout while preserving explicit `websocket_connect_timeout_ms` overrides.

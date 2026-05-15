@@ -4816,6 +4816,12 @@ public struct CodexCLI: Sendable {
         var iterator = arguments.makeIterator()
 
         while let argument = iterator.next() {
+            if argument == "--" {
+                if let extra = iterator.next() {
+                    return .failure("codex-swift: unexpected argument for command 'cloud list': \(extra)", 64)
+                }
+                break
+            }
             if argument == "--env" {
                 guard let value = iterator.next() else {
                     return .failure("codex-swift: missing value for --env", 64)

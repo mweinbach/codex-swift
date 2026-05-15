@@ -785,6 +785,22 @@ final class CodexCLITests: XCTestCase {
         XCTAssertEqual(stderr, ["limit must be between 1 and 20"])
     }
 
+    func testRunAsyncCloudListAcceptsBareDelimiterLikeRustClap() async {
+        var receivedRequest: CodexCLI.CloudCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["cloud", "list", "--env=Env A", "--"],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            cloudRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(receivedRequest?.action, .list(environment: "Env A", limit: 20, cursor: nil, json: false))
+    }
+
     func testRunAsyncCloudDiffParsesAttemptFlag() async {
         var stdout: [String] = []
         var receivedRequest: CodexCLI.CloudCommandRequest?
@@ -837,6 +853,22 @@ final class CodexCLITests: XCTestCase {
         XCTAssertEqual(exitCode, 0)
         XCTAssertEqual(stdout, ["Applied task task_123 locally (1 files)"])
         XCTAssertEqual(receivedRequest?.action, .apply(taskID: "task_123", attempt: 3))
+    }
+
+    func testRunAsyncCloudApplyAllowsDashPrefixedTaskAfterDelimiterLikeRustClap() async {
+        var receivedRequest: CodexCLI.CloudCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["cloud", "apply", "--attempt", "3", "--", "-task_123"],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            cloudRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(receivedRequest?.action, .apply(taskID: "-task_123", attempt: 3))
     }
 
     func testRunAsyncCloudRejectsInvalidAttemptBeforeRunner() async {
