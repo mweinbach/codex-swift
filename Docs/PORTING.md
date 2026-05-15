@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `fs/createDirectory`
+  default-recursive round-trip coverage in
+  `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift filesystem
+  protocol coverage now re-encodes decoded `recursive: null` directory-create
+  params to the same canonical Rust object shape.
 - 2026-05-15: rechecked Rust app-server v2 `command/exec`
   `disableTimeout` round-trip coverage in
   `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift protocol

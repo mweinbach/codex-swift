@@ -216,6 +216,10 @@ final class AppServerFileSystemProtocolTests: XCTestCase {
         )
         XCTAssertEqual(create.path.path, "/tmp/codex-fs")
         XCTAssertNil(create.recursive)
+        try XCTAssertJSONObjectEqual(create, [
+            "path": "/tmp/codex-fs",
+            "recursive": NSNull()
+        ])
 
         let remove = try JSONDecoder().decode(
             FsRemoveParams.self,
