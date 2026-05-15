@@ -1275,7 +1275,7 @@ public enum CodexAppServer {
             runtimeConfig: runtimeConfig,
             configuration: configuration
         )
-        let approvalPolicy = approvalPolicyParam(params?["approvalPolicy"])
+        let approvalPolicy = try approvalPolicyParam(params?["approvalPolicy"])
             ?? runtimeConfig.approvalPolicy
             ?? .unlessTrusted
         let approvalsReviewer = try approvalsReviewerParam(params?["approvalsReviewer"])
@@ -2239,7 +2239,7 @@ public enum CodexAppServer {
         let reasoningEffort = hasModelResumeOverride
             ? runtimeConfig.modelReasoningEffort
             : sourceSummary.reasoningEffort ?? runtimeConfig.modelReasoningEffort
-        let approvalPolicy = approvalPolicyParam(params?["approvalPolicy"])
+        let approvalPolicy = try approvalPolicyParam(params?["approvalPolicy"])
             ?? runtimeConfig.approvalPolicy
             ?? .unlessTrusted
         let approvalsReviewer = try approvalsReviewerParam(params?["approvalsReviewer"])
@@ -2909,16 +2909,7 @@ public enum CodexAppServer {
     }
 
     private static func turnStartApprovalPolicyParam(_ value: Any?) throws -> AskForApproval? {
-        guard let rawValue = try strictStringParam(value, fieldName: "approvalPolicy") else {
-            return nil
-        }
-        guard let approvalPolicy = AskForApproval(rawValue: rawValue) else {
-            throw unknownVariant(
-                rawValue,
-                expected: ["untrusted", "on-failure", "on-request", "never"]
-            )
-        }
-        return approvalPolicy
+        try approvalPolicyParam(value)
     }
 
     private static func turnStartReasoningEffortParam(_ value: Any?) throws -> ReasoningEffort? {
@@ -3265,8 +3256,7 @@ public enum CodexAppServer {
         guard !experimentalAPIEnabled,
               let approvalPolicy = params?["approvalPolicy"],
               !(approvalPolicy is NSNull),
-              !(approvalPolicy is String),
-              approvalPolicyParam(approvalPolicy) == nil
+              isGranularApprovalPolicyObject(approvalPolicy)
         else {
             return
         }
@@ -20647,8 +20637,65 @@ public enum CodexAppServer {
         return .internalError(error.localizedDescription)
     }
 
-    private static func approvalPolicyParam(_ value: Any?) -> AskForApproval? {
-        stringParam(value).flatMap(AskForApproval.init(rawValue:))
+    private static func approvalPolicyParam(_ value: Any?) throws -> AskForApproval? {
+        guard let value, !(value is NSNull) else {
+            return nil
+        }
+        if let rawValue = value as? String {
+            guard let approvalPolicy = AskForApproval(rawValue: rawValue) else {
+                throw unknownVariant(
+                    rawValue,
+                    expected: ["untrusted", "on-failure", "on-request", "never"]
+                )
+            }
+            return approvalPolicy
+        }
+        guard let object = value as? [String: Any] else {
+            throw AppServerError.invalidRequest("invalid value for field `approvalPolicy`")
+        }
+        return try granularApprovalPolicyParam(object)
+    }
+
+    private static func granularApprovalPolicyParam(_ object: [String: Any]) throws -> AskForApproval {
+        let configObject: [String: Any]
+        if let granular = object["granular"] {
+            guard let granularObject = granular as? [String: Any] else {
+                throw AppServerError.invalidRequest("invalid value for field `approvalPolicy`")
+            }
+            configObject = granularObject
+        } else {
+            guard object["type"] as? String == "granular" else {
+                throw AppServerError.invalidRequest("invalid value for field `approvalPolicy`")
+            }
+            configObject = object
+        }
+
+        return .granular(GranularApprovalConfig(
+            sandboxApproval: try rustRequiredBoolParam(
+                configObject["sandbox_approval"] ?? configObject["sandboxApproval"],
+                field: "sandbox_approval"
+            ),
+            rules: try rustRequiredBoolParam(configObject["rules"], field: "rules"),
+            skillApproval: try rustDefaultedBoolParam(
+                configObject["skill_approval"] ?? configObject["skillApproval"],
+                defaultValue: false
+            ),
+            requestPermissions: try rustDefaultedBoolParam(
+                configObject["request_permissions"] ?? configObject["requestPermissions"],
+                defaultValue: false
+            ),
+            mcpElicitations: try rustRequiredBoolParam(
+                configObject["mcp_elicitations"] ?? configObject["mcpElicitations"],
+                field: "mcp_elicitations"
+            )
+        ))
+    }
+
+    private static func isGranularApprovalPolicyObject(_ value: Any) -> Bool {
+        guard let object = value as? [String: Any] else {
+            return false
+        }
+        return object["type"] as? String == "granular" || object["granular"] != nil
     }
 
     private static func approvalsReviewerParam(_ value: Any?) throws -> ApprovalsReviewer? {

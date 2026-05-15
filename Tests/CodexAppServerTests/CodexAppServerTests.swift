@@ -4154,6 +4154,53 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(params.personality, .string("pragmatic"))
     }
 
+    func testTurnStartRuntimeSubmitterPreservesGranularApprovalPolicyLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let capture = AppServerCoreOpCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            coreOpSubmitter: capture.submit,
+            experimentalAPIEnabled: true
+        )
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+        let request: [String: Any] = [
+            "id": 2,
+            "method": "turn/start",
+            "params": [
+                "threadId": threadID,
+                "input": [["type": "text", "text": "Granular override"]],
+                "approvalPolicy": [
+                    "type": "granular",
+                    "sandboxApproval": true,
+                    "rules": false,
+                    "requestPermissions": true,
+                    "mcpElicitations": false
+                ]
+            ]
+        ]
+
+        _ = try decodeMessages(processor.processLine(try JSONSerialization.data(withJSONObject: request)))
+
+        let submissions = capture.submissions
+        XCTAssertEqual(submissions.count, 1)
+        guard case let .userInputWithTurnContext(params) = submissions[0].op else {
+            XCTFail("expected runtime turn start to submit context-aware user input")
+            return
+        }
+        XCTAssertEqual(params.items, [.text("Granular override")])
+        XCTAssertEqual(params.approvalPolicy, .granular(GranularApprovalConfig(
+            sandboxApproval: true,
+            rules: false,
+            requestPermissions: true,
+            mcpElicitations: false
+        )))
+    }
+
     func testTurnStartDropsFastTierWhenFastModeDisabledLikeRust() throws {
         let temp = try TemporaryDirectory()
         try """

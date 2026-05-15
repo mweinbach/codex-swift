@@ -566,6 +566,11 @@ Recent upstream audit checkpoint:
   body-delta `done`, and sandbox-context Windows/Landlock flags while
   rejecting explicit `null` for those Rust `#[serde(default)]` non-optional
   fields.
+- 2026-05-15: rechecked Rust's app-server v2 `AskForApproval::Granular`
+  bridge tests in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`.
+  Swift app-server turn-start overrides now parse experimental granular
+  approval-policy objects and preserve the defaulted `requestPermissions` flag
+  into the submitted core turn context.
 - 2026-05-15: rechecked Rust's core `SandboxPolicy` in
   `codex-rs/protocol/src/protocol.rs`. Swift now keeps the Rust
   `#[serde(default)]` behavior for omitted `read-only`, `external-sandbox`,
