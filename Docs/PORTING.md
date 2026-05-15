@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's MCP OAuth token response path through
+  `codex-rs/rmcp-client/src/oauth.rs` and oauth2's
+  `StandardTokenResponse.scope` deserializer. Swift token response decoding now
+  matches Rust by accepting only the space-delimited `scope` string shape,
+  defaulting omitted or explicit `null` to no scopes, and rejecting array scope
+  payloads instead of treating them as a legacy alias.
 - 2026-05-15: rechecked Rust core `SessionConfiguredEvent.approvals_reviewer`
   in `codex-rs/protocol/src/protocol.rs`. Swift session-configured decoding
   now preserves Serde's default boundary for the non-optional reviewer:

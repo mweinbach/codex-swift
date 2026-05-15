@@ -65,10 +65,10 @@ public struct McpOAuthTokenResponse: Codable, Equatable, Sendable {
         self.tokenType = try container.decode(String.self, forKey: .tokenType)
         self.expiresIn = try container.decodeIfPresent(UInt64.self, forKey: .expiresIn)
         self.refreshToken = try container.decodeIfPresent(String.self, forKey: .refreshToken)
-        if let scope = try? container.decodeIfPresent(String.self, forKey: .scopes) {
+        if let scope = try container.decodeIfPresent(String.self, forKey: .scopes) {
             self.scopes = scope.split(separator: " ").map(String.init)
         } else {
-            self.scopes = try container.decodeIfPresent([String].self, forKey: .scopes) ?? []
+            self.scopes = []
         }
     }
 

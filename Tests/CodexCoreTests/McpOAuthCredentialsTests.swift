@@ -13,6 +13,35 @@ final class McpOAuthCredentialsTests: XCTestCase {
         )
     }
 
+    func testTokenResponseScopeMatchesRustSpaceDelimitedOptional() throws {
+        let decoder = JSONDecoder()
+
+        let scoped = try decoder.decode(
+            McpOAuthTokenResponse.self,
+            from: Data(#"{"access_token":"access","token_type":"bearer","scope":"read write"}"#.utf8)
+        )
+        XCTAssertEqual(scoped.scopes, ["read", "write"])
+
+        let missing = try decoder.decode(
+            McpOAuthTokenResponse.self,
+            from: Data(#"{"access_token":"access","token_type":"bearer"}"#.utf8)
+        )
+        XCTAssertEqual(missing.scopes, [])
+
+        let explicitNull = try decoder.decode(
+            McpOAuthTokenResponse.self,
+            from: Data(#"{"access_token":"access","token_type":"bearer","scope":null}"#.utf8)
+        )
+        XCTAssertEqual(explicitNull.scopes, [])
+    }
+
+    func testTokenResponseRejectsArrayScopeLikeRustOAuth2() {
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            McpOAuthTokenResponse.self,
+            from: Data(#"{"access_token":"access","token_type":"bearer","scope":["read"]}"#.utf8)
+        ))
+    }
+
     func testHasOAuthTokensReadsFallbackFileByEntryContents() throws {
         let temp = try McpOAuthTemporaryDirectory()
         try writeFallbackStore(
