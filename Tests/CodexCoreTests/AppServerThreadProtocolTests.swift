@@ -1455,7 +1455,6 @@ final class AppServerThreadProtocolTests: XCTestCase {
 
         try XCTAssertJSONObjectEqual(
             ThreadForkResponse(
-                sessionID: "thread-1",
                 thread: thread,
                 model: "gpt-5",
                 modelProvider: "mock_provider",
@@ -1469,7 +1468,7 @@ final class AppServerThreadProtocolTests: XCTestCase {
                 activePermissionProfile: activePermissionProfile,
                 reasoningEffort: .high
             ),
-            expectedConfiguredRuntime.merging(["sessionId": "thread-1"]) { current, _ in current }
+            expectedConfiguredRuntime
         )
     }
 
@@ -1502,9 +1501,7 @@ final class AppServerThreadProtocolTests: XCTestCase {
         XCTAssertThrowsError(try JSONDecoder().decode(ThreadStartResponse.self, from: try data(base)))
         XCTAssertThrowsError(try JSONDecoder().decode(ThreadResumeResponse.self, from: try data(base)))
 
-        var fork = base
-        fork["sessionId"] = "session-1"
-        XCTAssertThrowsError(try JSONDecoder().decode(ThreadForkResponse.self, from: try data(fork)))
+        XCTAssertThrowsError(try JSONDecoder().decode(ThreadForkResponse.self, from: try data(base)))
     }
 
     func testThreadRuntimeResponsesRejectRelativeCwdAndInstructionSourcesLikeRustAbsolutePathBuf() throws {

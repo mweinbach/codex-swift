@@ -2300,7 +2300,6 @@ public enum CodexAppServer {
             turns: includeTurns ? buildTurnsFromRolloutEvents(at: recorder.rolloutPath.path) : []
         )
         let result = [
-            "sessionId": conversationID.description,
             "thread": thread,
             "model": model,
             "modelProvider": modelProvider,

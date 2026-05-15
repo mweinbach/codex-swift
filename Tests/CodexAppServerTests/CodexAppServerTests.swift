@@ -7609,7 +7609,6 @@ final class CodexAppServerTests: XCTestCase {
         let thread = try XCTUnwrap(result["thread"] as? [String: Any])
         let forkID = try XCTUnwrap(thread["id"] as? String)
         XCTAssertNotEqual(forkID, sourceID)
-        XCTAssertEqual(result["sessionId"] as? String, forkID)
         XCTAssertEqual(thread["sessionId"] as? String, forkID)
         XCTAssertEqual(thread["forkedFromId"] as? String, sourceID)
         XCTAssertEqual(thread["preview"] as? String, "Saved user message")
