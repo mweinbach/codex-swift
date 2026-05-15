@@ -189,6 +189,31 @@ final class DynamicToolsTests: XCTestCase {
         )
     }
 
+    func testDynamicToolResponseSerializesTextAndImageContentItemsLikeRust() throws {
+        try XCTAssertJSONObjectEqual(
+            DynamicToolResponse(
+                contentItems: [
+                    .text("dynamic-ok"),
+                    .imageURL("data:image/png;base64,AAA")
+                ],
+                success: true
+            ),
+            [
+                "contentItems": [
+                    [
+                        "type": "inputText",
+                        "text": "dynamic-ok"
+                    ],
+                    [
+                        "type": "inputImage",
+                        "imageUrl": "data:image/png;base64,AAA"
+                    ]
+                ],
+                "success": true
+            ]
+        )
+    }
+
     func testDynamicToolCallResponseDefaultsMissingCompletedAtLikeRust() throws {
         let decoded = try JSONDecoder().decode(DynamicToolCallResponseEvent.self, from: Data("""
         {

@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `DynamicToolCallResponse`
+  serialization in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`.
+  Swift now pins the `contentItems` wire shape for mixed `inputText` and
+  `inputImage` dynamic tool outputs, including camelCase `imageUrl`.
 - 2026-05-15: rechecked Rust app-server v2 plugin install/uninstall param
   serialization in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`.
   Swift now pins the current encoder boundary for local marketplace installs
