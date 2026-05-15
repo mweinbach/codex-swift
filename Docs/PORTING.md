@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust commit `bd8fc9adb9` and
+  `codex-rs/codex-api/src/requests/headers.rs`. Swift endpoint-client
+  coverage now pins ordinary streamed Responses requests, not just websocket
+  handshakes, to Rust's duplicate snake_case and hyphenated session/thread
+  request headers.
 - 2026-05-15: rechecked Rust's `ThreadGoalSetParams` in
   `codex-rs/app-server-protocol/src/protocol/v2/thread.rs`. Swift now encodes
   missing `objective` and `status` fields as explicit `null` like Rust's plain

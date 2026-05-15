@@ -639,6 +639,36 @@ final class EndpointClientsTests: XCTestCase {
         XCTAssertEqual(calls, [Attestation.Context(threadID: "thread-123")])
     }
 
+    func testResponsesClientStreamPromptSendsHyphenatedSessionThreadHeadersLikeRust() async throws {
+        let transport = CapturingTransport(
+            streamResults: [
+                .success(APIStreamResponse(statusCode: 200, sseText: """
+                data: {"type":"response.completed","response":{"id":"resp_1","usage":null}}
+
+                """))
+            ]
+        )
+        let client = ResponsesClient(
+            transport: transport,
+            provider: provider(),
+            auth: StaticAPIAuthProvider(bearerToken: "api-key")
+        )
+
+        _ = await client.streamPrompt(
+            model: "gpt-test",
+            instructions: "inst",
+            prompt: Prompt(input: [.message(role: "user", content: [.inputText(text: "hi")])]),
+            options: ResponsesOptions(conversationID: "thread-123")
+        )
+
+        let headers = try XCTUnwrap(transport.streamRequests.first?.headers)
+        XCTAssertEqual(headers["session_id"], "thread-123")
+        XCTAssertEqual(headers["session-id"], "thread-123")
+        XCTAssertEqual(headers["thread_id"], "thread-123")
+        XCTAssertEqual(headers["thread-id"], "thread-123")
+        XCTAssertEqual(headers["conversation_id"], "thread-123")
+    }
+
     func testResponsesClientForwardsTurnMetadataHeaderAndClientMetadata() async throws {
         let transport = CapturingTransport(
             streamResults: [
