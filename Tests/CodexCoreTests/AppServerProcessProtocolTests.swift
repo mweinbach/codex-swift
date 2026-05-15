@@ -113,6 +113,17 @@ final class AppServerProcessProtocolTests: XCTestCase {
         XCTAssertEqual(limited.timeoutMs, .milliseconds(500))
     }
 
+    func testProcessSpawnParamsRejectsNegativeOutputBytesCapLikeRustUsize() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                ProcessSpawnParams.self,
+                from: Data(
+                    #"{"command":["/bin/echo"],"processHandle":"proc-1","cwd":"/tmp/codex-process","outputBytesCap":-1}"#.utf8
+                )
+            )
+        )
+    }
+
     func testProcessParamsRejectExplicitNullForRustDefaultedFlags() {
         XCTAssertThrowsError(
             try JSONDecoder().decode(

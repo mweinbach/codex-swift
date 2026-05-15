@@ -265,7 +265,7 @@ private extension KeyedDecodingContainer {
         if try decodeNil(forKey: key) {
             return .disabled
         }
-        return .bytes(try decode(Int.self, forKey: key))
+        return .bytes(try decodeRustUsize(forKey: key))
     }
 
     func decodeProcessTimeoutIfPresent(forKey key: Key) throws -> ProcessTimeout? {

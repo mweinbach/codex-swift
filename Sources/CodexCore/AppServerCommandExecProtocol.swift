@@ -228,7 +228,7 @@ extension CommandExecParams: Codable {
                 forKey: .streamStdoutStderr,
                 defaultValue: false
             ),
-            outputBytesCap: try container.decodeIfPresent(Int.self, forKey: .outputBytesCap),
+            outputBytesCap: try container.decodeRustUsizeIfPresent(forKey: .outputBytesCap),
             disableOutputCap: try container.decodeRustDefaulted(
                 Bool.self,
                 forKey: .disableOutputCap,

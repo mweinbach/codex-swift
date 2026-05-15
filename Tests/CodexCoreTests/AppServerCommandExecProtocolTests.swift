@@ -96,6 +96,15 @@ final class AppServerCommandExecProtocolTests: XCTestCase {
         XCTAssertNil(decoded.permissionProfile)
     }
 
+    func testCommandExecParamsRejectsNegativeOutputBytesCapLikeRustUsize() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                CommandExecParams.self,
+                from: Data(#"{"command":["/bin/echo"],"outputBytesCap":-1}"#.utf8)
+            )
+        )
+    }
+
     func testCommandExecParamsRejectExplicitNullForRustDefaultedFlags() {
         for field in ["tty", "streamStdin", "streamStdoutStderr", "disableOutputCap", "disableTimeout"] {
             XCTAssertThrowsError(

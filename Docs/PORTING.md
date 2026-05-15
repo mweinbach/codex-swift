@@ -209,6 +209,11 @@ Recent upstream audit checkpoint:
   typed top-level null/default fields, typed profile defaults, sandbox
   workspace-write defaults, and flattened analytics fields instead of sparse
   raw dictionaries.
+- 2026-05-15: rechecked Rust's `usize` output cap fields in
+  `codex-rs/app-server-protocol/src/protocol/v2/command_exec.rs` and
+  `process.rs`. Swift's typed `command/exec` and `process/spawn` protocol
+  models now reject negative `outputBytesCap` values at decode time while
+  preserving omitted/null behavior.
 - 2026-05-15: rechecked Rust's global message-history record schema in
   `codex-rs/message-history/src/lib.rs`. Swift `HistoryEntry` now uses the
   Rust `session_id` JSON key and rejects the stale Swift-only
