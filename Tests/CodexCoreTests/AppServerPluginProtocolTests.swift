@@ -250,6 +250,18 @@ final class AppServerPluginProtocolTests: XCTestCase {
         )
     }
 
+    func testPluginListResponseRejectsExplicitNullForRustDefaultedFields() {
+        for payload in [
+            #"{"marketplaces":[],"marketplaceLoadErrors":null}"#,
+            #"{"marketplaces":[],"featuredPluginIds":null}"#
+        ] {
+            XCTAssertThrowsError(
+                try JSONDecoder().decode(PluginListResponse.self, from: Data(payload.utf8)),
+                "Rust PluginListResponse defaulted Vec fields reject explicit null: \(payload)"
+            )
+        }
+    }
+
     func testPluginInterfaceRequiresRustVectorFields() throws {
         let valid = try JSONDecoder().decode(
             PluginInterface.self,

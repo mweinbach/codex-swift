@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `PluginListResponse` in
+  `codex-rs/app-server-protocol/src/protocol/v2/plugin.rs`. Swift now pins the
+  Serde default boundary for `marketplaceLoadErrors` and `featuredPluginIds`:
+  omitted vectors decode as empty, while explicit `null` rejects like Rust
+  instead of being treated as another empty-list spelling.
 - 2026-05-15: rechecked Rust app-server v2 MCP OAuth login optionals in
   `codex-rs/app-server-protocol/src/protocol/v2/mcp.rs`. Swift now pins
   Rust's `default` plus `skip_serializing_if` behavior for
