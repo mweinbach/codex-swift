@@ -1476,6 +1476,8 @@ Recent upstream audit checkpoint:
   - added Swift's app-server request serialization queue primitive with Rust's exclusive/shared-read access modes: consecutive leading shared reads for the same queue key run together, exclusive requests wait for running shared reads, and later shared reads do not jump ahead of a queued exclusive write. Swift now maps Rust's `config/read`, `plugin/list`, and `skills/list` methods to shared reads on the global `config` queue while preserving exclusive access for config/plugin/skill write surfaces.
 - `codex-rs/app-server-protocol/src/protocol/common.rs` request serialization scope table
   - expanded Swift's app-server request serialization scope mapper to match Rust's keyed/global request families across thread lifecycle and turn routes, optional MCP resource reads, MCP OAuth, command/process sessions, fs-watch, fuzzy search sessions, config/plugin/skill mutations, MCP registry refresh/status reads, account-auth mutations/reads, memory reset, and Windows sandbox setup/readiness while preserving explicit concurrent/no-scope representatives such as `thread/start`, fs reads, account rate-limit reads, and legacy fuzzy search.
+- `codex-rs/protocol/src/models.rs` MCP tool output content fallback
+  - aligned Swift MCP content-block decoding with Rust's tagged content handling for function-call output conversion: unknown or missing MCP content `type` values now round-trip as raw JSON instead of shape-decoding as text/image blocks, and image-bearing tool outputs stringify those unknown blocks into `input_text` fallback entries like Rust's `convert_mcp_content_to_items`.
 
 ## Known Gaps
 

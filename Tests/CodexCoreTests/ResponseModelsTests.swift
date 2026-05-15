@@ -288,6 +288,45 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertEqual(resourceObject["mimeType"] as? String, "text/markdown")
     }
 
+    func testMcpCallToolResultUnknownTaggedBlocksBecomeTextWhenImagePresentLikeRust() throws {
+        let json = #"""
+        {
+            "content": [
+                {
+                    "type": "diagram",
+                    "text": "shape-compatible but unknown",
+                    "nodes": 3
+                },
+                {
+                    "type": "image",
+                    "data": "BASE64",
+                    "mimeType": "image/png"
+                }
+            ]
+        }
+        """#
+        let result = try JSONDecoder().decode(McpCallToolResult.self, from: Data(json.utf8))
+        XCTAssertEqual(result.content.first, .unknown(.object([
+            "type": .string("diagram"),
+            "text": .string("shape-compatible but unknown"),
+            "nodes": .integer(3)
+        ])))
+
+        let payload = FunctionCallOutputPayload(callToolResult: result)
+        XCTAssertEqual(payload.success, true)
+        let items = try XCTUnwrap(payload.contentItems)
+        XCTAssertEqual(items.count, 2)
+
+        guard case let .inputText(unknownText) = items[0] else {
+            return XCTFail("expected unknown block fallback text")
+        }
+        let unknownObject = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(unknownText.utf8)) as? [String: Any])
+        XCTAssertEqual(unknownObject["type"] as? String, "diagram")
+        XCTAssertEqual(unknownObject["text"] as? String, "shape-compatible but unknown")
+        XCTAssertEqual(unknownObject["nodes"] as? Int, 3)
+        XCTAssertEqual(items[1], .inputImage(imageURL: "data:image/png;base64,BASE64", detail: defaultImageDetail))
+    }
+
     func testMcpCallToolResultUnsupportedBlocksSkipContentItems() {
         let payload = FunctionCallOutputPayload(callToolResult: McpCallToolResult(
             content: [

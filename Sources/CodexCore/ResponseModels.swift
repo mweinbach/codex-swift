@@ -254,7 +254,8 @@ public struct FunctionCallOutputPayload: Equatable, Codable, CustomStringConvert
                 ))
             case .audio,
                  .resourceLink,
-                 .embeddedResource:
+                 .embeddedResource,
+                 .unknown:
                 let content = (try? String(
                     data: JSONEncoder.codexCompact.encode(block),
                     encoding: .utf8

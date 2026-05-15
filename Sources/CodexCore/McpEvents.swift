@@ -866,35 +866,38 @@ public enum McpContentBlock: Equatable, Codable, Sendable {
     case audio(McpAudioContent)
     case resourceLink(McpResourceLink)
     case embeddedResource(McpEmbeddedResource)
+    case unknown(JSONValue)
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+    }
 
     public init(from decoder: Decoder) throws {
-        if let value = try? McpTextContent(from: decoder) {
+        let container = try? decoder.container(keyedBy: CodingKeys.self)
+        guard let type = try container?.decodeIfPresent(String.self, forKey: .type) else {
+            self = .unknown(try JSONValue(from: decoder))
+            return
+        }
+
+        switch type {
+        case "text":
+            let value = try McpTextContent(from: decoder)
             self = .text(value)
-            return
-        }
-        if let value = try? McpImageContent(from: decoder) {
+        case "image":
+            let value = try McpImageContent(from: decoder)
             self = .image(value)
-            return
-        }
-        if let value = try? McpAudioContent(from: decoder) {
+        case "audio":
+            let value = try McpAudioContent(from: decoder)
             self = .audio(value)
-            return
-        }
-        if let value = try? McpResourceLink(from: decoder) {
+        case "resource_link":
+            let value = try McpResourceLink(from: decoder)
             self = .resourceLink(value)
-            return
-        }
-        if let value = try? McpEmbeddedResource(from: decoder) {
+        case "resource":
+            let value = try McpEmbeddedResource(from: decoder)
             self = .embeddedResource(value)
-            return
+        default:
+            self = .unknown(try JSONValue(from: decoder))
         }
-        throw DecodingError.typeMismatch(
-            McpContentBlock.self,
-            DecodingError.Context(
-                codingPath: decoder.codingPath,
-                debugDescription: "Expected an MCP content block"
-            )
-        )
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -908,6 +911,8 @@ public enum McpContentBlock: Equatable, Codable, Sendable {
         case let .resourceLink(value):
             try value.encode(to: encoder)
         case let .embeddedResource(value):
+            try value.encode(to: encoder)
+        case let .unknown(value):
             try value.encode(to: encoder)
         }
     }

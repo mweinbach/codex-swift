@@ -823,10 +823,9 @@ final class McpEventsTests: XCTestCase {
                 text: "caption",
                 meta: .object(["textSource": .string("fixture")])
             )),
-            .image(McpImageContent(
+            .audio(McpAudioContent(
                 data: "AAAA",
                 mimeType: "audio/wav",
-                type: "audio",
                 meta: .object(["duration": .integer(1)])
             )),
             .resourceLink(McpResourceLink(
@@ -938,7 +937,7 @@ final class McpEventsTests: XCTestCase {
         ])
     }
 
-    func testMcpContentBlockDecodingFollowsRustUntaggedOrder() throws {
+    func testMcpContentBlockDecodingUsesRustTypeTags() throws {
         let block = try JSONDecoder().decode(McpContentBlock.self, from: Data("""
         {
           "type": "audio",
@@ -947,7 +946,7 @@ final class McpEventsTests: XCTestCase {
         }
         """.utf8))
 
-        XCTAssertEqual(block, .image(McpImageContent(data: "AAAA", mimeType: "audio/wav", type: "audio")))
+        XCTAssertEqual(block, .audio(McpAudioContent(data: "AAAA", mimeType: "audio/wav")))
     }
 
     func testMcpImageContentDecodesRustMimeAliasesAndDefault() throws {
