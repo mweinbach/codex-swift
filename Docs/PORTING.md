@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust `UpdatePlanArgs` and `PlanItemArg` in
+  `codex-rs/protocol/src/plan_tool.rs`. Swift now carries typed update-plan
+  tool argument models with Rust's snake_case statuses, optional `explanation`
+  omitted/null behavior, required `plan`, and `deny_unknown_fields` rejection.
 - 2026-05-15: rechecked Rust `PlanType` in
   `codex-rs/protocol/src/auth.rs`. Swift account plan decoding now preserves
   unknown plan strings for round-trip encoding like Rust's

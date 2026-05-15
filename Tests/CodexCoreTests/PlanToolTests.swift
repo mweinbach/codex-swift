@@ -2,62 +2,86 @@ import CodexCore
 import XCTest
 
 final class PlanToolTests: XCTestCase {
-    func testUpdatePlanArgsWireShape() throws {
+    func testUpdatePlanArgsMatchRustWireShape() throws {
         let args = UpdatePlanArguments(
-            explanation: "doing work",
-            plan: [PlanItemArgument(step: "Port models", status: .inProgress)]
+            explanation: "Tighten parity",
+            plan: [
+                PlanItemArgument(step: "Inspect Rust", status: .completed),
+                PlanItemArgument(step: "Port Swift", status: .inProgress),
+                PlanItemArgument(step: "Verify", status: .pending)
+            ]
         )
+
         try XCTAssertJSONObjectEqual(args, [
-            "explanation": "doing work",
+            "explanation": "Tighten parity",
             "plan": [
-                [
-                    "step": "Port models",
-                    "status": "in_progress"
-                ]
+                ["step": "Inspect Rust", "status": "completed"],
+                ["step": "Port Swift", "status": "in_progress"],
+                ["step": "Verify", "status": "pending"]
             ]
         ])
     }
 
-    func testUpdatePlanArgsEncodeNilExplanationAsExplicitNullLikeRustOption() throws {
+    func testUpdatePlanArgsDefaultOptionalExplanationLikeRust() throws {
         try XCTAssertJSONObjectEqual(UpdatePlanArguments(explanation: nil, plan: []), [
             "explanation": NSNull(),
             "plan": [] as [Any]
         ])
+
+        let omitted = try JSONDecoder().decode(UpdatePlanArguments.self, from: Data(#"""
+        {
+          "plan": [
+            { "step": "Verify", "status": "pending" }
+          ]
+        }
+        """#.utf8))
+        XCTAssertNil(omitted.explanation)
+        XCTAssertEqual(omitted.plan, [PlanItemArgument(step: "Verify", status: .pending)])
+
+        let explicitNull = try JSONDecoder().decode(UpdatePlanArguments.self, from: Data(#"""
+        {
+          "explanation": null,
+          "plan": [
+            { "step": "Verify", "status": "completed" }
+          ]
+        }
+        """#.utf8))
+        XCTAssertNil(explicitNull.explanation)
+        XCTAssertEqual(explicitNull.plan, [PlanItemArgument(step: "Verify", status: .completed)])
     }
 
-    func testUpdatePlanArgsDecodeMissingExplanationAsNilLikeRustDefault() throws {
-        let decoded = try JSONDecoder().decode(
-            UpdatePlanArguments.self,
-            from: Data(#"{"plan":[{"step":"Port models","status":"completed"}]}"#.utf8)
-        )
+    func testUpdatePlanArgsRejectUnknownFieldsLikeRust() {
+        XCTAssertThrowsError(try JSONDecoder().decode(UpdatePlanArguments.self, from: Data(#"""
+        {
+          "plan": [
+            { "step": "Verify", "status": "pending" }
+          ],
+          "extra": true
+        }
+        """#.utf8)))
 
-        XCTAssertNil(decoded.explanation)
-        XCTAssertEqual(decoded.plan, [PlanItemArgument(step: "Port models", status: .completed)])
+        XCTAssertThrowsError(try JSONDecoder().decode(UpdatePlanArguments.self, from: Data(#"""
+        {
+          "plan": [
+            { "step": "Verify", "status": "pending", "extra": true }
+          ]
+        }
+        """#.utf8)))
     }
 
-    func testUpdatePlanArgsRejectUnknownFieldsLikeRustDenyUnknownFields() {
-        XCTAssertThrowsError(
-            try JSONDecoder().decode(
-                UpdatePlanArguments.self,
-                from: Data(#"{"explanation":null,"plan":[],"extra":true}"#.utf8)
-            )
-        ) { error in
-            XCTAssertTrue(
-                String(describing: error).contains("unknown field `extra`"),
-                "unexpected error: \(error)"
-            )
+    func testUpdatePlanArgsRequirePlanAndKnownStatusesLikeRust() {
+        XCTAssertThrowsError(try JSONDecoder().decode(UpdatePlanArguments.self, from: Data(#"""
+        {
+          "explanation": "missing plan"
         }
+        """#.utf8)))
 
-        XCTAssertThrowsError(
-            try JSONDecoder().decode(
-                UpdatePlanArguments.self,
-                from: Data(#"{"plan":[{"step":"Port models","status":"pending","extra":true}]}"#.utf8)
-            )
-        ) { error in
-            XCTAssertTrue(
-                String(describing: error).contains("unknown field `extra`"),
-                "unexpected error: \(error)"
-            )
+        XCTAssertThrowsError(try JSONDecoder().decode(UpdatePlanArguments.self, from: Data(#"""
+        {
+          "plan": [
+            { "step": "Verify", "status": "running" }
+          ]
         }
+        """#.utf8)))
     }
 }
