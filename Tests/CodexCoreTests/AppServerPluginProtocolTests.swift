@@ -277,6 +277,37 @@ final class AppServerPluginProtocolTests: XCTestCase {
         ])
     }
 
+    func testPluginInterfaceSerializesLocalPathsAndRemoteURLsLikeRustProtocol() throws {
+        let interface = PluginInterface(
+            displayName: "Linear",
+            category: "Productivity",
+            composerIcon: try AbsolutePath(absolutePath: "/plugins/linear/icon.png"),
+            composerIconURL: "https://example.com/linear/icon.png",
+            logoURL: "https://example.com/linear/logo.png",
+            screenshotURLs: ["https://example.com/linear/screenshot.png"]
+        )
+
+        try XCTAssertJSONObjectEqual(interface, [
+            "displayName": "Linear",
+            "shortDescription": NSNull(),
+            "longDescription": NSNull(),
+            "developerName": NSNull(),
+            "category": "Productivity",
+            "capabilities": [],
+            "websiteUrl": NSNull(),
+            "privacyPolicyUrl": NSNull(),
+            "termsOfServiceUrl": NSNull(),
+            "defaultPrompt": NSNull(),
+            "brandColor": NSNull(),
+            "composerIcon": "/plugins/linear/icon.png",
+            "composerIconUrl": "https://example.com/linear/icon.png",
+            "logo": NSNull(),
+            "logoUrl": "https://example.com/linear/logo.png",
+            "screenshots": [],
+            "screenshotUrls": ["https://example.com/linear/screenshot.png"]
+        ])
+    }
+
     func testPluginListResponseRejectsExplicitNullForRustDefaultedFields() {
         for payload in [
             #"{"marketplaces":[],"marketplaceLoadErrors":null}"#,
