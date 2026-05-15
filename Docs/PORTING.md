@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `NetworkRequirements` wire
+  compatibility in `codex-rs/app-server-protocol/src/protocol/v2/config.rs`.
+  Swift now pins Rust's legacy `allowedDomains`, `deniedDomains`, and
+  `allowUnixSockets` decode behavior plus the mixed canonical/legacy
+  serialization shape for network requirements, including `unixSockets` and
+  `allowLocalBinding`.
 - 2026-05-15: rechecked Rust app-server v2 `PluginSummary` defaults in
   `codex-rs/app-server-protocol/src/protocol/v2/plugin.rs`. Swift now pins the
   missing-field boundary from Rust's protocol tests: omitted `availability`

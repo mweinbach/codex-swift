@@ -304,6 +304,74 @@ final class AppServerConfigProtocolTests: XCTestCase {
         )
     }
 
+    func testNetworkRequirementsDecodeLegacyFieldsLikeRustProtocol() throws {
+        let decoded = try JSONDecoder().decode(
+            AppServerProtocol.NetworkRequirements.self,
+            from: Data("""
+            {
+              "allowedDomains": ["api.openai.com"],
+              "deniedDomains": ["blocked.example.com"],
+              "allowUnixSockets": ["/tmp/proxy.sock"]
+            }
+            """.utf8)
+        )
+
+        XCTAssertEqual(
+            decoded,
+            AppServerProtocol.NetworkRequirements(
+                allowedDomains: ["api.openai.com"],
+                deniedDomains: ["blocked.example.com"],
+                allowUnixSockets: ["/tmp/proxy.sock"]
+            )
+        )
+    }
+
+    func testNetworkRequirementsSerializeCanonicalAndLegacyFieldsLikeRustProtocol() throws {
+        let requirements = AppServerProtocol.NetworkRequirements(
+            enabled: true,
+            httpPort: 8080,
+            socksPort: 1080,
+            allowUpstreamProxy: false,
+            dangerouslyAllowNonLoopbackProxy: false,
+            dangerouslyAllowAllUnixSockets: true,
+            domains: [
+                "api.openai.com": .allow,
+                "blocked.example.com": .deny
+            ],
+            managedAllowedDomainsOnly: true,
+            allowedDomains: ["api.openai.com"],
+            deniedDomains: ["blocked.example.com"],
+            unixSockets: [
+                "/tmp/proxy.sock": .allow,
+                "/tmp/ignored.sock": .none
+            ],
+            allowUnixSockets: ["/tmp/proxy.sock"],
+            allowLocalBinding: true
+        )
+
+        try XCTAssertJSONObjectEqual(requirements, [
+            "enabled": true,
+            "httpPort": 8080,
+            "socksPort": 1080,
+            "allowUpstreamProxy": false,
+            "dangerouslyAllowNonLoopbackProxy": false,
+            "dangerouslyAllowAllUnixSockets": true,
+            "domains": [
+                "api.openai.com": "allow",
+                "blocked.example.com": "deny"
+            ],
+            "managedAllowedDomainsOnly": true,
+            "allowedDomains": ["api.openai.com"],
+            "deniedDomains": ["blocked.example.com"],
+            "unixSockets": [
+                "/tmp/ignored.sock": "none",
+                "/tmp/proxy.sock": "allow"
+            ],
+            "allowUnixSockets": ["/tmp/proxy.sock"],
+            "allowLocalBinding": true
+        ])
+    }
+
     func testConfigRequirementsHooksMatchRustTaggedHandlerShape() throws {
         let requirements = AppServerProtocol.ConfigRequirements(
             hooks: AppServerProtocol.ManagedHooksRequirements(
