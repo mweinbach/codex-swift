@@ -1734,16 +1734,19 @@ final class AppServerThreadProtocolTests: XCTestCase {
         XCTAssertEqual(start.instructionSources, [])
         XCTAssertNil(start.permissionProfile)
         XCTAssertNil(start.activePermissionProfile)
+        XCTAssertNil(start.reasoningEffort)
 
         let resume = try JSONDecoder().decode(ThreadResumeResponse.self, from: data)
         XCTAssertEqual(resume.instructionSources, [])
         XCTAssertNil(resume.permissionProfile)
         XCTAssertNil(resume.activePermissionProfile)
+        XCTAssertNil(resume.reasoningEffort)
 
         let fork = try JSONDecoder().decode(ThreadForkResponse.self, from: data)
         XCTAssertEqual(fork.instructionSources, [])
         XCTAssertNil(fork.permissionProfile)
         XCTAssertNil(fork.activePermissionProfile)
+        XCTAssertNil(fork.reasoningEffort)
     }
 
     func testThreadRuntimeResponsesRejectExplicitNullForRustDefaultedInstructionSources() throws {

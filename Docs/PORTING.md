@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 thread lifecycle response defaulting
+  in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now pins
+  the `reasoningEffort: null` decode boundary alongside missing
+  `instructionSources`, `permissionProfile`, and `activePermissionProfile`
+  defaults across start/resume/fork responses.
 - 2026-05-15: rechecked Rust app-server v2 `command/exec` default
   streaming flag decoding in
   `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now pins
