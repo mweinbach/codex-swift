@@ -12,6 +12,13 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server typed response routing through
+  `codex-rs/app-server-protocol/src/protocol/common.rs` and
+  `codex-rs/app-server/src/outgoing_message.rs`. Swift app-server client
+  response handling now accepts Rust's method-tagged `response` envelope for
+  every server-initiated request method, including external ChatGPT auth
+  refresh, legacy exec/apply-patch approvals, MCP elicitation, and attestation,
+  instead of only JSON-RPC `result` or the previous partial method set.
 - 2026-05-15: rechecked Rust `features` CLI parsing from
   `codex-rs/cli/src/main.rs`. Swift now validates `features list`,
   `features enable <FEATURE>`, and `features disable <FEATURE>` before

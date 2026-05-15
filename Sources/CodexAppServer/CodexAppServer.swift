@@ -885,11 +885,16 @@ public enum CodexAppServer {
     fileprivate static let persistExtendedHistoryDeprecationDetails =
         "Remove this parameter. App-server always uses limited history persistence."
     fileprivate static let clientResponseMethods: Set<String> = [
+        Attestation.generateMethod,
+        AppServerProtocol.ChatGPTAuthTokensRefreshParams.method,
+        AppServerProtocol.ExecCommandApprovalParams.method,
+        AppServerProtocol.ApplyPatchApprovalParams.method,
         AppServerProtocol.CommandExecutionRequestApprovalParams.method,
         AppServerProtocol.FileChangeRequestApprovalParams.method,
         AppServerProtocol.ToolRequestUserInputParams.method,
         AppServerProtocol.DynamicToolCallParams.method,
-        AppServerProtocol.PermissionsRequestApprovalParams.method
+        AppServerProtocol.PermissionsRequestApprovalParams.method,
+        AppServerProtocol.McpServerElicitationRequestParams.method
     ]
     fileprivate static let fuzzyFileSearchLimitPerRoot = 50
     private static let interactiveSessionSources: [SessionSource] = [.cli, .vscode]
@@ -26984,20 +26989,6 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
            CodexAppServer.clientResponseMethods.contains(method),
            let response = object["response"] {
             if JSONSerialization.isValidJSONObject(["response": response]),
-               let responseData = try? JSONSerialization.data(withJSONObject: response) {
-                _ = try? CodexAppServer.runAsyncBlocking {
-                    await broker.receiveResponse(id: requestID, resultData: responseData)
-                }
-            } else {
-                _ = try? CodexAppServer.runAsyncBlocking {
-                    await broker.receiveMalformedResponse(id: requestID)
-                }
-            }
-            return true
-        }
-        if object["method"] as? String == Attestation.generateMethod,
-           let response = object["response"] {
-            if JSONSerialization.isValidJSONObject(response),
                let responseData = try? JSONSerialization.data(withJSONObject: response) {
                 _ = try? CodexAppServer.runAsyncBlocking {
                     await broker.receiveResponse(id: requestID, resultData: responseData)
