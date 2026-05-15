@@ -883,6 +883,13 @@ final class AppServerProtocolTests: XCTestCase {
             from: Data(#"{"method":"item/permissions/requestApproval","id":1,"response":{"permissions":{}}}"#.utf8)
         )
         XCTAssertEqual(decodedWithDefaultScope, response)
+
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AppServerProtocol.ServerResponse.self,
+                from: Data(#"{"method":"item/permissions/requestApproval","id":1,"response":{"permissions":{},"scope":null}}"#.utf8)
+            )
+        )
     }
 
     func testPermissionsRequestApprovalServerResponseEncodesStrictAutoReview() throws {

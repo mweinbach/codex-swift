@@ -1475,7 +1475,7 @@ public enum AppServerProtocol {
         public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             permissions = try container.decode(GrantedPermissionProfile.self, forKey: .permissions)
-            scope = try container.decodeIfPresent(PermissionGrantScope.self, forKey: .scope) ?? .turn
+            scope = try container.decodeRustDefaulted(PermissionGrantScope.self, forKey: .scope, defaultValue: .turn)
             strictAutoReview = try container.decodeIfPresent(Bool.self, forKey: .strictAutoReview)
         }
 

@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked additional Rust app-server defaulted protocol fields in
+  `codex-rs/app-server-protocol/src/protocol/v2/{plugin.rs,thread.rs,permissions.rs}`.
+  Swift now rejects explicit `null` for plugin `availability`, runtime response
+  `instructionSources`, and permission approval response `scope` while keeping
+  Rust's omitted-field defaults.
 - 2026-05-15: rechecked more Rust app-server `#[serde(default)]` fields in
   `codex-rs/app-server-protocol/src/protocol/v2/{turn.rs,item.rs,thread_data.rs,permissions.rs}`.
   Swift now rejects explicit `null` for defaulted text elements, reasoning

@@ -1715,7 +1715,11 @@ public struct ThreadStartResponse: Equatable, Codable, Sendable {
         modelProvider = try container.decode(String.self, forKey: .modelProvider)
         serviceTier = try container.decodeIfPresent(String.self, forKey: .serviceTier)
         cwd = try container.decode(AbsolutePath.self, forKey: .cwd)
-        instructionSources = try container.decodeIfPresent([AbsolutePath].self, forKey: .instructionSources) ?? []
+        instructionSources = try container.decodeRustDefaulted(
+            [AbsolutePath].self,
+            forKey: .instructionSources,
+            defaultValue: []
+        )
         approvalPolicy = try container.decode(AskForApproval.self, forKey: .approvalPolicy)
         approvalsReviewer = try container.decode(ApprovalsReviewer.self, forKey: .approvalsReviewer)
         sandbox = try container.decode(AppServerSandboxPolicy.self, forKey: .sandbox).coreValue
@@ -1808,7 +1812,11 @@ public struct ThreadResumeResponse: Equatable, Codable, Sendable {
         modelProvider = try container.decode(String.self, forKey: .modelProvider)
         serviceTier = try container.decodeIfPresent(String.self, forKey: .serviceTier)
         cwd = try container.decode(AbsolutePath.self, forKey: .cwd)
-        instructionSources = try container.decodeIfPresent([AbsolutePath].self, forKey: .instructionSources) ?? []
+        instructionSources = try container.decodeRustDefaulted(
+            [AbsolutePath].self,
+            forKey: .instructionSources,
+            defaultValue: []
+        )
         approvalPolicy = try container.decode(AskForApproval.self, forKey: .approvalPolicy)
         approvalsReviewer = try container.decode(ApprovalsReviewer.self, forKey: .approvalsReviewer)
         sandbox = try container.decode(AppServerSandboxPolicy.self, forKey: .sandbox).coreValue
@@ -1906,7 +1914,11 @@ public struct ThreadForkResponse: Equatable, Codable, Sendable {
         modelProvider = try container.decode(String.self, forKey: .modelProvider)
         serviceTier = try container.decodeIfPresent(String.self, forKey: .serviceTier)
         cwd = try container.decode(AbsolutePath.self, forKey: .cwd)
-        instructionSources = try container.decodeIfPresent([AbsolutePath].self, forKey: .instructionSources) ?? []
+        instructionSources = try container.decodeRustDefaulted(
+            [AbsolutePath].self,
+            forKey: .instructionSources,
+            defaultValue: []
+        )
         approvalPolicy = try container.decode(AskForApproval.self, forKey: .approvalPolicy)
         approvalsReviewer = try container.decode(ApprovalsReviewer.self, forKey: .approvalsReviewer)
         sandbox = try container.decode(AppServerSandboxPolicy.self, forKey: .sandbox).coreValue

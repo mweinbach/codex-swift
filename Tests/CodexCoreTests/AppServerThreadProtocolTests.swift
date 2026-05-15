@@ -1319,6 +1319,40 @@ final class AppServerThreadProtocolTests: XCTestCase {
         )
     }
 
+    func testThreadRuntimeResponsesRejectExplicitNullForRustDefaultedInstructionSources() throws {
+        let base: [String: Any] = [
+            "thread": expectedRuntimeThreadJSON(),
+            "model": "gpt-5",
+            "modelProvider": "mock_provider",
+            "serviceTier": NSNull(),
+            "cwd": "/repo",
+            "instructionSources": NSNull(),
+            "approvalPolicy": "never",
+            "approvalsReviewer": "guardian_subagent",
+            "sandbox": [
+                "type": "workspaceWrite",
+                "writableRoots": [],
+                "networkAccess": false,
+                "excludeTmpdirEnvVar": false,
+                "excludeSlashTmp": false
+            ],
+            "permissionProfile": NSNull(),
+            "activePermissionProfile": NSNull(),
+            "reasoningEffort": NSNull()
+        ]
+
+        func data(_ object: [String: Any]) throws -> Data {
+            try JSONSerialization.data(withJSONObject: object)
+        }
+
+        XCTAssertThrowsError(try JSONDecoder().decode(ThreadStartResponse.self, from: try data(base)))
+        XCTAssertThrowsError(try JSONDecoder().decode(ThreadResumeResponse.self, from: try data(base)))
+
+        var fork = base
+        fork["sessionId"] = "session-1"
+        XCTAssertThrowsError(try JSONDecoder().decode(ThreadForkResponse.self, from: try data(fork)))
+    }
+
     func testThreadRuntimeResponsesRejectRelativeCwdAndInstructionSourcesLikeRustAbsolutePathBuf() throws {
         let baseResponse = """
         {

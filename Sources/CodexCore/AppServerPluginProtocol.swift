@@ -458,7 +458,11 @@ extension PluginSummary: Codable {
         enabled = try container.decode(Bool.self, forKey: .enabled)
         installPolicy = try container.decode(PluginInstallPolicy.self, forKey: .installPolicy)
         authPolicy = try container.decode(PluginAuthPolicy.self, forKey: .authPolicy)
-        availability = try container.decodeIfPresent(PluginAvailability.self, forKey: .availability) ?? .available
+        availability = try container.decodeRustDefaulted(
+            PluginAvailability.self,
+            forKey: .availability,
+            defaultValue: .available
+        )
         interface = try container.decodeIfPresent(PluginInterface.self, forKey: .interface)
         keywords = try container.decodeRustDefaulted([String].self, forKey: .keywords, defaultValue: [])
     }
