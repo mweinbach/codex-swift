@@ -730,6 +730,22 @@ final class CodexCLITests: XCTestCase {
         XCTAssertEqual(stderr, ["codex-swift: unsupported option for command 'cloud status': --attempt"])
     }
 
+    func testRunAsyncCloudStatusAllowsDashPrefixedTaskAfterDelimiterLikeRustClap() async {
+        var receivedRequest: CodexCLI.CloudCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["cloud", "status", "--", "-task_123"],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            cloudRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(receivedRequest?.action, .status(taskID: "-task_123"))
+    }
+
     func testRunAsyncCloudListParsesRustFlags() async {
         var stdout: [String] = []
         var receivedRequest: CodexCLI.CloudCommandRequest?
@@ -786,6 +802,22 @@ final class CodexCLITests: XCTestCase {
         XCTAssertEqual(exitCode, 0)
         XCTAssertEqual(stdout, ["diff --git\n"])
         XCTAssertEqual(receivedRequest?.action, .diff(taskID: "task_123", attempt: 2))
+    }
+
+    func testRunAsyncCloudDiffAllowsDashPrefixedTaskAfterDelimiterLikeRustClap() async {
+        var receivedRequest: CodexCLI.CloudCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["cloud", "diff", "--attempt=2", "--", "-task_123"],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            cloudRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(receivedRequest?.action, .diff(taskID: "-task_123", attempt: 2))
     }
 
     func testRunAsyncCloudApplyParsesSeparateAttemptFlag() async {
@@ -888,6 +920,22 @@ final class CodexCLITests: XCTestCase {
 
         XCTAssertEqual(exitCode, 0)
         XCTAssertEqual(receivedRequest?.action, .exec(query: "-", environment: "env_123", branch: nil, attempts: 1))
+    }
+
+    func testRunAsyncCloudExecAllowsDashPrefixedQueryAfterDelimiterLikeRustClap() async {
+        var receivedRequest: CodexCLI.CloudCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["cloud", "exec", "--env=env_123", "--", "--write-tests"],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            cloudRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(receivedRequest?.action, .exec(query: "--write-tests", environment: "env_123", branch: nil, attempts: 1))
     }
 
     func testRunAsyncCloudExecRequiresEnvAndRejectsInvalidAttemptsBeforeRunner() async {
