@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `command/exec` PTY size
+  round-trip coverage in
+  `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now pins
+  the exact `top` / `pty-1` fixture where only `tty` and `size` are set while
+  nullable command fields remain explicit nulls.
 - 2026-05-15: rechecked Rust app-server v2 `process/spawn` default
   request round trip in
   `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now pins

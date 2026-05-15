@@ -147,6 +147,39 @@ final class AppServerCommandExecProtocolTests: XCTestCase {
         )
     }
 
+    func testCommandExecParamsRoundTripWithSizeLikeRustProtocol() throws {
+        let params = CommandExecParams(
+            command: ["top"],
+            processID: "pty-1",
+            tty: true,
+            size: CommandExecTerminalSize(rows: 40, cols: 120)
+        )
+
+        try XCTAssertJSONObjectEqual(params, [
+            "command": ["top"],
+            "processId": "pty-1",
+            "tty": true,
+            "outputBytesCap": NSNull(),
+            "timeoutMs": NSNull(),
+            "cwd": NSNull(),
+            "env": NSNull(),
+            "size": [
+                "rows": 40,
+                "cols": 120
+            ],
+            "sandboxPolicy": NSNull(),
+            "permissionProfile": NSNull()
+        ])
+
+        let decoded = try JSONDecoder().decode(
+            CommandExecParams.self,
+            from: Data(
+                #"{"command":["top"],"processId":"pty-1","tty":true,"outputBytesCap":null,"timeoutMs":null,"cwd":null,"env":null,"size":{"rows":40,"cols":120},"sandboxPolicy":null,"permissionProfile":null}"#.utf8
+            )
+        )
+        XCTAssertEqual(decoded, params)
+    }
+
     func testCommandExecParamsDecodeRustDefaults() throws {
         let decoded = try JSONDecoder().decode(
             CommandExecParams.self,
