@@ -2512,6 +2512,56 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("created.txt").path))
     }
 
+    func testApplyPatchFunctionCallDoesNotRunHooksAfterRustFreeformDeletion() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let hookLog = temp.url.appendingPathComponent("pre-hook.json")
+        let patch = """
+        *** Begin Patch
+        *** Add File: created.txt
+        +hello
+        *** End Patch
+        """
+        let encodedPatch = try Self.jsonString(patch)
+        let item = ResponseItem.functionCall(
+            name: "apply_patch",
+            arguments: #"{"input":\#(encodedPatch)}"#,
+            callID: "call-patch"
+        )
+
+        let result = await NonInteractiveExec.executeFunctionCallWithHooks(
+            item,
+            handlers: [
+                ConfiguredHookHandler(
+                    eventName: .preToolUse,
+                    matcher: "apply_patch",
+                    command: "cat > \(shellSingleQuote(hookLog.path)); printf %s '{\"decision\":\"block\",\"reason\":\"legacy function path\"}'",
+                    timeoutSec: 5,
+                    sourcePath: try AbsolutePath(absolutePath: "/tmp/hooks.json"),
+                    displayOrder: 0
+                )
+            ],
+            conversationID: ConversationId(),
+            turnID: "turn-1",
+            cwd: temp.url,
+            model: "gpt-test",
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: [:]
+        )
+
+        guard case let .functionCallOutput(callID, payload) = result.output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-patch")
+        XCTAssertEqual(payload.success, false)
+        XCTAssertEqual(payload.content, "unsupported call: apply_patch")
+        XCTAssertEqual(result.additionalContextItems, [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: hookLog.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("created.txt").path))
+    }
+
     func testUnavailableMcpToolCallUsesRustPlaceholderMessage() async throws {
         let output = await NonInteractiveExec.executeFunctionCall(
             .functionCall(

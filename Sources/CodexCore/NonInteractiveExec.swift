@@ -2375,6 +2375,9 @@ public enum NonInteractiveExec {
                     approvalDescription: params.justification
                 )
 
+            case "apply_patch":
+                return nil
+
             default:
                 guard let toolInput = try? JSONDecoder().decode(JSONValue.self, from: Data(arguments.utf8)) else {
                     return ToolHookPayload(

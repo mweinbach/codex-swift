@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust commit `e783341b70` (`Delete
+  function-style apply_patch`). Swift non-interactive hook dispatch now mirrors
+  Rust's freeform-only boundary by skipping `apply_patch` hook payloads for
+  legacy function-call items, while keeping custom/freeform `apply_patch`
+  execution and shell-command interception intact.
 - 2026-05-15: rechecked Rust's `NetworkPolicyDecisionPayload` in
   `codex-rs/protocol/src/network_policy.rs`. Swift network-policy decision
   encoding now preserves Rust's ordinary `Option` wire shape by emitting
