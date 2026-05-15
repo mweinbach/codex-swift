@@ -1655,6 +1655,34 @@ final class ToolSpecTests: XCTestCase {
         XCTAssertNil(object["output_schema"], "Rust keeps MCP tool output_schema internal to ResponsesApiTool")
     }
 
+    func testMCPToolConversionPreservesArbitraryRustInputSchemaFields() throws {
+        let spec = ToolSpecFactory.createMCPTool(
+            fullyQualifiedName: "mcp__docs__search",
+            tool: McpTool(
+                name: "search",
+                inputSchema: McpToolInputSchema(rawValue: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "query": .object([
+                            "description": .string("Search query"),
+                            "type": .string("string")
+                        ])
+                    ]),
+                    "additionalProperties": .bool(false)
+                ]))
+            )
+        )
+
+        let object = try JSONObject(spec)
+        let parameters = try XCTUnwrap(object["parameters"] as? [String: Any])
+        XCTAssertEqual(parameters["type"] as? String, "object")
+        XCTAssertEqual(parameters["additionalProperties"] as? Bool, false)
+        let properties = try XCTUnwrap(parameters["properties"] as? [String: Any])
+        let query = try XCTUnwrap(properties["query"] as? [String: Any])
+        XCTAssertEqual(query["description"] as? String, "Search query")
+        XCTAssertEqual(query["type"] as? String, "string")
+    }
+
     func testShellToolSpecsOmitLoginWhenDisallowedLikeRust() throws {
         for spec in [
             ToolSpecFactory.createExecCommandTool(allowLoginShell: false),

@@ -1298,15 +1298,7 @@ public enum ToolSpecFactory {
         tool: McpTool,
         deferLoading: Bool? = nil
     ) -> ResponsesAPITool {
-        var inputSchema: [String: Any] = ["type": tool.inputSchema.type]
-        if let properties = tool.inputSchema.properties {
-            inputSchema["properties"] = jsonCompatibleValue(properties)
-        } else if tool.inputSchema.type == "object" {
-            inputSchema["properties"] = [String: Any]()
-        }
-        if let required = tool.inputSchema.required {
-            inputSchema["required"] = required
-        }
+        let inputSchema = mcpInputSchemaObject(tool.inputSchema)
 
         return ResponsesAPITool(
             name: name,
@@ -1316,6 +1308,20 @@ public enum ToolSpecFactory {
             parameters: JSONSchema.sanitized(from: inputSchema),
             outputSchema: mcpCallToolResultOutputSchema(structuredContentSchema: tool.outputSchema?.jsonSchema ?? .object([:]))
         )
+    }
+
+    private static func mcpInputSchemaObject(_ schema: McpToolInputSchema) -> [String: Any] {
+        var inputSchema: [String: Any]
+        if case let .object(object) = schema.rawValue {
+            inputSchema = object.mapValues(jsonCompatibleValue)
+        } else {
+            inputSchema = ["type": schema.type]
+        }
+        if inputSchema["properties"] == nil,
+           inputSchema["type"] as? String == "object" {
+            inputSchema["properties"] = [String: Any]()
+        }
+        return inputSchema
     }
 
     public static func mcpCallToolResultOutputSchema(structuredContentSchema: JSONValue = .object([:])) -> JSONValue {

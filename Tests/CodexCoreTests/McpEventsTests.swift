@@ -175,7 +175,7 @@ final class McpEventsTests: XCTestCase {
           "name": "search"
         }
         """.utf8))
-        XCTAssertEqual(omitted.inputSchema, McpToolInputSchema())
+        XCTAssertEqual(omitted.inputSchema, McpToolInputSchema(rawValue: .null))
 
         let explicitNull = try JSONDecoder().decode(McpTool.self, from: Data("""
         {
@@ -183,7 +183,57 @@ final class McpEventsTests: XCTestCase {
           "inputSchema": null
         }
         """.utf8))
-        XCTAssertEqual(explicitNull.inputSchema, McpToolInputSchema())
+        XCTAssertEqual(explicitNull.inputSchema, McpToolInputSchema(rawValue: .null))
+
+        try XCTAssertJSONObjectEqual(explicitNull, [
+            "inputSchema": NSNull(),
+            "name": "search"
+        ])
+    }
+
+    func testMcpToolInputSchemaPreservesArbitraryRustJsonSchema() throws {
+        let decoded = try JSONDecoder().decode(McpTool.self, from: Data("""
+        {
+          "name": "search",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "description": "Search query"
+              }
+            },
+            "additionalProperties": false,
+            "x-custom": {
+              "rank": 7
+            }
+          }
+        }
+        """.utf8))
+
+        XCTAssertEqual(decoded.inputSchema.type, "object")
+        XCTAssertEqual(decoded.inputSchema.properties, .object([
+            "query": .object([
+                "description": .string("Search query"),
+                "type": .string("string")
+            ])
+        ]))
+        try XCTAssertJSONObjectEqual(decoded, [
+            "inputSchema": [
+                "additionalProperties": false,
+                "properties": [
+                    "query": [
+                        "description": "Search query",
+                        "type": "string"
+                    ]
+                ],
+                "type": "object",
+                "x-custom": [
+                    "rank": 7
+                ]
+            ],
+            "name": "search"
+        ])
     }
 
     func testMcpToolPreservesRustIconsAndMetaFields() throws {
@@ -616,7 +666,7 @@ final class McpEventsTests: XCTestCase {
         XCTAssertEqual(filtered[0].tool.name, "tool_a")
     }
 
-    func testToolSchemasDefaultTypeOnDecodeAndAlwaysEncodeType() throws {
+    func testInputSchemaAccessorsDefaultTypeWithoutChangingRustWireShape() throws {
         let inputSchema = try JSONDecoder().decode(McpToolInputSchema.self, from: Data("""
         {
           "properties": {
@@ -634,9 +684,10 @@ final class McpEventsTests: XCTestCase {
                     "type": "string"
                 ]
             ],
-            "type": "object"
         ])
+    }
 
+    func testOutputSchemaDefaultsTypeOnDecodeAndAlwaysEncodesType() throws {
         let outputSchema = try JSONDecoder().decode(McpToolOutputSchema.self, from: Data(#"{}"#.utf8))
         XCTAssertEqual(outputSchema, McpToolOutputSchema())
         try XCTAssertJSONObjectEqual(outputSchema, [
