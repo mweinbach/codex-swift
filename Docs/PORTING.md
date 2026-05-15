@@ -340,6 +340,11 @@ Recent upstream audit checkpoint:
   unified exec process manager. Swift `exec_command` now decodes Rust's
   defaulted `tty` field with omitted `false` / explicit-`null` rejection and
   runs unified exec commands through a pseudo-terminal when `tty: true`.
+- 2026-05-15: rechecked Rust unified exec post-tool hook projection in
+  `codex-rs/core/src/tools/handlers/unified_exec_tests.rs`. Swift now treats
+  `Process running with session ID ...` as an in-progress marker only in the
+  formatted unified-exec header, so completed command stdout containing the same
+  text still reaches `PostToolUse` hooks like Rust's metadata-backed path.
 - 2026-05-15: rechecked Rust unified exec tool argument decoding in
   `codex-rs/core/src/tools/handlers/unified_exec{,/write_stdin}.rs`. Swift
   `ExecCommandToolCallParams` and `WriteStdinToolCallParams` now keep omitted

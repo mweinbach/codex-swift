@@ -2467,8 +2467,9 @@ public enum NonInteractiveExec {
     }
 
     private static func unifiedExecOutputIsStillRunning(_ content: String) -> Bool {
-        content.hasPrefix("Process running with session ID ")
-            || content.contains("\nProcess running with session ID ")
+        let header = content.components(separatedBy: "\nOutput:\n").first ?? content
+        return header.hasPrefix("Process running with session ID ")
+            || header.contains("\nProcess running with session ID ")
     }
 
     private static func outputTextAfterHeader(in content: String) -> String {

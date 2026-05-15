@@ -1253,6 +1253,50 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(object["tool_response"] as? String, "unified-output")
     }
 
+    func testPostToolUseHookReceivesCompletedExecOutputThatLooksLikeRunningHeader() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let hookLog = temp.url.appendingPathComponent("post-hook.json")
+        let item = ResponseItem.functionCall(
+            name: "exec_command",
+            arguments: #"{"cmd":"printf 'Process running with session ID 45\nfinished'","yield_time_ms":1000}"#,
+            callID: "call-exec"
+        )
+
+        let result = await NonInteractiveExec.executeFunctionCallWithHooks(
+            item,
+            handlers: [
+                ConfiguredHookHandler(
+                    eventName: .postToolUse,
+                    matcher: "Bash",
+                    command: "cat > \(shellSingleQuote(hookLog.path)); printf '{}'",
+                    timeoutSec: 5,
+                    sourcePath: try AbsolutePath(absolutePath: "/tmp/hooks.json"),
+                    displayOrder: 0
+                )
+            ],
+            conversationID: ConversationId(),
+            turnID: "turn-1",
+            cwd: temp.url,
+            model: "gpt-test",
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000)
+        )
+
+        guard case let .functionCallOutput(_, payload) = result.output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(payload.success, true)
+        XCTAssertTrue(payload.content.contains("Process exited with code 0"))
+
+        let object = try hookInputObject(at: hookLog)
+        XCTAssertEqual(
+            object["tool_response"] as? String,
+            "Process running with session ID 45\nfinished"
+        )
+    }
+
     func testPermissionRequestHookDeniesEscalatedShellCommandBeforeExecution() async throws {
         let item = ResponseItem.functionCall(
             name: "shell_command",
