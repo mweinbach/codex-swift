@@ -135,14 +135,273 @@ extension AppServerProtocol {
         }
     }
 
+    public struct ConfigRequirements: Codable, Equatable, Sendable {
+        public let allowedApprovalPolicies: [AskForApproval]?
+        public let allowedApprovalsReviewers: [ApprovalsReviewer]?
+        public let allowedSandboxModes: [SandboxMode]?
+        public let allowedWebSearchModes: [WebSearchMode]?
+        public let featureRequirements: [String: Bool]?
+        public let hooks: ManagedHooksRequirements?
+        public let enforceResidency: ResidencyRequirement?
+        public let network: NetworkRequirements?
+
+        public init(
+            allowedApprovalPolicies: [AskForApproval]? = nil,
+            allowedApprovalsReviewers: [ApprovalsReviewer]? = nil,
+            allowedSandboxModes: [SandboxMode]? = nil,
+            allowedWebSearchModes: [WebSearchMode]? = nil,
+            featureRequirements: [String: Bool]? = nil,
+            hooks: ManagedHooksRequirements? = nil,
+            enforceResidency: ResidencyRequirement? = nil,
+            network: NetworkRequirements? = nil
+        ) {
+            self.allowedApprovalPolicies = allowedApprovalPolicies
+            self.allowedApprovalsReviewers = allowedApprovalsReviewers
+            self.allowedSandboxModes = allowedSandboxModes
+            self.allowedWebSearchModes = allowedWebSearchModes
+            self.featureRequirements = featureRequirements
+            self.hooks = hooks
+            self.enforceResidency = enforceResidency
+            self.network = network
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encodeNilOrValue(allowedApprovalPolicies, forKey: .allowedApprovalPolicies)
+            try container.encodeNilOrValue(allowedApprovalsReviewers, forKey: .allowedApprovalsReviewers)
+            try container.encodeNilOrValue(allowedSandboxModes, forKey: .allowedSandboxModes)
+            try container.encodeNilOrValue(allowedWebSearchModes, forKey: .allowedWebSearchModes)
+            try container.encodeNilOrValue(featureRequirements, forKey: .featureRequirements)
+            try container.encodeNilOrValue(hooks, forKey: .hooks)
+            try container.encodeNilOrValue(enforceResidency, forKey: .enforceResidency)
+            try container.encodeNilOrValue(network, forKey: .network)
+        }
+    }
+
+    public struct ManagedHooksRequirements: Codable, Equatable, Sendable {
+        public let managedDir: String?
+        public let windowsManagedDir: String?
+        public let preToolUse: [ConfiguredHookMatcherGroup]
+        public let permissionRequest: [ConfiguredHookMatcherGroup]
+        public let postToolUse: [ConfiguredHookMatcherGroup]
+        public let preCompact: [ConfiguredHookMatcherGroup]
+        public let postCompact: [ConfiguredHookMatcherGroup]
+        public let sessionStart: [ConfiguredHookMatcherGroup]
+        public let userPromptSubmit: [ConfiguredHookMatcherGroup]
+        public let stop: [ConfiguredHookMatcherGroup]
+
+        private enum CodingKeys: String, CodingKey {
+            case managedDir
+            case windowsManagedDir
+            case preToolUse = "PreToolUse"
+            case permissionRequest = "PermissionRequest"
+            case postToolUse = "PostToolUse"
+            case preCompact = "PreCompact"
+            case postCompact = "PostCompact"
+            case sessionStart = "SessionStart"
+            case userPromptSubmit = "UserPromptSubmit"
+            case stop = "Stop"
+        }
+
+        public init(
+            managedDir: String? = nil,
+            windowsManagedDir: String? = nil,
+            preToolUse: [ConfiguredHookMatcherGroup] = [],
+            permissionRequest: [ConfiguredHookMatcherGroup] = [],
+            postToolUse: [ConfiguredHookMatcherGroup] = [],
+            preCompact: [ConfiguredHookMatcherGroup] = [],
+            postCompact: [ConfiguredHookMatcherGroup] = [],
+            sessionStart: [ConfiguredHookMatcherGroup] = [],
+            userPromptSubmit: [ConfiguredHookMatcherGroup] = [],
+            stop: [ConfiguredHookMatcherGroup] = []
+        ) {
+            self.managedDir = managedDir
+            self.windowsManagedDir = windowsManagedDir
+            self.preToolUse = preToolUse
+            self.permissionRequest = permissionRequest
+            self.postToolUse = postToolUse
+            self.preCompact = preCompact
+            self.postCompact = postCompact
+            self.sessionStart = sessionStart
+            self.userPromptSubmit = userPromptSubmit
+            self.stop = stop
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encodeNilOrValue(managedDir, forKey: .managedDir)
+            try container.encodeNilOrValue(windowsManagedDir, forKey: .windowsManagedDir)
+            try container.encode(preToolUse, forKey: .preToolUse)
+            try container.encode(permissionRequest, forKey: .permissionRequest)
+            try container.encode(postToolUse, forKey: .postToolUse)
+            try container.encode(preCompact, forKey: .preCompact)
+            try container.encode(postCompact, forKey: .postCompact)
+            try container.encode(sessionStart, forKey: .sessionStart)
+            try container.encode(userPromptSubmit, forKey: .userPromptSubmit)
+            try container.encode(stop, forKey: .stop)
+        }
+    }
+
+    public struct ConfiguredHookMatcherGroup: Codable, Equatable, Sendable {
+        public let matcher: String?
+        public let hooks: [ConfiguredHookHandler]
+
+        public init(matcher: String? = nil, hooks: [ConfiguredHookHandler]) {
+            self.matcher = matcher
+            self.hooks = hooks
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encodeNilOrValue(matcher, forKey: .matcher)
+            try container.encode(hooks, forKey: .hooks)
+        }
+    }
+
+    public enum ConfiguredHookHandler: Codable, Equatable, Sendable {
+        case command(command: String, timeoutSec: UInt64?, async: Bool, statusMessage: String?)
+        case prompt
+        case agent
+
+        private enum CodingKeys: String, CodingKey {
+            case type
+            case command
+            case timeoutSec
+            case `async`
+            case statusMessage
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            switch try container.decode(String.self, forKey: .type) {
+            case "command":
+                self = .command(
+                    command: try container.decode(String.self, forKey: .command),
+                    timeoutSec: try container.decodeIfPresent(UInt64.self, forKey: .timeoutSec),
+                    async: try container.decode(Bool.self, forKey: .async),
+                    statusMessage: try container.decodeIfPresent(String.self, forKey: .statusMessage)
+                )
+            case "prompt":
+                self = .prompt
+            case "agent":
+                self = .agent
+            case let type:
+                throw DecodingError.dataCorruptedError(
+                    forKey: .type,
+                    in: container,
+                    debugDescription: "Unknown ConfiguredHookHandler type: \(type)"
+                )
+            }
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            switch self {
+            case let .command(command, timeoutSec, async, statusMessage):
+                try container.encode("command", forKey: .type)
+                try container.encode(command, forKey: .command)
+                try container.encodeNilOrValue(timeoutSec, forKey: .timeoutSec)
+                try container.encode(async, forKey: .async)
+                try container.encodeNilOrValue(statusMessage, forKey: .statusMessage)
+            case .prompt:
+                try container.encode("prompt", forKey: .type)
+            case .agent:
+                try container.encode("agent", forKey: .type)
+            }
+        }
+    }
+
+    public struct NetworkRequirements: Codable, Equatable, Sendable {
+        public let enabled: Bool?
+        public let httpPort: UInt16?
+        public let socksPort: UInt16?
+        public let allowUpstreamProxy: Bool?
+        public let dangerouslyAllowNonLoopbackProxy: Bool?
+        public let dangerouslyAllowAllUnixSockets: Bool?
+        public let domains: [String: NetworkDomainPermission]?
+        public let managedAllowedDomainsOnly: Bool?
+        public let allowedDomains: [String]?
+        public let deniedDomains: [String]?
+        public let unixSockets: [String: NetworkUnixSocketPermission]?
+        public let allowUnixSockets: [String]?
+        public let allowLocalBinding: Bool?
+
+        public init(
+            enabled: Bool? = nil,
+            httpPort: UInt16? = nil,
+            socksPort: UInt16? = nil,
+            allowUpstreamProxy: Bool? = nil,
+            dangerouslyAllowNonLoopbackProxy: Bool? = nil,
+            dangerouslyAllowAllUnixSockets: Bool? = nil,
+            domains: [String: NetworkDomainPermission]? = nil,
+            managedAllowedDomainsOnly: Bool? = nil,
+            allowedDomains: [String]? = nil,
+            deniedDomains: [String]? = nil,
+            unixSockets: [String: NetworkUnixSocketPermission]? = nil,
+            allowUnixSockets: [String]? = nil,
+            allowLocalBinding: Bool? = nil
+        ) {
+            self.enabled = enabled
+            self.httpPort = httpPort
+            self.socksPort = socksPort
+            self.allowUpstreamProxy = allowUpstreamProxy
+            self.dangerouslyAllowNonLoopbackProxy = dangerouslyAllowNonLoopbackProxy
+            self.dangerouslyAllowAllUnixSockets = dangerouslyAllowAllUnixSockets
+            self.domains = domains
+            self.managedAllowedDomainsOnly = managedAllowedDomainsOnly
+            self.allowedDomains = allowedDomains
+            self.deniedDomains = deniedDomains
+            self.unixSockets = unixSockets
+            self.allowUnixSockets = allowUnixSockets
+            self.allowLocalBinding = allowLocalBinding
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encodeNilOrValue(enabled, forKey: .enabled)
+            try container.encodeNilOrValue(httpPort, forKey: .httpPort)
+            try container.encodeNilOrValue(socksPort, forKey: .socksPort)
+            try container.encodeNilOrValue(allowUpstreamProxy, forKey: .allowUpstreamProxy)
+            try container.encodeNilOrValue(
+                dangerouslyAllowNonLoopbackProxy,
+                forKey: .dangerouslyAllowNonLoopbackProxy
+            )
+            try container.encodeNilOrValue(
+                dangerouslyAllowAllUnixSockets,
+                forKey: .dangerouslyAllowAllUnixSockets
+            )
+            try container.encodeNilOrValue(domains, forKey: .domains)
+            try container.encodeNilOrValue(managedAllowedDomainsOnly, forKey: .managedAllowedDomainsOnly)
+            try container.encodeNilOrValue(allowedDomains, forKey: .allowedDomains)
+            try container.encodeNilOrValue(deniedDomains, forKey: .deniedDomains)
+            try container.encodeNilOrValue(unixSockets, forKey: .unixSockets)
+            try container.encodeNilOrValue(allowUnixSockets, forKey: .allowUnixSockets)
+            try container.encodeNilOrValue(allowLocalBinding, forKey: .allowLocalBinding)
+        }
+    }
+
+    public enum NetworkDomainPermission: String, Codable, Equatable, Sendable {
+        case allow
+        case deny
+    }
+
+    public enum NetworkUnixSocketPermission: String, Codable, Equatable, Sendable {
+        case allow
+        case none
+    }
+
+    public enum ResidencyRequirement: String, Codable, Equatable, Sendable {
+        case us
+    }
+
     public struct ConfigRequirementsReadResponse: Codable, Equatable, Sendable {
-        public let requirements: JSONValue?
+        public let requirements: ConfigRequirements?
 
         private enum CodingKeys: String, CodingKey {
             case requirements
         }
 
-        public init(requirements: JSONValue?) {
+        public init(requirements: ConfigRequirements?) {
             self.requirements = requirements
         }
 

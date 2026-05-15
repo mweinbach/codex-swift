@@ -189,6 +189,13 @@ Recent upstream audit checkpoint:
   app-server config protocol now carries the typed `configRequirements/read`
   response wrapper, preserving Rust's explicit nullable `requirements` field
   for absent or populated managed requirements.
+- 2026-05-15: rechecked Rust's `ConfigRequirements`, `ManagedHooksRequirements`,
+  `ConfiguredHookHandler`, `NetworkRequirements`, and related enums in
+  `codex-rs/app-server-protocol/src/protocol/v2/config.rs`. Swift's shared
+  app-server config protocol now carries typed wire models for
+  `configRequirements/read`, including Rust's explicit null optional fields,
+  PascalCase hook-event keys, tagged hook-handler variants, residency values,
+  and canonical network permission maps.
 - 2026-05-15: rechecked Rust's global message-history record schema in
   `codex-rs/message-history/src/lib.rs`. Swift `HistoryEntry` now uses the
   Rust `session_id` JSON key and rejects the stale Swift-only

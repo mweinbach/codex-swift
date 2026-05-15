@@ -117,22 +117,17 @@ final class AppServerConfigProtocolTests: XCTestCase {
             ]
         )
 
-        let requirements: JSONValue = .object([
-            "allowedApprovalPolicies": .array([.string("on-request")]),
-            "allowedApprovalsReviewers": .array([.string("guardian_subagent")]),
-            "allowedSandboxModes": .array([.string("workspace-write")]),
-            "allowedWebSearchModes": .array([.string("enabled"), .string("disabled")]),
-            "featureRequirements": .null,
-            "hooks": .null,
-            "enforceResidency": .string("us"),
-            "network": .object([
-                "enabled": .bool(true),
-                "domains": .array([.object([
-                    "domain": .string("api.example.com"),
-                    "value": .string("allow")
-                ])])
-            ])
-        ])
+        let requirements = AppServerProtocol.ConfigRequirements(
+            allowedApprovalPolicies: [.onRequest],
+            allowedApprovalsReviewers: [.autoReview],
+            allowedSandboxModes: [.workspaceWrite],
+            allowedWebSearchModes: [.live, .disabled],
+            enforceResidency: .us,
+            network: AppServerProtocol.NetworkRequirements(
+                enabled: true,
+                domains: ["api.example.com": .allow]
+            )
+        )
         let response = AppServerProtocol.ConfigRequirementsReadResponse(requirements: requirements)
 
         try XCTAssertJSONObjectEqual(response, [
@@ -140,16 +135,26 @@ final class AppServerConfigProtocolTests: XCTestCase {
                 "allowedApprovalPolicies": ["on-request"],
                 "allowedApprovalsReviewers": ["guardian_subagent"],
                 "allowedSandboxModes": ["workspace-write"],
-                "allowedWebSearchModes": ["enabled", "disabled"],
+                "allowedWebSearchModes": ["live", "disabled"],
                 "featureRequirements": NSNull(),
                 "hooks": NSNull(),
                 "enforceResidency": "us",
                 "network": [
                     "enabled": true,
-                    "domains": [[
-                        "domain": "api.example.com",
-                        "value": "allow"
-                    ]]
+                    "httpPort": NSNull(),
+                    "socksPort": NSNull(),
+                    "allowUpstreamProxy": NSNull(),
+                    "dangerouslyAllowNonLoopbackProxy": NSNull(),
+                    "dangerouslyAllowAllUnixSockets": NSNull(),
+                    "domains": [
+                        "api.example.com": "allow"
+                    ],
+                    "managedAllowedDomainsOnly": NSNull(),
+                    "allowedDomains": NSNull(),
+                    "deniedDomains": NSNull(),
+                    "unixSockets": NSNull(),
+                    "allowUnixSockets": NSNull(),
+                    "allowLocalBinding": NSNull()
                 ]
             ]
         ])
@@ -168,6 +173,74 @@ final class AppServerConfigProtocolTests: XCTestCase {
             ),
             response
         )
+    }
+
+    func testConfigRequirementsHooksMatchRustTaggedHandlerShape() throws {
+        let requirements = AppServerProtocol.ConfigRequirements(
+            hooks: AppServerProtocol.ManagedHooksRequirements(
+                managedDir: "/managed/hooks",
+                preToolUse: [
+                    AppServerProtocol.ConfiguredHookMatcherGroup(
+                        matcher: "Bash",
+                        hooks: [
+                            .command(
+                                command: "validate.sh",
+                                timeoutSec: 30,
+                                async: false,
+                                statusMessage: "Validating"
+                            ),
+                            .prompt,
+                            .agent
+                        ]
+                    )
+                ]
+            )
+        )
+
+        try XCTAssertJSONObjectEqual(requirements, [
+            "allowedApprovalPolicies": NSNull(),
+            "allowedApprovalsReviewers": NSNull(),
+            "allowedSandboxModes": NSNull(),
+            "allowedWebSearchModes": NSNull(),
+            "featureRequirements": NSNull(),
+            "hooks": [
+                "managedDir": "/managed/hooks",
+                "windowsManagedDir": NSNull(),
+                "PreToolUse": [[
+                    "matcher": "Bash",
+                    "hooks": [
+                        [
+                            "type": "command",
+                            "command": "validate.sh",
+                            "timeoutSec": 30,
+                            "async": false,
+                            "statusMessage": "Validating"
+                        ],
+                        [
+                            "type": "prompt"
+                        ],
+                        [
+                            "type": "agent"
+                        ]
+                    ]
+                ]],
+                "PermissionRequest": [],
+                "PostToolUse": [],
+                "PreCompact": [],
+                "PostCompact": [],
+                "SessionStart": [],
+                "UserPromptSubmit": [],
+                "Stop": []
+            ],
+            "enforceResidency": NSNull(),
+            "network": NSNull()
+        ])
+
+        let decoded = try JSONDecoder().decode(
+            AppServerProtocol.ConfigRequirements.self,
+            from: try JSONEncoder().encode(requirements)
+        )
+        XCTAssertEqual(decoded, requirements)
     }
 
     func testConfigWarningNotificationMatchesRustWireShape() throws {
