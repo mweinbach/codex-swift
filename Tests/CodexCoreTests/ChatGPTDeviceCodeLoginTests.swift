@@ -31,6 +31,21 @@ final class ChatGPTDeviceCodeLoginTests: XCTestCase {
         }
     }
 
+    func testUserCodeResponseRejectsExplicitNullIntervalLikeRustDeserializeWithDefault() throws {
+        XCTAssertThrowsError(try JSONDecoder().decode(UserCodeResponse.self, from: Data(#"""
+        {
+          "device_auth_id": "device-auth-123",
+          "user_code": "CODE-12345",
+          "interval": null
+        }
+        """#.utf8))) { error in
+            guard case let DecodingError.dataCorrupted(context) = error else {
+                return XCTFail("expected dataCorrupted error, got \(error)")
+            }
+            XCTAssertEqual(context.debugDescription, "invalid type: null, expected a string")
+        }
+    }
+
     func testDeviceCodeLoginPollsExchangesAndPersistsChatGPTTokens() async throws {
         let temp = try DeviceLoginTemporaryDirectory()
         let now = Date(timeIntervalSince1970: 1_800_000_000)

@@ -391,6 +391,13 @@ struct UserCodeResponse: Decodable, Equatable, Sendable {
         }
         userCode = try container.decodeIfPresent(String.self, forKey: .userCode)
             ?? container.decode(String.self, forKey: .usercode)
+        if container.contains(.interval), try container.decodeNil(forKey: .interval) {
+            throw DecodingError.dataCorruptedError(
+                forKey: .interval,
+                in: container,
+                debugDescription: "invalid type: null, expected a string"
+            )
+        }
         let rawInterval = try container.decodeIfPresent(String.self, forKey: .interval) ?? "0"
         guard let parsed = UInt64(rawInterval.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             throw DecodingError.dataCorruptedError(
