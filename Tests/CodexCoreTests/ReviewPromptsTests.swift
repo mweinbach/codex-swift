@@ -89,6 +89,20 @@ final class ReviewPromptsTests: XCTestCase {
         )
     }
 
+    func testReviewPromptDoesNotRerenderTemplateMarkersInsideValuesLikeRust() throws {
+        let branch = "feature/{mergeBaseSha}"
+        let prompt = try ReviewPrompts.reviewPrompt(
+            target: .baseBranch(branch: branch),
+            cwd: "/repo",
+            mergeBaseWithHead: { _, _ in "abc123" }
+        )
+
+        XCTAssertEqual(
+            prompt,
+            "Review the code changes against the base branch 'feature/{mergeBaseSha}'. The merge base commit for this comparison is abc123. Run `git diff abc123` to inspect the changes relative to feature/{mergeBaseSha}. Provide prioritized, actionable findings."
+        )
+    }
+
     func testCommitPrompts() throws {
         XCTAssertEqual(
             try ReviewPrompts.reviewPrompt(
@@ -103,6 +117,16 @@ final class ReviewPromptsTests: XCTestCase {
                 cwd: "/repo"
             ),
             "Review the code changes introduced by commit abcdef123. Provide prioritized, actionable findings."
+        )
+    }
+
+    func testCommitPromptDoesNotRerenderTemplateMarkersInsideTitleLikeRust() throws {
+        XCTAssertEqual(
+            try ReviewPrompts.reviewPrompt(
+                target: .commit(sha: "abcdef123", title: "subject {sha}"),
+                cwd: "/repo"
+            ),
+            "Review the code changes introduced by commit abcdef123 (\"subject {sha}\"). Provide prioritized, actionable findings."
         )
     }
 

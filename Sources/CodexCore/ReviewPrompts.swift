@@ -151,18 +151,26 @@ public enum ReviewPrompts {
             return uncommittedPrompt
         case let .baseBranch(branch):
             if let commit = try mergeBaseWithHead(cwd, branch) {
-                return baseBranchPrompt
-                    .replacingOccurrences(of: "{baseBranch}", with: branch)
-                    .replacingOccurrences(of: "{mergeBaseSha}", with: commit)
+                return renderReviewPrompt(
+                    baseBranchPrompt,
+                    variables: [
+                        ("baseBranch", branch),
+                        ("mergeBaseSha", commit)
+                    ]
+                )
             }
-            return baseBranchPromptBackup.replacingOccurrences(of: "{branch}", with: branch)
+            return renderReviewPrompt(baseBranchPromptBackup, variables: [("branch", branch)])
         case let .commit(sha, title):
             if let title {
-                return commitPromptWithTitle
-                    .replacingOccurrences(of: "{sha}", with: sha)
-                    .replacingOccurrences(of: "{title}", with: title)
+                return renderReviewPrompt(
+                    commitPromptWithTitle,
+                    variables: [
+                        ("sha", sha),
+                        ("title", title)
+                    ]
+                )
             }
-            return commitPrompt.replacingOccurrences(of: "{sha}", with: sha)
+            return renderReviewPrompt(commitPrompt, variables: [("sha", sha)])
         case let .custom(instructions):
             let prompt = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !prompt.isEmpty else {
@@ -187,5 +195,24 @@ public enum ReviewPrompts {
         case let .custom(instructions):
             return instructions.trimmingCharacters(in: .whitespacesAndNewlines)
         }
+    }
+
+    private static func renderReviewPrompt(
+        _ template: String,
+        variables: [(name: String, value: String)]
+    ) -> String {
+        let markers = variables.map { (marker: "{\($0.name)}", value: $0.value) }
+        var output = ""
+        var index = template.startIndex
+        while index < template.endIndex {
+            if let replacement = markers.first(where: { template[index...].hasPrefix($0.marker) }) {
+                output += replacement.value
+                index = template.index(index, offsetBy: replacement.marker.count)
+            } else {
+                output.append(template[index])
+                index = template.index(after: index)
+            }
+        }
+        return output
     }
 }

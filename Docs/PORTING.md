@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust review prompt rendering in
+  `codex-rs/core/src/review_prompts.rs`. Swift review prompt interpolation now
+  mirrors Rust's template-rendering boundary by substituting prompt variables
+  once without re-rendering placeholder-shaped text that appears inside branch
+  names or commit titles.
 - 2026-05-15: rechecked Rust app-server `ClientRequest::experimental_reason`
   param inspection in `codex-rs/app-server-protocol/src/protocol/common.rs`
   and the v2 thread/turn params. Swift request-param helpers now report the
