@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust apply-patch streaming parser fixtures in
+  `codex-rs/apply-patch/src/streaming_parser.rs`. Swift coverage now pins
+  Rust's multi-hunk same-delta streaming, final buffered line handling, and the
+  remaining Rust-shaped invalid update-hunk error cases.
 - 2026-05-15: rechecked Rust app-server feedback upload handling in
   `codex-rs/app-server-protocol/src/protocol/v2/feedback.rs` and
   `codex-rs/app-server/src/request_processors/feedback_processor.rs`. Swift

@@ -55,6 +55,15 @@ final class StreamingPatchParserTests: XCTestCase {
                 .deleteFile(path: "gone.txt")
             ]
         )
+
+        var multiHunkParser = StreamingPatchParser()
+        XCTAssertEqual(
+            try multiHunkParser.pushDelta(delta: "*** Begin Patch\n*** Add File: src/one.txt\n+one\n*** Delete File: src/two.txt\n"),
+            [
+                .addFile(path: "src/one.txt", contents: "one\n"),
+                .deleteFile(path: "src/two.txt")
+            ]
+        )
     }
 
     func testLargePatchSplitByCharacterNeverLosesHunks() throws {
@@ -248,6 +257,42 @@ final class StreamingPatchParserTests: XCTestCase {
                 .addFile(path: "file.txt", contents: "hello\n")
             ]
         )
+
+        var indentedEndParser = StreamingPatchParser()
+        XCTAssertEqual(
+            try indentedEndParser.pushDelta(delta: "*** Begin Patch\n*** Update File: file.txt\n@@\n-old\n+new\n *** End Patch"),
+            [
+                .updateFile(
+                    path: "file.txt",
+                    movePath: nil,
+                    chunks: [
+                        UpdateFileChunk(
+                            changeContext: nil,
+                            oldLines: ["old"],
+                            newLines: ["new"],
+                            isEndOfFile: false
+                        )
+                    ]
+                )
+            ]
+        )
+        XCTAssertEqual(
+            try indentedEndParser.finish(),
+            [
+                .updateFile(
+                    path: "file.txt",
+                    movePath: nil,
+                    chunks: [
+                        UpdateFileChunk(
+                            changeContext: nil,
+                            oldLines: ["old"],
+                            newLines: ["new"],
+                            isEndOfFile: false
+                        )
+                    ]
+                )
+            ]
+        )
     }
 
     func testFinishRequiresEndPatch() throws {
@@ -294,6 +339,101 @@ final class StreamingPatchParserTests: XCTestCase {
             XCTAssertEqual(
                 error as? ApplyPatchError,
                 .invalidHunk(message: "Update file hunk for path 'file.txt' is empty", lineNumber: 2)
+            )
+        }
+
+        var addFileBadLineParser = StreamingPatchParser()
+        XCTAssertThrowsError(
+            try addFileBadLineParser.pushDelta(delta: "*** Begin Patch\n*** Add File: file.txt\nbad\n")
+        ) { error in
+            XCTAssertEqual(
+                error as? ApplyPatchError,
+                .invalidHunk(
+                    message: "'bad' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {path}', '*** Update File: {path}'",
+                    lineNumber: 3
+                )
+            )
+        }
+
+        var deleteFileBadLineParser = StreamingPatchParser()
+        XCTAssertThrowsError(
+            try deleteFileBadLineParser.pushDelta(delta: "*** Begin Patch\n*** Delete File: file.txt\nbad\n")
+        ) { error in
+            XCTAssertEqual(
+                error as? ApplyPatchError,
+                .invalidHunk(
+                    message: "'bad' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {path}', '*** Update File: {path}'",
+                    lineNumber: 3
+                )
+            )
+        }
+
+        var moveBeforeHunkParser = StreamingPatchParser()
+        XCTAssertThrowsError(
+            try moveBeforeHunkParser.pushDelta(delta: "*** Begin Patch\n*** Update File: old.txt\n*** Move to: new.txt\n*** Delete File: other.txt\n")
+        ) { error in
+            XCTAssertEqual(
+                error as? ApplyPatchError,
+                .invalidHunk(message: "Update file hunk for path 'old.txt' is empty", lineNumber: 2)
+            )
+        }
+
+        var emptyChunkEndParser = StreamingPatchParser()
+        XCTAssertThrowsError(
+            try emptyChunkEndParser.pushDelta(delta: "*** Begin Patch\n*** Update File: file.txt\n@@\n*** End Patch\n")
+        ) { error in
+            XCTAssertEqual(
+                error as? ApplyPatchError,
+                .invalidHunk(message: "Update hunk does not contain any lines", lineNumber: 4)
+            )
+        }
+
+        var emptyChunkEOFParser = StreamingPatchParser()
+        XCTAssertThrowsError(
+            try emptyChunkEOFParser.pushDelta(delta: "*** Begin Patch\n*** Update File: file.txt\n@@\n*** End of File\n")
+        ) { error in
+            XCTAssertEqual(
+                error as? ApplyPatchError,
+                .invalidHunk(message: "Update hunk does not contain any lines", lineNumber: 4)
+            )
+        }
+
+        var duplicateContextParser = StreamingPatchParser()
+        XCTAssertThrowsError(
+            try duplicateContextParser.pushDelta(delta: "*** Begin Patch\n*** Update File: file.txt\n@@\n@@\n")
+        ) { error in
+            XCTAssertEqual(
+                error as? ApplyPatchError,
+                .invalidHunk(
+                    message: "Unexpected line found in update hunk: '@@'. Every line should start with ' ' (context line), '+' (added line), or '-' (removed line)",
+                    lineNumber: 4
+                )
+            )
+        }
+
+        var lineBeforeContextParser = StreamingPatchParser()
+        XCTAssertThrowsError(
+            try lineBeforeContextParser.pushDelta(delta: "*** Begin Patch\n*** Update File: file.txt\n@@\n-old\nbad\n")
+        ) { error in
+            XCTAssertEqual(
+                error as? ApplyPatchError,
+                .invalidHunk(
+                    message: "Expected update hunk to start with a @@ context marker, got: 'bad'",
+                    lineNumber: 5
+                )
+            )
+        }
+
+        var hunkHeaderInsideEmptyChunkParser = StreamingPatchParser()
+        XCTAssertThrowsError(
+            try hunkHeaderInsideEmptyChunkParser.pushDelta(delta: "*** Begin Patch\n*** Update File: file.txt\n@@\n*** Update File: other.txt\n")
+        ) { error in
+            XCTAssertEqual(
+                error as? ApplyPatchError,
+                .invalidHunk(
+                    message: "Unexpected line found in update hunk: '*** Update File: other.txt'. Every line should start with ' ' (context line), '+' (added line), or '-' (removed line)",
+                    lineNumber: 4
+                )
             )
         }
     }
