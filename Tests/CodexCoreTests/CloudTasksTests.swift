@@ -693,6 +693,86 @@ final class CloudTasksTests: XCTestCase {
         XCTAssertEqual(attempts[1].diff, "diff --git a/b b/b\n")
     }
 
+    func testHTTPClientSiblingAttemptsDefaultsMissingTurnsLikeRust() async throws {
+        let transport = CloudCapturingTransport(executeResults: [
+            .success(cloudResponse("{}"))
+        ])
+        let client = CloudHTTPClient(
+            baseURL: "https://chat.openai.com",
+            transport: transport,
+            auth: StaticAPIAuthProvider(),
+            errorLog: { _ in }
+        )
+
+        let attempts = try await client.listSiblingAttempts(task: CloudTaskID("T-1"), turnID: "turn-root").get()
+
+        XCTAssertEqual(attempts, [])
+    }
+
+    func testHTTPClientTaskDetailsRejectsNullRustDefaultedTurnItemKind() async throws {
+        let transport = CloudCapturingTransport(executeResults: [
+            .success(cloudResponse("""
+            {
+              "current_assistant_turn": {
+                "output_items": [
+                  {
+                    "type": null,
+                    "content": [{ "content_type": "text", "text": "Assistant response" }]
+                  }
+                ]
+              }
+            }
+            """))
+        ])
+        let client = CloudHTTPClient(
+            baseURL: "https://chat.openai.com",
+            transport: transport,
+            auth: StaticAPIAuthProvider(),
+            errorLog: { _ in }
+        )
+
+        let result = await client.getTaskMessages(id: CloudTaskID("T-1"))
+
+        guard case let .failure(.http(message)) = result else {
+            return XCTFail("expected HTTP decode failure, got \(result)")
+        }
+        XCTAssertTrue(message.contains("get_task_details failed: Decode error"), message)
+        XCTAssertTrue(message.contains("type"), message)
+    }
+
+    func testHTTPClientTaskDetailsRejectsNullRustDefaultedWorklogParts() async throws {
+        let transport = CloudCapturingTransport(executeResults: [
+            .success(cloudResponse("""
+            {
+              "current_assistant_turn": {
+                "worklog": {
+                  "messages": [
+                    {
+                      "author": { "role": "assistant" },
+                      "content": { "parts": null }
+                    }
+                  ]
+                }
+              }
+            }
+            """))
+        ])
+        let client = CloudHTTPClient(
+            baseURL: "https://chat.openai.com",
+            transport: transport,
+            auth: StaticAPIAuthProvider(),
+            errorLog: { _ in }
+        )
+
+        let result = await client.getTaskMessages(id: CloudTaskID("T-1"))
+
+        guard case let .failure(.http(message)) = result else {
+            return XCTFail("expected HTTP decode failure, got \(result)")
+        }
+        XCTAssertTrue(message.contains("get_task_details failed: Decode error"), message)
+        XCTAssertTrue(message.contains("parts"), message)
+    }
+
     func testHTTPClientApplyUsesInjectedGitApplyAndRejectsNonUnifiedDiff() async throws {
         let capture = CloudApplyCapture()
         let client = CloudHTTPClient(

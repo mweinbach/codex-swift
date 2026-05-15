@@ -656,6 +656,15 @@ private struct CloudSiblingTurnsResponse: Decodable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case siblingTurns = "sibling_turns"
     }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.siblingTurns = try container.decodeRustDefaulted(
+            [[String: JSONValue]].self,
+            forKey: .siblingTurns,
+            defaultValue: []
+        )
+    }
 }
 
 private struct CloudTaskDetailsResponse: Decodable, Equatable, Sendable {
@@ -752,7 +761,7 @@ private struct CloudTaskTurnItem: Decodable, Equatable, Sendable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.kind = try container.decodeIfPresent(String.self, forKey: .kind) ?? ""
+        self.kind = try container.decodeRustDefaulted(String.self, forKey: .kind, defaultValue: "")
         self.role = try container.decodeIfPresent(String.self, forKey: .role)
         self.content = try container.decodeIfPresent([CloudContentFragment].self, forKey: .content) ?? []
         self.diff = try container.decodeIfPresent(String.self, forKey: .diff)
@@ -852,7 +861,11 @@ private struct CloudTaskWorklogContent: Decodable, Equatable, Sendable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.parts = try container.decodeIfPresent([CloudContentFragment].self, forKey: .parts) ?? []
+        self.parts = try container.decodeRustDefaulted(
+            [CloudContentFragment].self,
+            forKey: .parts,
+            defaultValue: []
+        )
     }
 
     private enum CodingKeys: String, CodingKey {

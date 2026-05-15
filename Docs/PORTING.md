@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust backend task-details models in
+  `codex-rs/backend-client/src/types.rs`. Swift `CloudHTTPClient` task detail
+  decoding now preserves Rust's mixed default boundary: omitted `sibling_turns`
+  defaults to an empty list, while explicit `null` rejects for defaulted
+  `TurnItem.type` and worklog `parts`; the custom null-as-empty task-detail
+  arrays remain permissive like Rust's `deserialize_vec`.
 - 2026-05-15: rechecked Rust cloud-task client defaults in
   `codex-rs/cloud-tasks-client/src/api.rs`. Swift `CloudTaskSummary` and
   `CloudApplyOutcome` decoding now preserve Serde's omitted-vs-null boundary
