@@ -240,6 +240,10 @@ Recent upstream audit checkpoint:
   JSON schema members at the protocol layer while still defaulting the Swift
   tool-planning surface to an empty object schema when the MCP inventory omits
   a usable object schema.
+- 2026-05-15: rechecked Rust's MCP tool output schema handling in
+  `codex-rs/protocol/src/mcp.rs` and `codex-rs/tools/src/mcp_tool.rs`.
+  Swift `McpToolOutputSchema` now preserves raw JSON schema members without
+  inferring `type: object`, matching Rust's structured-content schema wrapper.
 - 2026-05-15: rechecked Rust unified exec stdin handling in
   `codex-rs/core/src/unified_exec/{process_manager,errors}.rs`. Swift
   non-interactive unified exec now closes stdin for non-PTY sessions, rejects

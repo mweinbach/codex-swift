@@ -1790,6 +1790,31 @@ final class ToolSpecTests: XCTestCase {
         XCTAssertNil(object["output_schema"], "Rust skips serializing ResponsesApiTool.output_schema")
     }
 
+    func testMCPToolConversionPreservesOutputSchemaWithoutInferredTypeLikeRust() throws {
+        let spec = ToolSpecFactory.createMCPTool(
+            fullyQualifiedName: "mcp__docs__classify",
+            tool: McpTool(
+                name: "classify",
+                inputSchema: McpToolInputSchema(),
+                outputSchema: McpToolOutputSchema(rawValue: .object([
+                    "enum": .array([.string("ok"), .string("error")])
+                ]))
+            )
+        )
+
+        guard case let .function(tool) = spec else {
+            return XCTFail("expected function tool")
+        }
+        XCTAssertEqual(
+            tool.outputSchema,
+            ToolSpecFactory.mcpCallToolResultOutputSchema(
+                structuredContentSchema: .object([
+                    "enum": .array([.string("ok"), .string("error")])
+                ])
+            )
+        )
+    }
+
     private func encode<T: Encodable>(_ value: T) throws -> String {
         String(data: try JSONEncoder().encode(value), encoding: .utf8)!
     }

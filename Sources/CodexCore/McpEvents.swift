@@ -716,12 +716,6 @@ public struct McpTool: Equatable, Codable, Sendable {
 public struct McpToolInputSchema: Equatable, Codable, Sendable {
     public let rawValue: JSONValue
 
-    private enum CodingKeys: String, CodingKey {
-        case properties
-        case required
-        case type
-    }
-
     public init(properties: JSONValue? = nil, required: [String]? = nil, type: String = "object") {
         var object: [String: JSONValue] = ["type": .string(type)]
         if let properties {
@@ -778,47 +772,64 @@ public struct McpToolInputSchema: Equatable, Codable, Sendable {
 }
 
 public struct McpToolOutputSchema: Equatable, Codable, Sendable {
-    public let properties: JSONValue?
-    public let required: [String]?
-    public let type: String
-
-    private enum CodingKeys: String, CodingKey {
-        case properties
-        case required
-        case type
-    }
+    public let rawValue: JSONValue
 
     public init(properties: JSONValue? = nil, required: [String]? = nil, type: String = "object") {
-        self.properties = properties
-        self.required = required
-        self.type = type
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.properties = try container.decodeIfPresent(JSONValue.self, forKey: .properties)
-        self.required = try container.decodeIfPresent([String].self, forKey: .required)
-        self.type = try container.decodeIfPresent(String.self, forKey: .type) ?? "object"
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encodeIfPresent(properties, forKey: .properties)
-        try container.encodeIfPresent(required, forKey: .required)
-        try container.encode(type, forKey: .type)
-    }
-
-    var jsonSchema: JSONValue {
-        var object: [String: JSONValue] = [
-            "type": .string(type)
-        ]
+        var object: [String: JSONValue] = ["type": .string(type)]
         if let properties {
             object["properties"] = properties
         }
         if let required {
             object["required"] = .array(required.map(JSONValue.string))
         }
-        return .object(object)
+        self.rawValue = .object(object)
+    }
+
+    public init(rawValue: JSONValue) {
+        self.rawValue = rawValue
+    }
+
+    public init(from decoder: Decoder) throws {
+        self.rawValue = try JSONValue(from: decoder)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        try rawValue.encode(to: encoder)
+    }
+
+    public var properties: JSONValue? {
+        guard case let .object(object) = rawValue else {
+            return nil
+        }
+        return object["properties"]
+    }
+
+    public var required: [String]? {
+        guard case let .object(object) = rawValue,
+              case let .array(values)? = object["required"]
+        else {
+            return nil
+        }
+        let strings = values.compactMap { value -> String? in
+            guard case let .string(string) = value else {
+                return nil
+            }
+            return string
+        }
+        return strings.count == values.count ? strings : nil
+    }
+
+    public var type: String {
+        guard case let .object(object) = rawValue,
+              case let .string(type)? = object["type"]
+        else {
+            return "object"
+        }
+        return type
+    }
+
+    var jsonSchema: JSONValue {
+        rawValue
     }
 }
 

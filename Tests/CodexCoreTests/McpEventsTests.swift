@@ -236,6 +236,41 @@ final class McpEventsTests: XCTestCase {
         ])
     }
 
+    func testMcpToolOutputSchemaPreservesArbitraryRustJsonSchemaWithoutInferredType() throws {
+        let decoded = try JSONDecoder().decode(McpTool.self, from: Data("""
+        {
+          "name": "classify",
+          "inputSchema": {
+            "type": "object"
+          },
+          "outputSchema": {
+            "enum": ["ok", "error"],
+            "x-custom": {
+              "rank": 3
+            }
+          }
+        }
+        """.utf8))
+
+        XCTAssertEqual(decoded.outputSchema?.type, "object")
+        XCTAssertEqual(decoded.outputSchema?.rawValue, .object([
+            "enum": .array([.string("ok"), .string("error")]),
+            "x-custom": .object(["rank": .integer(3)])
+        ]))
+        try XCTAssertJSONObjectEqual(decoded, [
+            "inputSchema": [
+                "type": "object"
+            ],
+            "name": "classify",
+            "outputSchema": [
+                "enum": ["ok", "error"],
+                "x-custom": [
+                    "rank": 3
+                ]
+            ]
+        ])
+    }
+
     func testMcpToolPreservesRustIconsAndMetaFields() throws {
         let decoded = try JSONDecoder().decode(McpTool.self, from: Data("""
         {
@@ -687,12 +722,10 @@ final class McpEventsTests: XCTestCase {
         ])
     }
 
-    func testOutputSchemaDefaultsTypeOnDecodeAndAlwaysEncodesType() throws {
+    func testOutputSchemaAccessorsDefaultTypeWithoutChangingRustWireShape() throws {
         let outputSchema = try JSONDecoder().decode(McpToolOutputSchema.self, from: Data(#"{}"#.utf8))
-        XCTAssertEqual(outputSchema, McpToolOutputSchema())
-        try XCTAssertJSONObjectEqual(outputSchema, [
-            "type": "object"
-        ])
+        XCTAssertEqual(outputSchema.type, "object")
+        try XCTAssertJSONObjectEqual(outputSchema, [:])
     }
 
     func testInvocationEncodesMissingArgumentsAsNull() throws {
