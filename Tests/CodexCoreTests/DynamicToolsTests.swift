@@ -118,6 +118,70 @@ final class DynamicToolsTests: XCTestCase {
         ])
     }
 
+    func testDynamicToolCallRequestDefaultsMissingStartedAtLikeRust() throws {
+        let decoded = try JSONDecoder().decode(DynamicToolCallRequest.self, from: Data("""
+        {
+          "callId": "dyn-1",
+          "turnId": "turn-1",
+          "tool": "lookup",
+          "arguments": {}
+        }
+        """.utf8))
+
+        XCTAssertEqual(decoded.startedAtMilliseconds, 0)
+    }
+
+    func testDynamicToolCallRequestRejectsNullRustDefaultedStartedAt() {
+        let payload = """
+        {
+          "callId": "dyn-1",
+          "turnId": "turn-1",
+          "startedAtMs": null,
+          "tool": "lookup",
+          "arguments": {}
+        }
+        """
+
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(DynamicToolCallRequest.self, from: Data(payload.utf8))
+        )
+    }
+
+    func testDynamicToolCallResponseDefaultsMissingCompletedAtLikeRust() throws {
+        let decoded = try JSONDecoder().decode(DynamicToolCallResponseEvent.self, from: Data("""
+        {
+          "call_id": "dyn-1",
+          "turn_id": "turn-1",
+          "tool": "lookup",
+          "arguments": {},
+          "content_items": [],
+          "success": true,
+          "duration": { "secs": 0, "nanos": 0 }
+        }
+        """.utf8))
+
+        XCTAssertEqual(decoded.completedAtMilliseconds, 0)
+    }
+
+    func testDynamicToolCallResponseRejectsNullRustDefaultedCompletedAt() {
+        let payload = """
+        {
+          "call_id": "dyn-1",
+          "turn_id": "turn-1",
+          "completed_at_ms": null,
+          "tool": "lookup",
+          "arguments": {},
+          "content_items": [],
+          "success": true,
+          "duration": { "secs": 0, "nanos": 0 }
+        }
+        """
+
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(DynamicToolCallResponseEvent.self, from: Data(payload.utf8))
+        )
+    }
+
     func testValidateDynamicToolsAcceptsRustSupportedSchemasAndIdentifiers() throws {
         try DynamicToolSpec.validate([
             dynamicTool(

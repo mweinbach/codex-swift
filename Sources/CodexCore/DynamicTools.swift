@@ -253,7 +253,11 @@ public struct DynamicToolCallRequest: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         callID = try container.decode(String.self, forKey: .callID)
         turnID = try container.decode(String.self, forKey: .turnID)
-        startedAtMilliseconds = try container.decodeIfPresent(Int64.self, forKey: .startedAtMilliseconds) ?? 0
+        startedAtMilliseconds = try container.decodeRustDefaulted(
+            Int64.self,
+            forKey: .startedAtMilliseconds,
+            defaultValue: 0
+        )
         namespace = try container.decodeIfPresent(String.self, forKey: .namespace)
         tool = try container.decode(String.self, forKey: .tool)
         arguments = try container.decode(JSONValue.self, forKey: .arguments)
@@ -338,7 +342,11 @@ public struct DynamicToolCallResponseEvent: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         callID = try container.decode(String.self, forKey: .callID)
         turnID = try container.decode(String.self, forKey: .turnID)
-        completedAtMilliseconds = try container.decodeIfPresent(Int64.self, forKey: .completedAtMilliseconds) ?? 0
+        completedAtMilliseconds = try container.decodeRustDefaulted(
+            Int64.self,
+            forKey: .completedAtMilliseconds,
+            defaultValue: 0
+        )
         namespace = try container.decodeIfPresent(String.self, forKey: .namespace)
         tool = try container.decode(String.self, forKey: .tool)
         arguments = try container.decode(JSONValue.self, forKey: .arguments)

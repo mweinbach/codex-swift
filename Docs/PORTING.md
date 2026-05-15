@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's dynamic tool call timing defaults in
+  `codex-rs/protocol/src/{dynamic_tools,protocol}.rs`. Swift
+  `DynamicToolCallRequest.startedAtMs` and
+  `DynamicToolCallResponseEvent.completed_at_ms` now keep Rust's omitted-field
+  defaults while rejecting explicit `null` for those non-optional
+  `#[serde(default)]` integer fields.
 - 2026-05-15: rechecked Rust's approval request event timing fields in
   `codex-rs/protocol/src/approvals.rs`. Swift `ExecApprovalRequestEvent` and
   `ApplyPatchApprovalRequestEvent` decoding now requires `started_at_ms` like
