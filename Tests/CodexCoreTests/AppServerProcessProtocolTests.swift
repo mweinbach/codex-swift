@@ -159,6 +159,14 @@ final class AppServerProcessProtocolTests: XCTestCase {
                 "deltaBase64": NSNull()
             ]
         )
+        try XCTAssertJSONObjectEqual(
+            ProcessWriteStdinParams(processHandle: "proc-7", closeStdin: true),
+            [
+                "processHandle": "proc-7",
+                "deltaBase64": NSNull(),
+                "closeStdin": true
+            ]
+        )
 
         try XCTAssertJSONObjectEqual(
             ProcessWriteStdinParams(processHandle: "proc-1", deltaBase64: "aGk=", closeStdin: true),
