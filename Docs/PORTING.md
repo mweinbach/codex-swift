@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust commit `5ecff05196` and the v2 `Thread`
+  payload in `codex-rs/app-server-protocol/src/protocol/v2/thread_data.rs`.
+  Swift already encodes `sessionId` on the reusable thread object; focused
+  coverage now pins Rust's required-string decode boundary so omitted or
+  explicit-`null` `thread.sessionId` payloads reject rather than falling back
+  to the thread id at the protocol layer.
 - 2026-05-15: rechecked Rust app-server typed response routing through
   `codex-rs/app-server-protocol/src/protocol/common.rs` and
   `codex-rs/app-server/src/outgoing_message.rs`. Swift app-server client

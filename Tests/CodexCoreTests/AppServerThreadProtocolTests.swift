@@ -1359,6 +1359,41 @@ final class AppServerThreadProtocolTests: XCTestCase {
         XCTAssertThrowsError(try JSONDecoder().decode(AppServerThread.self, from: payload))
     }
 
+    func testThreadDataRequiresSessionIDLikeRustProtocol() throws {
+        let basePayload: [String: Any] = [
+            "id": "thread-1",
+            "sessionId": "session-1",
+            "preview": "Ship parity",
+            "ephemeral": false,
+            "modelProvider": "openai",
+            "createdAt": 900,
+            "updatedAt": 1_100,
+            "status": ["type": "idle"],
+            "cwd": "/repo",
+            "cliVersion": "0.50.0",
+            "source": "appServer",
+            "turns": []
+        ]
+
+        var omitted = basePayload
+        omitted.removeValue(forKey: "sessionId")
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AppServerThread.self,
+                from: try JSONSerialization.data(withJSONObject: omitted)
+            )
+        )
+
+        var explicitNull = basePayload
+        explicitNull["sessionId"] = NSNull()
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AppServerThread.self,
+                from: try JSONSerialization.data(withJSONObject: explicitNull)
+            )
+        )
+    }
+
     func testThreadStartResumeAndForkResponsesCarryRustRuntimeShape() throws {
         let thread = AppServerThread(
             id: "thread-1",
