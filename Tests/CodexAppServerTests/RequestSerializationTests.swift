@@ -28,13 +28,29 @@ final class RequestSerializationTests: XCTestCase {
         for method in [
             "thread/archive",
             "thread/unsubscribe",
+            "thread/increment_elicitation",
+            "thread/decrement_elicitation",
+            "thread/name/set",
             "thread/goal/set",
+            "thread/goal/get",
+            "thread/goal/clear",
+            "thread/metadata/update",
+            "thread/memoryMode/set",
+            "thread/unarchive",
+            "thread/compact/start",
+            "thread/shellCommand",
+            "thread/approveGuardianDeniedAction",
+            "thread/backgroundTerminals/clean",
+            "thread/rollback",
             "thread/read",
             "thread/inject_items",
             "turn/start",
             "turn/steer",
             "turn/interrupt",
             "thread/realtime/start",
+            "thread/realtime/appendAudio",
+            "thread/realtime/appendText",
+            "thread/realtime/stop",
             "review/start",
             "mcpServer/tool/call"
         ] {
@@ -61,7 +77,27 @@ final class RequestSerializationTests: XCTestCase {
             .commandExecProcess(processID: "proc-1")
         )
         XCTAssertEqual(
+            CodexAppServer.requestSerializationScope(forMethod: "command/exec/terminate", params: ["processId": "proc-1"]),
+            .commandExecProcess(processID: "proc-1")
+        )
+        XCTAssertEqual(
+            CodexAppServer.requestSerializationScope(forMethod: "command/exec/resize", params: ["processId": "proc-1"]),
+            .commandExecProcess(processID: "proc-1")
+        )
+        XCTAssertEqual(
             CodexAppServer.requestSerializationScope(forMethod: "process/spawn", params: ["processHandle": "handle-1"]),
+            .process(processHandle: "handle-1")
+        )
+        XCTAssertEqual(
+            CodexAppServer.requestSerializationScope(forMethod: "process/writeStdin", params: ["processHandle": "handle-1"]),
+            .process(processHandle: "handle-1")
+        )
+        XCTAssertEqual(
+            CodexAppServer.requestSerializationScope(forMethod: "process/kill", params: ["processHandle": "handle-1"]),
+            .process(processHandle: "handle-1")
+        )
+        XCTAssertEqual(
+            CodexAppServer.requestSerializationScope(forMethod: "process/resizePty", params: ["processHandle": "handle-1"]),
             .process(processHandle: "handle-1")
         )
         XCTAssertEqual(
@@ -69,7 +105,19 @@ final class RequestSerializationTests: XCTestCase {
             .fsWatch(watchID: "watch-1")
         )
         XCTAssertEqual(
+            CodexAppServer.requestSerializationScope(forMethod: "fs/unwatch", params: ["watchId": "watch-1"]),
+            .fsWatch(watchID: "watch-1")
+        )
+        XCTAssertEqual(
+            CodexAppServer.requestSerializationScope(forMethod: "fuzzyFileSearch/sessionStart", params: ["sessionId": "search-1"]),
+            .fuzzyFileSearchSession(sessionID: "search-1")
+        )
+        XCTAssertEqual(
             CodexAppServer.requestSerializationScope(forMethod: "fuzzyFileSearch/sessionUpdate", params: ["sessionId": "search-1"]),
+            .fuzzyFileSearchSession(sessionID: "search-1")
+        )
+        XCTAssertEqual(
+            CodexAppServer.requestSerializationScope(forMethod: "fuzzyFileSearch/sessionStop", params: ["sessionId": "search-1"]),
             .fuzzyFileSearchSession(sessionID: "search-1")
         )
         XCTAssertEqual(
@@ -86,6 +134,11 @@ final class RequestSerializationTests: XCTestCase {
             "plugin/share/updateTargets",
             "plugin/share/list",
             "plugin/share/delete",
+            "plugin/install",
+            "plugin/uninstall",
+            "marketplace/add",
+            "marketplace/remove",
+            "marketplace/upgrade",
             "hooks/list",
             "experimentalFeature/list",
             "experimentalFeature/enablement/set",
@@ -116,6 +169,8 @@ final class RequestSerializationTests: XCTestCase {
         for method in [
             "initialize",
             "thread/start",
+            "thread/list",
+            "thread/loaded/list",
             "fs/readFile",
             "thread/turns/list",
             "thread/turns/items/list",
