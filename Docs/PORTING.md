@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust Starlark policy parsing with
+  `codex-rs/execpolicy`. Swift now treats top-level and branch-body `pass`
+  statements as no-op policy statements instead of falling through to an
+  unsupported statement error.
 - 2026-05-15: rechecked Rust app-server initialization in
   `codex-rs/app-server/src/lib.rs`. Swift now mirrors Rust's
   exec-policy parse warning notification path by appending a `configWarning`

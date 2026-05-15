@@ -1782,6 +1782,24 @@ final class ExecPolicyTests: XCTestCase {
         ])
     }
 
+    func testParserIgnoresRustStarlarkPassStatements() throws {
+        let policy = try parsePolicy("""
+        pass
+        TOOL = "git"
+
+        if TOOL == "git":
+            pass
+        else:
+            fail("unexpected tool")
+
+        prefix_rule([TOOL, "status"], "allow")
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(pattern: PrefixPattern(first: "git", rest: [.single("status")]), decision: .allow)
+        ])
+    }
+
     func testParserEvaluatesRustStarlarkDictLiteralsAndStringIndexing() throws {
         let policy = try parsePolicy("""
         TOOL = "git"

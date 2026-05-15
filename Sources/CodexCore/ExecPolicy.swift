@@ -869,7 +869,7 @@ public final class PolicyParser {
         while index < statements.count {
             let statement = statements[index]
             let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else {
+            guard !trimmed.isEmpty, trimmed != "pass" else {
                 index += 1
                 continue
             }
