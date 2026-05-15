@@ -1852,14 +1852,14 @@ final class AppServerThreadProtocolTests: XCTestCase {
             CommandExecutionOutputDeltaNotification(
                 threadID: "thread-1",
                 turnID: "turn-1",
-                itemID: "exec-1",
-                delta: "stdout"
+                itemID: "item-1",
+                delta: "\u{fffd}a\n"
             ),
             [
                 "threadId": "thread-1",
                 "turnId": "turn-1",
-                "itemId": "exec-1",
-                "delta": "stdout"
+                "itemId": "item-1",
+                "delta": "\u{fffd}a\n"
             ]
         )
         try XCTAssertJSONObjectEqual(
@@ -1891,6 +1891,27 @@ final class AppServerThreadProtocolTests: XCTestCase {
         )
         XCTAssertEqual(decodedSummaryDelta.summaryIndex, 2)
         XCTAssertEqual(decodedSummaryDelta.itemID, "reasoning-1")
+
+        let decodedCommandExecutionOutputDelta = try JSONDecoder().decode(
+            CommandExecutionOutputDeltaNotification.self,
+            from: Data(#"""
+            {
+              "threadId": "thread-1",
+              "turnId": "turn-1",
+              "itemId": "item-1",
+              "delta": "\uFFFDa\n"
+            }
+            """#.utf8)
+        )
+        XCTAssertEqual(
+            decodedCommandExecutionOutputDelta,
+            CommandExecutionOutputDeltaNotification(
+                threadID: "thread-1",
+                turnID: "turn-1",
+                itemID: "item-1",
+                delta: "\u{fffd}a\n"
+            )
+        )
     }
 
     func testItemLifecycleNotificationsUseRustProtocolShape() throws {

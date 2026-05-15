@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2
+  `CommandExecutionOutputDeltaNotification` in
+  `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now pins the
+  exact `item/commandExecution/outputDelta` round-trip wire shape, including
+  replacement-character and newline delta content.
 - 2026-05-15: rechecked Rust app-server v2 process control and notification
   fixtures in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift
   now pins the exact `process/writeStdin`, `process/kill`,
