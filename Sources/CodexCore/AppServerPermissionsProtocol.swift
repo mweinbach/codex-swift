@@ -101,9 +101,13 @@ public struct AppServerAdditionalFileSystemPermissions: Codable, Equatable, Send
                 debugDescription: "globScanMaxDepth must be nonzero"
             )
         }
+        let read = try container.decodeIfPresent([String].self, forKey: .read)
+        let write = try container.decodeIfPresent([String].self, forKey: .write)
+        try Self.validateAbsolutePaths(read, forKey: .read, in: container)
+        try Self.validateAbsolutePaths(write, forKey: .write, in: container)
         self.init(
-            read: try container.decodeIfPresent([String].self, forKey: .read),
-            write: try container.decodeIfPresent([String].self, forKey: .write),
+            read: read,
+            write: write,
             globScanMaxDepth: globScanMaxDepth,
             entries: try container.decodeIfPresent([FileSystemSandboxEntry].self, forKey: .entries)
         )
@@ -115,6 +119,20 @@ public struct AppServerAdditionalFileSystemPermissions: Codable, Equatable, Send
         try container.encodeNilOrValue(write, forKey: .write)
         try container.encodeIfPresent(globScanMaxDepth, forKey: .globScanMaxDepth)
         try container.encodeIfPresent(entries, forKey: .entries)
+    }
+
+    private static func validateAbsolutePaths(
+        _ paths: [String]?,
+        forKey key: CodingKeys,
+        in container: KeyedDecodingContainer<CodingKeys>
+    ) throws {
+        guard let paths else {
+            return
+        }
+
+        for path in paths {
+            try FileSystemPath.validateAbsolutePath(path, forKey: key, in: container)
+        }
     }
 }
 

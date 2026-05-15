@@ -71,7 +71,9 @@ public enum FileSystemPath: Equatable, Codable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         switch try container.decode(PathType.self, forKey: .type) {
         case .path:
-            self = .path(try container.decode(String.self, forKey: .path))
+            let path = try container.decode(String.self, forKey: .path)
+            try Self.validateAbsolutePath(path, forKey: .path, in: container)
+            self = .path(path)
         case .globPattern:
             self = .globPattern(try container.decode(String.self, forKey: .pattern))
         case .special:
@@ -92,6 +94,38 @@ public enum FileSystemPath: Equatable, Codable, Sendable {
             try container.encode(PathType.special, forKey: .type)
             try container.encode(value, forKey: .value)
         }
+    }
+
+    static func validateAbsolutePath<K: CodingKey>(
+        _ path: String,
+        forKey key: K,
+        in container: KeyedDecodingContainer<K>
+    ) throws {
+        guard path.isRustAbsolutePath else {
+            throw DecodingError.dataCorruptedError(
+                forKey: key,
+                in: container,
+                debugDescription: "AbsolutePathBuf deserialized without a base path"
+            )
+        }
+    }
+}
+
+extension String {
+    var isRustAbsolutePath: Bool {
+        if hasPrefix("/") || hasPrefix(#"\\"#) {
+            return true
+        }
+
+        let characters = Array(self)
+        guard characters.count >= 3 else {
+            return false
+        }
+
+        return characters[1] == ":"
+            && (characters[2] == "\\" || characters[2] == "/")
+            && characters[0].isASCII
+            && characters[0].isLetter
     }
 }
 
@@ -234,9 +268,13 @@ public struct FileSystemPermissions: Codable, Equatable, Sendable {
         }
 
         try Self.rejectUnknownKeys(in: decoder, allowed: ["read", "write"])
+        let read = try container.decodeIfPresent([String].self, forKey: .read)
+        let write = try container.decodeIfPresent([String].self, forKey: .write)
+        try Self.validateAbsolutePaths(read, forKey: .read, in: container)
+        try Self.validateAbsolutePaths(write, forKey: .write, in: container)
         self.init(
-            read: try container.decodeIfPresent([String].self, forKey: .read),
-            write: try container.decodeIfPresent([String].self, forKey: .write)
+            read: read,
+            write: write
         )
     }
 
@@ -252,6 +290,20 @@ public struct FileSystemPermissions: Codable, Equatable, Sendable {
             try container.encode(entries, forKey: .entries)
         }
         try container.encodeIfPresent(globScanMaxDepth, forKey: .globScanMaxDepth)
+    }
+
+    private static func validateAbsolutePaths(
+        _ paths: [String]?,
+        forKey key: CodingKeys,
+        in container: KeyedDecodingContainer<CodingKeys>
+    ) throws {
+        guard let paths else {
+            return
+        }
+
+        for path in paths {
+            try FileSystemPath.validateAbsolutePath(path, forKey: key, in: container)
+        }
     }
 
     public var legacyReadWriteRoots: (read: [String]?, write: [String]?)? {

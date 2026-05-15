@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 permission path decoding in
+  `codex-rs/app-server-protocol/src/protocol/v2/permissions.rs` and
+  `tests.rs`. Swift now rejects relative paths for legacy permission
+  `read`/`write` roots and canonical `FileSystemPath.path` entries with the
+  Rust `AbsolutePathBuf` error boundary, while preserving the request
+  permission profile decode shape.
 - 2026-05-15: rechecked Rust app-server `thread/fork` config override
   handling in
   `codex-rs/app-server/src/request_processors/thread_processor.rs`. Swift now

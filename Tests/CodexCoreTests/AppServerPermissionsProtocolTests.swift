@@ -89,6 +89,78 @@ final class AppServerPermissionsProtocolTests: XCTestCase {
         XCTAssertEqual(decoded.fileSystemPermissions, FileSystemPermissions(read: ["/repo"]))
     }
 
+    func testAdditionalFileSystemPermissionsRejectRelativeLegacyPathsLikeRustProtocol() {
+        let payloads = [
+            #"{"read":["relative/path"],"write":null}"#,
+            #"{"read":null,"write":["relative/path"]}"#,
+        ]
+
+        for payload in payloads {
+            XCTAssertThrowsError(
+                try JSONDecoder().decode(
+                    AppServerAdditionalFileSystemPermissions.self,
+                    from: Data(payload.utf8)
+                ),
+                "Rust decodes legacy read/write roots as AbsolutePathBuf: \(payload)"
+            ) { error in
+                XCTAssertTrue(
+                    String(describing: error).contains("AbsolutePathBuf deserialized without a base path"),
+                    "expected Rust-shaped absolute-path error, got \(error)"
+                )
+            }
+        }
+    }
+
+    func testFileSystemPathRejectsRelativePathVariantLikeRustProtocol() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AppServerAdditionalFileSystemPermissions.self,
+                from: Data(
+                    #"{"entries":[{"path":{"type":"path","path":"relative/path"},"access":"read"}]}"#.utf8
+                )
+            )
+        ) { error in
+            XCTAssertTrue(
+                String(describing: error).contains("AbsolutePathBuf deserialized without a base path"),
+                "expected Rust-shaped absolute-path error, got \(error)"
+            )
+        }
+    }
+
+    func testPermissionsRequestApprovalUsesRequestPermissionProfileLikeRustProtocol() throws {
+        let decoded = try JSONDecoder().decode(
+            AppServerProtocol.PermissionsRequestApprovalParams.self,
+            from: Data(
+                #"""
+                {
+                  "threadId": "thr_123",
+                  "turnId": "turn_123",
+                  "itemId": "call_123",
+                  "startedAtMs": 1,
+                  "cwd": "/repo",
+                  "reason": "Select a workspace root",
+                  "permissions": {
+                    "network": {
+                      "enabled": true
+                    },
+                    "fileSystem": {
+                      "read": ["/tmp/read-only"],
+                      "write": ["/tmp/read-write"]
+                    }
+                  }
+                }
+                """#.utf8
+            )
+        )
+
+        XCTAssertEqual(decoded.cwd.path, "/repo")
+        XCTAssertEqual(decoded.permissions.network?.requestPermissions, RequestPermissionNetworkPermissions(enabled: true))
+        XCTAssertEqual(
+            decoded.permissions.fileSystem?.fileSystemPermissions,
+            FileSystemPermissions(read: ["/tmp/read-only"], write: ["/tmp/read-write"])
+        )
+    }
+
     func testManagedPermissionProfileUsesAppServerCamelCaseFilesystemFields() throws {
         let profile = AppServerPermissionProfile.managed(
             network: AppServerPermissionProfileNetworkPermissions(enabled: false),
