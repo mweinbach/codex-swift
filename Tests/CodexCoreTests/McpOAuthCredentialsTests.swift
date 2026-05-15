@@ -70,6 +70,46 @@ final class McpOAuthCredentialsTests: XCTestCase {
         XCTAssertEqual(tokens?.expiresAt, 4_600_000)
     }
 
+    func testLoadOAuthTokensDefaultsMissingFallbackScopesLikeRustSerdeDefault() throws {
+        let temp = try McpOAuthTemporaryDirectory()
+        var entry = fallbackEntry(
+            serverName: "github",
+            serverURL: "https://example.com/mcp"
+        )
+        entry.removeValue(forKey: "scopes")
+        try writeFallbackStore(codexHome: temp.url, entries: ["stub": entry])
+
+        let tokens = try McpOAuthCredentialStore.loadOAuthTokens(
+            serverName: "github",
+            url: "https://example.com/mcp",
+            codexHome: temp.url,
+            mode: .file
+        )
+
+        XCTAssertEqual(tokens?.tokenResponse.scopes, [])
+    }
+
+    func testLoadOAuthTokensRejectsNullFallbackScopesLikeRustSerdeDefault() throws {
+        let temp = try McpOAuthTemporaryDirectory()
+        var entry = fallbackEntry(
+            serverName: "github",
+            serverURL: "https://example.com/mcp"
+        )
+        entry["scopes"] = NSNull()
+        try writeFallbackStore(codexHome: temp.url, entries: ["stub": entry])
+
+        XCTAssertThrowsError(try McpOAuthCredentialStore.loadOAuthTokens(
+            serverName: "github",
+            url: "https://example.com/mcp",
+            codexHome: temp.url,
+            mode: .file
+        )) { error in
+            guard case .fallbackParseFailed = error as? McpOAuthCredentialStoreError else {
+                return XCTFail("expected fallback parse failure, got \(error)")
+            }
+        }
+    }
+
     func testAuthStatusResolverReportsStoredOAuthTokens() throws {
         let temp = try McpOAuthTemporaryDirectory()
         try writeFallbackStore(

@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust MCP OAuth fallback credentials in
+  `codex-rs/rmcp-client/src/oauth.rs`. Swift `.credentials.json` fallback
+  token decoding now preserves Serde's default boundary for `scopes`: omitted
+  fields default to an empty list while explicit `null` rejects.
 - 2026-05-15: rechecked Rust `FileSystemPermissions` in
   `codex-rs/protocol/src/models.rs`. Swift canonical additional filesystem
   permission decoding now preserves Serde's default boundary for `entries`:

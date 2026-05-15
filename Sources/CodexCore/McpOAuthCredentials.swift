@@ -511,6 +511,6 @@ private struct McpOAuthFallbackTokenEntry: Codable, Equatable, Sendable {
         self.accessToken = try container.decode(String.self, forKey: .accessToken)
         self.expiresAt = try container.decodeIfPresent(UInt64.self, forKey: .expiresAt)
         self.refreshToken = try container.decodeIfPresent(String.self, forKey: .refreshToken)
-        self.scopes = try container.decodeIfPresent([String].self, forKey: .scopes) ?? []
+        self.scopes = try container.decodeRustDefaulted([String].self, forKey: .scopes, defaultValue: [])
     }
 }
