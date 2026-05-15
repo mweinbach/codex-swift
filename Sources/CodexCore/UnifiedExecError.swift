@@ -6,6 +6,7 @@ public enum UnifiedExecError: Error, Equatable, CustomStringConvertible, Sendabl
     case createSession(message: String)
     case unknownSessionID(processID: String)
     case writeToStdin
+    case stdinClosed
     case missingCommandLine
     case sandboxDenied(message: String, output: ExecToolCallOutput)
 
@@ -25,6 +26,8 @@ public enum UnifiedExecError: Error, Equatable, CustomStringConvertible, Sendabl
             return "Unknown session id \(processID)"
         case .writeToStdin:
             return "failed to write to stdin"
+        case .stdinClosed:
+            return "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open"
         case .missingCommandLine:
             return "missing command line for unified exec request"
         case let .sandboxDenied(message, _):

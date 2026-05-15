@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust unified exec stdin handling in
+  `codex-rs/core/src/unified_exec/{process_manager,errors}.rs`. Swift
+  non-interactive unified exec now closes stdin for non-PTY sessions, rejects
+  non-empty `write_stdin` calls with Rust's `StdinClosed` message, and keeps
+  `tty: true` sessions writable for interactive stdin.
 - 2026-05-15: rechecked Rust unified exec `tty` handling in
   `codex-rs/core/src/tools/handlers/unified_exec{,/exec_command}.rs` and the
   unified exec process manager. Swift `exec_command` now decodes Rust's

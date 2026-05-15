@@ -16,6 +16,10 @@ final class UnifiedExecErrorTests: XCTestCase {
             "failed to write to stdin"
         )
         XCTAssertEqual(
+            String(describing: UnifiedExecError.stdinClosed),
+            "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open"
+        )
+        XCTAssertEqual(
             String(describing: UnifiedExecError.missingCommandLine),
             "missing command line for unified exec request"
         )

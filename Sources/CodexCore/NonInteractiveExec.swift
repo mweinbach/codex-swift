@@ -2952,7 +2952,8 @@ private actor UnifiedExecSessionRegistry {
     private struct Session {
         let id: String
         let process: Process
-        let stdinHandle: FileHandle
+        let stdinHandle: FileHandle?
+        let tty: Bool
         let stdoutHandle: FileHandle
         let stderrHandle: FileHandle?
         let pseudoTerminal: ExecServerPseudoTerminal?
@@ -2992,7 +2993,7 @@ private actor UnifiedExecSessionRegistry {
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
         let pseudoTerminal: ExecServerPseudoTerminal?
-        let stdinHandle: FileHandle
+        let stdinHandle: FileHandle?
         let stdoutHandle: FileHandle
         let stderrHandle: FileHandle?
         let stdoutCapture = DataCapture()
@@ -3023,9 +3024,15 @@ private actor UnifiedExecSessionRegistry {
         do {
             try process.run()
             pseudoTerminal?.closeSlaveHandles()
+            if !tty {
+                try? stdinHandle?.close()
+            }
         } catch {
             detach(stdoutHandle, stderrHandle)
             pseudoTerminal?.closeSlaveHandles()
+            if !tty {
+                try? stdinHandle?.close()
+            }
             throw UnifiedExecError.createSession(String(describing: error))
         }
 
@@ -3037,7 +3044,8 @@ private actor UnifiedExecSessionRegistry {
             sessions[sessionID] = Session(
                 id: sessionID,
                 process: process,
-                stdinHandle: stdinHandle,
+                stdinHandle: tty ? stdinHandle : nil,
+                tty: tty,
                 stdoutHandle: stdoutHandle,
                 stderrHandle: stderrHandle,
                 pseudoTerminal: pseudoTerminal,
@@ -3084,11 +3092,14 @@ private actor UnifiedExecSessionRegistry {
 
         let start = Date()
         if !chars.isEmpty {
+            guard session.tty, let stdinHandle = session.stdinHandle else {
+                throw UnifiedExecError.stdinClosed
+            }
             guard let data = chars.data(using: .utf8) else {
                 throw UnifiedExecError.writeToStdin
             }
             do {
-                try session.stdinHandle.write(contentsOf: data)
+                try stdinHandle.write(contentsOf: data)
             } catch {
                 throw UnifiedExecError.writeToStdin
             }

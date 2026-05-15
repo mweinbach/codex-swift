@@ -2983,7 +2983,7 @@ final class NonInteractiveExecTests: XCTestCase {
         let temp = try NonInteractiveExecTemporaryDirectory()
         let start = ResponseItem.functionCall(
             name: "exec_command",
-            arguments: #"{"cmd":"read line; echo got:$line","yield_time_ms":100}"#,
+            arguments: #"{"cmd":"read line; echo got:$line","tty":true,"yield_time_ms":100}"#,
             callID: "call-start"
         )
 
@@ -3025,6 +3025,71 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(payload.success, true)
         XCTAssertTrue(payload.content.contains("Process exited with code 0"))
         XCTAssertTrue(payload.content.contains("got:hello"))
+    }
+
+    func testUnifiedExecRejectsNonTTYStdinWritesLikeRust() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let start = ResponseItem.functionCall(
+            name: "exec_command",
+            arguments: #"{"cmd":"sleep 2","yield_time_ms":100}"#,
+            callID: "call-non-tty-start"
+        )
+
+        let startOutput = await NonInteractiveExec.executeFunctionCall(
+            start,
+            cwd: temp.url,
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: ["PATH": "/bin:/usr/bin", "HOME": temp.url.path]
+        )
+
+        guard case let .functionCallOutput(_, startPayload) = startOutput else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(startPayload.success, true)
+        let sessionID = try XCTUnwrap(Self.sessionID(from: startPayload.content))
+
+        let write = ResponseItem.functionCall(
+            name: "write_stdin",
+            arguments: #"{"session_id":\#(sessionID),"chars":"hello\n","yield_time_ms":250}"#,
+            callID: "call-non-tty-write"
+        )
+        let writeOutput = await NonInteractiveExec.executeFunctionCall(
+            write,
+            cwd: temp.url,
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: ["PATH": "/bin:/usr/bin", "HOME": temp.url.path]
+        )
+
+        guard case let .functionCallOutput(callID, payload) = writeOutput else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-non-tty-write")
+        XCTAssertEqual(payload.success, false)
+        XCTAssertEqual(
+            payload.content,
+            "write_stdin failed: stdin is closed for this session; rerun exec_command with tty=true to keep stdin open"
+        )
+
+        let poll = ResponseItem.functionCall(
+            name: "write_stdin",
+            arguments: #"{"session_id":\#(sessionID),"chars":"","yield_time_ms":2500}"#,
+            callID: "call-non-tty-poll"
+        )
+        _ = await NonInteractiveExec.executeFunctionCall(
+            poll,
+            cwd: temp.url,
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: ["PATH": "/bin:/usr/bin", "HOME": temp.url.path]
+        )
     }
 
     func testUnifiedExecTtyRunsCommandInPseudoTerminalLikeRust() async throws {
