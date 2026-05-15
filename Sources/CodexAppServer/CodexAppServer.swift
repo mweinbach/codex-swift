@@ -5006,7 +5006,7 @@ public enum CodexAppServer {
             ? try localPluginListResult(cwds: cwds, configuration: configuration)
             : empty
         let marketplaces = result["marketplaces"] as? [[String: Any]] ?? []
-        let includeDefaultRemote = params?["marketplaceKinds"] == nil && runtimeConfig.features.isEnabled(.remotePlugin)
+        let includeDefaultRemote = marketplaceKinds == nil && runtimeConfig.features.isEnabled(.remotePlugin)
         let includeWorkspaceDirectory = kinds.contains("workspace-directory")
         let includeSharedWithMe = kinds.contains("shared-with-me")
         if includeDefaultRemote || includeWorkspaceDirectory || includeSharedWithMe {

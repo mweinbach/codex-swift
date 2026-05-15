@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `PluginListParams` in
+  `codex-rs/app-server-protocol/src/protocol/v2/plugin.rs` and the
+  `plugin/list` processor in `codex-rs/app-server/src/request_processors/plugins.rs`.
+  Swift live `plugin/list` now treats explicit `marketplaceKinds: null` the
+  same as an omitted optional filter, preserving Rust's default remote-catalog
+  inclusion when `remote_plugin` is enabled.
 - 2026-05-15: rechecked Rust app-server v2 `SkillsListParams` and
   `HooksListParams` in `codex-rs/app-server-protocol/src/protocol/v2/plugin.rs`.
   Swift manual `skills/list` and `hooks/list` routing now preserves Serde's

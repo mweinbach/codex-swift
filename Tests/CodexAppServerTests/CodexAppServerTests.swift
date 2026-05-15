@@ -11361,6 +11361,68 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(requests.allSatisfy { $0.value(forHTTPHeaderField: "chatgpt-account-id") == "account-123" })
     }
 
+    func testPluginListTreatsExplicitNullMarketplaceKindsLikeRustOption() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        remote_plugin = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+
+        let pluginID = "plugins~Plugin_00000000000000000000000000000000"
+        let directoryBody = remotePluginListPageBody(
+            id: pluginID,
+            name: "linear",
+            displayName: "Linear"
+        )
+        let installedBody = remotePluginListPageBody(
+            id: pluginID,
+            name: "linear",
+            displayName: "Linear",
+            enabled: true
+        )
+        let capture = MCPHTTPTransportCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                capture.append(request)
+                switch (request.url?.path, request.url?.query) {
+                case ("/backend-api/ps/plugins/list", "scope=GLOBAL&limit=200"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(directoryBody.utf8))
+                case ("/backend-api/ps/plugins/installed", "scope=GLOBAL"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(installedBody.utf8))
+                default:
+                    return URLSessionTransportResponse(statusCode: 404)
+                }
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/list","params":{"cwds":null,"marketplaceKinds":null}}"#,
+            configuration: configuration
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let marketplaces = try XCTUnwrap(result["marketplaces"] as? [[String: Any]])
+        XCTAssertEqual(marketplaces.map { $0["name"] as? String }, ["chatgpt-global"])
+        XCTAssertEqual(capture.requests.map { $0.url?.query ?? "" }, [
+            "scope=GLOBAL&limit=200",
+            "scope=GLOBAL"
+        ])
+    }
+
     func testPluginListMarksRemotePluginDisabledByAdmin() throws {
         let temp = try TemporaryDirectory()
         try """
