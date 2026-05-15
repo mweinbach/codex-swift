@@ -13,12 +13,12 @@ final class EventResponseEventsTests: XCTestCase {
         try XCTAssertJSONObjectEqual(GetHistoryEntryResponseEvent(
             offset: 4,
             logID: 100,
-            entry: HistoryEntry(conversationID: "conv-1", ts: 123, text: "hello")
+            entry: HistoryEntry(sessionID: "conv-1", ts: 123, text: "hello")
         ), [
             "offset": 4,
             "log_id": 100,
             "entry": [
-                "conversation_id": "conv-1",
+                "session_id": "conv-1",
                 "ts": 123,
                 "text": "hello"
             ]

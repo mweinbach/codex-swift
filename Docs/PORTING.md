@@ -12,11 +12,20 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's global message-history record schema in
+  `codex-rs/message-history/src/lib.rs`. Swift `HistoryEntry` now uses the
+  Rust `session_id` JSON key and rejects the stale Swift-only
+  `conversation_id` shape.
 - 2026-05-15: rechecked Rust commit `bd8fc9adb9` and
   `codex-rs/codex-api/src/requests/headers.rs`. Swift endpoint-client
   coverage now pins ordinary streamed Responses requests, not just websocket
   handshakes, to Rust's duplicate snake_case and hyphenated session/thread
   request headers.
+- 2026-05-15: rechecked Rust's `ConfigBatchWriteParams.reload_user_config`
+  field in `codex-rs/app-server-protocol/src/protocol/v2/config.rs`. Swift's
+  typed app-server config protocol now preserves Rust's defaulted bool boundary:
+  omitted `reloadUserConfig` decodes as `false`, while explicit `null` is
+  rejected instead of being accepted as false.
 - 2026-05-15: rechecked Rust's `ThreadGoalSetParams` in
   `codex-rs/app-server-protocol/src/protocol/v2/thread.rs`. Swift now encodes
   missing `objective` and `status` fields as explicit `null` like Rust's plain

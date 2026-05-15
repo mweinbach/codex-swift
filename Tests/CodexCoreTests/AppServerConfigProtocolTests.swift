@@ -174,6 +174,13 @@ final class AppServerConfigProtocolTests: XCTestCase {
         XCTAssertEqual(decoded, AppServerProtocol.ConfigBatchWriteParams(edits: [edit]))
     }
 
+    func testConfigBatchWriteRejectsNullReloadLikeRustDefaultBool() throws {
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            AppServerProtocol.ConfigBatchWriteParams.self,
+            from: Data(#"{"edits":[],"reloadUserConfig":null}"#.utf8)
+        ))
+    }
+
     func testConfigWriteResponseMatchesRustOverrideMetadataShape() throws {
         let response = AppServerProtocol.ConfigWriteResponse(
             status: .okOverridden,

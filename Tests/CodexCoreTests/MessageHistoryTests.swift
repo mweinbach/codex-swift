@@ -4,18 +4,26 @@ import XCTest
 final class MessageHistoryTests: XCTestCase {
     func testHistoryEntryWireShape() throws {
         let entry = HistoryEntry(
-            conversationID: "018f7a2d-4c5b-7abc-8def-0123456789ab",
+            sessionID: "018f7a2d-4c5b-7abc-8def-0123456789ab",
             ts: 1_717_171_717,
             text: "hello"
         )
 
         try XCTAssertJSONObjectEqual(entry, [
-            "conversation_id": "018f7a2d-4c5b-7abc-8def-0123456789ab",
+            "session_id": "018f7a2d-4c5b-7abc-8def-0123456789ab",
             "ts": 1_717_171_717,
             "text": "hello"
         ])
 
         let data = try JSONEncoder().encode(entry)
         XCTAssertEqual(try JSONDecoder().decode(HistoryEntry.self, from: data), entry)
+    }
+
+    func testHistoryEntryRejectsLegacyConversationIDKeyLikeRust() throws {
+        let data = Data("""
+        {"conversation_id":"legacy","ts":1,"text":"hello"}
+        """.utf8)
+
+        XCTAssertThrowsError(try JSONDecoder().decode(HistoryEntry.self, from: data))
     }
 }

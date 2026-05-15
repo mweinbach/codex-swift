@@ -211,7 +211,9 @@ extension AppServerProtocol {
             edits = try container.decode([ConfigEdit].self, forKey: .edits)
             filePath = try container.decodeIfPresent(String.self, forKey: .filePath)
             expectedVersion = try container.decodeIfPresent(String.self, forKey: .expectedVersion)
-            reloadUserConfig = try container.decodeIfPresent(Bool.self, forKey: .reloadUserConfig) ?? false
+            reloadUserConfig = try container.contains(.reloadUserConfig)
+                ? container.decode(Bool.self, forKey: .reloadUserConfig)
+                : false
         }
     }
 
