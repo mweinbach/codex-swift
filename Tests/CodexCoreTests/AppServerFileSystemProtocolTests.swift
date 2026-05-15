@@ -159,4 +159,15 @@ final class AppServerFileSystemProtocolTests: XCTestCase {
         XCTAssertEqual(copy.destinationPath.path, "/tmp/codex-fs/destination")
         XCTAssertFalse(copy.recursive)
     }
+
+    func testFsCopyRejectsExplicitNullForRustDefaultedRecursiveFlag() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                FsCopyParams.self,
+                from: Data(
+                    #"{"sourcePath":"/tmp/codex-fs/source","destinationPath":"/tmp/codex-fs/destination","recursive":null}"#.utf8
+                )
+            )
+        )
+    }
 }

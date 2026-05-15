@@ -23,7 +23,7 @@ extension AppServerProtocol {
 
         public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
-            includeLayers = try container.decodeIfPresent(Bool.self, forKey: .includeLayers) ?? false
+            includeLayers = try container.decodeRustDefaulted(Bool.self, forKey: .includeLayers, defaultValue: false)
             cwd = try container.decodeIfPresent(String.self, forKey: .cwd)
         }
     }

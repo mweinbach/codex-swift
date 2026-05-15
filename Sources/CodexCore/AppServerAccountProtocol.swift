@@ -517,7 +517,7 @@ public struct GetAccountParams: Equatable, Sendable {
 extension GetAccountParams: Codable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        refreshToken = try container.decodeIfPresent(Bool.self, forKey: .refreshToken) ?? false
+        refreshToken = try container.decodeRustDefaulted(Bool.self, forKey: .refreshToken, defaultValue: false)
     }
 
     public func encode(to encoder: Encoder) throws {

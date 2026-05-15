@@ -314,6 +314,15 @@ final class AppServerAccountProtocolTests: XCTestCase {
         )
     }
 
+    func testGetAccountParamsRejectsExplicitNullForRustDefaultedRefreshToken() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                GetAccountParams.self,
+                from: Data(#"{"refreshToken":null}"#.utf8)
+            )
+        )
+    }
+
     func testGetAccountResponseEncodesExplicitNullAccountLikeRustProtocol() throws {
         try XCTAssertJSONObjectEqual(
             GetAccountResponse(account: nil, requiresOpenAIAuth: true),

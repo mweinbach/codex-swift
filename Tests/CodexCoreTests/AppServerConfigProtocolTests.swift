@@ -23,6 +23,15 @@ final class AppServerConfigProtocolTests: XCTestCase {
         XCTAssertEqual(decoded, AppServerProtocol.ConfigReadParams())
     }
 
+    func testConfigReadParamsRejectsExplicitNullForRustDefaultedIncludeLayers() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AppServerProtocol.ConfigReadParams.self,
+                from: Data(#"{"includeLayers":null}"#.utf8)
+            )
+        )
+    }
+
     func testConfigReadResponseSkipsMissingLayersLikeRust() throws {
         let response = AppServerProtocol.ConfigReadResponse(
             config: .object([

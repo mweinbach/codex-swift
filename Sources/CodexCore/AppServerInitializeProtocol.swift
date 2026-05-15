@@ -50,8 +50,12 @@ extension InitializeCapabilities: Codable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        experimentalAPI = try container.decodeIfPresent(Bool.self, forKey: .experimentalAPI) ?? false
-        requestAttestation = try container.decodeIfPresent(Bool.self, forKey: .requestAttestation) ?? false
+        experimentalAPI = try container.decodeRustDefaulted(Bool.self, forKey: .experimentalAPI, defaultValue: false)
+        requestAttestation = try container.decodeRustDefaulted(
+            Bool.self,
+            forKey: .requestAttestation,
+            defaultValue: false
+        )
         optOutNotificationMethods = try container.decodeIfPresent([String].self, forKey: .optOutNotificationMethods)
     }
 

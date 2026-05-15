@@ -12,6 +12,13 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked the remaining Rust app-server shared protocol
+  `#[serde(default)]` booleans in `v1.rs` and
+  `v2/{account.rs,config.rs,fs.rs,model.rs,thread.rs}`. Swift typed protocol
+  decoding now rejects explicit `null` for initialize capabilities,
+  `config/read.includeLayers`, `fs/copy.recursive`, `account/read.refreshToken`,
+  `thread/list.useStateDbOnly`, `thread/read.includeTurns`, and model
+  `supportsPersonality` while preserving Rust's omitted-field defaults.
 - 2026-05-15: rechecked Rust's `HookRunSummary.source` default in
   `codex-rs/app-server-protocol/src/protocol/v2/hook.rs`. Swift app-server
   hook summary decoding now preserves Rust's `#[serde(default =

@@ -226,6 +226,29 @@ final class AppServerModelProtocolTests: XCTestCase {
         XCTAssertEqual(decoded.serviceTiers, [])
     }
 
+    func testModelRejectsExplicitNullForRustDefaultedSupportsPersonality() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                Model.self,
+                from: Data(
+                    #"""
+                    {
+                      "id": "gpt-test",
+                      "model": "gpt-test",
+                      "displayName": "GPT Test",
+                      "description": "A test model.",
+                      "hidden": false,
+                      "supportedReasoningEfforts": [],
+                      "defaultReasoningEffort": "medium",
+                      "supportsPersonality": null,
+                      "isDefault": false
+                    }
+                    """#.utf8
+                )
+            )
+        )
+    }
+
     func testModelProviderCapabilitiesPayloadsEncodeRustWireShape() throws {
         try XCTAssertJSONObjectEqual(ModelProviderCapabilitiesReadParams(), [:])
         try XCTAssertJSONObjectEqual(

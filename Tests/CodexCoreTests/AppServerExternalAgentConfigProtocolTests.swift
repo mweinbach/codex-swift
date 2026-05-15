@@ -29,6 +29,15 @@ final class AppServerExternalAgentConfigProtocolTests: XCTestCase {
         XCTAssertEqual(explicit.cwds, ["/repo"])
     }
 
+    func testExternalAgentConfigDetectParamsRejectExplicitNullForRustDefaultedIncludeHome() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                ExternalAgentConfigDetectParams.self,
+                from: Data(#"{"includeHome":null}"#.utf8)
+            )
+        )
+    }
+
     func testExternalAgentConfigMigrationItemsEncodeRustWireShape() throws {
         let details = ExternalAgentMigrationDetails(
             plugins: [

@@ -168,7 +168,11 @@ extension Model: Codable {
             [InputModality].self,
             forKey: .inputModalities
         ) ?? InputModality.defaultInputModalities
-        supportsPersonality = try container.decodeIfPresent(Bool.self, forKey: .supportsPersonality) ?? false
+        supportsPersonality = try container.decodeRustDefaulted(
+            Bool.self,
+            forKey: .supportsPersonality,
+            defaultValue: false
+        )
         additionalSpeedTiers = try container.decodeIfPresent([String].self, forKey: .additionalSpeedTiers) ?? []
         serviceTiers = try container.decodeIfPresent([ModelServiceTier].self, forKey: .serviceTiers) ?? []
         isDefault = try container.decode(Bool.self, forKey: .isDefault)

@@ -81,6 +81,21 @@ final class AppServerInitializeProtocolTests: XCTestCase {
         )
     }
 
+    func testInitializeCapabilitiesRejectsExplicitNullForRustDefaultedFlags() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                InitializeCapabilities.self,
+                from: Data(#"{"experimentalApi":null}"#.utf8)
+            )
+        )
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                InitializeCapabilities.self,
+                from: Data(#"{"requestAttestation":null}"#.utf8)
+            )
+        )
+    }
+
     func testInitializeResponseEncodesRustWireShape() throws {
         try XCTAssertJSONObjectEqual(
             InitializeResponse(

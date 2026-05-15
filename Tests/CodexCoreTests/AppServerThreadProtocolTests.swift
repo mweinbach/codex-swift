@@ -953,6 +953,15 @@ final class AppServerThreadProtocolTests: XCTestCase {
         XCTAssertTrue(decoded.useStateDBOnly)
     }
 
+    func testThreadListParamsRejectsExplicitNullForRustDefaultedStateDbFlag() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                ThreadListParams.self,
+                from: Data(#"{"useStateDbOnly":null}"#.utf8)
+            )
+        )
+    }
+
     func testThreadListAndReadResponsesCarryRustThreadDataShape() throws {
         let turn = AppServerTurn(
             id: "turn-1",
@@ -2110,6 +2119,12 @@ final class AppServerThreadProtocolTests: XCTestCase {
             from: Data(#"{"threadId":"\#(threadID)"}"#.utf8)
         )
         XCTAssertFalse(defaultRead.includeTurns)
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                ThreadReadParams.self,
+                from: Data(#"{"threadId":"\#(threadID)","includeTurns":null}"#.utf8)
+            )
+        )
 
         try XCTAssertJSONObjectEqual(ThreadRollbackParams(threadID: threadID, numTurns: 3), [
             "threadId": threadID,

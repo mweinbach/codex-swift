@@ -2160,7 +2160,7 @@ public struct ThreadListParams: Equatable, Codable, Sendable {
         sourceKinds = try container.decodeIfPresent([AppServerThreadSourceKind].self, forKey: .sourceKinds)
         archived = try container.decodeIfPresent(Bool.self, forKey: .archived)
         cwd = try container.decodeIfPresent(ThreadListCwdFilter.self, forKey: .cwd)
-        useStateDBOnly = try container.decodeIfPresent(Bool.self, forKey: .useStateDBOnly) ?? false
+        useStateDBOnly = try container.decodeRustDefaulted(Bool.self, forKey: .useStateDBOnly, defaultValue: false)
         searchTerm = try container.decodeIfPresent(String.self, forKey: .searchTerm)
     }
 
@@ -2784,7 +2784,7 @@ public struct ThreadReadParams: Equatable, Codable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         threadID = try container.decode(String.self, forKey: .threadID)
-        includeTurns = try container.decodeIfPresent(Bool.self, forKey: .includeTurns) ?? false
+        includeTurns = try container.decodeRustDefaulted(Bool.self, forKey: .includeTurns, defaultValue: false)
     }
 }
 

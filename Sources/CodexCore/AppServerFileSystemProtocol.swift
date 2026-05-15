@@ -180,7 +180,7 @@ extension FsCopyParams: Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         sourcePath = try container.decode(AbsolutePath.self, forKey: .sourcePath)
         destinationPath = try container.decode(AbsolutePath.self, forKey: .destinationPath)
-        recursive = try container.decodeIfPresent(Bool.self, forKey: .recursive) ?? false
+        recursive = try container.decodeRustDefaulted(Bool.self, forKey: .recursive, defaultValue: false)
     }
 
     public func encode(to encoder: Encoder) throws {
