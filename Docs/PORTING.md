@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust turn analytics approval policy projection in
+  `codex-rs/analytics/src/reducer.rs` and app-server lifecycle approval fields.
+  Swift now preserves granular approval policies as `"granular"` in runtime
+  turn analytics when they come from either the loaded thread metadata or a
+  `turn/start` override.
 - 2026-05-15: rechecked Rust app-server `thread/resume` config override
   handling in
   `codex-rs/app-server/src/request_processors/thread_processor.rs`. Swift now

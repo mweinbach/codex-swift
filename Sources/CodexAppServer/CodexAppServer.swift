@@ -20662,7 +20662,7 @@ public enum CodexAppServer {
         return .internalError(error.localizedDescription)
     }
 
-    private static func approvalPolicyParam(_ value: Any?) throws -> AskForApproval? {
+    fileprivate static func approvalPolicyParam(_ value: Any?) throws -> AskForApproval? {
         guard let value, !(value is NSNull) else {
             return nil
         }
@@ -25519,7 +25519,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             modelSlug: modelSlug,
             modelProvider: CodexAppServer.stringParam(result["modelProvider"]) ?? configuration.defaultModelProvider,
             cwd: URL(fileURLWithPath: cwd, isDirectory: true),
-            approvalPolicy: (result["approvalPolicy"] as? String).flatMap(AskForApproval.init(rawValue:)),
+            approvalPolicy: Self.analyticsApprovalPolicy(result["approvalPolicy"]),
             approvalsReviewer: CodexAppServer.stringParam(result["approvalsReviewer"]) ?? ApprovalsReviewer.user.appServerRawValue,
             serviceTier: CodexAppServer.stringParam(result["serviceTier"]) ?? "default",
             sandboxPolicy: sandbox.policy,
@@ -25536,6 +25536,10 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             subagentSource: Self.analyticsSubagentSource(configuration.sessionSource),
             parentThreadID: Self.analyticsParentThreadID(configuration.sessionSource)
         )
+    }
+
+    private static func analyticsApprovalPolicy(_ raw: Any?) -> AskForApproval? {
+        try? CodexAppServer.approvalPolicyParam(raw)
     }
 
     private static func analyticsSandbox(_ raw: Any?) -> (policy: String?, networkAccess: Bool) {
@@ -25585,7 +25589,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                 reasoningEffort: CodexAppServer.stringParam(params?["effort"]) ?? metadata.reasoningEffort,
                 reasoningSummary: Self.analyticsNonDefaultMode(reasoningSummary),
                 serviceTier: serviceTier.isEmpty ? "default" : serviceTier,
-                approvalPolicy: CodexAppServer.stringParam(params?["approvalPolicy"])
+                approvalPolicy: Self.analyticsApprovalPolicy(params?["approvalPolicy"])?.rawValue
                     ?? metadata.approvalPolicy?.rawValue
                     ?? AskForApproval.unlessTrusted.rawValue,
                 approvalsReviewer: CodexAppServer.stringParam(params?["approvalsReviewer"])

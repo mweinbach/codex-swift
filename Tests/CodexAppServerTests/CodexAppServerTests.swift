@@ -5500,6 +5500,133 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(params.totalTokens, 0)
     }
 
+    func testRuntimeTurnAnalyticsPreservesGranularApprovalPolicyLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let analyticsUploader = AppServerRecordingCodexAnalyticsUploader()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                codexAnalyticsUploader: analyticsUploader
+            ),
+            experimentalAPIEnabled: true
+        )
+
+        let startRequest: [String: Any] = [
+            "id": 1,
+            "method": "thread/start",
+            "params": [
+                "modelProvider": "mock_provider",
+                "approvalPolicy": [
+                    "type": "granular",
+                    "sandboxApproval": true,
+                    "rules": true,
+                    "requestPermissions": true,
+                    "mcpElicitations": true
+                ]
+            ]
+        ]
+        let startMessages = try decodeMessages(processor.processLine(try JSONSerialization.data(withJSONObject: startRequest)))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let startedThread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let startedThreadID = try XCTUnwrap(startedThread["id"] as? String)
+
+        let inheritedTurnMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"turn/start","params":{"threadId":"\#(startedThreadID)","input":[{"type":"text","text":"Inherited"}]}}"#.utf8
+        )))
+        let inheritedTurnResult = try XCTUnwrap(inheritedTurnMessages[0]["result"] as? [String: Any])
+        let inheritedTurn = try XCTUnwrap(inheritedTurnResult["turn"] as? [String: Any])
+        let inheritedTurnID = try XCTUnwrap(inheritedTurn["id"] as? String)
+
+        await processor.handleRuntimeEvent(
+            threadID: startedThreadID,
+            turnID: inheritedTurnID,
+            event: .taskStarted(TaskStartedEvent(
+                turnID: inheritedTurnID,
+                startedAt: 1_000,
+                modelContextWindow: nil
+            ))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: startedThreadID,
+            turnID: inheritedTurnID,
+            event: .taskComplete(TaskCompleteEvent(
+                turnID: inheritedTurnID,
+                lastAgentMessage: nil,
+                completedAt: 1_010,
+                durationMilliseconds: 10
+            ))
+        )
+
+        var analyticsRequests = await analyticsUploader.requests
+        XCTAssertEqual(analyticsRequests.count, 1)
+        var analyticsEvent = try XCTUnwrap(analyticsRequests.last?.events.first)
+        guard case let .turnEvent(inheritedTurnEvent) = analyticsEvent else {
+            return XCTFail("expected turn analytics event")
+        }
+        XCTAssertEqual(inheritedTurnEvent.eventParams.approvalPolicy, "granular")
+
+        let defaultStartMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":3,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let defaultStartResult = try XCTUnwrap(defaultStartMessages[0]["result"] as? [String: Any])
+        let defaultThread = try XCTUnwrap(defaultStartResult["thread"] as? [String: Any])
+        let defaultThreadID = try XCTUnwrap(defaultThread["id"] as? String)
+        let turnOverrideRequest: [String: Any] = [
+            "id": 4,
+            "method": "turn/start",
+            "params": [
+                "threadId": defaultThreadID,
+                "input": [
+                    [
+                        "type": "text",
+                        "text": "Override"
+                    ]
+                ],
+                "approvalPolicy": [
+                    "type": "granular",
+                    "sandboxApproval": false,
+                    "rules": true,
+                    "requestPermissions": true,
+                    "mcpElicitations": true
+                ]
+            ]
+        ]
+        let overrideTurnMessages = try decodeMessages(
+            processor.processLine(try JSONSerialization.data(withJSONObject: turnOverrideRequest))
+        )
+        let overrideTurnResult = try XCTUnwrap(overrideTurnMessages[0]["result"] as? [String: Any])
+        let overrideTurn = try XCTUnwrap(overrideTurnResult["turn"] as? [String: Any])
+        let overrideTurnID = try XCTUnwrap(overrideTurn["id"] as? String)
+
+        await processor.handleRuntimeEvent(
+            threadID: defaultThreadID,
+            turnID: overrideTurnID,
+            event: .taskStarted(TaskStartedEvent(
+                turnID: overrideTurnID,
+                startedAt: 2_000,
+                modelContextWindow: nil
+            ))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: defaultThreadID,
+            turnID: overrideTurnID,
+            event: .taskComplete(TaskCompleteEvent(
+                turnID: overrideTurnID,
+                lastAgentMessage: nil,
+                completedAt: 2_010,
+                durationMilliseconds: 10
+            ))
+        )
+
+        analyticsRequests = await analyticsUploader.requests
+        XCTAssertEqual(analyticsRequests.count, 2)
+        analyticsEvent = try XCTUnwrap(analyticsRequests.last?.events.first)
+        guard case let .turnEvent(overrideTurnEvent) = analyticsEvent else {
+            return XCTFail("expected turn analytics event")
+        }
+        XCTAssertEqual(overrideTurnEvent.eventParams.approvalPolicy, "granular")
+    }
+
     func testRuntimeExecCommandEndWithoutBeginIsSuppressedLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()
