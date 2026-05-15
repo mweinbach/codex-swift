@@ -115,6 +115,15 @@ public struct NetworkPolicyDecisionPayload: Equatable, Codable, Sendable {
     public let reason: String?
     public let port: UInt16?
 
+    private enum CodingKeys: String, CodingKey {
+        case decision
+        case source
+        case `protocol`
+        case host
+        case reason
+        case port
+    }
+
     public init(
         decision: NetworkPolicyDecision,
         source: NetworkDecisionSource,
@@ -146,6 +155,16 @@ public struct NetworkPolicyDecisionPayload: Equatable, Codable, Sendable {
 
         return NetworkApprovalContext(host: trimmedHost, protocol: `protocol`)
     }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(decision, forKey: .decision)
+        try container.encode(source, forKey: .source)
+        try container.encodeNilOrValue(`protocol`, forKey: .protocol)
+        try container.encodeNilOrValue(host, forKey: .host)
+        try container.encodeNilOrValue(reason, forKey: .reason)
+        try container.encodeNilOrValue(port, forKey: .port)
+    }
 }
 
 public struct NetworkPolicyAmendment: Equatable, Codable, Sendable {
@@ -155,6 +174,16 @@ public struct NetworkPolicyAmendment: Equatable, Codable, Sendable {
     public init(host: String, action: NetworkPolicyRuleAction) {
         self.host = host
         self.action = action
+    }
+}
+
+private extension KeyedEncodingContainer {
+    mutating func encodeNilOrValue<T: Encodable>(_ value: T?, forKey key: Key) throws {
+        if let value {
+            try encode(value, forKey: key)
+        } else {
+            try encodeNil(forKey: key)
+        }
     }
 }
 

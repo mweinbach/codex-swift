@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's `NetworkPolicyDecisionPayload` in
+  `codex-rs/protocol/src/network_policy.rs`. Swift network-policy decision
+  encoding now preserves Rust's ordinary `Option` wire shape by emitting
+  explicit `null` for absent `protocol`, `host`, `reason`, and `port` fields.
 - 2026-05-15: rechecked Rust's `TurnStartedEvent.collaboration_mode_kind` in
   `codex-rs/protocol/src/protocol.rs`. Swift task-started event decoding now
   preserves Serde's default boundary for the non-optional collaboration mode:

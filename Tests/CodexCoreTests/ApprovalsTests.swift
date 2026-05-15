@@ -150,6 +150,20 @@ final class ApprovalsTests: XCTestCase {
         XCTAssertEqual(httpConnect.protocol, .https)
     }
 
+    func testNetworkPolicyDecisionPayloadEncodesAbsentOptionalsAsNullLikeRust() throws {
+        try XCTAssertJSONObjectEqual(
+            NetworkPolicyDecisionPayload(decision: .deny, source: .baselinePolicy),
+            [
+                "decision": "deny",
+                "source": "baseline_policy",
+                "protocol": NSNull(),
+                "host": NSNull(),
+                "reason": NSNull(),
+                "port": NSNull()
+            ]
+        )
+    }
+
     func testNetworkApprovalContextFromPayloadMatchesRustAskFromDeciderRule() {
         XCTAssertEqual(
             NetworkPolicyDecisionPayload(
