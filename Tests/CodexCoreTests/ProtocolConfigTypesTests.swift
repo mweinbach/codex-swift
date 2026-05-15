@@ -82,6 +82,17 @@ final class ProtocolConfigTypesTests: XCTestCase {
         )))
     }
 
+    func testGranularApprovalConfigRejectsNullForRustDefaultedFlags() {
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            GranularApprovalConfig.self,
+            from: Data(#"{"sandbox_approval":true,"rules":true,"skill_approval":null,"mcp_elicitations":true}"#.utf8)
+        ))
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            GranularApprovalConfig.self,
+            from: Data(#"{"sandbox_approval":true,"rules":true,"request_permissions":null,"mcp_elicitations":true}"#.utf8)
+        ))
+    }
+
     func testCollaborationModeKindAliasesMatchRustDefaults() throws {
         let decoder = JSONDecoder()
         for alias in ["default", "code", "pair_programming", "execute", "custom"] {

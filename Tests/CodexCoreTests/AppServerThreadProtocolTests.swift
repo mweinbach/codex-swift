@@ -1167,6 +1167,12 @@ final class AppServerThreadProtocolTests: XCTestCase {
             from: Data(#"{"custom":"atlas"}"#.utf8)
         )
         XCTAssertEqual(decodedSource, .custom("atlas"))
+
+        let decodedUnknownUnitSource = try JSONDecoder().decode(
+            AppServerSessionSource.self,
+            from: Data(#""futureDesktop""#.utf8)
+        )
+        XCTAssertEqual(decodedUnknownUnitSource, .unknown)
     }
 
     func testThreadDataRejectsRelativeCwdLikeRustAbsolutePathBuf() throws {

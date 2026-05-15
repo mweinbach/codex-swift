@@ -12,6 +12,16 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's app-server v2 `SessionSource` in
+  `codex-rs/app-server-protocol/src/protocol/v2/thread_data.rs`. Swift
+  thread metadata decoding now mirrors Rust's `#[serde(other)]` fallback by
+  mapping unknown unit-string session sources to `unknown` while preserving
+  tagged `custom` and `subAgent` payload decoding.
+- 2026-05-15: rechecked Rust's app-server v2 `AskForApproval::Granular`
+  defaulted flags in `codex-rs/app-server-protocol/src/protocol/v2/shared.rs`.
+  Swift now keeps Rust's omitted-field defaults for `skill_approval` and
+  `request_permissions` while rejecting explicit `null` like Serde's
+  `#[serde(default)]` bool fields.
 - 2026-05-15: rechecked additional Rust app-server defaulted protocol fields in
   `codex-rs/app-server-protocol/src/protocol/v2/{plugin.rs,thread.rs,permissions.rs}`.
   Swift now rejects explicit `null` for plugin `availability`, runtime response

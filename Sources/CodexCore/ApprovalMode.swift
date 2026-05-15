@@ -33,8 +33,12 @@ public struct GranularApprovalConfig: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         sandboxApproval = try container.decode(Bool.self, forKey: .sandboxApproval)
         rules = try container.decode(Bool.self, forKey: .rules)
-        skillApproval = try container.decodeIfPresent(Bool.self, forKey: .skillApproval) ?? false
-        requestPermissions = try container.decodeIfPresent(Bool.self, forKey: .requestPermissions) ?? false
+        skillApproval = try container.decodeRustDefaulted(Bool.self, forKey: .skillApproval, defaultValue: false)
+        requestPermissions = try container.decodeRustDefaulted(
+            Bool.self,
+            forKey: .requestPermissions,
+            defaultValue: false
+        )
         mcpElicitations = try container.decode(Bool.self, forKey: .mcpElicitations)
     }
 

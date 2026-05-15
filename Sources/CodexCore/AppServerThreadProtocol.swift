@@ -49,17 +49,17 @@ public enum AppServerSessionSource: Equatable, Sendable {
 extension AppServerSessionSource: Codable {
     public init(from decoder: Decoder) throws {
         let single = try decoder.singleValueContainer()
-        if let unit = try? single.decode(UnitValue.self) {
-            switch unit {
-            case .cli:
+        if let rawUnit = try? single.decode(String.self) {
+            switch rawUnit {
+            case UnitValue.cli.rawValue:
                 self = .cli
-            case .vsCode:
+            case UnitValue.vsCode.rawValue:
                 self = .vsCode
-            case .exec:
+            case UnitValue.exec.rawValue:
                 self = .exec
-            case .appServer:
+            case UnitValue.appServer.rawValue:
                 self = .appServer
-            case .unknown:
+            default:
                 self = .unknown
             }
             return
