@@ -130,6 +130,24 @@ final class McpEventsTests: XCTestCase {
         ]))
     }
 
+    func testMcpToolRejectsDuplicateRustSchemaAliases() throws {
+        XCTAssertThrowsError(try JSONDecoder().decode(McpTool.self, from: Data("""
+        {
+          "name": "search",
+          "inputSchema": {"type": "object"},
+          "input_schema": {"type": "object"}
+        }
+        """.utf8)))
+
+        XCTAssertThrowsError(try JSONDecoder().decode(McpTool.self, from: Data("""
+        {
+          "name": "search",
+          "outputSchema": {"type": "object"},
+          "output_schema": null
+        }
+        """.utf8)))
+    }
+
     func testMcpToolDefaultsMissingInputSchemaLikeRustSerdeDefault() throws {
         let omitted = try JSONDecoder().decode(McpTool.self, from: Data("""
         {

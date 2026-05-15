@@ -643,12 +643,26 @@ public struct McpTool: Equatable, Codable, Sendable {
         connectorName = try container.decodeIfPresent(String.self, forKey: .connectorName)
         description = try container.decodeIfPresent(String.self, forKey: .description)
         icons = try container.decodeIfPresent([JSONValue].self, forKey: .icons)
+        if container.contains(.inputSchema), container.contains(.inputSchemaSnake) {
+            throw DecodingError.dataCorruptedError(
+                forKey: .inputSchema,
+                in: container,
+                debugDescription: "duplicate MCP tool inputSchema field"
+            )
+        }
         inputSchema = try container.decodeIfPresent(McpToolInputSchema.self, forKey: .inputSchema)
             ?? container.decodeIfPresent(McpToolInputSchema.self, forKey: .inputSchemaSnake)
             ?? McpToolInputSchema()
         meta = try container.decodeIfPresent(JSONValue.self, forKey: .meta)
         name = try container.decode(String.self, forKey: .name)
         namespaceDescription = try container.decodeIfPresent(String.self, forKey: .namespaceDescription)
+        if container.contains(.outputSchema), container.contains(.outputSchemaSnake) {
+            throw DecodingError.dataCorruptedError(
+                forKey: .outputSchema,
+                in: container,
+                debugDescription: "duplicate MCP tool outputSchema field"
+            )
+        }
         outputSchema = try container.decodeIfPresent(McpToolOutputSchema.self, forKey: .outputSchema)
             ?? container.decodeIfPresent(McpToolOutputSchema.self, forKey: .outputSchemaSnake)
         pluginDisplayNames = try container.decodeIfPresent([String].self, forKey: .pluginDisplayNames) ?? []

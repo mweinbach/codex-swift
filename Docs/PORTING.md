@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust MCP tool schema aliases in
+  `codex-rs/protocol/src/mcp.rs`. Swift `McpTool` decoding now rejects
+  payloads that provide both camelCase and snake_case schema spellings for the
+  same Rust field, matching Serde duplicate-field behavior for
+  `inputSchema`/`input_schema` and `outputSchema`/`output_schema`.
 - 2026-05-15: rechecked Rust's protected workspace metadata write rule in
   `codex-rs/protocol/src/permissions.rs` as used by apply-patch safety.
   Swift `PatchSafety` now blocks top-level `.git`, `.agents`, and `.codex`
