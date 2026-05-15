@@ -14870,6 +14870,61 @@ public enum CodexAppServer {
         )
     }
 
+    fileprivate static func configWarningFromExecPolicyWarning(
+        _ error: ExecPolicyLoadError
+    ) -> CodexAppServerConfiguration.ConfigWarning {
+        let (path, range) = execPolicyWarningLocation(error)
+        return CodexAppServerConfiguration.ConfigWarning(
+            summary: "Error parsing rules; custom rules not applied.",
+            details: String(describing: error),
+            path: path,
+            range: range
+        )
+    }
+
+    private static func execPolicyWarningLocation(
+        _ error: ExecPolicyLoadError
+    ) -> (String?, CodexAppServerConfiguration.AppTextRange?) {
+        guard case let .parsePolicy(path, message) = error else {
+            return (nil, nil)
+        }
+        guard let location = parseExecPolicyStarlarkLocation(from: message) else {
+            return (path, nil)
+        }
+        let position = CodexAppServerConfiguration.AppTextPosition(
+            line: location.line,
+            column: location.column
+        )
+        return (
+            location.path,
+            CodexAppServerConfiguration.AppTextRange(start: position, end: position)
+        )
+    }
+
+    private static func parseExecPolicyStarlarkLocation(
+        from message: String
+    ) -> (path: String, line: Int, column: Int)? {
+        guard let firstLine = message.split(separator: "\n", omittingEmptySubsequences: false).first else {
+            return nil
+        }
+        let trimmed = String(firstLine).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let range = trimmed.range(of: ": starlark error:", options: .backwards) else {
+            return nil
+        }
+
+        let pathAndPosition = String(trimmed[..<range.lowerBound])
+        let parts = pathAndPosition.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count >= 3,
+              let line = Int(parts[parts.count - 2]),
+              let column = Int(parts[parts.count - 1]),
+              line != 0
+        else {
+            return nil
+        }
+
+        return (parts.dropLast(2).joined(separator: ":"), line, column)
+    }
+
     fileprivate static func activeThreadStatus(activeFlags: [String] = []) -> [String: Any] {
         [
             "type": "active",
@@ -25276,6 +25331,18 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             warnings.append(contentsOf: runtimeConfig.startupWarnings.map {
                 CodexAppServerConfiguration.ConfigWarning(summary: $0)
             })
+            let configStack = try CodexConfigLayerLoader.loadConfigLayerStack(
+                codexHome: configuration.codexHome,
+                cwd: configuration.cwd,
+                overrides: configuration.configLayerOverrides,
+                environment: configuration.environment,
+                systemConfigFile: nil
+            )
+            if let execPolicyWarning = try? ExecPolicyManager.checkExecPolicyForWarnings(
+                configStack: configStack
+            ) {
+                warnings.append(CodexAppServer.configWarningFromExecPolicyWarning(execPolicyWarning))
+            }
         } catch {
             warnings.append(CodexAppServer.configWarningFromLoadError(
                 summary: "Invalid configuration; using defaults.",

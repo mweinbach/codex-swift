@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server initialization in
+  `codex-rs/app-server/src/lib.rs`. Swift now mirrors Rust's
+  exec-policy parse warning notification path by appending a `configWarning`
+  with the Rust summary, parse-error details, and policy path/range metadata
+  when startup `.rules` files fail to parse.
 - 2026-05-15: rechecked Rust's exec-policy warning path in
   `codex-rs/core/src/exec_policy.rs`. Swift now has the Rust-shaped
   parse-error warning loader that returns an empty exec policy while surfacing
