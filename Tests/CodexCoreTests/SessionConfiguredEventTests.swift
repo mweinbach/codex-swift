@@ -14,12 +14,19 @@ final class SessionConfiguredEventTests: XCTestCase {
         ]
     }
 
-    private func specialEntry(kind: String, access: String, subpath: String? = nil) -> [String: Any] {
+    private func specialEntry(
+        kind: String,
+        access: String,
+        subpath: String? = nil,
+        includesNullSubpath: Bool = false
+    ) -> [String: Any] {
         var value: [String: Any] = [
             "kind": kind
         ]
         if let subpath {
             value["subpath"] = subpath
+        } else if includesNullSubpath {
+            value["subpath"] = NSNull()
         }
         return [
             "path": [
@@ -169,7 +176,7 @@ final class SessionConfiguredEventTests: XCTestCase {
                     "type": "restricted",
                     "entries": [
                         rootReadEntry,
-                        specialEntry(kind: "project_roots", access: "write"),
+                        specialEntry(kind: "project_roots", access: "write", includesNullSubpath: true),
                         specialEntry(kind: "slash_tmp", access: "write"),
                         pathEntry("/tmp/work", access: "write"),
                         specialEntry(kind: "project_roots", access: "read", subpath: ".git"),

@@ -214,6 +214,10 @@ Recent upstream audit checkpoint:
   `process.rs`. Swift's typed `command/exec` and `process/spawn` protocol
   models now reject negative `outputBytesCap` values at decode time while
   preserving omitted/null behavior.
+- 2026-05-15: rechecked Rust's tagged filesystem special paths in
+  `codex-rs/app-server-protocol/src/protocol/v2/permissions.rs`. Swift
+  permission-profile encoding now preserves Rust's explicit nullable
+  `subpath` field for `project_roots` and future/unknown special path values.
 - 2026-05-15: rechecked Rust's global message-history record schema in
   `codex-rs/message-history/src/lib.rs`. Swift `HistoryEntry` now uses the
   Rust `session_id` JSON key and rejects the stale Swift-only

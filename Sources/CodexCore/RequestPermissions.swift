@@ -153,22 +153,19 @@ public enum FileSystemSpecialPath: Equatable, Sendable {
         case .slashTmp:
             return .object(["kind": .string("slash_tmp")])
         case let .unknown(path, subpath):
-            var object: [String: JSONValue] = [
+            return .object([
                 "kind": .string("unknown"),
-                "path": .string(path)
-            ]
-            if let subpath {
-                object["subpath"] = .string(subpath)
-            }
-            return .object(object)
+                "path": .string(path),
+                "subpath": subpath.map(JSONValue.string) ?? .null
+            ])
         }
     }
 
     private static func object(kind: String, subpath: String?) -> JSONValue {
-        var object: [String: JSONValue] = ["kind": .string(kind)]
-        if let subpath {
-            object["subpath"] = .string(subpath)
-        }
+        let object: [String: JSONValue] = [
+            "kind": .string(kind),
+            "subpath": subpath.map(JSONValue.string) ?? .null
+        ]
         return .object(object)
     }
 }

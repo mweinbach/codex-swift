@@ -657,7 +657,13 @@ final class SubmissionTests: XCTestCase {
             .unknown(path: "future_token", subpath: "nested")
         )
         XCTAssertEqual(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue, .object([
-            "kind": .string("project_roots")
+            "kind": .string("project_roots"),
+            "subpath": .null
+        ]))
+        XCTAssertEqual(FileSystemSpecialPath.unknown(path: "future_token", subpath: nil).jsonValue, .object([
+            "kind": .string("unknown"),
+            "path": .string("future_token"),
+            "subpath": .null
         ]))
     }
 

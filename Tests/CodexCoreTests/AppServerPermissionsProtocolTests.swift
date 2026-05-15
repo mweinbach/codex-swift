@@ -119,6 +119,42 @@ final class AppServerPermissionsProtocolTests: XCTestCase {
         ])
     }
 
+    func testSpecialFilesystemPathEncodesNullSubpathLikeRustTaggedEnum() throws {
+        let profile = AppServerPermissionProfile.managed(
+            network: AppServerPermissionProfileNetworkPermissions(enabled: false),
+            fileSystem: .restricted(
+                entries: [
+                    FileSystemSandboxEntry(
+                        path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue),
+                        access: .write
+                    )
+                ]
+            )
+        )
+
+        try XCTAssertJSONObjectEqual(profile, [
+            "type": "managed",
+            "network": [
+                "enabled": false
+            ],
+            "fileSystem": [
+                "type": "restricted",
+                "entries": [
+                    [
+                        "path": [
+                            "type": "special",
+                            "value": [
+                                "kind": "project_roots",
+                                "subpath": NSNull()
+                            ]
+                        ],
+                        "access": "write"
+                    ]
+                ]
+            ]
+        ])
+    }
+
     func testActivePermissionProfileUsesAppServerCamelCaseModificationTags() throws {
         let profile = AppServerActivePermissionProfile(
             ActivePermissionProfile(
