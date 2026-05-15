@@ -124,6 +124,43 @@ final class AppServerPluginProtocolTests: XCTestCase {
         )
     }
 
+    func testSkillsAndHooksListParamsUseRustDefaultedRequestShapes() throws {
+        try XCTAssertJSONObjectEqual(SkillsListParams(), [:])
+        try XCTAssertJSONObjectEqual(
+            SkillsListParams(cwds: ["/repo", "relative"], forceReload: true),
+            [
+                "cwds": ["/repo", "relative"],
+                "forceReload": true
+            ]
+        )
+        let defaultedSkills = try JSONDecoder().decode(SkillsListParams.self, from: Data(#"{}"#.utf8))
+        XCTAssertEqual(defaultedSkills, SkillsListParams())
+
+        try XCTAssertJSONObjectEqual(HooksListParams(), [:])
+        try XCTAssertJSONObjectEqual(HooksListParams(cwds: ["/repo", "relative"]), [
+            "cwds": ["/repo", "relative"]
+        ])
+        let defaultedHooks = try JSONDecoder().decode(HooksListParams.self, from: Data(#"{}"#.utf8))
+        XCTAssertEqual(defaultedHooks, HooksListParams())
+    }
+
+    func testSkillsAndHooksListParamsRejectExplicitNullForRustDefaultedFields() {
+        for payload in [
+            #"{"cwds":null}"#,
+            #"{"forceReload":null}"#
+        ] {
+            XCTAssertThrowsError(
+                try JSONDecoder().decode(SkillsListParams.self, from: Data(payload.utf8)),
+                "Rust SkillsListParams defaulted fields reject explicit null: \(payload)"
+            )
+        }
+
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(HooksListParams.self, from: Data(#"{"cwds":null}"#.utf8)),
+            "Rust HooksListParams defaulted cwds rejects explicit null"
+        )
+    }
+
     func testPluginListResponseShapesMatchRustProtocol() throws {
         let minimal = try JSONDecoder().decode(
             PluginListResponse.self,

@@ -168,6 +168,65 @@ public enum PluginListMarketplaceKind: String, Codable, Equatable, Sendable {
     case sharedWithMe = "shared-with-me"
 }
 
+public struct SkillsListParams: Equatable, Sendable {
+    public let cwds: [String]
+    public let forceReload: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case cwds
+        case forceReload
+    }
+
+    public init(cwds: [String] = [], forceReload: Bool = false) {
+        self.cwds = cwds
+        self.forceReload = forceReload
+    }
+}
+
+extension SkillsListParams: Codable {
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        cwds = try container.decodeRustDefaulted([String].self, forKey: .cwds, defaultValue: [])
+        forceReload = try container.decodeRustDefaulted(Bool.self, forKey: .forceReload, defaultValue: false)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        if !cwds.isEmpty {
+            try container.encode(cwds, forKey: .cwds)
+        }
+        if forceReload {
+            try container.encode(forceReload, forKey: .forceReload)
+        }
+    }
+}
+
+public struct HooksListParams: Equatable, Sendable {
+    public let cwds: [String]
+
+    private enum CodingKeys: String, CodingKey {
+        case cwds
+    }
+
+    public init(cwds: [String] = []) {
+        self.cwds = cwds
+    }
+}
+
+extension HooksListParams: Codable {
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        cwds = try container.decodeRustDefaulted([String].self, forKey: .cwds, defaultValue: [])
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        if !cwds.isEmpty {
+            try container.encode(cwds, forKey: .cwds)
+        }
+    }
+}
+
 public struct PluginListResponse: Equatable, Sendable {
     public let marketplaces: [PluginMarketplaceEntry]
     public let marketplaceLoadErrors: [MarketplaceLoadErrorInfo]

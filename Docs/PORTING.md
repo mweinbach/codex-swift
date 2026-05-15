@@ -24,6 +24,11 @@ Recent upstream audit checkpoint:
   focused coverage that `capabilities`, `screenshots`, and `screenshotUrls`
   remain required vector fields, rejecting omitted or explicit `null` payloads
   like Rust's plain `Vec` serde boundary.
+- 2026-05-15: rechecked Rust app-server v2 `SkillsListParams` and
+  `HooksListParams` in `codex-rs/app-server-protocol/src/protocol/v2/plugin.rs`.
+  Swift now carries the shared request models with Rust's omitted-field
+  defaults, empty-field serialization skips, and explicit-`null` rejection for
+  `cwds` and `forceReload`.
 - 2026-05-15: rechecked Rust `features` CLI parsing from
   `codex-rs/cli/src/main.rs`. Swift now validates `features list`,
   `features enable <FEATURE>`, and `features disable <FEATURE>` before
