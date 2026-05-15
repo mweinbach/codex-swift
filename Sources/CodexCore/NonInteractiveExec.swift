@@ -1515,7 +1515,7 @@ public enum NonInteractiveExec {
                 }
                 return functionOutput(
                     callID: callID,
-                    content: "unsupported call: \(name)",
+                    content: "unsupported call: \(toolNameDisplay(namespace: namespace, name: name))",
                     success: false
                 )
             }
@@ -2574,6 +2574,10 @@ public enum NonInteractiveExec {
             callID: callID,
             output: FunctionCallOutputPayload(content: content, success: success)
         )
+    }
+
+    private static func toolNameDisplay(namespace: String?, name: String) -> String {
+        (namespace ?? "") + name
     }
 
     private static func executeCustomToolCall(

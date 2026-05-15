@@ -2614,7 +2614,7 @@ final class NonInteractiveExecTests: XCTestCase {
         }
         XCTAssertEqual(callID, "call-mcp")
         XCTAssertEqual(payload.success, false)
-        XCTAssertEqual(payload.content, "unsupported call: _create_event")
+        XCTAssertEqual(payload.content, "unsupported call: mcp__codex_apps__calendar_create_event")
     }
 
     func testReportAgentJobResultRequiresAgentJobContext() async throws {
