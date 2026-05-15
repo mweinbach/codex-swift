@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `thread/shellCommand` request
+  and response round trips in
+  `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now pins
+  the exact quoted-newline command fixture and empty response decode/re-encode
+  boundary alongside adjacent thread command-action protocol coverage.
 - 2026-05-15: rechecked Rust app-server v2 `fs/changed` notification
   round-trip coverage in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`.
   Swift now pins the multiple changed-path decode and canonical re-encode path

@@ -2560,6 +2560,30 @@ final class AppServerThreadProtocolTests: XCTestCase {
         XCTAssertEqual(decoded.command, "printf 'hello' | cat")
     }
 
+    func testThreadShellCommandRoundTripsExactRustProtocolFixture() throws {
+        let params = ThreadShellCommandParams(
+            threadID: "thr_123",
+            command: "printf 'hello world\\n'"
+        )
+        try XCTAssertJSONObjectEqual(params, [
+            "threadId": "thr_123",
+            "command": "printf 'hello world\\n'"
+        ])
+
+        let decoded = try JSONDecoder().decode(
+            ThreadShellCommandParams.self,
+            from: Data(#"{"threadId":"thr_123","command":"printf 'hello world\\n'"}"#.utf8)
+        )
+        XCTAssertEqual(decoded, params)
+
+        let response = try JSONDecoder().decode(
+            ThreadShellCommandResponse.self,
+            from: Data(#"{}"#.utf8)
+        )
+        XCTAssertEqual(response, ThreadShellCommandResponse())
+        try XCTAssertJSONObjectEqual(response, [:])
+    }
+
     func testThreadGoalAndMemoryModeParamsRoundTripLikeRustProtocol() throws {
         let threadID = try ThreadId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
         let goal = ThreadGoal(
