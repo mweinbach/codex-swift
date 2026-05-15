@@ -276,6 +276,11 @@ Recent upstream audit checkpoint:
   freeform `apply_patch` tool as the canonical apply-patch surface that
   suppresses legacy shell guidance; a legacy function-shaped `apply_patch` tool
   no longer masks the fallback instructions.
+- 2026-05-15: rechecked Rust's model personality helpers in
+  `codex-rs/protocol/src/openai_models.rs`. Swift model metadata now preserves
+  Rust's explicit empty personality message for `Personality.none`, while
+  continuing to strip the `{{ personality }}` placeholder when a requested
+  personality string is absent.
 - 2026-05-15: rechecked Rust's `NetworkPolicyDecisionPayload` in
   `codex-rs/protocol/src/network_policy.rs`. Swift network-policy decision
   encoding now preserves Rust's ordinary `Option` wire shape by emitting

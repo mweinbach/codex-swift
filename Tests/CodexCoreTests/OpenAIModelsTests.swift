@@ -503,7 +503,87 @@ final class OpenAIModelsTests: XCTestCase {
         XCTAssertEqual(info.modelInstructions(personality: .pragmatic), "System\npragmatic voice")
         XCTAssertEqual(info.modelInstructions(personality: Personality.none), "System\n")
         XCTAssertEqual(info.personalityMessage(for: .pragmatic), "pragmatic voice")
-        XCTAssertNil(info.personalityMessage(for: Personality.none))
+        XCTAssertEqual(info.personalityMessage(for: Personality.none), "")
+    }
+
+    func testModelInstructionsAlwaysStripsPersonalityPlaceholderLikeRust() {
+        let friendlyOnly = ModelInfo(
+            slug: "gpt-5.4",
+            displayName: "GPT-5.4",
+            supportedReasoningLevels: [],
+            shellType: .default,
+            visibility: .hide,
+            supportedInAPI: true,
+            priority: 0,
+            baseInstructions: "base",
+            modelMessages: ModelMessages(
+                instructionsTemplate: "Hello\n{{ personality }}",
+                instructionsVariables: ModelInstructionsVariables(personalityFriendly: "friendly")
+            ),
+            supportsReasoningSummaries: false,
+            supportVerbosity: false,
+            truncationPolicy: .bytes(4096),
+            supportsParallelToolCalls: false,
+            experimentalSupportedTools: []
+        )
+
+        XCTAssertEqual(friendlyOnly.modelInstructions(personality: .friendly), "Hello\nfriendly")
+        XCTAssertEqual(friendlyOnly.modelInstructions(personality: .pragmatic), "Hello\n")
+        XCTAssertEqual(friendlyOnly.modelInstructions(personality: Personality.none), "Hello\n")
+        XCTAssertEqual(friendlyOnly.modelInstructions(personality: nil), "Hello\n")
+
+        let noPersonalityMessages = ModelInfo(
+            slug: "gpt-5.4",
+            displayName: "GPT-5.4",
+            supportedReasoningLevels: [],
+            shellType: .default,
+            visibility: .hide,
+            supportedInAPI: true,
+            priority: 0,
+            baseInstructions: "base",
+            modelMessages: ModelMessages(
+                instructionsTemplate: "Hello\n{{ personality }}",
+                instructionsVariables: ModelInstructionsVariables()
+            ),
+            supportsReasoningSummaries: false,
+            supportVerbosity: false,
+            truncationPolicy: .bytes(4096),
+            supportsParallelToolCalls: false,
+            experimentalSupportedTools: []
+        )
+
+        XCTAssertEqual(noPersonalityMessages.modelInstructions(personality: .friendly), "Hello\n")
+        XCTAssertEqual(noPersonalityMessages.modelInstructions(personality: .pragmatic), "Hello\n")
+        XCTAssertEqual(noPersonalityMessages.modelInstructions(personality: Personality.none), "Hello\n")
+        XCTAssertEqual(noPersonalityMessages.modelInstructions(personality: nil), "Hello\n")
+    }
+
+    func testModelInstructionVariablesReturnRustPersonalityMessages() {
+        let complete = ModelInstructionsVariables(
+            personalityDefault: "default",
+            personalityFriendly: "friendly",
+            personalityPragmatic: "pragmatic"
+        )
+
+        XCTAssertEqual(complete.personalityMessage(for: .friendly), "friendly")
+        XCTAssertEqual(complete.personalityMessage(for: .pragmatic), "pragmatic")
+        XCTAssertEqual(complete.personalityMessage(for: Personality.none), "")
+        XCTAssertEqual(complete.personalityMessage(for: nil), "default")
+
+        let defaultOnly = ModelInstructionsVariables(personalityDefault: "default")
+        XCTAssertNil(defaultOnly.personalityMessage(for: .friendly))
+        XCTAssertNil(defaultOnly.personalityMessage(for: .pragmatic))
+        XCTAssertEqual(defaultOnly.personalityMessage(for: Personality.none), "")
+        XCTAssertEqual(defaultOnly.personalityMessage(for: nil), "default")
+
+        let namedOnly = ModelInstructionsVariables(
+            personalityFriendly: "friendly",
+            personalityPragmatic: "pragmatic"
+        )
+        XCTAssertEqual(namedOnly.personalityMessage(for: .friendly), "friendly")
+        XCTAssertEqual(namedOnly.personalityMessage(for: .pragmatic), "pragmatic")
+        XCTAssertEqual(namedOnly.personalityMessage(for: Personality.none), "")
+        XCTAssertNil(namedOnly.personalityMessage(for: nil))
     }
 
     func testModelInstructionsFallsBackToBaseInstructionsLikeRust() {

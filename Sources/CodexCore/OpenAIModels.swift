@@ -602,9 +602,7 @@ public struct ModelInfo: Equatable, Sendable {
     }
 
     public func personalityMessage(for personality: Personality) -> String? {
-        modelMessages?.personalityMessage(for: personality).flatMap { message in
-            message.isEmpty ? nil : message
-        }
+        modelMessages?.personalityMessage(for: personality)
     }
 
     public func autoCompactTokenLimitValue() -> Int64? {
