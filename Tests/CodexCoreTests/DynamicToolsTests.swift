@@ -89,6 +89,48 @@ final class DynamicToolsTests: XCTestCase {
         XCTAssertFalse(defaulted.deferLoading)
     }
 
+    func testDynamicToolSpecAcceptsNullLegacyVisibilityLikeRust() throws {
+        let defaultedNullDeferLoading = try decodeDynamicTool(#"""
+        {
+          "name": "lookup_ticket",
+          "description": "Fetch a ticket",
+          "inputSchema": {
+            "type": "object",
+            "properties": {}
+          },
+          "deferLoading": null
+        }
+        """#)
+        XCTAssertFalse(defaultedNullDeferLoading.deferLoading)
+
+        let legacyFallback = try decodeDynamicTool(#"""
+        {
+          "name": "lookup_ticket",
+          "description": "Fetch a ticket",
+          "inputSchema": {
+            "type": "object",
+            "properties": {}
+          },
+          "deferLoading": null,
+          "exposeToContext": false
+        }
+        """#)
+        XCTAssertTrue(legacyFallback.deferLoading)
+
+        let defaultedNullExposeToContext = try decodeDynamicTool(#"""
+        {
+          "name": "lookup_ticket",
+          "description": "Fetch a ticket",
+          "inputSchema": {
+            "type": "object",
+            "properties": {}
+          },
+          "exposeToContext": null
+        }
+        """#)
+        XCTAssertFalse(defaultedNullExposeToContext.deferLoading)
+    }
+
     func testDynamicToolSpecEncodesCanonicalDeferLoadingLikeRust() throws {
         try XCTAssertJSONObjectEqual(DynamicToolSpec(
             namespace: "codex_app",
