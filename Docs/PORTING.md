@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's `HookRunSummary.source` default in
+  `codex-rs/app-server-protocol/src/protocol/v2/hook.rs`. Swift app-server
+  hook summary decoding now preserves Rust's `#[serde(default =
+  "default_hook_source")]` boundary: omitted `source` decodes as `unknown`,
+  while explicit `null` is rejected instead of being accepted as the default.
 - 2026-05-15: rechecked Rust's defaulted boolean fields in
   `codex-rs/app-server-protocol/src/protocol/v2/{apps.rs,process.rs,command_exec.rs,permissions.rs}`.
   Swift shared app-server protocol decoding now treats omitted

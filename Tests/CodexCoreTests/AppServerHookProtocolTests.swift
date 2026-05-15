@@ -66,6 +66,31 @@ final class AppServerHookProtocolTests: XCTestCase {
         XCTAssertEqual(decoded.durationMs, 2_000)
     }
 
+    func testHookRunSummaryRejectsExplicitNullRustDefaultedSource() throws {
+        let payload = Data(
+            """
+            {
+              "id": "run-1",
+              "eventName": "postToolUse",
+              "handlerType": "agent",
+              "executionMode": "async",
+              "scope": "thread",
+              "sourcePath": "/tmp/codex-hooks/hooks.json",
+              "source": null,
+              "displayOrder": 8,
+              "status": "completed",
+              "statusMessage": null,
+              "startedAt": 1778320000,
+              "completedAt": 1778320002,
+              "durationMs": 2000,
+              "entries": []
+            }
+            """.utf8
+        )
+
+        XCTAssertThrowsError(try JSONDecoder().decode(AppServerHookRunSummary.self, from: payload))
+    }
+
     func testHookNotificationsEncodeRustWireShape() throws {
         let run = try appServerHookRunSummary()
 

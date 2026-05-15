@@ -251,7 +251,7 @@ extension AppServerHookRunSummary: Codable {
             executionMode: try container.decode(AppServerHookExecutionMode.self, forKey: .executionMode),
             scope: try container.decode(AppServerHookScope.self, forKey: .scope),
             sourcePath: try container.decode(AbsolutePath.self, forKey: .sourcePath),
-            source: try container.decodeIfPresent(AppServerHookSource.self, forKey: .source) ?? .unknown,
+            source: try container.decodeRustDefaulted(AppServerHookSource.self, forKey: .source, defaultValue: .unknown),
             displayOrder: try container.decode(Int64.self, forKey: .displayOrder),
             status: try container.decode(AppServerHookRunStatus.self, forKey: .status),
             statusMessage: try container.decodeIfPresent(String.self, forKey: .statusMessage),
