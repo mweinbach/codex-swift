@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust core `UserInput` tagged variants in
+  `codex-rs/protocol/src/user_input.rs`. Swift now has focused coverage for
+  the remaining core `skill` variant, preserving Rust's snake_case tagged
+  rollout/request shape alongside text, image, local-image, and mention inputs.
 - 2026-05-15: rechecked Rust legacy `fuzzyFileSearch` protocol models in
   `codex-rs/app-server-protocol/src/protocol/common.rs` and
   `codex-rs/app-server/tests/suite/fuzzy_file_search.rs`. Swift now encodes

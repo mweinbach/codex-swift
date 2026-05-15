@@ -16,6 +16,11 @@ final class UserInputTests: XCTestCase {
             "type": "local_image",
             "path": "/tmp/a.png"
         ])
+        try XCTAssertJSONObjectEqual(UserInput.skill(name: "plan", path: "/skills/plan/SKILL.md"), [
+            "type": "skill",
+            "name": "plan",
+            "path": "/skills/plan/SKILL.md"
+        ])
         try XCTAssertJSONObjectEqual(UserInput.mention(name: "drive", path: "app://google_drive"), [
             "type": "mention",
             "name": "drive",
@@ -67,6 +72,19 @@ final class UserInputTests: XCTestCase {
             "type": "mention",
             "name": "figma",
             "path": "app://figma"
+        ])
+    }
+
+    func testSkillInputRoundTripsLikeRust() throws {
+        let json = #"{"type":"skill","name":"review","path":"/skills/review/SKILL.md"}"#
+
+        let decoded = try JSONDecoder().decode(UserInput.self, from: Data(json.utf8))
+
+        XCTAssertEqual(decoded, .skill(name: "review", path: "/skills/review/SKILL.md"))
+        try XCTAssertJSONObjectEqual(decoded, [
+            "type": "skill",
+            "name": "review",
+            "path": "/skills/review/SKILL.md"
         ])
     }
 }
