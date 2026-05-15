@@ -84,7 +84,7 @@ public struct PatchApplyBeginEvent: Equatable, Codable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.callID = try container.decode(String.self, forKey: .callID)
-        self.turnID = try container.decodeIfPresent(String.self, forKey: .turnID) ?? ""
+        self.turnID = try container.decodeRustDefaulted(String.self, forKey: .turnID, defaultValue: "")
         self.autoApproved = try container.decode(Bool.self, forKey: .autoApproved)
         self.changes = try container.decode([String: FileChange].self, forKey: .changes)
     }
@@ -145,11 +145,11 @@ public struct PatchApplyEndEvent: Equatable, Codable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.callID = try container.decode(String.self, forKey: .callID)
-        self.turnID = try container.decodeIfPresent(String.self, forKey: .turnID) ?? ""
+        self.turnID = try container.decodeRustDefaulted(String.self, forKey: .turnID, defaultValue: "")
         self.stdout = try container.decode(String.self, forKey: .stdout)
         self.stderr = try container.decode(String.self, forKey: .stderr)
         self.success = try container.decode(Bool.self, forKey: .success)
-        self.changes = try container.decodeIfPresent([String: FileChange].self, forKey: .changes) ?? [:]
+        self.changes = try container.decodeRustDefaulted([String: FileChange].self, forKey: .changes, defaultValue: [:])
         self.status = try container.decodeIfPresent(PatchApplyStatus.self, forKey: .status)
             ?? (success ? .completed : .failed)
     }

@@ -83,6 +83,19 @@ final class PatchEventsTests: XCTestCase {
         XCTAssertEqual(decoded.changes["Sources/New.swift"], .add(content: "let x = 1\n"))
     }
 
+    func testPatchApplyBeginEventRejectsNullRustDefaultedTurnID() {
+        let json = """
+        {
+          "call_id": "patch-1",
+          "turn_id": null,
+          "auto_approved": false,
+          "changes": {}
+        }
+        """
+
+        XCTAssertThrowsError(try JSONDecoder().decode(PatchApplyBeginEvent.self, from: Data(json.utf8)))
+    }
+
     func testPatchApplyEndEventDefaultsMissingTurnIDAndChanges() throws {
         let json = """
         {
@@ -115,6 +128,18 @@ final class PatchEventsTests: XCTestCase {
         ])
     }
 
+    func testPatchApplyEndEventRejectsNullRustDefaultedFields() {
+        for field in [
+            #""turn_id": null"#,
+            #""changes": null"#
+        ] {
+            XCTAssertThrowsError(try JSONDecoder().decode(
+                PatchApplyEndEvent.self,
+                from: Data(patchApplyEndJSON(extraField: field).utf8)
+            ))
+        }
+    }
+
     func testPatchApplyUpdatedEventUsesRustShape() throws {
         try XCTAssertJSONObjectEqual(PatchApplyUpdatedEvent(
             callID: "patch-1",
@@ -136,5 +161,17 @@ final class PatchEventsTests: XCTestCase {
         try XCTAssertJSONObjectEqual(TurnDiffEvent(unifiedDiff: "diff --git a/a b/a\n"), [
             "unified_diff": "diff --git a/a b/a\n"
         ])
+    }
+
+    private func patchApplyEndJSON(extraField: String) -> String {
+        """
+        {
+          "call_id": "patch-1",
+          "stdout": "Done",
+          "stderr": "",
+          "success": true,
+          \(extraField)
+        }
+        """
     }
 }

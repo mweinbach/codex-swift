@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's core exec and patch event defaults in
+  `codex-rs/protocol/src/protocol.rs`. Swift `ExecCommandBeginEvent`,
+  `ExecCommandEndEvent`, `PatchApplyBeginEvent`, and `PatchApplyEndEvent`
+  decoding now keeps Rust's omitted-field defaults for timing/source/output
+  and patch metadata while rejecting explicit `null` for those non-optional
+  `#[serde(default)]` fields.
 - 2026-05-15: rechecked Rust's core turn item defaults in
   `codex-rs/protocol/src/{items,protocol}.rs`. Swift `ReasoningItem` and
   `ItemCompletedEvent` decoding now keeps Rust's omitted-field compatibility

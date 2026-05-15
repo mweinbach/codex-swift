@@ -73,6 +73,18 @@ final class ExecEventsTests: XCTestCase {
         )
     }
 
+    func testExecCommandBeginRejectsNullRustDefaultedFields() {
+        for field in [
+            #""started_at_ms": null"#,
+            #""source": null"#
+        ] {
+            XCTAssertThrowsError(try JSONDecoder().decode(
+                ExecCommandBeginEvent.self,
+                from: Data(execCommandBeginJSON(extraField: field).utf8)
+            ))
+        }
+    }
+
     func testExecCommandEndWireShapeAndDefaults() throws {
         let event = ExecCommandEndEvent(
             callID: "exec-1",
@@ -147,6 +159,19 @@ final class ExecEventsTests: XCTestCase {
                 formattedOutput: "/repo"
             )
         )
+    }
+
+    func testExecCommandEndRejectsNullRustDefaultedFields() {
+        for field in [
+            #""completed_at_ms": null"#,
+            #""source": null"#,
+            #""aggregated_output": null"#
+        ] {
+            XCTAssertThrowsError(try JSONDecoder().decode(
+                ExecCommandEndEvent.self,
+                from: Data(execCommandEndJSON(extraField: field).utf8)
+            ))
+        }
     }
 
     func testExecBeginAndEndEventMessageWireShapes() throws {
@@ -257,5 +282,36 @@ final class ExecEventsTests: XCTestCase {
 
     private func encode<T: Encodable>(_ value: T) throws -> String {
         String(data: try JSONEncoder().encode(value), encoding: .utf8) ?? ""
+    }
+
+    private func execCommandBeginJSON(extraField: String) -> String {
+        """
+        {
+          "call_id": "exec-1",
+          "turn_id": "turn-1",
+          "command": ["pwd"],
+          "cwd": "/repo",
+          "parsed_cmd": [],
+          \(extraField)
+        }
+        """
+    }
+
+    private func execCommandEndJSON(extraField: String) -> String {
+        """
+        {
+          "call_id": "exec-1",
+          "turn_id": "turn-1",
+          "command": ["pwd"],
+          "cwd": "/repo",
+          "parsed_cmd": [],
+          "stdout": "/repo\\n",
+          "stderr": "",
+          "exit_code": 0,
+          "duration": {"secs": 0, "nanos": 0},
+          "formatted_output": "/repo",
+          \(extraField)
+        }
+        """
     }
 }

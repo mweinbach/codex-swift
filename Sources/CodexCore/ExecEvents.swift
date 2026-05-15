@@ -106,14 +106,19 @@ public struct ExecCommandBeginEvent: Equatable, Codable, Sendable {
         self.callID = try container.decode(String.self, forKey: .callID)
         self.processID = try container.decodeIfPresent(String.self, forKey: .processID)
         self.turnID = try container.decode(String.self, forKey: .turnID)
-        self.startedAtMilliseconds = try container.decodeIfPresent(
+        self.startedAtMilliseconds = try container.decodeRustDefaulted(
             Int64.self,
-            forKey: .startedAtMilliseconds
-        ) ?? 0
+            forKey: .startedAtMilliseconds,
+            defaultValue: 0
+        )
         self.command = try container.decode([String].self, forKey: .command)
         self.cwd = try container.decode(String.self, forKey: .cwd)
         self.parsedCmd = try container.decode([ParsedCommand].self, forKey: .parsedCmd)
-        self.source = try container.decodeIfPresent(ExecCommandSource.self, forKey: .source) ?? .default
+        self.source = try container.decodeRustDefaulted(
+            ExecCommandSource.self,
+            forKey: .source,
+            defaultValue: .default
+        )
         self.interactionInput = try container.decodeIfPresent(String.self, forKey: .interactionInput)
     }
 
@@ -209,18 +214,27 @@ public struct ExecCommandEndEvent: Equatable, Codable, Sendable {
         self.callID = try container.decode(String.self, forKey: .callID)
         self.processID = try container.decodeIfPresent(String.self, forKey: .processID)
         self.turnID = try container.decode(String.self, forKey: .turnID)
-        self.completedAtMilliseconds = try container.decodeIfPresent(
+        self.completedAtMilliseconds = try container.decodeRustDefaulted(
             Int64.self,
-            forKey: .completedAtMilliseconds
-        ) ?? 0
+            forKey: .completedAtMilliseconds,
+            defaultValue: 0
+        )
         self.command = try container.decode([String].self, forKey: .command)
         self.cwd = try container.decode(String.self, forKey: .cwd)
         self.parsedCmd = try container.decode([ParsedCommand].self, forKey: .parsedCmd)
-        self.source = try container.decodeIfPresent(ExecCommandSource.self, forKey: .source) ?? .default
+        self.source = try container.decodeRustDefaulted(
+            ExecCommandSource.self,
+            forKey: .source,
+            defaultValue: .default
+        )
         self.interactionInput = try container.decodeIfPresent(String.self, forKey: .interactionInput)
         self.stdout = try container.decode(String.self, forKey: .stdout)
         self.stderr = try container.decode(String.self, forKey: .stderr)
-        self.aggregatedOutput = try container.decodeIfPresent(String.self, forKey: .aggregatedOutput) ?? ""
+        self.aggregatedOutput = try container.decodeRustDefaulted(
+            String.self,
+            forKey: .aggregatedOutput,
+            defaultValue: ""
+        )
         self.exitCode = try container.decode(Int32.self, forKey: .exitCode)
         self.duration = try container.decode(ProtocolDuration.self, forKey: .duration)
         self.formattedOutput = try container.decode(String.self, forKey: .formattedOutput)
