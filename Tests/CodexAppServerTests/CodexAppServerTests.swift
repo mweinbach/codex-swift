@@ -26306,7 +26306,7 @@ final class CodexAppServerTests: XCTestCase {
         let temp = try TemporaryDirectory()
         let missingRequirements = temp.url.appendingPathComponent("missing-requirements.toml", isDirectory: false)
         let response = try appServerResponse(
-            #"{"id":1,"method":"configRequirements/read","params":{}}"#,
+            #"{"id":1,"method":"configRequirements/read"}"#,
             configuration: testConfiguration(
                 codexHome: temp.url,
                 configLayerOverrides: ConfigLayerLoaderOverrides(requirementsPath: missingRequirements)
@@ -26314,6 +26314,29 @@ final class CodexAppServerTests: XCTestCase {
         )
         let result = try XCTUnwrap(response["result"] as? [String: Any])
         XCTAssertTrue(result["requirements"] is NSNull)
+
+        let nullParams = try appServerResponse(
+            #"{"id":2,"method":"configRequirements/read","params":null}"#,
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                configLayerOverrides: ConfigLayerLoaderOverrides(requirementsPath: missingRequirements)
+            )
+        )
+        let nullParamsResult = try XCTUnwrap(nullParams["result"] as? [String: Any])
+        XCTAssertTrue(nullParamsResult["requirements"] is NSNull)
+    }
+
+    func testConfigRequirementsReadRejectsObjectParamsLikeRustUnitOption() throws {
+        let temp = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"configRequirements/read","params":{}}"#,
+            codexHome: temp.url
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "Invalid request: invalid type: map, expected unit")
     }
 
     func testConfigRequirementsReadIncludesLegacyManagedConfigRequirementsLikeRust() throws {
@@ -26326,7 +26349,7 @@ final class CodexAppServerTests: XCTestCase {
         """.write(to: managedConfig, atomically: true, encoding: .utf8)
 
         let response = try appServerResponse(
-            #"{"id":1,"method":"configRequirements/read","params":{}}"#,
+            #"{"id":1,"method":"configRequirements/read"}"#,
             configuration: testConfiguration(
                 codexHome: temp.url,
                 configLayerOverrides: ConfigLayerLoaderOverrides(
@@ -26355,7 +26378,7 @@ final class CodexAppServerTests: XCTestCase {
         try #"sandbox_mode = "read-only""#.write(to: managedConfig, atomically: true, encoding: .utf8)
 
         let response = try appServerResponse(
-            #"{"id":1,"method":"configRequirements/read","params":{}}"#,
+            #"{"id":1,"method":"configRequirements/read"}"#,
             configuration: testConfiguration(
                 codexHome: temp.url,
                 configLayerOverrides: ConfigLayerLoaderOverrides(
@@ -26406,7 +26429,7 @@ final class CodexAppServerTests: XCTestCase {
         """.write(to: requirementsPath, atomically: true, encoding: .utf8)
 
         let response = try appServerResponse(
-            #"{"id":1,"method":"configRequirements/read","params":{}}"#,
+            #"{"id":1,"method":"configRequirements/read"}"#,
             configuration: testConfiguration(
                 codexHome: temp.url,
                 configLayerOverrides: ConfigLayerLoaderOverrides(requirementsPath: requirementsPath)

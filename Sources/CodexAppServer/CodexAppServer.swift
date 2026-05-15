@@ -17112,8 +17112,14 @@ public enum CodexAppServer {
     }
 
     fileprivate static func configRequirementsReadResult(
+        rawParams: Any?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
+        if let rawParams, !(rawParams is NSNull) {
+            throw AppServerError.invalidRequest(
+                "Invalid request: \(rustInvalidTypeDescription(rawParams)), expected unit"
+            )
+        }
         do {
             let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
                 codexHome: configuration.codexHome,
@@ -28454,7 +28460,10 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                 case "configRequirements/read":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.configRequirementsReadResult(configuration: configuration)
+                        result: try CodexAppServer.configRequirementsReadResult(
+                            rawParams: object["params"],
+                            configuration: configuration
+                        )
                     )
                 case "config/value/write":
                     response = CodexAppServer.responseObject(
