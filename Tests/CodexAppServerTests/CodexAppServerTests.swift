@@ -6250,6 +6250,14 @@ final class CodexAppServerTests: XCTestCase {
         await processor.handleRuntimeEvent(
             threadID: "thread-1",
             turnID: "turn-1",
+            event: .error(ErrorEvent(
+                message: "This request has been flagged for potentially high-risk cyber activity.",
+                codexErrorInfo: .cyberPolicy
+            ))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
             event: .streamError(StreamErrorEvent(
                 message: "stream dropped",
                 codexErrorInfo: .responseStreamDisconnected(httpStatusCode: nil),
@@ -6289,6 +6297,25 @@ final class CodexAppServerTests: XCTestCase {
         let errorInfo = try XCTUnwrap(errorObject["codexErrorInfo"] as? [String: Any])
         let tooManyAttempts = try XCTUnwrap(errorInfo["responseTooManyFailedAttempts"] as? [String: Any])
         XCTAssertEqual(tooManyAttempts["httpStatusCode"] as? Int, 429)
+
+        let cyberPolicy = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(cyberPolicy[0]["method"] as? String, "thread/status/changed")
+        let cyberPolicyStatusParams = try XCTUnwrap(cyberPolicy[0]["params"] as? [String: Any])
+        XCTAssertEqual(cyberPolicyStatusParams["threadId"] as? String, "thread-1")
+        let cyberPolicyStatus = try XCTUnwrap(cyberPolicyStatusParams["status"] as? [String: Any])
+        XCTAssertEqual(cyberPolicyStatus["type"] as? String, "systemError")
+
+        let cyberPolicyError = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(cyberPolicyError[0]["method"] as? String, "error")
+        let cyberPolicyErrorParams = try XCTUnwrap(cyberPolicyError[0]["params"] as? [String: Any])
+        XCTAssertEqual(cyberPolicyErrorParams["willRetry"] as? Bool, false)
+        let cyberPolicyErrorObject = try XCTUnwrap(cyberPolicyErrorParams["error"] as? [String: Any])
+        XCTAssertEqual(
+            cyberPolicyErrorObject["message"] as? String,
+            "This request has been flagged for potentially high-risk cyber activity."
+        )
+        XCTAssertEqual(cyberPolicyErrorObject["codexErrorInfo"] as? String, "cyberPolicy")
+        XCTAssertTrue(cyberPolicyErrorObject["additionalDetails"] is NSNull)
 
         let streamError = try decodeMessages(try await nextNotificationPayload(notificationCapture))
         XCTAssertEqual(streamError[0]["method"] as? String, "error")
