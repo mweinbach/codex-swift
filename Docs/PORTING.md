@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `ApprovalsReviewer`
+  serialization in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`.
+  Swift now pins the canonical `"guardian_subagent"` encoding for
+  `autoReview` plus both legacy `"auto_review"` and canonical
+  `"guardian_subagent"` decode paths directly on the shared reviewer model.
 - 2026-05-15: rechecked Rust app-server v2 guardian approval review action
   command-source round-trip coverage in
   `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift notification
