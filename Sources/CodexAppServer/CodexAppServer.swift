@@ -20899,13 +20899,13 @@ public enum CodexAppServer {
             return .createdAt
         }
         switch value {
-        case "createdAt":
+        case "created_at":
             return .createdAt
-        case "updatedAt":
+        case "updated_at":
             return .updatedAt
         default:
             throw AppServerError.invalidRequest(
-                "Invalid request: unknown variant `\(value)`, expected `createdAt` or `updatedAt`"
+                "Invalid request: unknown variant `\(value)`, expected `created_at` or `updated_at`"
             )
         }
     }

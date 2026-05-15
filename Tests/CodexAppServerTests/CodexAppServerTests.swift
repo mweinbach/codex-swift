@@ -7884,8 +7884,8 @@ final class CodexAppServerTests: XCTestCase {
         let temp = try TemporaryDirectory()
         let cases: [(String, String)] = [
             (
-                #""sortKey":"updated_at""#,
-                "Invalid request: unknown variant `updated_at`, expected `createdAt` or `updatedAt`"
+                #""sortKey":"updatedAt""#,
+                "Invalid request: unknown variant `updatedAt`, expected `created_at` or `updated_at`"
             ),
             (
                 #""sortDirection":"sideways""#,
@@ -19058,7 +19058,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(secondResult["backwardsCursor"] as? String, "2025-01-03T12:00:00.001Z")
 
         let updatedResponse = try appServerResponse(
-            #"{"id":3,"method":"thread/list","params":{"sortKey":"updatedAt"}}"#,
+            #"{"id":3,"method":"thread/list","params":{"sortKey":"updated_at"}}"#,
             codexHome: temp.url
         )
         let updatedResult = try XCTUnwrap(updatedResponse["result"] as? [String: Any])
@@ -19290,7 +19290,7 @@ final class CodexAppServerTests: XCTestCase {
         let configuration = testConfiguration(codexHome: temp.url, stateStore: stateStore)
 
         let response = try appServerResponse(
-            #"{"id":1,"method":"thread/list","params":{"limit":1,"sortKey":"updatedAt"}}"#,
+            #"{"id":1,"method":"thread/list","params":{"limit":1,"sortKey":"updated_at"}}"#,
             configuration: configuration
         )
         let result = try XCTUnwrap(response["result"] as? [String: Any])

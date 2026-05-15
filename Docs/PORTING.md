@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's `ThreadSortKey` decoding in
+  `codex-rs/app-server-protocol/src/protocol/v2/thread.rs`. Swift app-server
+  `thread/list` now accepts Rust's snake_case `sortKey` values
+  (`created_at` / `updated_at`) at the route boundary instead of the thread
+  metadata response field spellings.
 - 2026-05-15: rechecked Rust's built-in OpenAI provider factory in `codex-rs/model-provider-info/src/lib.rs`. Swift `ModelProviderInfo.createOpenAIProvider` now preserves Rust's `supports_websockets = true` default for the built-in OpenAI provider while leaving OSS and Amazon Bedrock websocket support disabled.
 - 2026-05-15: rechecked Rust's `tool_search` bucket-limit tests in `codex-rs/core/src/tools/handlers/tool_search.rs`. Swift now has focused coverage that default `computer-use` discovery expands to Rust's larger 20-tool limit, while explicit `limit` requests bypass the per-server default bucket cap.
 - 2026-05-15: rechecked Rust's `ConfigProfile` and `ProfileTui` `deny_unknown_fields` behavior in `codex-rs/config/src/profile_toml.rs`. Swift `ConfigProfile` typed decoding now rejects unknown fields, and config loading rejects unsupported `[profiles.<name>]` keys instead of silently accepting profile typos, while keeping top-level unknown-key tolerance unchanged.
