@@ -20451,6 +20451,55 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNotNil(valid["result"])
     }
 
+    func testInitializeRejectsMalformedClientInfoLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cases: [(String, String)] = [
+            (
+                #"{"id":1,"method":"initialize","params":{}}"#,
+                "missing field `clientInfo`"
+            ),
+            (
+                #"{"id":1,"method":"initialize","params":{"clientInfo":null}}"#,
+                "Invalid request: invalid type: null, expected struct ClientInfo"
+            ),
+            (
+                #"{"id":1,"method":"initialize","params":{"clientInfo":"test"}}"#,
+                #"Invalid request: invalid type: string "test", expected struct ClientInfo"#
+            ),
+            (
+                #"{"id":1,"method":"initialize","params":{"clientInfo":{"version":"0"}}}"#,
+                "missing field `name`"
+            ),
+            (
+                #"{"id":1,"method":"initialize","params":{"clientInfo":{"name":1,"version":"0"}}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"test","title":1,"version":"0"}}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"test"}}}"#,
+                "missing field `version`"
+            ),
+            (
+                #"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"test","version":1}}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            )
+        ]
+
+        for (payload, expectedMessage) in cases {
+            let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(codexHome: temp.url))
+            let invalid = try decode(processor.processLine(Data(payload.utf8)))
+            let error = try XCTUnwrap(invalid["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, expectedMessage)
+
+            let valid = try decode(processor.processLine(Data(#"{"id":2,"method":"initialize","params":{"clientInfo":{"name":"test","title":null,"version":"0"}}}"#.utf8)))
+            XCTAssertNotNil(valid["result"])
+        }
+    }
+
     func testInitializeRejectsMalformedCapabilitiesLikeRust() throws {
         let temp = try TemporaryDirectory()
         let cases: [(String, String)] = [

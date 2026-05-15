@@ -17089,6 +17089,28 @@ public enum CodexAppServer {
         )
     }
 
+    fileprivate static func validateInitializeClientInfo(_ value: Any?) throws {
+        guard let value else {
+            throw AppServerError.invalidRequest("missing field `clientInfo`")
+        }
+        guard !(value is NSNull) else {
+            throw AppServerError.invalidRequest("Invalid request: invalid type: null, expected struct ClientInfo")
+        }
+        guard let clientInfo = value as? [String: Any] else {
+            throw AppServerError.invalidRequest(
+                "Invalid request: \(rustInvalidTypeDescription(value)), expected struct ClientInfo"
+            )
+        }
+        let clientName = try rustRequiredStringParam(clientInfo["name"], field: "name")
+        _ = try rustOptionalStringParam(clientInfo["title"])
+        _ = try rustRequiredStringParam(clientInfo["version"], field: "version")
+        guard isValidHTTPHeaderValue(clientName) else {
+            throw AppServerError.invalidRequest(
+                "Invalid clientInfo.name: '\(clientName)'. Must be a valid HTTP header value."
+            )
+        }
+    }
+
     fileprivate static func configRequirementsReadResult(
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
@@ -27442,17 +27464,9 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             if initialized {
                 response = CodexAppServer.errorObject(id: id, code: -32600, message: "Already initialized")
             } else {
-                if let clientName = ((params?["clientInfo"] as? [String: Any])?["name"] as? String),
-                   !CodexAppServer.isValidHTTPHeaderValue(clientName) {
-                    response = CodexAppServer.errorObject(
-                        id: id,
-                        code: -32600,
-                        message: "Invalid clientInfo.name: '\(clientName)'. Must be a valid HTTP header value."
-                    )
-                    return CodexAppServer.encodeMessages(response.map { [$0] } ?? [])
-                }
                 let capabilities: AppServerInitializeCapabilities
                 do {
+                    try CodexAppServer.validateInitializeClientInfo(params?["clientInfo"])
                     capabilities = try CodexAppServer.initializeCapabilities(params?["capabilities"])
                 } catch let error as AppServerError {
                     response = CodexAppServer.errorObject(
