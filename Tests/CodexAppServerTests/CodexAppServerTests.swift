@@ -20563,6 +20563,27 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(result["authToken"] as? String, "sk-test-key")
     }
 
+    func testLoginApiKeyRejectsMalformedParamsLikeRustV1Params() throws {
+        let temp = try TemporaryDirectory()
+        let cases: [(String, String)] = [
+            (#"{}"#, "missing field `apiKey`"),
+            (#"{"apiKey":null}"#, "Invalid request: invalid type: null, expected a string"),
+            (#"{"apiKey":1}"#, "Invalid request: invalid type: integer `1`, expected a string"),
+            (#"{"apiKey":true}"#, "Invalid request: invalid type: boolean `true`, expected a string")
+        ]
+
+        for (index, testCase) in cases.enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 1),"method":"loginApiKey","params":\#(testCase.0)}"#,
+                codexHome: temp.url
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, testCase.1)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("auth.json").path))
+        }
+    }
+
     func testLoginApiKeyRejectedWhenForcedChatGPT() throws {
         let temp = try TemporaryDirectory()
         try #"forced_login_method = "chatgpt""#.write(

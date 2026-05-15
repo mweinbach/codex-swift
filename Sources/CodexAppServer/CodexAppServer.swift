@@ -18106,9 +18106,7 @@ public enum CodexAppServer {
         configuration: CodexAppServerConfiguration,
         cancelActiveLogin: () -> Void = {}
     ) throws -> [String: Any] {
-        guard let apiKey = stringParam(params?["apiKey"]) else {
-            throw AppServerError.invalidRequest("missing apiKey")
-        }
+        let apiKey = try rustRequiredStringParam(params?["apiKey"], field: "apiKey")
         try loginApiKey(
             apiKey: apiKey,
             configuration: configuration,
