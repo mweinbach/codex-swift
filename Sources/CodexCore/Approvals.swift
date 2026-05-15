@@ -85,6 +85,18 @@ public enum NetworkPolicyRuleAction: String, Codable, Equatable, Sendable {
     case deny
 }
 
+public enum NetworkPolicyDecision: String, Codable, Equatable, Sendable {
+    case deny
+    case ask
+}
+
+public enum NetworkDecisionSource: String, Codable, Equatable, Sendable {
+    case baselinePolicy = "baseline_policy"
+    case modeGuard = "mode_guard"
+    case proxyState = "proxy_state"
+    case decider
+}
+
 public struct NetworkApprovalContext: Equatable, Codable, Sendable {
     public let host: String
     public let `protocol`: NetworkApprovalProtocol
@@ -92,6 +104,47 @@ public struct NetworkApprovalContext: Equatable, Codable, Sendable {
     public init(host: String, protocol: NetworkApprovalProtocol) {
         self.host = host
         self.protocol = `protocol`
+    }
+}
+
+public struct NetworkPolicyDecisionPayload: Equatable, Codable, Sendable {
+    public let decision: NetworkPolicyDecision
+    public let source: NetworkDecisionSource
+    public let `protocol`: NetworkApprovalProtocol?
+    public let host: String?
+    public let reason: String?
+    public let port: UInt16?
+
+    public init(
+        decision: NetworkPolicyDecision,
+        source: NetworkDecisionSource,
+        protocol: NetworkApprovalProtocol? = nil,
+        host: String? = nil,
+        reason: String? = nil,
+        port: UInt16? = nil
+    ) {
+        self.decision = decision
+        self.source = source
+        self.protocol = `protocol`
+        self.host = host
+        self.reason = reason
+        self.port = port
+    }
+
+    public var isAskFromDecider: Bool {
+        decision == .ask && source == .decider
+    }
+
+    public var networkApprovalContext: NetworkApprovalContext? {
+        guard isAskFromDecider,
+              let `protocol`,
+              let trimmedHost = host?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmedHost.isEmpty
+        else {
+            return nil
+        }
+
+        return NetworkApprovalContext(host: trimmedHost, protocol: `protocol`)
     }
 }
 

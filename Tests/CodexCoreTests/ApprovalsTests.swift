@@ -106,6 +106,89 @@ final class ApprovalsTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(ReviewDecision.self, from: Data(json.utf8)), decision)
     }
 
+    func testNetworkPolicyDecisionPayloadUsesRustWireShapeAndProtocolAliases() throws {
+        let payload = NetworkPolicyDecisionPayload(
+            decision: .ask,
+            source: .decider,
+            protocol: .https,
+            host: "example.com",
+            reason: "not_allowed",
+            port: 443
+        )
+
+        try XCTAssertJSONObjectEqual(payload, [
+            "decision": "ask",
+            "source": "decider",
+            "protocol": "https",
+            "host": "example.com",
+            "reason": "not_allowed",
+            "port": 443
+        ])
+
+        let httpsConnect = try JSONDecoder().decode(NetworkPolicyDecisionPayload.self, from: Data("""
+        {
+          "decision": "ask",
+          "source": "decider",
+          "protocol": "https_connect",
+          "host": "example.com",
+          "reason": "not_allowed",
+          "port": 443
+        }
+        """.utf8))
+        XCTAssertEqual(httpsConnect.protocol, .https)
+
+        let httpConnect = try JSONDecoder().decode(NetworkPolicyDecisionPayload.self, from: Data("""
+        {
+          "decision": "ask",
+          "source": "decider",
+          "protocol": "http-connect",
+          "host": "example.com",
+          "reason": "not_allowed",
+          "port": 443
+        }
+        """.utf8))
+        XCTAssertEqual(httpConnect.protocol, .https)
+    }
+
+    func testNetworkApprovalContextFromPayloadMatchesRustAskFromDeciderRule() {
+        XCTAssertEqual(
+            NetworkPolicyDecisionPayload(
+                decision: .ask,
+                source: .decider,
+                protocol: .socks5Tcp,
+                host: " example.com ",
+                reason: "not_allowed",
+                port: 443
+            ).networkApprovalContext,
+            NetworkApprovalContext(host: "example.com", protocol: .socks5Tcp)
+        )
+
+        XCTAssertNil(NetworkPolicyDecisionPayload(
+            decision: .deny,
+            source: .decider,
+            protocol: .https,
+            host: "example.com"
+        ).networkApprovalContext)
+        XCTAssertNil(NetworkPolicyDecisionPayload(
+            decision: .ask,
+            source: .proxyState,
+            protocol: .https,
+            host: "example.com"
+        ).networkApprovalContext)
+        XCTAssertNil(NetworkPolicyDecisionPayload(
+            decision: .ask,
+            source: .decider,
+            protocol: nil,
+            host: "example.com"
+        ).networkApprovalContext)
+        XCTAssertNil(NetworkPolicyDecisionPayload(
+            decision: .ask,
+            source: .decider,
+            protocol: .https,
+            host: "  "
+        ).networkApprovalContext)
+    }
+
     func testReviewDecisionDefaultIsDenied() {
         XCTAssertEqual(ReviewDecision.default, .denied)
     }

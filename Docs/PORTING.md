@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's network-policy decision payload in
+  `codex-rs/protocol/src/network_policy.rs` and approval-context projection in
+  `codex-rs/core/src/network_policy_decision.rs`. Swift now carries the typed
+  `NetworkPolicyDecisionPayload` wire model, protocol aliases, and the Rust
+  ask-from-decider rule for deriving `NetworkApprovalContext`.
 - 2026-05-15: rechecked Rust's MCP tool schema default in
   `codex-rs/protocol/src/mcp.rs`. Swift `McpTool` decoding now accepts omitted
   or explicit-null `inputSchema` / `input_schema` like Rust's
