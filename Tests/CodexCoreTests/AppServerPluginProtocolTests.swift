@@ -213,6 +213,30 @@ final class AppServerPluginProtocolTests: XCTestCase {
         )
     }
 
+    func testPluginInterfaceRequiresRustVectorFields() throws {
+        let valid = try JSONDecoder().decode(
+            PluginInterface.self,
+            from: Data(#"{"capabilities":[],"screenshots":[],"screenshotUrls":[]}"#.utf8)
+        )
+        XCTAssertEqual(valid.capabilities, [])
+        XCTAssertEqual(valid.screenshots, [])
+        XCTAssertEqual(valid.screenshotURLs, [])
+
+        for payload in [
+            #"{"screenshots":[],"screenshotUrls":[]}"#,
+            #"{"capabilities":[],"screenshotUrls":[]}"#,
+            #"{"capabilities":[],"screenshots":[]}"#,
+            #"{"capabilities":null,"screenshots":[],"screenshotUrls":[]}"#,
+            #"{"capabilities":[],"screenshots":null,"screenshotUrls":[]}"#,
+            #"{"capabilities":[],"screenshots":[],"screenshotUrls":null}"#
+        ] {
+            XCTAssertThrowsError(
+                try JSONDecoder().decode(PluginInterface.self, from: Data(payload.utf8)),
+                "Rust PluginInterface Vec fields reject omitted and explicit null values: \(payload)"
+            )
+        }
+    }
+
     func testPluginDetailAndInstallShapesMatchRustProtocol() throws {
         let summary = PluginSummary(
             id: "plugins~Plugin_weather",

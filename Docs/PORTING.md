@@ -19,6 +19,11 @@ Recent upstream audit checkpoint:
   every server-initiated request method, including external ChatGPT auth
   refresh, legacy exec/apply-patch approvals, MCP elicitation, and attestation,
   instead of only JSON-RPC `result` or the previous partial method set.
+- 2026-05-15: rechecked Rust app-server v2 `PluginInterface` in
+  `codex-rs/app-server-protocol/src/protocol/v2/plugin.rs`. Swift now has
+  focused coverage that `capabilities`, `screenshots`, and `screenshotUrls`
+  remain required vector fields, rejecting omitted or explicit `null` payloads
+  like Rust's plain `Vec` serde boundary.
 - 2026-05-15: rechecked Rust `features` CLI parsing from
   `codex-rs/cli/src/main.rs`. Swift now validates `features list`,
   `features enable <FEATURE>`, and `features disable <FEATURE>` before
