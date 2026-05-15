@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust commit `40de81e7af` (`Remove reasoning
+  format`). Swift bundled model metadata now omits the removed
+  `reasoning_summary_format` field, and model-catalog tests cover Rust's
+  current `/models` payload without that field.
 - 2026-05-15: rechecked Rust commit `63a27ad6c6` (`Avoid hard-coded
   environment context shell`). Swift configured-environment prompt context now
   has focused coverage that the inherited session shell name is used for

@@ -190,6 +190,42 @@ final class OpenAIModelsTests: XCTestCase {
         XCTAssertFalse(decoded.supportsSearchTool)
     }
 
+    func testModelInfoCurrentRustCatalogOmitsReasoningSummaryFormat() throws {
+        let decoded = try JSONDecoder().decode(ModelInfo.self, from: Data("""
+        {
+          "slug": "gpt-test",
+          "display_name": "gpt-test",
+          "description": "desc",
+          "default_reasoning_level": "medium",
+          "supported_reasoning_levels": [
+            { "effort": "low", "description": "low" },
+            { "effort": "medium", "description": "medium" },
+            { "effort": "high", "description": "high" }
+          ],
+          "shell_type": "shell_command",
+          "visibility": "list",
+          "minimal_client_version": [0, 99, 0],
+          "supported_in_api": true,
+          "priority": 1,
+          "upgrade": null,
+          "base_instructions": "",
+          "supports_reasoning_summaries": false,
+          "support_verbosity": false,
+          "default_verbosity": null,
+          "apply_patch_tool_type": null,
+          "truncation_policy": { "mode": "bytes", "limit": 10000 },
+          "supports_parallel_tool_calls": false,
+          "context_window": null,
+          "experimental_supported_tools": []
+        }
+        """.utf8))
+
+        XCTAssertEqual(decoded.slug, "gpt-test")
+        XCTAssertFalse(decoded.supportsReasoningSummaries)
+        XCTAssertFalse(try encode(decoded).contains("reasoning_summary_format"))
+        XCTAssertFalse(try encode(ModelsManager.bundledModelsResponse()).contains("reasoning_summary_format"))
+    }
+
     func testModelInfoRejectsNullRustDefaultedCatalogFields() {
         for field in [
             #""additional_speed_tiers": null"#,
