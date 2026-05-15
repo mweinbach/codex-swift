@@ -21882,6 +21882,28 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(status, .cooldownActive)
     }
 
+    func testURLSessionAddCreditsNudgeEmailSenderUsesWhamPathForChatGPTBackend() async throws {
+        let capture = AppServerRequestCapture()
+        let sender = URLSessionAddCreditsNudgeEmailSender { request in
+            await capture.append(request)
+            return AccountRateLimitsHTTPResponse(statusCode: 200, body: Data())
+        }
+
+        _ = try await sender.send(
+            baseURL: "https://chatgpt.com/",
+            accessToken: "chatgpt-token",
+            accountID: "account-123",
+            creditType: .credits
+        )
+
+        let requests = await capture.requests
+        let request = try XCTUnwrap(requests.first)
+        XCTAssertEqual(
+            request.url,
+            URL(string: "https://chatgpt.com/backend-api/wham/accounts/send_add_credits_nudge_email")
+        )
+    }
+
     func testURLSessionAccountRateLimitsFetcherUsesWhamUsagePathForChatGPTBackend() async throws {
         let capture = AppServerRequestCapture()
         let fetcher = URLSessionAccountRateLimitsFetcher { request in

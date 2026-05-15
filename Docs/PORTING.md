@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's
+  `BackendClient::send_add_credits_nudge_email_url` in
+  `codex-rs/backend-client/src/client.rs`. Swift app-server coverage now pins
+  `account/sendAddCreditsNudgeEmail` backend requests to Rust's ChatGPT
+  path-style `/backend-api/wham/accounts/send_add_credits_nudge_email` endpoint
+  while preserving the Codex API `/api/codex/...` endpoint.
 - 2026-05-15: rechecked Rust's `ThreadSortKey` decoding in
   `codex-rs/app-server-protocol/src/protocol/v2/thread.rs`. Swift app-server
   `thread/list` now accepts Rust's snake_case `sortKey` values
