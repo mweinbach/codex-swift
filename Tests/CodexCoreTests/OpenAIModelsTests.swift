@@ -190,7 +190,7 @@ final class OpenAIModelsTests: XCTestCase {
         XCTAssertFalse(decoded.supportsSearchTool)
     }
 
-    func testModelInfoCurrentRustCatalogOmitsReasoningSummaryFormat() throws {
+    func testModelInfoIgnoresLegacyReasoningSummaryFormatLikeRustBaseline() throws {
         let decoded = try JSONDecoder().decode(ModelInfo.self, from: Data("""
         {
           "slug": "gpt-test",
@@ -210,6 +210,7 @@ final class OpenAIModelsTests: XCTestCase {
           "upgrade": null,
           "base_instructions": "",
           "supports_reasoning_summaries": false,
+          "reasoning_summary_format": "experimental",
           "support_verbosity": false,
           "default_verbosity": null,
           "apply_patch_tool_type": null,

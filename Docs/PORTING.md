@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked the Rust baseline `models-manager/models.json` at
+  `7c9731c9af`. The raw catalog still carries legacy
+  `reasoning_summary_format` fields, while Rust's `ModelInfo` ignores them on
+  decode and omits them from serialized model responses; Swift now pins the
+  same ignored-field boundary in `OpenAIModelsTests`.
 - 2026-05-15: rechecked Rust feature `apply_map` handling in
   `codex-rs/features/src/lib.rs`. Swift feature-state application now treats
   removed no-op config keys (`tui_app_server`, `undo`, `js_repl`,
