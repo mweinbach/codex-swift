@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust v2 `TurnEnvironmentParams` from
+  `codex-rs/app-server-protocol/src/protocol/v2/turn.rs`. Swift app-server
+  runtime validation now reads the canonical `environmentId` request key for
+  `thread/start` and `turn/start` environment selections, matching the
+  protocol model and Rust's camelCase wire shape.
 - 2026-05-15: rechecked Rust service-tier handling from `7c0e54bf59` and
   related config/session normalization. Swift now has focused coverage that
   both the legacy `fast` alias and the request-value `priority` tier are

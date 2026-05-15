@@ -2107,7 +2107,7 @@ final class CodexAppServerTests: XCTestCase {
         )
 
         let messages = try decodeMessages(processor.processLine(Data(
-            #"{"id":1,"method":"thread/start","params":{"environments":[{"environment_id":"missing","cwd":"\#(temp.url.path)"}]}}"#.utf8
+            #"{"id":1,"method":"thread/start","params":{"environments":[{"environmentId":"missing","cwd":"\#(temp.url.path)"}]}}"#.utf8
         )))
 
         XCTAssertEqual(messages.count, 1)
@@ -2130,7 +2130,7 @@ final class CodexAppServerTests: XCTestCase {
         )
 
         let messages = try decodeMessages(processor.processLine(Data(
-            #"{"id":1,"method":"thread/start","params":{"environments":[{"environment_id":"local","cwd":"\#(temp.url.path)"},{"environment_id":"local","cwd":"\#(temp.url.path)"}]}}"#.utf8
+            #"{"id":1,"method":"thread/start","params":{"environments":[{"environmentId":"local","cwd":"\#(temp.url.path)"},{"environmentId":"local","cwd":"\#(temp.url.path)"}]}}"#.utf8
         )))
 
         XCTAssertEqual(messages.count, 1)
@@ -3103,7 +3103,7 @@ final class CodexAppServerTests: XCTestCase {
         let threadID = try XCTUnwrap(thread["id"] as? String)
 
         let messages = try decodeMessages(processor.processLine(Data(
-            #"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Hello"}],"environments":[{"environment_id":"missing","cwd":"\#(temp.url.path)"}]}}"#.utf8
+            #"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Hello"}],"environments":[{"environmentId":"missing","cwd":"\#(temp.url.path)"}]}}"#.utf8
         )))
 
         XCTAssertEqual(messages.count, 1)
@@ -3126,7 +3126,7 @@ final class CodexAppServerTests: XCTestCase {
         let threadID = try XCTUnwrap(thread["id"] as? String)
 
         let messages = try decodeMessages(processor.processLine(Data(
-            #"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Hello"}],"environments":[{"environment_id":"local","cwd":"\#(temp.url.path)"},{"environment_id":"local","cwd":"\#(temp.url.path)"}]}}"#.utf8
+            #"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Hello"}],"environments":[{"environmentId":"local","cwd":"\#(temp.url.path)"},{"environmentId":"local","cwd":"\#(temp.url.path)"}]}}"#.utf8
         )))
 
         XCTAssertEqual(messages.count, 1)

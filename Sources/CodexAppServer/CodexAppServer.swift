@@ -3097,7 +3097,7 @@ public enum CodexAppServer {
         var seenEnvironmentIDs = Set<String>()
         var selections: [TurnEnvironmentSelection] = []
         for environment in environments {
-            let environmentID = stringParam(environment["environment_id"]) ?? ""
+            let environmentID = stringParam(environment["environmentId"]) ?? ""
             guard seenEnvironmentIDs.insert(environmentID).inserted else {
                 throw AppServerError.invalidRequest("duplicate turn environment id `\(environmentID)`")
             }
