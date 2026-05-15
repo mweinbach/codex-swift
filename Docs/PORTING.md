@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked current Rust `models-manager/models.json` at
+  `7c9731c9af`. Swift's bundled raw catalog now carries the same
+  `reasoning_summary_format` metadata for the six current model entries while
+  preserving the Rust `ModelInfo` boundary that ignores the field on decode and
+  omits it from serialized model responses.
 - 2026-05-15: rechecked Rust v2 `TurnEnvironmentParams` from
   `codex-rs/app-server-protocol/src/protocol/v2/turn.rs`. Swift app-server
   runtime validation now reads the canonical `environmentId` request key for
@@ -128,9 +133,9 @@ Recent upstream audit checkpoint:
   delivery values default to inline review execution without creating a
   detached review thread.
 - 2026-05-15: rechecked Rust commit `40de81e7af` (`Remove reasoning
-  format`). Swift bundled model metadata now omits the removed
-  `reasoning_summary_format` field, and model-catalog tests cover Rust's
-  current `/models` payload without that field.
+  format`) against the current Rust catalog. Swift model decoding still omits
+  `reasoning_summary_format` from model responses like Rust `ModelInfo`, while
+  the bundled raw catalog mirrors the field's later reintroduction.
 - 2026-05-15: rechecked Rust commit `63a27ad6c6` (`Avoid hard-coded
   environment context shell`). Swift configured-environment prompt context now
   has focused coverage that the inherited session shell name is used for
