@@ -197,7 +197,8 @@ public enum PatchSafety {
         return roots.map { root in
             WritableRoot(
                 root: root,
-                readOnlySubpaths: readOnlySubpaths(for: root, fileManager: fileManager)
+                readOnlySubpaths: readOnlySubpaths(for: root, fileManager: fileManager),
+                protectedMetadataNames: [".git", ".agents", ".codex"]
             )
         }
     }

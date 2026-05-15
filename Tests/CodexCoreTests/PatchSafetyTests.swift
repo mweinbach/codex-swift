@@ -72,11 +72,9 @@ final class PatchSafetyTests: XCTestCase {
         ))
     }
 
-    func testGitAndCodexSubpathsRemainReadOnlyUnderWritableRoot() throws {
+    func testProtectedMetadataNamesRemainReadOnlyUnderWritableRootLikeRust() throws {
         let temp = try TemporaryDirectory()
         let cwd = try AbsolutePath(absolutePath: temp.url.path)
-        try FileManager.default.createDirectory(atPath: cwd.join(".git").path, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(atPath: cwd.join(".codex").path, withIntermediateDirectories: true)
         let policy = SandboxPolicy.workspaceWrite(
             writableRoots: [],
             networkAccess: false,
@@ -86,6 +84,12 @@ final class PatchSafetyTests: XCTestCase {
 
         XCTAssertFalse(PatchSafety.isWritePatchConstrainedToWritablePaths(
             hunks: [.addFile(path: ".git/hooks/pre-commit", contents: "")],
+            sandboxPolicy: policy,
+            cwd: cwd,
+            environment: [:]
+        ))
+        XCTAssertFalse(PatchSafety.isWritePatchConstrainedToWritablePaths(
+            hunks: [.addFile(path: ".agents/skills/test/SKILL.md", contents: "")],
             sandboxPolicy: policy,
             cwd: cwd,
             environment: [:]

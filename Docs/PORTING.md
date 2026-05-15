@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's protected workspace metadata write rule in
+  `codex-rs/protocol/src/permissions.rs` as used by apply-patch safety.
+  Swift `PatchSafety` now blocks top-level `.git`, `.agents`, and `.codex`
+  paths under writable roots even before those metadata paths exist.
 - 2026-05-15: rechecked Rust's apply-patch safety matrix in
   `codex-rs/core/src/safety.rs`. Swift `PatchSafety` now treats granular
   approval configs with `sandbox_approval = false` like Rust's
