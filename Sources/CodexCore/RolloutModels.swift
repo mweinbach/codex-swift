@@ -86,6 +86,14 @@ public struct SessionMeta: Equatable, Codable, Sendable {
         self.source = try container.decodeIfPresent(SessionSource.self, forKey: .source) ?? .default
         self.threadSource = try container.decodeIfPresent(ThreadSource.self, forKey: .threadSource)
         self.agentNickname = try container.decodeIfPresent(String.self, forKey: .agentNickname)
+        if container.contains(.agentRole), container.contains(.agentType) {
+            throw DecodingError.dataCorrupted(
+                DecodingError.Context(
+                    codingPath: decoder.codingPath + [CodingKeys.agentRole],
+                    debugDescription: "duplicate field `agent_role`"
+                )
+            )
+        }
         self.agentRole = try container.decodeIfPresent(String.self, forKey: .agentRole)
             ?? container.decodeIfPresent(String.self, forKey: .agentType)
         self.agentPath = try container.decodeIfPresent(String.self, forKey: .agentPath)

@@ -194,6 +194,27 @@ final class RolloutModelsTests: XCTestCase {
         XCTAssertEqual(line.meta.agentRole, "critic")
     }
 
+    func testSessionMetaRejectsDuplicateAgentRoleAliasLikeSerde() throws {
+        XCTAssertThrowsError(try JSONDecoder().decode(SessionMetaLine.self, from: Data("""
+        {
+          "id": "67e55044-10b1-426f-9247-bb680e5fe0c8",
+          "timestamp": "",
+          "cwd": "",
+          "originator": "",
+          "cli_version": "",
+          "source": "cli",
+          "agent_role": "analyst",
+          "agent_type": "critic",
+          "model_provider": null
+        }
+        """.utf8))) { error in
+            guard case let DecodingError.dataCorrupted(context) = error else {
+                return XCTFail("expected dataCorrupted, got \(error)")
+            }
+            XCTAssertEqual(context.debugDescription, "duplicate field `agent_role`")
+        }
+    }
+
     func testSessionMetaLineIncludesGitWhenPresent() throws {
         let id = try ConversationId(string: "67e55044-10b1-426f-9247-bb680e5fe0c8")
         let line = SessionMetaLine(

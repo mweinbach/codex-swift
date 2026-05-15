@@ -228,6 +228,14 @@ public struct CollabAgentRef: Equatable, Codable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         threadID = try container.decode(ThreadId.self, forKey: .threadID)
         agentNickname = try container.decodeIfPresent(String.self, forKey: .agentNickname)
+        if container.contains(.agentRole), container.contains(.agentType) {
+            throw DecodingError.dataCorrupted(
+                DecodingError.Context(
+                    codingPath: decoder.codingPath + [CodingKeys.agentRole],
+                    debugDescription: "duplicate field `agent_role`"
+                )
+            )
+        }
         agentRole = try container.decodeIfPresent(String.self, forKey: .agentRole)
             ?? container.decodeIfPresent(String.self, forKey: .agentType)
     }
@@ -270,6 +278,14 @@ public struct CollabAgentStatusEntry: Equatable, Codable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         threadID = try container.decode(ThreadId.self, forKey: .threadID)
         agentNickname = try container.decodeIfPresent(String.self, forKey: .agentNickname)
+        if container.contains(.agentRole), container.contains(.agentType) {
+            throw DecodingError.dataCorrupted(
+                DecodingError.Context(
+                    codingPath: decoder.codingPath + [CodingKeys.agentRole],
+                    debugDescription: "duplicate field `agent_role`"
+                )
+            )
+        }
         agentRole = try container.decodeIfPresent(String.self, forKey: .agentRole)
             ?? container.decodeIfPresent(String.self, forKey: .agentType)
         status = try container.decode(AgentStatus.self, forKey: .status)

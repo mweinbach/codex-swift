@@ -124,6 +124,35 @@ final class CollabEventsTests: XCTestCase {
         ])
     }
 
+    func testCollabAgentMetadataRejectsDuplicateAgentRoleAliasLikeSerde() throws {
+        XCTAssertThrowsError(try JSONDecoder().decode(CollabAgentRef.self, from: Data("""
+        {
+          "thread_id": "\(receiver.description)",
+          "agent_role": "reviewer",
+          "agent_type": "critic"
+        }
+        """.utf8))) { error in
+            guard case let DecodingError.dataCorrupted(context) = error else {
+                return XCTFail("expected dataCorrupted, got \(error)")
+            }
+            XCTAssertEqual(context.debugDescription, "duplicate field `agent_role`")
+        }
+
+        XCTAssertThrowsError(try JSONDecoder().decode(CollabAgentStatusEntry.self, from: Data("""
+        {
+          "thread_id": "\(receiver.description)",
+          "agent_role": "reviewer",
+          "agent_type": "critic",
+          "status": "running"
+        }
+        """.utf8))) { error in
+            guard case let DecodingError.dataCorrupted(context) = error else {
+                return XCTFail("expected dataCorrupted, got \(error)")
+            }
+            XCTAssertEqual(context.debugDescription, "duplicate field `agent_role`")
+        }
+    }
+
     func testCollabWaitingEventsOmitEmptyMetadataAndDecodeAliases() throws {
         let begin = CollabWaitingBeginEvent(
             senderThreadID: sender,

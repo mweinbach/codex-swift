@@ -68,6 +68,18 @@ final class SessionSourceTests: XCTestCase {
         XCTAssertNil(decoded.agentPath)
     }
 
+    func testThreadSpawnRejectsDuplicateAgentRoleAliasLikeSerde() throws {
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            SessionSource.self,
+            from: Data(#"{"subagent":{"thread_spawn":{"parent_thread_id":"018f7a2d-4c5b-7abc-8def-0123456789ab","depth":3,"agent_role":"analyst","agent_type":"critic"}}}"#.utf8)
+        )) { error in
+            guard case let DecodingError.dataCorrupted(context) = error else {
+                return XCTFail("expected dataCorrupted, got \(error)")
+            }
+            XCTAssertEqual(context.debugDescription, "duplicate field `agent_role`")
+        }
+    }
+
     func testPersistedSourceThreadSpawnParentExtractionMatchesRustFallbackOrder() throws {
         let parent = try ThreadId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
         let source = SessionSource.subagent(.threadSpawn(parentThreadID: parent, depth: 3))

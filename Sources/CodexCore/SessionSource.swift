@@ -373,8 +373,7 @@ extension SubAgentSource: Codable {
                 depth: try spawn.decode(Int32.self, forKey: .depth),
                 agentPath: try spawn.decodeIfPresent(AgentPath.self, forKey: .agentPath),
                 agentNickname: try spawn.decodeIfPresent(String.self, forKey: .agentNickname),
-                agentRole: try spawn.decodeIfPresent(String.self, forKey: .agentRole)
-                    ?? spawn.decodeIfPresent(String.self, forKey: .agentType)
+                agentRole: try Self.decodeAgentRole(from: spawn, codingPath: decoder.codingPath)
             )
         } else {
             self = .other(try container.decode(String.self, forKey: .other))
@@ -404,6 +403,22 @@ extension SubAgentSource: Codable {
             var container = encoder.container(keyedBy: TaggedKey.self)
             try container.encode(label, forKey: .other)
         }
+    }
+
+    private static func decodeAgentRole(
+        from container: KeyedDecodingContainer<ThreadSpawnKey>,
+        codingPath: [CodingKey]
+    ) throws -> String? {
+        if container.contains(.agentRole), container.contains(.agentType) {
+            throw DecodingError.dataCorrupted(
+                DecodingError.Context(
+                    codingPath: codingPath + [TaggedKey.threadSpawn, ThreadSpawnKey.agentRole],
+                    debugDescription: "duplicate field `agent_role`"
+                )
+            )
+        }
+        return try container.decodeIfPresent(String.self, forKey: .agentRole)
+            ?? container.decodeIfPresent(String.self, forKey: .agentType)
     }
 }
 
