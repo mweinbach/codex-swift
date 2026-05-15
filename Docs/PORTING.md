@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's core `UserInput::Text.text_elements` field in
+  `codex-rs/protocol/src/user_input.rs`. Swift core user-input decoding now
+  preserves Rust's omitted-field empty-array default while rejecting explicit
+  `null` for the non-optional Serde defaulted `text_elements` vector.
 - 2026-05-15: rechecked Rust's core approval and Guardian assessment events in
   `codex-rs/protocol/src/approvals.rs`. Swift now preserves Rust's
   omitted-field defaults for exec/apply-patch approval `turn_id` and Guardian

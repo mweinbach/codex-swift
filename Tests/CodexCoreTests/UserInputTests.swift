@@ -48,6 +48,15 @@ final class UserInputTests: XCTestCase {
         XCTAssertEqual(decoded, .text("hello", textElements: []))
     }
 
+    func testTextInputRejectsNullRustDefaultedTextElements() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                UserInput.self,
+                from: Data(#"{"type":"text","text":"hello","text_elements":null}"#.utf8)
+            )
+        )
+    }
+
     func testMentionInputRoundTripsLikeRust() throws {
         let json = #"{"type":"mention","name":"figma","path":"app://figma"}"#
 

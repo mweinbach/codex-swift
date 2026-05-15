@@ -68,7 +68,11 @@ public enum UserInput: Equatable, Codable, Sendable {
         case .text:
             self = .text(
                 try container.decode(String.self, forKey: .text),
-                textElements: try container.decodeIfPresent([TextElement].self, forKey: .textElements) ?? []
+                textElements: try container.decodeRustDefaulted(
+                    [TextElement].self,
+                    forKey: .textElements,
+                    defaultValue: []
+                )
             )
         case .image:
             self = .image(imageURL: try container.decode(String.self, forKey: .imageURL))
