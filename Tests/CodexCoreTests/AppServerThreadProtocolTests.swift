@@ -1323,6 +1323,21 @@ final class AppServerThreadProtocolTests: XCTestCase {
         XCTAssertEqual(decodedUnknownUnitSource, .unknown)
     }
 
+    func testAppServerSessionSourceRejectsMultipleExternallyTaggedVariantsLikeRustSerde() {
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            AppServerSessionSource.self,
+            from: Data(#"{"custom":"atlas","subAgent":"review"}"#.utf8)
+        )) { error in
+            guard case let DecodingError.dataCorrupted(context) = error else {
+                return XCTFail("expected dataCorrupted, got \(error)")
+            }
+            XCTAssertEqual(
+                context.debugDescription,
+                "Expected externally tagged AppServerSessionSource object with exactly one tag"
+            )
+        }
+    }
+
     func testThreadDataRejectsRelativeCwdLikeRustAbsolutePathBuf() throws {
         let payload = Data(#"""
         {

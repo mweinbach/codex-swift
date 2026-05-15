@@ -181,6 +181,14 @@ extension SessionSource: Codable {
         }
 
         let container = try decoder.container(keyedBy: TaggedKey.self)
+        guard container.allKeys.count <= 1 else {
+            throw DecodingError.dataCorrupted(
+                DecodingError.Context(
+                    codingPath: decoder.codingPath,
+                    debugDescription: "Expected externally tagged SessionSource object with exactly one tag"
+                )
+            )
+        }
         if container.contains(.custom) {
             self = .custom(try container.decode(String.self, forKey: .custom))
         } else if container.contains(.internal) {

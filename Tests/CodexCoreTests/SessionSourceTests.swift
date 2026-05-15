@@ -80,6 +80,21 @@ final class SessionSourceTests: XCTestCase {
         }
     }
 
+    func testSessionSourceRejectsMultipleExternallyTaggedVariantsLikeRustSerde() {
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            SessionSource.self,
+            from: Data(#"{"custom":"atlas","subagent":"review"}"#.utf8)
+        )) { error in
+            guard case let DecodingError.dataCorrupted(context) = error else {
+                return XCTFail("expected dataCorrupted, got \(error)")
+            }
+            XCTAssertEqual(
+                context.debugDescription,
+                "Expected externally tagged SessionSource object with exactly one tag"
+            )
+        }
+    }
+
     func testPersistedSourceThreadSpawnParentExtractionMatchesRustFallbackOrder() throws {
         let parent = try ThreadId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
         let source = SessionSource.subagent(.threadSpawn(parentThreadID: parent, depth: 3))
