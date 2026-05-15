@@ -510,6 +510,24 @@ final class AppServerPluginProtocolTests: XCTestCase {
         XCTAssertEqual(decoded.shareTargets, [])
     }
 
+    func testPluginShareUpdateTargetsRejectsListedDiscoverabilityLikeRustProtocol() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                PluginShareUpdateTargetsParams.self,
+                from: Data(#"{"remotePluginId":"plugins~Plugin_123","discoverability":"LISTED","shareTargets":[]}"#.utf8)
+            )
+        )
+    }
+
+    func testPluginShareUpdateTargetsResponseRequiresDiscoverabilityLikeRustProtocol() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                PluginShareUpdateTargetsResponse.self,
+                from: Data(#"{"principals":[]}"#.utf8)
+            )
+        )
+    }
+
     func testPluginShareResponseAndDeleteShapesMatchRustProtocol() throws {
         try XCTAssertJSONObjectEqual(
             PluginShareSaveResponse(
