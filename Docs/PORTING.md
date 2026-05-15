@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 dynamic tool response content-item
+  serialization in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`.
+  Swift now pins the minimal one-text-item `contentItems` response shape in
+  addition to the richer text-plus-image case.
 - 2026-05-15: rechecked Rust app-server v2 config experimental markers in
   `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now pins the
   nested profile `approvalsReviewer: AutoReview` marker so profile-owned

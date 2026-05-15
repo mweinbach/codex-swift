@@ -193,6 +193,24 @@ final class DynamicToolsTests: XCTestCase {
         try XCTAssertJSONObjectEqual(
             DynamicToolResponse(
                 contentItems: [
+                    .text("dynamic-ok")
+                ],
+                success: true
+            ),
+            [
+                "contentItems": [
+                    [
+                        "type": "inputText",
+                        "text": "dynamic-ok"
+                    ]
+                ],
+                "success": true
+            ]
+        )
+
+        try XCTAssertJSONObjectEqual(
+            DynamicToolResponse(
+                contentItems: [
                     .text("dynamic-ok"),
                     .imageURL("data:image/png;base64,AAA")
                 ],
