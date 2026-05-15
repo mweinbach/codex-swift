@@ -2250,6 +2250,8 @@ Recent upstream audit checkpoint:
   - aligned Swift MCP content-block decoding with Rust's tagged content handling for function-call output conversion: unknown or missing MCP content `type` values now round-trip as raw JSON instead of shape-decoding as text/image blocks, and image-bearing tool outputs stringify those unknown blocks into `input_text` fallback entries like Rust's `convert_mcp_content_to_items`.
 - `codex-rs/app-server-protocol/src/protocol/v2/thread.rs` list params optional serialization
   - pinned Swift `thread/list`, `thread/loaded/list`, `thread/turns/list`, and `thread/turns/items/list` params to Rust's serde shape where nullable cursor/filter/page fields encode as explicit `null`, while `thread/list` continues to skip false `useStateDbOnly`.
+- `codex-rs/app-server-protocol/src/protocol/v2/tests.rs` turn/start environments
+  - pinned Swift `turn/start.environments` protocol parity for Rust's environment payload edge cases: absolute `cwd` round trips, empty arrays are preserved, `null` and omission decode to the default unset state, and relative environment working directories are rejected through the shared `AbsolutePath` contract.
 
 ## Known Gaps
 

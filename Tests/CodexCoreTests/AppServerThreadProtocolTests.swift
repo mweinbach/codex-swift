@@ -187,6 +187,99 @@ final class AppServerThreadProtocolTests: XCTestCase {
         XCTAssertTrue(forkSet.excludeTurns)
     }
 
+    func testTurnStartParamsRoundTripEnvironmentsLikeRustProtocol() throws {
+        let environment = AppServerTurnEnvironmentParams(
+            environmentID: "local",
+            cwd: try AbsolutePath(absolutePath: "/repo")
+        )
+
+        try XCTAssertJSONObjectEqual(
+            AppServerTurnStartParams(threadID: "thread_123", input: [], environments: [environment]),
+            [
+                "threadId": "thread_123",
+                "input": [],
+                "responsesapiClientMetadata": NSNull(),
+                "environments": [
+                    [
+                        "environmentId": "local",
+                        "cwd": "/repo"
+                    ]
+                ],
+                "cwd": NSNull(),
+                "approvalPolicy": NSNull(),
+                "approvalsReviewer": NSNull(),
+                "sandboxPolicy": NSNull(),
+                "permissions": NSNull(),
+                "model": NSNull(),
+                "effort": NSNull(),
+                "summary": NSNull(),
+                "personality": NSNull(),
+                "outputSchema": NSNull(),
+                "collaborationMode": NSNull()
+            ]
+        )
+
+        let decoded = try JSONDecoder().decode(
+            AppServerTurnStartParams.self,
+            from: Data(#"{"threadId":"thread_123","input":[],"environments":[{"environmentId":"local","cwd":"/repo"}]}"#.utf8)
+        )
+        XCTAssertEqual(decoded.environments, [environment])
+
+        let decodedEmpty = try JSONDecoder().decode(
+            AppServerTurnStartParams.self,
+            from: Data(#"{"threadId":"thread_123","input":[],"environments":[]}"#.utf8)
+        )
+        XCTAssertEqual(decodedEmpty.environments, [])
+        try XCTAssertJSONObjectEqual(
+            decodedEmpty,
+            [
+                "threadId": "thread_123",
+                "input": [],
+                "responsesapiClientMetadata": NSNull(),
+                "environments": [],
+                "cwd": NSNull(),
+                "approvalPolicy": NSNull(),
+                "approvalsReviewer": NSNull(),
+                "sandboxPolicy": NSNull(),
+                "permissions": NSNull(),
+                "model": NSNull(),
+                "effort": NSNull(),
+                "summary": NSNull(),
+                "personality": NSNull(),
+                "outputSchema": NSNull(),
+                "collaborationMode": NSNull()
+            ]
+        )
+    }
+
+    func testTurnStartParamsTreatNullOrOmittedEnvironmentsAsDefaultLikeRustProtocol() throws {
+        let decodedNull = try JSONDecoder().decode(
+            AppServerTurnStartParams.self,
+            from: Data(#"{"threadId":"thread_123","input":[],"environments":null}"#.utf8)
+        )
+        XCTAssertNil(decodedNull.environments)
+
+        let decodedOmitted = try JSONDecoder().decode(
+            AppServerTurnStartParams.self,
+            from: Data(#"{"threadId":"thread_123","input":[]}"#.utf8)
+        )
+        XCTAssertNil(decodedOmitted.environments)
+    }
+
+    func testTurnStartParamsRejectRelativeEnvironmentCwdLikeRustProtocol() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AppServerTurnStartParams.self,
+                from: Data(#"{"threadId":"thread_123","input":[],"environments":[{"environmentId":"local","cwd":"relative"}]}"#.utf8)
+            )
+        ) { error in
+            XCTAssertTrue(
+                String(describing: error).contains("AbsolutePath"),
+                "unexpected error: \(error)"
+            )
+        }
+    }
+
     func testThreadLifecycleParamsRejectExplicitNullForRustDefaultedBooleans() {
         let payloads: [(Data) throws -> Void] = [
             { _ = try JSONDecoder().decode(ThreadStartParams.self, from: $0) },
