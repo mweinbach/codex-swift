@@ -223,7 +223,11 @@ public struct FileSystemPermissions: Codable, Equatable, Sendable {
                 )
             }
             self.init(
-                entries: try container.decodeIfPresent([FileSystemSandboxEntry].self, forKey: .entries) ?? [],
+                entries: try container.decodeRustDefaulted(
+                    [FileSystemSandboxEntry].self,
+                    forKey: .entries,
+                    defaultValue: []
+                ),
                 globScanMaxDepth: globScanMaxDepth
             )
             return

@@ -1456,6 +1456,22 @@ final class ResponseModelsTests: XCTestCase {
             ],
             "glob_scan_max_depth": 3
         ])
+
+        let missingEntries = try JSONDecoder().decode(FileSystemPermissions.self, from: Data(#"""
+        {
+            "glob_scan_max_depth": 3
+        }
+        """#.utf8))
+        XCTAssertEqual(missingEntries, FileSystemPermissions(entries: [], globScanMaxDepth: 3))
+    }
+
+    func testFileSystemPermissionsRejectsNullCanonicalEntriesLikeRustSerdeDefault() {
+        XCTAssertThrowsError(try JSONDecoder().decode(FileSystemPermissions.self, from: Data(#"""
+        {
+            "entries": null,
+            "glob_scan_max_depth": 3
+        }
+        """#.utf8)))
     }
 
     func testFileSystemPermissionsLegacyWireShapeLikeRust() throws {
