@@ -249,6 +249,17 @@ public struct AppServerActivePermissionProfile: Codable, Equatable, Sendable {
         )
     }
 
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        extends = try container.decodeIfPresent(String.self, forKey: .extends)
+        modifications = try container.decodeRustDefaulted(
+            [AppServerActivePermissionProfileModification].self,
+            forKey: .modifications,
+            defaultValue: []
+        )
+    }
+
     public var activePermissionProfile: ActivePermissionProfile {
         ActivePermissionProfile(
             id: id,

@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `ActivePermissionProfile` in
+  `codex-rs/app-server-protocol/src/protocol/v2/permissions.rs`. Swift now has
+  focused coverage that omitted `modifications` defaults to an empty list while
+  explicit `null` rejects, with `extends` retaining Rust's omitted/null optional
+  behavior.
 - 2026-05-15: rechecked Rust models-cache `client_version` freshness in
   `codex-rs/models-manager/src/cache.rs`. Swift now has focused coverage that
   a cache entry with a fresh timestamp but mismatched `client_version` is

@@ -183,6 +183,42 @@ final class AppServerPermissionsProtocolTests: XCTestCase {
         )
     }
 
+    func testActivePermissionProfileDecodesRustDefaultedModifications() throws {
+        let missingModifications = try JSONDecoder().decode(
+            AppServerActivePermissionProfile.self,
+            from: Data(#"{"id":":workspace"}"#.utf8)
+        )
+        XCTAssertEqual(
+            missingModifications,
+            AppServerActivePermissionProfile(id: ":workspace")
+        )
+
+        let explicitNullExtends = try JSONDecoder().decode(
+            AppServerActivePermissionProfile.self,
+            from: Data(#"{"id":":workspace","extends":null}"#.utf8)
+        )
+        XCTAssertEqual(
+            explicitNullExtends,
+            AppServerActivePermissionProfile(id: ":workspace")
+        )
+
+        let explicitEmptyModifications = try JSONDecoder().decode(
+            AppServerActivePermissionProfile.self,
+            from: Data(#"{"id":":workspace","modifications":[]}"#.utf8)
+        )
+        XCTAssertEqual(
+            explicitEmptyModifications,
+            AppServerActivePermissionProfile(id: ":workspace")
+        )
+
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AppServerActivePermissionProfile.self,
+                from: Data(#"{"id":":workspace","modifications":null}"#.utf8)
+            )
+        )
+    }
+
     func testPermissionProfileSelectionParamsEncodesNullableModifications() throws {
         try XCTAssertJSONObjectEqual(
             AppServerPermissionProfileSelectionParams.profile(id: "limited"),
