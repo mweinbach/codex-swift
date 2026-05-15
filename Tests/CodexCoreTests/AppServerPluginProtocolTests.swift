@@ -124,6 +124,47 @@ final class AppServerPluginProtocolTests: XCTestCase {
         )
     }
 
+    func testPluginParamsIgnoreRemovedForceRemoteSyncFieldLikeRustProtocol() throws {
+        let listParams = try JSONDecoder().decode(
+            PluginListParams.self,
+            from: Data(#"{"cwds":null,"forceRemoteSync":true}"#.utf8)
+        )
+        XCTAssertEqual(listParams, PluginListParams())
+
+        let readParams = try JSONDecoder().decode(
+            PluginReadParams.self,
+            from: Data(#"{"marketplacePath":"/plugins/marketplace.json","pluginName":"gmail","forceRemoteSync":true}"#.utf8)
+        )
+        XCTAssertEqual(
+            readParams,
+            PluginReadParams(
+                marketplacePath: try AbsolutePath(absolutePath: "/plugins/marketplace.json"),
+                pluginName: "gmail"
+            )
+        )
+
+        let installParams = try JSONDecoder().decode(
+            PluginInstallParams.self,
+            from: Data(#"{"remoteMarketplaceName":"openai-curated","pluginName":"gmail","forceRemoteSync":true}"#.utf8)
+        )
+        XCTAssertEqual(
+            installParams,
+            PluginInstallParams(remoteMarketplaceName: "openai-curated", pluginName: "gmail")
+        )
+
+        let localIDUninstallParams = try JSONDecoder().decode(
+            PluginUninstallParams.self,
+            from: Data(#"{"pluginId":"gmail@openai-curated","forceRemoteSync":true}"#.utf8)
+        )
+        XCTAssertEqual(localIDUninstallParams, PluginUninstallParams(pluginID: "gmail@openai-curated"))
+
+        let remoteIDUninstallParams = try JSONDecoder().decode(
+            PluginUninstallParams.self,
+            from: Data(#"{"pluginId":"plugins~Plugin_gmail","forceRemoteSync":true}"#.utf8)
+        )
+        XCTAssertEqual(remoteIDUninstallParams, PluginUninstallParams(pluginID: "plugins~Plugin_gmail"))
+    }
+
     func testSkillsAndHooksListParamsUseRustDefaultedRequestShapes() throws {
         try XCTAssertJSONObjectEqual(SkillsListParams(), [:])
         try XCTAssertJSONObjectEqual(

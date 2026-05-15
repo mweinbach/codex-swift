@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 plugin params in
+  `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now pins the
+  removed `forceRemoteSync` compatibility boundary across `plugin/list`,
+  `plugin/read`, `plugin/install`, and `plugin/uninstall`: legacy request
+  payloads decode successfully while current encoders keep omitting the field.
 - 2026-05-15: rechecked Rust app-server v2 `PluginMarketplaceEntry` remote-only
   serialization in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`.
   Swift now pins Rust's explicit `null` encoding for absent marketplace `path`
