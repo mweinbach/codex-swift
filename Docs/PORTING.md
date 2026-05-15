@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust `ResponseItem::Reasoning` in
+  `codex-rs/protocol/src/models.rs`. Swift response-item decoding now preserves
+  Serde's default boundary for reasoning ids: omitted `id` defaults to an empty
+  string while explicit `null` rejects, with summary/content/encrypted-content
+  behavior unchanged.
 - 2026-05-15: rechecked Rust backend task-details models in
   `codex-rs/backend-client/src/types.rs`. Swift `CloudHTTPClient` task detail
   decoding now preserves Rust's mixed default boundary: omitted `sibling_turns`

@@ -1185,6 +1185,20 @@ final class ResponseModelsTests: XCTestCase {
         ])
     }
 
+    func testRejectsReasoningNullIDLikeRustSerde() throws {
+        let json = #"""
+        {
+            "type": "reasoning",
+            "id": null,
+            "summary": [
+                {"type": "summary_text", "text": "Step 1"}
+            ]
+        }
+        """#
+
+        XCTAssertThrowsError(try JSONDecoder().decode(ResponseItem.self, from: Data(json.utf8)))
+    }
+
     func testResponseItemSerializesRustNullOptionals() throws {
         try XCTAssertJSONObjectEqual(ResponseItem.reasoning(id: "rs_1", summary: []), [
             "type": "reasoning",

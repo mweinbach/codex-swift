@@ -965,7 +965,7 @@ public enum ResponseItem: Equatable, Codable, Sendable {
             )
         case "reasoning":
             self = .reasoning(
-                id: try container.decodeIfPresent(String.self, forKey: .id) ?? "",
+                id: try container.decodeRustDefaulted(String.self, forKey: .id, defaultValue: ""),
                 summary: try container.decode([ReasoningItemReasoningSummary].self, forKey: .summary),
                 content: try container.decodeIfPresent([ReasoningItemContent].self, forKey: .content),
                 encryptedContent: try container.decodeIfPresent(String.self, forKey: .encryptedContent)
