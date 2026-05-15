@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server `ClientRequest::experimental_reason`
+  param inspection in `codex-rs/app-server-protocol/src/protocol/common.rs`
+  and the v2 thread/turn params. Swift request-param helpers now report the
+  Rust field-level reasons for `thread/start`, `thread/resume`,
+  `thread/fork`, `turn/start`, and `turn/steer`, including nested granular
+  approval precedence.
 - 2026-05-15: rechecked Rust app-server v2 `FileSystemSpecialPath` decoding in
   `codex-rs/app-server-protocol/src/protocol/v2/permissions.rs`. Swift now
   canonicalizes the legacy `current_working_directory` alias to

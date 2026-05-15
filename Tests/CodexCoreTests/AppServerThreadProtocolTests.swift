@@ -1278,6 +1278,88 @@ final class AppServerThreadProtocolTests: XCTestCase {
         )
     }
 
+    func testThreadLifecycleParamsExperimentalReasonsMatchRustClientRequestInspection() {
+        let granular = AskForApproval.granular(
+            GranularApprovalConfig(
+                sandboxApproval: true,
+                rules: false,
+                skillApproval: false,
+                requestPermissions: true,
+                mcpElicitations: false
+            )
+        )
+
+        XCTAssertEqual(
+            ThreadStartParams(approvalPolicy: granular).appServerExperimentalReason,
+            "askForApproval.granular"
+        )
+        XCTAssertEqual(
+            ThreadResumeParams(threadID: "thr_123", approvalPolicy: granular).appServerExperimentalReason,
+            "askForApproval.granular"
+        )
+        XCTAssertEqual(
+            ThreadForkParams(threadID: "thr_456", approvalPolicy: granular).appServerExperimentalReason,
+            "askForApproval.granular"
+        )
+
+        XCTAssertEqual(
+            ThreadStartParams(
+                approvalPolicy: granular,
+                permissions: AppServerPermissionProfileSelectionParams.profile(id: "workspace")
+            ).appServerExperimentalReason,
+            "askForApproval.granular"
+        )
+        XCTAssertEqual(
+            ThreadResumeParams(threadID: "thr_123", history: []).appServerExperimentalReason,
+            "thread/resume.history"
+        )
+        XCTAssertEqual(
+            ThreadResumeParams(
+                threadID: "thr_123",
+                path: "/tmp/session.jsonl",
+                approvalPolicy: granular
+            ).appServerExperimentalReason,
+            "thread/resume.path"
+        )
+        XCTAssertEqual(
+            ThreadForkParams(
+                threadID: "thr_456",
+                path: "/tmp/session.jsonl",
+                approvalPolicy: granular
+            ).appServerExperimentalReason,
+            "thread/fork.path"
+        )
+        XCTAssertEqual(
+            ThreadStartParams(environments: []).appServerExperimentalReason,
+            "thread/start.environments"
+        )
+        XCTAssertEqual(
+            ThreadStartParams(dynamicTools: []).appServerExperimentalReason,
+            "thread/start.dynamicTools"
+        )
+        XCTAssertEqual(
+            ThreadStartParams(mockExperimentalField: "test").appServerExperimentalReason,
+            "thread/start.mockExperimentalField"
+        )
+        XCTAssertEqual(
+            ThreadStartParams(experimentalRawEvents: true).appServerExperimentalReason,
+            "thread/start.experimentalRawEvents"
+        )
+        XCTAssertEqual(
+            ThreadStartParams(persistExtendedHistory: true).appServerExperimentalReason,
+            "thread/start.persistFullHistory"
+        )
+        XCTAssertEqual(
+            ThreadResumeParams(threadID: "thr_123", excludeTurns: true).appServerExperimentalReason,
+            "thread/resume.excludeTurns"
+        )
+        XCTAssertEqual(
+            ThreadForkParams(threadID: "thr_456", persistExtendedHistory: true).appServerExperimentalReason,
+            "thread/fork.persistFullHistory"
+        )
+        XCTAssertNil(ThreadStartParams(model: "gpt-5").appServerExperimentalReason)
+    }
+
     func testThreadListAndReadResponsesCarryRustThreadDataShape() throws {
         let turn = AppServerTurn(
             id: "turn-1",

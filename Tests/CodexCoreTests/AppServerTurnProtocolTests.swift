@@ -291,6 +291,71 @@ final class AppServerTurnProtocolTests: XCTestCase {
         ])
     }
 
+    func testTurnStartAndSteerParamsExperimentalReasonsMatchRustClientRequestInspection() {
+        let granular = AskForApproval.granular(
+            GranularApprovalConfig(
+                sandboxApproval: false,
+                rules: true,
+                skillApproval: false,
+                requestPermissions: false,
+                mcpElicitations: true
+            )
+        )
+
+        XCTAssertEqual(
+            AppServerTurnStartParams(threadID: "thr_123", input: [], approvalPolicy: granular)
+                .appServerExperimentalReason,
+            "askForApproval.granular"
+        )
+        XCTAssertEqual(
+            AppServerTurnStartParams(
+                threadID: "thr_123",
+                input: [],
+                responsesapiClientMetadata: ["source": "test"],
+                approvalPolicy: granular
+            ).appServerExperimentalReason,
+            "turn/start.responsesapiClientMetadata"
+        )
+        XCTAssertEqual(
+            AppServerTurnStartParams(threadID: "thr_123", input: [], environments: [])
+                .appServerExperimentalReason,
+            "turn/start.environments"
+        )
+        XCTAssertEqual(
+            AppServerTurnStartParams(
+                threadID: "thr_123",
+                input: [],
+                permissions: AppServerPermissionProfileSelectionParams.profile(id: "workspace")
+            ).appServerExperimentalReason,
+            "turn/start.permissions"
+        )
+        XCTAssertEqual(
+            AppServerTurnStartParams(
+                threadID: "thr_123",
+                input: [],
+                collaborationMode: CollaborationMode(
+                    mode: .plan,
+                    settings: CollaborationModeSettings(model: "gpt-5")
+                )
+            ).appServerExperimentalReason,
+            "turn/start.collaborationMode"
+        )
+        XCTAssertEqual(
+            AppServerTurnSteerParams(
+                threadID: "thr_123",
+                input: [],
+                responsesapiClientMetadata: ["source": "test"],
+                expectedTurnID: "turn_123"
+            ).appServerExperimentalReason,
+            "turn/steer.responsesapiClientMetadata"
+        )
+        XCTAssertNil(AppServerTurnStartParams(threadID: "thr_123", input: []).appServerExperimentalReason)
+        XCTAssertNil(
+            AppServerTurnSteerParams(threadID: "thr_123", input: [], expectedTurnID: "turn_123")
+                .appServerExperimentalReason
+        )
+    }
+
     func testTurnNotificationsAndPlanUseRustCamelCaseShape() throws {
         let turn = AppServerTurn(id: "turn-1", items: [], status: .inProgress)
 
