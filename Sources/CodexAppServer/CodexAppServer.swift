@@ -2842,10 +2842,11 @@ public enum CodexAppServer {
             threadID: ThreadId(uuid: conversationID.uuid),
             texts: hookOutcome.additionalContexts
         )
-        if turnContext != nil || !sessionStartContexts.isEmpty || !input.text.isEmpty || !(input.images?.isEmpty ?? true) {
+        let hasUserInput = !input.text.isEmpty || !(input.images?.isEmpty ?? true)
+        if !sessionStartContexts.isEmpty || hasUserInput || !spilledHookContexts.isEmpty {
             let recorder = try RolloutRecorder.resume(path: URL(fileURLWithPath: rolloutPath))
             var items: [RolloutRecordItem] = []
-            if let turnContext {
+            if hasUserInput, let turnContext {
                 items.append(.turnContext(turnContext.withTurnID(turnID)))
             }
             items.append(contentsOf: sessionStartContexts.map { context in
@@ -2853,7 +2854,7 @@ public enum CodexAppServer {
             })
             if !sessionStartShouldStop,
                !hookOutcome.shouldStop,
-               (!input.text.isEmpty || !(input.images?.isEmpty ?? true)) {
+               hasUserInput {
                 items.append(.eventMsg(.userMessage(UserMessageEvent(message: input.text, images: input.images))))
             }
             items.append(contentsOf: spilledHookContexts.map { context in

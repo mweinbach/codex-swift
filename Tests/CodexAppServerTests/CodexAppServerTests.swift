@@ -1511,6 +1511,35 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNotNil(turnContext.permissionProfile)
     }
 
+    func testTurnStartContextOverrideWithoutUserInputDoesNotAppendRolloutLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        retainedTemporaryDirectories.append(cwd)
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
+        )
+
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider","cwd":"\#(cwd.url.path)"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        let baseline = try rolloutRecordTypes(at: rolloutPath)
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","approvalPolicy":"on-failure"}}"#.utf8
+        )))
+
+        XCTAssertNotNil((messages[0]["result"] as? [String: Any])?["turn"])
+        XCTAssertEqual(try rolloutRecordTypes(at: rolloutPath), baseline)
+    }
+
     func testThreadStartEphemeralRemainsPathlessLikeRust() throws {
         let temp = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
@@ -31398,6 +31427,14 @@ final class CodexAppServerTests: XCTestCase {
             return payload
         }
         return try XCTUnwrap(nil as [String: Any]?)
+    }
+
+    private func rolloutRecordTypes(at path: String) throws -> [String] {
+        let rollout = try String(contentsOfFile: path, encoding: .utf8)
+        return try rollout.split(separator: "\n").compactMap { rawLine in
+            let object = try JSONSerialization.jsonObject(with: Data(rawLine.utf8)) as? [String: Any]
+            return object?["type"] as? String
+        }
     }
 
     private func appendRolloutEvents(to path: String, timestamp: String, events: [EventMessage]) throws {
