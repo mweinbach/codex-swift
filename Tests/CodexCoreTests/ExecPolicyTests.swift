@@ -852,6 +852,41 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
     }
 
+    func testParserEvaluatesRustStarlarkNestedTargetDestructuring() throws {
+        let policy = try parsePolicy("""
+        PAIRS = [[0, ["git", "status"]], [1, ["jj", "log"]]]
+        HOSTS = [["api.github.com"]]
+        PATHS = [["git", ["ignored", "/usr/bin/git"]]]
+        [HOST] = HOSTS[0]
+        (GROUPED_HOST) = "downloads.example.com"
+        SELECTED = [tool + "-" + command for index, [tool, command] in PAIRS if index == 0]
+
+        for index, [tool, command] in PAIRS:
+            if index == 0:
+                prefix_rule([tool, command], "allow", justification = SELECTED[0])
+
+        if HOST == "api.github.com":
+            network_rule(HOST, "https", "allow")
+        network_rule(GROUPED_HOST, "https", "prompt")
+
+        for [tool, [_, path]] in PATHS:
+            host_executable(tool, [path])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(
+                pattern: PrefixPattern(first: "git", rest: [.single("status")]),
+                decision: .allow,
+                justification: "git-status"
+            )
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "api.github.com", protocol: .https, decision: .allow),
+            NetworkRule(host: "downloads.example.com", protocol: .https, decision: .prompt)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
+    }
+
     func testParserEvaluatesRustStarlarkEnumerateAndZip() throws {
         let policy = try parsePolicy("""
         TOOLS = ["git", "jj", "npm"]

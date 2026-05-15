@@ -2830,7 +2830,7 @@ public final class PolicyParser {
     }
 
     private static func parseTopLevelForHeader(_ statement: String) throws -> (
-        targets: [String],
+        targets: StarlarkLoopTarget,
         iterableText: String
     )? {
         let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2854,42 +2854,85 @@ public final class PolicyParser {
         return (targets, iterableText)
     }
 
-    private static func parseStarlarkLoopTargets(_ text: String, expression: String) throws -> [String] {
-        var trimmed = strippingEnclosingParentheses(from: text.trimmingCharacters(in: .whitespacesAndNewlines))
+    private enum StarlarkLoopTarget {
+        case name(String)
+        case sequence([StarlarkLoopTarget])
+    }
+
+    private static func parseStarlarkLoopTargets(_ text: String, expression: String) throws -> StarlarkLoopTarget {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.hasPrefix("["),
            trimmed.hasSuffix("]"),
            enclosesWholeExpression(trimmed) {
-            trimmed = String(trimmed.dropFirst().dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+            return try parseStarlarkLoopTargetSequence(
+                String(trimmed.dropFirst().dropLast()),
+                expression: expression
+            )
+        }
+        if trimmed.hasPrefix("("),
+           trimmed.hasSuffix(")"),
+           enclosesWholeExpression(trimmed) {
+            let inner = String(trimmed.dropFirst().dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+            let pieces = splitTopLevel(inner, separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            if pieces.count <= 1, !inner.hasSuffix(",") {
+                return try parseStarlarkLoopTargets(inner, expression: expression)
+            }
+            return try parseStarlarkLoopTargetSequence(
+                inner,
+                expression: expression
+            )
         }
         let targetPieces = splitTopLevel(trimmed, separator: ",")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        guard !targetPieces.isEmpty,
-              targetPieces.allSatisfy(isStarlarkIdentifier)
+        if targetPieces.count > 1 {
+            return try .sequence(targetPieces.map {
+                try parseStarlarkLoopTargets($0, expression: expression)
+            })
+        }
+        guard let name = targetPieces.first,
+              isStarlarkIdentifier(name)
         else {
             throw ConfigOverrideError.invalidLiteral(expression)
         }
-        return targetPieces
+        return .name(name)
+    }
+
+    private static func parseStarlarkLoopTargetSequence(
+        _ text: String,
+        expression: String
+    ) throws -> StarlarkLoopTarget {
+        let targetPieces = splitTopLevel(text.trimmingCharacters(in: .whitespacesAndNewlines), separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !targetPieces.isEmpty else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        return try .sequence(targetPieces.map {
+            try parseStarlarkLoopTargets($0, expression: expression)
+        })
     }
 
     private static func bindStarlarkLoopTargets(
-        _ targets: [String],
+        _ targets: StarlarkLoopTarget,
         to item: ConfigValue,
         constants: inout [String: ConfigValue],
         expression: String
     ) throws {
-        if targets.count == 1 {
-            constants[targets[0]] = item
-            return
-        }
-
-        guard case let .array(values) = item,
-              values.count == targets.count
-        else {
-            throw ConfigOverrideError.invalidLiteral(expression)
-        }
-        for (target, value) in zip(targets, values) {
-            constants[target] = value
+        switch targets {
+        case let .name(name):
+            constants[name] = item
+        case let .sequence(targets):
+            guard case let .array(values) = item,
+                  values.count == targets.count
+            else {
+                throw ConfigOverrideError.invalidLiteral(expression)
+            }
+            for (target, value) in zip(targets, values) {
+                try bindStarlarkLoopTargets(target, to: value, constants: &constants, expression: expression)
+            }
         }
     }
 
@@ -7541,7 +7584,7 @@ public final class PolicyParser {
     }
 
     private enum StarlarkComprehensionClause {
-        case forLoop(targets: [String], iterableText: String)
+        case forLoop(targets: StarlarkLoopTarget, iterableText: String)
         case condition(String)
     }
 
