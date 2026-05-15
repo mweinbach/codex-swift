@@ -13543,6 +13543,31 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(capture.requests.map { $0.value(forHTTPHeaderField: "Authorization") }, ["Bearer chatgpt-token", "Bearer chatgpt-token"])
     }
 
+    func testPluginShareListRejectsMalformedEmptyStructParamsLikeRust() throws {
+        let cases: [(String, String)] = [
+            (
+                #"{"id":1,"method":"plugin/share/list"}"#,
+                "missing field `params`"
+            ),
+            (
+                #"{"id":1,"method":"plugin/share/list","params":null}"#,
+                "Invalid request: invalid type: null, expected struct PluginShareListParams"
+            ),
+            (
+                #"{"id":1,"method":"plugin/share/list","params":false}"#,
+                "Invalid request: invalid type: boolean `false`, expected struct PluginShareListParams"
+            )
+        ]
+
+        for (payload, expectedMessage) in cases {
+            let temp = try TemporaryDirectory()
+            let response = try appServerResponse(payload, codexHome: temp.url)
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, expectedMessage)
+        }
+    }
+
     func testPluginShareUpdateTargetsForwardsWorkspaceTargetAndFiltersResponse() throws {
         let temp = try TemporaryDirectory()
         try """
@@ -24141,19 +24166,7 @@ final class CodexAppServerTests: XCTestCase {
         let temp = try TemporaryDirectory()
 
         let response = try appServerResponse(
-            #"{"id":1,"method":"config/mcpServer/reload"}"#,
-            codexHome: temp.url
-        )
-
-        let result = try XCTUnwrap(response["result"] as? [String: Any])
-        XCTAssertTrue(result.isEmpty)
-    }
-
-    func testMcpServerReloadAcceptsNullParams() throws {
-        let temp = try TemporaryDirectory()
-
-        let response = try appServerResponse(
-            #"{"id":1,"method":"config/mcpServer/reload","params":null}"#,
+            #"{"id":1,"method":"config/mcpServer/reload","params":{}}"#,
             codexHome: temp.url
         )
 
@@ -24202,7 +24215,7 @@ final class CodexAppServerTests: XCTestCase {
         let threadID = try XCTUnwrap(((start[0]["result"] as? [String: Any])?["thread"] as? [String: Any])?["id"] as? String)
 
         let response = try decode(processor.processLine(
-            Data(#"{"id":2,"method":"config/mcpServer/reload"}"#.utf8)
+            Data(#"{"id":2,"method":"config/mcpServer/reload","params":{}}"#.utf8)
         ))
 
         let result = try XCTUnwrap(response["result"] as? [String: Any])
@@ -24280,7 +24293,7 @@ final class CodexAppServerTests: XCTestCase {
         )
 
         let response = try decode(processor.processLine(
-            Data(#"{"id":2,"method":"config/mcpServer/reload"}"#.utf8)
+            Data(#"{"id":2,"method":"config/mcpServer/reload","params":{}}"#.utf8)
         ))
 
         let result = try XCTUnwrap(response["result"] as? [String: Any])
@@ -24320,7 +24333,7 @@ final class CodexAppServerTests: XCTestCase {
         let threadID = try XCTUnwrap(((start[0]["result"] as? [String: Any])?["thread"] as? [String: Any])?["id"] as? String)
 
         let response = try decode(processor.processLine(
-            Data(#"{"id":2,"method":"config/mcpServer/reload"}"#.utf8)
+            Data(#"{"id":2,"method":"config/mcpServer/reload","params":{}}"#.utf8)
         ))
 
         let result = try XCTUnwrap(response["result"] as? [String: Any])
@@ -24352,7 +24365,7 @@ final class CodexAppServerTests: XCTestCase {
         let threadID = try XCTUnwrap(((start[0]["result"] as? [String: Any])?["thread"] as? [String: Any])?["id"] as? String)
 
         let response = try decode(processor.processLine(
-            Data(#"{"id":2,"method":"config/mcpServer/reload"}"#.utf8)
+            Data(#"{"id":2,"method":"config/mcpServer/reload","params":{}}"#.utf8)
         ))
 
         let error = try XCTUnwrap(response["error"] as? [String: Any])
@@ -24362,17 +24375,29 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
-    func testMcpServerReloadRejectsObjectParamsLikeRustUnitOption() throws {
-        let temp = try TemporaryDirectory()
+    func testMcpServerReloadRejectsMalformedEmptyStructParamsLikeRust() throws {
+        let cases: [(String, String)] = [
+            (
+                #"{"id":1,"method":"config/mcpServer/reload"}"#,
+                "missing field `params`"
+            ),
+            (
+                #"{"id":1,"method":"config/mcpServer/reload","params":null}"#,
+                "Invalid request: invalid type: null, expected struct McpServerRefreshParams"
+            ),
+            (
+                #"{"id":1,"method":"config/mcpServer/reload","params":"bad"}"#,
+                #"Invalid request: invalid type: string "bad", expected struct McpServerRefreshParams"#
+            )
+        ]
 
-        let response = try appServerResponse(
-            #"{"id":1,"method":"config/mcpServer/reload","params":{}}"#,
-            codexHome: temp.url
-        )
-
-        let error = try XCTUnwrap(response["error"] as? [String: Any])
-        XCTAssertEqual(error["code"] as? Int, -32600)
-        XCTAssertEqual(error["message"] as? String, "Invalid request: invalid type: map, expected unit")
+        for (payload, expectedMessage) in cases {
+            let temp = try TemporaryDirectory()
+            let response = try appServerResponse(payload, codexHome: temp.url)
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, expectedMessage)
+        }
     }
 
     func testMcpServerReloadReportsConfigLoadFailures() throws {
@@ -24384,7 +24409,7 @@ final class CodexAppServerTests: XCTestCase {
         """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
 
         let response = try appServerResponse(
-            #"{"id":1,"method":"config/mcpServer/reload"}"#,
+            #"{"id":1,"method":"config/mcpServer/reload","params":{}}"#,
             codexHome: temp.url
         )
 

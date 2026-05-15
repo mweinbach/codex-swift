@@ -8227,9 +8227,10 @@ public enum CodexAppServer {
     }
 
     fileprivate static func pluginShareListResult(
-        params _: [String: Any]?,
+        rawParams: Any?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
+        try requireRustEmptyStructParams(rawParams, structName: "PluginShareListParams")
         let (runtimeConfig, auth) = try pluginShareRuntimeConfigAndAuth(
             configuration: configuration,
             failurePrefix: "list remote plugin shares"
@@ -13503,7 +13504,7 @@ public enum CodexAppServer {
         refreshConfigForThreadID: (String) throws -> McpServerRefreshConfig? = { _ in nil },
         queueThreadRefresh: (String, McpServerRefreshConfig) throws -> Void = { _, _ in }
     ) throws -> [String: Any] {
-        try requireRustUnitParams(rawParams)
+        try requireRustEmptyStructParams(rawParams, structName: "McpServerRefreshParams")
         let runtimeConfig: CodexRuntimeConfig
         do {
             runtimeConfig = try CodexConfigLoader.load(
@@ -28201,7 +28202,10 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                 case "plugin/share/list":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.pluginShareListResult(params: params, configuration: configuration)
+                        result: try CodexAppServer.pluginShareListResult(
+                            rawParams: object["params"],
+                            configuration: configuration
+                        )
                     )
                 case "plugin/share/delete":
                     let result = try CodexAppServer.pluginShareDeleteResult(params: params, configuration: configuration)
