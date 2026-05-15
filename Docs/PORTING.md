@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust `ModelProviderAuthInfo` in
+  `codex-rs/protocol/src/config_types.rs`. Swift provider auth decoding now
+  preserves Serde's default boundary for `args`, `timeout_ms`,
+  `refresh_interval_ms`, and `cwd`: omitted fields use Rust defaults while
+  explicit `null` rejects.
 - 2026-05-15: rechecked Rust `FileSystemSandboxPolicy` in
   `codex-rs/protocol/src/permissions.rs`. Swift core sandbox-policy decoding
   now preserves Serde's default boundary for restricted `entries`: omitted

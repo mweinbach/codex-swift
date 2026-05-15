@@ -167,19 +167,37 @@ final class ModelProviderInfoTests: XCTestCase {
         {
           "name": "Corp",
           "auth": {
-            "command": "./scripts/print-token",
-            "args": ["--format=text"]
+            "command": "./scripts/print-token"
           }
         }
         """.utf8))
 
         let auth = try XCTUnwrap(provider.auth)
         XCTAssertEqual(auth.command, "./scripts/print-token")
-        XCTAssertEqual(auth.args, ["--format=text"])
+        XCTAssertEqual(auth.args, [])
         XCTAssertEqual(auth.timeoutMilliseconds, 5_000)
         XCTAssertEqual(auth.refreshIntervalMilliseconds, 300_000)
         XCTAssertEqual(auth.refreshIntervalMS, 300_000)
         XCTAssertEqual(auth.cwd, try AbsolutePath.currentDirectory())
+    }
+
+    func testProviderAuthConfigRejectsNullRustDefaultedFields() {
+        let nullDefaultedFields = [
+            "args",
+            "timeout_ms",
+            "refresh_interval_ms",
+            "cwd"
+        ]
+
+        for field in nullDefaultedFields {
+            XCTAssertThrowsError(
+                try JSONDecoder().decode(
+                    ModelProviderInfo.self,
+                    from: Data(#"{"name":"Corp","auth":{"command":"./scripts/print-token","\#(field)":null}}"#.utf8)
+                ),
+                field
+            )
+        }
     }
 
     func testProviderAuthConfigAllowsZeroRefreshIntervalLikeRust() throws {

@@ -693,11 +693,12 @@ public struct ModelProviderAuthInfo: Codable, Equatable, Hashable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.command = try container.decode(String.self, forKey: .command)
-        self.args = try container.decodeIfPresent([String].self, forKey: .args) ?? []
-        self.timeoutMilliseconds = try container.decodeIfPresent(
+        self.args = try container.decodeRustDefaulted([String].self, forKey: .args, defaultValue: [])
+        self.timeoutMilliseconds = try container.decodeRustDefaulted(
             UInt64.self,
-            forKey: .timeoutMilliseconds
-        ) ?? Self.defaultTimeoutMilliseconds
+            forKey: .timeoutMilliseconds,
+            defaultValue: Self.defaultTimeoutMilliseconds
+        )
         guard timeoutMilliseconds > 0 else {
             throw DecodingError.dataCorruptedError(
                 forKey: .timeoutMilliseconds,
@@ -705,15 +706,13 @@ public struct ModelProviderAuthInfo: Codable, Equatable, Hashable, Sendable {
                 debugDescription: "model_providers.<id>.auth.timeout_ms must be non-zero"
             )
         }
-        self.refreshIntervalMilliseconds = try container.decodeIfPresent(
+        self.refreshIntervalMilliseconds = try container.decodeRustDefaulted(
             UInt64.self,
-            forKey: .refreshIntervalMilliseconds
-        ) ?? Self.defaultRefreshIntervalMilliseconds
-        if let cwdText = try container.decodeIfPresent(String.self, forKey: .cwd) {
-            self.cwd = try AbsolutePath.resolve(cwdText, against: FileManager.default.currentDirectoryPath)
-        } else {
-            self.cwd = try AbsolutePath.currentDirectory()
-        }
+            forKey: .refreshIntervalMilliseconds,
+            defaultValue: Self.defaultRefreshIntervalMilliseconds
+        )
+        let cwdText = try container.decodeRustDefaulted(String.self, forKey: .cwd, defaultValue: ".")
+        self.cwd = try AbsolutePath.resolve(cwdText, against: FileManager.default.currentDirectoryPath)
     }
 
     public func encode(to encoder: Encoder) throws {
