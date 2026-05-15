@@ -28,6 +28,32 @@ final class ResponsesAPITests: XCTestCase {
         XCTAssertNotNil(format["schema"] as? [String: Any])
     }
 
+    func testCreateTextParamBuildsNonStrictSchemaFormatLikeRust() throws {
+        let schema = JSONValue.object([
+            "type": .string("object"),
+            "properties": .object([
+                "answer": .object(["type": .string("string")]),
+                "rationale": .object(["type": .string("string")])
+            ]),
+            "required": .array([.string("answer")]),
+            "additionalProperties": .bool(false)
+        ])
+
+        let text = try XCTUnwrap(ResponsesAPITextControls.createForRequest(
+            verbosity: nil,
+            outputSchema: schema,
+            outputSchemaStrict: false
+        ))
+        let object = try JSONObject(text)
+
+        XCTAssertNil(object["verbosity"])
+        let format = try XCTUnwrap(object["format"] as? [String: Any])
+        XCTAssertEqual(format["type"] as? String, "json_schema")
+        XCTAssertEqual(format["strict"] as? Bool, false)
+        XCTAssertEqual(format["name"] as? String, "codex_output_schema")
+        XCTAssertNotNil(format["schema"] as? [String: Any])
+    }
+
     func testResponsesAPIRequestWireShapeSkipsNilOptionals() throws {
         let request = ResponsesAPIRequest(
             model: "gpt-test",

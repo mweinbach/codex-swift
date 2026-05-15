@@ -44,6 +44,7 @@ final class NonInteractiveExecTests: XCTestCase {
 
         XCTAssertEqual(prompt.tools, [])
         XCTAssertEqual(prompt.outputSchema, schema)
+        XCTAssertTrue(prompt.outputSchemaStrict)
         XCTAssertEqual(prompt.input.count, 3)
 
         guard case let .message(_, developerRole, developerContent, _) = prompt.input[0] else {

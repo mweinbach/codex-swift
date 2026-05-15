@@ -7,19 +7,22 @@ public struct Prompt: Equatable, Sendable {
     public var parallelToolCalls: Bool
     public var baseInstructionsOverride: String?
     public var outputSchema: JSONValue?
+    public var outputSchemaStrict: Bool
 
     public init(
         input: [ResponseItem] = [],
         tools: [ToolSpec] = [],
         parallelToolCalls: Bool = false,
         baseInstructionsOverride: String? = nil,
-        outputSchema: JSONValue? = nil
+        outputSchema: JSONValue? = nil,
+        outputSchemaStrict: Bool = true
     ) {
         self.input = input
         self.tools = tools
         self.parallelToolCalls = parallelToolCalls
         self.baseInstructionsOverride = baseInstructionsOverride
         self.outputSchema = outputSchema
+        self.outputSchemaStrict = outputSchemaStrict
     }
 
     public func fullInstructions(for model: ModelFamily) -> String {

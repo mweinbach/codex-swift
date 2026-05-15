@@ -298,7 +298,8 @@ public func memoryStageOneResponsesOptions(
         supportedServiceTierIDs: supportedServiceTierIDs.isEmpty ? nil : supportedServiceTierIDs,
         text: ResponsesAPITextControls.createForRequest(
             verbosity: verbosity ?? context.modelInfo.defaultVerbosity,
-            outputSchema: prompt.outputSchema
+            outputSchema: prompt.outputSchema,
+            outputSchemaStrict: prompt.outputSchemaStrict
         ),
         inputModalities: context.modelInfo.inputModalities,
         turnMetadataHeader: context.turnMetadataHeader

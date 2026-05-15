@@ -85,6 +85,10 @@ Recent upstream audit checkpoint:
   hunk cases in `codex-rs/apply-patch/src/parser.rs`. Swift parse-level
   coverage now pins the matching empty `@@`, bad first update line, empty
   `*** End of File`, missing subsequent `@@`, and embedded hunk-header errors.
+- 2026-05-15: rechecked Rust's `create_text_param_for_request` in
+  `codex-rs/codex-api/src/common.rs`. Swift Responses text controls now carry
+  Rust's `output_schema_strict` knob while preserving strict schema output as
+  the default.
 - 2026-05-15: rechecked Rust app-server feedback upload handling in
   `codex-rs/app-server-protocol/src/protocol/v2/feedback.rs` and
   `codex-rs/app-server/src/request_processors/feedback_processor.rs`. Swift

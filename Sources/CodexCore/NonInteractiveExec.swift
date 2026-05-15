@@ -295,6 +295,7 @@ public enum NonInteractiveExec {
         verbosity: Verbosity?,
         serviceTier: String? = nil,
         outputSchema: JSONValue?,
+        outputSchemaStrict: Bool = true,
         requestTrace: W3CTraceContext? = nil
     ) -> ResponsesOptions {
         let effort = reasoningEffort ?? modelFamily.defaultReasoningEffort
@@ -313,7 +314,8 @@ public enum NonInteractiveExec {
             supportedServiceTierIDs: supportedServiceTierIDs.isEmpty ? nil : supportedServiceTierIDs,
             text: ResponsesAPITextControls.createForRequest(
                 verbosity: verbosity ?? modelFamily.defaultVerbosity,
-                outputSchema: outputSchema
+                outputSchema: outputSchema,
+                outputSchemaStrict: outputSchemaStrict
             ),
             inputModalities: modelFamily.inputModalities,
             conversationID: conversationID.description,

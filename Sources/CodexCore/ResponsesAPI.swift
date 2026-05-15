@@ -65,7 +65,8 @@ public struct ResponsesAPITextControls: Equatable, Codable, Sendable {
     /// Port of codex-api create_text_param_for_request.
     public static func createForRequest(
         verbosity: Verbosity?,
-        outputSchema: JSONValue?
+        outputSchema: JSONValue?,
+        outputSchemaStrict: Bool = true
     ) -> ResponsesAPITextControls? {
         if verbosity == nil, outputSchema == nil {
             return nil
@@ -75,7 +76,7 @@ public struct ResponsesAPITextControls: Equatable, Codable, Sendable {
             verbosity: verbosity.map(OpenAIVerbosity.init),
             format: outputSchema.map {
                 ResponsesAPITextFormat(
-                    strict: true,
+                    strict: outputSchemaStrict,
                     schema: $0,
                     name: "codex_output_schema"
                 )
