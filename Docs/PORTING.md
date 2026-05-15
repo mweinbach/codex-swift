@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's `ThreadGoalSetParams` in
+  `codex-rs/app-server-protocol/src/protocol/v2/thread.rs`. Swift now encodes
+  missing `objective` and `status` fields as explicit `null` like Rust's plain
+  `Option` fields while preserving `tokenBudget`'s omitted/null/value patch
+  semantics.
 - 2026-05-15: rechecked Rust's
   `BackendClient::send_add_credits_nudge_email_url` in
   `codex-rs/backend-client/src/client.rs`. Swift app-server coverage now pins

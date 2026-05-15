@@ -2014,12 +2014,16 @@ final class AppServerThreadProtocolTests: XCTestCase {
             ]
         )
         try XCTAssertJSONObjectEqual(ThreadGoalSetParams(threadID: threadID.description), [
-            "threadId": threadID.description
+            "threadId": threadID.description,
+            "objective": NSNull(),
+            "status": NSNull()
         ])
         try XCTAssertJSONObjectEqual(
             ThreadGoalSetParams(threadID: threadID.description, tokenBudget: .clear),
             [
                 "threadId": threadID.description,
+                "objective": NSNull(),
+                "status": NSNull(),
                 "tokenBudget": NSNull()
             ]
         )

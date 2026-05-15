@@ -2647,8 +2647,8 @@ public struct ThreadGoalSetParams: Equatable, Codable, Sendable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(threadID, forKey: .threadID)
-        try container.encodeIfPresent(objective, forKey: .objective)
-        try container.encodeIfPresent(status, forKey: .status)
+        try container.encodeNilOrValue(objective, forKey: .objective)
+        try container.encodeNilOrValue(status, forKey: .status)
         switch tokenBudget {
         case .preserve:
             break
