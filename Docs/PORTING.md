@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `CommandExecWriteParams`
+  serialization in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`.
+  Swift now pins the close-only `command/exec/write` control payload with
+  explicit `null` `deltaBase64` and `closeStdin: true`.
 - 2026-05-15: rechecked Rust app-server v2 `CommandExecParams`
   environment override serialization in
   `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now pins the

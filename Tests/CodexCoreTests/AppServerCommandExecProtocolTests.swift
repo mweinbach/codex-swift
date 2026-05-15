@@ -324,6 +324,14 @@ final class AppServerCommandExecProtocolTests: XCTestCase {
             "deltaBase64": NSNull()
         ])
         try XCTAssertJSONObjectEqual(
+            CommandExecWriteParams(processID: "proc-7", closeStdin: true),
+            [
+                "processId": "proc-7",
+                "deltaBase64": NSNull(),
+                "closeStdin": true
+            ]
+        )
+        try XCTAssertJSONObjectEqual(
             CommandExecWriteParams(processID: "cmd-1", deltaBase64: "aGk=", closeStdin: true),
             [
                 "processId": "cmd-1",
