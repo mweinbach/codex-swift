@@ -3027,6 +3027,33 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertTrue(payload.content.contains("got:hello"))
     }
 
+    func testUnifiedExecTtyRunsCommandInPseudoTerminalLikeRust() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let item = ResponseItem.functionCall(
+            name: "exec_command",
+            arguments: #"{"cmd":"test -t 0 && printf tty || printf notty","tty":true,"yield_time_ms":1000}"#,
+            callID: "call-tty"
+        )
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            item,
+            cwd: temp.url,
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: ["PATH": "/bin:/usr/bin", "HOME": temp.url.path]
+        )
+
+        guard case let .functionCallOutput(callID, payload) = output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-tty")
+        XCTAssertEqual(payload.success, true)
+        XCTAssertTrue(payload.content.contains("Output:\ntty"), payload.content)
+        XCTAssertFalse(payload.content.contains("notty"), payload.content)
+    }
+
     func testPermissionRequestHookAllowsPolicyPromptedExecCommandLikeRust() async throws {
         let temp = try NonInteractiveExecTemporaryDirectory()
         let hookInputLog = temp.url.appendingPathComponent("exec-permission-hook-input.json")

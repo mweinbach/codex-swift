@@ -818,6 +818,7 @@ public struct ExecCommandToolCallParams: Equatable, Decodable, Sendable {
     public let shell: String?
     public let requestedLogin: Bool?
     public let login: Bool
+    public let tty: Bool
     public let yieldTimeMS: UInt64
     public let maxOutputTokens: Int?
     public let sandboxPermissions: SandboxPermissions
@@ -830,6 +831,7 @@ public struct ExecCommandToolCallParams: Equatable, Decodable, Sendable {
         case workdir
         case shell
         case login
+        case tty
         case yieldTimeMS = "yield_time_ms"
         case maxOutputTokens = "max_output_tokens"
         case sandboxPermissions = "sandbox_permissions"
@@ -845,6 +847,7 @@ public struct ExecCommandToolCallParams: Equatable, Decodable, Sendable {
         self.shell = try container.decodeIfPresent(String.self, forKey: .shell)
         self.requestedLogin = try container.decodeIfPresent(Bool.self, forKey: .login)
         self.login = requestedLogin ?? true
+        self.tty = try container.decodeRustDefaulted(Bool.self, forKey: .tty, defaultValue: false)
         self.yieldTimeMS = try container.decodeRustDefaulted(UInt64.self, forKey: .yieldTimeMS, defaultValue: 10_000)
         self.maxOutputTokens = try container.decodeIfPresent(Int.self, forKey: .maxOutputTokens)
         self.sandboxPermissions = try container.decodeRustDefaulted(

@@ -1301,6 +1301,7 @@ final class ResponseModelsTests: XCTestCase {
             "cmd": "git push origin main",
             "workdir": "/repo",
             "login": false,
+            "tty": true,
             "yield_time_ms": 750,
             "max_output_tokens": 1200,
             "sandbox_permissions": "require_escalated",
@@ -1318,6 +1319,7 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertEqual(params.cmd, "git push origin main")
         XCTAssertEqual(params.workdir, "/repo")
         XCTAssertEqual(params.requestedLogin, false)
+        XCTAssertTrue(params.tty)
         XCTAssertEqual(params.yieldTimeMS, 750)
         XCTAssertEqual(params.maxOutputTokens, 1200)
         XCTAssertEqual(params.sandboxPermissions, .requireEscalated)
@@ -1333,10 +1335,12 @@ final class ResponseModelsTests: XCTestCase {
         }
         """#.utf8))
         XCTAssertEqual(execDefaults.login, true)
+        XCTAssertEqual(execDefaults.tty, false)
         XCTAssertEqual(execDefaults.yieldTimeMS, 10_000)
         XCTAssertEqual(execDefaults.sandboxPermissions, .useDefault)
 
         for json in [
+            #"{"cmd":"pwd","tty":null}"#,
             #"{"cmd":"pwd","yield_time_ms":null}"#,
             #"{"cmd":"pwd","sandbox_permissions":null}"#
         ] {

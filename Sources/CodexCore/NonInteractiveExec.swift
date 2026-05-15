@@ -1381,6 +1381,7 @@ public enum NonInteractiveExec {
                     sessionShell: snapshotShell,
                     workdir: params.workdir,
                     timeoutMS: params.yieldTimeMS,
+                    tty: params.tty,
                     sandboxPermissions: params.sandboxPermissions,
                     prefixRule: params.prefixRule,
                     additionalPermissions: params.additionalPermissions,
@@ -2041,6 +2042,7 @@ public enum NonInteractiveExec {
         sessionShell: Shell?,
         workdir: String?,
         timeoutMS: UInt64?,
+        tty: Bool,
         sandboxPermissions: SandboxPermissions,
         prefixRule: [String]?,
         additionalPermissions: RequestPermissionProfile?,
@@ -2121,6 +2123,7 @@ public enum NonInteractiveExec {
                     sandboxPermissions: sandboxPermissions,
                     approvalRequirement: approvalRequirement
                 ) ? .dangerFullAccess : commandSandboxPolicy,
+                tty: tty,
                 yieldTimeMS: UnifiedExecTiming.clampInitialYieldTimeMS(timeoutMS ?? 10_000),
                 truncationPolicy: truncationPolicy,
                 environment: childEnvironment
@@ -2949,9 +2952,10 @@ private actor UnifiedExecSessionRegistry {
     private struct Session {
         let id: String
         let process: Process
-        let stdinPipe: Pipe
-        let stdoutPipe: Pipe
-        let stderrPipe: Pipe
+        let stdinHandle: FileHandle
+        let stdoutHandle: FileHandle
+        let stderrHandle: FileHandle?
+        let pseudoTerminal: ExecServerPseudoTerminal?
         let stdoutCapture: DataCapture
         let stderrCapture: DataCapture
         var stdoutOffset: Int
@@ -2965,6 +2969,7 @@ private actor UnifiedExecSessionRegistry {
         command: [String],
         cwd: URL,
         sandboxPolicy: SandboxPolicy,
+        tty: Bool,
         yieldTimeMS: UInt64,
         truncationPolicy: TruncationPolicy,
         environment: [String: String]
@@ -2986,18 +2991,41 @@ private actor UnifiedExecSessionRegistry {
         let stdinPipe = Pipe()
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
+        let pseudoTerminal: ExecServerPseudoTerminal?
+        let stdinHandle: FileHandle
+        let stdoutHandle: FileHandle
+        let stderrHandle: FileHandle?
         let stdoutCapture = DataCapture()
         let stderrCapture = DataCapture()
-        process.standardInput = stdinPipe
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-        attachCapture(stdoutPipe, to: stdoutCapture)
-        attachCapture(stderrPipe, to: stderrCapture)
+        if tty {
+            let pty = try ExecServerPseudoTerminal()
+            pseudoTerminal = pty
+            process.standardInput = pty.stdinHandle
+            process.standardOutput = pty.stdoutHandle
+            process.standardError = pty.stderrHandle
+            stdinHandle = pty.master
+            stdoutHandle = pty.master
+            stderrHandle = nil
+        } else {
+            pseudoTerminal = nil
+            process.standardInput = stdinPipe
+            process.standardOutput = stdoutPipe
+            process.standardError = stderrPipe
+            stdinHandle = stdinPipe.fileHandleForWriting
+            stdoutHandle = stdoutPipe.fileHandleForReading
+            stderrHandle = stderrPipe.fileHandleForReading
+        }
+        attachCapture(stdoutHandle, to: stdoutCapture)
+        if let stderrHandle {
+            attachCapture(stderrHandle, to: stderrCapture)
+        }
 
         do {
             try process.run()
+            pseudoTerminal?.closeSlaveHandles()
         } catch {
-            detach(stdoutPipe, stderrPipe)
+            detach(stdoutHandle, stderrHandle)
+            pseudoTerminal?.closeSlaveHandles()
             throw UnifiedExecError.createSession(String(describing: error))
         }
 
@@ -3009,9 +3037,10 @@ private actor UnifiedExecSessionRegistry {
             sessions[sessionID] = Session(
                 id: sessionID,
                 process: process,
-                stdinPipe: stdinPipe,
-                stdoutPipe: stdoutPipe,
-                stderrPipe: stderrPipe,
+                stdinHandle: stdinHandle,
+                stdoutHandle: stdoutHandle,
+                stderrHandle: stderrHandle,
+                pseudoTerminal: pseudoTerminal,
                 stdoutCapture: stdoutCapture,
                 stderrCapture: stderrCapture,
                 stdoutOffset: stdout.count,
@@ -3028,9 +3057,10 @@ private actor UnifiedExecSessionRegistry {
             )
         }
 
-        detach(stdoutPipe, stderrPipe)
-        let stdout = readFinalData(pipe: stdoutPipe, capture: stdoutCapture)
-        let stderr = readFinalData(pipe: stderrPipe, capture: stderrCapture)
+        detach(stdoutHandle, stderrHandle)
+        let stdout = readFinalData(handle: stdoutHandle, capture: stdoutCapture)
+        let stderr = stderrHandle.map { readFinalData(handle: $0, capture: stderrCapture) } ?? Data()
+        pseudoTerminal?.closeMaster()
         return makeOutput(
             stdout: stdout,
             stderr: stderr,
@@ -3058,7 +3088,7 @@ private actor UnifiedExecSessionRegistry {
                 throw UnifiedExecError.writeToStdin
             }
             do {
-                try session.stdinPipe.fileHandleForWriting.write(contentsOf: data)
+                try session.stdinHandle.write(contentsOf: data)
             } catch {
                 throw UnifiedExecError.writeToStdin
             }
@@ -3089,11 +3119,14 @@ private actor UnifiedExecSessionRegistry {
             )
         }
 
-        detach(session.stdoutPipe, session.stderrPipe)
+        detach(session.stdoutHandle, session.stderrHandle)
         var finalStdout = stdout
-        finalStdout.append(session.stdoutPipe.fileHandleForReading.readDataToEndOfFile())
+        finalStdout.append(session.stdoutHandle.readDataToEndOfFile())
         var finalStderr = stderr
-        finalStderr.append(session.stderrPipe.fileHandleForReading.readDataToEndOfFile())
+        if let stderrHandle = session.stderrHandle {
+            finalStderr.append(stderrHandle.readDataToEndOfFile())
+        }
+        session.pseudoTerminal?.closeMaster()
         sessions.removeValue(forKey: sessionID)
         return makeOutput(
             stdout: finalStdout,
@@ -3143,8 +3176,8 @@ private actor UnifiedExecSessionRegistry {
         return (executable, Array(launch.dropFirst()), childEnvironment)
     }
 
-    private func attachCapture(_ pipe: Pipe, to capture: DataCapture) {
-        pipe.fileHandleForReading.readabilityHandler = { handle in
+    private func attachCapture(_ handle: FileHandle, to capture: DataCapture) {
+        handle.readabilityHandler = { handle in
             let data = handle.availableData
             if !data.isEmpty {
                 capture.append(data)
@@ -3152,9 +3185,9 @@ private actor UnifiedExecSessionRegistry {
         }
     }
 
-    private func detach(_ pipes: Pipe...) {
-        for pipe in pipes {
-            pipe.fileHandleForReading.readabilityHandler = nil
+    private func detach(_ handles: FileHandle?...) {
+        for handle in handles {
+            handle?.readabilityHandler = nil
         }
     }
 
@@ -3168,9 +3201,9 @@ private actor UnifiedExecSessionRegistry {
         }
     }
 
-    private func readFinalData(pipe: Pipe, capture: DataCapture) -> Data {
+    private func readFinalData(handle: FileHandle, capture: DataCapture) -> Data {
         var data = capture.snapshot()
-        data.append(pipe.fileHandleForReading.readDataToEndOfFile())
+        data.append(handle.readDataToEndOfFile())
         return data
     }
 

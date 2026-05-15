@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust unified exec `tty` handling in
+  `codex-rs/core/src/tools/handlers/unified_exec{,/exec_command}.rs` and the
+  unified exec process manager. Swift `exec_command` now decodes Rust's
+  defaulted `tty` field with omitted `false` / explicit-`null` rejection and
+  runs unified exec commands through a pseudo-terminal when `tty: true`.
 - 2026-05-15: rechecked Rust unified exec tool argument decoding in
   `codex-rs/core/src/tools/handlers/unified_exec{,/write_stdin}.rs`. Swift
   `ExecCommandToolCallParams` and `WriteStdinToolCallParams` now keep omitted
