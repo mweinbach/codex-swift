@@ -393,6 +393,29 @@ final class AppServerPluginProtocolTests: XCTestCase {
         XCTAssertEqual(decoded.availability, .available)
     }
 
+    func testPluginSummaryRejectsExplicitNullForRustDefaultedKeywords() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                PluginSummary.self,
+                from: Data("""
+                {
+                  "id": "remote",
+                  "name": "remote",
+                  "shareContext": null,
+                  "source": { "type": "remote" },
+                  "installed": false,
+                  "enabled": false,
+                  "installPolicy": "AVAILABLE",
+                  "authPolicy": "ON_USE",
+                  "availability": "AVAILABLE",
+                  "interface": null,
+                  "keywords": null
+                }
+                """.utf8)
+            )
+        )
+    }
+
     func testPluginShareSaveParamsEncodeExplicitNullOptionalsLikeRustProtocol() throws {
         let params = PluginShareSaveParams(pluginPath: try AbsolutePath(absolutePath: "/repo/plugin"))
 

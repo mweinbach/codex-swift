@@ -460,7 +460,7 @@ extension PluginSummary: Codable {
         authPolicy = try container.decode(PluginAuthPolicy.self, forKey: .authPolicy)
         availability = try container.decodeIfPresent(PluginAvailability.self, forKey: .availability) ?? .available
         interface = try container.decodeIfPresent(PluginInterface.self, forKey: .interface)
-        keywords = try container.decodeIfPresent([String].self, forKey: .keywords) ?? []
+        keywords = try container.decodeRustDefaulted([String].self, forKey: .keywords, defaultValue: [])
     }
 
     public func encode(to encoder: Encoder) throws {

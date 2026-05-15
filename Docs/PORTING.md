@@ -12,6 +12,19 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's remaining app-server shared protocol
+  `#[serde(default)]` array fields in
+  `v2/{apps.rs,config.rs,plugin.rs}`. Swift typed protocol decoding now
+  defaults omitted `AppInfo.pluginDisplayNames`,
+  `MigrationDetails.{plugins,sessions,mcpServers,hooks,subagents,commands}`,
+  and `PluginSummary.keywords` to empty arrays while rejecting explicit `null`
+  like Serde's defaulted `Vec` fields.
+- 2026-05-15: rechecked Rust app-server collection defaults in
+  `codex-rs/app-server-protocol/src/protocol/v2/{apps.rs,config.rs,model.rs,plugin.rs}`.
+  Swift decoding now preserves the Rust `#[serde(default)]` boundary for
+  app plugin display names, external-agent migration detail arrays, model input
+  modalities/speed tiers/service tiers, and plugin keywords: omitted fields use
+  the Rust defaults, while explicit `null` is rejected.
 - 2026-05-15: rechecked the remaining Rust app-server shared protocol
   `#[serde(default)]` booleans in `v1.rs` and
   `v2/{account.rs,config.rs,fs.rs,model.rs,thread.rs}`. Swift typed protocol

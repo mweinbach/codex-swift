@@ -137,6 +137,18 @@ final class AppServerExternalAgentConfigProtocolTests: XCTestCase {
         XCTAssertEqual(decoded.commands, [])
     }
 
+    func testExternalAgentConfigMigrationDetailsRejectExplicitNullForRustDefaultedArrays() {
+        for key in ["plugins", "sessions", "mcpServers", "hooks", "subagents", "commands"] {
+            XCTAssertThrowsError(
+                try JSONDecoder().decode(
+                    ExternalAgentMigrationDetails.self,
+                    from: Data(#"{"\#(key)":null}"#.utf8)
+                ),
+                "Expected \(key) null to be rejected like Rust #[serde(default)] Vec decoding"
+            )
+        }
+    }
+
     func testExternalAgentConfigRequestResponsesAndNotificationEncodeRustShapes() throws {
         let item = ExternalAgentConfigMigrationItem(
             itemType: .config,

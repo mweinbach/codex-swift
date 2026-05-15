@@ -249,6 +249,38 @@ final class AppServerModelProtocolTests: XCTestCase {
         )
     }
 
+    func testModelRejectsExplicitNullForRustDefaultedCollectionFields() {
+        let nullFields = [
+            #""inputModalities": null"#,
+            #""additionalSpeedTiers": null"#,
+            #""serviceTiers": null"#,
+        ]
+
+        for nullField in nullFields {
+            XCTAssertThrowsError(
+                try JSONDecoder().decode(
+                    Model.self,
+                    from: Data(
+                        """
+                        {
+                          "id": "gpt-test",
+                          "model": "gpt-test",
+                          "displayName": "GPT Test",
+                          "description": "A test model.",
+                          "hidden": false,
+                          "supportedReasoningEfforts": [],
+                          "defaultReasoningEffort": "medium",
+                          \(nullField),
+                          "isDefault": false
+                        }
+                        """.utf8
+                    )
+                ),
+                "Expected Rust #[serde(default)] field to reject explicit null: \(nullField)"
+            )
+        }
+    }
+
     func testModelProviderCapabilitiesPayloadsEncodeRustWireShape() throws {
         try XCTAssertJSONObjectEqual(ModelProviderCapabilitiesReadParams(), [:])
         try XCTAssertJSONObjectEqual(

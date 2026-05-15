@@ -164,17 +164,26 @@ extension Model: Codable {
             forKey: .supportedReasoningEfforts
         )
         defaultReasoningEffort = try container.decode(ReasoningEffort.self, forKey: .defaultReasoningEffort)
-        inputModalities = try container.decodeIfPresent(
+        inputModalities = try container.decodeRustDefaulted(
             [InputModality].self,
-            forKey: .inputModalities
-        ) ?? InputModality.defaultInputModalities
+            forKey: .inputModalities,
+            defaultValue: InputModality.defaultInputModalities
+        )
         supportsPersonality = try container.decodeRustDefaulted(
             Bool.self,
             forKey: .supportsPersonality,
             defaultValue: false
         )
-        additionalSpeedTiers = try container.decodeIfPresent([String].self, forKey: .additionalSpeedTiers) ?? []
-        serviceTiers = try container.decodeIfPresent([ModelServiceTier].self, forKey: .serviceTiers) ?? []
+        additionalSpeedTiers = try container.decodeRustDefaulted(
+            [String].self,
+            forKey: .additionalSpeedTiers,
+            defaultValue: []
+        )
+        serviceTiers = try container.decodeRustDefaulted(
+            [ModelServiceTier].self,
+            forKey: .serviceTiers,
+            defaultValue: []
+        )
         isDefault = try container.decode(Bool.self, forKey: .isDefault)
     }
 

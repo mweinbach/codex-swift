@@ -104,12 +104,32 @@ extension ExternalAgentMigrationDetails: Codable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.init(
-            plugins: try container.decodeIfPresent([ExternalAgentPluginsMigration].self, forKey: .plugins) ?? [],
-            sessions: try container.decodeIfPresent([ExternalAgentSessionMigration].self, forKey: .sessions) ?? [],
-            mcpServers: try container.decodeIfPresent([ExternalAgentMcpServerMigration].self, forKey: .mcpServers) ?? [],
-            hooks: try container.decodeIfPresent([ExternalAgentHookMigration].self, forKey: .hooks) ?? [],
-            subagents: try container.decodeIfPresent([ExternalAgentSubagentMigration].self, forKey: .subagents) ?? [],
-            commands: try container.decodeIfPresent([ExternalAgentCommandMigration].self, forKey: .commands) ?? []
+            plugins: try container.decodeRustDefaulted(
+                [ExternalAgentPluginsMigration].self,
+                forKey: .plugins,
+                defaultValue: []
+            ),
+            sessions: try container.decodeRustDefaulted(
+                [ExternalAgentSessionMigration].self,
+                forKey: .sessions,
+                defaultValue: []
+            ),
+            mcpServers: try container.decodeRustDefaulted(
+                [ExternalAgentMcpServerMigration].self,
+                forKey: .mcpServers,
+                defaultValue: []
+            ),
+            hooks: try container.decodeRustDefaulted([ExternalAgentHookMigration].self, forKey: .hooks, defaultValue: []),
+            subagents: try container.decodeRustDefaulted(
+                [ExternalAgentSubagentMigration].self,
+                forKey: .subagents,
+                defaultValue: []
+            ),
+            commands: try container.decodeRustDefaulted(
+                [ExternalAgentCommandMigration].self,
+                forKey: .commands,
+                defaultValue: []
+            )
         )
     }
 

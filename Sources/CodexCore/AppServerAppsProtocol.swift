@@ -312,7 +312,11 @@ extension AppInfo: Codable {
         installURL = try container.decodeIfPresent(String.self, forKey: .installURL)
         isAccessible = try container.decodeRustDefaulted(Bool.self, forKey: .isAccessible, defaultValue: false)
         isEnabled = try container.decodeRustDefaulted(Bool.self, forKey: .isEnabled, defaultValue: true)
-        pluginDisplayNames = try container.decodeIfPresent([String].self, forKey: .pluginDisplayNames) ?? []
+        pluginDisplayNames = try container.decodeRustDefaulted(
+            [String].self,
+            forKey: .pluginDisplayNames,
+            defaultValue: []
+        )
     }
 
     public func encode(to encoder: Encoder) throws {

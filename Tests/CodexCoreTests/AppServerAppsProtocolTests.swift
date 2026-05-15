@@ -170,6 +170,15 @@ final class AppServerAppsProtocolTests: XCTestCase {
         )
     }
 
+    func testAppInfoRejectsExplicitNullForRustDefaultedPluginDisplayNames() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AppsListResponse.self,
+                from: Data(#"{"data":[{"id":"weather-app","name":"Weather","pluginDisplayNames":null}],"nextCursor":null}"#.utf8)
+            )
+        )
+    }
+
     func testAppListUpdatedNotificationShapeMatchesRustProtocol() throws {
         try XCTAssertJSONObjectEqual(
             AppListUpdatedNotification(data: [
