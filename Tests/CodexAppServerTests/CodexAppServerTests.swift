@@ -9566,7 +9566,7 @@ final class CodexAppServerTests: XCTestCase {
         )
 
         let response = try appServerResponse(
-            #"{"id":1,"method":"memory/reset","params":{}}"#,
+            #"{"id":1,"method":"memory/reset"}"#,
             configuration: testConfiguration(codexHome: temp.url, stateStore: stateStore),
             experimentalAPIEnabled: true
         )
@@ -9608,7 +9608,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: codexHomeStatePath.path))
 
         let response = try appServerResponse(
-            #"{"id":1,"method":"memory/reset","params":{}}"#,
+            #"{"id":1,"method":"memory/reset"}"#,
             configuration: testConfiguration(codexHome: temp.url, stateStore: stateStore),
             experimentalAPIEnabled: true
         )
@@ -9620,7 +9620,7 @@ final class CodexAppServerTests: XCTestCase {
         let temp = try TemporaryDirectory()
 
         let response = try appServerResponse(
-            #"{"id":1,"method":"memory/reset","params":{}}"#,
+            #"{"id":1,"method":"memory/reset"}"#,
             codexHome: temp.url
         )
 
@@ -9629,11 +9629,24 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(error["message"] as? String, "memory/reset requires experimentalApi capability")
     }
 
-    func testMemoryResetRequiresStateDbWhenExperimentalAPIEnabled() throws {
+    func testMemoryResetRejectsObjectParamsLikeRustUnitOption() throws {
         let temp = try TemporaryDirectory()
 
         let response = try appServerResponse(
             #"{"id":1,"method":"memory/reset","params":{}}"#,
+            codexHome: temp.url
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "Invalid request: invalid type: map, expected unit")
+    }
+
+    func testMemoryResetRequiresStateDbWhenExperimentalAPIEnabled() throws {
+        let temp = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"memory/reset"}"#,
             codexHome: temp.url,
             experimentalAPIEnabled: true
         )
@@ -9669,7 +9682,7 @@ final class CodexAppServerTests: XCTestCase {
         _ = try await stateStore.setThreadMemoryMode(threadID: threadID, memoryMode: "disabled")
 
         let response = try appServerResponse(
-            #"{"id":1,"method":"memory/reset","params":{}}"#,
+            #"{"id":1,"method":"memory/reset"}"#,
             configuration: testConfiguration(codexHome: temp.url, stateStore: stateStore),
             experimentalAPIEnabled: true
         )
@@ -9695,7 +9708,7 @@ final class CodexAppServerTests: XCTestCase {
         try createAppServerMemoryTables(databaseURL: stateDatabaseURL)
         let stateStore = try SQLiteAgentGraphStore(databaseURL: stateDatabaseURL, defaultProvider: "openai")
         let missingRoots = try appServerResponse(
-            #"{"id":1,"method":"memory/reset","params":{}}"#,
+            #"{"id":1,"method":"memory/reset"}"#,
             configuration: testConfiguration(codexHome: temp.url, stateStore: stateStore),
             experimentalAPIEnabled: true
         )
@@ -9716,7 +9729,7 @@ final class CodexAppServerTests: XCTestCase {
         try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: target)
 
         let rejected = try appServerResponse(
-            #"{"id":2,"method":"memory/reset","params":{}}"#,
+            #"{"id":2,"method":"memory/reset"}"#,
             configuration: testConfiguration(codexHome: symlink.deletingLastPathComponent(), stateStore: stateStore),
             experimentalAPIEnabled: true
         )
@@ -21642,6 +21655,19 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(result["account"] is NSNull)
     }
 
+    func testAccountLogoutRejectsObjectParamsLikeRustUnitOption() throws {
+        let temp = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"account/logout","params":{}}"#,
+            codexHome: temp.url
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "Invalid request: invalid type: map, expected unit")
+    }
+
     func testAccountLogoutClearsExternalEphemeralAuthAndEmitsV2Notification() throws {
         let temp = try TemporaryDirectory()
         let accessToken = try fakeJWT(email: "embedded@example.com", plan: "pro", accountID: "org-embedded")
@@ -21857,7 +21883,7 @@ final class CodexAppServerTests: XCTestCase {
         let temp = try TemporaryDirectory()
 
         let response = try appServerResponse(
-            #"{"id":1,"method":"account/rateLimits/read","params":{}}"#,
+            #"{"id":1,"method":"account/rateLimits/read"}"#,
             codexHome: temp.url
         )
 
@@ -21871,13 +21897,26 @@ final class CodexAppServerTests: XCTestCase {
         try CodexAuthStorage.loginWithAPIKey(codexHome: temp.url, apiKey: "sk-test")
 
         let response = try appServerResponse(
-            #"{"id":1,"method":"account/rateLimits/read","params":{}}"#,
+            #"{"id":1,"method":"account/rateLimits/read"}"#,
             codexHome: temp.url
         )
 
         let error = try XCTUnwrap(response["error"] as? [String: Any])
         XCTAssertEqual(error["code"] as? Int, -32600)
         XCTAssertEqual(error["message"] as? String, "chatgpt authentication required to read rate limits")
+    }
+
+    func testAccountRateLimitsReadRejectsObjectParamsLikeRustUnitOption() throws {
+        let temp = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"account/rateLimits/read","params":{}}"#,
+            codexHome: temp.url
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "Invalid request: invalid type: map, expected unit")
     }
 
     func testSendAddCreditsNudgeEmailRequiresAuthentication() throws {
@@ -22036,7 +22075,7 @@ final class CodexAppServerTests: XCTestCase {
         let configuration = testConfiguration(codexHome: temp.url, accountRateLimitsFetcher: fetcher)
 
         let response = try appServerResponse(
-            #"{"id":1,"method":"account/rateLimits/read","params":{}}"#,
+            #"{"id":1,"method":"account/rateLimits/read"}"#,
             configuration: configuration
         )
 
@@ -22097,7 +22136,7 @@ final class CodexAppServerTests: XCTestCase {
 
         let processorBox = AppServerUncheckedSendableBox(processor)
         let rateLimitsTask = Task {
-            processorBox.value.processLine(Data(#"{"id":2,"method":"account/rateLimits/read","params":{}}"#.utf8))
+            processorBox.value.processLine(Data(#"{"id":2,"method":"account/rateLimits/read"}"#.utf8))
         }
 
         let refreshRequestData = try await nextNotificationPayload(notificationCapture)
@@ -22489,6 +22528,19 @@ final class CodexAppServerTests: XCTestCase {
         )
         let result = try XCTUnwrap(response["result"] as? [String: Any])
         XCTAssertEqual(result["status"] as? String, "notConfigured")
+    }
+
+    func testWindowsSandboxReadinessRejectsObjectParamsLikeRustUnitOption() throws {
+        let temp = try TemporaryDirectory()
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"windowsSandbox/readiness","params":{}}"#,
+            codexHome: temp.url
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "Invalid request: invalid type: map, expected unit")
     }
 
     func testWindowsSandboxReadinessStatusMatchesRustStateTable() {
@@ -24235,7 +24287,7 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
-    func testMcpServerReloadRejectsObjectParams() throws {
+    func testMcpServerReloadRejectsObjectParamsLikeRustUnitOption() throws {
         let temp = try TemporaryDirectory()
 
         let response = try appServerResponse(
@@ -24244,8 +24296,8 @@ final class CodexAppServerTests: XCTestCase {
         )
 
         let error = try XCTUnwrap(response["error"] as? [String: Any])
-        XCTAssertEqual(error["code"] as? Int, -32602)
-        XCTAssertEqual(error["message"] as? String, "invalid params for config/mcpServer/reload")
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "Invalid request: invalid type: map, expected unit")
     }
 
     func testMcpServerReloadReportsConfigLoadFailures() throws {

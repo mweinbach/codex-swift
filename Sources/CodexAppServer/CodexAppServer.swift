@@ -4498,9 +4498,11 @@ public enum CodexAppServer {
     }
 
     fileprivate static func memoryResetResult(
+        rawParams: Any?,
         configuration: CodexAppServerConfiguration,
         experimentalAPIEnabled: Bool
     ) throws -> [String: Any] {
+        try requireRustUnitParams(rawParams)
         try requireExperimentalAPI(method: "memory/reset", experimentalAPIEnabled: experimentalAPIEnabled)
         guard let stateStore = configuration.stateStore else {
             throw AppServerError.internalError("sqlite state db unavailable for memory reset")
@@ -12950,8 +12952,10 @@ public enum CodexAppServer {
     }
 
     fileprivate static func windowsSandboxReadinessResult(
+        rawParams: Any?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
+        try requireRustUnitParams(rawParams)
         let runtimeConfig: CodexRuntimeConfig
         do {
             runtimeConfig = try CodexConfigLoader.load(
@@ -13497,9 +13501,7 @@ public enum CodexAppServer {
         refreshConfigForThreadID: (String) throws -> McpServerRefreshConfig? = { _ in nil },
         queueThreadRefresh: (String, McpServerRefreshConfig) throws -> Void = { _, _ in }
     ) throws -> [String: Any] {
-        if let rawParams, !(rawParams is NSNull) {
-            throw AppServerError.invalidParams("invalid params for config/mcpServer/reload")
-        }
+        try requireRustUnitParams(rawParams)
         let runtimeConfig: CodexRuntimeConfig
         do {
             runtimeConfig = try CodexConfigLoader.load(
@@ -17115,11 +17117,7 @@ public enum CodexAppServer {
         rawParams: Any?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        if let rawParams, !(rawParams is NSNull) {
-            throw AppServerError.invalidRequest(
-                "Invalid request: \(rustInvalidTypeDescription(rawParams)), expected unit"
-            )
-        }
+        try requireRustUnitParams(rawParams)
         do {
             let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
                 codexHome: configuration.codexHome,
@@ -18298,7 +18296,11 @@ public enum CodexAppServer {
         ]
     }
 
-    fileprivate static func logoutResult(configuration: CodexAppServerConfiguration) throws -> [String: Any] {
+    fileprivate static func logoutResult(
+        rawParams: Any? = nil,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        try requireRustUnitParams(rawParams)
         do {
             _ = try CodexAuthStorage.logout(
                 codexHome: configuration.codexHome,
@@ -18678,8 +18680,12 @@ public enum CodexAppServer {
         }
     }
 
-    fileprivate static func accountRateLimitsResult(configuration: CodexAppServerConfiguration) throws -> [String: Any] {
-        try accountRateLimitsResult(configuration: configuration, retryAfterUnauthorized: nil)
+    fileprivate static func accountRateLimitsResult(
+        rawParams: Any? = nil,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        try requireRustUnitParams(rawParams)
+        return try accountRateLimitsResult(configuration: configuration, retryAfterUnauthorized: nil)
     }
 
     fileprivate static func accountRateLimitsResult(
@@ -20863,6 +20869,14 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(value)), expected a string")
         }
         return string
+    }
+
+    fileprivate static func requireRustUnitParams(_ rawParams: Any?) throws {
+        if let rawParams, !(rawParams is NSNull) {
+            throw AppServerError.invalidRequest(
+                "Invalid request: \(rustInvalidTypeDescription(rawParams)), expected unit"
+            )
+        }
     }
 
     fileprivate static func rustInvalidTypeDescription(_ value: Any) -> String {
@@ -26778,8 +26792,9 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         }
     }
 
-    private func accountRateLimitsResult() throws -> [String: Any] {
-        try CodexAppServer.accountRateLimitsResult(
+    private func accountRateLimitsResult(rawParams: Any?) throws -> [String: Any] {
+        try CodexAppServer.requireRustUnitParams(rawParams)
+        return try CodexAppServer.accountRateLimitsResult(
             configuration: configuration,
             retryAfterUnauthorized: refreshExternalAuthAfterUnauthorized
         )
@@ -28075,6 +28090,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                     response = CodexAppServer.responseObject(
                         id: id,
                         result: try CodexAppServer.memoryResetResult(
+                            rawParams: object["params"],
                             configuration: configuration,
                             experimentalAPIEnabled: experimentalAPIEnabled
                         )
@@ -28259,7 +28275,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                 case "account/rateLimits/read":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try accountRateLimitsResult()
+                        result: try accountRateLimitsResult(rawParams: object["params"])
                     )
                 case "account/sendAddCreditsNudgeEmail":
                     response = CodexAppServer.responseObject(
@@ -28284,7 +28300,10 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                 case "windowsSandbox/readiness":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.windowsSandboxReadinessResult(configuration: configuration)
+                        result: try CodexAppServer.windowsSandboxReadinessResult(
+                            rawParams: object["params"],
+                            configuration: configuration
+                        )
                     )
                 case "windowsSandbox/setupStart":
                     let result = try CodexAppServer.windowsSandboxSetupStartResult(
@@ -28653,7 +28672,10 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                     cancelActiveAccountLogins()
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.logoutResult(configuration: configuration)
+                        result: try CodexAppServer.logoutResult(
+                            rawParams: object["params"],
+                            configuration: configuration
+                        )
                     )
                     notifications.append(try CodexAppServer.accountUpdatedNotification(configuration: configuration))
                     queueBestEffortMcpServerRefresh()
