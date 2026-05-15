@@ -1285,6 +1285,13 @@ public enum AppServerProtocol {
         public init(from decoder: Decoder) throws {
             try AppServerProtocol.rejectUnknownKeys(decoder, allowedBy: CodingKeys.self)
             let container = try decoder.container(keyedBy: CodingKeys.self)
+            if container.contains(.anyOf), container.contains(.oneOf) {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .anyOf,
+                    in: container,
+                    debugDescription: "duplicate MCP elicitation titled enum items anyOf field"
+                )
+            }
             if let anyOf = try container.decodeIfPresent([McpElicitationConstOption].self, forKey: .anyOf) {
                 self.anyOf = anyOf
             } else {

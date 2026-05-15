@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 MCP elicitation titled enum items in
+  `codex-rs/app-server-protocol/src/protocol/v2/mcp.rs`. Swift
+  `McpElicitationTitledEnumItems` still accepts Rust's `oneOf` alias for
+  `anyOf`, but now rejects payloads that provide both spellings like Serde's
+  single-field alias handling.
 - 2026-05-15: rechecked Rust app-server v2 app screenshot aliases in
   `codex-rs/app-server-protocol/src/protocol/v2/apps.rs`. Swift
   `AppScreenshot` decoding now rejects duplicate camelCase/snake_case alias

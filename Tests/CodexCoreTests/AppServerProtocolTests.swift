@@ -1131,6 +1131,22 @@ final class AppServerProtocolTests: XCTestCase {
         XCTAssertEqual(decoded, schema)
     }
 
+    func testMcpElicitationTitledEnumItemsRejectsDuplicateRustAliases() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AppServerProtocol.McpElicitationTitledEnumItems.self,
+                from: Data(
+                    #"""
+                    {
+                      "anyOf": [{"const": "ios", "title": "iOS"}],
+                      "oneOf": [{"const": "macos", "title": "macOS"}]
+                    }
+                    """#.utf8
+                )
+            )
+        )
+    }
+
     func testMcpElicitationSchemasRejectUnknownFieldsLikeRustDenyUnknownFields() {
         func assertRejectsUnknownField<T: Decodable>(
             _ type: T.Type,
