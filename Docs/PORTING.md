@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 plugin install/uninstall param
+  serialization in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`.
+  Swift now pins the current encoder boundary for local marketplace installs
+  and remote-plugin-id uninstalls, keeping the removed `forceRemoteSync` field
+  out of serialized payloads.
 - 2026-05-15: rechecked Rust app-server v2 `PluginShareListResponse` and
   `PluginShareListItem` in `codex-rs/app-server-protocol/src/protocol/v2/plugin.rs`.
   Swift now carries the typed share-list response surface and pins Rust's

@@ -510,6 +510,17 @@ final class AppServerPluginProtocolTests: XCTestCase {
             "remoteMarketplaceName": "shared-with-me",
             "pluginName": "plugins~Plugin_weather"
         ])
+        try XCTAssertJSONObjectEqual(
+            PluginInstallParams(
+                marketplacePath: try AbsolutePath(absolutePath: "/plugins/marketplace.json"),
+                pluginName: "gmail"
+            ),
+            [
+                "marketplacePath": "/plugins/marketplace.json",
+                "remoteMarketplaceName": NSNull(),
+                "pluginName": "gmail"
+            ]
+        )
 
         try XCTAssertJSONObjectEqual(
             PluginInstallResponse(
@@ -558,6 +569,9 @@ final class AppServerPluginProtocolTests: XCTestCase {
         ])
         try XCTAssertJSONObjectEqual(PluginUninstallParams(pluginID: "weather@debug"), [
             "pluginId": "weather@debug"
+        ])
+        try XCTAssertJSONObjectEqual(PluginUninstallParams(pluginID: "plugins~Plugin_weather"), [
+            "pluginId": "plugins~Plugin_weather"
         ])
         try XCTAssertJSONObjectEqual(PluginUninstallResponse(), [:])
 
