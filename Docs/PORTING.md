@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust feature `apply_map` handling in
+  `codex-rs/features/src/lib.rs`. Swift feature-state application now treats
+  removed no-op config keys (`tui_app_server`, `undo`, `js_repl`,
+  `js_repl_tools_only`, and `image_detail_original`) as parseable but ignored,
+  matching Rust instead of allowing stale config to flip removed flags.
 - 2026-05-15: rechecked Rust commit `7c9731c9af` (`cargo shear
   --deny-warnings` cleanup). The changes remove unreachable Rust-only test,
   hook, MCP-server, plugin-namespace, and Windows module plumbing plus CI

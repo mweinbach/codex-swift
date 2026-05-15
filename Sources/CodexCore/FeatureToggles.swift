@@ -141,6 +141,13 @@ public struct FeatureSpec: Equatable, Sendable {
 
 public struct FeatureStates: Equatable, Sendable {
     private var enabled: Set<FeatureKey>
+    private static let removedNoOpConfigKeys: Set<String> = [
+        "tui_app_server",
+        "undo",
+        "js_repl",
+        "js_repl_tools_only",
+        "image_detail_original"
+    ]
 
     public init(enabled: Set<FeatureKey> = []) {
         self.enabled = enabled
@@ -164,6 +171,9 @@ public struct FeatureStates: Equatable, Sendable {
 
     public mutating func apply(featureValues: [String: Bool]) {
         for (key, isEnabled) in featureValues {
+            if Self.removedNoOpConfigKeys.contains(key) {
+                continue
+            }
             guard let feature = FeatureRegistry.feature(forKey: key) else { continue }
             set(feature, enabled: isEnabled)
         }

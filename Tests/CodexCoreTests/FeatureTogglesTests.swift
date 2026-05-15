@@ -191,6 +191,23 @@ final class FeatureTogglesTests: XCTestCase {
         XCTAssertTrue(states.isEnabled(.codeMode))
     }
 
+    func testRemovedNoOpFeatureKeysAreIgnoredLikeRustApplyMap() {
+        var states = FeatureStates.withDefaults()
+        states.apply(featureValues: [
+            "tui_app_server": false,
+            "undo": true,
+            "js_repl": true,
+            "js_repl_tools_only": true,
+            "image_detail_original": true
+        ])
+
+        XCTAssertTrue(states.isEnabled(.tuiAppServer))
+        XCTAssertFalse(states.isEnabled(.undo))
+        XCTAssertFalse(states.isEnabled(.jsRepl))
+        XCTAssertFalse(states.isEnabled(.jsReplToolsOnly))
+        XCTAssertFalse(states.isEnabled(.imageDetailOriginal))
+    }
+
     func testUnknownFeatureThrows() {
         XCTAssertThrowsError(try FeatureToggles(enable: ["definitely_not_real"]).toOverrides())
     }
