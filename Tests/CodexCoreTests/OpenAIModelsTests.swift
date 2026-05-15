@@ -182,7 +182,47 @@ final class OpenAIModelsTests: XCTestCase {
         XCTAssertEqual(decoded.additionalSpeedTiers, [])
         XCTAssertEqual(decoded.serviceTiers, [])
         XCTAssertNil(decoded.availabilityNux)
+        XCTAssertEqual(decoded.defaultReasoningSummary, .auto)
+        XCTAssertEqual(decoded.webSearchToolType, .text)
+        XCTAssertFalse(decoded.supportsImageDetailOriginal)
+        XCTAssertEqual(decoded.effectiveContextWindowPercent, 95)
         XCTAssertEqual(decoded.inputModalities, [.text, .image])
+        XCTAssertFalse(decoded.supportsSearchTool)
+    }
+
+    func testModelInfoRejectsNullRustDefaultedCatalogFields() {
+        for field in [
+            #""additional_speed_tiers": null"#,
+            #""service_tiers": null"#,
+            #""default_reasoning_summary": null"#,
+            #""web_search_tool_type": null"#,
+            #""supports_image_detail_original": null"#,
+            #""effective_context_window_percent": null"#,
+            #""input_modalities": null"#,
+            #""supports_search_tool": null"#
+        ] {
+            XCTAssertThrowsError(try JSONDecoder().decode(ModelInfo.self, from: Data(modelInfoJSON(extraField: field).utf8)))
+        }
+    }
+
+    func testModelPresetDefaultsMissingCatalogFieldsLikeRust() throws {
+        let decoded = try JSONDecoder().decode(ModelPreset.self, from: Data(modelPresetJSON().utf8))
+
+        XCTAssertFalse(decoded.supportsPersonality)
+        XCTAssertEqual(decoded.additionalSpeedTiers, [])
+        XCTAssertEqual(decoded.serviceTiers, [])
+        XCTAssertEqual(decoded.inputModalities, [.text, .image])
+    }
+
+    func testModelPresetRejectsNullRustDefaultedCatalogFields() {
+        for field in [
+            #""supports_personality": null"#,
+            #""additional_speed_tiers": null"#,
+            #""service_tiers": null"#,
+            #""input_modalities": null"#
+        ] {
+            XCTAssertThrowsError(try JSONDecoder().decode(ModelPreset.self, from: Data(modelPresetJSON(extraField: field).utf8)))
+        }
     }
 
     func testModelInfoRejectsMissingBaseInstructionsLikeRust() {
@@ -456,6 +496,50 @@ final class OpenAIModelsTests: XCTestCase {
             contextWindow: nil,
             experimentalSupportedTools: []
         )
+    }
+
+    private func modelInfoJSON(extraField: String? = nil) -> String {
+        """
+        {
+          "slug": "gpt-test",
+          "display_name": "GPT Test",
+          "description": null,
+          "default_reasoning_level": "medium",
+          "supported_reasoning_levels": [],
+          "shell_type": "default",
+          "visibility": "list",
+          "supported_in_api": true,
+          "priority": 1,
+          "upgrade": null,
+          "base_instructions": "base",
+          "supports_reasoning_summaries": false,
+          "support_verbosity": false,
+          "default_verbosity": null,
+          "apply_patch_tool_type": null,
+          "truncation_policy": { "mode": "bytes", "limit": 4096 },
+          "supports_parallel_tool_calls": false,
+          "context_window": null,
+          "experimental_supported_tools": []\(extraField.map { ",\n          \($0)" } ?? "")
+        }
+        """
+    }
+
+    private func modelPresetJSON(extraField: String? = nil) -> String {
+        """
+        {
+          "id": "gpt-test",
+          "model": "gpt-test",
+          "display_name": "GPT Test",
+          "description": "Test model",
+          "default_reasoning_effort": "medium",
+          "supported_reasoning_efforts": [],
+          "is_default": false,
+          "upgrade": null,
+          "show_in_picker": true,
+          "availability_nux": null,
+          "supported_in_api": true\(extraField.map { ",\n          \($0)" } ?? "")
+        }
+        """
     }
 
     private func encode<T: Encodable>(_ value: T) throws -> String {

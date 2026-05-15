@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's core model catalog defaults in
+  `codex-rs/protocol/src/openai_models.rs`. Swift `ModelPreset` and
+  `ModelInfo` decoding now preserves Rust's omitted-field defaults for
+  defaulted catalog flags, arrays, enums, and numeric defaults while rejecting
+  explicit `null` for those non-optional `#[serde(default)]` fields.
 - 2026-05-15: rechecked Rust's legacy core event payload defaults in
   `codex-rs/protocol/src/protocol.rs`. Swift legacy `user_message` and
   reasoning delta/section-break decoding now keeps Rust's omitted-field

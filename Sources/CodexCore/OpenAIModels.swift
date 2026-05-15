@@ -329,18 +329,31 @@ extension ModelPreset: Codable {
             [ReasoningEffortPreset].self,
             forKey: .supportedReasoningEfforts
         )
-        self.supportsPersonality = try container.decodeIfPresent(Bool.self, forKey: .supportsPersonality) ?? false
-        self.additionalSpeedTiers = try container.decodeIfPresent([String].self, forKey: .additionalSpeedTiers) ?? []
-        self.serviceTiers = try container.decodeIfPresent([ModelServiceTier].self, forKey: .serviceTiers) ?? []
+        self.supportsPersonality = try container.decodeRustDefaulted(
+            Bool.self,
+            forKey: .supportsPersonality,
+            defaultValue: false
+        )
+        self.additionalSpeedTiers = try container.decodeRustDefaulted(
+            [String].self,
+            forKey: .additionalSpeedTiers,
+            defaultValue: []
+        )
+        self.serviceTiers = try container.decodeRustDefaulted(
+            [ModelServiceTier].self,
+            forKey: .serviceTiers,
+            defaultValue: []
+        )
         self.isDefault = try container.decode(Bool.self, forKey: .isDefault)
         self.upgrade = try container.decodeIfPresent(ModelUpgrade.self, forKey: .upgrade)
         self.showInPicker = try container.decode(Bool.self, forKey: .showInPicker)
         self.availabilityNux = try container.decodeIfPresent(ModelAvailabilityNux.self, forKey: .availabilityNux)
         self.supportedInAPI = try container.decode(Bool.self, forKey: .supportedInAPI)
-        self.inputModalities = try container.decodeIfPresent(
+        self.inputModalities = try container.decodeRustDefaulted(
             [InputModality].self,
-            forKey: .inputModalities
-        ) ?? InputModality.defaultInputModalities
+            forKey: .inputModalities,
+            defaultValue: InputModality.defaultInputModalities
+        )
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -625,43 +638,60 @@ extension ModelInfo: Codable {
         self.visibility = try container.decode(ModelVisibility.self, forKey: .visibility)
         self.supportedInAPI = try container.decode(Bool.self, forKey: .supportedInAPI)
         self.priority = try container.decode(Int32.self, forKey: .priority)
-        self.additionalSpeedTiers = try container.decodeIfPresent([String].self, forKey: .additionalSpeedTiers) ?? []
-        self.serviceTiers = try container.decodeIfPresent([ModelServiceTier].self, forKey: .serviceTiers) ?? []
+        self.additionalSpeedTiers = try container.decodeRustDefaulted(
+            [String].self,
+            forKey: .additionalSpeedTiers,
+            defaultValue: []
+        )
+        self.serviceTiers = try container.decodeRustDefaulted(
+            [ModelServiceTier].self,
+            forKey: .serviceTiers,
+            defaultValue: []
+        )
         self.availabilityNux = try container.decodeIfPresent(ModelAvailabilityNux.self, forKey: .availabilityNux)
         self.upgrade = try container.decodeIfPresent(ModelInfoUpgrade.self, forKey: .upgrade)
         self.baseInstructions = try container.decode(String.self, forKey: .baseInstructions)
         self.modelMessages = try container.decodeIfPresent(ModelMessages.self, forKey: .modelMessages)
         self.supportsReasoningSummaries = try container.decode(Bool.self, forKey: .supportsReasoningSummaries)
-        self.defaultReasoningSummary = try container.decodeIfPresent(
+        self.defaultReasoningSummary = try container.decodeRustDefaulted(
             ReasoningSummary.self,
-            forKey: .defaultReasoningSummary
-        ) ?? .auto
+            forKey: .defaultReasoningSummary,
+            defaultValue: .auto
+        )
         self.supportVerbosity = try container.decode(Bool.self, forKey: .supportVerbosity)
         self.defaultVerbosity = try container.decodeIfPresent(Verbosity.self, forKey: .defaultVerbosity)
         self.applyPatchToolType = try container.decodeIfPresent(ApplyPatchToolType.self, forKey: .applyPatchToolType)
-        self.webSearchToolType = try container.decodeIfPresent(
+        self.webSearchToolType = try container.decodeRustDefaulted(
             WebSearchToolType.self,
-            forKey: .webSearchToolType
-        ) ?? .text
+            forKey: .webSearchToolType,
+            defaultValue: .text
+        )
         self.truncationPolicy = try container.decode(TruncationPolicyConfig.self, forKey: .truncationPolicy)
         self.supportsParallelToolCalls = try container.decode(Bool.self, forKey: .supportsParallelToolCalls)
-        self.supportsImageDetailOriginal = try container.decodeIfPresent(
+        self.supportsImageDetailOriginal = try container.decodeRustDefaulted(
             Bool.self,
-            forKey: .supportsImageDetailOriginal
-        ) ?? false
+            forKey: .supportsImageDetailOriginal,
+            defaultValue: false
+        )
         self.contextWindow = try container.decodeIfPresent(Int64.self, forKey: .contextWindow)
         self.maxContextWindow = try container.decodeIfPresent(Int64.self, forKey: .maxContextWindow)
         self.autoCompactTokenLimit = try container.decodeIfPresent(Int64.self, forKey: .autoCompactTokenLimit)
-        self.effectiveContextWindowPercent = try container.decodeIfPresent(
+        self.effectiveContextWindowPercent = try container.decodeRustDefaulted(
             Int64.self,
-            forKey: .effectiveContextWindowPercent
-        ) ?? 95
+            forKey: .effectiveContextWindowPercent,
+            defaultValue: 95
+        )
         self.experimentalSupportedTools = try container.decode([String].self, forKey: .experimentalSupportedTools)
-        self.inputModalities = try container.decodeIfPresent(
+        self.inputModalities = try container.decodeRustDefaulted(
             [InputModality].self,
-            forKey: .inputModalities
-        ) ?? InputModality.defaultInputModalities
-        self.supportsSearchTool = try container.decodeIfPresent(Bool.self, forKey: .supportsSearchTool) ?? false
+            forKey: .inputModalities,
+            defaultValue: InputModality.defaultInputModalities
+        )
+        self.supportsSearchTool = try container.decodeRustDefaulted(
+            Bool.self,
+            forKey: .supportsSearchTool,
+            defaultValue: false
+        )
     }
 
     public func encode(to encoder: Encoder) throws {
