@@ -157,6 +157,38 @@ final class AppServerMcpProtocolTests: XCTestCase {
             ]
         )
 
+        let minimalParams = try JSONDecoder().decode(
+            AppServerProtocol.McpServerToolCallParams.self,
+            from: Data(#"{"threadId":"thr_1","server":"docs","tool":"search"}"#.utf8)
+        )
+        XCTAssertNil(minimalParams.arguments)
+        XCTAssertNil(minimalParams.meta)
+
+        let nullParams = try JSONDecoder().decode(
+            AppServerProtocol.McpServerToolCallParams.self,
+            from: Data(#"{"threadId":"thr_1","server":"docs","tool":"search","arguments":null,"_meta":null}"#.utf8)
+        )
+        XCTAssertNil(nullParams.arguments)
+        XCTAssertNil(nullParams.meta)
+
+        let minimalResponse = try JSONDecoder().decode(
+            AppServerProtocol.McpServerToolCallResponse.self,
+            from: Data(#"{"content":[]}"#.utf8)
+        )
+        XCTAssertEqual(minimalResponse.content, [])
+        XCTAssertNil(minimalResponse.structuredContent)
+        XCTAssertNil(minimalResponse.isError)
+        XCTAssertNil(minimalResponse.meta)
+
+        let nullResponse = try JSONDecoder().decode(
+            AppServerProtocol.McpServerToolCallResponse.self,
+            from: Data(#"{"content":[],"structuredContent":null,"isError":null,"_meta":null}"#.utf8)
+        )
+        XCTAssertEqual(nullResponse.content, [])
+        XCTAssertNil(nullResponse.structuredContent)
+        XCTAssertNil(nullResponse.isError)
+        XCTAssertNil(nullResponse.meta)
+
         try XCTAssertJSONObjectEqual(
             AppServerProtocol.McpToolCallResult(
                 content: [],

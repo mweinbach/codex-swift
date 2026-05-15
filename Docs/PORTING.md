@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 MCP tool-call optionals in
+  `codex-rs/app-server-protocol/src/protocol/v2/mcp.rs`. Swift now pins
+  Rust's `default` plus `skip_serializing_if` boundary for `arguments`, `_meta`,
+  `structuredContent`, and `isError`: absent values omit on encode while
+  omitted or explicit-`null` request/response payload fields decode as absent.
 - 2026-05-15: rechecked Rust commit `99016ec732` and protocol-native
   approval timing in `codex-rs/app-server-protocol/src/protocol/v2/item.rs`
   and `permissions.rs`. Swift already threaded `startedAtMs`; focused
