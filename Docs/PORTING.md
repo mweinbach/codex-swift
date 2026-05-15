@@ -12,6 +12,7 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's `update_plan` argument models in `codex-rs/protocol/src/plan_tool.rs`. Swift `UpdatePlanArguments` / `PlanItemArgument` now reject unknown top-level or item fields like Rust's `deny_unknown_fields`, preserve the backwards-compatible default for missing `explanation`, and encode a nil explanation as explicit `null` like Rust's ordinary `Option`.
 - 2026-05-15: rechecked Rust's `DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS` in `codex-rs/model-provider-info/src/lib.rs`. Swift model-provider helpers now use Rust's 15-second default websocket connect timeout while preserving explicit `websocket_connect_timeout_ms` overrides.
 - 2026-05-14: rechecked Rust's current `codex-rs/model-provider-info/src/lib.rs` after the chat-wire removal. Swift model-provider config decoding now rejects `wire_api = "chat"` with Rust's removal guidance, rejects non-`responses` provider wire API values at the provider boundary, and the bundled `ollama` / `lmstudio` OSS providers both default to Responses like Rust.
 - 2026-05-14: rechecked Rust's PowerShell command-safety parser in `codex-rs/shell-command/src/command_safety/windows_safe_commands.rs`. Swift now has focused coverage for Rust's PowerShell Core-only pipeline-chain handling, allowing read-only `pwsh` `&&` / `||` chains while continuing to reject the same chains through legacy `powershell.exe`.
