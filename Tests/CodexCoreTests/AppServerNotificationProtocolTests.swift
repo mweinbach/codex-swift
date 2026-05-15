@@ -147,6 +147,54 @@ final class AppServerNotificationProtocolTests: XCTestCase {
         try XCTAssertJSONObjectEqual(
             ErrorNotification(
                 error: AppServerTurnError(
+                    message: "policy blocked",
+                    codexErrorInfo: .cyberPolicy
+                ),
+                willRetry: false,
+                threadID: "thread-1",
+                turnID: "turn-1"
+            ),
+            [
+                "error": [
+                    "message": "policy blocked",
+                    "codexErrorInfo": "cyberPolicy",
+                    "additionalDetails": NSNull()
+                ],
+                "willRetry": false,
+                "threadId": "thread-1",
+                "turnId": "turn-1"
+            ]
+        )
+
+        try XCTAssertJSONObjectEqual(
+            ErrorNotification(
+                error: AppServerTurnError(
+                    message: "too many attempts",
+                    codexErrorInfo: .responseTooManyFailedAttempts(httpStatusCode: 401)
+                ),
+                willRetry: false,
+                threadID: "thread-1",
+                turnID: "turn-1"
+            ),
+            [
+                "error": [
+                    "message": "too many attempts",
+                    "codexErrorInfo": [
+                        "responseTooManyFailedAttempts": [
+                            "httpStatusCode": 401
+                        ]
+                    ],
+                    "additionalDetails": NSNull()
+                ],
+                "willRetry": false,
+                "threadId": "thread-1",
+                "turnId": "turn-1"
+            ]
+        )
+
+        try XCTAssertJSONObjectEqual(
+            ErrorNotification(
+                error: AppServerTurnError(
                     message: "stream disconnected",
                     codexErrorInfo: .responseStreamDisconnected(httpStatusCode: nil)
                 ),
@@ -192,6 +240,14 @@ final class AppServerNotificationProtocolTests: XCTestCase {
                 message: "stream disconnected",
                 codexErrorInfo: .responseStreamDisconnected(httpStatusCode: 502)
             )
+        )
+
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                AppServerTurnError.self,
+                from: Data(#"{"message":"policy blocked","codexErrorInfo":"cyberPolicy","additionalDetails":null}"#.utf8)
+            ),
+            AppServerTurnError(message: "policy blocked", codexErrorInfo: .cyberPolicy)
         )
 
         try XCTAssertJSONObjectEqual(
