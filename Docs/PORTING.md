@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's legacy core event payload defaults in
+  `codex-rs/protocol/src/protocol.rs`. Swift legacy `user_message` and
+  reasoning delta/section-break decoding now keeps Rust's omitted-field
+  backwards-compatible defaults while rejecting explicit `null` for those
+  non-optional `#[serde(default)]` fields.
 - 2026-05-15: rechecked Rust's core `UserInput::Text.text_elements` field in
   `codex-rs/protocol/src/user_input.rs`. Swift core user-input decoding now
   preserves Rust's omitted-field empty-array default while rejecting explicit

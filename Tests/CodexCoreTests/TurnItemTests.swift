@@ -59,6 +59,27 @@ final class TurnItemTests: XCTestCase {
         ])
     }
 
+    func testUserMessageEventDefaultsMissingRustDefaultedFields() throws {
+        let json = #"{"type":"user_message","message":"hello"}"#
+        let event = try JSONDecoder().decode(LegacyEventMessage.self, from: Data(json.utf8))
+
+        XCTAssertEqual(event, .userMessage(UserMessageEvent(
+            message: "hello",
+            images: nil,
+            localImages: [],
+            textElements: []
+        )))
+    }
+
+    func testUserMessageEventRejectsNullRustDefaultedFields() {
+        for json in [
+            #"{"type":"user_message","message":"hello","local_images":null}"#,
+            #"{"type":"user_message","message":"hello","text_elements":null}"#
+        ] {
+            XCTAssertThrowsError(try JSONDecoder().decode(LegacyEventMessage.self, from: Data(json.utf8)))
+        }
+    }
+
     func testAgentMessageItemSplitsLegacyTextEvents() {
         let item = AgentMessageItem(id: "agent-1", content: [.text("one"), .text("two")])
 

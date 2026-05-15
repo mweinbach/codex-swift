@@ -44,8 +44,12 @@ public struct UserMessageEvent: Equatable, Codable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.message = try container.decode(String.self, forKey: .message)
         self.images = try container.decodeIfPresent([String].self, forKey: .images)
-        self.localImages = try container.decodeIfPresent([String].self, forKey: .localImages) ?? []
-        self.textElements = try container.decodeIfPresent([TextElement].self, forKey: .textElements) ?? []
+        self.localImages = try container.decodeRustDefaulted([String].self, forKey: .localImages, defaultValue: [])
+        self.textElements = try container.decodeRustDefaulted(
+            [TextElement].self,
+            forKey: .textElements,
+            defaultValue: []
+        )
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -113,8 +117,8 @@ public struct AgentReasoningSectionBreakEvent: Equatable, Codable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.itemID = try container.decodeIfPresent(String.self, forKey: .itemID) ?? ""
-        self.summaryIndex = try container.decodeIfPresent(Int64.self, forKey: .summaryIndex) ?? 0
+        self.itemID = try container.decodeRustDefaulted(String.self, forKey: .itemID, defaultValue: "")
+        self.summaryIndex = try container.decodeRustDefaulted(Int64.self, forKey: .summaryIndex, defaultValue: 0)
     }
 }
 
@@ -265,7 +269,7 @@ public struct ReasoningContentDeltaEvent: Equatable, Codable, Sendable {
         self.turnID = try container.decode(String.self, forKey: .turnID)
         self.itemID = try container.decode(String.self, forKey: .itemID)
         self.delta = try container.decode(String.self, forKey: .delta)
-        self.summaryIndex = try container.decodeIfPresent(Int64.self, forKey: .summaryIndex) ?? 0
+        self.summaryIndex = try container.decodeRustDefaulted(Int64.self, forKey: .summaryIndex, defaultValue: 0)
     }
 
     public func asLegacyEvents() -> [LegacyEventMessage] {
@@ -302,7 +306,7 @@ public struct ReasoningRawContentDeltaEvent: Equatable, Codable, Sendable {
         self.turnID = try container.decode(String.self, forKey: .turnID)
         self.itemID = try container.decode(String.self, forKey: .itemID)
         self.delta = try container.decode(String.self, forKey: .delta)
-        self.contentIndex = try container.decodeIfPresent(Int64.self, forKey: .contentIndex) ?? 0
+        self.contentIndex = try container.decodeRustDefaulted(Int64.self, forKey: .contentIndex, defaultValue: 0)
     }
 
     public func asLegacyEvents() -> [LegacyEventMessage] {

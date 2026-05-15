@@ -37,6 +37,15 @@ final class ContentDeltaEventsTests: XCTestCase {
         ])
     }
 
+    func testReasoningSectionBreakRejectsNullRustDefaultedFields() {
+        for json in [
+            #"{"type":"agent_reasoning_section_break","item_id":null}"#,
+            #"{"type":"agent_reasoning_section_break","summary_index":null}"#
+        ] {
+            XCTAssertThrowsError(try JSONDecoder().decode(LegacyEventMessage.self, from: Data(json.utf8)))
+        }
+    }
+
     func testModernContentDeltaEventsUseRustWireShapeAndLegacyProjection() throws {
         let message = AgentMessageContentDeltaEvent(
             threadID: "thread-1",
@@ -79,6 +88,12 @@ final class ContentDeltaEventsTests: XCTestCase {
         ])
     }
 
+    func testReasoningContentDeltaRejectsNullRustDefaultedSummaryIndex() {
+        let json = #"{"thread_id":"thread-1","turn_id":"turn-1","item_id":"item-1","delta":"step","summary_index":null}"#
+
+        XCTAssertThrowsError(try JSONDecoder().decode(ReasoningContentDeltaEvent.self, from: Data(json.utf8)))
+    }
+
     func testReasoningRawContentDeltaDefaultsContentIndexLikeRust() throws {
         let json = #"{"thread_id":"thread-1","turn_id":"turn-1","item_id":"item-1","delta":"raw"}"#
         let event = try JSONDecoder().decode(ReasoningRawContentDeltaEvent.self, from: Data(json.utf8))
@@ -100,6 +115,12 @@ final class ContentDeltaEventsTests: XCTestCase {
             "delta": "raw",
             "content_index": 0
         ])
+    }
+
+    func testReasoningRawContentDeltaRejectsNullRustDefaultedContentIndex() {
+        let json = #"{"thread_id":"thread-1","turn_id":"turn-1","item_id":"item-1","delta":"raw","content_index":null}"#
+
+        XCTAssertThrowsError(try JSONDecoder().decode(ReasoningRawContentDeltaEvent.self, from: Data(json.utf8)))
     }
 
     func testLegacyDeltaEventsRoundTrip() throws {
