@@ -2440,7 +2440,7 @@ public struct RequestPermissionsEvent: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         callID = try container.decode(String.self, forKey: .callID)
         turnID = try container.decodeRustDefaulted(String.self, forKey: .turnID, defaultValue: "")
-        startedAtMilliseconds = try container.decodeIfPresent(Int64.self, forKey: .startedAtMilliseconds) ?? 0
+        startedAtMilliseconds = try container.decode(Int64.self, forKey: .startedAtMilliseconds)
         reason = try container.decodeIfPresent(String.self, forKey: .reason)
         permissions = try container.decode(RequestPermissionProfile.self, forKey: .permissions)
         cwd = try container.decodeIfPresent(AbsolutePath.self, forKey: .cwd)

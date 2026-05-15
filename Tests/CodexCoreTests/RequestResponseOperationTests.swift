@@ -283,6 +283,29 @@ final class RequestResponseOperationTests: XCTestCase {
           }
         }
         """#.utf8)))
+
+        XCTAssertThrowsError(try JSONDecoder().decode(RequestPermissionsEvent.self, from: Data(#"""
+        {
+          "call_id": "perm-1",
+          "permissions": {
+            "network": {
+              "enabled": true
+            }
+          }
+        }
+        """#.utf8)))
+
+        XCTAssertThrowsError(try JSONDecoder().decode(RequestPermissionsEvent.self, from: Data(#"""
+        {
+          "call_id": "perm-1",
+          "started_at_ms": null,
+          "permissions": {
+            "network": {
+              "enabled": true
+            }
+          }
+        }
+        """#.utf8)))
     }
 
     func testDynamicToolModelsUseCamelCaseWireShapeAndCompatibilityFlag() throws {

@@ -256,13 +256,17 @@ final class EventMessageTests: XCTestCase {
           "permissions": { "network": { "enabled": true } }
         }
         """#.utf8)
-        XCTAssertEqual(
-            try JSONDecoder().decode(EventMessage.self, from: missingRequestPermissionsTiming),
-            .requestPermissions(RequestPermissionsEvent(
-                callID: "perm-legacy",
-                permissions: RequestPermissionProfile(network: RequestPermissionNetworkPermissions(enabled: true))
-            ))
-        )
+        XCTAssertThrowsError(try JSONDecoder().decode(EventMessage.self, from: missingRequestPermissionsTiming))
+
+        let nullRequestPermissionsTiming = Data(#"""
+        {
+          "type": "request_permissions",
+          "call_id": "perm-legacy",
+          "started_at_ms": null,
+          "permissions": { "network": { "enabled": true } }
+        }
+        """#.utf8)
+        XCTAssertThrowsError(try JSONDecoder().decode(EventMessage.self, from: nullRequestPermissionsTiming))
 
         let userInput = EventMessage.requestUserInput(RequestUserInputEvent(
             callID: "input-1",

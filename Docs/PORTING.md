@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked current Rust `RequestPermissionsEvent` in
+  `codex-rs/protocol/src/request_permissions.rs`. Swift now requires
+  `request_permissions.started_at_ms` like Rust's non-defaulted `i64` field
+  while preserving the separate omitted-field default for `turn_id` and the
+  request-permissions response defaults.
 - 2026-05-15: rechecked Rust's collab agent event defaults in
   `codex-rs/protocol/src/protocol.rs`. Swift collab event decoding now keeps
   omitted `started_at_ms` / `completed_at_ms` timing defaults and waiting
@@ -203,7 +208,7 @@ Recent upstream audit checkpoint:
 - 2026-05-14: rechecked Rust's app-server v2 item delta notification payloads from `codex-rs/app-server-protocol/src/protocol/v2/item.rs`. Swift shared protocol models now carry typed plan, reasoning-summary, reasoning-text, terminal-interaction, command-output, file-change-output, and file-change-patch notification payloads with Rust's camelCase `threadId` / `turnId` / `itemId` keys.
 - 2026-05-14: rechecked Rust's accepted-line fingerprint normalization from `codex-rs/analytics/src/accepted_lines.rs`. Swift now applies Rust's UTF-8 byte-length threshold for effective added lines and payload chunk byte estimates, so short multi-byte source lines are fingerprinted the same way Rust's `str::len()` path handles them.
 - 2026-05-14: rechecked Rust commits `cf941ede15` / `9183503b97` (Python runtime wheel release workflow), `8956a928a1` (Python SDK artifact resource-binary staging), `8bea5d231a`, `47f1d7b40b`, `05ffa0b1d0`, and related Rust CI hygiene commits. These are release/CI/Python SDK surfaces outside the current SwiftPM port; no Swift runtime behavior change is required. Also rechecked `0a0d09ad21` and confirmed the Swift workspace `AGENTS.md` already carries the corresponding no-general-docs-under-`Docs/` guidance, and rechecked `317213fd33`, `71d80f9a14`, `ae15343243`, `314229fd72`, `05cd5c313e`, and `0274398901`, whose service-tier config, compact request, plugin-share, skills-list, shared-read queue, and pathless summary parity remains covered by the entries below.
-- 2026-05-14: rechecked Rust commit `99016ec732` and `codex-rs/protocol/src/request_permissions.rs`. Swift `RequestPermissionsEvent` now preserves Rust's backwards-compatible default for missing `started_at_ms`, decoding older rollout/request-permission events as `0` instead of rejecting them.
+- 2026-05-14: rechecked Rust commit `99016ec732` and `codex-rs/protocol/src/request_permissions.rs`. At that checkpoint Swift `RequestPermissionsEvent` preserved the then-current backwards-compatible default for missing `started_at_ms`; the 2026-05-15 current-source recheck above supersedes this older compatibility boundary.
 - 2026-05-14: rechecked Rust commit `78baa20780` and the legacy `notify` deprecation path in `codex-rs/core/src/session/session.rs`. Swift app-server initialization now emits Rust's `deprecationNotice` for non-empty legacy `notify` commands while leaving empty arrays or empty executable strings quiet.
 - 2026-05-14: rechecked Rust `codex-rs/model-provider-info/src/lib.rs` / `model_provider_info_tests.rs` provider defaults. Swift `ModelProviderInfo` now defaults missing `wire_api` fields to `responses` like Rust while keeping explicit built-in OSS helpers on their Rust-selected wire APIs.
 - 2026-05-14: rechecked Rust commit `772e034594` and `codex-rs/models-manager/models.json`. Swift's bundled `gpt-5.4` model preset now has focused coverage for Rust's removal of the `ultrafast` service tier while retaining the legacy `fast` additional-speed tier.
