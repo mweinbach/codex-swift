@@ -4082,14 +4082,51 @@ final class ExecPolicyTests: XCTestCase {
         STRING_ATTRS = dir(TOOL)
         LIST_ATTRS = dir(COMMANDS)
         DICT_ATTRS = dir(METADATA)
+        EXPECTED_STRING_ATTRS = [
+            "capitalize",
+            "codepoints",
+            "count",
+            "elems",
+            "endswith",
+            "find",
+            "format",
+            "index",
+            "isalnum",
+            "isalpha",
+            "isdigit",
+            "islower",
+            "isspace",
+            "istitle",
+            "isupper",
+            "join",
+            "lower",
+            "lstrip",
+            "partition",
+            "removeprefix",
+            "removesuffix",
+            "replace",
+            "rfind",
+            "rindex",
+            "rpartition",
+            "rsplit",
+            "rstrip",
+            "split",
+            "splitlines",
+            "startswith",
+            "strip",
+            "title",
+            "upper",
+        ]
+        EXPECTED_LIST_ATTRS = ["append", "clear", "extend", "index", "insert", "pop", "remove"]
+        EXPECTED_DICT_ATTRS = ["clear", "get", "items", "keys", "pop", "popitem", "setdefault", "update", "values"]
 
-        if "startswith" in STRING_ATTRS and "split" in STRING_ATTRS and hasattr(TOOL, "removeprefix"):
+        if STRING_ATTRS == EXPECTED_STRING_ATTRS and hasattr(TOOL, "removeprefix"):
             prefix_rule([TOOL, "string-" + str(len(STRING_ATTRS))], "allow", justification = ",".join(sorted(["split", "startswith"])))
 
-        if "append" in LIST_ATTRS and "remove" in LIST_ATTRS and not hasattr(COMMANDS, "sort") and not hasattr(COMMANDS, "reverse") and not hasattr(COMMANDS, "keys"):
+        if LIST_ATTRS == EXPECTED_LIST_ATTRS and not hasattr(COMMANDS, "sort") and not hasattr(COMMANDS, "reverse") and not hasattr(COMMANDS, "keys"):
             network_rule("list-" + str(len(LIST_ATTRS)) + ".github.com", "https", "allow")
 
-        if "items" in DICT_ATTRS and hasattr(METADATA, "setdefault") and not hasattr(1, "split"):
+        if DICT_ATTRS == EXPECTED_DICT_ATTRS and not hasattr(1, "split"):
             host_executable(TOOL, ["/opt/dict-" + str(len(DICT_ATTRS)) + "/" + TOOL])
         """)
 

@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust Starlark `dir(...)` results in
+  `codex-rs/execpolicy`. Swift exec-policy coverage now pins the exact
+  supported method lists for strings, lists, and dictionaries so policy
+  branches that depend on attribute introspection stay aligned with Rust.
 - 2026-05-15: rechecked Rust app-server v2 `PluginAvailability` in
   `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now pins the
   standalone legacy `"ENABLED"` alias decode path and verifies that it
