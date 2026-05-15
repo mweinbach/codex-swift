@@ -34,6 +34,56 @@ final class AppServerFileSystemProtocolTests: XCTestCase {
         )
     }
 
+    func testFileReadWriteAndMetadataPayloadsRoundTripLikeRustProtocol() throws {
+        let readParams = try JSONDecoder().decode(
+            FsReadFileParams.self,
+            from: Data(#"{"path":"/tmp/codex-fs/file.txt"}"#.utf8)
+        )
+        XCTAssertEqual(readParams.path.path, "/tmp/codex-fs/file.txt")
+        try XCTAssertJSONObjectEqual(readParams, ["path": "/tmp/codex-fs/file.txt"])
+
+        let readResponse = try JSONDecoder().decode(
+            FsReadFileResponse.self,
+            from: Data(#"{"dataBase64":"aGVsbG8="}"#.utf8)
+        )
+        XCTAssertEqual(readResponse, FsReadFileResponse(dataBase64: "aGVsbG8="))
+        try XCTAssertJSONObjectEqual(readResponse, ["dataBase64": "aGVsbG8="])
+
+        let writeParams = try JSONDecoder().decode(
+            FsWriteFileParams.self,
+            from: Data(#"{"path":"/tmp/codex-fs/file.bin","dataBase64":"AAE="}"#.utf8)
+        )
+        XCTAssertEqual(writeParams, FsWriteFileParams(
+            path: try AbsolutePath(absolutePath: "/tmp/codex-fs/file.bin"),
+            dataBase64: "AAE="
+        ))
+        try XCTAssertJSONObjectEqual(writeParams, [
+            "path": "/tmp/codex-fs/file.bin",
+            "dataBase64": "AAE="
+        ])
+
+        let metadata = try JSONDecoder().decode(
+            FsGetMetadataResponse.self,
+            from: Data(
+                #"{"isDirectory":false,"isFile":true,"isSymlink":false,"createdAtMs":123,"modifiedAtMs":456}"#.utf8
+            )
+        )
+        XCTAssertEqual(metadata, FsGetMetadataResponse(
+            isDirectory: false,
+            isFile: true,
+            isSymlink: false,
+            createdAtMs: 123,
+            modifiedAtMs: 456
+        ))
+        try XCTAssertJSONObjectEqual(metadata, [
+            "isDirectory": false,
+            "isFile": true,
+            "isSymlink": false,
+            "createdAtMs": 123,
+            "modifiedAtMs": 456
+        ])
+    }
+
     func testCreateRemoveAndCopyPayloadsPreserveRustOptionalRules() throws {
         let source = try AbsolutePath(absolutePath: "/tmp/codex-fs/source")
         let destination = try AbsolutePath(absolutePath: "/tmp/codex-fs/destination")

@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 filesystem read/write/metadata
+  round-trip tests in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`.
+  Swift filesystem protocol coverage now pins the decode and re-encode side of
+  `fs/readFile`, `fs/writeFile`, and `fs/getMetadata` payloads, including
+  base64 data fields and metadata timestamp casing.
 - 2026-05-15: rechecked Rust app-server v2 `CollabAgentState::from`
   conversion in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`.
   Swift now carries the same core `AgentStatus` to app-server collab-agent
