@@ -296,6 +296,15 @@ final class AppServerAccountProtocolTests: XCTestCase {
         )
     }
 
+    func testLoginAccountParamsRejectsExplicitNullForRustDefaultedStreamlinedFlag() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                LoginAccountParams.self,
+                from: Data(#"{"type":"chatgpt","codexStreamlinedLogin":null}"#.utf8)
+            )
+        )
+    }
+
     func testGetAccountParamsDefaultAndEncodingMatchRustProtocol() throws {
         let decoded = try JSONDecoder().decode(GetAccountParams.self, from: Data(#"{}"#.utf8))
         XCTAssertEqual(decoded, GetAccountParams(refreshToken: false))

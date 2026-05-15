@@ -78,10 +78,11 @@ extension LoginAccountParams: Codable {
             self = .apiKey(apiKey: try container.decode(String.self, forKey: .apiKey))
         case .chatGPT:
             self = .chatGPT(
-                codexStreamlinedLogin: try container.decodeIfPresent(
+                codexStreamlinedLogin: try container.decodeRustDefaulted(
                     Bool.self,
-                    forKey: .codexStreamlinedLogin
-                ) ?? false
+                    forKey: .codexStreamlinedLogin,
+                    defaultValue: false
+                )
             )
         case .chatGPTDeviceCode:
             self = .chatGPTDeviceCode

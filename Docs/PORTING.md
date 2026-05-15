@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's app-server v2
+  `LoginAccountParams::Chatgpt.codex_streamlined_login` in
+  `codex-rs/app-server-protocol/src/protocol/v2/account.rs`. Swift now keeps
+  Rust's omitted-field default for `codexStreamlinedLogin` while rejecting
+  explicit `null` like Serde's `#[serde(default)]` bool field.
 - 2026-05-15: rechecked Rust's app-server v2 `SessionSource` in
   `codex-rs/app-server-protocol/src/protocol/v2/thread_data.rs`. Swift
   thread metadata decoding now mirrors Rust's `#[serde(other)]` fallback by
