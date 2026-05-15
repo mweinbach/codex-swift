@@ -104,6 +104,10 @@ Recent upstream audit checkpoint:
   Serde's default boundary for reasoning ids: omitted `id` defaults to an empty
   string while explicit `null` rejects, with summary/content/encrypted-content
   behavior unchanged.
+- 2026-05-15: rechecked Rust `From<ResponseInputItem> for ResponseItem` in
+  `codex-rs/protocol/src/models.rs`. Swift response-input conversion now
+  preserves message inputs, including assistant `phase`, while keeping tool
+  output conversion behavior aligned with Rust.
 - 2026-05-15: rechecked Rust backend task-details models in
   `codex-rs/backend-client/src/types.rs`. Swift `CloudHTTPClient` task detail
   decoding now preserves Rust's mixed default boundary: omitted `sibling_turns`

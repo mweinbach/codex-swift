@@ -185,7 +185,15 @@ final class StreamEventUtilsTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: expectedURL), Data("foo".utf8))
     }
 
-    func testResponseInputToResponseItemConvertsOutputVariants() {
+    func testResponseInputToResponseItemConvertsInputVariantsLikeRust() {
+        XCTAssertEqual(
+            StreamEventUtils.responseInputToResponseItem(.message(
+                role: "assistant",
+                content: [.outputText(text: "still working")],
+                phase: .commentary
+            )),
+            .message(role: "assistant", content: [.outputText(text: "still working")], phase: .commentary)
+        )
         XCTAssertEqual(
             StreamEventUtils.responseInputToResponseItem(.functionCallOutput(
                 callID: "fn1",
@@ -214,7 +222,6 @@ final class StreamEventUtilsTests: XCTestCase {
                 tools: [.object(["name": .string("calendar")])]
             )
         )
-        XCTAssertNil(StreamEventUtils.responseInputToResponseItem(.message(role: "user", content: [])))
     }
 
     func testResponseInputToResponseItemConvertsMcpResults() {

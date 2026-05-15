@@ -109,20 +109,8 @@ public enum StreamEventUtils {
         return stripped
     }
 
-    public static func responseInputToResponseItem(_ input: ResponseInputItem) -> ResponseItem? {
-        switch input {
-        case let .functionCallOutput(callID, output):
-            return .functionCallOutput(callID: callID, output: output)
-        case let .customToolCallOutput(callID, name, output):
-            return .customToolCallOutput(callID: callID, name: name, output: output)
-        case let .toolSearchOutput(callID, status, execution, tools):
-            return .toolSearchOutput(callID: callID, status: status, execution: execution, tools: tools)
-        case let .mcpToolCallOutput(callID, result):
-            let output = FunctionCallOutputPayload(callToolResult: result)
-            return .functionCallOutput(callID: callID, output: output)
-        case .message:
-            return nil
-        }
+    public static func responseInputToResponseItem(_ input: ResponseInputItem) -> ResponseItem {
+        input.responseItem()
     }
 
     public static func imageGenerationArtifactPath(
