@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust MCP `ToolInfo` in
+  `codex-rs/codex-mcp/src/tools.rs`. Swift `McpTool` decoding now preserves
+  Serde's default boundary for `plugin_display_names`: omitted fields default
+  to an empty list while explicit `null` rejects, matching the Rust cached tool
+  metadata shape.
 - 2026-05-15: rechecked Rust `ResponseItem::Reasoning` in
   `codex-rs/protocol/src/models.rs`. Swift response-item decoding now preserves
   Serde's default boundary for reasoning ids: omitted `id` defaults to an empty

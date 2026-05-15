@@ -686,7 +686,11 @@ public struct McpTool: Equatable, Codable, Sendable {
         }
         outputSchema = try container.decodeIfPresent(McpToolOutputSchema.self, forKey: .outputSchema)
             ?? container.decodeIfPresent(McpToolOutputSchema.self, forKey: .outputSchemaSnake)
-        pluginDisplayNames = try container.decodeIfPresent([String].self, forKey: .pluginDisplayNames) ?? []
+        pluginDisplayNames = try container.decodeRustDefaulted(
+            [String].self,
+            forKey: .pluginDisplayNames,
+            defaultValue: []
+        )
         title = try container.decodeIfPresent(String.self, forKey: .title)
     }
 

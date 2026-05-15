@@ -148,6 +148,27 @@ final class McpEventsTests: XCTestCase {
         """.utf8)))
     }
 
+    func testMcpToolDefaultsMissingPluginDisplayNamesLikeRustSerdeDefault() throws {
+        let decoded = try JSONDecoder().decode(McpTool.self, from: Data("""
+        {
+          "name": "search",
+          "inputSchema": {"type": "object"}
+        }
+        """.utf8))
+
+        XCTAssertEqual(decoded.pluginDisplayNames, [])
+    }
+
+    func testMcpToolRejectsNullPluginDisplayNamesLikeRustSerdeDefault() throws {
+        XCTAssertThrowsError(try JSONDecoder().decode(McpTool.self, from: Data("""
+        {
+          "name": "search",
+          "inputSchema": {"type": "object"},
+          "plugin_display_names": null
+        }
+        """.utf8)))
+    }
+
     func testMcpToolDefaultsMissingInputSchemaLikeRustSerdeDefault() throws {
         let omitted = try JSONDecoder().decode(McpTool.self, from: Data("""
         {
