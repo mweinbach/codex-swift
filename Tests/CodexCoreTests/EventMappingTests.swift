@@ -27,6 +27,52 @@ final class EventMappingTests: XCTestCase {
         ])
     }
 
+    func testSkipsLocalImageLabelTextLikeRust() {
+        let imageURL = "data:image/png;base64,abc"
+        let userText = "Please review this image."
+
+        let item = ResponseItem.message(
+            role: "user",
+            content: [
+                .inputText(text: "<image name=[Image #1]>"),
+                .inputImage(imageURL: imageURL, detail: defaultImageDetail),
+                .inputText(text: "</image>"),
+                .inputText(text: userText)
+            ]
+        )
+
+        guard case let .userMessage(message) = EventMapping.parseTurnItem(item) else {
+            return XCTFail("expected user message")
+        }
+        XCTAssertEqual(message.content, [
+            .image(imageURL: imageURL),
+            .text(userText)
+        ])
+    }
+
+    func testSkipsUnnamedImageLabelTextLikeRust() {
+        let imageURL = "data:image/png;base64,abc"
+        let userText = "Please review this image."
+
+        let item = ResponseItem.message(
+            role: "user",
+            content: [
+                .inputText(text: "<image>"),
+                .inputImage(imageURL: imageURL, detail: defaultImageDetail),
+                .inputText(text: "</image>"),
+                .inputText(text: userText)
+            ]
+        )
+
+        guard case let .userMessage(message) = EventMapping.parseTurnItem(item) else {
+            return XCTFail("expected user message")
+        }
+        XCTAssertEqual(message.content, [
+            .image(imageURL: imageURL),
+            .text(userText)
+        ])
+    }
+
     func testParsesHookPromptBeforePlainUserMessage() {
         let item = ResponseItem.message(
             id: "hook-prompt-1",

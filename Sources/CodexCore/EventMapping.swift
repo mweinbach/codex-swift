@@ -71,9 +71,12 @@ public enum EventMapping {
         }
 
         var content: [UserInput] = []
-        for contentItem in message {
+        for (index, contentItem) in message.enumerated() {
             switch contentItem {
             case let .inputText(text):
+                if isImageWrapperText(text, at: index, in: message) {
+                    continue
+                }
                 content.append(.text(text))
 
             case let .inputImage(imageURL, _):
@@ -85,6 +88,34 @@ public enum EventMapping {
         }
 
         return UserMessageItem(content: content)
+    }
+
+    private static func isImageWrapperText(_ text: String, at index: Int, in message: [ContentItem]) -> Bool {
+        if (isLocalImageOpenTagText(text) || isImageOpenTagText(text)),
+           message.indices.contains(index + 1),
+           case .inputImage = message[index + 1] {
+            return true
+        }
+
+        if index > 0,
+           isImageCloseTagText(text),
+           case .inputImage = message[index - 1] {
+            return true
+        }
+
+        return false
+    }
+
+    private static func isImageOpenTagText(_ text: String) -> Bool {
+        text == "<image>"
+    }
+
+    private static func isImageCloseTagText(_ text: String) -> Bool {
+        text == "</image>"
+    }
+
+    private static func isLocalImageOpenTagText(_ text: String) -> Bool {
+        text.hasPrefix("<image name=") && text.hasSuffix(">")
     }
 
     private static func isContextualUserFragment(_ item: ContentItem) -> Bool {
