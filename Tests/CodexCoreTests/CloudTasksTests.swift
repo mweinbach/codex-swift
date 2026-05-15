@@ -52,6 +52,28 @@ final class CloudTasksTests: XCTestCase {
         XCTAssertNil(decoded.attemptTotal)
     }
 
+    func testTaskSummaryRejectsNullRustDefaultedIsReview() throws {
+        let payload = Data("""
+        {
+          "id": "T-1000",
+          "title": "Review thing",
+          "status": "pending",
+          "updated_at": "2026-05-08T12:34:56Z",
+          "environment_id": null,
+          "environment_label": null,
+          "summary": {
+            "files_changed": 0,
+            "lines_added": 0,
+            "lines_removed": 0
+          },
+          "is_review": null,
+          "attempt_total": null
+        }
+        """.utf8)
+
+        XCTAssertThrowsError(try JSONDecoder().decode(CloudTaskSummary.self, from: payload))
+    }
+
     func testApplyOutcomeDefaultsAndErrorDescriptionsMatchRust() throws {
         let decoded = try JSONDecoder().decode(CloudApplyOutcome.self, from: Data("""
         {
@@ -73,6 +95,23 @@ final class CloudTasksTests: XCTestCase {
         XCTAssertEqual(String(describing: CloudTaskError.http("bad")), "http error: bad")
         XCTAssertEqual(String(describing: CloudTaskError.io("disk")), "io error: disk")
         XCTAssertEqual(String(describing: CloudTaskError.message("plain")), "plain")
+    }
+
+    func testApplyOutcomeRejectsNullRustDefaultedPathLists() throws {
+        let fields = ["skipped_paths", "conflict_paths"]
+
+        for field in fields {
+            let payload = Data("""
+            {
+              "applied": true,
+              "status": "success",
+              "message": "ok",
+              "\(field)": null
+            }
+            """.utf8)
+
+            XCTAssertThrowsError(try JSONDecoder().decode(CloudApplyOutcome.self, from: payload), field)
+        }
     }
 
     func testMockClientListTasksMatchesRustRowsAndDiffCounts() async throws {

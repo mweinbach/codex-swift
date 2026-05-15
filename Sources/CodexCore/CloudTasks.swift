@@ -105,7 +105,7 @@ public struct CloudTaskSummary: Equatable, Codable, Sendable {
         self.environmentID = try container.decodeIfPresent(String.self, forKey: .environmentID)
         self.environmentLabel = try container.decodeIfPresent(String.self, forKey: .environmentLabel)
         self.summary = try container.decode(CloudDiffSummary.self, forKey: .summary)
-        self.isReview = try container.decodeIfPresent(Bool.self, forKey: .isReview) ?? false
+        self.isReview = try container.decodeRustDefaulted(Bool.self, forKey: .isReview, defaultValue: false)
         self.attemptTotal = try container.decodeIfPresent(Int.self, forKey: .attemptTotal)
     }
 
@@ -197,8 +197,16 @@ public struct CloudApplyOutcome: Equatable, Codable, Sendable {
         self.applied = try container.decode(Bool.self, forKey: .applied)
         self.status = try container.decode(CloudApplyStatus.self, forKey: .status)
         self.message = try container.decode(String.self, forKey: .message)
-        self.skippedPaths = try container.decodeIfPresent([String].self, forKey: .skippedPaths) ?? []
-        self.conflictPaths = try container.decodeIfPresent([String].self, forKey: .conflictPaths) ?? []
+        self.skippedPaths = try container.decodeRustDefaulted(
+            [String].self,
+            forKey: .skippedPaths,
+            defaultValue: []
+        )
+        self.conflictPaths = try container.decodeRustDefaulted(
+            [String].self,
+            forKey: .conflictPaths,
+            defaultValue: []
+        )
     }
 
     public func encode(to encoder: Encoder) throws {

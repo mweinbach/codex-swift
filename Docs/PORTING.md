@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust cloud-task client defaults in
+  `codex-rs/cloud-tasks-client/src/api.rs`. Swift `CloudTaskSummary` and
+  `CloudApplyOutcome` decoding now preserve Serde's omitted-vs-null boundary
+  for defaulted `is_review`, `skipped_paths`, and `conflict_paths`, while
+  keeping explicit `null` accepted for optional `attempt_total`.
 - 2026-05-15: rechecked current Rust `codex-rs/app-server-protocol/src/protocol/v2/thread.rs`.
   `ThreadForkResponse` no longer carries a top-level `sessionId`; Swift now
   matches by returning the forked id only on the nested `thread.sessionId` field
