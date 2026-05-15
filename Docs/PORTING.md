@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's MCP image content conversion in
+  `codex-rs/protocol/src/models.rs`. Swift `McpImageContent` decoding now
+  rejects payloads that provide both `mimeType` and `mime_type`, while keeping
+  Rust's snake-case alias and missing-MIME default.
 - 2026-05-15: rechecked Rust MCP resource aliases in
   `codex-rs/protocol/src/mcp.rs`. Swift `McpResource` and
   `McpResourceTemplate` decoding now rejects duplicate camelCase/snake_case

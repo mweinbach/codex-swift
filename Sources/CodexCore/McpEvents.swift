@@ -1172,6 +1172,13 @@ public struct McpImageContent: Equatable, Codable, Sendable {
         self.annotations = try container.decodeIfPresent(McpAnnotations.self, forKey: .annotations)
         self.data = try container.decode(String.self, forKey: .data)
         self.meta = try container.decodeIfPresent(JSONValue.self, forKey: .meta)
+        if container.contains(.mimeType), container.contains(.mimeTypeSnake) {
+            throw DecodingError.dataCorruptedError(
+                forKey: .mimeType,
+                in: container,
+                debugDescription: "duplicate MCP image content mimeType field"
+            )
+        }
         self.mimeType = try container.decodeIfPresent(String.self, forKey: .mimeType)
             ?? container.decodeIfPresent(String.self, forKey: .mimeTypeSnake)
             ?? "application/octet-stream"

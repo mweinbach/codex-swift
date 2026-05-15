@@ -1084,6 +1084,17 @@ final class McpEventsTests: XCTestCase {
         XCTAssertEqual(missing, .image(McpImageContent(data: "BBBB", mimeType: "application/octet-stream")))
     }
 
+    func testMcpImageContentRejectsDuplicateRustMimeTypeAliases() throws {
+        XCTAssertThrowsError(try JSONDecoder().decode(McpContentBlock.self, from: Data("""
+        {
+          "type": "image",
+          "data": "AAAA",
+          "mimeType": "image/png",
+          "mime_type": "image/jpeg"
+        }
+        """.utf8)))
+    }
+
     func testAuthStatusWireValuesAndDisplayMatchRust() throws {
         XCTAssertEqual(try encode(McpAuthStatus.unsupported), #""unsupported""#)
         XCTAssertEqual(try encode(McpAuthStatus.notLoggedIn), #""not_logged_in""#)
