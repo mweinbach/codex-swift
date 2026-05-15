@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust shell tool parameter aliases in
+  `codex-rs/protocol/src/models.rs`. Swift `ShellToolCallParams` and
+  `ShellCommandToolCallParams` still accept the legacy `timeout` alias for
+  `timeout_ms`, but now reject payloads that provide both spellings like Serde.
 - 2026-05-15: rechecked Rust app-server v2 MCP elicitation titled enum items in
   `codex-rs/app-server-protocol/src/protocol/v2/mcp.rs`. Swift
   `McpElicitationTitledEnumItems` still accepts Rust's `oneOf` alias for

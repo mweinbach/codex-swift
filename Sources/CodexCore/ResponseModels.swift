@@ -751,6 +751,13 @@ public struct ShellToolCallParams: Equatable, Decodable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.command = try container.decode([String].self, forKey: .command)
         self.workdir = try container.decodeIfPresent(String.self, forKey: .workdir)
+        if container.contains(.timeoutMS), container.contains(.timeout) {
+            throw DecodingError.dataCorruptedError(
+                forKey: .timeoutMS,
+                in: container,
+                debugDescription: "duplicate shell tool timeout_ms field"
+            )
+        }
         self.timeoutMS = try container.decodeIfPresent(UInt64.self, forKey: .timeoutMS)
             ?? container.decodeIfPresent(UInt64.self, forKey: .timeout)
         self.sandboxPermissions = try container.decodeIfPresent(SandboxPermissions.self, forKey: .sandboxPermissions)
@@ -790,6 +797,13 @@ public struct ShellCommandToolCallParams: Equatable, Decodable, Sendable {
         self.command = try container.decode(String.self, forKey: .command)
         self.workdir = try container.decodeIfPresent(String.self, forKey: .workdir)
         self.login = try container.decodeIfPresent(Bool.self, forKey: .login)
+        if container.contains(.timeoutMS), container.contains(.timeout) {
+            throw DecodingError.dataCorruptedError(
+                forKey: .timeoutMS,
+                in: container,
+                debugDescription: "duplicate shell_command tool timeout_ms field"
+            )
+        }
         self.timeoutMS = try container.decodeIfPresent(UInt64.self, forKey: .timeoutMS)
             ?? container.decodeIfPresent(UInt64.self, forKey: .timeout)
         self.sandboxPermissions = try container.decodeIfPresent(SandboxPermissions.self, forKey: .sandboxPermissions)

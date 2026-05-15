@@ -1235,6 +1235,15 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertEqual(params.timeoutMS, 1000)
     }
 
+    func testShellToolCallParamsRejectsDuplicateTimeoutAliasesLikeRust() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                ShellToolCallParams.self,
+                from: Data(#"{"command":["ls"],"workdir":"/tmp","timeout_ms":1000,"timeout":2000}"#.utf8)
+            )
+        )
+    }
+
     func testShellToolCallParamsDecodeApprovalHintsLikeRust() throws {
         let json = #"""
         {
@@ -1293,6 +1302,15 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertEqual(params.additionalPermissions?.network, RequestPermissionNetworkPermissions(enabled: false))
         XCTAssertNil(params.additionalPermissions?.fileSystem)
         XCTAssertEqual(params.justification, "inspect repo")
+    }
+
+    func testShellCommandToolCallParamsRejectsDuplicateTimeoutAliasesLikeRust() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                ShellCommandToolCallParams.self,
+                from: Data(#"{"command":"git status","workdir":"/repo","timeout_ms":1000,"timeout":2000}"#.utf8)
+            )
+        )
     }
 
     func testExecCommandToolCallParamsDecodeApprovalHintsLikeRust() throws {
