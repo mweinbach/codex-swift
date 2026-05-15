@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `command/exec`
+  `disableTimeout` round-trip coverage in
+  `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift protocol
+  coverage now decodes the canonical disabled-timeout fixture back to typed
+  command params, matching the already pinned encode shape.
 - 2026-05-15: rechecked Rust `start_thread_uses_all_default_environments_from_codex_home`
   in `codex-rs/core/src/thread_manager_tests.rs`. Swift prompt/runtime
   coverage now pins configured `CODEX_HOME/environments.toml` snapshots as

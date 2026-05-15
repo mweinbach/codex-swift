@@ -75,12 +75,13 @@ final class AppServerCommandExecProtocolTests: XCTestCase {
     }
 
     func testCommandExecParamsRoundTripDisabledLimitShapesLikeRustProtocol() throws {
+        let disabledTimeout = CommandExecParams(
+            command: ["sleep", "30"],
+            processID: "sleep-1",
+            disableTimeout: true
+        )
         try XCTAssertJSONObjectEqual(
-            CommandExecParams(
-                command: ["sleep", "30"],
-                processID: "sleep-1",
-                disableTimeout: true
-            ),
+            disabledTimeout,
             [
                 "command": ["sleep", "30"],
                 "processId": "sleep-1",
@@ -93,6 +94,13 @@ final class AppServerCommandExecProtocolTests: XCTestCase {
                 "permissionProfile": NSNull(),
                 "outputBytesCap": NSNull()
             ]
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                CommandExecParams.self,
+                from: Data(#"{"command":["sleep","30"],"processId":"sleep-1","disableTimeout":true,"timeoutMs":null,"cwd":null,"env":null,"size":null,"sandboxPolicy":null,"permissionProfile":null,"outputBytesCap":null}"#.utf8)
+            ),
+            disabledTimeout
         )
 
         let disabledOutputCap = CommandExecParams(
