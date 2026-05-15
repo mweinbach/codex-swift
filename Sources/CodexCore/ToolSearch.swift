@@ -98,7 +98,7 @@ public struct ToolSearchIndex: Equatable, Sendable {
 
     public static func mcpEntries(from tools: [McpToolInfo]) -> [ToolSearchEntry] {
         McpToolName.normalizeToolsForModel(tools)
-            .sorted { $0.canonicalToolName < $1.canonicalToolName }
+            .sorted { compareMcpToolOrder($0, $1) }
             .map { toolInfo in
                 let qualifiedName = toolInfo.canonicalToolName
                 let namespace = toolInfo.callableNamespace
@@ -222,6 +222,13 @@ public struct ToolSearchIndex: Equatable, Sendable {
         case let (lhsName?, rhsName?):
             return lhsName < rhsName
         }
+    }
+
+    private static func compareMcpToolOrder(_ lhs: McpToolInfo, _ rhs: McpToolInfo) -> Bool {
+        if lhs.callableNamespace != rhs.callableNamespace {
+            return lhs.callableNamespace < rhs.callableNamespace
+        }
+        return lhs.callableName < rhs.callableName
     }
 
     public func toolSpec(defaultLimit: Int = ToolSearchIndex.defaultLimit) -> ToolSpec {

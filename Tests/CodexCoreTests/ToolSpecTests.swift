@@ -1432,6 +1432,28 @@ final class ToolSpecTests: XCTestCase {
         ])
     }
 
+    func testMCPToolSearchEntriesUseRustStructuralToolNameOrdering() {
+        let entries = ToolSearchIndex.mcpEntries(from: [
+            McpToolInfo(
+                serverName: "alpha_a",
+                tool: makeMcpTool(name: "tool"),
+                callableNamespace: "mcp__alpha__a__",
+                callableName: "tool"
+            ),
+            McpToolInfo(
+                serverName: "alpha",
+                tool: makeMcpTool(name: "z"),
+                callableNamespace: "mcp__alpha__",
+                callableName: "z"
+            )
+        ])
+
+        XCTAssertEqual(entries.map(\.output.name), [
+            "mcp__alpha__",
+            "mcp__alpha__a__"
+        ])
+    }
+
     func testToolSearchIndexReturnsCoalescedDeferredMCPNamespace() throws {
         let index = ToolSearchIndex.mcpIndex(from: [
             McpToolInfo(serverName: "calendar", tool: makeMcpTool(name: "create_event", description: "Create events")),
