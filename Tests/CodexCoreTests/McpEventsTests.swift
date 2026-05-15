@@ -130,6 +130,23 @@ final class McpEventsTests: XCTestCase {
         ]))
     }
 
+    func testMcpToolDefaultsMissingInputSchemaLikeRustSerdeDefault() throws {
+        let omitted = try JSONDecoder().decode(McpTool.self, from: Data("""
+        {
+          "name": "search"
+        }
+        """.utf8))
+        XCTAssertEqual(omitted.inputSchema, McpToolInputSchema())
+
+        let explicitNull = try JSONDecoder().decode(McpTool.self, from: Data("""
+        {
+          "name": "search",
+          "inputSchema": null
+        }
+        """.utf8))
+        XCTAssertEqual(explicitNull.inputSchema, McpToolInputSchema())
+    }
+
     func testMcpToolPreservesRustIconsAndMetaFields() throws {
         let decoded = try JSONDecoder().decode(McpTool.self, from: Data("""
         {

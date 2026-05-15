@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's MCP tool schema default in
+  `codex-rs/protocol/src/mcp.rs`. Swift `McpTool` decoding now accepts omitted
+  or explicit-null `inputSchema` / `input_schema` like Rust's
+  `#[serde(default)]` `serde_json::Value` field, normalizing it to the existing
+  empty object schema used by the Swift tool-planning surface.
 - 2026-05-15: rechecked Rust unified exec stdin handling in
   `codex-rs/core/src/unified_exec/{process_manager,errors}.rs`. Swift
   non-interactive unified exec now closes stdin for non-PTY sessions, rejects
