@@ -100,6 +100,92 @@ final class AppServerExternalAgentConfigProtocolTests: XCTestCase {
         ])
     }
 
+    func testExternalAgentConfigPluginsDetailsDecodeLikeRustProtocol() throws {
+        let item = try JSONDecoder().decode(
+            ExternalAgentConfigMigrationItem.self,
+            from: Data(
+                #"""
+                {
+                  "itemType": "PLUGINS",
+                  "description": "Install supported plugins from Claude settings",
+                  "cwd": "/repo",
+                  "details": {
+                    "plugins": [
+                      {
+                        "marketplaceName": "team-marketplace",
+                        "pluginNames": ["asana"]
+                      }
+                    ]
+                  }
+                }
+                """#.utf8
+            )
+        )
+
+        XCTAssertEqual(
+            item,
+            ExternalAgentConfigMigrationItem(
+                itemType: .plugins,
+                description: "Install supported plugins from Claude settings",
+                cwd: "/repo",
+                details: ExternalAgentMigrationDetails(
+                    plugins: [
+                        ExternalAgentPluginsMigration(
+                            marketplaceName: "team-marketplace",
+                            pluginNames: ["asana"]
+                        )
+                    ]
+                )
+            )
+        )
+    }
+
+    func testExternalAgentConfigImportParamsAcceptLegacyPluginDetailsLikeRustProtocol() throws {
+        let params = try JSONDecoder().decode(
+            ExternalAgentConfigImportParams.self,
+            from: Data(
+                #"""
+                {
+                  "migrationItems": [
+                    {
+                      "itemType": "PLUGINS",
+                      "description": "Install supported plugins from Claude settings",
+                      "cwd": "/repo",
+                      "details": {
+                        "plugins": [
+                          {
+                            "marketplaceName": "team-marketplace",
+                            "pluginNames": ["asana"]
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """#.utf8
+            )
+        )
+
+        XCTAssertEqual(
+            params,
+            ExternalAgentConfigImportParams(migrationItems: [
+                ExternalAgentConfigMigrationItem(
+                    itemType: .plugins,
+                    description: "Install supported plugins from Claude settings",
+                    cwd: "/repo",
+                    details: ExternalAgentMigrationDetails(
+                        plugins: [
+                            ExternalAgentPluginsMigration(
+                                marketplaceName: "team-marketplace",
+                                pluginNames: ["asana"]
+                            )
+                        ]
+                    )
+                )
+            ])
+        )
+    }
+
     func testExternalAgentConfigMigrationItemsPreserveNullOptionalsLikeRust() throws {
         try XCTAssertJSONObjectEqual(
             ExternalAgentConfigMigrationItem(itemType: .sessions, description: "Migrate sessions"),
