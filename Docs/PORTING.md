@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `command/exec` default
+  streaming flag decoding in
+  `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now pins
+  the same payload with `timeoutMs` and `cwd` present while omitted
+  `tty`/streaming booleans, output-cap, timeout-disable, env, size, sandbox,
+  and permission profile fields resolve to Rust defaults.
 - 2026-05-15: rechecked Rust app-server v2 `ApprovalsReviewer`
   serialization in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`.
   Swift now pins the canonical `"guardian_subagent"` encoding for

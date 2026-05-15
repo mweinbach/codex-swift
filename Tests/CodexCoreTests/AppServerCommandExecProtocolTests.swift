@@ -169,6 +169,28 @@ final class AppServerCommandExecProtocolTests: XCTestCase {
         XCTAssertNil(decoded.permissionProfile)
     }
 
+    func testCommandExecParamsDefaultOptionalStreamingFlagsLikeRustProtocol() throws {
+        let decoded = try JSONDecoder().decode(
+            CommandExecParams.self,
+            from: Data(#"{"command":["ls","-la"],"timeoutMs":1000,"cwd":"/tmp"}"#.utf8)
+        )
+
+        XCTAssertEqual(decoded.command, ["ls", "-la"])
+        XCTAssertNil(decoded.processID)
+        XCTAssertFalse(decoded.tty)
+        XCTAssertFalse(decoded.streamStdin)
+        XCTAssertFalse(decoded.streamStdoutStderr)
+        XCTAssertNil(decoded.outputBytesCap)
+        XCTAssertFalse(decoded.disableOutputCap)
+        XCTAssertFalse(decoded.disableTimeout)
+        XCTAssertEqual(decoded.timeoutMs, 1000)
+        XCTAssertEqual(decoded.cwd, "/tmp")
+        XCTAssertNil(decoded.env)
+        XCTAssertNil(decoded.size)
+        XCTAssertNil(decoded.sandboxPolicy)
+        XCTAssertNil(decoded.permissionProfile)
+    }
+
     func testCommandExecParamsRejectsNegativeOutputBytesCapLikeRustUsize() {
         XCTAssertThrowsError(
             try JSONDecoder().decode(
