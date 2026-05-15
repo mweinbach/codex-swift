@@ -267,6 +267,60 @@ final class ApplyPatchTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: target), "line1\nline2\n")
     }
 
+    func testApplyPatchFindsExpectedLinesWithRustSeekSequenceLenience() throws {
+        let dir = try TemporaryDirectory()
+
+        let trailing = dir.url.appendingPathComponent("trailing.txt")
+        try "foo   \nbar\t\t\n".write(to: trailing, atomically: true, encoding: .utf8)
+        let trailingPatch = """
+        *** Begin Patch
+        *** Update File: trailing.txt
+        @@
+        -foo
+        -bar
+        +FOO
+        +BAR
+        *** End Patch
+        """
+
+        let trailingResult = ApplyPatch.apply(trailingPatch, cwd: dir.url)
+        XCTAssertEqual(trailingResult.stderr, "")
+        XCTAssertEqual(try String(contentsOf: trailing), "FOO\nBAR\n")
+
+        let trimmed = dir.url.appendingPathComponent("trimmed.txt")
+        try "    foo   \n   bar\t\n".write(to: trimmed, atomically: true, encoding: .utf8)
+        let trimmedPatch = """
+        *** Begin Patch
+        *** Update File: trimmed.txt
+        @@
+        -foo
+        -bar
+        +FOO
+        +BAR
+        *** End Patch
+        """
+
+        let trimmedResult = ApplyPatch.apply(trimmedPatch, cwd: dir.url)
+        XCTAssertEqual(trimmedResult.stderr, "")
+        XCTAssertEqual(try String(contentsOf: trimmed), "FOO\nBAR\n")
+
+        let unicode = dir.url.appendingPathComponent("unicode.txt")
+        try "import asyncio  # local import \u{2013} avoids top\u{2011}level dep\n"
+            .write(to: unicode, atomically: true, encoding: .utf8)
+        let unicodePatch = """
+        *** Begin Patch
+        *** Update File: unicode.txt
+        @@
+        -import asyncio  # local import - avoids top-level dep
+        +import asyncio  # HELLO
+        *** End Patch
+        """
+
+        let unicodeResult = ApplyPatch.apply(unicodePatch, cwd: dir.url)
+        XCTAssertEqual(unicodeResult.stderr, "")
+        XCTAssertEqual(try String(contentsOf: unicode), "import asyncio  # HELLO\n")
+    }
+
     func testApplyPatchRejectsEmptyUpdateHunk() {
         let result = ApplyPatch.apply("*** Begin Patch\n*** Update File: foo.txt\n*** End Patch")
         XCTAssertEqual(result.stderr, "Invalid patch hunk on line 2: Update file hunk for path 'foo.txt' is empty\n")

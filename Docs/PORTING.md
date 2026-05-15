@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust apply-patch `seek_sequence` matching in
+  `codex-rs/apply-patch/src/seek_sequence.rs`. Swift apply-patch lookup now
+  mirrors Rust's staged exact, trailing-whitespace, trimmed, and Unicode
+  punctuation-normalized line matching.
 - 2026-05-15: rechecked Rust apply-patch streaming parser fixtures in
   `codex-rs/apply-patch/src/streaming_parser.rs`. Swift coverage now pins
   Rust's multi-hunk same-delta streaming, final buffered line handling, and the

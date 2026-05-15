@@ -1181,18 +1181,56 @@ public enum ApplyPatch {
             return start
         }
         guard pattern.count <= lines.count else { return nil }
-        var index = start
-        while index + pattern.count <= lines.count {
-            if Array(lines[index..<index + pattern.count]) == pattern {
-                if endOfFile, index + pattern.count != lines.count {
-                    index += 1
-                    continue
-                }
-                return index
+
+        let lastPossibleStart = lines.count - pattern.count
+        let searchStart = endOfFile ? lastPossibleStart : start
+        guard searchStart <= lastPossibleStart else { return nil }
+
+        let matchers: [(String, String) -> Bool] = [
+            { $0 == $1 },
+            {
+                $0.trimmingTrailingWhitespaceAndNewlines() == $1.trimmingTrailingWhitespaceAndNewlines()
+            },
+            {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines) == $1.trimmingCharacters(in: .whitespacesAndNewlines)
+            },
+            {
+                normalizedPatchLookupLine($0) == normalizedPatchLookupLine($1)
             }
-            index += 1
+        ]
+
+        for matcher in matchers {
+            var index = searchStart
+            while index + pattern.count <= lines.count {
+                let candidate = lines[index..<index + pattern.count]
+                if zip(candidate, pattern).allSatisfy(matcher) {
+                    return index
+                }
+                index += 1
+            }
         }
+
         return nil
+    }
+
+    private static func normalizedPatchLookupLine(_ line: String) -> String {
+        var normalized = ""
+        for scalar in line.trimmingCharacters(in: .whitespacesAndNewlines).unicodeScalars {
+            switch scalar.value {
+            case 0x2010, 0x2011, 0x2012, 0x2013, 0x2014, 0x2015, 0x2212:
+                normalized.unicodeScalars.append(UnicodeScalar("-"))
+            case 0x2018, 0x2019, 0x201A, 0x201B:
+                normalized.unicodeScalars.append(UnicodeScalar("'"))
+            case 0x201C, 0x201D, 0x201E, 0x201F:
+                normalized.unicodeScalars.append(UnicodeScalar("\""))
+            case 0x00A0, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200A,
+                 0x202F, 0x205F, 0x3000:
+                normalized.unicodeScalars.append(UnicodeScalar(" "))
+            default:
+                normalized.unicodeScalars.append(scalar)
+            }
+        }
+        return normalized
     }
 
     fileprivate static func resolve(_ path: String, cwd: URL) -> URL {
@@ -1236,6 +1274,16 @@ public func maybeParseApplyPatchVerified(_ argv: [String], cwd: URL) -> MaybeApp
 }
 
 private extension String {
+    func trimmingTrailingWhitespaceAndNewlines() -> String {
+        var result = self
+        while let scalar = result.unicodeScalars.last,
+              CharacterSet.whitespacesAndNewlines.contains(scalar)
+        {
+            result.unicodeScalars.removeLast()
+        }
+        return result
+    }
+
     func removingPrefix(_ prefix: String) -> String? {
         guard hasPrefix(prefix) else { return nil }
         return String(dropFirst(prefix.count))
