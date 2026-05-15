@@ -1394,7 +1394,7 @@ public enum AppServerProtocol {
         public let network: AppServerAdditionalNetworkPermissions?
         public let fileSystem: AppServerAdditionalFileSystemPermissions?
 
-        private enum CodingKeys: String, CodingKey {
+        private enum CodingKeys: String, CodingKey, CaseIterable {
             case network
             case fileSystem
         }
@@ -1419,6 +1419,13 @@ public enum AppServerProtocol {
 
         public init(fileSystem: FileSystemPermissions?) {
             self.init(network: nil as RequestPermissionNetworkPermissions?, fileSystem: fileSystem)
+        }
+
+        public init(from decoder: Decoder) throws {
+            try AppServerProtocol.rejectUnknownKeys(decoder, allowedBy: CodingKeys.self)
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            network = try container.decodeIfPresent(AppServerAdditionalNetworkPermissions.self, forKey: .network)
+            fileSystem = try container.decodeIfPresent(AppServerAdditionalFileSystemPermissions.self, forKey: .fileSystem)
         }
 
         public func encode(to encoder: Encoder) throws {

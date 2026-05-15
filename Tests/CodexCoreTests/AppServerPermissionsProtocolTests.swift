@@ -267,6 +267,44 @@ final class AppServerPermissionsProtocolTests: XCTestCase {
         )
     }
 
+    func testPermissionsRequestApprovalRejectsMacOSPermissionFieldLikeRust() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AppServerProtocol.PermissionsRequestApprovalParams.self,
+                from: Data(
+                    #"""
+                    {
+                      "threadId": "thr_123",
+                      "turnId": "turn_123",
+                      "itemId": "call_123",
+                      "startedAtMs": 1,
+                      "cwd": "/repo",
+                      "reason": "Select a workspace root",
+                      "permissions": {
+                        "network": null,
+                        "fileSystem": null,
+                        "macos": {
+                          "preferences": "read_only",
+                          "automations": "none",
+                          "launchServices": false,
+                          "accessibility": false,
+                          "calendar": false,
+                          "reminders": false,
+                          "contacts": "none"
+                        }
+                      }
+                    }
+                    """#.utf8
+                )
+            )
+        ) { error in
+            XCTAssertTrue(
+                String(describing: error).contains("unknown field `macos`"),
+                "expected Rust-shaped unknown macos field error, got \(error)"
+            )
+        }
+    }
+
     func testRequestPermissionProfileRejectsUnknownFieldsLikeRust() {
         XCTAssertThrowsError(try JSONDecoder().decode(
             RequestPermissionProfile.self,

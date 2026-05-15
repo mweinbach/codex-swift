@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `RequestPermissionProfile`
+  decoding in `codex-rs/app-server-protocol/src/protocol/v2/permissions.rs`.
+  Swift app-server permission approval requests now reject unknown permission
+  fields such as the removed `macos` block with Rust's unknown-field error
+  instead of silently accepting legacy extras.
 - 2026-05-15: rechecked Rust HEAD `7c9731c9af` (`cargo shear`
   `--deny-warnings`) plus the adjacent release/Python-SDK maintenance commits
   `cf941ede15`, `9183503b97`, and `8956a928a1`. These touch Rust CI/release
