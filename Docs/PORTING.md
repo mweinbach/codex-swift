@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust configured-environment stdio cwd normalization in
+  `codex-rs/exec-server/src/environment_toml.rs`. Swift now preserves Rust's
+  literal `config_dir.join(cwd)` behavior for relative stdio `cwd` values
+  instead of standardizing away `.` / `..` path components.
 - 2026-05-15: rechecked Rust app-server dynamic tool validation in
   `codex-rs/app-server/src/request_processors/thread_processor.rs`. Swift
   dynamic tool validation now formats identifier validation errors with Rust's

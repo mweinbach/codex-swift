@@ -517,7 +517,10 @@ private extension ConfiguredEnvironmentLoader {
         guard let configDirectory else {
             throw ConfiguredEnvironmentLoadError.protocolError("environment `\(id)` cwd must be absolute")
         }
-        return configDirectory.appendingPathComponent(rawCwd, isDirectory: true).standardizedFileURL.path
+        let configDirectoryPath = configDirectory.path
+        return configDirectoryPath.hasSuffix("/")
+            ? "\(configDirectoryPath)\(rawCwd)"
+            : "\(configDirectoryPath)/\(rawCwd)"
     }
 
     static func normalizeExecServerURL(_ rawValue: String?) -> (url: String?, disabled: Bool) {

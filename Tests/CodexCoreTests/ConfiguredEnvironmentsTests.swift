@@ -233,7 +233,29 @@ final class ConfiguredEnvironmentsTests: XCTestCase {
                 program: "ssh",
                 args: ["dev", "codex exec-server --listen stdio"],
                 env: ["CODEX_LOG": "debug"],
-                cwd: temp.url.appendingPathComponent("workspace", isDirectory: true).standardizedFileURL.path
+                cwd: temp.url.appendingPathComponent("workspace", isDirectory: true).path
+            ))
+        )
+    }
+
+    func testRelativeStdioCwdPreservesLiteralJoinLikeRustPathBuf() throws {
+        let temp = try ConfiguredEnvironmentTemporaryDirectory()
+
+        let snapshot = try ConfiguredEnvironmentLoader.snapshot(
+            fromToml: """
+            [[environments]]
+            id = "ssh-dev"
+            program = "ssh"
+            cwd = "workspace/../other"
+            """,
+            configDirectory: temp.url
+        )
+
+        XCTAssertEqual(
+            snapshot.environment(id: "ssh-dev")?.transport,
+            .stdio(StdioConfiguredEnvironmentCommand(
+                program: "ssh",
+                cwd: "\(temp.url.path)/workspace/../other"
             ))
         )
     }
