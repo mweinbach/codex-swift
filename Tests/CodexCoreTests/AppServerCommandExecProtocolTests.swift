@@ -74,7 +74,7 @@ final class AppServerCommandExecProtocolTests: XCTestCase {
         ])
     }
 
-    func testCommandExecParamsEncodeDisabledLimitShapesLikeRustProtocol() throws {
+    func testCommandExecParamsRoundTripDisabledLimitShapesLikeRustProtocol() throws {
         try XCTAssertJSONObjectEqual(
             CommandExecParams(
                 command: ["sleep", "30"],
@@ -95,13 +95,14 @@ final class AppServerCommandExecProtocolTests: XCTestCase {
             ]
         )
 
+        let disabledOutputCap = CommandExecParams(
+            command: ["yes"],
+            processID: "yes-1",
+            streamStdoutStderr: true,
+            disableOutputCap: true
+        )
         try XCTAssertJSONObjectEqual(
-            CommandExecParams(
-                command: ["yes"],
-                processID: "yes-1",
-                streamStdoutStderr: true,
-                disableOutputCap: true
-            ),
+            disabledOutputCap,
             [
                 "command": ["yes"],
                 "processId": "yes-1",
@@ -116,19 +117,28 @@ final class AppServerCommandExecProtocolTests: XCTestCase {
                 "permissionProfile": NSNull()
             ]
         )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                CommandExecParams.self,
+                from: Data(#"{"command":["yes"],"processId":"yes-1","streamStdoutStderr":true,"outputBytesCap":null,"disableOutputCap":true,"timeoutMs":null,"cwd":null,"env":null,"size":null,"sandboxPolicy":null,"permissionProfile":null}"#.utf8)
+            ),
+            disabledOutputCap
+        )
     }
 
-    func testCommandExecParamsEncodeEnvOverridesAndUnsetsLikeRustProtocol() throws {
+    func testCommandExecParamsRoundTripEnvOverridesAndUnsetsLikeRustProtocol() throws {
+        let params = CommandExecParams(
+            command: ["printenv", "FOO"],
+            processID: "env-1",
+            env: [
+                "FOO": "override",
+                "BAR": "added",
+                "BAZ": nil
+            ]
+        )
+
         try XCTAssertJSONObjectEqual(
-            CommandExecParams(
-                command: ["printenv", "FOO"],
-                processID: "env-1",
-                env: [
-                    "FOO": "override",
-                    "BAR": "added",
-                    "BAZ": nil
-                ]
-            ),
+            params,
             [
                 "command": ["printenv", "FOO"],
                 "processId": "env-1",
@@ -144,6 +154,13 @@ final class AppServerCommandExecProtocolTests: XCTestCase {
                 "sandboxPolicy": NSNull(),
                 "permissionProfile": NSNull()
             ]
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                CommandExecParams.self,
+                from: Data(#"{"command":["printenv","FOO"],"processId":"env-1","outputBytesCap":null,"timeoutMs":null,"cwd":null,"env":{"FOO":"override","BAR":"added","BAZ":null},"size":null,"sandboxPolicy":null,"permissionProfile":null}"#.utf8)
+            ),
+            params
         )
     }
 

@@ -82,6 +82,49 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(text, "ship it")
     }
 
+    func testMakePromptExpandsConfiguredEnvironmentSnapshotDefaultFirstLikeRust() throws {
+        let cwd = URL(fileURLWithPath: "/tmp/project", isDirectory: true)
+        let snapshot = ConfiguredEnvironmentSnapshot(
+            environments: [
+                ConfiguredEnvironmentEntry(id: "local", transport: .local),
+                ConfiguredEnvironmentEntry(
+                    id: "dev",
+                    transport: .stdio(StdioConfiguredEnvironmentCommand(program: "ssh", args: ["dev"]))
+                ),
+                ConfiguredEnvironmentEntry(id: "qa", transport: .websocketURL("ws://127.0.0.1:4512"))
+            ],
+            defaultEnvironment: .environmentID("dev")
+        )
+
+        let prompt = NonInteractiveExec.makePrompt(
+            prompt: "ship it",
+            imagePaths: [],
+            outputSchema: nil,
+            cwd: cwd,
+            approvalPolicy: .never,
+            sandboxPolicy: .readOnly,
+            shell: Shell(shellType: .zsh, shellPath: "/bin/zsh"),
+            environmentContextEnvironments: snapshot.environmentContextEnvironments(
+                cwd: cwd.path,
+                shell: Shell(shellType: .zsh, shellPath: "/bin/zsh")
+            )
+        )
+
+        guard case let .message(_, "user", content, _) = prompt.input[1],
+              case let .inputText(environmentText) = content.first
+        else {
+            return XCTFail("expected contextual environment message")
+        }
+        let devRange = try XCTUnwrap(environmentText.range(of: #"<environment id="dev">"#))
+        let localRange = try XCTUnwrap(environmentText.range(of: #"<environment id="local">"#))
+        let qaRange = try XCTUnwrap(environmentText.range(of: #"<environment id="qa">"#))
+        XCTAssertLessThan(devRange.lowerBound, localRange.lowerBound)
+        XCTAssertLessThan(localRange.lowerBound, qaRange.lowerBound)
+        XCTAssertTrue(environmentText.contains("<environments>"))
+        XCTAssertFalse(environmentText.contains("\n  <cwd>/tmp/project</cwd>"))
+        XCTAssertFalse(environmentText.contains("\n  <shell>zsh</shell>"))
+    }
+
     func testMakePromptHonorsInitialContextInstructionGatesLikeRust() {
         let prompt = NonInteractiveExec.makePrompt(
             prompt: "ship it",
