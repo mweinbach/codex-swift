@@ -60,6 +60,10 @@ final class GitInfoCollectorTests: XCTestCase {
             "https://github.com/openai/codex.git",
             "https://github.com:443/openai/codex.git",
             "https://token@github.com/openai/codex/",
+            "https://github.com/openai/codex.git?tab=readme",
+            "https://github.com/openai/codex.git#main",
+            "git://github.com:9418/openai/codex.git",
+            "http://github.com:80/openai/codex.git",
             "github.com/OpenAI/Codex.git"
         ] {
             XCTAssertEqual(
