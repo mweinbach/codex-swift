@@ -413,6 +413,25 @@ final class AppServerNotificationProtocolTests: XCTestCase {
         )
         XCTAssertEqual(decodedCompleted, completed)
 
+        let shellCommand = GuardianApprovalReviewAction.command(
+            source: .shell,
+            command: "rm -rf /tmp/example.sqlite",
+            cwd: try AbsolutePath(absolutePath: "/tmp")
+        )
+        try XCTAssertJSONObjectEqual(shellCommand, [
+            "type": "command",
+            "source": "shell",
+            "command": "rm -rf /tmp/example.sqlite",
+            "cwd": "/tmp"
+        ])
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                GuardianApprovalReviewAction.self,
+                from: Data(#"{"type":"command","source":"shell","command":"rm -rf /tmp/example.sqlite","cwd":"/tmp"}"#.utf8)
+            ),
+            shellCommand
+        )
+
         try XCTAssertJSONObjectEqual(
             GuardianApprovalReviewAction.networkAccess(
                 target: "https://example.com",

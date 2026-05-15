@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 guardian approval review action
+  command-source round-trip coverage in
+  `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift notification
+  protocol coverage now pins the legacy `"shell"` command source alongside the
+  existing `unifiedExec` path for guardian review command actions.
 - 2026-05-15: rechecked Rust app-server v2 filesystem read/write/metadata
   round-trip tests in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`.
   Swift filesystem protocol coverage now pins the decode and re-encode side of
