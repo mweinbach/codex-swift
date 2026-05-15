@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `process/spawn`
+  double-option limit decoding in
+  `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now pins the
+  exact omitted, explicit-null, and explicit-value `outputBytesCap` /
+  `timeoutMs` fixture as distinct decoded states.
 - 2026-05-15: rechecked Rust app-server v2 dynamic tool response content-item
   serialization in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`.
   Swift now pins the minimal one-text-item `contentItems` response shape in

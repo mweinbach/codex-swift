@@ -113,6 +113,52 @@ final class AppServerProcessProtocolTests: XCTestCase {
         XCTAssertEqual(limited.timeoutMs, .milliseconds(500))
     }
 
+    func testProcessSpawnParamsDistinguishOmittedNullAndValueLimitsLikeRustProtocol() throws {
+        let expectedOmitted = ProcessSpawnParams(
+            command: ["sleep", "30"],
+            processHandle: "sleep-1",
+            cwd: try AbsolutePath(absolutePath: "/tmp/codex-process/readable")
+        )
+
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                ProcessSpawnParams.self,
+                from: Data(#"{"command":["sleep","30"],"processHandle":"sleep-1","cwd":"/tmp/codex-process/readable"}"#.utf8)
+            ),
+            expectedOmitted
+        )
+
+        let decodedDisabled = try JSONDecoder().decode(
+            ProcessSpawnParams.self,
+            from: Data(#"{"command":["sleep","30"],"processHandle":"sleep-1","cwd":"/tmp/codex-process/readable","outputBytesCap":null,"timeoutMs":null}"#.utf8)
+        )
+        XCTAssertEqual(
+            decodedDisabled,
+            ProcessSpawnParams(
+                command: expectedOmitted.command,
+                processHandle: expectedOmitted.processHandle,
+                cwd: expectedOmitted.cwd,
+                outputBytesCap: .disabled,
+                timeoutMs: .disabled
+            )
+        )
+
+        let decodedLimited = try JSONDecoder().decode(
+            ProcessSpawnParams.self,
+            from: Data(#"{"command":["sleep","30"],"processHandle":"sleep-1","cwd":"/tmp/codex-process/readable","outputBytesCap":123,"timeoutMs":456}"#.utf8)
+        )
+        XCTAssertEqual(
+            decodedLimited,
+            ProcessSpawnParams(
+                command: expectedOmitted.command,
+                processHandle: expectedOmitted.processHandle,
+                cwd: expectedOmitted.cwd,
+                outputBytesCap: .bytes(123),
+                timeoutMs: .milliseconds(456)
+            )
+        )
+    }
+
     func testProcessSpawnParamsRoundTripsWithoutSandboxPolicyLikeRustProtocol() throws {
         let params = ProcessSpawnParams(
             command: ["sleep", "30"],
