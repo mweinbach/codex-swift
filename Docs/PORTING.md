@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `fs/copy` recursive directory copy
+  round-trip coverage in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`.
+  Swift now pins the `recursive: true` decode and canonical re-encode path
+  alongside the existing omitted-default and explicit-null rejection coverage.
 - 2026-05-15: rechecked Rust app-server v2 `ThreadListParams` cwd filter
   decoding in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift
   now pins the array `cwd` decode path alongside the existing single-cwd

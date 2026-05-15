@@ -208,6 +208,23 @@ final class AppServerFileSystemProtocolTests: XCTestCase {
         XCTAssertEqual(copy.sourcePath.path, "/tmp/codex-fs/source")
         XCTAssertEqual(copy.destinationPath.path, "/tmp/codex-fs/destination")
         XCTAssertFalse(copy.recursive)
+
+        let recursiveCopy = try JSONDecoder().decode(
+            FsCopyParams.self,
+            from: Data(
+                #"{"sourcePath":"/tmp/codex-fs/source","destinationPath":"/tmp/codex-fs/destination","recursive":true}"#.utf8
+            )
+        )
+        XCTAssertEqual(recursiveCopy, FsCopyParams(
+            sourcePath: try AbsolutePath(absolutePath: "/tmp/codex-fs/source"),
+            destinationPath: try AbsolutePath(absolutePath: "/tmp/codex-fs/destination"),
+            recursive: true
+        ))
+        try XCTAssertJSONObjectEqual(recursiveCopy, [
+            "sourcePath": "/tmp/codex-fs/source",
+            "destinationPath": "/tmp/codex-fs/destination",
+            "recursive": true
+        ])
     }
 
     func testFsCopyRejectsExplicitNullForRustDefaultedRecursiveFlag() {
