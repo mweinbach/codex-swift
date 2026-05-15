@@ -111,6 +111,154 @@ final class AppServerThreadProtocolTests: XCTestCase {
         XCTAssertEqual(decodedResponse.echoed, "hello")
     }
 
+    func testThreadStartResumeAndForkParamsPreserveRustDoubleOptionServiceTier() throws {
+        let startDefault = try JSONObject(ThreadStartParams())
+        XCTAssertFalse(startDefault.keys.contains("serviceTier"))
+        XCTAssertEqual(startDefault["model"] as? NSNull, NSNull())
+        XCTAssertEqual(startDefault["experimentalRawEvents"] as? Bool, false)
+        XCTAssertEqual(startDefault["persistExtendedHistory"] as? Bool, false)
+
+        try XCTAssertJSONObjectEqual(
+            ThreadStartParams(
+                model: "gpt-5",
+                modelProvider: "mock_provider",
+                serviceTier: .clear,
+                cwd: "/repo",
+                approvalPolicy: .never,
+                approvalsReviewer: .autoReview,
+                sandbox: .workspaceWrite,
+                config: ["feature": .bool(true)],
+                serviceName: "desktop",
+                baseInstructions: "Base",
+                developerInstructions: "Dev",
+                personality: .pragmatic,
+                ephemeral: true,
+                sessionStartSource: .startup,
+                threadSource: .user,
+                experimentalRawEvents: true,
+                persistExtendedHistory: true
+            ),
+            [
+                "model": "gpt-5",
+                "modelProvider": "mock_provider",
+                "serviceTier": NSNull(),
+                "cwd": "/repo",
+                "approvalPolicy": "never",
+                "approvalsReviewer": "guardian_subagent",
+                "sandbox": "workspace-write",
+                "permissions": NSNull(),
+                "config": ["feature": true],
+                "serviceName": "desktop",
+                "baseInstructions": "Base",
+                "developerInstructions": "Dev",
+                "personality": "pragmatic",
+                "ephemeral": true,
+                "sessionStartSource": "startup",
+                "threadSource": "user",
+                "environments": NSNull(),
+                "dynamicTools": NSNull(),
+                "mockExperimentalField": NSNull(),
+                "experimentalRawEvents": true,
+                "persistExtendedHistory": true
+            ]
+        )
+
+        let startSet = try JSONDecoder().decode(
+            ThreadStartParams.self,
+            from: Data(#"{"serviceTier":"priority"}"#.utf8)
+        )
+        XCTAssertEqual(startSet.serviceTier, .set("priority"))
+        XCTAssertFalse(startSet.experimentalRawEvents)
+        XCTAssertFalse(startSet.persistExtendedHistory)
+
+        let resumeClear = try JSONDecoder().decode(
+            ThreadResumeParams.self,
+            from: Data(#"{"threadId":"thread_123","serviceTier":null}"#.utf8)
+        )
+        XCTAssertEqual(resumeClear.serviceTier, .clear)
+        XCTAssertFalse(resumeClear.excludeTurns)
+
+        let forkSet = try JSONDecoder().decode(
+            ThreadForkParams.self,
+            from: Data(#"{"threadId":"thread_123","serviceTier":"priority","ephemeral":true,"excludeTurns":true}"#.utf8)
+        )
+        XCTAssertEqual(forkSet.serviceTier, .set("priority"))
+        XCTAssertTrue(forkSet.ephemeral)
+        XCTAssertTrue(forkSet.excludeTurns)
+    }
+
+    func testThreadLifecycleParamsRejectExplicitNullForRustDefaultedBooleans() {
+        let payloads: [(Data) throws -> Void] = [
+            { _ = try JSONDecoder().decode(ThreadStartParams.self, from: $0) },
+            { _ = try JSONDecoder().decode(ThreadStartParams.self, from: $0) },
+            { _ = try JSONDecoder().decode(ThreadResumeParams.self, from: $0) },
+            { _ = try JSONDecoder().decode(ThreadResumeParams.self, from: $0) },
+            { _ = try JSONDecoder().decode(ThreadForkParams.self, from: $0) },
+            { _ = try JSONDecoder().decode(ThreadForkParams.self, from: $0) },
+            { _ = try JSONDecoder().decode(ThreadForkParams.self, from: $0) }
+        ]
+        let inputs = [
+            Data(#"{"experimentalRawEvents":null}"#.utf8),
+            Data(#"{"persistExtendedHistory":null}"#.utf8),
+            Data(#"{"threadId":"thread_123","excludeTurns":null}"#.utf8),
+            Data(#"{"threadId":"thread_123","persistExtendedHistory":null}"#.utf8),
+            Data(#"{"threadId":"thread_123","ephemeral":null}"#.utf8),
+            Data(#"{"threadId":"thread_123","excludeTurns":null}"#.utf8),
+            Data(#"{"threadId":"thread_123","persistExtendedHistory":null}"#.utf8)
+        ]
+
+        for (decode, payload) in zip(payloads, inputs) {
+            XCTAssertThrowsError(try decode(payload))
+        }
+    }
+
+    func testThreadResumeAndForkParamsSkipFalseFieldsLikeRustProtocol() throws {
+        let resume = try JSONObject(ThreadResumeParams(threadID: "thread_123"))
+        XCTAssertEqual(resume["threadId"] as? String, "thread_123")
+        XCTAssertEqual(resume["history"] as? NSNull, NSNull())
+        XCTAssertFalse(resume.keys.contains("serviceTier"))
+        XCTAssertFalse(resume.keys.contains("excludeTurns"))
+        XCTAssertEqual(resume["persistExtendedHistory"] as? Bool, false)
+
+        let fork = try JSONObject(ThreadForkParams(threadID: "thread_123"))
+        XCTAssertEqual(fork["threadId"] as? String, "thread_123")
+        XCTAssertEqual(fork["path"] as? NSNull, NSNull())
+        XCTAssertFalse(fork.keys.contains("serviceTier"))
+        XCTAssertFalse(fork.keys.contains("ephemeral"))
+        XCTAssertFalse(fork.keys.contains("excludeTurns"))
+        XCTAssertEqual(fork["persistExtendedHistory"] as? Bool, false)
+
+        try XCTAssertJSONObjectEqual(
+            ThreadForkParams(
+                threadID: "thread_123",
+                serviceTier: .set("priority"),
+                ephemeral: true,
+                threadSource: .subagent,
+                excludeTurns: true,
+                persistExtendedHistory: true
+            ),
+            [
+                "threadId": "thread_123",
+                "path": NSNull(),
+                "model": NSNull(),
+                "modelProvider": NSNull(),
+                "serviceTier": "priority",
+                "cwd": NSNull(),
+                "approvalPolicy": NSNull(),
+                "approvalsReviewer": NSNull(),
+                "sandbox": NSNull(),
+                "permissions": NSNull(),
+                "config": NSNull(),
+                "baseInstructions": NSNull(),
+                "developerInstructions": NSNull(),
+                "ephemeral": true,
+                "threadSource": "subagent",
+                "excludeTurns": true,
+                "persistExtendedHistory": true
+            ]
+        )
+    }
+
     func testThreadTurnsListParamsAcceptsItemsViewLikeRustProtocol() throws {
         try XCTAssertJSONObjectEqual(ThreadTurnsListParams(threadID: "thr_123"), [
             "threadId": "thr_123",

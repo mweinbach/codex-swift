@@ -1651,6 +1651,487 @@ public struct ThreadStartedNotification: Equatable, Codable, Sendable {
     }
 }
 
+public struct ThreadStartParams: Equatable, Sendable {
+    public let model: String?
+    public let modelProvider: String?
+    public let serviceTier: AppServerServiceTierOverride?
+    public let cwd: String?
+    public let approvalPolicy: AskForApproval?
+    public let approvalsReviewer: ApprovalsReviewer?
+    public let sandbox: SandboxMode?
+    public let permissions: AppServerPermissionProfileSelectionParams?
+    public let config: [String: JSONValue]?
+    public let serviceName: String?
+    public let baseInstructions: String?
+    public let developerInstructions: String?
+    public let personality: Personality?
+    public let ephemeral: Bool?
+    public let sessionStartSource: ThreadStartSource?
+    public let threadSource: ThreadSource?
+    public let environments: [AppServerTurnEnvironmentParams]?
+    public let dynamicTools: [DynamicToolSpec]?
+    public let mockExperimentalField: String?
+    public let experimentalRawEvents: Bool
+    public let persistExtendedHistory: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case model
+        case modelProvider
+        case serviceTier
+        case cwd
+        case approvalPolicy
+        case approvalsReviewer
+        case sandbox
+        case permissions
+        case config
+        case serviceName
+        case baseInstructions
+        case developerInstructions
+        case personality
+        case ephemeral
+        case sessionStartSource
+        case threadSource
+        case environments
+        case dynamicTools
+        case mockExperimentalField
+        case experimentalRawEvents
+        case persistExtendedHistory
+    }
+
+    public init(
+        model: String? = nil,
+        modelProvider: String? = nil,
+        serviceTier: AppServerServiceTierOverride? = nil,
+        cwd: String? = nil,
+        approvalPolicy: AskForApproval? = nil,
+        approvalsReviewer: ApprovalsReviewer? = nil,
+        sandbox: SandboxMode? = nil,
+        permissions: AppServerPermissionProfileSelectionParams? = nil,
+        config: [String: JSONValue]? = nil,
+        serviceName: String? = nil,
+        baseInstructions: String? = nil,
+        developerInstructions: String? = nil,
+        personality: Personality? = nil,
+        ephemeral: Bool? = nil,
+        sessionStartSource: ThreadStartSource? = nil,
+        threadSource: ThreadSource? = nil,
+        environments: [AppServerTurnEnvironmentParams]? = nil,
+        dynamicTools: [DynamicToolSpec]? = nil,
+        mockExperimentalField: String? = nil,
+        experimentalRawEvents: Bool = false,
+        persistExtendedHistory: Bool = false
+    ) {
+        self.model = model
+        self.modelProvider = modelProvider
+        self.serviceTier = serviceTier
+        self.cwd = cwd
+        self.approvalPolicy = approvalPolicy
+        self.approvalsReviewer = approvalsReviewer
+        self.sandbox = sandbox
+        self.permissions = permissions
+        self.config = config
+        self.serviceName = serviceName
+        self.baseInstructions = baseInstructions
+        self.developerInstructions = developerInstructions
+        self.personality = personality
+        self.ephemeral = ephemeral
+        self.sessionStartSource = sessionStartSource
+        self.threadSource = threadSource
+        self.environments = environments
+        self.dynamicTools = dynamicTools
+        self.mockExperimentalField = mockExperimentalField
+        self.experimentalRawEvents = experimentalRawEvents
+        self.persistExtendedHistory = persistExtendedHistory
+    }
+}
+
+extension ThreadStartParams: Codable {
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        model = try container.decodeIfPresent(String.self, forKey: .model)
+        modelProvider = try container.decodeIfPresent(String.self, forKey: .modelProvider)
+        serviceTier = try Self.decodeServiceTier(from: container)
+        cwd = try container.decodeIfPresent(String.self, forKey: .cwd)
+        approvalPolicy = try container.decodeIfPresent(AskForApproval.self, forKey: .approvalPolicy)
+        approvalsReviewer = try container.decodeIfPresent(ApprovalsReviewer.self, forKey: .approvalsReviewer)
+        sandbox = try container.decodeIfPresent(SandboxMode.self, forKey: .sandbox)
+        permissions = try container.decodeIfPresent(AppServerPermissionProfileSelectionParams.self, forKey: .permissions)
+        config = try container.decodeIfPresent([String: JSONValue].self, forKey: .config)
+        serviceName = try container.decodeIfPresent(String.self, forKey: .serviceName)
+        baseInstructions = try container.decodeIfPresent(String.self, forKey: .baseInstructions)
+        developerInstructions = try container.decodeIfPresent(String.self, forKey: .developerInstructions)
+        personality = try container.decodeIfPresent(Personality.self, forKey: .personality)
+        ephemeral = try container.decodeIfPresent(Bool.self, forKey: .ephemeral)
+        sessionStartSource = try container.decodeIfPresent(ThreadStartSource.self, forKey: .sessionStartSource)
+        threadSource = try container.decodeIfPresent(ThreadSource.self, forKey: .threadSource)
+        environments = try container.decodeIfPresent([AppServerTurnEnvironmentParams].self, forKey: .environments)
+        dynamicTools = try container.decodeIfPresent([DynamicToolSpec].self, forKey: .dynamicTools)
+        mockExperimentalField = try container.decodeIfPresent(String.self, forKey: .mockExperimentalField)
+        experimentalRawEvents = try container.decodeRustDefaulted(
+            Bool.self,
+            forKey: .experimentalRawEvents,
+            defaultValue: false
+        )
+        persistExtendedHistory = try container.decodeRustDefaulted(
+            Bool.self,
+            forKey: .persistExtendedHistory,
+            defaultValue: false
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try encodeCommonFields(into: &container)
+        try container.encodeNilOrValue(serviceName, forKey: .serviceName)
+        try container.encodeNilOrValue(baseInstructions, forKey: .baseInstructions)
+        try container.encodeNilOrValue(developerInstructions, forKey: .developerInstructions)
+        try container.encodeNilOrValue(personality, forKey: .personality)
+        try container.encodeNilOrValue(ephemeral, forKey: .ephemeral)
+        try container.encodeNilOrValue(sessionStartSource, forKey: .sessionStartSource)
+        try container.encodeNilOrValue(threadSource, forKey: .threadSource)
+        try container.encodeNilOrValue(environments, forKey: .environments)
+        try container.encodeNilOrValue(dynamicTools, forKey: .dynamicTools)
+        try container.encodeNilOrValue(mockExperimentalField, forKey: .mockExperimentalField)
+        try container.encode(experimentalRawEvents, forKey: .experimentalRawEvents)
+        try container.encode(persistExtendedHistory, forKey: .persistExtendedHistory)
+    }
+
+    private static func decodeServiceTier(
+        from container: KeyedDecodingContainer<CodingKeys>
+    ) throws -> AppServerServiceTierOverride? {
+        guard container.contains(.serviceTier) else {
+            return nil
+        }
+        if try container.decodeNil(forKey: .serviceTier) {
+            return .clear
+        }
+        return .set(try container.decode(String.self, forKey: .serviceTier))
+    }
+
+    private func encodeCommonFields(into container: inout KeyedEncodingContainer<CodingKeys>) throws {
+        try container.encodeNilOrValue(model, forKey: .model)
+        try container.encodeNilOrValue(modelProvider, forKey: .modelProvider)
+        switch serviceTier {
+        case .clear:
+            try container.encodeNil(forKey: .serviceTier)
+        case let .set(value):
+            try container.encode(value, forKey: .serviceTier)
+        case nil:
+            break
+        }
+        try container.encodeNilOrValue(cwd, forKey: .cwd)
+        try container.encodeNilOrValue(approvalPolicy, forKey: .approvalPolicy)
+        try container.encodeNilOrValue(approvalsReviewer, forKey: .approvalsReviewer)
+        try container.encodeNilOrValue(sandbox, forKey: .sandbox)
+        try container.encodeNilOrValue(permissions, forKey: .permissions)
+        try container.encodeNilOrValue(config, forKey: .config)
+    }
+}
+
+public struct ThreadResumeParams: Equatable, Sendable {
+    public let threadID: String
+    public let history: [ResponseItem]?
+    public let path: String?
+    public let model: String?
+    public let modelProvider: String?
+    public let serviceTier: AppServerServiceTierOverride?
+    public let cwd: String?
+    public let approvalPolicy: AskForApproval?
+    public let approvalsReviewer: ApprovalsReviewer?
+    public let sandbox: SandboxMode?
+    public let permissions: AppServerPermissionProfileSelectionParams?
+    public let config: [String: JSONValue]?
+    public let baseInstructions: String?
+    public let developerInstructions: String?
+    public let personality: Personality?
+    public let excludeTurns: Bool
+    public let persistExtendedHistory: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+        case history
+        case path
+        case model
+        case modelProvider
+        case serviceTier
+        case cwd
+        case approvalPolicy
+        case approvalsReviewer
+        case sandbox
+        case permissions
+        case config
+        case baseInstructions
+        case developerInstructions
+        case personality
+        case excludeTurns
+        case persistExtendedHistory
+    }
+
+    public init(
+        threadID: String,
+        history: [ResponseItem]? = nil,
+        path: String? = nil,
+        model: String? = nil,
+        modelProvider: String? = nil,
+        serviceTier: AppServerServiceTierOverride? = nil,
+        cwd: String? = nil,
+        approvalPolicy: AskForApproval? = nil,
+        approvalsReviewer: ApprovalsReviewer? = nil,
+        sandbox: SandboxMode? = nil,
+        permissions: AppServerPermissionProfileSelectionParams? = nil,
+        config: [String: JSONValue]? = nil,
+        baseInstructions: String? = nil,
+        developerInstructions: String? = nil,
+        personality: Personality? = nil,
+        excludeTurns: Bool = false,
+        persistExtendedHistory: Bool = false
+    ) {
+        self.threadID = threadID
+        self.history = history
+        self.path = path
+        self.model = model
+        self.modelProvider = modelProvider
+        self.serviceTier = serviceTier
+        self.cwd = cwd
+        self.approvalPolicy = approvalPolicy
+        self.approvalsReviewer = approvalsReviewer
+        self.sandbox = sandbox
+        self.permissions = permissions
+        self.config = config
+        self.baseInstructions = baseInstructions
+        self.developerInstructions = developerInstructions
+        self.personality = personality
+        self.excludeTurns = excludeTurns
+        self.persistExtendedHistory = persistExtendedHistory
+    }
+}
+
+extension ThreadResumeParams: Codable {
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        threadID = try container.decode(String.self, forKey: .threadID)
+        history = try container.decodeIfPresent([ResponseItem].self, forKey: .history)
+        path = try container.decodeIfPresent(String.self, forKey: .path)
+        model = try container.decodeIfPresent(String.self, forKey: .model)
+        modelProvider = try container.decodeIfPresent(String.self, forKey: .modelProvider)
+        serviceTier = try Self.decodeServiceTier(from: container)
+        cwd = try container.decodeIfPresent(String.self, forKey: .cwd)
+        approvalPolicy = try container.decodeIfPresent(AskForApproval.self, forKey: .approvalPolicy)
+        approvalsReviewer = try container.decodeIfPresent(ApprovalsReviewer.self, forKey: .approvalsReviewer)
+        sandbox = try container.decodeIfPresent(SandboxMode.self, forKey: .sandbox)
+        permissions = try container.decodeIfPresent(AppServerPermissionProfileSelectionParams.self, forKey: .permissions)
+        config = try container.decodeIfPresent([String: JSONValue].self, forKey: .config)
+        baseInstructions = try container.decodeIfPresent(String.self, forKey: .baseInstructions)
+        developerInstructions = try container.decodeIfPresent(String.self, forKey: .developerInstructions)
+        personality = try container.decodeIfPresent(Personality.self, forKey: .personality)
+        excludeTurns = try container.decodeRustDefaulted(Bool.self, forKey: .excludeTurns, defaultValue: false)
+        persistExtendedHistory = try container.decodeRustDefaulted(
+            Bool.self,
+            forKey: .persistExtendedHistory,
+            defaultValue: false
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(threadID, forKey: .threadID)
+        try container.encodeNilOrValue(history, forKey: .history)
+        try container.encodeNilOrValue(path, forKey: .path)
+        try encodeCommonFields(into: &container)
+        try container.encodeNilOrValue(baseInstructions, forKey: .baseInstructions)
+        try container.encodeNilOrValue(developerInstructions, forKey: .developerInstructions)
+        try container.encodeNilOrValue(personality, forKey: .personality)
+        if excludeTurns {
+            try container.encode(excludeTurns, forKey: .excludeTurns)
+        }
+        try container.encode(persistExtendedHistory, forKey: .persistExtendedHistory)
+    }
+
+    private static func decodeServiceTier(
+        from container: KeyedDecodingContainer<CodingKeys>
+    ) throws -> AppServerServiceTierOverride? {
+        guard container.contains(.serviceTier) else {
+            return nil
+        }
+        if try container.decodeNil(forKey: .serviceTier) {
+            return .clear
+        }
+        return .set(try container.decode(String.self, forKey: .serviceTier))
+    }
+
+    private func encodeCommonFields(into container: inout KeyedEncodingContainer<CodingKeys>) throws {
+        try container.encodeNilOrValue(model, forKey: .model)
+        try container.encodeNilOrValue(modelProvider, forKey: .modelProvider)
+        switch serviceTier {
+        case .clear:
+            try container.encodeNil(forKey: .serviceTier)
+        case let .set(value):
+            try container.encode(value, forKey: .serviceTier)
+        case nil:
+            break
+        }
+        try container.encodeNilOrValue(cwd, forKey: .cwd)
+        try container.encodeNilOrValue(approvalPolicy, forKey: .approvalPolicy)
+        try container.encodeNilOrValue(approvalsReviewer, forKey: .approvalsReviewer)
+        try container.encodeNilOrValue(sandbox, forKey: .sandbox)
+        try container.encodeNilOrValue(permissions, forKey: .permissions)
+        try container.encodeNilOrValue(config, forKey: .config)
+    }
+}
+
+public struct ThreadForkParams: Equatable, Sendable {
+    public let threadID: String
+    public let path: String?
+    public let model: String?
+    public let modelProvider: String?
+    public let serviceTier: AppServerServiceTierOverride?
+    public let cwd: String?
+    public let approvalPolicy: AskForApproval?
+    public let approvalsReviewer: ApprovalsReviewer?
+    public let sandbox: SandboxMode?
+    public let permissions: AppServerPermissionProfileSelectionParams?
+    public let config: [String: JSONValue]?
+    public let baseInstructions: String?
+    public let developerInstructions: String?
+    public let ephemeral: Bool
+    public let threadSource: ThreadSource?
+    public let excludeTurns: Bool
+    public let persistExtendedHistory: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case threadID = "threadId"
+        case path
+        case model
+        case modelProvider
+        case serviceTier
+        case cwd
+        case approvalPolicy
+        case approvalsReviewer
+        case sandbox
+        case permissions
+        case config
+        case baseInstructions
+        case developerInstructions
+        case ephemeral
+        case threadSource
+        case excludeTurns
+        case persistExtendedHistory
+    }
+
+    public init(
+        threadID: String,
+        path: String? = nil,
+        model: String? = nil,
+        modelProvider: String? = nil,
+        serviceTier: AppServerServiceTierOverride? = nil,
+        cwd: String? = nil,
+        approvalPolicy: AskForApproval? = nil,
+        approvalsReviewer: ApprovalsReviewer? = nil,
+        sandbox: SandboxMode? = nil,
+        permissions: AppServerPermissionProfileSelectionParams? = nil,
+        config: [String: JSONValue]? = nil,
+        baseInstructions: String? = nil,
+        developerInstructions: String? = nil,
+        ephemeral: Bool = false,
+        threadSource: ThreadSource? = nil,
+        excludeTurns: Bool = false,
+        persistExtendedHistory: Bool = false
+    ) {
+        self.threadID = threadID
+        self.path = path
+        self.model = model
+        self.modelProvider = modelProvider
+        self.serviceTier = serviceTier
+        self.cwd = cwd
+        self.approvalPolicy = approvalPolicy
+        self.approvalsReviewer = approvalsReviewer
+        self.sandbox = sandbox
+        self.permissions = permissions
+        self.config = config
+        self.baseInstructions = baseInstructions
+        self.developerInstructions = developerInstructions
+        self.ephemeral = ephemeral
+        self.threadSource = threadSource
+        self.excludeTurns = excludeTurns
+        self.persistExtendedHistory = persistExtendedHistory
+    }
+}
+
+extension ThreadForkParams: Codable {
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        threadID = try container.decode(String.self, forKey: .threadID)
+        path = try container.decodeIfPresent(String.self, forKey: .path)
+        model = try container.decodeIfPresent(String.self, forKey: .model)
+        modelProvider = try container.decodeIfPresent(String.self, forKey: .modelProvider)
+        serviceTier = try Self.decodeServiceTier(from: container)
+        cwd = try container.decodeIfPresent(String.self, forKey: .cwd)
+        approvalPolicy = try container.decodeIfPresent(AskForApproval.self, forKey: .approvalPolicy)
+        approvalsReviewer = try container.decodeIfPresent(ApprovalsReviewer.self, forKey: .approvalsReviewer)
+        sandbox = try container.decodeIfPresent(SandboxMode.self, forKey: .sandbox)
+        permissions = try container.decodeIfPresent(AppServerPermissionProfileSelectionParams.self, forKey: .permissions)
+        config = try container.decodeIfPresent([String: JSONValue].self, forKey: .config)
+        baseInstructions = try container.decodeIfPresent(String.self, forKey: .baseInstructions)
+        developerInstructions = try container.decodeIfPresent(String.self, forKey: .developerInstructions)
+        ephemeral = try container.decodeRustDefaulted(Bool.self, forKey: .ephemeral, defaultValue: false)
+        threadSource = try container.decodeIfPresent(ThreadSource.self, forKey: .threadSource)
+        excludeTurns = try container.decodeRustDefaulted(Bool.self, forKey: .excludeTurns, defaultValue: false)
+        persistExtendedHistory = try container.decodeRustDefaulted(
+            Bool.self,
+            forKey: .persistExtendedHistory,
+            defaultValue: false
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(threadID, forKey: .threadID)
+        try container.encodeNilOrValue(path, forKey: .path)
+        try encodeCommonFields(into: &container)
+        try container.encodeNilOrValue(baseInstructions, forKey: .baseInstructions)
+        try container.encodeNilOrValue(developerInstructions, forKey: .developerInstructions)
+        if ephemeral {
+            try container.encode(ephemeral, forKey: .ephemeral)
+        }
+        try container.encodeNilOrValue(threadSource, forKey: .threadSource)
+        if excludeTurns {
+            try container.encode(excludeTurns, forKey: .excludeTurns)
+        }
+        try container.encode(persistExtendedHistory, forKey: .persistExtendedHistory)
+    }
+
+    private static func decodeServiceTier(
+        from container: KeyedDecodingContainer<CodingKeys>
+    ) throws -> AppServerServiceTierOverride? {
+        guard container.contains(.serviceTier) else {
+            return nil
+        }
+        if try container.decodeNil(forKey: .serviceTier) {
+            return .clear
+        }
+        return .set(try container.decode(String.self, forKey: .serviceTier))
+    }
+
+    private func encodeCommonFields(into container: inout KeyedEncodingContainer<CodingKeys>) throws {
+        try container.encodeNilOrValue(model, forKey: .model)
+        try container.encodeNilOrValue(modelProvider, forKey: .modelProvider)
+        switch serviceTier {
+        case .clear:
+            try container.encodeNil(forKey: .serviceTier)
+        case let .set(value):
+            try container.encode(value, forKey: .serviceTier)
+        case nil:
+            break
+        }
+        try container.encodeNilOrValue(cwd, forKey: .cwd)
+        try container.encodeNilOrValue(approvalPolicy, forKey: .approvalPolicy)
+        try container.encodeNilOrValue(approvalsReviewer, forKey: .approvalsReviewer)
+        try container.encodeNilOrValue(sandbox, forKey: .sandbox)
+        try container.encodeNilOrValue(permissions, forKey: .permissions)
+        try container.encodeNilOrValue(config, forKey: .config)
+    }
+}
+
 public struct ThreadStartResponse: Equatable, Codable, Sendable {
     public let thread: AppServerThread
     public let model: String

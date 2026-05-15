@@ -12,6 +12,13 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's app-server v2 `ThreadStartParams`,
+  `ThreadResumeParams`, and `ThreadForkParams` in
+  `codex-rs/app-server-protocol/src/protocol/v2/thread.rs`. Swift shared
+  protocol models now carry the Rust request shapes, including omitted/null/set
+  `serviceTier` double-option semantics, ordinary explicit-null optionals, and
+  the Rust defaulted boolean boundaries for raw events, excluded turns,
+  ephemeral forks, and deprecated full-history persistence.
 - 2026-05-15: rechecked Rust's network-policy decision payload in
   `codex-rs/protocol/src/network_policy.rs` and approval-context projection in
   `codex-rs/core/src/network_policy_decision.rs`. Swift now carries the typed
