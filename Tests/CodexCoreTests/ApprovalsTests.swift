@@ -214,6 +214,23 @@ final class ApprovalsTests: XCTestCase {
         )
     }
 
+    func testExecApprovalRequestRejectsNullRustDefaultedTurnID() {
+        let explicitNullTurnID = """
+        {
+          "call_id": "exec-1",
+          "turn_id": null,
+          "started_at_ms": 1,
+          "command": ["pwd"],
+          "cwd": "/repo",
+          "parsed_cmd": []
+        }
+        """
+
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(ExecApprovalRequestEvent.self, from: Data(explicitNullTurnID.utf8))
+        )
+    }
+
     func testExecApprovalRequestDefaultsAvailableDecisionsLikeRust() {
         let execAmendment = ExecPolicyAmendment(command: ["git", "status"])
         XCTAssertEqual(
@@ -301,6 +318,21 @@ final class ApprovalsTests: XCTestCase {
         XCTAssertEqual(
             try JSONDecoder().decode(ApplyPatchApprovalRequestEvent.self, from: Data(missingDefault.utf8)),
             ApplyPatchApprovalRequestEvent(callID: "patch-1", changes: [:])
+        )
+    }
+
+    func testApplyPatchApprovalRequestRejectsNullRustDefaultedTurnID() {
+        let explicitNullTurnID = """
+        {
+          "call_id": "patch-1",
+          "turn_id": null,
+          "started_at_ms": 1,
+          "changes": {}
+        }
+        """
+
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(ApplyPatchApprovalRequestEvent.self, from: Data(explicitNullTurnID.utf8))
         )
     }
 

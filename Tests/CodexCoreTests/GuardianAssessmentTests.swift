@@ -37,6 +37,42 @@ final class GuardianAssessmentTests: XCTestCase {
         XCTAssertEqual(decoded.startedAtMilliseconds, 0)
     }
 
+    func testGuardianAssessmentEventRejectsNullRustDefaultedFields() {
+        let explicitNullTurnID = """
+        {
+          "id": "guardian-1",
+          "turn_id": null,
+          "started_at_ms": 1,
+          "status": "aborted",
+          "action": {
+            "type": "apply_patch",
+            "cwd": "/repo",
+            "files": ["/repo/a.swift"]
+          }
+        }
+        """
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(GuardianAssessmentEvent.self, from: Data(explicitNullTurnID.utf8))
+        )
+
+        let explicitNullStartedAt = """
+        {
+          "id": "guardian-1",
+          "turn_id": "turn-1",
+          "started_at_ms": null,
+          "status": "aborted",
+          "action": {
+            "type": "apply_patch",
+            "cwd": "/repo",
+            "files": ["/repo/a.swift"]
+          }
+        }
+        """
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(GuardianAssessmentEvent.self, from: Data(explicitNullStartedAt.utf8))
+        )
+    }
+
     func testGuardianAssessmentActionVariantsUseRustTaggedShape() throws {
         let actions: [(GuardianAssessmentAction, [String: Any])] = [
             (.execve(source: .shell, program: "/bin/rm", argv: ["rm", "-rf", "build"], cwd: "/repo"), [

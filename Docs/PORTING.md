@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's core approval and Guardian assessment events in
+  `codex-rs/protocol/src/approvals.rs`. Swift now preserves Rust's
+  omitted-field defaults for exec/apply-patch approval `turn_id` and Guardian
+  assessment `turn_id` / `started_at_ms` while rejecting explicit `null` for
+  those non-optional Serde defaulted fields.
 - 2026-05-15: rechecked Rust's core `request_user_input` and
   `request_permissions` protocol models in
   `codex-rs/protocol/src/{request_user_input,request_permissions}.rs`.

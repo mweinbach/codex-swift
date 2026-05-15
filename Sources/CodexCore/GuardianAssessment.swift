@@ -248,8 +248,12 @@ public struct GuardianAssessmentEvent: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         targetItemID = try container.decodeIfPresent(String.self, forKey: .targetItemID)
-        turnID = try container.decodeIfPresent(String.self, forKey: .turnID) ?? ""
-        startedAtMilliseconds = try container.decodeIfPresent(Int64.self, forKey: .startedAtMilliseconds) ?? 0
+        turnID = try container.decodeRustDefaulted(String.self, forKey: .turnID, defaultValue: "")
+        startedAtMilliseconds = try container.decodeRustDefaulted(
+            Int64.self,
+            forKey: .startedAtMilliseconds,
+            defaultValue: 0
+        )
         completedAtMilliseconds = try container.decodeIfPresent(Int64.self, forKey: .completedAtMilliseconds)
         status = try container.decode(GuardianAssessmentStatus.self, forKey: .status)
         riskLevel = try container.decodeIfPresent(GuardianRiskLevel.self, forKey: .riskLevel)
