@@ -125,6 +125,12 @@ final class AppServerPluginProtocolTests: XCTestCase {
     }
 
     func testPluginListResponseShapesMatchRustProtocol() throws {
+        let minimal = try JSONDecoder().decode(
+            PluginListResponse.self,
+            from: Data(#"{"marketplaces":[]}"#.utf8)
+        )
+        XCTAssertEqual(minimal, PluginListResponse(marketplaces: []))
+
         let summary = PluginSummary(
             id: "weather@debug",
             name: "weather",

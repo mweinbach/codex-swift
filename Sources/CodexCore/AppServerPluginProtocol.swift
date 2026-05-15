@@ -168,7 +168,7 @@ public enum PluginListMarketplaceKind: String, Codable, Equatable, Sendable {
     case sharedWithMe = "shared-with-me"
 }
 
-public struct PluginListResponse: Equatable, Codable, Sendable {
+public struct PluginListResponse: Equatable, Sendable {
     public let marketplaces: [PluginMarketplaceEntry]
     public let marketplaceLoadErrors: [MarketplaceLoadErrorInfo]
     public let featuredPluginIDs: [String]
@@ -187,6 +187,30 @@ public struct PluginListResponse: Equatable, Codable, Sendable {
         self.marketplaces = marketplaces
         self.marketplaceLoadErrors = marketplaceLoadErrors
         self.featuredPluginIDs = featuredPluginIDs
+    }
+}
+
+extension PluginListResponse: Codable {
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        marketplaces = try container.decode([PluginMarketplaceEntry].self, forKey: .marketplaces)
+        marketplaceLoadErrors = try container.decodeRustDefaulted(
+            [MarketplaceLoadErrorInfo].self,
+            forKey: .marketplaceLoadErrors,
+            defaultValue: []
+        )
+        featuredPluginIDs = try container.decodeRustDefaulted(
+            [String].self,
+            forKey: .featuredPluginIDs,
+            defaultValue: []
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(marketplaces, forKey: .marketplaces)
+        try container.encode(marketplaceLoadErrors, forKey: .marketplaceLoadErrors)
+        try container.encode(featuredPluginIDs, forKey: .featuredPluginIDs)
     }
 }
 

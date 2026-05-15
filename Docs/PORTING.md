@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 plugin response defaults in
+  `codex-rs/app-server-protocol/src/protocol/v2/plugin.rs`. Swift
+  `PluginListResponse` decoding now defaults omitted `marketplaceLoadErrors`
+  and `featuredPluginIds` to empty arrays like Serde's `#[serde(default)]`
+  fields.
 - 2026-05-15: rechecked Rust shell tool parameter aliases in
   `codex-rs/protocol/src/models.rs`. Swift `ShellToolCallParams` and
   `ShellCommandToolCallParams` still accept the legacy `timeout` alias for
