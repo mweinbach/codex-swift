@@ -118,6 +118,35 @@ final class AppServerCommandExecProtocolTests: XCTestCase {
         )
     }
 
+    func testCommandExecParamsEncodeEnvOverridesAndUnsetsLikeRustProtocol() throws {
+        try XCTAssertJSONObjectEqual(
+            CommandExecParams(
+                command: ["printenv", "FOO"],
+                processID: "env-1",
+                env: [
+                    "FOO": "override",
+                    "BAR": "added",
+                    "BAZ": nil
+                ]
+            ),
+            [
+                "command": ["printenv", "FOO"],
+                "processId": "env-1",
+                "outputBytesCap": NSNull(),
+                "timeoutMs": NSNull(),
+                "cwd": NSNull(),
+                "env": [
+                    "FOO": "override",
+                    "BAR": "added",
+                    "BAZ": NSNull()
+                ],
+                "size": NSNull(),
+                "sandboxPolicy": NSNull(),
+                "permissionProfile": NSNull()
+            ]
+        )
+    }
+
     func testCommandExecParamsDecodeRustDefaults() throws {
         let decoded = try JSONDecoder().decode(
             CommandExecParams.self,

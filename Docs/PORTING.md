@@ -13,6 +13,11 @@ Source baseline inspected for this scaffold:
 Recent upstream audit checkpoint:
 
 - 2026-05-15: rechecked Rust app-server v2 `CommandExecParams`
+  environment override serialization in
+  `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now pins the
+  sparse `command/exec` `env` request shape where string values override
+  variables and explicit `null` unsets them.
+- 2026-05-15: rechecked Rust app-server v2 `CommandExecParams`
   serialization in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`.
   Swift now pins the sparse disabled-limit request shapes for `command/exec`,
   including explicit `null` `timeoutMs` / `outputBytesCap` with only the active
