@@ -14,11 +14,13 @@ final class AccountTests: XCTestCase {
         XCTAssertEqual(try encode(PlanType.enterpriseCbpUsageBased), #""enterprise_cbp_usage_based""#)
         XCTAssertEqual(try encode(PlanType.enterprise), #""enterprise""#)
         XCTAssertEqual(try encode(PlanType.edu), #""edu""#)
-        XCTAssertEqual(try encode(PlanType.unknown), #""unknown""#)
+        XCTAssertEqual(try encode(PlanType.unknown("future-plan")), #""future-plan""#)
     }
 
-    func testPlanTypeDecodesUnknownStringAsUnknown() throws {
-        XCTAssertEqual(try JSONDecoder().decode(PlanType.self, from: Data(#""future-plan""#.utf8)), .unknown)
+    func testPlanTypeDecodesAndReencodesUnknownStringLikeRust() throws {
+        let decoded = try JSONDecoder().decode(PlanType.self, from: Data(#""future-plan""#.utf8))
+        XCTAssertEqual(decoded, .unknown("future-plan"))
+        XCTAssertEqual(try encode(decoded), #""future-plan""#)
     }
 
     func testUsageBasedPlanTypesUseRustWireNames() throws {
@@ -40,7 +42,12 @@ final class AccountTests: XCTestCase {
         XCTAssertEqual(PlanType.fromRawValue("FREE"), .free)
         XCTAssertEqual(PlanType.fromRawValue("hc"), .enterprise)
         XCTAssertEqual(PlanType.fromRawValue("education"), .edu)
-        XCTAssertEqual(PlanType.fromRawValue("mystery-tier"), .unknown)
+        XCTAssertEqual(PlanType.fromRawValue("mystery-tier"), .unknown("mystery-tier"))
+    }
+
+    func testPlanTypeDecodesRustSerdeAliases() throws {
+        XCTAssertEqual(try JSONDecoder().decode(PlanType.self, from: Data(#""hc""#.utf8)), .enterprise)
+        XCTAssertEqual(try JSONDecoder().decode(PlanType.self, from: Data(#""education""#.utf8)), .edu)
     }
 
     func testDisplayNamesMatchRustKnownPlanNames() {

@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust `PlanType` in
+  `codex-rs/protocol/src/auth.rs`. Swift account plan decoding now preserves
+  unknown plan strings for round-trip encoding like Rust's
+  `PlanType::Unknown(String)`, while keeping the `hc` and `education` aliases
+  mapped to their known plan variants.
 - 2026-05-15: rechecked Rust app-server v2 `PluginListParams` in
   `codex-rs/app-server-protocol/src/protocol/v2/plugin.rs` and the
   `plugin/list` processor in `codex-rs/app-server/src/request_processors/plugins.rs`.

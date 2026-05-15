@@ -423,7 +423,7 @@ final class APIErrorTests: XCTestCase {
         let resetsAt = Date(timeIntervalSince1970: 1_705_365_300) // 2024-01-16 00:35:00 UTC
 
         XCTAssertEqual(
-            UsageLimitReachedError(planType: .unknown, resetsAt: resetsAt).description(now: now, calendar: calendar),
+            UsageLimitReachedError(planType: .unknown("future-plan"), resetsAt: resetsAt).description(now: now, calendar: calendar),
             "You've hit your usage limit. Try again at Jan 16th, 2024 12:35 AM."
         )
     }

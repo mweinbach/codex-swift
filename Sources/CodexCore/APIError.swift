@@ -583,7 +583,7 @@ public struct UsageLimitReachedError: Error, Equatable, CustomStringConvertible,
             return "You've hit your usage limit. Upgrade to Plus to continue using Codex (https://chatgpt.com/explore/plus),\(retrySuffixAfterOr(now: now, calendar: calendar))"
         case .pro, .proLite:
             return "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits\(retrySuffixAfterOr(now: now, calendar: calendar))"
-        case .enterprise, .edu, .unknown, nil:
+        case .enterprise, .edu, .unknown(_), nil:
             return "You've hit your usage limit.\(retrySuffix(now: now, calendar: calendar))"
         }
     }

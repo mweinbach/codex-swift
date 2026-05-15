@@ -12,7 +12,7 @@ public enum PlanType: Equatable, Codable, Sendable {
     case enterpriseCbpUsageBased
     case enterprise
     case edu
-    case unknown
+    case unknown(String)
 
     public var rawValue: String {
         switch self {
@@ -38,8 +38,8 @@ public enum PlanType: Equatable, Codable, Sendable {
             return "enterprise"
         case .edu:
             return "edu"
-        case .unknown:
-            return "unknown"
+        case let .unknown(value):
+            return value
         }
     }
 
@@ -114,7 +114,7 @@ public enum PlanType: Equatable, Codable, Sendable {
         case "education", "edu":
             return .edu
         default:
-            return .unknown
+            return .unknown(rawValue)
         }
     }
 

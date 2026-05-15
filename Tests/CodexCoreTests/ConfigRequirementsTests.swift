@@ -845,7 +845,7 @@ final class ConfigRequirementsTests: XCTestCase {
         XCTAssertFalse(CloudRequirements.isEligibleAuth(planType: .selfServeBusinessUsageBased, usesCodexBackend: true))
         XCTAssertFalse(CloudRequirements.isEligibleAuth(planType: .edu, usesCodexBackend: true))
         XCTAssertFalse(CloudRequirements.isEligibleAuth(planType: .pro, usesCodexBackend: true))
-        XCTAssertFalse(CloudRequirements.isEligibleAuth(planType: .unknown, usesCodexBackend: true))
+        XCTAssertFalse(CloudRequirements.isEligibleAuth(planType: .unknown("future-plan"), usesCodexBackend: true))
     }
 
     func testCloudRequirementsFetchAttemptStatusCodesMatchRust() {
