@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust legacy `fuzzyFileSearch` protocol models in
+  `codex-rs/app-server-protocol/src/protocol/common.rs` and
+  `codex-rs/app-server/tests/suite/fuzzy_file_search.rs`. Swift now encodes
+  and decodes `FuzzyFileSearchResult` fields as Rust's snake_case
+  `match_type` and `file_name` while preserving the surrounding camelCase
+  session payloads.
 - 2026-05-15: rechecked Rust app-server v2 permission path decoding in
   `codex-rs/app-server-protocol/src/protocol/v2/permissions.rs` and
   `tests.rs`. Swift now rejects relative paths for legacy permission

@@ -47,16 +47,16 @@ final class AppServerFuzzyFileSearchProtocolTests: XCTestCase {
                     [
                         "root": "/repo",
                         "path": "Sources/CodexCore/App.swift",
-                        "matchType": "file",
-                        "fileName": "App.swift",
+                        "match_type": "file",
+                        "file_name": "App.swift",
                         "score": 42,
                         "indices": [0, 4, 8]
                     ],
                     [
                         "root": "/repo",
                         "path": "Sources/CodexCore",
-                        "matchType": "directory",
-                        "fileName": "CodexCore",
+                        "match_type": "directory",
+                        "file_name": "CodexCore",
                         "score": 7,
                         "indices": NSNull()
                     ]
@@ -114,8 +114,8 @@ final class AppServerFuzzyFileSearchProtocolTests: XCTestCase {
                     [
                         "root": "/repo",
                         "path": "Sources/CodexCore/App.swift",
-                        "matchType": "file",
-                        "fileName": "App.swift",
+                        "match_type": "file",
+                        "file_name": "App.swift",
                         "score": 42,
                         "indices": [0, 4, 8]
                     ]
@@ -138,7 +138,7 @@ final class AppServerFuzzyFileSearchProtocolTests: XCTestCase {
 
         let response = try JSONDecoder().decode(
             FuzzyFileSearchResponse.self,
-            from: Data(#"{"files":[{"root":"/repo","path":"Sources/App.swift","matchType":"file","fileName":"App.swift","score":9,"indices":null}]}"#.utf8)
+            from: Data(#"{"files":[{"root":"/repo","path":"Sources/App.swift","match_type":"file","file_name":"App.swift","score":9,"indices":null}]}"#.utf8)
         )
         XCTAssertEqual(response.files.first?.indices, nil)
         XCTAssertEqual(response.files.first?.matchType, .file)

@@ -59,8 +59,8 @@ extension FuzzyFileSearchResult: Codable {
     private enum CodingKeys: String, CodingKey {
         case root
         case path
-        case matchType
-        case fileName
+        case matchType = "match_type"
+        case fileName = "file_name"
         case score
         case indices
     }
