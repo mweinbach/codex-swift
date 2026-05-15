@@ -223,6 +223,68 @@ final class AppServerConfigProtocolTests: XCTestCase {
         XCTAssertEqual(decoded, config)
     }
 
+    func testConfigExperimentalReasonsMatchRustProtocolMarkers() {
+        let granular = AskForApproval.granular(GranularApprovalConfig(
+            sandboxApproval: true,
+            rules: false,
+            requestPermissions: true,
+            mcpElicitations: false
+        ))
+
+        XCTAssertEqual(
+            AppServerProtocol.ProfileV2(approvalPolicy: granular).appServerExperimentalReason,
+            "askForApproval.granular"
+        )
+        XCTAssertEqual(
+            AppServerProtocol.ProfileV2(approvalsReviewer: .autoReview).appServerExperimentalReason,
+            "config/read.approvalsReviewer"
+        )
+        XCTAssertEqual(
+            AppServerProtocol.Config(approvalPolicy: granular).appServerExperimentalReason,
+            "askForApproval.granular"
+        )
+        XCTAssertEqual(
+            AppServerProtocol.Config(approvalsReviewer: .autoReview).appServerExperimentalReason,
+            "config/read.approvalsReviewer"
+        )
+        XCTAssertEqual(
+            AppServerProtocol.Config(profiles: [
+                "default": AppServerProtocol.ProfileV2(approvalPolicy: granular)
+            ]).appServerExperimentalReason,
+            "askForApproval.granular"
+        )
+        XCTAssertEqual(
+            AppServerProtocol.ConfigReadResponse(
+                config: AppServerProtocol.Config(apps: AppServerProtocol.AppsConfig()),
+                origins: [:]
+            ).appServerExperimentalReason,
+            "config/read.apps"
+        )
+        XCTAssertNil(AppServerProtocol.Config(model: "gpt-5").appServerExperimentalReason)
+    }
+
+    func testConfigRequirementsExperimentalReasonsMatchRustProtocolMarkers() {
+        let granular = AskForApproval.granular(GranularApprovalConfig(
+            sandboxApproval: true,
+            rules: true,
+            mcpElicitations: false
+        ))
+
+        XCTAssertEqual(
+            AppServerProtocol.ConfigRequirements(
+                allowedApprovalPolicies: [granular]
+            ).appServerExperimentalReason,
+            "askForApproval.granular"
+        )
+        XCTAssertEqual(
+            AppServerProtocol.ConfigRequirements(
+                allowedApprovalsReviewers: [.autoReview]
+            ).appServerExperimentalReason,
+            "configRequirements/read.allowedApprovalsReviewers"
+        )
+        XCTAssertNil(AppServerProtocol.ConfigRequirements(allowedSandboxModes: [.readOnly]).appServerExperimentalReason)
+    }
+
     func testConfigDefaultedFieldsRejectExplicitNullLikeRust() {
         XCTAssertThrowsError(try JSONDecoder().decode(
             AppServerProtocol.SandboxWorkspaceWrite.self,

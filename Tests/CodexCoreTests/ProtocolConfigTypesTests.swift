@@ -93,6 +93,19 @@ final class ProtocolConfigTypesTests: XCTestCase {
         ))
     }
 
+    func testGranularApprovalPolicyReportsRustExperimentalReason() {
+        XCTAssertEqual(
+            AskForApproval.granular(GranularApprovalConfig(
+                sandboxApproval: true,
+                rules: false,
+                requestPermissions: true,
+                mcpElicitations: false
+            )).appServerExperimentalReason,
+            "askForApproval.granular"
+        )
+        XCTAssertNil(AskForApproval.onRequest.appServerExperimentalReason)
+    }
+
     func testCollaborationModeKindAliasesMatchRustDefaults() throws {
         let decoder = JSONDecoder()
         for alias in ["default", "code", "pair_programming", "execute", "custom"] {

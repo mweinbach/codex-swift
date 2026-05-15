@@ -662,6 +662,12 @@ Recent upstream audit checkpoint:
   `MigrationDetails.{plugins,sessions,mcpServers,hooks,subagents,commands}`,
   and `PluginSummary.keywords` to empty arrays while rejecting explicit `null`
   like Serde's defaulted `Vec` fields.
+- 2026-05-15: rechecked Rust's app-server v2 `ExperimentalApi` markers in
+  `codex-rs/app-server-protocol/src/protocol/v2/{shared.rs,config.rs}`. Swift
+  shared protocol models now expose Rust-matching experimental reason helpers
+  for granular approval policies, config/profile `approvalsReviewer`, nested
+  profiles, config apps, and config-requirement reviewer / hook / network
+  markers.
 - 2026-05-15: rechecked Rust's `skills/list` projection in
   `codex-rs/app-server/src/request_processors/catalog_processor.rs` and the
   `SkillMetadata` protocol model in
