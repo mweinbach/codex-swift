@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's collab agent event defaults in
+  `codex-rs/protocol/src/protocol.rs`. Swift collab event decoding now keeps
+  omitted `started_at_ms` / `completed_at_ms` timing defaults and waiting
+  metadata array defaults while rejecting explicit `null` for those
+  non-optional `#[serde(default)]` fields.
 - 2026-05-15: rechecked Rust's dynamic tool call timing defaults in
   `codex-rs/protocol/src/{dynamic_tools,protocol}.rs`. Swift
   `DynamicToolCallRequest.startedAtMs` and

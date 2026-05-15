@@ -320,7 +320,11 @@ public struct CollabAgentSpawnBeginEvent: Equatable, Codable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         callID = try container.decode(String.self, forKey: .callID)
-        startedAtMilliseconds = try container.decodeIfPresent(Int64.self, forKey: .startedAtMilliseconds) ?? 0
+        startedAtMilliseconds = try container.decodeRustDefaulted(
+            Int64.self,
+            forKey: .startedAtMilliseconds,
+            defaultValue: 0
+        )
         senderThreadID = try container.decode(ThreadId.self, forKey: .senderThreadID)
         prompt = try container.decode(String.self, forKey: .prompt)
         model = try container.decode(String.self, forKey: .model)
@@ -380,7 +384,11 @@ public struct CollabAgentSpawnEndEvent: Equatable, Codable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         callID = try container.decode(String.self, forKey: .callID)
-        completedAtMilliseconds = try container.decodeIfPresent(Int64.self, forKey: .completedAtMilliseconds) ?? 0
+        completedAtMilliseconds = try container.decodeRustDefaulted(
+            Int64.self,
+            forKey: .completedAtMilliseconds,
+            defaultValue: 0
+        )
         senderThreadID = try container.decode(ThreadId.self, forKey: .senderThreadID)
         newThreadID = try container.decodeIfPresent(ThreadId.self, forKey: .newThreadID)
         newAgentNickname = try container.decodeIfPresent(String.self, forKey: .newAgentNickname)
@@ -438,7 +446,11 @@ public struct CollabAgentInteractionBeginEvent: Equatable, Codable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         callID = try container.decode(String.self, forKey: .callID)
-        startedAtMilliseconds = try container.decodeIfPresent(Int64.self, forKey: .startedAtMilliseconds) ?? 0
+        startedAtMilliseconds = try container.decodeRustDefaulted(
+            Int64.self,
+            forKey: .startedAtMilliseconds,
+            defaultValue: 0
+        )
         senderThreadID = try container.decode(ThreadId.self, forKey: .senderThreadID)
         receiverThreadID = try container.decode(ThreadId.self, forKey: .receiverThreadID)
         prompt = try container.decode(String.self, forKey: .prompt)
@@ -489,7 +501,11 @@ public struct CollabAgentInteractionEndEvent: Equatable, Codable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         callID = try container.decode(String.self, forKey: .callID)
-        completedAtMilliseconds = try container.decodeIfPresent(Int64.self, forKey: .completedAtMilliseconds) ?? 0
+        completedAtMilliseconds = try container.decodeRustDefaulted(
+            Int64.self,
+            forKey: .completedAtMilliseconds,
+            defaultValue: 0
+        )
         senderThreadID = try container.decode(ThreadId.self, forKey: .senderThreadID)
         receiverThreadID = try container.decode(ThreadId.self, forKey: .receiverThreadID)
         receiverAgentNickname = try container.decodeIfPresent(String.self, forKey: .receiverAgentNickname)
@@ -542,10 +558,18 @@ public struct CollabWaitingBeginEvent: Equatable, Codable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        startedAtMilliseconds = try container.decodeIfPresent(Int64.self, forKey: .startedAtMilliseconds) ?? 0
+        startedAtMilliseconds = try container.decodeRustDefaulted(
+            Int64.self,
+            forKey: .startedAtMilliseconds,
+            defaultValue: 0
+        )
         senderThreadID = try container.decode(ThreadId.self, forKey: .senderThreadID)
         receiverThreadIDs = try container.decode([ThreadId].self, forKey: .receiverThreadIDs)
-        receiverAgents = try container.decodeIfPresent([CollabAgentRef].self, forKey: .receiverAgents) ?? []
+        receiverAgents = try container.decodeRustDefaulted(
+            [CollabAgentRef].self,
+            forKey: .receiverAgents,
+            defaultValue: []
+        )
         callID = try container.decode(String.self, forKey: .callID)
     }
 
@@ -594,8 +618,16 @@ public struct CollabWaitingEndEvent: Equatable, Codable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         senderThreadID = try container.decode(ThreadId.self, forKey: .senderThreadID)
         callID = try container.decode(String.self, forKey: .callID)
-        completedAtMilliseconds = try container.decodeIfPresent(Int64.self, forKey: .completedAtMilliseconds) ?? 0
-        agentStatuses = try container.decodeIfPresent([CollabAgentStatusEntry].self, forKey: .agentStatuses) ?? []
+        completedAtMilliseconds = try container.decodeRustDefaulted(
+            Int64.self,
+            forKey: .completedAtMilliseconds,
+            defaultValue: 0
+        )
+        agentStatuses = try container.decodeRustDefaulted(
+            [CollabAgentStatusEntry].self,
+            forKey: .agentStatuses,
+            defaultValue: []
+        )
         let statusContainer = try container.nestedContainer(keyedBy: DynamicCodingKey.self, forKey: .statuses)
         statuses = try statusContainer.allKeys.reduce(into: [:]) { result, key in
             result[try ThreadId(string: key.stringValue)] = try statusContainer.decode(AgentStatus.self, forKey: key)
@@ -645,7 +677,11 @@ public struct CollabCloseBeginEvent: Equatable, Codable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         callID = try container.decode(String.self, forKey: .callID)
-        startedAtMilliseconds = try container.decodeIfPresent(Int64.self, forKey: .startedAtMilliseconds) ?? 0
+        startedAtMilliseconds = try container.decodeRustDefaulted(
+            Int64.self,
+            forKey: .startedAtMilliseconds,
+            defaultValue: 0
+        )
         senderThreadID = try container.decode(ThreadId.self, forKey: .senderThreadID)
         receiverThreadID = try container.decode(ThreadId.self, forKey: .receiverThreadID)
     }
@@ -691,7 +727,11 @@ public struct CollabCloseEndEvent: Equatable, Codable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         callID = try container.decode(String.self, forKey: .callID)
-        completedAtMilliseconds = try container.decodeIfPresent(Int64.self, forKey: .completedAtMilliseconds) ?? 0
+        completedAtMilliseconds = try container.decodeRustDefaulted(
+            Int64.self,
+            forKey: .completedAtMilliseconds,
+            defaultValue: 0
+        )
         senderThreadID = try container.decode(ThreadId.self, forKey: .senderThreadID)
         receiverThreadID = try container.decode(ThreadId.self, forKey: .receiverThreadID)
         receiverAgentNickname = try container.decodeIfPresent(String.self, forKey: .receiverAgentNickname)
@@ -747,7 +787,11 @@ public struct CollabResumeBeginEvent: Equatable, Codable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         callID = try container.decode(String.self, forKey: .callID)
-        startedAtMilliseconds = try container.decodeIfPresent(Int64.self, forKey: .startedAtMilliseconds) ?? 0
+        startedAtMilliseconds = try container.decodeRustDefaulted(
+            Int64.self,
+            forKey: .startedAtMilliseconds,
+            defaultValue: 0
+        )
         senderThreadID = try container.decode(ThreadId.self, forKey: .senderThreadID)
         receiverThreadID = try container.decode(ThreadId.self, forKey: .receiverThreadID)
         receiverAgentNickname = try container.decodeIfPresent(String.self, forKey: .receiverAgentNickname)
@@ -805,7 +849,11 @@ public struct CollabResumeEndEvent: Equatable, Codable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         callID = try container.decode(String.self, forKey: .callID)
-        completedAtMilliseconds = try container.decodeIfPresent(Int64.self, forKey: .completedAtMilliseconds) ?? 0
+        completedAtMilliseconds = try container.decodeRustDefaulted(
+            Int64.self,
+            forKey: .completedAtMilliseconds,
+            defaultValue: 0
+        )
         senderThreadID = try container.decode(ThreadId.self, forKey: .senderThreadID)
         receiverThreadID = try container.decode(ThreadId.self, forKey: .receiverThreadID)
         receiverAgentNickname = try container.decodeIfPresent(String.self, forKey: .receiverAgentNickname)
