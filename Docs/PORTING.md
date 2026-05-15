@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust commit `7c9731c9af` (`cargo shear
+  --deny-warnings` cleanup). The changes remove unreachable Rust-only test,
+  hook, MCP-server, plugin-namespace, and Windows module plumbing plus CI
+  dependency metadata; no Swift runtime or protocol behavior change is
+  required beyond the already-covered hook, MCP, plugin-skill namespace,
+  exec-server JSON-RPC, and Windows sandbox slices.
 - 2026-05-15: rechecked Rust `UpdatePlanArgs` and `PlanItemArg` in
   `codex-rs/protocol/src/plan_tool.rs`. Swift now carries typed update-plan
   tool argument models with Rust's snake_case statuses, optional `explanation`
