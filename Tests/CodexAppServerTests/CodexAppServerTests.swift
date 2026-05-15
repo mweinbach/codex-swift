@@ -20600,6 +20600,28 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(accountPayload["type"] as? String, "apiKey")
     }
 
+    func testAccountLoginAPIKeyRejectsMalformedFieldsLikeRustV2Params() throws {
+        let temp = try TemporaryDirectory()
+        let cases: [(String, String)] = [
+            (#"{"apiKey":"sk-test-key"}"#, "missing field `type`"),
+            (#"{"type":null,"apiKey":"sk-test-key"}"#, "Invalid request: invalid type: null, expected a string"),
+            (#"{"type":"apiKey"}"#, "missing field `apiKey`"),
+            (#"{"type":"apiKey","apiKey":null}"#, "Invalid request: invalid type: null, expected a string"),
+            (#"{"type":"apiKey","apiKey":1}"#, "Invalid request: invalid type: integer `1`, expected a string")
+        ]
+
+        for (index, testCase) in cases.enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 1),"method":"account/login/start","params":\#(testCase.0)}"#,
+                codexHome: temp.url
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, testCase.1)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("auth.json").path))
+    }
+
     func testAccountLoginAndLogoutQueueMcpRefreshForLoadedThreads() throws {
         let temp = try TemporaryDirectory()
         let workspace = try TemporaryDirectory()
@@ -20766,6 +20788,45 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(accountPayload["type"] as? String, "chatgpt")
         XCTAssertEqual(accountPayload["email"] as? String, "embedded@example.com")
         XCTAssertEqual(accountPayload["planType"] as? String, "pro")
+    }
+
+    func testAccountLoginChatGPTAuthTokensRejectsMalformedFieldsLikeRustV2Params() throws {
+        let temp = try TemporaryDirectory()
+        let accessToken = try fakeJWT(email: "embedded@example.com", plan: "pro", accountID: "org-embedded")
+        let cases: [(String, String)] = [
+            (
+                #"{"type":"chatgptAuthTokens","chatgptAccountId":"org-embedded"}"#,
+                "missing field `accessToken`"
+            ),
+            (
+                #"{"type":"chatgptAuthTokens","accessToken":null,"chatgptAccountId":"org-embedded"}"#,
+                "Invalid request: invalid type: null, expected a string"
+            ),
+            (
+                #"{"type":"chatgptAuthTokens","accessToken":"\#(accessToken)"}"#,
+                "missing field `chatgptAccountId`"
+            ),
+            (
+                #"{"type":"chatgptAuthTokens","accessToken":"\#(accessToken)","chatgptAccountId":1}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"type":"chatgptAuthTokens","accessToken":"\#(accessToken)","chatgptAccountId":"org-embedded","chatgptPlanType":1}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            )
+        ]
+
+        for (index, testCase) in cases.enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 1),"method":"account/login/start","params":\#(testCase.0)}"#,
+                codexHome: temp.url,
+                experimentalAPIEnabled: true
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, testCase.1)
+        }
+        XCTAssertNil(try CodexAuthStorage.loadAuthDotJSON(codexHome: temp.url, mode: .ephemeral))
     }
 
     func testAccountReadRejectsMalformedRefreshTokenLikeRustV2Params() throws {

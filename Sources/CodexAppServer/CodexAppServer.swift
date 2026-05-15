@@ -18073,6 +18073,19 @@ public enum CodexAppServer {
         guard let apiKey = stringParam(params?["apiKey"]) else {
             throw AppServerError.invalidRequest("missing apiKey")
         }
+        try loginApiKey(
+            apiKey: apiKey,
+            configuration: configuration,
+            cancelActiveLogin: cancelActiveLogin
+        )
+        return [:]
+    }
+
+    private static func loginApiKey(
+        apiKey: String,
+        configuration: CodexAppServerConfiguration,
+        cancelActiveLogin: () -> Void = {}
+    ) throws {
         if try externalChatGPTAuthActive(configuration: configuration) {
             throw externalAuthActiveError()
         }
@@ -18089,7 +18102,6 @@ public enum CodexAppServer {
         } catch {
             throw AppServerError.internalError("failed to save api key: \(error)")
         }
-        return [:]
     }
 
     fileprivate static func loginAccountResult(
@@ -18097,7 +18109,7 @@ public enum CodexAppServer {
         configuration: CodexAppServerConfiguration,
         cancelActiveLogin: () -> Void = {}
     ) throws -> [String: Any] {
-        let type = stringParam(params?["type"])
+        let type = try rustRequiredStringParam(params?["type"], field: "type")
         if type == "chatgptAuthTokens", try forcedLoginMethod(configuration: configuration) == "api" {
             throw AppServerError.invalidRequest("External ChatGPT auth is disabled. Use API key login instead.")
         }
@@ -18105,13 +18117,9 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("ChatGPT login is disabled. Use API key login instead.")
         }
         if type == "chatgptAuthTokens" {
-            guard let accessToken = stringParam(params?["accessToken"]) else {
-                throw AppServerError.invalidRequest("missing accessToken")
-            }
-            guard let chatGPTAccountID = stringParam(params?["chatgptAccountId"]) else {
-                throw AppServerError.invalidRequest("missing chatgptAccountId")
-            }
-            let chatGPTPlanType = stringParam(params?["chatgptPlanType"])
+            let accessToken = try rustRequiredStringParam(params?["accessToken"], field: "accessToken")
+            let chatGPTAccountID = try rustRequiredStringParam(params?["chatgptAccountId"], field: "chatgptAccountId")
+            let chatGPTPlanType = try rustOptionalStringParam(params?["chatgptPlanType"])
             cancelActiveLogin()
             if let forcedWorkspace = try forcedChatGPTWorkspaceID(configuration: configuration),
                chatGPTAccountID != forcedWorkspace {
@@ -18133,9 +18141,10 @@ public enum CodexAppServer {
             return ["type": "chatgptAuthTokens"]
         }
         guard type == "apiKey" else {
-            throw AppServerError.invalidRequest("unsupported account login type: \(type ?? "<missing>")")
+            throw AppServerError.invalidRequest("unsupported account login type: \(type)")
         }
-        _ = try loginApiKeyResult(params: params, configuration: configuration, cancelActiveLogin: cancelActiveLogin)
+        let apiKey = try rustRequiredStringParam(params?["apiKey"], field: "apiKey")
+        try loginApiKey(apiKey: apiKey, configuration: configuration, cancelActiveLogin: cancelActiveLogin)
         return ["type": "apiKey"]
     }
 
