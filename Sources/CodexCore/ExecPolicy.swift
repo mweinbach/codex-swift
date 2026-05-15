@@ -7008,6 +7008,8 @@ public final class PolicyParser {
             return items.keys.map(ConfigValue.string)
         case let .range(start, stop, step):
             return starlarkRangeValues(start: start, stop: stop, step: step).map { .integer(Int64($0)) }
+        case .string:
+            throw ExecPolicyError.invalidSyntax("Operation `(iter)` not supported on type `string`")
         default:
             throw ConfigOverrideError.invalidLiteral(expression)
         }

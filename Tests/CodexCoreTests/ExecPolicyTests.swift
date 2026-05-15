@@ -3689,7 +3689,12 @@ final class ExecPolicyTests: XCTestCase {
                 prefix_rule([letter], "allow")
             """
         ] {
-            XCTAssertThrowsError(try parsePolicy(source))
+            XCTAssertThrowsError(try parsePolicy(source)) { error in
+                XCTAssertTrue(
+                    String(describing: error).contains("Operation `(iter)` not supported on type `string`"),
+                    "Expected Rust Starlark string-iteration error, got: \(error)"
+                )
+            }
         }
     }
 

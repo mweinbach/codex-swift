@@ -84,6 +84,11 @@ Recent upstream audit checkpoint:
   `codex-rs/execpolicy`. Swift now treats top-level and branch-body `pass`
   statements as no-op policy statements instead of falling through to an
   unsupported statement error.
+- 2026-05-15: rechecked current Rust Starlark direct string iteration in
+  `codex-rs/execpolicy`. Swift now rejects `list("...")`, `tuple("...")`,
+  `zip(..., "...")`, `all("...")`, `any("...")`, and `for x in "..."`
+  with Rust's unsupported string iteration message; policy files should use
+  `.elems()` or `.codepoints()` when character iteration is intended.
 - 2026-05-15: rechecked Rust app-server initialization in
   `codex-rs/app-server/src/lib.rs`. Swift now mirrors Rust's
   exec-policy parse warning notification path by appending a `configWarning`
@@ -1811,7 +1816,7 @@ Recent upstream audit checkpoint:
 - `codex-rs/execpolicy/src/parser.rs` Starlark assigned lambda functions
   - Added Swift execpolicy parser support for top-level and executed block-scope `name = lambda ...` assignments that can be called from policy literals or used as named key functions, including positional/default arguments and expression bodies.
 - `codex-rs/execpolicy/src/parser.rs` Starlark dictionary comprehensions and iterable loops
-  - Added Swift execpolicy parser support for single-generator dictionary comprehensions with optional `if` filters, plus direct string and dictionary iteration in top-level loops and list comprehensions for map-driven rules, network hosts, and executable paths.
+  - Added Swift execpolicy parser support for single-generator dictionary comprehensions with optional `if` filters, dictionary iteration in top-level loops and list comprehensions, and explicit string `.elems()` iteration for map-driven rules, network hosts, and executable paths.
 - `codex-rs/execpolicy/src/parser.rs` Starlark multi-clause comprehensions
   - Extended Swift execpolicy parser support for list and dictionary comprehensions with multiple `for` generators and multiple top-level `if` filters evaluated left-to-right, matching Rust Starlark policy files that derive generated rule values from nested loops.
 - `codex-rs/execpolicy/src/parser.rs` Starlark unary plus and default split
