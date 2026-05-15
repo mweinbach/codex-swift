@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust models-cache `client_version` freshness in
+  `codex-rs/models-manager/src/cache.rs`. Swift now has focused coverage that
+  a cache entry with a fresh timestamp but mismatched `client_version` is
+  treated as unusable, forcing a remote `/models` refresh and persisting the
+  current client version.
 - 2026-05-15: rechecked Rust commit `46e2250bcf` (removed legacy
   `AfterToolUse` dispatch and hook payload types). Swift plugin hook discovery
   now has focused coverage that legacy `AfterToolUse` / `after_tool_use`

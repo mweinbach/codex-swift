@@ -144,6 +144,54 @@ final class ModelsManagerTests: XCTestCase {
         XCTAssertTrue(response.models.contains { $0.slug == "cached-remote" })
     }
 
+    func testRawModelCatalogOnlineIfUncachedRefetchesFreshVersionMismatchLikeRust() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cachedModel = minimalModelInfo(slug: "cached-version-mismatch", priority: 0)
+        let remoteModel = minimalModelInfo(slug: "remote-version-refresh", priority: 0)
+        try ModelsCache(
+            fetchedAt: try parseDate("2026-05-08T12:00:00Z"),
+            etag: "cache-etag",
+            clientVersion: "1.2.2",
+            models: [cachedModel]
+        ).save(to: ModelsManager.cachePath(codexHome: root))
+        let responseBody = try JSONEncoder().encode(ModelsResponse(models: [remoteModel], etag: "body-etag"))
+        let capture = APIRequestCapture()
+        let transport = RecordingAPITransport { request in
+            await capture.append(request)
+            return URLSessionTransportResponse(
+                statusCode: 200,
+                headers: ["ETag": "remote-etag"],
+                body: responseBody
+            )
+        }
+
+        let response = try await ModelsManager.rawModelCatalogOnlineIfUncached(
+            codexHome: root,
+            config: CodexRuntimeConfig(modelProvider: "openai"),
+            auth: AuthDotJSON(
+                authMode: .chatGPT,
+                openAIAPIKey: nil,
+                tokens: chatGPTTokenData(accessToken: "chatgpt-token", accountID: "acct-123"),
+                lastRefresh: nil
+            ),
+            transport: transport,
+            clientVersion: "1.2.3",
+            now: try parseDate("2026-05-08T12:04:59Z")
+        )
+
+        XCTAssertEqual(response.etag, "remote-etag")
+        XCTAssertTrue(response.models.contains { $0.slug == "remote-version-refresh" })
+        XCTAssertFalse(response.models.contains { $0.slug == "cached-version-mismatch" })
+        let capturedRequest = await capture.firstRequest()
+        let request = try XCTUnwrap(capturedRequest)
+        XCTAssertEqual(request.url, "https://chatgpt.com/backend-api/codex/models?client_version=1.2.3")
+        let cache = try XCTUnwrap(ModelsCache.load(from: ModelsManager.cachePath(codexHome: root)))
+        XCTAssertEqual(cache.etag, "remote-etag")
+        XCTAssertEqual(cache.clientVersion, "1.2.3")
+        XCTAssertEqual(cache.models, [remoteModel])
+    }
+
     func testRefreshCachedModelsIfNewETagRenewsMatchingCacheWithoutFetchLikeRust() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
