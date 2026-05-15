@@ -867,6 +867,9 @@ private func pythonWalksFiles(_ tail: [String]) -> Bool {
                 || script.contains("os.listdir")
                 || script.contains("os.scandir")
                 || script.contains("glob.glob")
+                || script.contains("glob.iglob")
+                || script.contains("pathlib.Path")
+                || script.contains(".rglob(")
         }
         index += 1
     }
