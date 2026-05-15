@@ -3736,11 +3736,27 @@ public final class PolicyParser {
             )
             return .string(try formattingStarlarkString(receiver, arguments: arguments, expression: text))
         case "startswith":
-            let prefixes = try parseStringOrTupleMethodArgument(rawArguments, expression: text, constants: constants, functions: functions)
-            return .bool(prefixes.contains { receiver.hasPrefix($0) })
+            let arguments = try parseStringPrefixSuffixMethodArguments(
+                rawArguments,
+                expression: text,
+                constants: constants,
+                functions: functions
+            )
+            guard let window = starlarkStringSearchWindow(receiver, start: arguments.start, end: arguments.end) else {
+                return .bool(false)
+            }
+            return .bool(arguments.affixes.contains { window.haystack.hasPrefix($0) })
         case "endswith":
-            let suffixes = try parseStringOrTupleMethodArgument(rawArguments, expression: text, constants: constants, functions: functions)
-            return .bool(suffixes.contains { receiver.hasSuffix($0) })
+            let arguments = try parseStringPrefixSuffixMethodArguments(
+                rawArguments,
+                expression: text,
+                constants: constants,
+                functions: functions
+            )
+            guard let window = starlarkStringSearchWindow(receiver, start: arguments.start, end: arguments.end) else {
+                return .bool(false)
+            }
+            return .bool(arguments.affixes.contains { window.haystack.hasSuffix($0) })
         case "lower":
             try requireNoStringMethodArguments(rawArguments, expression: text)
             return .string(receiver.lowercased())
@@ -4185,6 +4201,40 @@ public final class PolicyParser {
         default:
             throw ConfigOverrideError.invalidLiteral(expression)
         }
+    }
+
+    private static func parseStringPrefixSuffixMethodArguments(
+        _ rawArguments: [String],
+        expression: String,
+        constants: [String: ConfigValue],
+        functions: [String: StarlarkFunction]
+    ) throws -> (affixes: [String], start: Int?, end: Int?) {
+        guard (1...3).contains(rawArguments.count) else {
+            throw ConfigOverrideError.invalidLiteral(expression)
+        }
+        let affixes = try parseStringOrTupleMethodArgument(
+            [rawArguments[0]],
+            expression: expression,
+            constants: constants,
+            functions: functions
+        )
+        let start = try rawArguments.count >= 2
+            ? parseOptionalStarlarkSearchBound(
+                rawArguments[1],
+                constants: constants,
+                functions: functions,
+                expression: expression
+            )
+            : nil
+        let end = try rawArguments.count == 3
+            ? parseOptionalStarlarkSearchBound(
+                rawArguments[2],
+                constants: constants,
+                functions: functions,
+                expression: expression
+            )
+            : nil
+        return (affixes, start, end)
     }
 
     private static func parseStringFormatMethodArguments(

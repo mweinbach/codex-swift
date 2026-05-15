@@ -3318,6 +3318,30 @@ final class ExecPolicyTests: XCTestCase {
         """))
     }
 
+    func testParserEvaluatesRustStarlarkStringPrefixSuffixBounds() throws {
+        let policy = try parsePolicy("""
+        COMMAND = "git status"
+        ARCHIVE = "release.tar.gz"
+
+        if COMMAND.startswith("status", 4) and COMMAND.startswith(("diff", "status"), 4, 10) and not COMMAND.startswith("git", 1):
+            prefix_rule(["git", "status"], "allow")
+
+        if ARCHIVE.endswith(".tar", 0, -3) and ARCHIVE.endswith((".zip", ".tar"), 0, -3) and not ARCHIVE.endswith(".gz", 0, -3):
+            network_rule("bounded-prefix.example.com", "https", "allow")
+
+        if "git".startswith("", 4) == False and "git".endswith("", 4) == False:
+            host_executable("git", ["/usr/bin/git"])
+        """)
+
+        XCTAssertEqual(policy.rules(for: "git"), [
+            PrefixRule(pattern: PrefixPattern(first: "git", rest: [.single("status")]), decision: .allow)
+        ])
+        XCTAssertEqual(policy.networkRules(), [
+            NetworkRule(host: "bounded-prefix.example.com", protocol: .https, decision: .allow)
+        ])
+        XCTAssertEqual(policy.hostExecutables(), ["git": ["/usr/bin/git"]])
+    }
+
     func testParserEvaluatesRustStarlarkStringFormatMethod() throws {
         let policy = try parsePolicy("""
         TOOL = "git"

@@ -1711,6 +1711,8 @@ Recent upstream audit checkpoint:
   - Added Swift execpolicy parser support for `.removeprefix(...)` and `.removesuffix(...)`, including Rust's empty-affix no-op behavior across supported policy literals, generated rule values, conditions, and host executable paths.
 - `codex-rs/execpolicy/src/parser.rs` Starlark string search methods
   - Added Swift execpolicy parser support for `.count(...)`, `.find(...)`, `.index(...)`, `.rfind(...)`, and `.rindex(...)`, including optional `start`/`end` bounds, `None` bounds, non-overlapping counts, empty-needle behavior, reverse search, and failing index lookups.
+- `codex-rs/execpolicy/src/parser.rs` Starlark string prefix/suffix methods
+  - Added Swift execpolicy parser support for `.startswith(...)` and `.endswith(...)` optional `start`/`end` bounds, including tuple affixes, negative end bounds, out-of-range false results, and existing malformed tuple rejection.
 - `codex-rs/execpolicy/src/parser.rs` Starlark string partition methods
   - Added Swift execpolicy parser support for `.partition(...)` and `.rpartition(...)`, including tuple-shaped results, missing-separator triples, reverse partitioning, destructuring use, and empty-separator rejection.
 - `codex-rs/execpolicy/src/parser.rs` Starlark string split methods
