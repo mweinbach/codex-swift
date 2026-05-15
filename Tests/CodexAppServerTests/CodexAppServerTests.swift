@@ -6370,7 +6370,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(item["durationMs"] as? Int, 1)
     }
 
-    func testRuntimeItemLifecycleSerializesUserFileAndMcpItems() async throws {
+    func testRuntimeItemLifecycleSerializesRustCoreThreadItemVariants() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()
         let processor = try initializedProcessor(
@@ -6394,10 +6394,77 @@ final class CodexAppServerTests: XCTestCase {
                         ),
                         .image(imageURL: "https://example.test/image.png"),
                         .localImage(path: "local/image.png"),
-                        .skill(name: "skill-creator", path: "/repo/.codex/skills/skill-creator/SKILL.md")
+                        .skill(name: "skill-creator", path: "/repo/.codex/skills/skill-creator/SKILL.md"),
+                        .mention(name: "Demo App", path: "app://demo-app")
                     ]
                 )),
                 startedAtMilliseconds: 10
+            ))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .itemCompleted(ItemCompletedEvent(
+                threadID: eventThreadID,
+                turnID: "event-turn",
+                item: .agentMessage(AgentMessageItem(
+                    id: "agent-1",
+                    content: [.text("Hello "), .text("world")],
+                    phase: .finalAnswer,
+                    memoryCitation: MemoryCitation(
+                        entries: [
+                            MemoryCitationEntry(
+                                path: "MEMORY.md",
+                                lineStart: 1,
+                                lineEnd: 2,
+                                note: "summary"
+                            )
+                        ],
+                        rolloutIDs: ["rollout-1"]
+                    )
+                )),
+                completedAtMilliseconds: 12
+            ))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .itemCompleted(ItemCompletedEvent(
+                threadID: eventThreadID,
+                turnID: "event-turn",
+                item: .reasoning(ReasoningItem(
+                    id: "reasoning-1",
+                    summaryText: ["line one", "line two"],
+                    rawContent: ["raw thought"]
+                )),
+                completedAtMilliseconds: 14
+            ))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .itemCompleted(ItemCompletedEvent(
+                threadID: eventThreadID,
+                turnID: "event-turn",
+                item: .webSearch(WebSearchItem(
+                    id: "search-1",
+                    query: "docs",
+                    action: .search(query: "docs", queries: nil)
+                )),
+                completedAtMilliseconds: 16
+            ))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .itemCompleted(ItemCompletedEvent(
+                threadID: eventThreadID,
+                turnID: "event-turn",
+                item: .imageView(ImageViewItem(
+                    id: "view-image-1",
+                    path: try AbsolutePath(absolutePath: "/tmp/view-image.png")
+                )),
+                completedAtMilliseconds: 18
             ))
         )
         await processor.handleRuntimeEvent(
@@ -6442,7 +6509,7 @@ final class CodexAppServerTests: XCTestCase {
         let userItem = try XCTUnwrap(userParams["item"] as? [String: Any])
         XCTAssertEqual(userItem["type"] as? String, "userMessage")
         let content = try XCTUnwrap(userItem["content"] as? [[String: Any]])
-        XCTAssertEqual(content.map { $0["type"] as? String }, ["text", "image", "localImage", "skill"])
+        XCTAssertEqual(content.map { $0["type"] as? String }, ["text", "image", "localImage", "skill", "mention"])
         XCTAssertEqual(content[0]["text"] as? String, "hello")
         let textElements = try XCTUnwrap(content[0]["textElements"] as? [[String: Any]])
         XCTAssertEqual((textElements[0]["byteRange"] as? [String: Any])?["start"] as? Int, 0)
@@ -6451,6 +6518,44 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(content[1]["url"] as? String, "https://example.test/image.png")
         XCTAssertEqual(content[2]["path"] as? String, "local/image.png")
         XCTAssertEqual(content[3]["name"] as? String, "skill-creator")
+        XCTAssertEqual(content[4]["type"] as? String, "mention")
+        XCTAssertEqual(content[4]["name"] as? String, "Demo App")
+        XCTAssertEqual(content[4]["path"] as? String, "app://demo-app")
+
+        let agentMessages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        let agentParams = try XCTUnwrap(agentMessages[0]["params"] as? [String: Any])
+        let agentItem = try XCTUnwrap(agentParams["item"] as? [String: Any])
+        XCTAssertEqual(agentItem["type"] as? String, "agentMessage")
+        XCTAssertEqual(agentItem["text"] as? String, "Hello world")
+        XCTAssertEqual(agentItem["phase"] as? String, "FinalAnswer")
+        let memoryCitation = try XCTUnwrap(agentItem["memoryCitation"] as? [String: Any])
+        let memoryEntries = try XCTUnwrap(memoryCitation["entries"] as? [[String: Any]])
+        XCTAssertEqual(memoryEntries[0]["path"] as? String, "MEMORY.md")
+        XCTAssertEqual(memoryEntries[0]["lineStart"] as? Int, 1)
+        XCTAssertEqual(memoryEntries[0]["lineEnd"] as? Int, 2)
+        XCTAssertEqual(memoryEntries[0]["note"] as? String, "summary")
+        XCTAssertEqual(memoryCitation["threadIds"] as? [String], ["rollout-1"])
+
+        let reasoningMessages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        let reasoningParams = try XCTUnwrap(reasoningMessages[0]["params"] as? [String: Any])
+        let reasoningItem = try XCTUnwrap(reasoningParams["item"] as? [String: Any])
+        XCTAssertEqual(reasoningItem["type"] as? String, "reasoning")
+        XCTAssertEqual(reasoningItem["summary"] as? [String], ["line one", "line two"])
+        XCTAssertEqual(reasoningItem["content"] as? [String], ["raw thought"])
+
+        let searchMessages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        let searchParams = try XCTUnwrap(searchMessages[0]["params"] as? [String: Any])
+        let searchItem = try XCTUnwrap(searchParams["item"] as? [String: Any])
+        XCTAssertEqual(searchItem["type"] as? String, "webSearch")
+        XCTAssertEqual(searchItem["query"] as? String, "docs")
+        XCTAssertEqual((searchItem["action"] as? [String: Any])?["type"] as? String, "search")
+        XCTAssertEqual((searchItem["action"] as? [String: Any])?["query"] as? String, "docs")
+
+        let imageMessages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        let imageParams = try XCTUnwrap(imageMessages[0]["params"] as? [String: Any])
+        let imageItem = try XCTUnwrap(imageParams["item"] as? [String: Any])
+        XCTAssertEqual(imageItem["type"] as? String, "imageView")
+        XCTAssertEqual(imageItem["path"] as? String, "/tmp/view-image.png")
 
         let fileMessages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
         let fileParams = try XCTUnwrap(fileMessages[0]["params"] as? [String: Any])

@@ -12,6 +12,13 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust v2 `ThreadItem::from(TurnItem)` supported
+  variant conversion in
+  `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift app-server
+  runtime item lifecycle coverage now pins the lower-camel thread item
+  notification shapes for user mentions, concatenated agent text with phase and
+  memory citation, reasoning summaries/raw content, web search actions, image
+  views, file changes, and MCP tool calls.
 - 2026-05-15: rechecked Rust core response event mapping in
   `codex-rs/core/src/event_mapping.rs`. Swift now strips Rust's synthetic
   remote and local image wrapper tags when reconstructing user turns from
