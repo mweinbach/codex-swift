@@ -1122,13 +1122,13 @@ public enum ToolSpecFactory {
 
         var namespaceDescriptions: [String: String] = [:]
         for toolInfo in McpToolName.normalizeToolsForModel(mcpTools) {
-            let namespace = "\(McpToolName.prefix)\(McpToolName.delimiter)\(toolInfo.serverName)\(McpToolName.delimiter)"
+            let namespace = toolInfo.callableNamespace
             if namespaceDescriptions[namespace] == nil,
                let description = toolInfo.namespaceDescription?.trimmingCharacters(in: .whitespacesAndNewlines),
                !description.isEmpty {
                 namespaceDescriptions[namespace] = description
             }
-            groupedTools[namespace, default: []].append((name: toolInfo.tool.name, tool: toolInfo.tool))
+            groupedTools[namespace, default: []].append((name: toolInfo.callableName, tool: toolInfo.tool))
         }
 
         return groupedTools.keys.sorted().compactMap { namespace in

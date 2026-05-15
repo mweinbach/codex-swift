@@ -101,14 +101,14 @@ public struct ToolSearchIndex: Equatable, Sendable {
             .sorted { $0.canonicalToolName < $1.canonicalToolName }
             .map { toolInfo in
                 let qualifiedName = toolInfo.canonicalToolName
-                let namespace = "\(McpToolName.prefix)\(McpToolName.delimiter)\(toolInfo.serverName)\(McpToolName.delimiter)"
+                let namespace = toolInfo.callableNamespace
                 let description = namespaceDescription(for: namespace, fallback: toolInfo.namespaceDescription)
                 let output = ToolSpec.namespace(ResponsesAPINamespace(
                     name: namespace,
                     description: description,
                     tools: [
                         .function(ToolSpecFactory.createMCPResponsesAPITool(
-                            name: toolInfo.tool.name,
+                            name: toolInfo.callableName,
                             tool: toolInfo.tool,
                             deferLoading: true
                         ))
@@ -118,7 +118,7 @@ public struct ToolSearchIndex: Equatable, Sendable {
                     searchText: buildMCPSearchText(
                         qualifiedName: qualifiedName,
                         serverName: toolInfo.serverName,
-                        callableName: toolInfo.tool.name,
+                        callableName: toolInfo.callableName,
                         namespaceDescription: toolInfo.namespaceDescription,
                         tool: toolInfo.tool
                     ),

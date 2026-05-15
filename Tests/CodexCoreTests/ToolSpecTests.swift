@@ -1073,6 +1073,26 @@ final class ToolSpecTests: XCTestCase {
         XCTAssertEqual(namespace.description, "Use this server for durable workspace notes.")
     }
 
+    func testBuildSpecsUsesRustSanitizedMCPCallableNames() throws {
+        let specs = ToolSpecFactory.buildSpecs(
+            config: ToolsConfig(
+                shellType: .disabled,
+                applyPatchToolType: nil,
+                includeViewImageTool: false
+            ),
+            mcpToolInfos: [
+                McpToolInfo(serverName: "server.one", tool: makeMcpTool(name: "tool.two-three"))
+            ]
+        )
+
+        let mcpSpec = try XCTUnwrap(specs.first { $0.spec.name == "mcp__server_one__" })
+        guard case let .namespace(namespace) = mcpSpec.spec else {
+            return XCTFail("expected namespace")
+        }
+        XCTAssertEqual(namespace.name, "mcp__server_one__")
+        XCTAssertEqual(namespace.tools.map(namespaceToolName), ["tool_two_three"])
+    }
+
     func testBuildSpecsCoalescesDynamicToolNamespacesLikeRust() throws {
         let specs = ToolSpecFactory.buildSpecs(
             config: ToolsConfig(
@@ -1461,6 +1481,29 @@ final class ToolSpecTests: XCTestCase {
         }
         XCTAssertEqual(namespace["name"], .string("mcp__docs__"))
         XCTAssertEqual(children.compactMap(toolName), ["search"])
+    }
+
+    func testToolSearchUsesRustSanitizedMCPCallableNames() throws {
+        let index = ToolSearchIndex.deferredToolIndex(
+            mcpTools: [
+                McpToolInfo(serverName: "server.one", tool: makeMcpTool(name: "tool.two-three", description: "Search dotted tools"))
+            ],
+            dynamicTools: []
+        )
+
+        let tools = try index.search(arguments: .object([
+            "query": .string("dotted tools"),
+            "limit": .integer(8)
+        ]))
+
+        XCTAssertEqual(tools.count, 1)
+        guard case let .object(namespace) = tools[0],
+              case let .array(children)? = namespace["tools"]
+        else {
+            return XCTFail("expected namespace result")
+        }
+        XCTAssertEqual(namespace["name"], .string("mcp__server_one__"))
+        XCTAssertEqual(children.compactMap(toolName), ["tool_two_three"])
     }
 
     func testToolSearchUsesMCPNamespaceDescriptionLikeRust() throws {

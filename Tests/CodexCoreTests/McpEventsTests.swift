@@ -430,6 +430,57 @@ final class McpEventsTests: XCTestCase {
         XCTAssertEqual(tools.first?.tool.description, "first")
     }
 
+    func testNormalizeToolsForModelSanitizesInvalidCharactersLikeRust() {
+        let tools = McpToolName.normalizeToolsForModel([
+            McpToolInfo(serverName: "server.one", tool: makeMcpTool(name: "tool.two-three"))
+        ])
+
+        XCTAssertEqual(tools.count, 1)
+        XCTAssertEqual(tools[0].serverName, "server.one")
+        XCTAssertEqual(tools[0].tool.name, "tool.two-three")
+        XCTAssertEqual(tools[0].callableNamespace, "mcp__server_one__")
+        XCTAssertEqual(tools[0].callableName, "tool_two_three")
+        XCTAssertEqual(tools[0].canonicalToolName, "mcp__server_one__tool_two_three")
+    }
+
+    func testNormalizeToolsForModelDisambiguatesSanitizedCollisionsLikeRust() {
+        let tools = McpToolName.normalizeToolsForModel([
+            McpToolInfo(serverName: "basic-server", tool: makeMcpTool(name: "lookup")),
+            McpToolInfo(serverName: "basic_server", tool: makeMcpTool(name: "query")),
+            McpToolInfo(serverName: "server", tool: makeMcpTool(name: "tool-name")),
+            McpToolInfo(serverName: "server", tool: makeMcpTool(name: "tool_name"))
+        ])
+
+        XCTAssertEqual(tools.count, 4)
+        let namespaces = Set(tools.filter { $0.serverName.hasPrefix("basic") }.map(\.callableNamespace))
+        XCTAssertEqual(namespaces.count, 2)
+        XCTAssertTrue(namespaces.allSatisfy { $0.hasPrefix("mcp__basic_server_") && $0.hasSuffix("__") })
+
+        let callableNames = Set(tools.filter { $0.serverName == "server" }.map(\.callableName))
+        XCTAssertEqual(callableNames.count, 2)
+        XCTAssertTrue(callableNames.allSatisfy { $0.hasPrefix("tool_name_") })
+        XCTAssertFalse(callableNames.contains("tool_name"))
+    }
+
+    func testNormalizeToolsForModelFitsLongNamesWithRustHashSuffix() {
+        let tools = McpToolName.normalizeToolsForModel([
+            McpToolInfo(
+                serverName: "my_server",
+                tool: makeMcpTool(name: "extremely_lengthy_function_name_that_absolutely_surpasses_all_reasonable_limits")
+            ),
+            McpToolInfo(
+                serverName: "my_server",
+                tool: makeMcpTool(name: "yet_another_extremely_lengthy_function_name_that_absolutely_surpasses_all_reasonable_limits")
+            )
+        ])
+
+        XCTAssertEqual(tools.count, 2)
+        XCTAssertTrue(tools.allSatisfy { $0.callableNamespace == "mcp__my_server__" })
+        XCTAssertTrue(tools.allSatisfy { $0.canonicalToolName.count == McpToolName.maximumLength })
+        XCTAssertTrue(tools.allSatisfy { $0.callableName.contains("_") })
+        XCTAssertEqual(Set(tools.map(\.canonicalToolName)).count, 2)
+    }
+
     func testToolFilterAllowsByDefault() {
         XCTAssertTrue(McpToolFilter().allows("any"))
     }

@@ -82,18 +82,28 @@ public struct McpStartupFailure: Equatable, Codable, Sendable {
 }
 
 public struct McpToolInfo: Equatable, Sendable {
+    public let callableName: String
+    public let callableNamespace: String
     public let serverName: String
     public let namespaceDescription: String?
     public let tool: McpTool
 
-    public init(serverName: String, namespaceDescription: String? = nil, tool: McpTool) {
+    public init(
+        serverName: String,
+        namespaceDescription: String? = nil,
+        tool: McpTool,
+        callableNamespace: String? = nil,
+        callableName: String? = nil
+    ) {
+        self.callableName = callableName ?? tool.name
+        self.callableNamespace = callableNamespace ?? "\(McpToolName.prefix)\(McpToolName.delimiter)\(serverName)\(McpToolName.delimiter)"
         self.serverName = serverName
         self.namespaceDescription = namespaceDescription
         self.tool = tool
     }
 
     public var canonicalToolName: String {
-        McpToolName.qualifiedToolName(serverName: serverName, toolName: tool.name)
+        "\(callableNamespace)\(callableName)"
     }
 }
 
@@ -101,6 +111,7 @@ public enum McpToolName {
     public static let prefix = "mcp"
     public static let delimiter = "__"
     public static let maximumLength = 64
+    private static let callableNameHashLength = 12
 
     public static func qualifiedToolName(serverName: String, toolName: String) -> String {
         var qualifiedName = "\(prefix)\(delimiter)\(serverName)\(delimiter)\(toolName)"
@@ -155,18 +166,167 @@ public enum McpToolName {
     }
 
     public static func normalizeToolsForModel(_ tools: [McpToolInfo]) -> [McpToolInfo] {
-        var normalizedTools: [McpToolInfo] = []
-        var usedNames = Set<String>()
+        var seenRawNames = Set<String>()
+        var candidates: [CallableToolCandidate] = []
         for tool in tools {
-            let qualifiedName = tool.canonicalToolName
-            guard !usedNames.contains(qualifiedName) else {
+            let rawNamespaceIdentity = [
+                tool.serverName,
+                tool.callableNamespace,
+                tool.tool.connectorID ?? ""
+            ].joined(separator: "\0")
+            let rawToolIdentity = [
+                rawNamespaceIdentity,
+                tool.callableName,
+                tool.tool.name
+            ].joined(separator: "\0")
+            guard seenRawNames.insert(rawToolIdentity).inserted else {
                 continue
             }
-            usedNames.insert(qualifiedName)
-            normalizedTools.append(tool)
+
+            candidates.append(CallableToolCandidate(
+                tool: tool,
+                rawNamespaceIdentity: rawNamespaceIdentity,
+                rawToolIdentity: rawToolIdentity,
+                callableNamespace: sanitizeResponsesAPIToolName(tool.callableNamespace),
+                callableName: sanitizeResponsesAPIToolName(tool.callableName)
+            ))
+        }
+
+        let namespaceIdentitiesByBase = Dictionary(grouping: candidates, by: \.callableNamespace)
+            .mapValues { Set($0.map(\.rawNamespaceIdentity)) }
+        let collidingNamespaces = Set(namespaceIdentitiesByBase.compactMap { namespace, identities in
+            identities.count > 1 ? namespace : nil
+        })
+        for index in candidates.indices where collidingNamespaces.contains(candidates[index].callableNamespace) {
+            candidates[index].callableNamespace = appendNamespaceHashSuffix(
+                to: candidates[index].callableNamespace,
+                rawIdentity: candidates[index].rawNamespaceIdentity
+            )
+        }
+
+        let toolIdentitiesByBase = Dictionary(grouping: candidates) { candidate in
+            CallableToolKey(namespace: candidate.callableNamespace, name: candidate.callableName)
+        }.mapValues { Set($0.map(\.rawToolIdentity)) }
+        let collidingTools = Set(toolIdentitiesByBase.compactMap { key, identities in
+            identities.count > 1 ? key : nil
+        })
+        for index in candidates.indices {
+            let key = CallableToolKey(namespace: candidates[index].callableNamespace, name: candidates[index].callableName)
+            if collidingTools.contains(key) {
+                candidates[index].callableName = appendHashSuffix(
+                    to: candidates[index].callableName,
+                    rawIdentity: candidates[index].rawToolIdentity
+                )
+            }
+        }
+
+        candidates.sort { $0.rawToolIdentity < $1.rawToolIdentity }
+
+        var normalizedTools: [McpToolInfo] = []
+        var usedNames = Set<String>()
+        for candidate in candidates {
+            let parts = uniqueCallableParts(
+                namespace: candidate.callableNamespace,
+                toolName: candidate.callableName,
+                rawIdentity: candidate.rawToolIdentity,
+                usedNames: &usedNames
+            )
+            normalizedTools.append(McpToolInfo(
+                serverName: candidate.tool.serverName,
+                namespaceDescription: candidate.tool.namespaceDescription,
+                tool: candidate.tool.tool,
+                callableNamespace: parts.namespace,
+                callableName: parts.name
+            ))
         }
         return normalizedTools
     }
+
+    private static func sanitizeResponsesAPIToolName(_ name: String) -> String {
+        var sanitized = ""
+        sanitized.reserveCapacity(name.count)
+        for scalar in name.unicodeScalars {
+            if (CharacterSet.alphanumerics.contains(scalar) && scalar.isASCII) || scalar == "_" {
+                sanitized.unicodeScalars.append(scalar)
+            } else {
+                sanitized.append("_")
+            }
+        }
+        return sanitized.isEmpty ? "_" : sanitized
+    }
+
+    private static func callableNameHashSuffix(rawIdentity: String) -> String {
+        let digest = Insecure.SHA1.hash(data: Data(rawIdentity.utf8))
+        return "_" + digest.map { String(format: "%02x", $0) }.joined().prefix(callableNameHashLength)
+    }
+
+    private static func appendHashSuffix(to value: String, rawIdentity: String) -> String {
+        value + callableNameHashSuffix(rawIdentity: rawIdentity)
+    }
+
+    private static func appendNamespaceHashSuffix(to namespace: String, rawIdentity: String) -> String {
+        if namespace.hasSuffix(delimiter) {
+            return String(namespace.dropLast(delimiter.count))
+                + callableNameHashSuffix(rawIdentity: rawIdentity)
+                + delimiter
+        }
+        return appendHashSuffix(to: namespace, rawIdentity: rawIdentity)
+    }
+
+    private static func truncateName(_ value: String, maximumCount: Int) -> String {
+        String(value.prefix(maximumCount))
+    }
+
+    private static func fitCallablePartsWithHash(
+        namespace: String,
+        toolName: String,
+        rawIdentity: String
+    ) -> (namespace: String, name: String) {
+        let suffix = callableNameHashSuffix(rawIdentity: rawIdentity)
+        let maximumToolLength = max(0, maximumLength - namespace.count)
+        if maximumToolLength >= suffix.count {
+            let prefixLength = maximumToolLength - suffix.count
+            return (namespace, truncateName(toolName, maximumCount: prefixLength) + suffix)
+        }
+
+        let maximumNamespaceLength = maximumLength - suffix.count
+        return (truncateName(namespace, maximumCount: maximumNamespaceLength), suffix)
+    }
+
+    private static func uniqueCallableParts(
+        namespace: String,
+        toolName: String,
+        rawIdentity: String,
+        usedNames: inout Set<String>
+    ) -> (namespace: String, name: String) {
+        let modelName = namespace + toolName
+        if modelName.count <= maximumLength, usedNames.insert(modelName).inserted {
+            return (namespace, toolName)
+        }
+
+        var attempt: UInt32 = 0
+        while true {
+            let hashInput = attempt == 0 ? rawIdentity : "\(rawIdentity)\0\(attempt)"
+            let parts = fitCallablePartsWithHash(namespace: namespace, toolName: toolName, rawIdentity: hashInput)
+            if usedNames.insert(parts.namespace + parts.name).inserted {
+                return parts
+            }
+            attempt = attempt == UInt32.max ? UInt32.max : attempt + 1
+        }
+    }
+}
+
+private struct CallableToolCandidate {
+    let tool: McpToolInfo
+    let rawNamespaceIdentity: String
+    let rawToolIdentity: String
+    var callableNamespace: String
+    var callableName: String
+}
+
+private struct CallableToolKey: Hashable {
+    let namespace: String
+    let name: String
 }
 
 /// Port of codex-rs/core/src/mcp_connection_manager.rs ToolFilter.
