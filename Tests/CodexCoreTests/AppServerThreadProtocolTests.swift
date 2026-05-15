@@ -1112,6 +1112,23 @@ final class AppServerThreadProtocolTests: XCTestCase {
         ))
     }
 
+    func testCollabAgentStateMapsCoreAgentStatusLikeRustProtocol() {
+        XCTAssertEqual(AppServerCollabAgentState(agentStatus: .pendingInit), .init(status: .pendingInit))
+        XCTAssertEqual(AppServerCollabAgentState(agentStatus: .running), .init(status: .running))
+        XCTAssertEqual(AppServerCollabAgentState(agentStatus: .interrupted), .init(status: .interrupted))
+        XCTAssertEqual(AppServerCollabAgentState(agentStatus: .completed(nil)), .init(status: .completed))
+        XCTAssertEqual(
+            AppServerCollabAgentState(agentStatus: .completed("done")),
+            .init(status: .completed, message: "done")
+        )
+        XCTAssertEqual(
+            AppServerCollabAgentState(agentStatus: .errored("boom")),
+            .init(status: .errored, message: "boom")
+        )
+        XCTAssertEqual(AppServerCollabAgentState(agentStatus: .shutdown), .init(status: .shutdown))
+        XCTAssertEqual(AppServerCollabAgentState(agentStatus: .notFound), .init(status: .notFound))
+    }
+
     func testAgentMessageItemCarriesMemoryCitationLikeRustProtocol() throws {
         let citation = AppServerMemoryCitation(
             entries: [

@@ -699,6 +699,25 @@ public struct AppServerCollabAgentState: Equatable, Sendable {
         self.status = status
         self.message = message
     }
+
+    public init(agentStatus: AgentStatus) {
+        switch agentStatus {
+        case .pendingInit:
+            self.init(status: .pendingInit)
+        case .running:
+            self.init(status: .running)
+        case .interrupted:
+            self.init(status: .interrupted)
+        case let .completed(message):
+            self.init(status: .completed, message: message)
+        case let .errored(message):
+            self.init(status: .errored, message: message)
+        case .shutdown:
+            self.init(status: .shutdown)
+        case .notFound:
+            self.init(status: .notFound)
+        }
+    }
 }
 
 extension AppServerCollabAgentState: Codable {

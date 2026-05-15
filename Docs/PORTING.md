@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `CollabAgentState::from`
+  conversion in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`.
+  Swift now carries the same core `AgentStatus` to app-server collab-agent
+  state bridge, including the non-final `interrupted` status and completed /
+  errored message propagation.
 - 2026-05-15: rechecked Rust Starlark `dir(...)` results in
   `codex-rs/execpolicy`. Swift exec-policy coverage now pins the exact
   supported method lists for strings, lists, and dictionaries so policy
