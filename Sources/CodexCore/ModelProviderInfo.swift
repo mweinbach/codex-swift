@@ -322,32 +322,33 @@ More info: https://github.com/openai/codex/discussions/7782
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
+        self.name = try container.decodeRustDefaulted(String.self, forKey: .name, defaultValue: "")
         self.baseURL = try container.decodeIfPresent(String.self, forKey: .baseURL)
         self.envKey = try container.decodeIfPresent(String.self, forKey: .envKey)
         self.envKeyInstructions = try container.decodeIfPresent(String.self, forKey: .envKeyInstructions)
         self.experimentalBearerToken = try container.decodeIfPresent(String.self, forKey: .experimentalBearerToken)
         self.auth = try container.decodeIfPresent(ModelProviderAuthInfo.self, forKey: .auth)
         self.aws = try container.decodeIfPresent(ModelProviderAWSAuthInfo.self, forKey: .aws)
-        if let rawWireAPI = try container.decodeIfPresent(String.self, forKey: .wireAPI) {
-            switch rawWireAPI {
-            case "responses":
-                self.wireAPI = .responses
-            case "chat":
-                throw DecodingError.dataCorruptedError(
-                    forKey: .wireAPI,
-                    in: container,
-                    debugDescription: Self.chatWireAPIRemovedError
-                )
-            default:
-                throw DecodingError.dataCorruptedError(
-                    forKey: .wireAPI,
-                    in: container,
-                    debugDescription: "unknown variant `\(rawWireAPI)`, expected `responses`"
-                )
-            }
-        } else {
+        let rawWireAPI = try container.decodeRustDefaulted(
+            String.self,
+            forKey: .wireAPI,
+            defaultValue: "responses"
+        )
+        switch rawWireAPI {
+        case "responses":
             self.wireAPI = .responses
+        case "chat":
+            throw DecodingError.dataCorruptedError(
+                forKey: .wireAPI,
+                in: container,
+                debugDescription: Self.chatWireAPIRemovedError
+            )
+        default:
+            throw DecodingError.dataCorruptedError(
+                forKey: .wireAPI,
+                in: container,
+                debugDescription: "unknown variant `\(rawWireAPI)`, expected `responses`"
+            )
         }
         self.queryParams = try container.decodeIfPresent([String: String].self, forKey: .queryParams)
         self.httpHeaders = try container.decodeIfPresent([String: String].self, forKey: .httpHeaders)
@@ -359,8 +360,16 @@ More info: https://github.com/openai/codex/discussions/7782
             UInt64.self,
             forKey: .websocketConnectTimeoutMilliseconds
         )
-        self.requiresOpenAIAuth = try container.decodeIfPresent(Bool.self, forKey: .requiresOpenAIAuth) ?? false
-        self.supportsWebsockets = try container.decodeIfPresent(Bool.self, forKey: .supportsWebsockets) ?? false
+        self.requiresOpenAIAuth = try container.decodeRustDefaulted(
+            Bool.self,
+            forKey: .requiresOpenAIAuth,
+            defaultValue: false
+        )
+        self.supportsWebsockets = try container.decodeRustDefaulted(
+            Bool.self,
+            forKey: .supportsWebsockets,
+            defaultValue: false
+        )
     }
 
     public func encode(to encoder: Encoder) throws {

@@ -109,6 +109,25 @@ final class ModelProviderInfoTests: XCTestCase {
         XCTAssertFalse(provider.supportsWebsockets)
     }
 
+    func testProviderInfoRejectsExplicitNullForRustDefaultedFields() {
+        let nullDefaultedFields = [
+            "name",
+            "wire_api",
+            "requires_openai_auth",
+            "supports_websockets"
+        ]
+
+        for field in nullDefaultedFields {
+            XCTAssertThrowsError(
+                try JSONDecoder().decode(
+                    ModelProviderInfo.self,
+                    from: Data(#"{"\#(field)":null}"#.utf8)
+                ),
+                field
+            )
+        }
+    }
+
     func testProviderInfoReportsCommandAuthLikeRust() throws {
         let provider = try ModelProviderInfo(
             name: "Provider",
