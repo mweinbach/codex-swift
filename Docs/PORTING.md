@@ -520,6 +520,11 @@ Recent upstream audit checkpoint:
   `McpElicitationTitledEnumItems` still accepts Rust's `oneOf` alias for
   `anyOf`, but now rejects payloads that provide both spellings like Serde's
   single-field alias handling.
+- 2026-05-15: rechecked Rust app-server v2 MCP elicitation RMCP result
+  conversion in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`.
+  Swift now has focused protocol coverage for accepted elicitation responses
+  with non-null content and explicit-null `_meta`, matching the Rust
+  `CreateElicitationResult` bridge wire shape.
 - 2026-05-15: rechecked Rust app-server v2
   `ListMcpServerStatusParams.detail` in
   `codex-rs/app-server-protocol/src/protocol/v2/mcp.rs`. Swift app-server

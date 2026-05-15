@@ -1280,6 +1280,28 @@ final class AppServerProtocolTests: XCTestCase {
         XCTAssertEqual(decoded, response)
     }
 
+    func testMcpServerElicitationAcceptedContentMatchesRustRmcpResultShape() throws {
+        let response = AppServerProtocol.McpServerElicitationRequestResponse(
+            action: .accept,
+            content: .object(["confirmed": .bool(true)]),
+            meta: nil
+        )
+
+        try XCTAssertJSONObjectEqual(response, [
+            "action": "accept",
+            "content": [
+                "confirmed": true
+            ],
+            "_meta": NSNull()
+        ])
+
+        let decoded = try JSONDecoder().decode(
+            AppServerProtocol.McpServerElicitationRequestResponse.self,
+            from: Data(#"{"action":"accept","content":{"confirmed":true},"_meta":null}"#.utf8)
+        )
+        XCTAssertEqual(decoded, response)
+    }
+
     func testUnknownServerRequestMethodFailsLikeTaggedRustEnum() {
         XCTAssertThrowsError(try JSONDecoder().decode(
             AppServerProtocol.ServerRequest.self,
