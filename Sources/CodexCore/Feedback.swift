@@ -119,8 +119,10 @@ public struct CodexLogSnapshot: Equatable, Sendable {
     public func makeUploadRequest(
         classification: String,
         reason: String? = nil,
+        tags clientTags: [String: String]? = nil,
         includeLogs: Bool,
         rolloutPath: URL? = nil,
+        extraAttachmentPaths: [URL] = [],
         sessionSource: SessionSource? = nil,
         accountID: String? = nil,
         cliVersion: String = "0.0.0",
@@ -142,6 +144,12 @@ public struct CodexLogSnapshot: Equatable, Sendable {
         }
         if let reason {
             tags["reason"] = reason
+        }
+        let reservedTagKeys = Set(["thread_id", "classification", "cli_version", "session_source", "reason"])
+        if let clientTags {
+            for (key, value) in clientTags where !reservedTagKeys.contains(key) && tags[key] == nil {
+                tags[key] = value
+            }
         }
 
         var event: [String: Any] = [
@@ -187,6 +195,19 @@ public struct CodexLogSnapshot: Equatable, Sendable {
                 to: &envelope
             )
         }
+        for path in extraAttachmentPaths {
+            guard let data = try? Data(contentsOf: path) else {
+                continue
+            }
+            let filename = path.lastPathComponent.isEmpty ? "extra-log.log" : path.lastPathComponent
+            try appendItem(
+                payload: data,
+                type: "attachment",
+                filename: filename,
+                contentType: "text/plain",
+                to: &envelope
+            )
+        }
 
         return FeedbackUploadRequest(
             endpoint: dsn.envelopeURL,
@@ -199,8 +220,10 @@ public struct CodexLogSnapshot: Equatable, Sendable {
     public func uploadFeedback(
         classification: String,
         reason: String? = nil,
+        tags: [String: String]? = nil,
         includeLogs: Bool,
         rolloutPath: URL? = nil,
+        extraAttachmentPaths: [URL] = [],
         sessionSource: SessionSource? = nil,
         accountID: String? = nil,
         cliVersion: String = "0.0.0",
@@ -209,8 +232,10 @@ public struct CodexLogSnapshot: Equatable, Sendable {
         let request = try makeUploadRequest(
             classification: classification,
             reason: reason,
+            tags: tags,
             includeLogs: includeLogs,
             rolloutPath: rolloutPath,
+            extraAttachmentPaths: extraAttachmentPaths,
             sessionSource: sessionSource,
             accountID: accountID,
             cliVersion: cliVersion
@@ -226,6 +251,8 @@ public struct CodexLogSnapshot: Equatable, Sendable {
             return "Bad result"
         case "good_result":
             return "Good result"
+        case "safety_check":
+            return "Safety check"
         default:
             return "Other"
         }

@@ -21199,6 +21199,8 @@ final class CodexAppServerTests: XCTestCase {
         )
         let feedback = CodexFeedback()
         feedback.makeWriter().write(Data("captured logs".utf8))
+        let extraLog = temp.url.appendingPathComponent("extra-feedback.log", isDirectory: false)
+        try "extra diagnostic log".write(to: extraLog, atomically: true, encoding: .utf8)
         let transport = AppServerRecordingFeedbackUploadTransport()
         let configuration = testConfiguration(
             codexHome: temp.url,
@@ -21207,7 +21209,7 @@ final class CodexAppServerTests: XCTestCase {
         )
 
         let response = try appServerResponse(
-            #"{"id":1,"method":"feedback/upload","params":{"classification":"bad_result","reason":"wrong answer","threadId":"\#(threadID)","includeLogs":true}}"#,
+            #"{"id":1,"method":"feedback/upload","params":{"classification":"bad_result","reason":"wrong answer","threadId":"\#(threadID)","includeLogs":true,"extraLogFiles":["\#(extraLog.path)"],"tags":{"surface":"app-server","classification":"ignored"}}}"#,
             configuration: configuration
         )
 
@@ -21218,8 +21220,10 @@ final class CodexAppServerTests: XCTestCase {
         let envelope = String(decoding: requests[0].envelope, as: UTF8.self)
         XCTAssertTrue(envelope.contains(#""classification":"bad_result""#))
         XCTAssertTrue(envelope.contains(#""account_id":"actual-account""#))
+        XCTAssertTrue(envelope.contains(#""surface":"app-server""#))
         XCTAssertTrue(envelope.contains("captured logs"))
         XCTAssertTrue(envelope.contains("feedback rollout"))
+        XCTAssertTrue(envelope.contains("extra diagnostic log"))
     }
 
     func testFeedbackUploadRejectsInvalidThreadID() throws {
@@ -21235,6 +21239,63 @@ final class CodexAppServerTests: XCTestCase {
         let error = try XCTUnwrap(response["error"] as? [String: Any])
         XCTAssertEqual(error["code"] as? Int, -32600)
         XCTAssertEqual(error["message"] as? String, "invalid thread id: Invalid conversation id: not-a-uuid")
+    }
+
+    func testFeedbackUploadRejectsMalformedParamsLikeRustProtocol() throws {
+        let temp = try TemporaryDirectory()
+        let configuration = testConfiguration(codexHome: temp.url)
+
+        let cases: [(String, String)] = [
+            (
+                #"{"id":1,"method":"feedback/upload","params":{"includeLogs":false}}"#,
+                "missing field `classification`"
+            ),
+            (
+                #"{"id":2,"method":"feedback/upload","params":{"classification":"bug"}}"#,
+                "missing field `includeLogs`"
+            ),
+            (
+                #"{"id":3,"method":"feedback/upload","params":{"classification":"bug","includeLogs":null}}"#,
+                "Invalid request: invalid type: null, expected a boolean"
+            ),
+            (
+                #"{"id":4,"method":"feedback/upload","params":{"classification":"bug","includeLogs":"true"}}"#,
+                #"Invalid request: invalid type: string "true", expected a boolean"#
+            ),
+            (
+                #"{"id":5,"method":"feedback/upload","params":{"classification":"bug","includeLogs":false,"tags":{"surface":1}}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            )
+        ]
+
+        for (payload, expectedMessage) in cases {
+            let response = try appServerResponse(payload, configuration: configuration)
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, expectedMessage)
+        }
+    }
+
+    func testFeedbackUploadRespectsDisabledConfigLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [feedback]
+        enabled = false
+        """.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let configuration = testConfiguration(codexHome: temp.url)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"feedback/upload","params":{"classification":"bug","includeLogs":false}}"#,
+            configuration: configuration
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "sending feedback is disabled by configuration")
     }
 
     func testAccountLogoutRemovesAuthAndEmitsV2Notification() throws {

@@ -17995,6 +17995,19 @@ public enum CodexAppServer {
         throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(value)), expected a boolean")
     }
 
+    private static func rustRequiredBoolParam(_ value: Any?, field: String) throws -> Bool {
+        guard let value else {
+            throw AppServerError.invalidRequest("missing field `\(field)`")
+        }
+        guard !(value is NSNull) else {
+            throw AppServerError.invalidRequest("Invalid request: invalid type: null, expected a boolean")
+        }
+        guard let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else {
+            throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(value)), expected a boolean")
+        }
+        return number.boolValue
+    }
+
     fileprivate static func rustDefaultBoolParam(_ value: Any?, defaultValue: Bool) throws -> Bool {
         guard let value else {
             return defaultValue
@@ -18159,11 +18172,20 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        guard let classification = stringParam(params?["classification"]) else {
-            throw AppServerError.invalidRequest("missing classification")
+        let runtimeConfig = try CodexConfigLoader.load(
+            codexHome: configuration.codexHome,
+            systemConfigFile: nil,
+            environment: configuration.environment
+        )
+        guard runtimeConfig.feedbackEnabled else {
+            throw AppServerError.invalidRequest("sending feedback is disabled by configuration")
         }
-        let reason = stringParam(params?["reason"])
-        let threadID = stringParam(params?["threadId"])
+        let classification = try rustRequiredStringParam(params?["classification"], field: "classification")
+        let reason = try rustOptionalStringParam(params?["reason"])
+        let threadID = try rustOptionalStringParam(params?["threadId"])
+        let includeLogs = try rustRequiredBoolParam(params?["includeLogs"], field: "includeLogs")
+        let extraLogFiles = try rustStringArrayParam(params?["extraLogFiles"]) ?? []
+        let tags = try rustStringMapParam(params?["tags"])
         let conversationID: ConversationId?
         if let threadID {
             do {
@@ -18175,7 +18197,6 @@ public enum CodexAppServer {
             conversationID = nil
         }
 
-        let includeLogs = boolParam(params?["includeLogs"], defaultValue: false)
         let snapshot = configuration.feedback.snapshot(sessionID: conversationID)
         let rolloutPath: URL?
         if includeLogs, let conversationID,
@@ -18193,8 +18214,10 @@ public enum CodexAppServer {
             try await snapshot.uploadFeedback(
                 classification: classification,
                 reason: reason,
+                tags: tags,
                 includeLogs: includeLogs,
                 rolloutPath: rolloutPath,
+                extraAttachmentPaths: extraLogFiles.map { URL(fileURLWithPath: $0, isDirectory: false) },
                 sessionSource: configuration.sessionSource,
                 accountID: try currentAuth(configuration: configuration)?.accountID,
                 cliVersion: configuration.version,
@@ -20667,6 +20690,23 @@ public enum CodexAppServer {
             }
             return string
         }
+    }
+
+    private static func rustStringMapParam(_ value: Any?) throws -> [String: String]? {
+        guard let value, !(value is NSNull) else {
+            return nil
+        }
+        guard let object = value as? [String: Any] else {
+            throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(value)), expected a map")
+        }
+        var result: [String: String] = [:]
+        for (key, rawValue) in object {
+            guard let string = rawValue as? String else {
+                throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(rawValue)), expected a string")
+            }
+            result[key] = string
+        }
+        return result
     }
 
     private static func rustRequiredArrayParam(_ value: Any?, field: String) throws -> [Any] {
