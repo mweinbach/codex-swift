@@ -20697,6 +20697,25 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("auth.json").path))
     }
 
+    func testAccountLoginChatGPTRejectsMalformedStreamlinedLoginLikeRustV2Params() throws {
+        let temp = try TemporaryDirectory()
+        let cases: [(String, String)] = [
+            (#"null"#, "Invalid request: invalid type: null, expected a boolean"),
+            (#"1"#, "Invalid request: invalid type: integer `1`, expected a boolean"),
+            (#""true""#, #"Invalid request: invalid type: string "true", expected a boolean"#)
+        ]
+
+        for (index, testCase) in cases.enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 1),"method":"account/login/start","params":{"type":"chatgpt","codexStreamlinedLogin":\#(testCase.0)}}"#,
+                codexHome: temp.url
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, testCase.1)
+        }
+    }
+
     func testAccountLoginChatGPTAuthTokensRequiresExperimentalAPI() throws {
         let temp = try TemporaryDirectory()
         let accessToken = try fakeJWT(email: "embedded@example.com", plan: "pro", accountID: "org-embedded")

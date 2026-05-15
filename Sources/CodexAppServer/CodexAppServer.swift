@@ -27045,7 +27045,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
 
     private func loginChatGptAccountResult(params: [String: Any]?) throws -> [String: Any] {
         let started = try startChatGptLogin(
-            codexStreamlinedLogin: CodexAppServer.boolParam(
+            codexStreamlinedLogin: CodexAppServer.rustDefaultBoolParam(
                 params?["codexStreamlinedLogin"],
                 defaultValue: false
             ),
