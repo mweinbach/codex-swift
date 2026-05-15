@@ -1,8 +1,36 @@
-import CodexCore
+@testable import CodexCore
 import Foundation
 import XCTest
 
 final class ChatGPTDeviceCodeLoginTests: XCTestCase {
+    func testUserCodeResponseAcceptsRustUsercodeAlias() throws {
+        let decoded = try JSONDecoder().decode(UserCodeResponse.self, from: Data(#"""
+        {
+          "device_auth_id": "device-auth-123",
+          "usercode": "CODE-12345"
+        }
+        """#.utf8))
+
+        XCTAssertEqual(decoded.deviceAuthID, "device-auth-123")
+        XCTAssertEqual(decoded.userCode, "CODE-12345")
+        XCTAssertEqual(decoded.interval, 0)
+    }
+
+    func testUserCodeResponseRejectsDuplicateRustUserCodeAlias() throws {
+        XCTAssertThrowsError(try JSONDecoder().decode(UserCodeResponse.self, from: Data(#"""
+        {
+          "device_auth_id": "device-auth-123",
+          "user_code": "CODE-12345",
+          "usercode": "CODE-67890"
+        }
+        """#.utf8))) { error in
+            guard case let DecodingError.dataCorrupted(context) = error else {
+                return XCTFail("expected dataCorrupted error, got \(error)")
+            }
+            XCTAssertEqual(context.debugDescription, "duplicate field `user_code`")
+        }
+    }
+
     func testDeviceCodeLoginPollsExchangesAndPersistsChatGPTTokens() async throws {
         let temp = try DeviceLoginTemporaryDirectory()
         let now = Date(timeIntervalSince1970: 1_800_000_000)

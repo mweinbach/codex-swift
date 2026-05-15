@@ -382,6 +382,13 @@ struct UserCodeResponse: Decodable, Equatable, Sendable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         deviceAuthID = try container.decode(String.self, forKey: .deviceAuthID)
+        if container.contains(.userCode), container.contains(.usercode) {
+            throw DecodingError.dataCorruptedError(
+                forKey: .usercode,
+                in: container,
+                debugDescription: "duplicate field `user_code`"
+            )
+        }
         userCode = try container.decodeIfPresent(String.self, forKey: .userCode)
             ?? container.decode(String.self, forKey: .usercode)
         let rawInterval = try container.decodeIfPresent(String.self, forKey: .interval) ?? "0"
