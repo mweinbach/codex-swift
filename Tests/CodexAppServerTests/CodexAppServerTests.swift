@@ -27206,6 +27206,26 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
+    func testGitDiffToRemoteRejectsMalformedCwdLikeRustV1Params() throws {
+        let temp = try TemporaryDirectory()
+        let cases: [(String, String)] = [
+            (#"{}"#, "Invalid request: missing field `cwd`"),
+            (#"{"cwd":null}"#, "Invalid request: invalid type: null, expected path string"),
+            (#"{"cwd":1}"#, "Invalid request: invalid type: integer `1`, expected path string"),
+            (#"{"cwd":true}"#, "Invalid request: invalid type: boolean `true`, expected path string")
+        ]
+
+        for (index, testCase) in cases.enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 1),"method":"gitDiffToRemote","params":\#(testCase.0)}"#,
+                codexHome: temp.url
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, testCase.1)
+        }
+    }
+
     func testFuzzyFileSearchReturnsMatchesWithIndices() throws {
         let codexHome = try TemporaryDirectory()
         let root = try TemporaryDirectory()

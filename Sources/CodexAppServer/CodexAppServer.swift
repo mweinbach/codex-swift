@@ -17202,9 +17202,7 @@ public enum CodexAppServer {
     }
 
     fileprivate static func gitDiffToRemoteResult(params: [String: Any]?) throws -> [String: Any] {
-        guard let cwd = stringParam(params?["cwd"]) else {
-            throw AppServerError.invalidRequest("missing cwd")
-        }
+        let cwd = try legacyGitDiffToRemoteCwd(params)
         let cwdURL = URL(fileURLWithPath: cwd, isDirectory: true)
         guard let state = GitInfoCollector.gitDiffToRemote(cwd: cwdURL) else {
             throw AppServerError.invalidRequest("failed to compute git diff to remote for cwd: \"\(cwd)\"")
@@ -17213,6 +17211,16 @@ public enum CodexAppServer {
             "sha": state.sha,
             "diff": state.diff
         ]
+    }
+
+    private static func legacyGitDiffToRemoteCwd(_ params: [String: Any]?) throws -> String {
+        guard let value = params?["cwd"] else {
+            throw AppServerError.invalidRequest("Invalid request: missing field `cwd`")
+        }
+        guard let cwd = value as? String else {
+            throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(value)), expected path string")
+        }
+        return cwd
     }
 
     fileprivate static func fuzzyFileSearchResult(params: [String: Any]?) throws -> [String: Any] {
