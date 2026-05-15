@@ -173,6 +173,69 @@ public enum AppServerProtocol {
             }
         }
 
+        public func response(fromResult result: JSONValue) throws -> ServerResponse {
+            switch self {
+            case let .attestationGenerate(requestID, _):
+                return .attestationGenerate(
+                    requestID: requestID,
+                    response: try Self.decodeResult(Attestation.GenerateResponse.self, from: result)
+                )
+            case let .chatGPTAuthTokensRefresh(requestID, _):
+                return .chatGPTAuthTokensRefresh(
+                    requestID: requestID,
+                    response: try Self.decodeResult(ChatGPTAuthTokensRefreshResponse.self, from: result)
+                )
+            case let .execCommandApproval(requestID, _):
+                return .execCommandApproval(
+                    requestID: requestID,
+                    response: try Self.decodeResult(ExecCommandApprovalResponse.self, from: result)
+                )
+            case let .applyPatchApproval(requestID, _):
+                return .applyPatchApproval(
+                    requestID: requestID,
+                    response: try Self.decodeResult(ApplyPatchApprovalResponse.self, from: result)
+                )
+            case let .fileChangeRequestApproval(requestID, _):
+                return .fileChangeRequestApproval(
+                    requestID: requestID,
+                    response: try Self.decodeResult(FileChangeRequestApprovalResponse.self, from: result)
+                )
+            case let .commandExecutionRequestApproval(requestID, _):
+                return .commandExecutionRequestApproval(
+                    requestID: requestID,
+                    response: try Self.decodeResult(CommandExecutionRequestApprovalResponse.self, from: result)
+                )
+            case let .toolRequestUserInput(requestID, _):
+                return .toolRequestUserInput(
+                    requestID: requestID,
+                    response: try Self.decodeResult(ToolRequestUserInputResponse.self, from: result)
+                )
+            case let .dynamicToolCall(requestID, _):
+                return .dynamicToolCall(
+                    requestID: requestID,
+                    response: try Self.decodeResult(DynamicToolCallResponse.self, from: result)
+                )
+            case let .permissionsRequestApproval(requestID, _):
+                return .permissionsRequestApproval(
+                    requestID: requestID,
+                    response: try Self.decodeResult(PermissionsRequestApprovalResponse.self, from: result)
+                )
+            case let .mcpServerElicitationRequest(requestID, _):
+                return .mcpServerElicitationRequest(
+                    requestID: requestID,
+                    response: try Self.decodeResult(McpServerElicitationRequestResponse.self, from: result)
+                )
+            }
+        }
+
+        private static func decodeResult<Response: Decodable>(
+            _ responseType: Response.Type,
+            from result: JSONValue
+        ) throws -> Response {
+            let data = try JSONEncoder().encode(result)
+            return try JSONDecoder().decode(responseType, from: data)
+        }
+
         public func encode(to encoder: Encoder) throws {
             var container = encoder.container(keyedBy: CodingKeys.self)
             try container.encode(method, forKey: .method)

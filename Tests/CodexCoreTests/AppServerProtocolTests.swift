@@ -53,6 +53,38 @@ final class AppServerProtocolTests: XCTestCase {
         XCTAssertEqual(decoded, response)
     }
 
+    func testServerRequestBuildsTypedResponseFromResultLikeRust() throws {
+        let request = AppServerProtocol.ServerRequest.attestationGenerate(
+            requestID: .string("request-9"),
+            params: Attestation.GenerateParams()
+        )
+
+        let response = try request.response(fromResult: .object([
+            "token": .string("v1.integration-test")
+        ]))
+
+        XCTAssertEqual(
+            response,
+            .attestationGenerate(
+                requestID: .string("request-9"),
+                response: Attestation.GenerateResponse(token: "v1.integration-test")
+            )
+        )
+    }
+
+    func testServerRequestResponseFromResultRejectsMalformedResultLikeRust() {
+        let request = AppServerProtocol.ServerRequest.attestationGenerate(
+            requestID: .integer(9),
+            params: Attestation.GenerateParams()
+        )
+
+        XCTAssertThrowsError(
+            try request.response(fromResult: .object([
+                "status": .string("ok")
+            ]))
+        )
+    }
+
     func testChatGPTAuthTokensRefreshServerRequestMatchesRustWireShape() throws {
         let params = AppServerProtocol.ChatGPTAuthTokensRefreshParams(
             reason: .unauthorized,

@@ -18,6 +18,12 @@ Recent upstream audit checkpoint:
   invoking the runtime, preserving distinct missing-argument,
   unexpected-argument, and unsupported-subcommand failures instead of collapsing
   all invalid forms into the generic missing-subcommand error.
+- 2026-05-15: rechecked Rust app-server protocol `ServerRequest::response_from_result`
+  in `codex-rs/app-server-protocol/src/protocol/common.rs`. Swift
+  server-initiated request models now rebuild the matching typed
+  `ServerResponse` from a raw JSON result while preserving the original request
+  id and rejecting malformed response payloads through the target response
+  decoder.
 - 2026-05-15: rechecked current Rust `models-manager/models.json` at
   `7c9731c9af`. Swift's bundled raw catalog now carries the same
   `reasoning_summary_format` metadata for the six current model entries while
