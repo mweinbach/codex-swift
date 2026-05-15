@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's exec-policy warning path in
+  `codex-rs/core/src/exec_policy.rs`. Swift now has the Rust-shaped
+  parse-error warning loader that returns an empty exec policy while surfacing
+  the parse warning, plus `formatExecPolicyErrorWithSource` display formatting
+  for Starlark-style file/line messages.
 - 2026-05-15: rechecked Rust commit `e783341b70` (`Delete
   function-style apply_patch`). Swift non-interactive hook dispatch now mirrors
   Rust's freeform-only boundary by skipping `apply_patch` hook payloads for

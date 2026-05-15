@@ -106,6 +106,60 @@ public enum ExecPolicyLoadError: Error, Equatable, CustomStringConvertible, Send
     }
 }
 
+public func formatExecPolicyErrorWithSource(_ error: ExecPolicyLoadError) -> String {
+    guard case let .parsePolicy(path, renderedSource) = error else {
+        return error.description
+    }
+
+    let message = execPolicyMessageForDisplay(renderedSource)
+    guard let (locationPath, line) = parseStarlarkLine(from: renderedSource) else {
+        return "\(path): \(message)"
+    }
+    return "\(locationPath):\(line): \(message) (problem is on or around line \(line))"
+}
+
+private func execPolicyMessageForDisplay(_ renderedSource: String) -> String {
+    for line in renderedSource.split(separator: "\n", omittingEmptySubsequences: false) {
+        if line.drop(while: { $0 == " " || $0 == "\t" }).hasPrefix("error: ") {
+            return String(line)
+        }
+    }
+
+    if let firstLine = renderedSource.split(separator: "\n", omittingEmptySubsequences: false).first,
+       let range = firstLine.range(of: ": starlark error: ", options: .backwards) {
+        return String(firstLine[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    return renderedSource
+        .split(separator: "\n", omittingEmptySubsequences: false)
+        .first
+        .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+        ?? ""
+}
+
+private func parseStarlarkLine(from message: String) -> (path: String, line: Int)? {
+    guard let firstLine = message.split(separator: "\n", omittingEmptySubsequences: false).first else {
+        return nil
+    }
+    let trimmed = String(firstLine).trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let range = trimmed.range(of: ": starlark error:", options: .backwards) else {
+        return nil
+    }
+
+    let pathAndPosition = String(trimmed[..<range.lowerBound])
+    let parts = pathAndPosition.split(separator: ":", omittingEmptySubsequences: false)
+    guard parts.count >= 3,
+          let line = Int(parts[parts.count - 2]),
+          Int(parts[parts.count - 1]) != nil,
+          line != 0
+    else {
+        return nil
+    }
+
+    let path = parts.dropLast(2).joined(separator: ":")
+    return (path, line)
+}
+
 public enum PatternToken: Equatable, Sendable {
     case single(String)
     case alts([String])
@@ -9202,6 +9256,32 @@ public final class ExecPolicyManager: @unchecked Sendable {
     ) throws -> ExecPolicyManager {
         _ = features
         return ExecPolicyManager(policy: try loadExecPolicy(configStack: configStack, fileManager: fileManager))
+    }
+
+    public static func loadWithWarning(
+        features: FeatureStates,
+        configStack: ConfigLayerStack,
+        fileManager: FileManager = .default
+    ) throws -> (manager: ExecPolicyManager, warning: ExecPolicyLoadError?) {
+        _ = features
+        do {
+            return (
+                ExecPolicyManager(policy: try loadExecPolicy(configStack: configStack, fileManager: fileManager)),
+                nil
+            )
+        } catch let error as ExecPolicyLoadError {
+            if case .parsePolicy = error {
+                return (ExecPolicyManager(policy: .empty()), error)
+            }
+            throw error
+        }
+    }
+
+    public static func checkExecPolicyForWarnings(
+        configStack: ConfigLayerStack,
+        fileManager: FileManager = .default
+    ) throws -> ExecPolicyLoadError? {
+        try loadWithWarning(features: .withDefaults(), configStack: configStack, fileManager: fileManager).warning
     }
 
     public static func loadExecPolicy(

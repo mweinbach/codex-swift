@@ -4779,6 +4779,74 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(policy.compiledNetworkDomains().denied, ["blocked.example.com"])
     }
 
+    func testLoadExecPolicyWithWarningReturnsEmptyPolicyForParseErrorsLikeRust() throws {
+        let tempDir = try CoreTemporaryDirectory()
+        let codexHome = tempDir.url.appendingPathComponent("codex-home", isDirectory: true)
+        let rulesDir = codexHome.appendingPathComponent("rules", isDirectory: true)
+        try FileManager.default.createDirectory(at: rulesDir, withIntermediateDirectories: true)
+        let brokenPolicy = rulesDir.appendingPathComponent("broken.rules")
+        try #"prefix_rule(pattern=["git"], decision=)"#.write(
+            to: brokenPolicy,
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let stack = try ConfigLayerStack(
+            layers: [
+                ConfigLayerEntry(
+                    name: .user(file: try AbsolutePath(absolutePath: codexHome.appendingPathComponent("config.toml").path)),
+                    config: .table([:])
+                )
+            ],
+            requirements: ConfigRequirements()
+        )
+        let result = try ExecPolicyManager.loadWithWarning(features: .withDefaults(), configStack: stack)
+
+        XCTAssertEqual(result.manager.current(), .empty())
+        XCTAssertEqual(
+            result.manager.current().check(tokens("git", "status"), heuristicsFallback: allowAll),
+            PolicyEvaluation(
+                decision: .allow,
+                matchedRules: [.heuristicsRuleMatch(command: tokens("git", "status"), decision: .allow)]
+            )
+        )
+        guard case let .parsePolicy(path, message) = result.warning else {
+            return XCTFail("expected parse warning")
+        }
+        XCTAssertEqual(
+            URL(fileURLWithPath: path).resolvingSymlinksInPath().path,
+            brokenPolicy.resolvingSymlinksInPath().path
+        )
+        XCTAssertFalse(formatExecPolicyErrorWithSource(.parsePolicy(path: path, message: message)).isEmpty)
+
+        let checkWarning = try ExecPolicyManager.checkExecPolicyForWarnings(configStack: stack)
+        XCTAssertEqual(checkWarning, result.warning)
+    }
+
+    func testFormatExecPolicyErrorWithSourceUsesRustStarlarkLocations() {
+        let error = ExecPolicyLoadError.parsePolicy(
+            path: "/tmp/fallback.rules",
+            message: "/tmp/default.rules:143:1: starlark error: error: Parse error: unexpected new line"
+        )
+
+        XCTAssertEqual(
+            formatExecPolicyErrorWithSource(error),
+            "/tmp/default.rules:143: error: Parse error: unexpected new line (problem is on or around line 143)"
+        )
+    }
+
+    func testFormatExecPolicyErrorWithSourceFallsBackToPolicyPath() {
+        let error = ExecPolicyLoadError.parsePolicy(
+            path: "/tmp/default.rules",
+            message: "invalid syntax: unsupported Starlark top-level call: load"
+        )
+
+        XCTAssertEqual(
+            formatExecPolicyErrorWithSource(error),
+            "/tmp/default.rules: invalid syntax: unsupported Starlark top-level call: load"
+        )
+    }
+
     func testAppendExecPolicyAmendmentUpdatesPolicyAndFile() throws {
         let tempDir = try CoreTemporaryDirectory()
         let prefix = tokens("echo", "hello")
