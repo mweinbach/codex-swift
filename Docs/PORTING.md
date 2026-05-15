@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `ThreadListParams` cwd filter
+  decoding in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift
+  now pins the array `cwd` decode path alongside the existing single-cwd
+  decode/encode coverage, including the default `useStateDbOnly: false`
+  boundary.
 - 2026-05-15: rechecked Rust app-server v2 thread lifecycle response defaulting
   in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now pins
   the `reasoningEffort: null` decode boundary alongside missing

@@ -1284,6 +1284,13 @@ final class AppServerThreadProtocolTests: XCTestCase {
         XCTAssertEqual(decoded.sourceKinds, [.exec, .appServer, .unknown])
         XCTAssertEqual(decoded.cwd, .one("/repo"))
         XCTAssertTrue(decoded.useStateDBOnly)
+
+        let decodedManyCwds = try JSONDecoder().decode(
+            ThreadListParams.self,
+            from: Data(#"{"cwd":["/repo","/other"]}"#.utf8)
+        )
+        XCTAssertEqual(decodedManyCwds.cwd, .many(["/repo", "/other"]))
+        XCTAssertFalse(decodedManyCwds.useStateDBOnly)
     }
 
     func testThreadListParamsRejectsExplicitNullForRustDefaultedStateDbFlag() {
