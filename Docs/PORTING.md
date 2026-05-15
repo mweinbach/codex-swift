@@ -133,6 +133,12 @@ Recent upstream audit checkpoint:
   `McpElicitationTitledEnumItems` still accepts Rust's `oneOf` alias for
   `anyOf`, but now rejects payloads that provide both spellings like Serde's
   single-field alias handling.
+- 2026-05-15: rechecked Rust app-server v2
+  `ListMcpServerStatusParams.detail` in
+  `codex-rs/app-server-protocol/src/protocol/v2/mcp.rs`. Swift app-server
+  `mcpServerStatus/list` now has route-level coverage that explicit
+  `detail: null` is accepted like omission and defaults to the full status
+  detail view.
 - 2026-05-15: rechecked Rust app-server v2 app screenshot aliases in
   `codex-rs/app-server-protocol/src/protocol/v2/apps.rs`. Swift
   `AppScreenshot` decoding now rejects duplicate camelCase/snake_case alias

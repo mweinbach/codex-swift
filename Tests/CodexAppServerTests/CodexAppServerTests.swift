@@ -23266,6 +23266,14 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(secondData[0]["authStatus"] as? String, "bearerToken")
         XCTAssertNil(secondResult["nextCursor"])
 
+        let nullDetail = try appServerResponse(
+            #"{"id":4,"method":"mcpServerStatus/list","params":{"detail":null}}"#,
+            configuration: configuration
+        )
+        let nullDetailResult = try XCTUnwrap(nullDetail["result"] as? [String: Any])
+        let nullDetailData = try XCTUnwrap(nullDetailResult["data"] as? [[String: Any]])
+        XCTAssertEqual(nullDetailData.map { $0["name"] as? String }, ["docs", "github"])
+
         let toolsOnly = try appServerResponse(
             #"{"id":3,"method":"mcpServerStatus/list","params":{"detail":"toolsAndAuthOnly"}}"#,
             configuration: configuration
