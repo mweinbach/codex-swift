@@ -391,7 +391,7 @@ public struct ReasoningItem: Equatable, Codable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.id = try container.decode(String.self, forKey: .id)
         self.summaryText = try container.decode([String].self, forKey: .summaryText)
-        self.rawContent = try container.decodeIfPresent([String].self, forKey: .rawContent) ?? []
+        self.rawContent = try container.decodeRustDefaulted([String].self, forKey: .rawContent, defaultValue: [])
     }
 
     public func asLegacyEvents(showRawAgentReasoning: Bool) -> [LegacyEventMessage] {
@@ -712,7 +712,11 @@ public struct ItemCompletedEvent: Equatable, Codable, Sendable {
         self.threadID = try container.decode(ConversationId.self, forKey: .threadID)
         self.turnID = try container.decode(String.self, forKey: .turnID)
         self.item = try container.decode(TurnItem.self, forKey: .item)
-        self.completedAtMilliseconds = try container.decodeIfPresent(Int64.self, forKey: .completedAtMilliseconds) ?? 0
+        self.completedAtMilliseconds = try container.decodeRustDefaulted(
+            Int64.self,
+            forKey: .completedAtMilliseconds,
+            defaultValue: 0
+        )
     }
 
     public func asLegacyEvents(showRawAgentReasoning: Bool) -> [LegacyEventMessage] {

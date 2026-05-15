@@ -196,6 +196,12 @@ final class TurnItemTests: XCTestCase {
         XCTAssertEqual(item, ReasoningItem(id: "reason-1", summaryText: ["summary"], rawContent: []))
     }
 
+    func testReasoningItemRejectsNullRustDefaultedRawContent() {
+        let json = #"{"id":"reason-1","summary_text":["summary"],"raw_content":null}"#
+
+        XCTAssertThrowsError(try JSONDecoder().decode(ReasoningItem.self, from: Data(json.utf8)))
+    }
+
     func testWebSearchAndTurnItemIDs() {
         let item = TurnItem.webSearch(WebSearchItem(id: "search-1", query: "find docs"))
 
@@ -918,6 +924,21 @@ final class TurnItemTests: XCTestCase {
         """.utf8))
 
         XCTAssertEqual(missingCompletedAt.completedAtMilliseconds, 0)
+    }
+
+    func testItemCompletedEventRejectsNullRustDefaultedCompletedAt() throws {
+        XCTAssertThrowsError(try JSONDecoder().decode(ItemCompletedEvent.self, from: Data("""
+        {
+          "thread_id": "018f7a2d-4c5b-7abc-8def-0123456789ab",
+          "turn_id": "turn-1",
+          "item": {
+            "type": "Plan",
+            "id": "plan-1",
+            "text": "next"
+          },
+          "completed_at_ms": null
+        }
+        """.utf8)))
     }
 
     func testItemCompletedEventDelegatesToTurnItemLegacyEvents() throws {

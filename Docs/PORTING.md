@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's core turn item defaults in
+  `codex-rs/protocol/src/{items,protocol}.rs`. Swift `ReasoningItem` and
+  `ItemCompletedEvent` decoding now keeps Rust's omitted-field compatibility
+  for `raw_content` and `completed_at_ms` while rejecting explicit `null` for
+  those non-optional `#[serde(default)]` fields.
 - 2026-05-15: rechecked Rust's core model catalog defaults in
   `codex-rs/protocol/src/openai_models.rs`. Swift `ModelPreset` and
   `ModelInfo` decoding now preserves Rust's omitted-field defaults for
