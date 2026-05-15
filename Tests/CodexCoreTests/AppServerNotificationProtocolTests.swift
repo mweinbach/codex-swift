@@ -267,6 +267,19 @@ final class AppServerNotificationProtocolTests: XCTestCase {
         )
         XCTAssertEqual(decodedStarted, started)
 
+        let abortedReview = try JSONDecoder().decode(
+            GuardianApprovalReview.self,
+            from: Data("""
+            {
+              "status": "aborted",
+              "riskLevel": null,
+              "userAuthorization": null,
+              "rationale": null
+            }
+            """.utf8)
+        )
+        XCTAssertEqual(abortedReview, GuardianApprovalReview(status: .aborted))
+
         let completed = ItemGuardianApprovalReviewCompletedNotification(
             threadID: "thread-1",
             turnID: "turn-1",

@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `GuardianApprovalReview` status
+  decoding in `codex-rs/app-server-protocol/src/protocol/v2/item.rs`. Swift now
+  pins Rust's standalone automatic-approval review payload behavior where
+  `"status": "aborted"` decodes with explicit-null `riskLevel`,
+  `userAuthorization`, and `rationale` as absent values.
 - 2026-05-15: rechecked Rust app-server v2 `NetworkRequirements` wire
   compatibility in `codex-rs/app-server-protocol/src/protocol/v2/config.rs`.
   Swift now pins Rust's legacy `allowedDomains`, `deniedDomains`, and
