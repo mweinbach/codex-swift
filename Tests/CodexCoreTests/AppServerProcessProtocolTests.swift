@@ -167,6 +167,13 @@ final class AppServerProcessProtocolTests: XCTestCase {
                 "closeStdin": true
             ]
         )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                ProcessWriteStdinParams.self,
+                from: Data(#"{"processHandle":"proc-7","deltaBase64":null,"closeStdin":true}"#.utf8)
+            ),
+            ProcessWriteStdinParams(processHandle: "proc-7", closeStdin: true)
+        )
 
         try XCTAssertJSONObjectEqual(
             ProcessWriteStdinParams(processHandle: "proc-1", deltaBase64: "aGk=", closeStdin: true),
@@ -178,17 +185,31 @@ final class AppServerProcessProtocolTests: XCTestCase {
         )
 
         try XCTAssertJSONObjectEqual(ProcessWriteStdinResponse(), [:])
-        try XCTAssertJSONObjectEqual(ProcessKillParams(processHandle: "proc-1"), ["processHandle": "proc-1"])
+        try XCTAssertJSONObjectEqual(ProcessKillParams(processHandle: "proc-7"), ["processHandle": "proc-7"])
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                ProcessKillParams.self,
+                from: Data(#"{"processHandle":"proc-7"}"#.utf8)
+            ),
+            ProcessKillParams(processHandle: "proc-7")
+        )
         try XCTAssertJSONObjectEqual(ProcessKillResponse(), [:])
         try XCTAssertJSONObjectEqual(
-            ProcessResizePtyParams(processHandle: "proc-1", size: ProcessTerminalSize(rows: 40, cols: 120)),
+            ProcessResizePtyParams(processHandle: "proc-7", size: ProcessTerminalSize(rows: 50, cols: 160)),
             [
-                "processHandle": "proc-1",
+                "processHandle": "proc-7",
                 "size": [
-                    "rows": 40,
-                    "cols": 120
+                    "rows": 50,
+                    "cols": 160
                 ]
             ]
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                ProcessResizePtyParams.self,
+                from: Data(#"{"processHandle":"proc-7","size":{"rows":50,"cols":160}}"#.utf8)
+            ),
+            ProcessResizePtyParams(processHandle: "proc-7", size: ProcessTerminalSize(rows: 50, cols: 160))
         )
         try XCTAssertJSONObjectEqual(ProcessResizePtyResponse(), [:])
     }
@@ -198,34 +219,60 @@ final class AppServerProcessProtocolTests: XCTestCase {
             ProcessOutputDeltaNotification(
                 processHandle: "proc-1",
                 stream: .stdout,
-                deltaBase64: "b3V0",
+                deltaBase64: "AQI=",
                 capReached: false
             ),
             [
                 "processHandle": "proc-1",
                 "stream": "stdout",
-                "deltaBase64": "b3V0",
+                "deltaBase64": "AQI=",
                 "capReached": false
             ]
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                ProcessOutputDeltaNotification.self,
+                from: Data(#"{"processHandle":"proc-1","stream":"stdout","deltaBase64":"AQI=","capReached":false}"#.utf8)
+            ),
+            ProcessOutputDeltaNotification(
+                processHandle: "proc-1",
+                stream: .stdout,
+                deltaBase64: "AQI=",
+                capReached: false
+            )
         )
 
         try XCTAssertJSONObjectEqual(
             ProcessExitedNotification(
                 processHandle: "proc-1",
-                exitCode: 7,
+                exitCode: 0,
                 stdout: "out",
-                stdoutCapReached: true,
+                stdoutCapReached: false,
                 stderr: "err",
-                stderrCapReached: false
+                stderrCapReached: true
             ),
             [
                 "processHandle": "proc-1",
-                "exitCode": 7,
+                "exitCode": 0,
                 "stdout": "out",
-                "stdoutCapReached": true,
+                "stdoutCapReached": false,
                 "stderr": "err",
-                "stderrCapReached": false
+                "stderrCapReached": true
             ]
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                ProcessExitedNotification.self,
+                from: Data(#"{"processHandle":"proc-1","exitCode":0,"stdout":"out","stdoutCapReached":false,"stderr":"err","stderrCapReached":true}"#.utf8)
+            ),
+            ProcessExitedNotification(
+                processHandle: "proc-1",
+                exitCode: 0,
+                stdout: "out",
+                stdoutCapReached: false,
+                stderr: "err",
+                stderrCapReached: true
+            )
         )
     }
 }

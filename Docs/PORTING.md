@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 process control and notification
+  fixtures in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift
+  now pins the exact `process/writeStdin`, `process/kill`,
+  `process/resizePty`, `process/outputDelta`, and `process/exited`
+  round-trip wire shapes from Rust's protocol tests.
 - 2026-05-15: rechecked Rust app-server v2 command-exec control fixtures in
   `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now pins the
   exact `command/exec/write`, `command/exec/terminate`, `command/exec/resize`,
