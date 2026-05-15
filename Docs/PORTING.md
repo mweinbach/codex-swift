@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `SkillsListParams` and
+  `HooksListParams` in `codex-rs/app-server-protocol/src/protocol/v2/plugin.rs`.
+  Swift manual `skills/list` and `hooks/list` routing now preserves Serde's
+  default boundary for `cwds` and `forceReload`: omitted fields use Rust
+  defaults while explicit `null` or wrong JSON types reject with Rust-shaped
+  invalid-request errors.
 - 2026-05-15: rechecked Rust app-server v2 `ActivePermissionProfile` in
   `codex-rs/app-server-protocol/src/protocol/v2/permissions.rs`. Swift now has
   focused coverage that omitted `modifications` defaults to an empty list while

@@ -16359,10 +16359,10 @@ public enum CodexAppServer {
         remoteInstalledPlugins: [RemoteInstalledPluginReference] = [],
         cachedOutcome: ((String) -> SkillLoadOutcome?)? = nil,
         cacheOutcome: ((String, SkillLoadOutcome) -> Void)? = nil
-    ) -> [String: Any] {
-        let rawCwds = stringArrayParam(params?["cwds"]) ?? []
+    ) throws -> [String: Any] {
+        let rawCwds = try rustDefaultedStringArrayParam(params?["cwds"]) ?? []
         let cwds = rawCwds.isEmpty ? [configuration.cwd.standardizedFileURL.path] : rawCwds
-        let forceReload = boolParam(params?["forceReload"], defaultValue: false)
+        let forceReload = try rustDefaultedBoolParam(params?["forceReload"], defaultValue: false)
         let includeCwdSkillRoots = skillsListIncludesCwdSkillRoots(configuration: configuration)
         return [
             "data": cwds.map { cwd in
@@ -16462,8 +16462,8 @@ public enum CodexAppServer {
     fileprivate static func hooksListResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
-    ) -> [String: Any] {
-        let rawCwds = stringArrayParam(params?["cwds"]) ?? []
+    ) throws -> [String: Any] {
+        let rawCwds = try rustDefaultedStringArrayParam(params?["cwds"]) ?? []
         let cwds = rawCwds.isEmpty ? [configuration.cwd.standardizedFileURL.path] : rawCwds
         return [
             "data": cwds.map { cwd in
@@ -20675,6 +20675,21 @@ public enum CodexAppServer {
 
     private static func stringArrayParam(_ value: Any?) -> [String]? {
         value as? [String]
+    }
+
+    private static func rustDefaultedStringArrayParam(_ value: Any?) throws -> [String]? {
+        guard let value else {
+            return nil
+        }
+        guard let values = value as? [Any] else {
+            throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(value)), expected a sequence")
+        }
+        return try values.map { item in
+            guard let string = item as? String else {
+                throw AppServerError.invalidRequest("Invalid request: \(rustInvalidTypeDescription(item)), expected a string")
+            }
+            return string
+        }
     }
 
     private static func rustStringArrayParam(_ value: Any?) throws -> [String]? {
@@ -25596,8 +25611,8 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         skillsListCache = [:]
     }
 
-    private func skillsListResult(params: [String: Any]?) -> [String: Any] {
-        CodexAppServer.skillsListResult(
+    private func skillsListResult(params: [String: Any]?) throws -> [String: Any] {
+        try CodexAppServer.skillsListResult(
             params: params,
             configuration: configuration,
             remoteInstalledPlugins: remoteInstalledPluginsCache,
@@ -28252,7 +28267,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                 case "skills/list":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: skillsListResult(params: params)
+                        result: try skillsListResult(params: params)
                     )
                 case "skills/config/write":
                     response = CodexAppServer.responseObject(
@@ -28262,7 +28277,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                 case "hooks/list":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: CodexAppServer.hooksListResult(params: params, configuration: configuration)
+                        result: try CodexAppServer.hooksListResult(params: params, configuration: configuration)
                     )
                 case "experimentalFeature/list":
                     response = CodexAppServer.responseObject(

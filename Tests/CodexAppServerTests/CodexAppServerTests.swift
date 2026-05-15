@@ -24766,6 +24766,68 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
+    func testSkillsAndHooksListRejectMalformedDefaultedParamsLikeRustProtocol() throws {
+        let codexHome = try TemporaryDirectory()
+
+        let cases: [(method: String, params: String, message: String)] = [
+            (
+                "skills/list",
+                #"{"cwds":null}"#,
+                "Invalid request: invalid type: null, expected a sequence"
+            ),
+            (
+                "skills/list",
+                #"{"cwds":"/tmp"}"#,
+                #"Invalid request: invalid type: string "/tmp", expected a sequence"#
+            ),
+            (
+                "skills/list",
+                #"{"cwds":[1]}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                "skills/list",
+                #"{"forceReload":null}"#,
+                "Invalid request: invalid type: null, expected a boolean"
+            ),
+            (
+                "skills/list",
+                #"{"forceReload":1}"#,
+                "Invalid request: invalid type: integer `1`, expected a boolean"
+            ),
+            (
+                "skills/list",
+                #"{"forceReload":"true"}"#,
+                #"Invalid request: invalid type: string "true", expected a boolean"#
+            ),
+            (
+                "hooks/list",
+                #"{"cwds":null}"#,
+                "Invalid request: invalid type: null, expected a sequence"
+            ),
+            (
+                "hooks/list",
+                #"{"cwds":"/tmp"}"#,
+                #"Invalid request: invalid type: string "/tmp", expected a sequence"#
+            ),
+            (
+                "hooks/list",
+                #"{"cwds":[1]}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            )
+        ]
+
+        for (index, testCase) in cases.enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 1),"method":"\#(testCase.method)","params":\#(testCase.params)}"#,
+                codexHome: codexHome.url
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600, "case \(index): \(testCase.method)")
+            XCTAssertEqual(error["message"] as? String, testCase.message, "case \(index): \(testCase.method)")
+        }
+    }
+
     func testSkillsConfigWriteTogglesPathSelectorAndAffectsSkillsList() throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
