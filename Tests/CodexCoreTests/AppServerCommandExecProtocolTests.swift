@@ -74,6 +74,50 @@ final class AppServerCommandExecProtocolTests: XCTestCase {
         ])
     }
 
+    func testCommandExecParamsEncodeDisabledLimitShapesLikeRustProtocol() throws {
+        try XCTAssertJSONObjectEqual(
+            CommandExecParams(
+                command: ["sleep", "30"],
+                processID: "sleep-1",
+                disableTimeout: true
+            ),
+            [
+                "command": ["sleep", "30"],
+                "processId": "sleep-1",
+                "disableTimeout": true,
+                "timeoutMs": NSNull(),
+                "cwd": NSNull(),
+                "env": NSNull(),
+                "size": NSNull(),
+                "sandboxPolicy": NSNull(),
+                "permissionProfile": NSNull(),
+                "outputBytesCap": NSNull()
+            ]
+        )
+
+        try XCTAssertJSONObjectEqual(
+            CommandExecParams(
+                command: ["yes"],
+                processID: "yes-1",
+                streamStdoutStderr: true,
+                disableOutputCap: true
+            ),
+            [
+                "command": ["yes"],
+                "processId": "yes-1",
+                "streamStdoutStderr": true,
+                "outputBytesCap": NSNull(),
+                "disableOutputCap": true,
+                "timeoutMs": NSNull(),
+                "cwd": NSNull(),
+                "env": NSNull(),
+                "size": NSNull(),
+                "sandboxPolicy": NSNull(),
+                "permissionProfile": NSNull()
+            ]
+        )
+    }
+
     func testCommandExecParamsDecodeRustDefaults() throws {
         let decoded = try JSONDecoder().decode(
             CommandExecParams.self,

@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `CommandExecParams`
+  serialization in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`.
+  Swift now pins the sparse disabled-limit request shapes for `command/exec`,
+  including explicit `null` `timeoutMs` / `outputBytesCap` with only the active
+  boolean flags emitted.
 - 2026-05-15: rechecked Rust app-server v2 `MarketplaceAddParams`
   serialization in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`.
   Swift now pins the populated `refName` and `sparsePaths` request shape for
