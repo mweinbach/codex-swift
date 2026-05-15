@@ -148,6 +148,8 @@ extension CodexAppServer {
              "thread/backgroundTerminals/clean",
              "thread/rollback",
              "thread/read",
+             "thread/turns/list",
+             "thread/turns/items/list",
              "thread/inject_items",
              "turn/start",
              "turn/steer",
