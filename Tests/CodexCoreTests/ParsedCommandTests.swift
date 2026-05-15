@@ -512,6 +512,14 @@ final class ParsedCommandTests: XCTestCase {
             .unknown(cmd: #"python -c "print('hello')""#)
         ])
 
+        XCTAssertEqual(parseCommand(["bash", "-lc", #"python -c "import pathlib; print(list(pathlib.Path('.').rglob('*.swift')))""#]), [
+            .unknown(cmd: #"python -c "import pathlib; print(list(pathlib.Path('.').rglob('*.swift')))""#)
+        ])
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", #"python -c "import glob; print(list(glob.iglob('*.swift')))""#]), [
+            .unknown(cmd: #"python -c "import glob; print(list(glob.iglob('*.swift')))""#)
+        ])
+
         let mutatingPipeline = #"rg -l QkBindingController presentation/src/main/java | xargs perl -pi -e 's/QkBindingController/QkController/g'"#
         XCTAssertEqual(parseCommand(["bash", "-lc", mutatingPipeline]), [
             .unknown(cmd: mutatingPipeline)
