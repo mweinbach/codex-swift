@@ -29,11 +29,9 @@ public struct Prompt: Equatable, Sendable {
         let base = baseInstructionsOverride ?? model.baseInstructions
         let hasApplyPatchTool = tools.contains { tool in
             switch tool {
-            case let .function(function):
-                return function.name == "apply_patch"
             case let .freeform(freeform):
                 return freeform.name == "apply_patch"
-            case .namespace, .toolSearch, .localShell, .imageGeneration, .webSearch:
+            case .function, .namespace, .toolSearch, .localShell, .imageGeneration, .webSearch:
                 return false
             }
         }

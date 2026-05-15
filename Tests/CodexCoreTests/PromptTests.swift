@@ -38,7 +38,7 @@ final class PromptTests: XCTestCase {
         XCTAssertEqual(prompt.fullInstructions(for: modelFamily), "custom instructions")
     }
 
-    func testFullInstructionsDoNotAppendApplyPatchGuidanceWhenApplyPatchToolExists() {
+    func testFullInstructionsOnlyFreeformApplyPatchToolSuppressesLegacyGuidance() {
         let modelFamily = ModelsManager.constructModelFamilyOffline(model: "gpt-4.1")
 
         let functionPrompt = Prompt(tools: [
@@ -48,7 +48,10 @@ final class PromptTests: XCTestCase {
                 parameters: .object(properties: [:], required: nil, additionalProperties: nil)
             ))
         ])
-        XCTAssertEqual(functionPrompt.fullInstructions(for: modelFamily), modelFamily.baseInstructions)
+        XCTAssertTrue(
+            functionPrompt.fullInstructions(for: modelFamily)
+                .hasPrefix("\(modelFamily.baseInstructions)\n## `apply_patch`")
+        )
 
         let freeformPrompt = Prompt(tools: [
             ToolSpecFactory.createApplyPatchFreeformTool()

@@ -56,6 +56,11 @@ Recent upstream audit checkpoint:
   Rust's freeform-only boundary by skipping `apply_patch` hook payloads for
   legacy function-call items, while keeping custom/freeform `apply_patch`
   execution and shell-command interception intact.
+- 2026-05-15: rechecked Rust commit `e783341b70` (`Delete
+  function-style apply_patch`). Swift prompt construction now only treats a
+  freeform `apply_patch` tool as the canonical apply-patch surface that
+  suppresses legacy shell guidance; a legacy function-shaped `apply_patch` tool
+  no longer masks the fallback instructions.
 - 2026-05-15: rechecked Rust's `NetworkPolicyDecisionPayload` in
   `codex-rs/protocol/src/network_policy.rs`. Swift network-policy decision
   encoding now preserves Rust's ordinary `Option` wire shape by emitting
