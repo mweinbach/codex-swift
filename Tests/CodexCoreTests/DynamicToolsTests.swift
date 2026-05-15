@@ -274,6 +274,14 @@ final class DynamicToolsTests: XCTestCase {
             dynamicTool(name: "lookup.ticket", inputSchema: objectSchema()),
             "dynamic tool name must match ^[a-zA-Z0-9_-]+$ to match Responses API: lookup.ticket"
         )
+        assertValidationError(
+            dynamicTool(name: "lookup🙂", inputSchema: objectSchema()),
+            "dynamic tool name must match ^[a-zA-Z0-9_-]+$ to match Responses API: lookup\\u{1f642}"
+        )
+        assertValidationError(
+            dynamicTool(name: "lookup\"ticket", inputSchema: objectSchema()),
+            "dynamic tool name must match ^[a-zA-Z0-9_-]+$ to match Responses API: lookup\\\"ticket"
+        )
         let longName = String(repeating: "a", count: 129)
         assertValidationError(
             dynamicTool(name: longName, inputSchema: objectSchema()),
@@ -301,6 +309,10 @@ final class DynamicToolsTests: XCTestCase {
         assertValidationError(
             dynamicTool(namespace: "codex.app", name: "lookup", inputSchema: objectSchema()),
             "dynamic tool namespace must match ^[a-zA-Z0-9_-]+$ to match Responses API: codex.app"
+        )
+        assertValidationError(
+            dynamicTool(namespace: "codex\u{7}app", name: "lookup", inputSchema: objectSchema()),
+            "dynamic tool namespace must match ^[a-zA-Z0-9_-]+$ to match Responses API: codex\\u{7}app"
         )
         let longNamespace = String(repeating: "a", count: 65)
         assertValidationError(

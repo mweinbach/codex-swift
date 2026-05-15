@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server dynamic tool validation in
+  `codex-rs/app-server/src/request_processors/thread_processor.rs`. Swift
+  dynamic tool validation now formats identifier validation errors with Rust's
+  `escape_default()` behavior for quotes, slashes, controls, and non-ASCII
+  scalars while keeping the existing Responses API identifier rules intact.
 - 2026-05-15: rechecked Rust MCP `ToolSerde`, `ResourceSerde`, and
   `ResourceTemplateSerde` annotation handling in `codex-rs/protocol/src/mcp.rs`.
   Swift now preserves non-object `annotations` JSON on tools, resources, and

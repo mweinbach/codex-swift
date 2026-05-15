@@ -194,10 +194,16 @@ public struct DynamicToolSpec: Codable, Equatable, Sendable {
                 result += "\\r"
             case 9:
                 result += "\\t"
+            case 34:
+                result += "\\\""
+            case 39:
+                result += "\\'"
             case 92:
                 result += "\\\\"
-            default:
+            case 32...126:
                 result += String(scalar)
+            default:
+                result += "\\u{\(String(scalar.value, radix: 16))}"
             }
         }
     }
