@@ -30,8 +30,6 @@ final class RequestSerializationTests: XCTestCase {
             "thread/unsubscribe",
             "thread/goal/set",
             "thread/read",
-            "thread/turns/list",
-            "thread/turns/items/list",
             "thread/inject_items",
             "turn/start",
             "turn/steer",
@@ -119,6 +117,8 @@ final class RequestSerializationTests: XCTestCase {
             "initialize",
             "thread/start",
             "fs/readFile",
+            "thread/turns/list",
+            "thread/turns/items/list",
             "account/rateLimits/read",
             "fuzzyFileSearch"
         ] {
