@@ -30,6 +30,18 @@ final class InterAgentCommunicationTests: XCTestCase {
         XCTAssertEqual(missingOtherRecipients.otherRecipients, [])
     }
 
+    func testInterAgentCommunicationRejectsNullOtherRecipientsLikeRustSerdeDefault() {
+        XCTAssertThrowsError(try JSONDecoder().decode(InterAgentCommunication.self, from: Data(#"""
+        {
+          "author": "/root",
+          "recipient": "/root/reviewer",
+          "other_recipients": null,
+          "content": "review the diff",
+          "trigger_turn": true
+        }
+        """#.utf8)))
+    }
+
     func testInterAgentCommunicationOperationWireShape() throws {
         let op = Op.interAgentCommunication(communication: InterAgentCommunication(
             author: .root,

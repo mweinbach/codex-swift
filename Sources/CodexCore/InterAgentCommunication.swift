@@ -62,7 +62,11 @@ public struct InterAgentCommunication: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.author = try container.decode(AgentPath.self, forKey: .author)
         self.recipient = try container.decode(AgentPath.self, forKey: .recipient)
-        self.otherRecipients = try container.decodeIfPresent([AgentPath].self, forKey: .otherRecipients) ?? []
+        self.otherRecipients = try container.decodeRustDefaulted(
+            [AgentPath].self,
+            forKey: .otherRecipients,
+            defaultValue: []
+        )
         self.content = try container.decode(String.self, forKey: .content)
         self.triggerTurn = try container.decode(Bool.self, forKey: .triggerTurn)
     }

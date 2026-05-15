@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust `InterAgentCommunication` in
+  `codex-rs/protocol/src/protocol.rs`. Swift inter-agent message decoding now
+  preserves Serde's default boundary for `other_recipients`: omitted fields
+  default to an empty list while explicit `null` rejects.
 - 2026-05-15: rechecked Rust `ModelProviderAuthInfo` in
   `codex-rs/protocol/src/config_types.rs`. Swift provider auth decoding now
   preserves Serde's default boundary for `args`, `timeout_ms`,
