@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust commit `63a27ad6c6` (`Avoid hard-coded
+  environment context shell`). Swift configured-environment prompt context now
+  has focused coverage that the inherited session shell name is used for
+  configured environments instead of hard-coding `bash`, including a
+  PowerShell-style fallback.
 - 2026-05-15: rechecked Rust's current app-server request serialization table
   in `codex-rs/app-server-protocol/src/protocol/common.rs`. Swift now has
   focused coverage that the remaining explicitly concurrent/no-scope v2

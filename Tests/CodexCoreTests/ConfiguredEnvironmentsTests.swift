@@ -164,6 +164,27 @@ final class ConfiguredEnvironmentsTests: XCTestCase {
         )
     }
 
+    func testEnvironmentContextEnvironmentsUseInheritedShellNameLikeRust() throws {
+        let snapshot = try ConfiguredEnvironmentLoader.snapshot(fromToml: """
+        default = "dev"
+
+        [[environments]]
+        id = "dev"
+        program = "ssh"
+        """)
+
+        XCTAssertEqual(
+            snapshot.environmentContextEnvironments(
+                cwd: "/workspace",
+                shell: Shell(shellType: .powerShell, shellPath: "pwsh.exe")
+            ),
+            [
+                EnvironmentContextEnvironment(id: "dev", cwd: "/workspace", shell: "powershell"),
+                EnvironmentContextEnvironment(id: "local", cwd: "/workspace", shell: "powershell")
+            ]
+        )
+    }
+
     func testLegacySnapshotStillExpandsRemoteBeforeLocalForExecServerURL() {
         let snapshot = ConfiguredEnvironmentLoader.legacyEnvironmentSnapshot(environment: [
             ConfiguredEnvironmentLoader.codexExecServerURLEnvironmentVariable: "ws://127.0.0.1:8765"
