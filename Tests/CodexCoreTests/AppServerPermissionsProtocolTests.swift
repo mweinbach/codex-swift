@@ -80,6 +80,51 @@ final class AppServerPermissionsProtocolTests: XCTestCase {
         )
     }
 
+    func testAdditionalFileSystemPermissionsPreserveCanonicalEntriesLikeRustProtocol() throws {
+        let corePermissions = FileSystemPermissions(
+            entries: [
+                FileSystemSandboxEntry(
+                    path: .special(FileSystemSpecialPath.root.jsonValue),
+                    access: .write
+                ),
+                FileSystemSandboxEntry(
+                    path: .globPattern("**/*.env"),
+                    access: .none
+                )
+            ],
+            globScanMaxDepth: 2
+        )
+        let permissions = AppServerAdditionalFileSystemPermissions(corePermissions)
+
+        XCTAssertNil(permissions.read)
+        XCTAssertNil(permissions.write)
+        XCTAssertEqual(permissions.globScanMaxDepth, 2)
+        XCTAssertEqual(permissions.fileSystemPermissions, corePermissions)
+        try XCTAssertJSONObjectEqual(permissions, [
+            "read": NSNull(),
+            "write": NSNull(),
+            "globScanMaxDepth": 2,
+            "entries": [
+                [
+                    "path": [
+                        "type": "special",
+                        "value": [
+                            "kind": "root"
+                        ]
+                    ],
+                    "access": "write"
+                ],
+                [
+                    "path": [
+                        "type": "glob_pattern",
+                        "pattern": "**/*.env"
+                    ],
+                    "access": "none"
+                ]
+            ]
+        ])
+    }
+
     func testDecodedReadWriteOnlyAdditionalFileSystemPermissionsPreserveLegacyCoreShape() throws {
         let decoded = try JSONDecoder().decode(
             AppServerAdditionalFileSystemPermissions.self,

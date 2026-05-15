@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 additional filesystem
+  permission conversion in
+  `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now pins
+  canonical special-root and glob-pattern entries with `globScanMaxDepth`
+  through the app-server additional-permissions bridge.
 - 2026-05-15: rechecked Rust app-server v2 `process/spawn`
   double-option limit decoding in
   `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now pins the
