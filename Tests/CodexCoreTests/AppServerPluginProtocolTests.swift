@@ -472,6 +472,28 @@ final class AppServerPluginProtocolTests: XCTestCase {
         XCTAssertEqual(decoded.availability, .available)
     }
 
+    func testPluginSummaryDefaultsMissingRustDefaultedFieldsLikeRustProtocol() throws {
+        let decoded = try JSONDecoder().decode(
+            PluginSummary.self,
+            from: Data("""
+            {
+              "id": "plugins~Plugin_00000000000000000000000000000000",
+              "name": "gmail",
+              "source": { "type": "remote" },
+              "installed": false,
+              "enabled": false,
+              "installPolicy": "AVAILABLE",
+              "authPolicy": "ON_USE",
+              "interface": null
+            }
+            """.utf8)
+        )
+
+        XCTAssertEqual(decoded.availability, .available)
+        XCTAssertNil(decoded.shareContext)
+        XCTAssertEqual(decoded.keywords, [])
+    }
+
     func testPluginSummaryRejectsExplicitNullForRustDefaultedKeywords() {
         XCTAssertThrowsError(
             try JSONDecoder().decode(

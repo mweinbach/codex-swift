@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `PluginSummary` defaults in
+  `codex-rs/app-server-protocol/src/protocol/v2/plugin.rs`. Swift now pins the
+  missing-field boundary from Rust's protocol tests: omitted `availability`
+  decodes as `AVAILABLE`, omitted `keywords` decodes as an empty array, and
+  omitted `shareContext` remains absent while explicit `null` is still rejected
+  for Rust-defaulted fields.
 - 2026-05-15: rechecked Rust app-server v2 `SandboxPolicy` decoding in
   `codex-rs/app-server-protocol/src/protocol/v2/permissions.rs`. Swift now
   matches the legacy read-only access boundary: removed `access` /
