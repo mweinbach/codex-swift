@@ -845,12 +845,13 @@ public struct ExecCommandToolCallParams: Equatable, Decodable, Sendable {
         self.shell = try container.decodeIfPresent(String.self, forKey: .shell)
         self.requestedLogin = try container.decodeIfPresent(Bool.self, forKey: .login)
         self.login = requestedLogin ?? true
-        self.yieldTimeMS = try container.decodeIfPresent(UInt64.self, forKey: .yieldTimeMS) ?? 10_000
+        self.yieldTimeMS = try container.decodeRustDefaulted(UInt64.self, forKey: .yieldTimeMS, defaultValue: 10_000)
         self.maxOutputTokens = try container.decodeIfPresent(Int.self, forKey: .maxOutputTokens)
-        self.sandboxPermissions = try container.decodeIfPresent(
+        self.sandboxPermissions = try container.decodeRustDefaulted(
             SandboxPermissions.self,
-            forKey: .sandboxPermissions
-        ) ?? .useDefault
+            forKey: .sandboxPermissions,
+            defaultValue: .useDefault
+        )
         self.prefixRule = try container.decodeIfPresent([String].self, forKey: .prefixRule)
         self.additionalPermissions = try container.decodeIfPresent(
             RequestPermissionProfile.self,
@@ -876,8 +877,8 @@ public struct WriteStdinToolCallParams: Equatable, Decodable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.sessionID = try container.decode(Int.self, forKey: .sessionID)
-        self.chars = try container.decodeIfPresent(String.self, forKey: .chars) ?? ""
-        self.yieldTimeMS = try container.decodeIfPresent(UInt64.self, forKey: .yieldTimeMS) ?? 250
+        self.chars = try container.decodeRustDefaulted(String.self, forKey: .chars, defaultValue: "")
+        self.yieldTimeMS = try container.decodeRustDefaulted(UInt64.self, forKey: .yieldTimeMS, defaultValue: 250)
         self.maxOutputTokens = try container.decodeIfPresent(Int.self, forKey: .maxOutputTokens)
     }
 }

@@ -1326,6 +1326,39 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertEqual(params.justification, "publish branch")
     }
 
+    func testUnifiedExecToolParamsUseRustDefaultsAndRejectNulls() throws {
+        let execDefaults = try JSONDecoder().decode(ExecCommandToolCallParams.self, from: Data(#"""
+        {
+            "cmd": "pwd"
+        }
+        """#.utf8))
+        XCTAssertEqual(execDefaults.login, true)
+        XCTAssertEqual(execDefaults.yieldTimeMS, 10_000)
+        XCTAssertEqual(execDefaults.sandboxPermissions, .useDefault)
+
+        for json in [
+            #"{"cmd":"pwd","yield_time_ms":null}"#,
+            #"{"cmd":"pwd","sandbox_permissions":null}"#
+        ] {
+            XCTAssertThrowsError(try JSONDecoder().decode(ExecCommandToolCallParams.self, from: Data(json.utf8)))
+        }
+
+        let writeDefaults = try JSONDecoder().decode(WriteStdinToolCallParams.self, from: Data(#"""
+        {
+            "session_id": 7
+        }
+        """#.utf8))
+        XCTAssertEqual(writeDefaults.chars, "")
+        XCTAssertEqual(writeDefaults.yieldTimeMS, 250)
+
+        for json in [
+            #"{"session_id":7,"chars":null}"#,
+            #"{"session_id":7,"yield_time_ms":null}"#
+        ] {
+            XCTAssertThrowsError(try JSONDecoder().decode(WriteStdinToolCallParams.self, from: Data(json.utf8)))
+        }
+    }
+
     func testSandboxPermissionsAdditionalPermissionsWireValueLikeRust() throws {
         let json = #"""
         {

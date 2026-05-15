@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust unified exec tool argument decoding in
+  `codex-rs/core/src/tools/handlers/unified_exec{,/write_stdin}.rs`. Swift
+  `ExecCommandToolCallParams` and `WriteStdinToolCallParams` now keep omitted
+  defaults for `yield_time_ms`, `sandbox_permissions`, and `chars` while
+  rejecting explicit `null` for those non-optional `#[serde(default)]` fields.
 - 2026-05-15: rechecked current Rust `RequestPermissionsEvent` in
   `codex-rs/protocol/src/request_permissions.rs`. Swift now requires
   `request_permissions.started_at_ms` like Rust's non-defaulted `i64` field
