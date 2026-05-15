@@ -3398,10 +3398,11 @@ final class ExecPolicyTests: XCTestCase {
         TOOL = "%s" % "git"
         COMMAND = "%s-%s" % (TOOL, "status")
         JUSTIFICATION = "%r:%d:%%:%x:%X:%o" % ("zero", 7, 31, 31, 8)
+        FLOATS = "%f" % float("3.5") + ":" + "%e" % float("1200.0") + ":" + "%E" % float("0.012") + ":" + "%g" % float("1200.0") + ":" + "%G" % float("0.0000012") + ":" + "%d" % float("3.9") + ":" + "%i" % float("-3.9")
         HOST = "api.%(name)s.com" % {"name": "github"}
         PATH = "/opt/%s" % TOOL
 
-        if COMMAND == "git-status" and JUSTIFICATION == "\\"zero\\":7:%:1f:1F:10":
+        if COMMAND == "git-status" and JUSTIFICATION == "\\"zero\\":7:%:1f:1F:10" and FLOATS == "3.500000:1.200000e+03:1.200000E-02:1200.0:1.2E-06:3:-3":
             prefix_rule([TOOL, COMMAND], "allow", justification = JUSTIFICATION)
             network_rule(HOST, "https", "allow")
             host_executable(TOOL, [PATH])

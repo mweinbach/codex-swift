@@ -228,6 +228,11 @@ Recent upstream audit checkpoint:
   `ServerResponse` from a raw JSON result while preserving the original request
   id and rejecting malformed response payloads through the target response
   decoder.
+- 2026-05-15: rechecked Rust Starlark `%` formatting in
+  `codex-rs/execpolicy/src/parser.rs`. Swift exec-policy tests now pin the
+  floating-point `%e`/`%E`/`%f`/`%g`/`%G` conversions plus float truncation for
+  `%d`/`%i`, alongside the existing string, mapping, escaped-percent, and
+  integer-base coverage.
 - 2026-05-15: rechecked current Rust `models-manager/models.json` at
   `7c9731c9af`. Swift's bundled raw catalog now carries the same
   `reasoning_summary_format` metadata for the six current model entries while
