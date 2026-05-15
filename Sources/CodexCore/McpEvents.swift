@@ -366,6 +366,7 @@ public struct McpAnnotations: Equatable, Codable, Sendable {
     public let audience: [McpRole]?
     public let lastModified: String?
     public let priority: Double?
+    public let rawValue: JSONValue?
 
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case audience
@@ -377,15 +378,27 @@ public struct McpAnnotations: Equatable, Codable, Sendable {
         audience: [McpRole]? = nil,
         lastModified: String? = nil,
         priority: Double? = nil,
-        additionalProperties: [String: JSONValue] = [:]
+        additionalProperties: [String: JSONValue] = [:],
+        rawValue: JSONValue? = nil
     ) {
         self.additionalProperties = additionalProperties
         self.audience = audience
         self.lastModified = lastModified
         self.priority = priority
+        self.rawValue = rawValue
     }
 
     public init(from decoder: Decoder) throws {
+        let rawValue = try decoder.singleValueContainer().decode(JSONValue.self)
+        guard case .object = rawValue else {
+            self.additionalProperties = [:]
+            self.audience = nil
+            self.lastModified = nil
+            self.priority = nil
+            self.rawValue = rawValue
+            return
+        }
+
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let dynamicContainer = try decoder.container(keyedBy: McpDynamicCodingKey.self)
         var additionalProperties: [String: JSONValue] = [:]
@@ -405,9 +418,15 @@ public struct McpAnnotations: Equatable, Codable, Sendable {
             }
         }
         self.additionalProperties = additionalProperties
+        self.rawValue = nil
     }
 
     public func encode(to encoder: Encoder) throws {
+        if let rawValue {
+            try rawValue.encode(to: encoder)
+            return
+        }
+
         var dynamicContainer = encoder.container(keyedBy: McpDynamicCodingKey.self)
         for key in additionalProperties.keys.sorted() {
             try dynamicContainer.encode(additionalProperties[key], forKey: McpDynamicCodingKey(stringValue: key))
@@ -839,6 +858,7 @@ public struct McpToolAnnotations: Equatable, Codable, Sendable {
     public let idempotentHint: Bool?
     public let openWorldHint: Bool?
     public let readOnlyHint: Bool?
+    public let rawValue: JSONValue?
     public let title: String?
 
     private enum CodingKeys: String, CodingKey, CaseIterable {
@@ -855,17 +875,31 @@ public struct McpToolAnnotations: Equatable, Codable, Sendable {
         openWorldHint: Bool? = nil,
         readOnlyHint: Bool? = nil,
         title: String? = nil,
-        additionalProperties: [String: JSONValue] = [:]
+        additionalProperties: [String: JSONValue] = [:],
+        rawValue: JSONValue? = nil
     ) {
         self.additionalProperties = additionalProperties
         self.destructiveHint = destructiveHint
         self.idempotentHint = idempotentHint
         self.openWorldHint = openWorldHint
         self.readOnlyHint = readOnlyHint
+        self.rawValue = rawValue
         self.title = title
     }
 
     public init(from decoder: Decoder) throws {
+        let rawValue = try decoder.singleValueContainer().decode(JSONValue.self)
+        guard case .object = rawValue else {
+            self.additionalProperties = [:]
+            self.destructiveHint = nil
+            self.idempotentHint = nil
+            self.openWorldHint = nil
+            self.readOnlyHint = nil
+            self.rawValue = rawValue
+            self.title = nil
+            return
+        }
+
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let dynamicContainer = try decoder.container(keyedBy: McpDynamicCodingKey.self)
         var additionalProperties: [String: JSONValue] = [:]
@@ -889,9 +923,15 @@ public struct McpToolAnnotations: Equatable, Codable, Sendable {
             }
         }
         self.additionalProperties = additionalProperties
+        self.rawValue = nil
     }
 
     public func encode(to encoder: Encoder) throws {
+        if let rawValue {
+            try rawValue.encode(to: encoder)
+            return
+        }
+
         var dynamicContainer = encoder.container(keyedBy: McpDynamicCodingKey.self)
         for key in additionalProperties.keys.sorted() {
             try dynamicContainer.encode(additionalProperties[key], forKey: McpDynamicCodingKey(stringValue: key))

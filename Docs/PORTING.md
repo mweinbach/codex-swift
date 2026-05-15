@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust MCP `ToolSerde`, `ResourceSerde`, and
+  `ResourceTemplateSerde` annotation handling in `codex-rs/protocol/src/mcp.rs`.
+  Swift now preserves non-object `annotations` JSON on tools, resources, and
+  resource templates while retaining typed convenience access for object-shaped
+  MCP annotations.
 - 2026-05-15: rechecked Rust commit `5ecff05196` and the v2 `Thread`
   payload in `codex-rs/app-server-protocol/src/protocol/v2/thread_data.rs`.
   Swift already encodes `sessionId` on the reusable thread object; focused
