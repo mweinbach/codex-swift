@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's core `SandboxPolicy` in
+  `codex-rs/protocol/src/protocol.rs`. Swift now keeps the Rust
+  `#[serde(default)]` behavior for omitted `read-only`, `external-sandbox`,
+  and `workspace-write` fields while rejecting explicit `null` for the
+  defaulted snake_case sandbox policy fields.
 - 2026-05-15: rechecked Rust's app-server v2
   `LoginAccountParams::Chatgpt.codex_streamlined_login` in
   `codex-rs/app-server-protocol/src/protocol/v2/account.rs`. Swift now keeps

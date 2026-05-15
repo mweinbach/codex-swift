@@ -96,17 +96,39 @@ extension SandboxPolicy: Codable {
         case .dangerFullAccess:
             self = .dangerFullAccess
         case .readOnly:
-            self = try container.decodeIfPresent(Bool.self, forKey: .networkAccess) == true
+            self = try container.decodeRustDefaulted(Bool.self, forKey: .networkAccess, defaultValue: false)
                 ? .readOnlyWithNetworkAccess
                 : .readOnly
         case .externalSandbox:
-            self = .externalSandbox(networkAccess: try container.decodeIfPresent(NetworkAccess.self, forKey: .networkAccess) ?? .restricted)
+            self = .externalSandbox(
+                networkAccess: try container.decodeRustDefaulted(
+                    NetworkAccess.self,
+                    forKey: .networkAccess,
+                    defaultValue: .restricted
+                )
+            )
         case .workspaceWrite:
             self = .workspaceWrite(
-                writableRoots: try container.decodeIfPresent([AbsolutePath].self, forKey: .writableRoots) ?? [],
-                networkAccess: try container.decodeIfPresent(Bool.self, forKey: .networkAccess) ?? false,
-                excludeTmpdirEnvVar: try container.decodeIfPresent(Bool.self, forKey: .excludeTmpdirEnvVar) ?? false,
-                excludeSlashTmp: try container.decodeIfPresent(Bool.self, forKey: .excludeSlashTmp) ?? false
+                writableRoots: try container.decodeRustDefaulted(
+                    [AbsolutePath].self,
+                    forKey: .writableRoots,
+                    defaultValue: []
+                ),
+                networkAccess: try container.decodeRustDefaulted(
+                    Bool.self,
+                    forKey: .networkAccess,
+                    defaultValue: false
+                ),
+                excludeTmpdirEnvVar: try container.decodeRustDefaulted(
+                    Bool.self,
+                    forKey: .excludeTmpdirEnvVar,
+                    defaultValue: false
+                ),
+                excludeSlashTmp: try container.decodeRustDefaulted(
+                    Bool.self,
+                    forKey: .excludeSlashTmp,
+                    defaultValue: false
+                )
             )
         }
     }
