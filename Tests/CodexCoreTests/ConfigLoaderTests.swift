@@ -1925,7 +1925,7 @@ final class ConfigLoaderTests: XCTestCase {
         )
     }
 
-    func testServiceTierConfigAcceptsArbitraryStringsAndLegacyFastAlias() throws {
+    func testServiceTierConfigAcceptsArbitraryStringsAndDropsFastTierWhenDisabled() throws {
         let arbitraryDir = try CoreTemporaryDirectory()
         try """
         service_tier = "experimental-tier-id"
@@ -1945,6 +1945,16 @@ final class ConfigLoaderTests: XCTestCase {
         """.write(to: disabledFastDir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
 
         XCTAssertNil(try CodexConfigLoader.load(codexHome: disabledFastDir.url, systemConfigFile: nil).serviceTier)
+
+        let disabledPriorityDir = try CoreTemporaryDirectory()
+        try """
+        service_tier = "priority"
+
+        [features]
+        fast_mode = false
+        """.write(to: disabledPriorityDir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertNil(try CodexConfigLoader.load(codexHome: disabledPriorityDir.url, systemConfigFile: nil).serviceTier)
     }
 
     func testLoadsModelProvidersIntoRuntimeConfig() throws {

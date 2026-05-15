@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust service-tier handling from `7c0e54bf59` and
+  related config/session normalization. Swift now has focused coverage that
+  both the legacy `fast` alias and the request-value `priority` tier are
+  cleared when `fast_mode` is disabled across config loading, thread
+  lifecycle, and live `turn/start` submission.
 - 2026-05-15: rechecked Rust Starlark sequence method support with
   `codex-rs/execpolicy`. Swift now has focused coverage that Python-style
   `list.count(...)` remains unsupported like Rust, preserving the existing

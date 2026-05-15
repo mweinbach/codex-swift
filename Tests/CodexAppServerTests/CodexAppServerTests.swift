@@ -3186,7 +3186,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(clearedResult["serviceTier"] is NSNull)
     }
 
-    func testThreadLifecycleServiceTierDropsFastWhenFastModeDisabledLikeRust() throws {
+    func testThreadLifecycleServiceTierDropsFastTierWhenFastModeDisabledLikeRust() throws {
         let temp = try TemporaryDirectory()
         try """
         [features]
@@ -3213,6 +3213,12 @@ final class CodexAppServerTests: XCTestCase {
         )))
         let forkResult = try XCTUnwrap(fork[0]["result"] as? [String: Any])
         XCTAssertTrue(forkResult["serviceTier"] is NSNull)
+
+        let priorityStart = try decodeMessages(processor.processLine(Data(
+            #"{"id":4,"method":"thread/start","params":{"modelProvider":"mock_provider","serviceTier":"priority"}}"#.utf8
+        )))
+        let priorityStartResult = try XCTUnwrap(priorityStart[0]["result"] as? [String: Any])
+        XCTAssertTrue(priorityStartResult["serviceTier"] is NSNull)
     }
 
     func testThreadAndTurnServiceTierRejectMalformedValuesLikeRust() throws {
@@ -4082,7 +4088,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(params.personality, .string("pragmatic"))
     }
 
-    func testTurnStartDropsFastServiceTierWhenFastModeDisabledLikeRust() throws {
+    func testTurnStartDropsFastTierWhenFastModeDisabledLikeRust() throws {
         let temp = try TemporaryDirectory()
         try """
         [features]
@@ -4110,6 +4116,17 @@ final class CodexAppServerTests: XCTestCase {
             return
         }
         XCTAssertEqual(params.serviceTier, .null)
+
+        _ = try decodeMessages(processor.processLine(Data(
+            #"{"id":3,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Override"}],"serviceTier":"priority"}}"#.utf8
+        )))
+
+        XCTAssertEqual(capture.submissions.count, 2)
+        guard case let .userInputWithTurnContext(priorityParams) = capture.submissions[1].op else {
+            XCTFail("expected runtime turn start to submit context-aware user input")
+            return
+        }
+        XCTAssertEqual(priorityParams.serviceTier, .null)
     }
 
     func testTurnSteerRuntimeSubmitterFailuresReturnRustInternalErrors() throws {
