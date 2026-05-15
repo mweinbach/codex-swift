@@ -222,6 +222,21 @@ final class AppServerMcpProtocolTests: XCTestCase {
                 "timeoutSecs": 30
             ]
         )
+
+        let minimalLogin = try JSONDecoder().decode(
+            AppServerProtocol.McpServerOauthLoginParams.self,
+            from: Data(#"{"name":"github"}"#.utf8)
+        )
+        XCTAssertNil(minimalLogin.scopes)
+        XCTAssertNil(minimalLogin.timeoutSeconds)
+
+        let nullLogin = try JSONDecoder().decode(
+            AppServerProtocol.McpServerOauthLoginParams.self,
+            from: Data(#"{"name":"github","scopes":null,"timeoutSecs":null}"#.utf8)
+        )
+        XCTAssertNil(nullLogin.scopes)
+        XCTAssertNil(nullLogin.timeoutSeconds)
+
         try XCTAssertJSONObjectEqual(
             AppServerProtocol.McpServerOauthLoginResponse(authorizationURL: "https://auth.example/authorize"),
             [
@@ -250,6 +265,12 @@ final class AppServerMcpProtocolTests: XCTestCase {
                 "success": false
             ]
         )
+        let nullCompleted = try JSONDecoder().decode(
+            AppServerProtocol.McpServerOauthLoginCompletedNotification.self,
+            from: Data(#"{"name":"github","success":false,"error":null}"#.utf8)
+        )
+        XCTAssertNil(nullCompleted.error)
+
         try XCTAssertJSONObjectEqual(
             AppServerProtocol.McpServerStatusUpdatedNotification(name: "github", status: .failed, error: nil),
             [

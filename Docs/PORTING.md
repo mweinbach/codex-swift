@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 MCP OAuth login optionals in
+  `codex-rs/app-server-protocol/src/protocol/v2/mcp.rs`. Swift now pins
+  Rust's `default` plus `skip_serializing_if` behavior for
+  `mcpServer/oauth/login` `scopes` and `timeoutSecs`, including the route-level
+  case where explicit `null` remains absent so configured scopes still apply.
 - 2026-05-15: rechecked Rust app-server v2 MCP tool-call optionals in
   `codex-rs/app-server-protocol/src/protocol/v2/mcp.rs`. Swift now pins
   Rust's `default` plus `skip_serializing_if` boundary for `arguments`, `_meta`,

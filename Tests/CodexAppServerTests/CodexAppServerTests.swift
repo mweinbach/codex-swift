@@ -24746,7 +24746,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNil(params["error"])
     }
 
-    func testMcpServerOAuthLoginUsesConfiguredScopesWhenParamsOmitScopes() async throws {
+    func testMcpServerOAuthLoginUsesConfiguredScopesWhenParamsOmitOrNullScopes() async throws {
         let temp = try TemporaryDirectory()
         try """
         [mcp_servers.github]
@@ -24766,11 +24766,19 @@ final class CodexAppServerTests: XCTestCase {
         let processor = try initializedProcessor(configuration: configuration)
 
         _ = try decode(processor.processLine(Data(#"{"id":1,"method":"mcpServer/oauth/login","params":{"name":"github"}}"#.utf8)))
+        _ = try decode(processor.processLine(Data(#"{"id":2,"method":"mcpServer/oauth/login","params":{"name":"github","scopes":null,"timeoutSecs":null}}"#.utf8)))
 
         let requests = await loginCapture.requests
-        XCTAssertEqual(requests.count, 1)
-        XCTAssertEqual(requests[0].scopes, ["repo", "workflow"])
-        XCTAssertEqual(requests[0].oauthResource, "https://api.github.test")
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(requests.map(\.scopes), [
+            ["repo", "workflow"],
+            ["repo", "workflow"]
+        ])
+        XCTAssertEqual(requests.map(\.oauthResource), [
+            "https://api.github.test",
+            "https://api.github.test"
+        ])
+        XCTAssertEqual(requests.map(\.timeoutSeconds), [nil, nil])
     }
 
     func testMcpServerOAuthLoginUsesDiscoveredScopesWhenUnconfigured() async throws {
