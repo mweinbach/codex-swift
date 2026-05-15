@@ -7055,6 +7055,33 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(resumedItems[0]["review"] as? String, "commit 1234567: Tidy UI colors")
     }
 
+    func testReviewStartDefaultsOmittedAndNullDeliveryToInlineLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        func startThread(requestID: Int) throws -> String {
+            let messages = try decodeMessages(processor.processLine(Data(#"{"id":\#(requestID),"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8)))
+            let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
+            let thread = try XCTUnwrap(result["thread"] as? [String: Any])
+            return try XCTUnwrap(thread["id"] as? String)
+        }
+
+        func assertDefaultsToInline(requestID: Int, threadID: String, deliveryJSON: String) throws {
+            let payload = #"{"id":\#(requestID),"method":"review/start","params":{"threadId":"\#(threadID)"\#(deliveryJSON),"target":{"type":"custom","instructions":"  inspect omitted delivery  "}}}"#
+            let messages = try decodeMessages(processor.processLine(Data(payload.utf8)))
+
+            XCTAssertEqual(messages.count, 2, payload)
+            let result = try XCTUnwrap(messages[0]["result"] as? [String: Any], payload)
+            XCTAssertEqual(result["reviewThreadId"] as? String, threadID, payload)
+            XCTAssertEqual(messages[1]["method"] as? String, "turn/started", payload)
+            let params = try XCTUnwrap(messages[1]["params"] as? [String: Any], payload)
+            XCTAssertEqual(params["threadId"] as? String, threadID, payload)
+        }
+
+        try assertDefaultsToInline(requestID: 2, threadID: startThread(requestID: 1), deliveryJSON: "")
+        try assertDefaultsToInline(requestID: 4, threadID: startThread(requestID: 3), deliveryJSON: #","delivery":null"#)
+    }
+
     func testReviewStartDetachedCreatesReviewThread() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))

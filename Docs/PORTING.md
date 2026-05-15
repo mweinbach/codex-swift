@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `ReviewStartParams.delivery` in
+  `codex-rs/app-server-protocol/src/protocol/v2/review.rs`. Swift
+  `review/start` now has focused coverage that omitted and explicit `null`
+  delivery values default to inline review execution without creating a
+  detached review thread.
 - 2026-05-15: rechecked Rust commit `40de81e7af` (`Remove reasoning
   format`). Swift bundled model metadata now omits the removed
   `reasoning_summary_format` field, and model-catalog tests cover Rust's
