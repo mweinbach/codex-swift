@@ -331,6 +331,13 @@ final class AppServerCommandExecProtocolTests: XCTestCase {
                 "closeStdin": true
             ]
         )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                CommandExecWriteParams.self,
+                from: Data(#"{"processId":"proc-7","deltaBase64":null,"closeStdin":true}"#.utf8)
+            ),
+            CommandExecWriteParams(processID: "proc-7", closeStdin: true)
+        )
         try XCTAssertJSONObjectEqual(
             CommandExecWriteParams(processID: "cmd-1", deltaBase64: "aGk=", closeStdin: true),
             [
@@ -340,34 +347,60 @@ final class AppServerCommandExecProtocolTests: XCTestCase {
             ]
         )
         try XCTAssertJSONObjectEqual(CommandExecWriteResponse(), [:])
-        try XCTAssertJSONObjectEqual(CommandExecTerminateParams(processID: "cmd-1"), [
-            "processId": "cmd-1"
+        try XCTAssertJSONObjectEqual(CommandExecTerminateParams(processID: "proc-8"), [
+            "processId": "proc-8"
         ])
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                CommandExecTerminateParams.self,
+                from: Data(#"{"processId":"proc-8"}"#.utf8)
+            ),
+            CommandExecTerminateParams(processID: "proc-8")
+        )
         try XCTAssertJSONObjectEqual(CommandExecTerminateResponse(), [:])
         try XCTAssertJSONObjectEqual(
-            CommandExecResizeParams(processID: "cmd-1", size: CommandExecTerminalSize(rows: 40, cols: 120)),
+            CommandExecResizeParams(processID: "proc-9", size: CommandExecTerminalSize(rows: 50, cols: 160)),
             [
-                "processId": "cmd-1",
+                "processId": "proc-9",
                 "size": [
-                    "rows": 40,
-                    "cols": 120
+                    "rows": 50,
+                    "cols": 160
                 ]
             ]
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                CommandExecResizeParams.self,
+                from: Data(#"{"processId":"proc-9","size":{"rows":50,"cols":160}}"#.utf8)
+            ),
+            CommandExecResizeParams(processID: "proc-9", size: CommandExecTerminalSize(rows: 50, cols: 160))
         )
         try XCTAssertJSONObjectEqual(CommandExecResizeResponse(), [:])
         try XCTAssertJSONObjectEqual(
             CommandExecOutputDeltaNotification(
-                processID: "cmd-1",
-                stream: .stderr,
-                deltaBase64: "ZXJy",
-                capReached: true
+                processID: "proc-1",
+                stream: .stdout,
+                deltaBase64: "AQI=",
+                capReached: false
             ),
             [
-                "processId": "cmd-1",
-                "stream": "stderr",
-                "deltaBase64": "ZXJy",
-                "capReached": true
+                "processId": "proc-1",
+                "stream": "stdout",
+                "deltaBase64": "AQI=",
+                "capReached": false
             ]
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                CommandExecOutputDeltaNotification.self,
+                from: Data(#"{"processId":"proc-1","stream":"stdout","deltaBase64":"AQI=","capReached":false}"#.utf8)
+            ),
+            CommandExecOutputDeltaNotification(
+                processID: "proc-1",
+                stream: .stdout,
+                deltaBase64: "AQI=",
+                capReached: false
+            )
         )
     }
 }
