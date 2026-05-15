@@ -27300,6 +27300,51 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(files[0]["path"] as? String, "alpha.txt")
     }
 
+    func testFuzzyFileSearchRejectsMalformedParamsLikeRustProtocol() throws {
+        let codexHome = try TemporaryDirectory()
+        let cases: [(String, String)] = [
+            (
+                #"{"id":1,"method":"fuzzyFileSearch","params":{"roots":[]}}"#,
+                "missing field `query`"
+            ),
+            (
+                #"{"id":2,"method":"fuzzyFileSearch","params":{"query":null,"roots":[]}}"#,
+                "Invalid request: invalid type: null, expected a string"
+            ),
+            (
+                #"{"id":3,"method":"fuzzyFileSearch","params":{"query":1,"roots":[]}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":4,"method":"fuzzyFileSearch","params":{"query":""}}"#,
+                "missing field `roots`"
+            ),
+            (
+                #"{"id":5,"method":"fuzzyFileSearch","params":{"query":"","roots":null}}"#,
+                "Invalid request: invalid type: null, expected a sequence"
+            ),
+            (
+                #"{"id":6,"method":"fuzzyFileSearch","params":{"query":"","roots":"."}}"#,
+                #"Invalid request: invalid type: string ".", expected a sequence"#
+            ),
+            (
+                #"{"id":7,"method":"fuzzyFileSearch","params":{"query":"","roots":[1]}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            ),
+            (
+                #"{"id":8,"method":"fuzzyFileSearch","params":{"query":"","roots":[],"cancellationToken":1}}"#,
+                "Invalid request: invalid type: integer `1`, expected a string"
+            )
+        ]
+
+        for (request, expectedMessage) in cases {
+            let response = try appServerResponse(request, codexHome: codexHome.url)
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, expectedMessage)
+        }
+    }
+
     func testFuzzyFileSearchAppliesRustMatchLimitAcrossAllRoots() throws {
         let codexHome = try TemporaryDirectory()
         let rootA = try TemporaryDirectory()

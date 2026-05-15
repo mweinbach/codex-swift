@@ -17224,13 +17224,15 @@ public enum CodexAppServer {
     }
 
     fileprivate static func fuzzyFileSearchResult(params: [String: Any]?) throws -> [String: Any] {
-        guard let query = stringParam(params?["query"]) else {
-            throw AppServerError.invalidRequest("missing query")
-        }
+        let query = try rustRequiredStringParam(params?["query"], field: "query")
+        let roots = try rustRequiredStringArrayParam(
+            params?["roots"],
+            missingMessage: "missing field `roots`"
+        )
+        _ = try rustOptionalStringParam(params?["cancellationToken"])
         guard !query.isEmpty else {
             return ["files": []]
         }
-        let roots = stringArrayParam(params?["roots"]) ?? []
         return ["files": limitedFuzzyFileSearchResults(query: query, roots: roots)]
     }
 
