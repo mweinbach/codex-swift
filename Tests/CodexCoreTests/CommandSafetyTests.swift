@@ -447,10 +447,20 @@ final class CommandSafetyTests: XCTestCase {
             "-Command",
             "pwd && ls"
         ]))
+        XCTAssertTrue(CommandSafety.isKnownSafeCommand([
+            "pwsh.exe",
+            "-Command",
+            "Test-Path Cargo.toml || Get-Location"
+        ]))
         XCTAssertFalse(CommandSafety.isKnownSafeCommand([
             "powershell.exe",
             "-Command",
             "pwd && ls"
+        ]))
+        XCTAssertFalse(CommandSafety.isKnownSafeCommand([
+            "powershell.exe",
+            "-Command",
+            "Test-Path Cargo.toml || Get-Location"
         ]))
     }
 

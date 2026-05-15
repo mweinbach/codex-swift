@@ -12,6 +12,7 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-14: rechecked Rust's PowerShell command-safety parser in `codex-rs/shell-command/src/command_safety/windows_safe_commands.rs`. Swift now has focused coverage for Rust's PowerShell Core-only pipeline-chain handling, allowing read-only `pwsh` `&&` / `||` chains while continuing to reject the same chains through legacy `powershell.exe`.
 - 2026-05-14: rechecked Rust commit `06e5dfa4dd` and `codex-rs/app-server-protocol/src/protocol/v2/thread.rs`. Swift `thread/fork` responses now include the top-level `sessionId` for the newly forked thread while preserving backwards-compatible typed decoding for older payloads that omitted it.
 - 2026-05-14: rechecked Rust's app-server thread-history replay for `turn_started` / `turn_complete` from `codex-rs/app-server-protocol/src/protocol/thread_history.rs`. Swift app-server resume/read rebuilding now preserves explicit persisted turn IDs, `inProgress`/completed status, start/completion timing, duration, and empty explicit in-progress turns instead of collapsing those lifecycle boundaries into generated implicit turn IDs.
 - 2026-05-14: rechecked Rust's `codex-rs/responses-api-proxy/src/lib.rs` `Args` surface. Swift's standalone `codex-responses-api-proxy` executable now accepts `--dump-dir` and advertises it in help like Rust, using the same shared parser shape as the proxy library tests while continuing to feed the existing request/response dump implementation.
