@@ -3686,13 +3686,10 @@ public enum CodexAppServer {
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
         let rolloutPath: String
-        if let path = stringParam(params?["rolloutPath"]) ?? stringParam(params?["rollout_path"]) {
+        if let path = try legacyGetConversationSummaryRolloutPath(params) {
             rolloutPath = resolvedRolloutPath(path, configuration: configuration)
         } else {
-            let rawID = stringParam(params?["conversationId"]) ?? stringParam(params?["conversation_id"])
-            guard let rawID else {
-                throw AppServerError.invalidRequest("missing conversationId")
-            }
+            let rawID = try legacyGetConversationSummaryConversationID(params)
             let conversationID: ConversationId
             do {
                 conversationID = try ConversationId(string: rawID)
@@ -3722,6 +3719,35 @@ public enum CodexAppServer {
                 defaultProvider: configuration.defaultModelProvider
             )
         ]
+    }
+
+    private static func legacyGetConversationSummaryRolloutPath(_ params: [String: Any]?) throws -> String? {
+        guard let params else {
+            throw legacyGetConversationSummaryParamsError()
+        }
+        if let value = params["rolloutPath"] {
+            guard let path = value as? String else {
+                throw legacyGetConversationSummaryParamsError()
+            }
+            return path
+        }
+        return nil
+    }
+
+    private static func legacyGetConversationSummaryConversationID(_ params: [String: Any]?) throws -> String {
+        guard let params,
+              let value = params["conversationId"],
+              let conversationID = value as? String
+        else {
+            throw legacyGetConversationSummaryParamsError()
+        }
+        return conversationID
+    }
+
+    private static func legacyGetConversationSummaryParamsError() -> AppServerError {
+        AppServerError.invalidRequest(
+            "Invalid request: data did not match any variant of untagged enum GetConversationSummaryParams"
+        )
     }
 
     private static func resolvedRolloutPath(

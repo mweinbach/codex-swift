@@ -2426,6 +2426,30 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(summary["modelProvider"] as? String, "mock_provider")
     }
 
+    func testGetConversationSummaryRejectsMalformedUntaggedParamsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let expectedMessage = "Invalid request: data did not match any variant of untagged enum GetConversationSummaryParams"
+        let cases = [
+            #"{}"#,
+            #"{"conversationId":1}"#,
+            #"{"conversationId":null}"#,
+            #"{"rolloutPath":1}"#,
+            #"{"rolloutPath":null}"#,
+            #"{"conversation_id":"00000000-0000-4000-8000-000000000125"}"#,
+            #"{"rollout_path":"sessions/test.jsonl"}"#
+        ]
+
+        for (index, params) in cases.enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 1),"method":"getConversationSummary","params":\#(params)}"#,
+                codexHome: temp.url
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, expectedMessage)
+        }
+    }
+
     func testGetConversationSummaryByThreadIDReadsPathlessStateStoreThread() async throws {
         let temp = try TemporaryDirectory()
         let stateStore = try createAppServerStateStore(codexHome: temp.url)
