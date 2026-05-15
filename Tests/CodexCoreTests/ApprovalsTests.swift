@@ -203,6 +203,63 @@ final class ApprovalsTests: XCTestCase {
         ).networkApprovalContext)
     }
 
+    func testNetworkPolicyAmendmentMapsExecPolicyRuleLikeRust() {
+        let amendment = NetworkPolicyAmendment(host: "example.com", action: .deny)
+        let mapped = amendment.execPolicyNetworkRuleAmendment(
+            context: NetworkApprovalContext(host: "example.com", protocol: .socks5Udp),
+            host: "example.com"
+        )
+
+        XCTAssertEqual(
+            mapped,
+            ExecPolicyNetworkRuleAmendment(
+                protocol: .socks5Udp,
+                decision: .forbidden,
+                justification: "Deny socks5_udp access to example.com"
+            )
+        )
+
+        let allow = NetworkPolicyAmendment(host: "api.github.com", action: .allow)
+            .execPolicyNetworkRuleAmendment(
+                context: NetworkApprovalContext(host: "api.github.com", protocol: .https),
+                host: "api.github.com"
+            )
+        XCTAssertEqual(allow.justification, "Allow https_connect access to api.github.com")
+        XCTAssertEqual(allow.protocol, .https)
+        XCTAssertEqual(allow.decision, .allow)
+    }
+
+    func testDeniedNetworkPolicyMessageMatchesRustReasons() {
+        XCTAssertNil(BlockedNetworkRequest(
+            host: "example.com",
+            reason: "not_allowed",
+            decision: "ask"
+        ).deniedNetworkPolicyMessage)
+
+        XCTAssertEqual(
+            BlockedNetworkRequest(host: "   ", reason: "not_allowed", decision: "deny")
+                .deniedNetworkPolicyMessage,
+            "Network access was blocked by policy."
+        )
+
+        let cases: [(String, String)] = [
+            ("denied", "domain is explicitly denied by policy and cannot be approved from this prompt"),
+            ("not_allowed", "domain is not on the allowlist for the current sandbox mode"),
+            ("not_allowed_local", "local/private network addresses are blocked by the sandbox policy"),
+            ("method_not_allowed", "request method is blocked by the current network mode"),
+            ("proxy_disabled", "network proxy is disabled"),
+            ("unexpected", "request is blocked by network policy"),
+        ]
+
+        for (reason, detail) in cases {
+            XCTAssertEqual(
+                BlockedNetworkRequest(host: " example.com ", reason: reason, decision: "deny")
+                    .deniedNetworkPolicyMessage,
+                "Network access to \"example.com\" was blocked: \(detail)."
+            )
+        }
+    }
+
     func testReviewDecisionDefaultIsDenied() {
         XCTAssertEqual(ReviewDecision.default, .denied)
     }

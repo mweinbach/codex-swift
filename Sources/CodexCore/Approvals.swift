@@ -175,6 +175,111 @@ public struct NetworkPolicyAmendment: Equatable, Codable, Sendable {
         self.host = host
         self.action = action
     }
+
+    public func execPolicyNetworkRuleAmendment(
+        context: NetworkApprovalContext,
+        host: String
+    ) -> ExecPolicyNetworkRuleAmendment {
+        let actionVerb: String
+        let decision: ExecPolicyDecision
+        switch action {
+        case .allow:
+            actionVerb = "Allow"
+            decision = .allow
+        case .deny:
+            actionVerb = "Deny"
+            decision = .forbidden
+        }
+
+        return ExecPolicyNetworkRuleAmendment(
+            protocol: NetworkRuleProtocol(approvalProtocol: context.protocol),
+            decision: decision,
+            justification: "\(actionVerb) \(context.protocol.execPolicyJustificationLabel) access to \(host)"
+        )
+    }
+}
+
+public struct ExecPolicyNetworkRuleAmendment: Equatable, Sendable {
+    public let `protocol`: NetworkRuleProtocol
+    public let decision: ExecPolicyDecision
+    public let justification: String
+
+    public init(protocol: NetworkRuleProtocol, decision: ExecPolicyDecision, justification: String) {
+        self.protocol = `protocol`
+        self.decision = decision
+        self.justification = justification
+    }
+}
+
+public struct BlockedNetworkRequest: Equatable, Sendable {
+    public let host: String
+    public let reason: String
+    public let decision: String?
+
+    public init(host: String, reason: String, decision: String?) {
+        self.host = host
+        self.reason = reason
+        self.decision = decision
+    }
+
+    public var deniedNetworkPolicyMessage: String? {
+        guard decision == "deny" else {
+            return nil
+        }
+
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedHost.isEmpty else {
+            return "Network access was blocked by policy."
+        }
+
+        let detail: String
+        switch reason {
+        case "denied":
+            detail = "domain is explicitly denied by policy and cannot be approved from this prompt"
+        case "not_allowed":
+            detail = "domain is not on the allowlist for the current sandbox mode"
+        case "not_allowed_local":
+            detail = "local/private network addresses are blocked by the sandbox policy"
+        case "method_not_allowed":
+            detail = "request method is blocked by the current network mode"
+        case "proxy_disabled":
+            detail = "network proxy is disabled"
+        default:
+            detail = "request is blocked by network policy"
+        }
+
+        return "Network access to \"\(trimmedHost)\" was blocked: \(detail)."
+    }
+}
+
+private extension NetworkRuleProtocol {
+    init(approvalProtocol: NetworkApprovalProtocol) {
+        switch approvalProtocol {
+        case .http:
+            self = .http
+        case .https:
+            self = .https
+        case .socks5Tcp:
+            self = .socks5Tcp
+        case .socks5Udp:
+            self = .socks5Udp
+        }
+    }
+}
+
+private extension NetworkApprovalProtocol {
+    var execPolicyJustificationLabel: String {
+        switch self {
+        case .http:
+            return "http"
+        case .https:
+            return "https_connect"
+        case .socks5Tcp:
+            return "socks5_tcp"
+        case .socks5Udp:
+            return "socks5_udp"
+        }
+    }
 }
 
 private extension KeyedEncodingContainer {

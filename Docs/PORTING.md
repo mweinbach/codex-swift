@@ -684,6 +684,7 @@ Recent upstream audit checkpoint:
 - 2026-05-15: rechecked Rust commit `e783341b70` and `codex-rs/apply-patch/src/standalone_executable.rs`. Swift standalone `apply_patch` empty-stdin usage text now matches Rust's canonical `echo 'PATCH' | apply_patch` hint while preserving the `applypatch` argv0 dispatch alias.
 - 2026-05-15: rechecked Rust's externally tagged `SessionSource` enum in `codex-rs/protocol/src/protocol.rs` and the app-server projection in `codex-rs/app-server-protocol/src/protocol/v2/thread_data.rs`. Swift now rejects malformed session-source objects with multiple known variant tags instead of silently choosing the first recognized tag.
 - 2026-05-15: rechecked Rust commit `61142b6169` and `codex-rs/protocol/src/tool_name.rs`. Swift unsupported non-interactive function-call fallbacks now format namespaced tool names with Rust's structural `ToolName` display rule, preserving the namespace prefix before the child tool name when unavailable MCP placeholders are disabled.
+- 2026-05-15: rechecked Rust's `codex-rs/core/src/network_policy_decision.rs`. Swift approval helpers now preserve Rust's denied-network-policy user message mapping and network-policy-amendment to exec-policy network-rule translation, including protocol labels and allow/deny decision mapping.
 
 ## Current Swift Package Shape
 
