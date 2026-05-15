@@ -308,4 +308,28 @@ final class SessionConfiguredEventTests: XCTestCase {
         let data = try JSONEncoder().encode(event.approvalsReviewer)
         XCTAssertEqual(String(data: data, encoding: .utf8), #""guardian_subagent""#)
     }
+
+    func testApprovalsReviewerRejectsNullLikeRustDefaultedField() throws {
+        let json = """
+        {
+          "session_id": "67e55044-10b1-426f-9247-bb680e5fe0c8",
+          "thread_id": "67e55044-10b1-426f-9247-bb680e5fe0c8",
+          "model": "codex-mini-latest",
+          "model_provider_id": "openai",
+          "approval_policy": "never",
+          "approvals_reviewer": null,
+          "permission_profile": {
+            "type": "managed",
+            "file_system": {
+              "type": "restricted",
+              "entries": []
+            },
+            "network": "restricted"
+          },
+          "cwd": "/home/user/project"
+        }
+        """.data(using: .utf8)!
+
+        XCTAssertThrowsError(try JSONDecoder().decode(SessionConfiguredEvent.self, from: json))
+    }
 }

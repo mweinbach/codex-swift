@@ -159,7 +159,11 @@ public struct SessionConfiguredEvent: Equatable, Codable, Sendable {
         modelProviderID = try container.decode(String.self, forKey: .modelProviderID)
         serviceTier = try container.decodeIfPresent(String.self, forKey: .serviceTier)
         approvalPolicy = try container.decode(AskForApproval.self, forKey: .approvalPolicy)
-        approvalsReviewer = try container.decodeIfPresent(ApprovalsReviewer.self, forKey: .approvalsReviewer) ?? .user
+        approvalsReviewer = try container.decodeRustDefaulted(
+            ApprovalsReviewer.self,
+            forKey: .approvalsReviewer,
+            defaultValue: .user
+        )
         activePermissionProfile = try container.decodeIfPresent(
             ActivePermissionProfile.self,
             forKey: .activePermissionProfile
