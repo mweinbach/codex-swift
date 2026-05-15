@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `PluginAvailability` in
+  `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now pins the
+  standalone legacy `"ENABLED"` alias decode path and verifies that it
+  re-serializes through the canonical `"AVAILABLE"` value like Rust.
 - 2026-05-15: rechecked Rust permission-profile `glob_scan_max_depth`
   validation in `codex-rs/core/src/config/permissions.rs`. Swift config
   loading now has focused coverage that custom permission profiles reject zero

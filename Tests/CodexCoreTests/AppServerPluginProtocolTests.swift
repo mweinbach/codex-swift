@@ -632,6 +632,14 @@ final class AppServerPluginProtocolTests: XCTestCase {
         XCTAssertEqual(decoded.keywords, [])
     }
 
+    func testPluginAvailabilityEnabledAliasReencodesAsAvailableLikeRustProtocol() throws {
+        let decoded = try JSONDecoder().decode(PluginAvailability.self, from: Data(#""ENABLED""#.utf8))
+        let reencoded = String(data: try JSONEncoder().encode(decoded), encoding: .utf8)
+
+        XCTAssertEqual(decoded, .available)
+        XCTAssertEqual(reencoded, #""AVAILABLE""#)
+    }
+
     func testPluginSummaryRejectsExplicitNullForRustDefaultedKeywords() {
         XCTAssertThrowsError(
             try JSONDecoder().decode(
