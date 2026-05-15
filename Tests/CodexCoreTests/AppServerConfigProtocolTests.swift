@@ -34,10 +34,7 @@ final class AppServerConfigProtocolTests: XCTestCase {
 
     func testConfigReadResponseSkipsMissingLayersLikeRust() throws {
         let response = AppServerProtocol.ConfigReadResponse(
-            config: .object([
-                "model": .string("gpt-5"),
-                "approval_policy": .string("never")
-            ]),
+            config: AppServerProtocol.Config(model: "gpt-5", approvalPolicy: .never),
             origins: [
                 "model": ConfigLayerMetadata(
                     name: .user(file: try AbsolutePath(absolutePath: "/Users/me/.codex/config.toml")),
@@ -47,10 +44,7 @@ final class AppServerConfigProtocolTests: XCTestCase {
         )
 
         try XCTAssertJSONObjectEqual(response, [
-            "config": [
-                "approval_policy": "never",
-                "model": "gpt-5"
-            ],
+            "config": expectedConfigObject(model: "gpt-5", approvalPolicy: "never"),
             "origins": [
                 "model": [
                     "name": [
@@ -65,25 +59,25 @@ final class AppServerConfigProtocolTests: XCTestCase {
 
     func testConfigReadResponseIncludesLayerDisabledReasonOnlyWhenPresent() throws {
         let response = AppServerProtocol.ConfigReadResponse(
-            config: .object([:]),
+            config: AppServerProtocol.Config(),
             origins: [:],
             layers: [
                 AppServerProtocol.ConfigLayer(
                     name: .system(file: try AbsolutePath(absolutePath: "/etc/codex/config.toml")),
                     version: "sha256:system",
-                    config: .object(["model": .string("gpt-system")])
+                    config: AppServerProtocol.Config(model: "gpt-system")
                 ),
                 AppServerProtocol.ConfigLayer(
                     name: .project(dotCodexFolder: try AbsolutePath(absolutePath: "/repo/.codex")),
                     version: "sha256:project",
-                    config: .object([:]),
+                    config: AppServerProtocol.Config(),
                     disabledReason: "not trusted"
                 )
             ]
         )
 
         try XCTAssertJSONObjectEqual(response, [
-            "config": [String: Any](),
+            "config": expectedConfigObject(),
             "origins": [String: Any](),
             "layers": [
                 [
@@ -92,9 +86,7 @@ final class AppServerConfigProtocolTests: XCTestCase {
                         "file": "/etc/codex/config.toml"
                     ],
                     "version": "sha256:system",
-                    "config": [
-                        "model": "gpt-system"
-                    ]
+                    "config": expectedConfigObject(model: "gpt-system")
                 ],
                 [
                     "name": [
@@ -102,11 +94,148 @@ final class AppServerConfigProtocolTests: XCTestCase {
                         "dotCodexFolder": "/repo/.codex"
                     ],
                     "version": "sha256:project",
-                    "config": [String: Any](),
+                    "config": expectedConfigObject(),
                     "disabledReason": "not trusted"
                 ]
             ]
         ])
+    }
+
+    func testConfigReadResponseUsesTypedConfigRustShape() throws {
+        let config = AppServerProtocol.Config(
+            model: "gpt-5",
+            modelContextWindow: 128_000,
+            modelProvider: "openai",
+            approvalPolicy: .onRequest,
+            approvalsReviewer: .autoReview,
+            sandboxMode: .workspaceWrite,
+            sandboxWorkspaceWrite: AppServerProtocol.SandboxWorkspaceWrite(
+                writableRoots: ["/repo"],
+                networkAccess: true
+            ),
+            forcedLoginMethod: .chatgpt,
+            webSearch: .live,
+            tools: AppServerProtocol.ToolsV2(
+                webSearch: AppServerProtocol.WebSearchToolConfig(
+                    contextSize: .low,
+                    allowedDomains: ["openai.com"],
+                    location: AppServerProtocol.WebSearchLocation(country: "US", city: "New York")
+                ),
+                viewImage: true
+            ),
+            profiles: [
+                "work": AppServerProtocol.ProfileV2(
+                    modelProvider: "openai",
+                    webSearch: .cached,
+                    additional: ["custom_profile_flag": .bool(true)]
+                )
+            ],
+            analytics: AppServerProtocol.AnalyticsConfig(
+                enabled: true,
+                additional: ["sink": .string("test")]
+            ),
+            apps: AppServerProtocol.AppsConfig(
+                defaultConfig: AppServerProtocol.AppsDefaultConfig(destructiveEnabled: false),
+                apps: [
+                    "slack": AppServerProtocol.AppConfig(
+                        defaultToolsApprovalMode: .prompt,
+                        tools: AppServerProtocol.AppToolsConfig(tools: [
+                            "send": AppServerProtocol.AppToolConfig(enabled: true, approvalMode: .approve)
+                        ])
+                    )
+                ]
+            ),
+            additional: ["custom_flag": .bool(true)]
+        )
+
+        try XCTAssertJSONObjectEqual(config, expectedConfigObject(
+            model: "gpt-5",
+            modelContextWindow: 128_000,
+            modelProvider: "openai",
+            approvalPolicy: "on-request",
+            approvalsReviewer: "guardian_subagent",
+            sandboxMode: "workspace-write",
+            sandboxWorkspaceWrite: [
+                "writable_roots": ["/repo"],
+                "network_access": true,
+                "exclude_tmpdir_env_var": false,
+                "exclude_slash_tmp": false
+            ],
+            forcedLoginMethod: "chatgpt",
+            webSearch: "live",
+            tools: [
+                "web_search": [
+                    "context_size": "low",
+                    "allowed_domains": ["openai.com"],
+                    "location": [
+                        "country": "US",
+                        "region": NSNull(),
+                        "city": "New York",
+                        "timezone": NSNull()
+                    ]
+                ],
+                "view_image": true
+            ],
+            profiles: [
+                "work": [
+                    "model": NSNull(),
+                    "model_provider": "openai",
+                    "approval_policy": NSNull(),
+                    "approvals_reviewer": NSNull(),
+                    "service_tier": NSNull(),
+                    "model_reasoning_effort": NSNull(),
+                    "model_reasoning_summary": NSNull(),
+                    "model_verbosity": NSNull(),
+                    "web_search": "cached",
+                    "tools": NSNull(),
+                    "chatgpt_base_url": NSNull(),
+                    "custom_profile_flag": true
+                ]
+            ],
+            analytics: [
+                "enabled": true,
+                "sink": "test"
+            ],
+            apps: [
+                "_default": [
+                    "enabled": true,
+                    "destructive_enabled": false,
+                    "open_world_enabled": true
+                ],
+                "slack": [
+                    "enabled": true,
+                    "destructive_enabled": NSNull(),
+                    "open_world_enabled": NSNull(),
+                    "default_tools_approval_mode": "prompt",
+                    "default_tools_enabled": NSNull(),
+                    "tools": [
+                        "send": [
+                            "enabled": true,
+                            "approval_mode": "approve"
+                        ]
+                    ]
+                ]
+            ],
+            additional: ["custom_flag": true]
+        ))
+
+        let decoded = try JSONDecoder().decode(AppServerProtocol.Config.self, from: try JSONEncoder().encode(config))
+        XCTAssertEqual(decoded, config)
+    }
+
+    func testConfigDefaultedFieldsRejectExplicitNullLikeRust() {
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            AppServerProtocol.SandboxWorkspaceWrite.self,
+            from: Data(#"{"writable_roots":null}"#.utf8)
+        ))
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            AppServerProtocol.Config.self,
+            from: Data(#"{"profiles":null}"#.utf8)
+        ))
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            AppServerProtocol.AppsDefaultConfig.self,
+            from: Data(#"{"enabled":null}"#.utf8)
+        ))
     }
 
     func testConfigRequirementsReadResponseMatchesRustOptionShape() throws {
@@ -419,4 +548,63 @@ final class AppServerConfigProtocolTests: XCTestCase {
             "userLayerNotFound"
         ])
     }
+}
+
+private func expectedConfigObject(
+    model: Any = NSNull(),
+    reviewModel: Any = NSNull(),
+    modelContextWindow: Any = NSNull(),
+    modelAutoCompactTokenLimit: Any = NSNull(),
+    modelProvider: Any = NSNull(),
+    approvalPolicy: Any = NSNull(),
+    approvalsReviewer: Any = NSNull(),
+    sandboxMode: Any = NSNull(),
+    sandboxWorkspaceWrite: Any = NSNull(),
+    forcedChatGPTWorkspaceID: Any = NSNull(),
+    forcedLoginMethod: Any = NSNull(),
+    webSearch: Any = NSNull(),
+    tools: Any = NSNull(),
+    profile: Any = NSNull(),
+    profiles: Any = [String: Any](),
+    instructions: Any = NSNull(),
+    developerInstructions: Any = NSNull(),
+    compactPrompt: Any = NSNull(),
+    modelReasoningEffort: Any = NSNull(),
+    modelReasoningSummary: Any = NSNull(),
+    modelVerbosity: Any = NSNull(),
+    serviceTier: Any = NSNull(),
+    analytics: Any = NSNull(),
+    apps: Any = NSNull(),
+    additional: [String: Any] = [:]
+) -> [String: Any] {
+    var object: [String: Any] = [
+        "model": model,
+        "review_model": reviewModel,
+        "model_context_window": modelContextWindow,
+        "model_auto_compact_token_limit": modelAutoCompactTokenLimit,
+        "model_provider": modelProvider,
+        "approval_policy": approvalPolicy,
+        "approvals_reviewer": approvalsReviewer,
+        "sandbox_mode": sandboxMode,
+        "sandbox_workspace_write": sandboxWorkspaceWrite,
+        "forced_chatgpt_workspace_id": forcedChatGPTWorkspaceID,
+        "forced_login_method": forcedLoginMethod,
+        "web_search": webSearch,
+        "tools": tools,
+        "profile": profile,
+        "profiles": profiles,
+        "instructions": instructions,
+        "developer_instructions": developerInstructions,
+        "compact_prompt": compactPrompt,
+        "model_reasoning_effort": modelReasoningEffort,
+        "model_reasoning_summary": modelReasoningSummary,
+        "model_verbosity": modelVerbosity,
+        "service_tier": serviceTier,
+        "analytics": analytics,
+        "apps": apps
+    ]
+    for (key, value) in additional {
+        object[key] = value
+    }
+    return object
 }

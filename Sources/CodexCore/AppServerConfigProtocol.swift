@@ -1,5 +1,38 @@
 import Foundation
 
+fileprivate struct AppServerConfigCodingKey: CodingKey, Hashable {
+    let stringValue: String
+    let intValue: Int?
+
+    init(stringValue: String) {
+        self.stringValue = stringValue
+        intValue = nil
+    }
+
+    init?(intValue: Int) {
+        stringValue = String(intValue)
+        self.intValue = intValue
+    }
+}
+
+fileprivate extension KeyedDecodingContainer where Key == AppServerConfigCodingKey {
+    func decodeAdditionalFields(excluding excludedKeys: Set<String>) throws -> [String: JSONValue] {
+        var additional: [String: JSONValue] = [:]
+        for key in allKeys where !excludedKeys.contains(key.stringValue) {
+            additional[key.stringValue] = try decode(JSONValue.self, forKey: key)
+        }
+        return additional
+    }
+}
+
+fileprivate extension KeyedEncodingContainer where Key == AppServerConfigCodingKey {
+    mutating func encodeAdditionalFields(_ additional: [String: JSONValue]) throws {
+        for key in additional.keys.sorted() {
+            try encode(additional[key], forKey: AppServerConfigCodingKey(stringValue: key))
+        }
+    }
+}
+
 public struct TextPosition: Codable, Equatable, Sendable {
     public let line: Int
     public let column: Int
@@ -69,6 +102,719 @@ extension ConfigWarningNotification: Codable {
 }
 
 extension AppServerProtocol {
+    public struct WebSearchLocation: Codable, Equatable, Sendable {
+        public let country: String?
+        public let region: String?
+        public let city: String?
+        public let timezone: String?
+
+        public init(country: String? = nil, region: String? = nil, city: String? = nil, timezone: String? = nil) {
+            self.country = country
+            self.region = region
+            self.city = city
+            self.timezone = timezone
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encodeNilOrValue(country, forKey: .country)
+            try container.encodeNilOrValue(region, forKey: .region)
+            try container.encodeNilOrValue(city, forKey: .city)
+            try container.encodeNilOrValue(timezone, forKey: .timezone)
+        }
+    }
+
+    public struct WebSearchToolConfig: Codable, Equatable, Sendable {
+        public let contextSize: WebSearchContextSize?
+        public let allowedDomains: [String]?
+        public let location: WebSearchLocation?
+
+        private enum CodingKeys: String, CodingKey {
+            case contextSize = "context_size"
+            case allowedDomains = "allowed_domains"
+            case location
+        }
+
+        public init(
+            contextSize: WebSearchContextSize? = nil,
+            allowedDomains: [String]? = nil,
+            location: WebSearchLocation? = nil
+        ) {
+            self.contextSize = contextSize
+            self.allowedDomains = allowedDomains
+            self.location = location
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encodeNilOrValue(contextSize, forKey: .contextSize)
+            try container.encodeNilOrValue(allowedDomains, forKey: .allowedDomains)
+            try container.encodeNilOrValue(location, forKey: .location)
+        }
+    }
+
+    public struct SandboxWorkspaceWrite: Codable, Equatable, Sendable {
+        public let writableRoots: [String]
+        public let networkAccess: Bool
+        public let excludeTmpdirEnvVar: Bool
+        public let excludeSlashTmp: Bool
+
+        private enum CodingKeys: String, CodingKey {
+            case writableRoots = "writable_roots"
+            case networkAccess = "network_access"
+            case excludeTmpdirEnvVar = "exclude_tmpdir_env_var"
+            case excludeSlashTmp = "exclude_slash_tmp"
+        }
+
+        public init(
+            writableRoots: [String] = [],
+            networkAccess: Bool = false,
+            excludeTmpdirEnvVar: Bool = false,
+            excludeSlashTmp: Bool = false
+        ) {
+            self.writableRoots = writableRoots
+            self.networkAccess = networkAccess
+            self.excludeTmpdirEnvVar = excludeTmpdirEnvVar
+            self.excludeSlashTmp = excludeSlashTmp
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            if container.contains(.writableRoots) {
+                writableRoots = try container.decode([String].self, forKey: .writableRoots)
+            } else {
+                writableRoots = []
+            }
+            networkAccess = try container.decodeRustDefaulted(Bool.self, forKey: .networkAccess, defaultValue: false)
+            excludeTmpdirEnvVar = try container.decodeRustDefaulted(
+                Bool.self,
+                forKey: .excludeTmpdirEnvVar,
+                defaultValue: false
+            )
+            excludeSlashTmp = try container.decodeRustDefaulted(Bool.self, forKey: .excludeSlashTmp, defaultValue: false)
+        }
+    }
+
+    public struct ToolsV2: Codable, Equatable, Sendable {
+        public let webSearch: WebSearchToolConfig?
+        public let viewImage: Bool?
+
+        private enum CodingKeys: String, CodingKey {
+            case webSearch = "web_search"
+            case viewImage = "view_image"
+        }
+
+        public init(webSearch: WebSearchToolConfig? = nil, viewImage: Bool? = nil) {
+            self.webSearch = webSearch
+            self.viewImage = viewImage
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encodeNilOrValue(webSearch, forKey: .webSearch)
+            try container.encodeNilOrValue(viewImage, forKey: .viewImage)
+        }
+    }
+
+    public struct ProfileV2: Codable, Equatable, Sendable {
+        public let model: String?
+        public let modelProvider: String?
+        public let approvalPolicy: AskForApproval?
+        public let approvalsReviewer: ApprovalsReviewer?
+        public let serviceTier: String?
+        public let modelReasoningEffort: ReasoningEffort?
+        public let modelReasoningSummary: ReasoningSummary?
+        public let modelVerbosity: Verbosity?
+        public let webSearch: WebSearchMode?
+        public let tools: ToolsV2?
+        public let chatgptBaseURL: String?
+        public let additional: [String: JSONValue]
+
+        private static let knownKeys: Set<String> = [
+            "model",
+            "model_provider",
+            "approval_policy",
+            "approvals_reviewer",
+            "service_tier",
+            "model_reasoning_effort",
+            "model_reasoning_summary",
+            "model_verbosity",
+            "web_search",
+            "tools",
+            "chatgpt_base_url"
+        ]
+
+        public init(
+            model: String? = nil,
+            modelProvider: String? = nil,
+            approvalPolicy: AskForApproval? = nil,
+            approvalsReviewer: ApprovalsReviewer? = nil,
+            serviceTier: String? = nil,
+            modelReasoningEffort: ReasoningEffort? = nil,
+            modelReasoningSummary: ReasoningSummary? = nil,
+            modelVerbosity: Verbosity? = nil,
+            webSearch: WebSearchMode? = nil,
+            tools: ToolsV2? = nil,
+            chatgptBaseURL: String? = nil,
+            additional: [String: JSONValue] = [:]
+        ) {
+            self.model = model
+            self.modelProvider = modelProvider
+            self.approvalPolicy = approvalPolicy
+            self.approvalsReviewer = approvalsReviewer
+            self.serviceTier = serviceTier
+            self.modelReasoningEffort = modelReasoningEffort
+            self.modelReasoningSummary = modelReasoningSummary
+            self.modelVerbosity = modelVerbosity
+            self.webSearch = webSearch
+            self.tools = tools
+            self.chatgptBaseURL = chatgptBaseURL
+            self.additional = additional
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: AppServerConfigCodingKey.self)
+            model = try container.decodeIfPresent(String.self, forKey: AppServerConfigCodingKey(stringValue: "model"))
+            modelProvider = try container.decodeIfPresent(
+                String.self,
+                forKey: AppServerConfigCodingKey(stringValue: "model_provider")
+            )
+            approvalPolicy = try container.decodeIfPresent(
+                AskForApproval.self,
+                forKey: AppServerConfigCodingKey(stringValue: "approval_policy")
+            )
+            approvalsReviewer = try container.decodeIfPresent(
+                ApprovalsReviewer.self,
+                forKey: AppServerConfigCodingKey(stringValue: "approvals_reviewer")
+            )
+            serviceTier = try container.decodeIfPresent(
+                String.self,
+                forKey: AppServerConfigCodingKey(stringValue: "service_tier")
+            )
+            modelReasoningEffort = try container.decodeIfPresent(
+                ReasoningEffort.self,
+                forKey: AppServerConfigCodingKey(stringValue: "model_reasoning_effort")
+            )
+            modelReasoningSummary = try container.decodeIfPresent(
+                ReasoningSummary.self,
+                forKey: AppServerConfigCodingKey(stringValue: "model_reasoning_summary")
+            )
+            modelVerbosity = try container.decodeIfPresent(
+                Verbosity.self,
+                forKey: AppServerConfigCodingKey(stringValue: "model_verbosity")
+            )
+            webSearch = try container.decodeIfPresent(
+                WebSearchMode.self,
+                forKey: AppServerConfigCodingKey(stringValue: "web_search")
+            )
+            tools = try container.decodeIfPresent(ToolsV2.self, forKey: AppServerConfigCodingKey(stringValue: "tools"))
+            chatgptBaseURL = try container.decodeIfPresent(
+                String.self,
+                forKey: AppServerConfigCodingKey(stringValue: "chatgpt_base_url")
+            )
+            additional = try container.decodeAdditionalFields(excluding: Self.knownKeys)
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: AppServerConfigCodingKey.self)
+            try container.encodeNilOrValue(model, forKey: AppServerConfigCodingKey(stringValue: "model"))
+            try container.encodeNilOrValue(
+                modelProvider,
+                forKey: AppServerConfigCodingKey(stringValue: "model_provider")
+            )
+            try container.encodeNilOrValue(
+                approvalPolicy,
+                forKey: AppServerConfigCodingKey(stringValue: "approval_policy")
+            )
+            try container.encodeNilOrValue(
+                approvalsReviewer,
+                forKey: AppServerConfigCodingKey(stringValue: "approvals_reviewer")
+            )
+            try container.encodeNilOrValue(serviceTier, forKey: AppServerConfigCodingKey(stringValue: "service_tier"))
+            try container.encodeNilOrValue(
+                modelReasoningEffort,
+                forKey: AppServerConfigCodingKey(stringValue: "model_reasoning_effort")
+            )
+            try container.encodeNilOrValue(
+                modelReasoningSummary,
+                forKey: AppServerConfigCodingKey(stringValue: "model_reasoning_summary")
+            )
+            try container.encodeNilOrValue(
+                modelVerbosity,
+                forKey: AppServerConfigCodingKey(stringValue: "model_verbosity")
+            )
+            try container.encodeNilOrValue(webSearch, forKey: AppServerConfigCodingKey(stringValue: "web_search"))
+            try container.encodeNilOrValue(tools, forKey: AppServerConfigCodingKey(stringValue: "tools"))
+            try container.encodeNilOrValue(
+                chatgptBaseURL,
+                forKey: AppServerConfigCodingKey(stringValue: "chatgpt_base_url")
+            )
+            try container.encodeAdditionalFields(additional)
+        }
+    }
+
+    public enum AppToolApproval: String, Codable, Equatable, Sendable {
+        case auto
+        case prompt
+        case approve
+    }
+
+    public struct AppsDefaultConfig: Codable, Equatable, Sendable {
+        public let enabled: Bool
+        public let destructiveEnabled: Bool
+        public let openWorldEnabled: Bool
+
+        private enum CodingKeys: String, CodingKey {
+            case enabled
+            case destructiveEnabled = "destructive_enabled"
+            case openWorldEnabled = "open_world_enabled"
+        }
+
+        public init(enabled: Bool = true, destructiveEnabled: Bool = true, openWorldEnabled: Bool = true) {
+            self.enabled = enabled
+            self.destructiveEnabled = destructiveEnabled
+            self.openWorldEnabled = openWorldEnabled
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            enabled = try container.decodeRustDefaulted(Bool.self, forKey: .enabled, defaultValue: true)
+            destructiveEnabled = try container.decodeRustDefaulted(
+                Bool.self,
+                forKey: .destructiveEnabled,
+                defaultValue: true
+            )
+            openWorldEnabled = try container.decodeRustDefaulted(Bool.self, forKey: .openWorldEnabled, defaultValue: true)
+        }
+    }
+
+    public struct AppToolConfig: Codable, Equatable, Sendable {
+        public let enabled: Bool?
+        public let approvalMode: AppToolApproval?
+
+        private enum CodingKeys: String, CodingKey {
+            case enabled
+            case approvalMode = "approval_mode"
+        }
+
+        public init(enabled: Bool? = nil, approvalMode: AppToolApproval? = nil) {
+            self.enabled = enabled
+            self.approvalMode = approvalMode
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encodeNilOrValue(enabled, forKey: .enabled)
+            try container.encodeNilOrValue(approvalMode, forKey: .approvalMode)
+        }
+    }
+
+    public struct AppToolsConfig: Codable, Equatable, Sendable {
+        public let tools: [String: AppToolConfig]
+
+        public init(tools: [String: AppToolConfig] = [:]) {
+            self.tools = tools
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: AppServerConfigCodingKey.self)
+            var tools: [String: AppToolConfig] = [:]
+            for key in container.allKeys {
+                tools[key.stringValue] = try container.decode(AppToolConfig.self, forKey: key)
+            }
+            self.tools = tools
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: AppServerConfigCodingKey.self)
+            for key in tools.keys.sorted() {
+                try container.encode(tools[key], forKey: AppServerConfigCodingKey(stringValue: key))
+            }
+        }
+    }
+
+    public struct AppConfig: Codable, Equatable, Sendable {
+        public let enabled: Bool
+        public let destructiveEnabled: Bool?
+        public let openWorldEnabled: Bool?
+        public let defaultToolsApprovalMode: AppToolApproval?
+        public let defaultToolsEnabled: Bool?
+        public let tools: AppToolsConfig?
+
+        private enum CodingKeys: String, CodingKey {
+            case enabled
+            case destructiveEnabled = "destructive_enabled"
+            case openWorldEnabled = "open_world_enabled"
+            case defaultToolsApprovalMode = "default_tools_approval_mode"
+            case defaultToolsEnabled = "default_tools_enabled"
+            case tools
+        }
+
+        public init(
+            enabled: Bool = true,
+            destructiveEnabled: Bool? = nil,
+            openWorldEnabled: Bool? = nil,
+            defaultToolsApprovalMode: AppToolApproval? = nil,
+            defaultToolsEnabled: Bool? = nil,
+            tools: AppToolsConfig? = nil
+        ) {
+            self.enabled = enabled
+            self.destructiveEnabled = destructiveEnabled
+            self.openWorldEnabled = openWorldEnabled
+            self.defaultToolsApprovalMode = defaultToolsApprovalMode
+            self.defaultToolsEnabled = defaultToolsEnabled
+            self.tools = tools
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            enabled = try container.decodeRustDefaulted(Bool.self, forKey: .enabled, defaultValue: true)
+            destructiveEnabled = try container.decodeIfPresent(Bool.self, forKey: .destructiveEnabled)
+            openWorldEnabled = try container.decodeIfPresent(Bool.self, forKey: .openWorldEnabled)
+            defaultToolsApprovalMode = try container.decodeIfPresent(
+                AppToolApproval.self,
+                forKey: .defaultToolsApprovalMode
+            )
+            defaultToolsEnabled = try container.decodeIfPresent(Bool.self, forKey: .defaultToolsEnabled)
+            tools = try container.decodeIfPresent(AppToolsConfig.self, forKey: .tools)
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(enabled, forKey: .enabled)
+            try container.encodeNilOrValue(destructiveEnabled, forKey: .destructiveEnabled)
+            try container.encodeNilOrValue(openWorldEnabled, forKey: .openWorldEnabled)
+            try container.encodeNilOrValue(defaultToolsApprovalMode, forKey: .defaultToolsApprovalMode)
+            try container.encodeNilOrValue(defaultToolsEnabled, forKey: .defaultToolsEnabled)
+            try container.encodeNilOrValue(tools, forKey: .tools)
+        }
+    }
+
+    public struct AppsConfig: Codable, Equatable, Sendable {
+        public let defaultConfig: AppsDefaultConfig?
+        public let apps: [String: AppConfig]
+
+        private static let defaultKey = "_default"
+
+        public init(defaultConfig: AppsDefaultConfig? = nil, apps: [String: AppConfig] = [:]) {
+            self.defaultConfig = defaultConfig
+            self.apps = apps
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: AppServerConfigCodingKey.self)
+            defaultConfig = try container.decodeIfPresent(
+                AppsDefaultConfig.self,
+                forKey: AppServerConfigCodingKey(stringValue: Self.defaultKey)
+            )
+            var apps: [String: AppConfig] = [:]
+            for key in container.allKeys where key.stringValue != Self.defaultKey {
+                apps[key.stringValue] = try container.decode(AppConfig.self, forKey: key)
+            }
+            self.apps = apps
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: AppServerConfigCodingKey.self)
+            try container.encodeNilOrValue(
+                defaultConfig,
+                forKey: AppServerConfigCodingKey(stringValue: Self.defaultKey)
+            )
+            for key in apps.keys.sorted() {
+                try container.encode(apps[key], forKey: AppServerConfigCodingKey(stringValue: key))
+            }
+        }
+    }
+
+    public struct AnalyticsConfig: Codable, Equatable, Sendable {
+        public let enabled: Bool?
+        public let additional: [String: JSONValue]
+
+        private static let knownKeys: Set<String> = ["enabled"]
+
+        public init(enabled: Bool? = nil, additional: [String: JSONValue] = [:]) {
+            self.enabled = enabled
+            self.additional = additional
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: AppServerConfigCodingKey.self)
+            enabled = try container.decodeIfPresent(Bool.self, forKey: AppServerConfigCodingKey(stringValue: "enabled"))
+            additional = try container.decodeAdditionalFields(excluding: Self.knownKeys)
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: AppServerConfigCodingKey.self)
+            try container.encodeNilOrValue(enabled, forKey: AppServerConfigCodingKey(stringValue: "enabled"))
+            try container.encodeAdditionalFields(additional)
+        }
+    }
+
+    public struct Config: Codable, Equatable, Sendable {
+        public let model: String?
+        public let reviewModel: String?
+        public let modelContextWindow: Int64?
+        public let modelAutoCompactTokenLimit: Int64?
+        public let modelProvider: String?
+        public let approvalPolicy: AskForApproval?
+        public let approvalsReviewer: ApprovalsReviewer?
+        public let sandboxMode: SandboxMode?
+        public let sandboxWorkspaceWrite: SandboxWorkspaceWrite?
+        public let forcedChatGPTWorkspaceID: String?
+        public let forcedLoginMethod: ForcedLoginMethod?
+        public let webSearch: WebSearchMode?
+        public let tools: ToolsV2?
+        public let profile: String?
+        public let profiles: [String: ProfileV2]
+        public let instructions: String?
+        public let developerInstructions: String?
+        public let compactPrompt: String?
+        public let modelReasoningEffort: ReasoningEffort?
+        public let modelReasoningSummary: ReasoningSummary?
+        public let modelVerbosity: Verbosity?
+        public let serviceTier: String?
+        public let analytics: AnalyticsConfig?
+        public let apps: AppsConfig?
+        public let additional: [String: JSONValue]
+
+        private static let knownKeys: Set<String> = [
+            "model",
+            "review_model",
+            "model_context_window",
+            "model_auto_compact_token_limit",
+            "model_provider",
+            "approval_policy",
+            "approvals_reviewer",
+            "sandbox_mode",
+            "sandbox_workspace_write",
+            "forced_chatgpt_workspace_id",
+            "forced_login_method",
+            "web_search",
+            "tools",
+            "profile",
+            "profiles",
+            "instructions",
+            "developer_instructions",
+            "compact_prompt",
+            "model_reasoning_effort",
+            "model_reasoning_summary",
+            "model_verbosity",
+            "service_tier",
+            "analytics",
+            "apps"
+        ]
+
+        public init(
+            model: String? = nil,
+            reviewModel: String? = nil,
+            modelContextWindow: Int64? = nil,
+            modelAutoCompactTokenLimit: Int64? = nil,
+            modelProvider: String? = nil,
+            approvalPolicy: AskForApproval? = nil,
+            approvalsReviewer: ApprovalsReviewer? = nil,
+            sandboxMode: SandboxMode? = nil,
+            sandboxWorkspaceWrite: SandboxWorkspaceWrite? = nil,
+            forcedChatGPTWorkspaceID: String? = nil,
+            forcedLoginMethod: ForcedLoginMethod? = nil,
+            webSearch: WebSearchMode? = nil,
+            tools: ToolsV2? = nil,
+            profile: String? = nil,
+            profiles: [String: ProfileV2] = [:],
+            instructions: String? = nil,
+            developerInstructions: String? = nil,
+            compactPrompt: String? = nil,
+            modelReasoningEffort: ReasoningEffort? = nil,
+            modelReasoningSummary: ReasoningSummary? = nil,
+            modelVerbosity: Verbosity? = nil,
+            serviceTier: String? = nil,
+            analytics: AnalyticsConfig? = nil,
+            apps: AppsConfig? = nil,
+            additional: [String: JSONValue] = [:]
+        ) {
+            self.model = model
+            self.reviewModel = reviewModel
+            self.modelContextWindow = modelContextWindow
+            self.modelAutoCompactTokenLimit = modelAutoCompactTokenLimit
+            self.modelProvider = modelProvider
+            self.approvalPolicy = approvalPolicy
+            self.approvalsReviewer = approvalsReviewer
+            self.sandboxMode = sandboxMode
+            self.sandboxWorkspaceWrite = sandboxWorkspaceWrite
+            self.forcedChatGPTWorkspaceID = forcedChatGPTWorkspaceID
+            self.forcedLoginMethod = forcedLoginMethod
+            self.webSearch = webSearch
+            self.tools = tools
+            self.profile = profile
+            self.profiles = profiles
+            self.instructions = instructions
+            self.developerInstructions = developerInstructions
+            self.compactPrompt = compactPrompt
+            self.modelReasoningEffort = modelReasoningEffort
+            self.modelReasoningSummary = modelReasoningSummary
+            self.modelVerbosity = modelVerbosity
+            self.serviceTier = serviceTier
+            self.analytics = analytics
+            self.apps = apps
+            self.additional = additional
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: AppServerConfigCodingKey.self)
+            model = try container.decodeIfPresent(String.self, forKey: AppServerConfigCodingKey(stringValue: "model"))
+            reviewModel = try container.decodeIfPresent(
+                String.self,
+                forKey: AppServerConfigCodingKey(stringValue: "review_model")
+            )
+            modelContextWindow = try container.decodeIfPresent(
+                Int64.self,
+                forKey: AppServerConfigCodingKey(stringValue: "model_context_window")
+            )
+            modelAutoCompactTokenLimit = try container.decodeIfPresent(
+                Int64.self,
+                forKey: AppServerConfigCodingKey(stringValue: "model_auto_compact_token_limit")
+            )
+            modelProvider = try container.decodeIfPresent(
+                String.self,
+                forKey: AppServerConfigCodingKey(stringValue: "model_provider")
+            )
+            approvalPolicy = try container.decodeIfPresent(
+                AskForApproval.self,
+                forKey: AppServerConfigCodingKey(stringValue: "approval_policy")
+            )
+            approvalsReviewer = try container.decodeIfPresent(
+                ApprovalsReviewer.self,
+                forKey: AppServerConfigCodingKey(stringValue: "approvals_reviewer")
+            )
+            sandboxMode = try container.decodeIfPresent(
+                SandboxMode.self,
+                forKey: AppServerConfigCodingKey(stringValue: "sandbox_mode")
+            )
+            sandboxWorkspaceWrite = try container.decodeIfPresent(
+                SandboxWorkspaceWrite.self,
+                forKey: AppServerConfigCodingKey(stringValue: "sandbox_workspace_write")
+            )
+            forcedChatGPTWorkspaceID = try container.decodeIfPresent(
+                String.self,
+                forKey: AppServerConfigCodingKey(stringValue: "forced_chatgpt_workspace_id")
+            )
+            forcedLoginMethod = try container.decodeIfPresent(
+                ForcedLoginMethod.self,
+                forKey: AppServerConfigCodingKey(stringValue: "forced_login_method")
+            )
+            webSearch = try container.decodeIfPresent(
+                WebSearchMode.self,
+                forKey: AppServerConfigCodingKey(stringValue: "web_search")
+            )
+            tools = try container.decodeIfPresent(ToolsV2.self, forKey: AppServerConfigCodingKey(stringValue: "tools"))
+            profile = try container.decodeIfPresent(String.self, forKey: AppServerConfigCodingKey(stringValue: "profile"))
+            let profilesKey = AppServerConfigCodingKey(stringValue: "profiles")
+            if container.contains(profilesKey) {
+                profiles = try container.decode([String: ProfileV2].self, forKey: profilesKey)
+            } else {
+                profiles = [:]
+            }
+            instructions = try container.decodeIfPresent(
+                String.self,
+                forKey: AppServerConfigCodingKey(stringValue: "instructions")
+            )
+            developerInstructions = try container.decodeIfPresent(
+                String.self,
+                forKey: AppServerConfigCodingKey(stringValue: "developer_instructions")
+            )
+            compactPrompt = try container.decodeIfPresent(
+                String.self,
+                forKey: AppServerConfigCodingKey(stringValue: "compact_prompt")
+            )
+            modelReasoningEffort = try container.decodeIfPresent(
+                ReasoningEffort.self,
+                forKey: AppServerConfigCodingKey(stringValue: "model_reasoning_effort")
+            )
+            modelReasoningSummary = try container.decodeIfPresent(
+                ReasoningSummary.self,
+                forKey: AppServerConfigCodingKey(stringValue: "model_reasoning_summary")
+            )
+            modelVerbosity = try container.decodeIfPresent(
+                Verbosity.self,
+                forKey: AppServerConfigCodingKey(stringValue: "model_verbosity")
+            )
+            serviceTier = try container.decodeIfPresent(
+                String.self,
+                forKey: AppServerConfigCodingKey(stringValue: "service_tier")
+            )
+            analytics = try container.decodeIfPresent(
+                AnalyticsConfig.self,
+                forKey: AppServerConfigCodingKey(stringValue: "analytics")
+            )
+            apps = try container.decodeIfPresent(AppsConfig.self, forKey: AppServerConfigCodingKey(stringValue: "apps"))
+            additional = try container.decodeAdditionalFields(excluding: Self.knownKeys)
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: AppServerConfigCodingKey.self)
+            try container.encodeNilOrValue(model, forKey: AppServerConfigCodingKey(stringValue: "model"))
+            try container.encodeNilOrValue(reviewModel, forKey: AppServerConfigCodingKey(stringValue: "review_model"))
+            try container.encodeNilOrValue(
+                modelContextWindow,
+                forKey: AppServerConfigCodingKey(stringValue: "model_context_window")
+            )
+            try container.encodeNilOrValue(
+                modelAutoCompactTokenLimit,
+                forKey: AppServerConfigCodingKey(stringValue: "model_auto_compact_token_limit")
+            )
+            try container.encodeNilOrValue(modelProvider, forKey: AppServerConfigCodingKey(stringValue: "model_provider"))
+            try container.encodeNilOrValue(
+                approvalPolicy,
+                forKey: AppServerConfigCodingKey(stringValue: "approval_policy")
+            )
+            try container.encodeNilOrValue(
+                approvalsReviewer,
+                forKey: AppServerConfigCodingKey(stringValue: "approvals_reviewer")
+            )
+            try container.encodeNilOrValue(sandboxMode, forKey: AppServerConfigCodingKey(stringValue: "sandbox_mode"))
+            try container.encodeNilOrValue(
+                sandboxWorkspaceWrite,
+                forKey: AppServerConfigCodingKey(stringValue: "sandbox_workspace_write")
+            )
+            try container.encodeNilOrValue(
+                forcedChatGPTWorkspaceID,
+                forKey: AppServerConfigCodingKey(stringValue: "forced_chatgpt_workspace_id")
+            )
+            try container.encodeNilOrValue(
+                forcedLoginMethod,
+                forKey: AppServerConfigCodingKey(stringValue: "forced_login_method")
+            )
+            try container.encodeNilOrValue(webSearch, forKey: AppServerConfigCodingKey(stringValue: "web_search"))
+            try container.encodeNilOrValue(tools, forKey: AppServerConfigCodingKey(stringValue: "tools"))
+            try container.encodeNilOrValue(profile, forKey: AppServerConfigCodingKey(stringValue: "profile"))
+            try container.encode(profiles, forKey: AppServerConfigCodingKey(stringValue: "profiles"))
+            try container.encodeNilOrValue(instructions, forKey: AppServerConfigCodingKey(stringValue: "instructions"))
+            try container.encodeNilOrValue(
+                developerInstructions,
+                forKey: AppServerConfigCodingKey(stringValue: "developer_instructions")
+            )
+            try container.encodeNilOrValue(
+                compactPrompt,
+                forKey: AppServerConfigCodingKey(stringValue: "compact_prompt")
+            )
+            try container.encodeNilOrValue(
+                modelReasoningEffort,
+                forKey: AppServerConfigCodingKey(stringValue: "model_reasoning_effort")
+            )
+            try container.encodeNilOrValue(
+                modelReasoningSummary,
+                forKey: AppServerConfigCodingKey(stringValue: "model_reasoning_summary")
+            )
+            try container.encodeNilOrValue(
+                modelVerbosity,
+                forKey: AppServerConfigCodingKey(stringValue: "model_verbosity")
+            )
+            try container.encodeNilOrValue(serviceTier, forKey: AppServerConfigCodingKey(stringValue: "service_tier"))
+            try container.encodeNilOrValue(analytics, forKey: AppServerConfigCodingKey(stringValue: "analytics"))
+            try container.encodeNilOrValue(apps, forKey: AppServerConfigCodingKey(stringValue: "apps"))
+            try container.encodeAdditionalFields(additional)
+        }
+    }
+
     public struct ConfigReadParams: Codable, Equatable, Sendable {
         public let includeLayers: Bool
         public let cwd: String?
@@ -97,7 +843,7 @@ extension AppServerProtocol {
     }
 
     public struct ConfigReadResponse: Codable, Equatable, Sendable {
-        public let config: JSONValue
+        public let config: Config
         public let origins: [String: ConfigLayerMetadata]
         public let layers: [ConfigLayer]?
 
@@ -107,7 +853,7 @@ extension AppServerProtocol {
             case layers
         }
 
-        public init(config: JSONValue, origins: [String: ConfigLayerMetadata], layers: [ConfigLayer]? = nil) {
+        public init(config: Config, origins: [String: ConfigLayerMetadata], layers: [ConfigLayer]? = nil) {
             self.config = config
             self.origins = origins
             self.layers = layers
@@ -117,7 +863,7 @@ extension AppServerProtocol {
     public struct ConfigLayer: Codable, Equatable, Sendable {
         public let name: ConfigLayerSource
         public let version: String
-        public let config: JSONValue
+        public let config: Config
         public let disabledReason: String?
 
         private enum CodingKeys: String, CodingKey {
@@ -127,7 +873,7 @@ extension AppServerProtocol {
             case disabledReason
         }
 
-        public init(name: ConfigLayerSource, version: String, config: JSONValue, disabledReason: String? = nil) {
+        public init(name: ConfigLayerSource, version: String, config: Config, disabledReason: String? = nil) {
             self.name = name
             self.version = version
             self.config = config
