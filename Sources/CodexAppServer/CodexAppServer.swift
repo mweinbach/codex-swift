@@ -18508,7 +18508,12 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        let refreshResult = refreshManagedChatGPTAuthIfNeeded(params: params, configuration: configuration)
+        let request = try getAuthStatusParams(from: params)
+        let refreshResult = refreshManagedChatGPTAuthIfNeeded(
+            params: params,
+            configuration: configuration,
+            forceRefresh: request.refreshToken
+        )
 
         guard configuration.requiresOpenAIAuth else {
             return [
@@ -18518,13 +18523,12 @@ public enum CodexAppServer {
             ]
         }
 
-        let includeToken = boolParam(params?["includeToken"], defaultValue: false)
         let auth = try currentAuth(configuration: configuration)
         let hideToken = refreshResult == .failedPermanently
             || auth.map { AppServerPermanentRefreshFailures.hasFailure(for: $0, configuration: configuration) } == true
         return [
             "authMethod": auth?.method ?? NSNull(),
-            "authToken": includeToken && !hideToken ? (auth?.token ?? NSNull()) : NSNull(),
+            "authToken": request.includeToken && !hideToken ? (auth?.token ?? NSNull()) : NSNull(),
             "requiresOpenAIAuth": true
         ].nullStripped(keepNulls: true)
     }
@@ -18586,6 +18590,13 @@ public enum CodexAppServer {
     private static func getAccountParams(from params: [String: Any]?) throws -> GetAccountParams {
         try GetAccountParams(
             refreshToken: rustDefaultBoolParam(params?["refreshToken"], defaultValue: false)
+        )
+    }
+
+    private static func getAuthStatusParams(from params: [String: Any]?) throws -> (includeToken: Bool, refreshToken: Bool) {
+        try (
+            includeToken: rustBoolParam(params?["includeToken"], defaultValue: false),
+            refreshToken: rustBoolParam(params?["refreshToken"], defaultValue: false)
         )
     }
 

@@ -20496,6 +20496,32 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(tokenResult["requiresOpenAIAuth"] as? Bool, true)
     }
 
+    func testGetAuthStatusRejectsMalformedOptionalBooleansLikeRustV1Params() throws {
+        let temp = try TemporaryDirectory()
+        let acceptedNulls = try appServerResponse(
+            #"{"id":1,"method":"getAuthStatus","params":{"includeToken":null,"refreshToken":null}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertNotNil(acceptedNulls["result"] as? [String: Any])
+
+        let cases: [(String, String)] = [
+            (#""includeToken":1"#, "Invalid request: invalid type: integer `1`, expected a boolean"),
+            (#""includeToken":"true""#, #"Invalid request: invalid type: string "true", expected a boolean"#),
+            (#""refreshToken":1"#, "Invalid request: invalid type: integer `1`, expected a boolean"),
+            (#""refreshToken":"true""#, #"Invalid request: invalid type: string "true", expected a boolean"#)
+        ]
+
+        for (index, testCase) in cases.enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 2),"method":"getAuthStatus","params":{\#(testCase.0)}}"#,
+                codexHome: temp.url
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, testCase.1)
+        }
+    }
+
     func testLoginApiKeyPersistsAuthAndEmitsLegacyNotification() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
