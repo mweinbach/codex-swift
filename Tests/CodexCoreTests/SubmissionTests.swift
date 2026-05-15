@@ -422,6 +422,26 @@ final class SubmissionTests: XCTestCase {
         """#.utf8)))
     }
 
+    func testFileSystemSandboxPolicyDefaultsMissingEntriesLikeRustSerdeDefault() throws {
+        let policy = try JSONDecoder().decode(FileSystemSandboxPolicy.self, from: Data(#"""
+        {
+            "kind": "restricted",
+            "glob_scan_max_depth": null
+        }
+        """#.utf8))
+
+        XCTAssertEqual(policy, .restricted(entries: []))
+    }
+
+    func testFileSystemSandboxPolicyRejectsNullEntriesLikeRustSerdeDefault() {
+        XCTAssertThrowsError(try JSONDecoder().decode(FileSystemSandboxPolicy.self, from: Data(#"""
+        {
+            "kind": "restricted",
+            "entries": null
+        }
+        """#.utf8)))
+    }
+
     func testPermissionProfileHelperSemanticsLikeRust() {
         let managed = PermissionProfile.managed(fileSystem: .restricted(entries: []), network: .restricted)
         XCTAssertEqual(managed.enforcement, .managed)

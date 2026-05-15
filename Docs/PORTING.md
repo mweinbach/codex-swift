@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust `FileSystemSandboxPolicy` in
+  `codex-rs/protocol/src/permissions.rs`. Swift core sandbox-policy decoding
+  now preserves Serde's default boundary for restricted `entries`: omitted
+  entries default to an empty list while explicit `null` rejects, with optional
+  `glob_scan_max_depth` behavior unchanged.
 - 2026-05-15: rechecked Rust MCP `ToolInfo` in
   `codex-rs/codex-mcp/src/tools.rs`. Swift `McpTool` decoding now preserves
   Serde's default boundary for `plugin_display_names`: omitted fields default

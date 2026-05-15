@@ -1655,7 +1655,7 @@ extension FileSystemSandboxPolicy: Codable {
         switch try container.decode(Kind.self, forKey: .kind) {
         case .restricted:
             self = .restricted(
-                entries: try container.decodeIfPresent([FileSystemSandboxEntry].self, forKey: .entries) ?? [],
+                entries: try container.decodeRustDefaulted([FileSystemSandboxEntry].self, forKey: .entries, defaultValue: []),
                 globScanMaxDepth: try container.decodeIfPresent(Int.self, forKey: .globScanMaxDepth)
             )
         case .unrestricted:
