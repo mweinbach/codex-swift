@@ -19,6 +19,22 @@ final class ReviewAnalyticsTests: XCTestCase {
             agentsStates: ["child-1": AppServerCollabAgentState(status: .completed)],
             reducer: &collabReducer
         )
+        let review = CodexReviewAnalyticsReducer().ingest(
+            CodexReviewAnalyticsFact(
+                threadID: "thread-1",
+                turnID: "turn-1",
+                reviewID: "review-1",
+                toolKind: .commandExecution,
+                toolName: "shell",
+                reviewer: .user,
+                trigger: .sandboxDenial,
+                status: .approved,
+                resolution: .sessionApproval,
+                startedAtMilliseconds: 120,
+                completedAtMilliseconds: 140
+            ),
+            context: Self.analyticsContext
+        )
         let acceptedLine = AcceptedLineFingerprintsEventRequest(eventParams: AcceptedLineFingerprintsEventParams(
             eventType: "codex.accepted_line_fingerprints",
             turnID: "turn-1",
@@ -72,6 +88,7 @@ final class ReviewAnalyticsTests: XCTestCase {
                 )
             )),
             .collabAgentToolCall(collab),
+            .reviewEvent(review),
             .acceptedLineFingerprints(acceptedLine)
         ])
 
@@ -82,6 +99,7 @@ final class ReviewAnalyticsTests: XCTestCase {
             "codex_turn_event",
             "codex_turn_steer_event",
             "codex_collab_agent_tool_call_event",
+            "codex_review_event",
             "codex_accepted_line_fingerprints"
         ])
         XCTAssertNotNil(events[0]["event_params"])
@@ -89,6 +107,7 @@ final class ReviewAnalyticsTests: XCTestCase {
         XCTAssertNotNil(events[2]["event_params"])
         XCTAssertNotNil(events[3]["event_params"])
         XCTAssertNotNil(events[4]["event_params"])
+        XCTAssertNotNil(events[5]["event_params"])
     }
 
     func testTrackEventRequestBatchesIsolateAcceptedLineEventsLikeRust() throws {
@@ -2352,6 +2371,78 @@ final class ReviewAnalyticsTests: XCTestCase {
                 "duration_ms": nil
             ]
         ])
+    }
+
+    func testCodexReviewAnalyticsReducerAddsRuntimeContextLikeRust() throws {
+        let reducer = CodexReviewAnalyticsReducer()
+
+        let event = reducer.ingest(
+            CodexReviewAnalyticsFact(
+                threadID: "thread-review",
+                turnID: "turn-review",
+                itemID: "item-review",
+                reviewID: "review-1",
+                threadSource: .subagent,
+                subagentSource: "worker",
+                parentThreadID: "thread-parent",
+                toolKind: .commandExecution,
+                toolName: "shell",
+                reviewer: .user,
+                trigger: .sandboxDenial,
+                status: .denied,
+                resolution: .execPolicyAmendment,
+                startedAtMilliseconds: 10,
+                completedAtMilliseconds: 35,
+                durationMilliseconds: 25
+            ),
+            context: Self.analyticsContext
+        )
+
+        XCTAssertEqual(event.eventType, "codex_review_event")
+        XCTAssertEqual(event.eventParams.appServerClient, Self.analyticsContext.appServerClient)
+        XCTAssertEqual(event.eventParams.runtime, Self.analyticsContext.runtime)
+        XCTAssertEqual(event.eventParams.threadID, "thread-review")
+        XCTAssertEqual(event.eventParams.itemID, "item-review")
+        XCTAssertEqual(event.eventParams.threadSource, .subagent)
+        XCTAssertEqual(event.eventParams.parentThreadID, "thread-parent")
+        XCTAssertEqual(event.eventParams.toolKind, .commandExecution)
+        XCTAssertEqual(event.eventParams.status, .denied)
+        XCTAssertEqual(event.eventParams.resolution, .execPolicyAmendment)
+        XCTAssertEqual(event.eventParams.durationMilliseconds, 25)
+    }
+
+    func testCodexAnalyticsClientUploadsReviewEventLikeRust() async throws {
+        let uploader = RecordingCodexAnalyticsUploader()
+        let client = CodexToolItemAnalyticsClient(uploader: uploader)
+
+        await client.trackReview(
+            CodexReviewAnalyticsFact(
+                threadID: "thread-review",
+                turnID: "turn-review",
+                reviewID: "review-1",
+                toolKind: .mcpToolCall,
+                toolName: "mcp__github__read",
+                reviewer: .guardian,
+                trigger: .networkPolicyDenial,
+                status: .approved,
+                resolution: .networkPolicyAmendment,
+                startedAtMilliseconds: 100,
+                completedAtMilliseconds: 130,
+                durationMilliseconds: 30
+            ),
+            context: Self.analyticsContext
+        )
+
+        let requests = await uploader.requests
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests[0].events.count, 1)
+        guard case let .reviewEvent(event) = requests[0].events[0] else {
+            return XCTFail("expected review analytics event")
+        }
+        XCTAssertEqual(event.eventType, "codex_review_event")
+        XCTAssertEqual(event.eventParams.threadID, "thread-review")
+        XCTAssertEqual(event.eventParams.reviewID, "review-1")
+        XCTAssertEqual(event.eventParams.reviewer, .guardian)
     }
 
     func testReviewAnalyticsEnumsUseRustSnakeCaseValues() throws {

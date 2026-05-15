@@ -200,6 +200,7 @@ public actor CodexToolItemAnalyticsClient {
     private var turnEventReducer = CodexTurnAnalyticsReducer()
     private var turnSteerReducer = CodexTurnSteerAnalyticsReducer()
     private var guardianReviewReducer = CodexGuardianReviewAnalyticsReducer()
+    private var reviewEventReducer = CodexReviewAnalyticsReducer()
     private var commandExecutionReducer = CodexCommandExecutionAnalyticsReducer()
     private var fileChangeReducer = CodexFileChangeAnalyticsReducer()
     private var mcpToolCallReducer = CodexMcpToolCallAnalyticsReducer()
@@ -296,6 +297,14 @@ public actor CodexToolItemAnalyticsClient {
             tracking.eventParams(result: result),
             context: context
         )
+    }
+
+    public func trackReview(
+        _ fact: CodexReviewAnalyticsFact,
+        context: CodexReviewAnalyticsContext
+    ) async {
+        let event = reviewEventReducer.ingest(fact, context: context)
+        try? await uploader.upload(CodexTrackEventsRequest(events: [.reviewEvent(event)]))
     }
 }
 
@@ -3346,6 +3355,61 @@ public struct CodexReviewEventParams: Equatable, Codable, Sendable {
     }
 }
 
+public struct CodexReviewAnalyticsFact: Equatable, Sendable {
+    public let threadID: String
+    public let turnID: String
+    public let itemID: String?
+    public let reviewID: String
+    public let threadSource: ThreadSource?
+    public let subagentSource: String?
+    public let parentThreadID: String?
+    public let toolKind: ReviewSubjectKind
+    public let toolName: String
+    public let reviewer: ReviewAnalyticsReviewer
+    public let trigger: ReviewTrigger
+    public let status: ReviewStatus
+    public let resolution: ReviewResolution
+    public let startedAtMilliseconds: UInt64
+    public let completedAtMilliseconds: UInt64
+    public let durationMilliseconds: UInt64?
+
+    public init(
+        threadID: String,
+        turnID: String,
+        itemID: String? = nil,
+        reviewID: String,
+        threadSource: ThreadSource? = nil,
+        subagentSource: String? = nil,
+        parentThreadID: String? = nil,
+        toolKind: ReviewSubjectKind,
+        toolName: String,
+        reviewer: ReviewAnalyticsReviewer,
+        trigger: ReviewTrigger,
+        status: ReviewStatus,
+        resolution: ReviewResolution,
+        startedAtMilliseconds: UInt64,
+        completedAtMilliseconds: UInt64,
+        durationMilliseconds: UInt64? = nil
+    ) {
+        self.threadID = threadID
+        self.turnID = turnID
+        self.itemID = itemID
+        self.reviewID = reviewID
+        self.threadSource = threadSource
+        self.subagentSource = subagentSource
+        self.parentThreadID = parentThreadID
+        self.toolKind = toolKind
+        self.toolName = toolName
+        self.reviewer = reviewer
+        self.trigger = trigger
+        self.status = status
+        self.resolution = resolution
+        self.startedAtMilliseconds = startedAtMilliseconds
+        self.completedAtMilliseconds = completedAtMilliseconds
+        self.durationMilliseconds = durationMilliseconds
+    }
+}
+
 public struct CodexReviewEventRequest: Equatable, Codable, Sendable {
     public let eventType: String
     public let eventParams: CodexReviewEventParams
@@ -3358,6 +3422,41 @@ public struct CodexReviewEventRequest: Equatable, Codable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case eventType = "event_type"
         case eventParams = "event_params"
+    }
+}
+
+public typealias CodexReviewAnalyticsContext = CodexCommandExecutionAnalyticsContext
+
+public struct CodexReviewAnalyticsReducer: Sendable {
+    public init() {}
+
+    public func ingest(
+        _ fact: CodexReviewAnalyticsFact,
+        context: CodexReviewAnalyticsContext
+    ) -> CodexReviewEventRequest {
+        CodexReviewEventRequest(
+            eventType: "codex_review_event",
+            eventParams: CodexReviewEventParams(
+                threadID: fact.threadID,
+                turnID: fact.turnID,
+                itemID: fact.itemID,
+                reviewID: fact.reviewID,
+                appServerClient: context.appServerClient,
+                runtime: context.runtime,
+                threadSource: fact.threadSource,
+                subagentSource: fact.subagentSource,
+                parentThreadID: fact.parentThreadID,
+                toolKind: fact.toolKind,
+                toolName: fact.toolName,
+                reviewer: fact.reviewer,
+                trigger: fact.trigger,
+                status: fact.status,
+                resolution: fact.resolution,
+                startedAtMilliseconds: fact.startedAtMilliseconds,
+                completedAtMilliseconds: fact.completedAtMilliseconds,
+                durationMilliseconds: fact.durationMilliseconds
+            )
+        )
     }
 }
 
