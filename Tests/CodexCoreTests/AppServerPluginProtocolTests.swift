@@ -250,6 +250,33 @@ final class AppServerPluginProtocolTests: XCTestCase {
         )
     }
 
+    func testPluginSourceSerializesLocalGitAndRemoteVariantsLikeRustProtocol() throws {
+        try XCTAssertJSONObjectEqual(PluginSource.local(path: try AbsolutePath(absolutePath: "/plugins/linear")), [
+            "type": "local",
+            "path": "/plugins/linear"
+        ])
+
+        try XCTAssertJSONObjectEqual(
+            PluginSource.git(
+                url: "https://github.com/openai/example.git",
+                path: "plugins/example",
+                refName: "main",
+                sha: "abc123"
+            ),
+            [
+                "type": "git",
+                "url": "https://github.com/openai/example.git",
+                "path": "plugins/example",
+                "refName": "main",
+                "sha": "abc123"
+            ]
+        )
+
+        try XCTAssertJSONObjectEqual(PluginSource.remote, [
+            "type": "remote"
+        ])
+    }
+
     func testPluginListResponseRejectsExplicitNullForRustDefaultedFields() {
         for payload in [
             #"{"marketplaces":[],"marketplaceLoadErrors":null}"#,

@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `PluginSource` tagged variants in
+  `codex-rs/app-server-protocol/src/protocol/v2/plugin.rs`. Swift now pins the
+  standalone local, git, and remote source wire shapes, including local absolute
+  paths and populated git `path` / `refName` / `sha` metadata.
 - 2026-05-15: rechecked Rust app-server v2 `GuardianApprovalReview` status
   decoding in `codex-rs/app-server-protocol/src/protocol/v2/item.rs`. Swift now
   pins Rust's standalone automatic-approval review payload behavior where
