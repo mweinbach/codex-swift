@@ -356,7 +356,7 @@ public struct TaskStartedEvent: Equatable, Codable, Sendable {
     public let turnID: String
     public let startedAt: Int64?
     public let modelContextWindow: Int64?
-    public let collaborationModeKind: CollaborationModeKind?
+    public let collaborationModeKind: CollaborationModeKind
 
     private enum CodingKeys: String, CodingKey {
         case turnID = "turn_id"
@@ -374,7 +374,7 @@ public struct TaskStartedEvent: Equatable, Codable, Sendable {
         self.turnID = turnID
         self.startedAt = startedAt
         self.modelContextWindow = modelContextWindow
-        self.collaborationModeKind = collaborationModeKind
+        self.collaborationModeKind = collaborationModeKind ?? .defaultMode
     }
 
     public init(from decoder: Decoder) throws {
@@ -382,10 +382,11 @@ public struct TaskStartedEvent: Equatable, Codable, Sendable {
         self.turnID = try container.decode(String.self, forKey: .turnID)
         self.startedAt = try container.decodeIfPresent(Int64.self, forKey: .startedAt)
         self.modelContextWindow = try container.decodeIfPresent(Int64.self, forKey: .modelContextWindow)
-        self.collaborationModeKind = try container.decodeIfPresent(
+        self.collaborationModeKind = try container.decodeRustDefaulted(
             CollaborationModeKind.self,
-            forKey: .collaborationModeKind
-        ) ?? .defaultMode
+            forKey: .collaborationModeKind,
+            defaultValue: .defaultMode
+        )
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -393,7 +394,7 @@ public struct TaskStartedEvent: Equatable, Codable, Sendable {
         try container.encode(turnID, forKey: .turnID)
         try container.encodeIfPresent(startedAt, forKey: .startedAt)
         try container.encodeIfPresentOrNull(modelContextWindow, forKey: .modelContextWindow)
-        try container.encode(collaborationModeKind ?? .defaultMode, forKey: .collaborationModeKind)
+        try container.encode(collaborationModeKind, forKey: .collaborationModeKind)
     }
 }
 

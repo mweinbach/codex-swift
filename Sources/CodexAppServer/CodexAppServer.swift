@@ -25853,8 +25853,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             }
             runtimeTurnErrors[threadID]?[runtimeTurnID] = nil
             runtimeTurnErrorInfos[threadID]?[runtimeTurnID] = nil
-            if let collaborationMode = event.collaborationModeKind?.rawValue,
-               var seed = runtimeTurnAnalyticsSeeds[threadID]?[runtimeTurnID] {
+            if var seed = runtimeTurnAnalyticsSeeds[threadID]?[runtimeTurnID] {
                 let base = seed.fact
                 seed.fact = CodexTurnAnalyticsFact(
                     threadID: base.threadID,
@@ -25874,7 +25873,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                     approvalPolicy: base.approvalPolicy,
                     approvalsReviewer: base.approvalsReviewer,
                     sandboxNetworkAccess: base.sandboxNetworkAccess,
-                    collaborationMode: collaborationMode,
+                    collaborationMode: event.collaborationModeKind.rawValue,
                     personality: base.personality,
                     numInputImages: base.numInputImages,
                     isFirstTurn: base.isFirstTurn,

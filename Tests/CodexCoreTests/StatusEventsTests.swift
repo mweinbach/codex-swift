@@ -140,6 +140,10 @@ final class StatusEventsTests: XCTestCase {
             from: Data(#"{"turn_id":"turn-1","model_context_window":null}"#.utf8)
         )
         XCTAssertEqual(legacyStarted.collaborationModeKind, .defaultMode)
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            TaskStartedEvent.self,
+            from: Data(#"{"turn_id":"turn-1","model_context_window":null,"collaboration_mode_kind":null}"#.utf8)
+        ))
 
         XCTAssertThrowsError(try JSONDecoder().decode(
             TaskStartedEvent.self,

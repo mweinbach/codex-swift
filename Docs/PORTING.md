@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's `TurnStartedEvent.collaboration_mode_kind` in
+  `codex-rs/protocol/src/protocol.rs`. Swift task-started event decoding now
+  preserves Serde's default boundary for the non-optional collaboration mode:
+  omitted values default to `default`, while explicit `null` rejects like Rust.
 - 2026-05-15: rechecked Rust's MCP OAuth token response path through
   `codex-rs/rmcp-client/src/oauth.rs` and oauth2's
   `StandardTokenResponse.scope` deserializer. Swift token response decoding now
