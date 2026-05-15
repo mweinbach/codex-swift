@@ -85,7 +85,15 @@ final class GitInfoCollectorTests: XCTestCase {
     }
 
     func testCanonicalizeGitRemoteURLRejectsNonRepositoryValues() {
-        for remote in ["", "file:///tmp/repo", "github.com/openai", "/tmp/repo"] {
+        for remote in [
+            "",
+            "file:///tmp/repo",
+            "github.com/openai",
+            "/tmp/repo",
+            "HTTPS://github.com/openai/codex.git",
+            "https://github.com/./codex.git",
+            "https://github.com/openai/../codex.git"
+        ] {
             XCTAssertNil(GitInfoCollector.canonicalizeGitRemoteURL(remote))
         }
     }
