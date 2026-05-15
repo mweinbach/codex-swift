@@ -276,6 +276,11 @@ Recent upstream audit checkpoint:
   both the legacy `fast` alias and the request-value `priority` tier are
   cleared when `fast_mode` is disabled across config loading, thread
   lifecycle, and live `turn/start` submission.
+- 2026-05-15: rechecked the current Rust Amazon Bedrock static catalog in
+  `codex-rs/model-provider/src/amazon_bedrock/catalog.rs`. Swift now advertises
+  the `openai.gpt-5.4` Bedrock service-tier command name as lowercase `fast`
+  with Rust's `priority` request id and description, matching
+  `SPEED_TIER_FAST` instead of a title-cased display label.
 - 2026-05-15: rechecked Rust Starlark sequence method support with
   `codex-rs/execpolicy`. Swift now has focused coverage that Python-style
   `list.count(...)` remains unsupported like Rust, preserving the existing

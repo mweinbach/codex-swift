@@ -467,6 +467,8 @@ final class ModelsManagerTests: XCTestCase {
         XCTAssertEqual(defaultModel.displayName, "gpt-5.4")
         XCTAssertEqual(defaultModel.supportedReasoningLevels.map(\.effort), [.minimal, .low, .medium, .high])
         XCTAssertEqual(defaultModel.serviceTiers.map(\.id), ["priority"])
+        XCTAssertEqual(defaultModel.serviceTiers.map(\.name), ["fast"])
+        XCTAssertEqual(defaultModel.serviceTiers.map(\.description), ["Fastest inference with increased plan usage"])
         XCTAssertEqual(defaultModel.defaultVerbosity, .medium)
         XCTAssertEqual(defaultModel.applyPatchToolType, .freeform)
         XCTAssertEqual(defaultModel.webSearchToolType, .textAndImage)

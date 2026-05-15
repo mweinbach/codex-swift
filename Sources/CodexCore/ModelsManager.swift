@@ -446,7 +446,7 @@ public enum ModelsManager {
             serviceTiers: [
                 ModelServiceTier(
                     id: ServiceTier.fast.requestValue,
-                    name: "Fast",
+                    name: "fast",
                     description: "Fastest inference with increased plan usage"
                 )
             ],
