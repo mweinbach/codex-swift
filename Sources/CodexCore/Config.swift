@@ -4083,6 +4083,8 @@ private struct ParsedCodexConfigToml {
         let data = try JSONEncoder().encode(value)
         do {
             return try JSONDecoder().decode(ModelProviderInfo.self, from: data)
+        } catch let DecodingError.dataCorrupted(context) {
+            throw CodexConfigLoadError.invalidModelProvider("\(key): \(context.debugDescription)")
         } catch {
             throw CodexConfigLoadError.invalidConfigLine(key)
         }

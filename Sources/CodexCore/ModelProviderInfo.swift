@@ -231,6 +231,12 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
     public static let maxRequestMaxRetries: UInt64 = 100
     public static let chatWireAPIDeprecationSummary =
         #"Support for the "chat" wire API is deprecated and will soon be removed. Update your model provider definition in config.toml to use wire_api = "responses"."#
+    public static let chatWireAPIRemovedError =
+        #"""
+`wire_api = "chat"` is no longer supported.
+How to fix: set `wire_api = "responses"` in your provider config.
+More info: https://github.com/openai/codex/discussions/7782
+"""#
     public static let openAIProviderName = "OpenAI"
     public static let defaultLMStudioPort: UInt16 = 1234
     public static let defaultOllamaPort: UInt16 = 11434
@@ -322,7 +328,26 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
         self.experimentalBearerToken = try container.decodeIfPresent(String.self, forKey: .experimentalBearerToken)
         self.auth = try container.decodeIfPresent(ModelProviderAuthInfo.self, forKey: .auth)
         self.aws = try container.decodeIfPresent(ModelProviderAWSAuthInfo.self, forKey: .aws)
-        self.wireAPI = try container.decodeIfPresent(WireAPI.self, forKey: .wireAPI) ?? .responses
+        if let rawWireAPI = try container.decodeIfPresent(String.self, forKey: .wireAPI) {
+            switch rawWireAPI {
+            case "responses":
+                self.wireAPI = .responses
+            case "chat":
+                throw DecodingError.dataCorruptedError(
+                    forKey: .wireAPI,
+                    in: container,
+                    debugDescription: Self.chatWireAPIRemovedError
+                )
+            default:
+                throw DecodingError.dataCorruptedError(
+                    forKey: .wireAPI,
+                    in: container,
+                    debugDescription: "unknown variant `\(rawWireAPI)`, expected `responses`"
+                )
+            }
+        } else {
+            self.wireAPI = .responses
+        }
         self.queryParams = try container.decodeIfPresent([String: String].self, forKey: .queryParams)
         self.httpHeaders = try container.decodeIfPresent([String: String].self, forKey: .httpHeaders)
         self.envHTTPHeaders = try container.decodeIfPresent([String: String].self, forKey: .envHTTPHeaders)
@@ -519,7 +544,7 @@ public struct ModelProviderInfo: Codable, Equatable, Sendable {
             amazonBedrockProviderID: createAmazonBedrockProvider(),
             ollamaOSSProviderID: createOSSProvider(
                 defaultProviderPort: defaultOllamaPort,
-                wireAPI: .chat,
+                wireAPI: .responses,
                 environment: environment
             ),
             lmStudioOSSProviderID: createOSSProvider(

@@ -2458,7 +2458,7 @@ final class ConfigLoaderTests: XCTestCase {
         let config = try CodexConfigLoader.load(
             codexHome: dir.url,
             overrides: CliConfigOverrides(rawOverrides: [
-                "model_providers.mock={ name = \"Mock\", base_url = \"https://mock.example/v1\", env_key = \"MOCK_KEY\", wire_api = \"chat\" }",
+                "model_providers.mock={ name = \"Mock\", base_url = \"https://mock.example/v1\", env_key = \"MOCK_KEY\", wire_api = \"responses\" }",
                 "model_providers.mock.http_headers.X-Test=\"yes\""
             ]),
             systemConfigFile: nil
@@ -2470,7 +2470,7 @@ final class ConfigLoaderTests: XCTestCase {
                 name: "Mock",
                 baseURL: "https://mock.example/v1",
                 envKey: "MOCK_KEY",
-                wireAPI: .chat,
+                wireAPI: .responses,
                 httpHeaders: ["X-Test": "yes"]
             )
         )
@@ -2526,6 +2526,25 @@ final class ConfigLoaderTests: XCTestCase {
 
         XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
             XCTAssertEqual((error as? CodexConfigLoadError)?.description, OSSProvider.legacyOllamaChatRemovedMessage)
+        }
+    }
+
+    func testModelProviderChatWireAPIMatchesRustRemovalError() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        model_provider = "legacy"
+
+        [model_providers.legacy]
+        name = "Legacy Chat"
+        base_url = "https://legacy.example/v1"
+        wire_api = "chat"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual(
+                (error as? CodexConfigLoadError)?.description,
+                "model_providers.legacy: \(ModelProviderInfo.chatWireAPIRemovedError)"
+            )
         }
     }
 

@@ -430,12 +430,27 @@ final class ModelProviderInfoTests: XCTestCase {
         XCTAssertEqual(providers["amazon-bedrock"]?.aws, ModelProviderAWSAuthInfo())
         XCTAssertEqual(providers["ollama"], ModelProviderInfo.createOSSProvider(
             baseURL: "http://localhost:11434/v1",
-            wireAPI: .chat
+            wireAPI: .responses
         ))
         XCTAssertEqual(providers["lmstudio"], ModelProviderInfo.createOSSProvider(
             baseURL: "http://localhost:1234/v1",
             wireAPI: .responses
         ))
+    }
+
+    func testModelProviderWireAPIRejectsRemovedChatValueLikeRust() {
+        XCTAssertThrowsError(try JSONDecoder().decode(ModelProviderInfo.self, from: Data("""
+        {
+          "name": "Legacy Chat",
+          "base_url": "https://example.com/v1",
+          "wire_api": "chat"
+        }
+        """.utf8))) { error in
+            guard case let DecodingError.dataCorrupted(context) = error else {
+                return XCTFail("expected data corrupted error, got \(error)")
+            }
+            XCTAssertEqual(context.debugDescription, ModelProviderInfo.chatWireAPIRemovedError)
+        }
     }
 
     func testCreateOSSProviderUsesBaseURLOrPortEnvironment() {
