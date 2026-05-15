@@ -227,6 +227,53 @@ final class AppServerPermissionsProtocolTests: XCTestCase {
         ])
     }
 
+    func testSpecialFilesystemPathCanonicalizesLegacyCurrentWorkingDirectoryAliasLikeRust() throws {
+        let decoded = try JSONDecoder().decode(
+            AppServerPermissionProfileFileSystemPermissions.self,
+            from: Data(
+                #"""
+                {
+                  "type": "restricted",
+                  "entries": [{
+                    "path": {
+                      "type": "special",
+                      "value": {
+                        "kind": "current_working_directory"
+                      }
+                    },
+                    "access": "write"
+                  }]
+                }
+                """#.utf8
+            )
+        )
+
+        XCTAssertEqual(
+            decoded,
+            .restricted(entries: [
+                FileSystemSandboxEntry(
+                    path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue),
+                    access: .write
+                )
+            ])
+        )
+        try XCTAssertJSONObjectEqual(decoded, [
+            "type": "restricted",
+            "entries": [
+                [
+                    "path": [
+                        "type": "special",
+                        "value": [
+                            "kind": "project_roots",
+                            "subpath": NSNull()
+                        ]
+                    ],
+                    "access": "write"
+                ]
+            ]
+        ])
+    }
+
     func testActivePermissionProfileUsesAppServerCamelCaseModificationTags() throws {
         let profile = AppServerActivePermissionProfile(
             ActivePermissionProfile(

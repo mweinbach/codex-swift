@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `FileSystemSpecialPath` decoding in
+  `codex-rs/app-server-protocol/src/protocol/v2/permissions.rs`. Swift now
+  canonicalizes the legacy `current_working_directory` alias to
+  `project_roots` when decoding tagged app-server filesystem permission paths,
+  matching Rust's serde alias behavior before re-serialization or core bridging.
 - 2026-05-15: rechecked Rust core `UserInput` tagged variants in
   `codex-rs/protocol/src/user_input.rs`. Swift now has focused coverage for
   the remaining core `skill` variant, preserving Rust's snake_case tagged

@@ -77,7 +77,8 @@ public enum FileSystemPath: Equatable, Codable, Sendable {
         case .globPattern:
             self = .globPattern(try container.decode(String.self, forKey: .pattern))
         case .special:
-            self = .special(try container.decode(JSONValue.self, forKey: .value))
+            let value = try container.decode(JSONValue.self, forKey: .value)
+            self = .special(FileSystemSpecialPath(jsonValue: value).jsonValue)
         }
     }
 
