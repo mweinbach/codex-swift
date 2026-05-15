@@ -2242,7 +2242,7 @@ public enum CodexAppServer {
             isDirectory: true
         )
         let permissionSelection = try permissionProfileSelectionParam(params?["permissions"])
-        let runtimeConfig = try loadRuntimeConfigForThreadStartup(
+        var runtimeConfig = try loadRuntimeConfigForThreadStartup(
             configuration: configuration,
             cwd: cwd,
             permissionSelection: permissionSelection
@@ -2260,21 +2260,38 @@ public enum CodexAppServer {
         let reasoningEffort = hasModelResumeOverride
             ? runtimeConfig.modelReasoningEffort
             : sourceSummary.reasoningEffort ?? runtimeConfig.modelReasoningEffort
-        let approvalPolicy = try approvalPolicyParam(params?["approvalPolicy"])
+        let requestedApprovalPolicy = try approvalPolicyParam(params?["approvalPolicy"])
+        let approvalPolicy = requestedApprovalPolicy
             ?? runtimeConfig.approvalPolicy
             ?? .unlessTrusted
+        if let requestedApprovalPolicy {
+            runtimeConfig.approvalPolicy = requestedApprovalPolicy
+        }
         let approvalsReviewer = try approvalsReviewerParam(params?["approvalsReviewer"])
             ?? runtimeConfig.approvalsReviewer
         let serviceTier = try resolvedServiceTier(
             serviceTierParam(params?["serviceTier"], features: runtimeConfig.features),
             fallback: runtimeConfig.serviceTier
         )
-        let baseSandbox = sandboxModeParam(params?["sandbox"])
-            .map(sandboxPolicy(for:))
-            ?? runtimeConfig.legacySandboxPolicy()
+        let requestedSandbox = sandboxModeParam(params?["sandbox"]).map(sandboxPolicy(for:))
+        let baseSandbox = requestedSandbox ?? runtimeConfig.legacySandboxPolicy()
+        if let requestedSandbox {
+            runtimeConfig.sandboxPolicy = requestedSandbox
+            runtimeConfig.permissionProfile = PermissionProfile.fromLegacySandboxPolicyForCwd(
+                requestedSandbox,
+                cwd: cwd.path
+            )
+        }
         let permissionProfile = runtimeConfig.permissionProfile ?? PermissionProfile.fromLegacySandboxPolicyForCwd(
             baseSandbox,
             cwd: cwd.path
+        )
+        try validateTurnContextOverrideRequirements(
+            configuration: configuration,
+            cwd: cwd,
+            approvalPolicy: requestedApprovalPolicy,
+            sandboxPolicy: requestedSandbox,
+            permissionProfile: permissionSelection == nil ? nil : permissionProfile
         )
         let sandbox = responseSandboxPolicy(
             for: permissionProfile,

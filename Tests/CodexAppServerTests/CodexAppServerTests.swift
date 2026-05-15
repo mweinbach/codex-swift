@@ -7965,6 +7965,52 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(error["message"] as? String, "`permissions` cannot be combined with `sandbox`")
     }
 
+    func testThreadForkAppliesApprovalAndSandboxOverridesLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let sourceThreadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "Saved user message",
+            provider: "mock_provider"
+        )
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
+        )
+        let request: [String: Any] = [
+            "id": 1,
+            "method": "thread/fork",
+            "params": [
+                "threadId": sourceThreadID,
+                "sandbox": "workspace-write",
+                "approvalPolicy": [
+                    "type": "granular",
+                    "sandboxApproval": false,
+                    "rules": true,
+                    "requestPermissions": true,
+                    "mcpElicitations": true
+                ]
+            ]
+        ]
+
+        let messages = try decodeMessages(processor.processLine(try JSONSerialization.data(withJSONObject: request)))
+
+        let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
+        let approvalPolicy = try XCTUnwrap(result["approvalPolicy"] as? [String: Any])
+        let granular = try XCTUnwrap(approvalPolicy["granular"] as? [String: Any])
+        XCTAssertEqual(granular["sandbox_approval"] as? Bool, false)
+        XCTAssertEqual(granular["rules"] as? Bool, true)
+        XCTAssertEqual(granular["skill_approval"] as? Bool, false)
+        XCTAssertEqual(granular["request_permissions"] as? Bool, true)
+        XCTAssertEqual(granular["mcp_elicitations"] as? Bool, true)
+        XCTAssertEqual((result["sandbox"] as? [String: Any])?["type"] as? String, "workspaceWrite")
+        let permissionProfile = try XCTUnwrap(result["permissionProfile"] as? [String: Any])
+        XCTAssertEqual(permissionProfile["type"] as? String, "managed")
+        XCTAssertEqual((permissionProfile["file_system"] as? [String: Any])?["type"] as? String, "restricted")
+        XCTAssertEqual(permissionProfile["network"] as? String, "restricted")
+    }
+
     func testThreadResumeAndForkRejectMalformedThreadIDParamsLikeRust() throws {
         let temp = try TemporaryDirectory()
         let cases: [(String, String)] = [

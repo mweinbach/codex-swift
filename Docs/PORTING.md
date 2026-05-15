@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server `thread/fork` config override
+  handling in
+  `codex-rs/app-server/src/request_processors/thread_processor.rs`. Swift now
+  applies fork request `approvalPolicy` and `sandbox` overrides before
+  returning the lifecycle response or starting live MCP managers, matching
+  Rust's resolved config snapshot behavior for forked threads.
 - 2026-05-15: rechecked Rust turn analytics approval policy projection in
   `codex-rs/analytics/src/reducer.rs` and app-server lifecycle approval fields.
   Swift now preserves granular approval policies as `"granular"` in runtime
