@@ -12,6 +12,120 @@ final class RequestSerializationTests: XCTestCase {
         XCTAssertEqual(CodexAppServer.requestSerializationScope(forMethod: "skills/config/write"), .global("config"))
     }
 
+    func testRustRequestScopeTableCoversKeyedFamilies() {
+        XCTAssertEqual(
+            CodexAppServer.requestSerializationScope(forMethod: "thread/resume", params: ["threadId": "thread-1"]),
+            .thread(threadID: "thread-1")
+        )
+        XCTAssertEqual(
+            CodexAppServer.requestSerializationScope(forMethod: "thread/resume", params: ["threadId": "", "path": "/tmp/thread.jsonl"]),
+            .threadPath("/tmp/thread.jsonl")
+        )
+        XCTAssertEqual(
+            CodexAppServer.requestSerializationScope(forMethod: "thread/fork", params: [:]),
+            .thread(threadID: "")
+        )
+        for method in [
+            "thread/archive",
+            "thread/unsubscribe",
+            "thread/goal/set",
+            "thread/read",
+            "thread/inject_items",
+            "turn/start",
+            "turn/steer",
+            "turn/interrupt",
+            "thread/realtime/start",
+            "review/start",
+            "mcpServer/tool/call"
+        ] {
+            XCTAssertEqual(
+                CodexAppServer.requestSerializationScope(forMethod: method, params: ["threadId": "thread-2"]),
+                .thread(threadID: "thread-2"),
+                method
+            )
+        }
+
+        XCTAssertEqual(
+            CodexAppServer.requestSerializationScope(forMethod: "mcpServer/resource/read", params: ["threadId": "thread-3"]),
+            .thread(threadID: "thread-3")
+        )
+        XCTAssertNil(CodexAppServer.requestSerializationScope(forMethod: "mcpServer/resource/read", params: [:]))
+
+        XCTAssertEqual(
+            CodexAppServer.requestSerializationScope(forMethod: "command/exec", params: ["processId": "proc-1"]),
+            .commandExecProcess(processID: "proc-1")
+        )
+        XCTAssertNil(CodexAppServer.requestSerializationScope(forMethod: "command/exec", params: [:]))
+        XCTAssertEqual(
+            CodexAppServer.requestSerializationScope(forMethod: "command/exec/write", params: ["processId": "proc-1"]),
+            .commandExecProcess(processID: "proc-1")
+        )
+        XCTAssertEqual(
+            CodexAppServer.requestSerializationScope(forMethod: "process/spawn", params: ["processHandle": "handle-1"]),
+            .process(processHandle: "handle-1")
+        )
+        XCTAssertEqual(
+            CodexAppServer.requestSerializationScope(forMethod: "fs/watch", params: ["watchId": "watch-1"]),
+            .fsWatch(watchID: "watch-1")
+        )
+        XCTAssertEqual(
+            CodexAppServer.requestSerializationScope(forMethod: "fuzzyFileSearch/sessionUpdate", params: ["sessionId": "search-1"]),
+            .fuzzyFileSearchSession(sessionID: "search-1")
+        )
+        XCTAssertEqual(
+            CodexAppServer.requestSerializationScope(forMethod: "mcpServer/oauth/login", params: ["name": "server-a"]),
+            .mcpOauth(serverName: "server-a")
+        )
+    }
+
+    func testRustRequestScopeTableCoversGlobalFamilies() {
+        for method in [
+            "plugin/read",
+            "plugin/skill/read",
+            "plugin/share/save",
+            "plugin/share/updateTargets",
+            "plugin/share/list",
+            "plugin/share/delete",
+            "hooks/list",
+            "experimentalFeature/list",
+            "experimentalFeature/enablement/set",
+            "externalAgentConfig/detect",
+            "externalAgentConfig/import",
+            "configRequirements/read",
+            "windowsSandbox/readiness"
+        ] {
+            XCTAssertEqual(CodexAppServer.requestSerializationScope(forMethod: method), .global("config"), method)
+        }
+
+        XCTAssertEqual(CodexAppServer.requestSerializationScope(forMethod: "memory/reset"), .global("memory"))
+        XCTAssertEqual(CodexAppServer.requestSerializationScope(forMethod: "config/mcpServer/reload"), .global("mcp-registry"))
+        XCTAssertEqual(CodexAppServer.requestSerializationScope(forMethod: "mcpServerStatus/list"), .global("mcp-registry"))
+        XCTAssertEqual(CodexAppServer.requestSerializationScope(forMethod: "windowsSandbox/setupStart"), .global("windows-sandbox-setup"))
+
+        for method in [
+            "account/login/start",
+            "account/login/cancel",
+            "account/logout",
+            "account/read",
+            "account/sendAddCreditsNudgeEmail",
+            "getAuthStatus"
+        ] {
+            XCTAssertEqual(CodexAppServer.requestSerializationScope(forMethod: method), .global("account-auth"), method)
+        }
+
+        for method in [
+            "initialize",
+            "thread/start",
+            "thread/turns/list",
+            "thread/turns/items/list",
+            "fs/readFile",
+            "account/rateLimits/read",
+            "fuzzyFileSearch"
+        ] {
+            XCTAssertNil(CodexAppServer.requestSerializationScope(forMethod: method), method)
+        }
+    }
+
     func testGlobalSharedReadScopeUsesSameQueueKeyWithSharedAccessLikeRust() {
         let shared = RequestSerializationQueueKey.from(scope: .globalSharedRead("config"))
         let exclusive = RequestSerializationQueueKey.from(scope: .global("config"))
@@ -20,6 +134,29 @@ final class RequestSerializationTests: XCTestCase {
         XCTAssertEqual(shared.1, .sharedRead)
         XCTAssertEqual(exclusive.0, .global("config"))
         XCTAssertEqual(exclusive.1, .exclusive)
+    }
+
+    func testConnectionScopedRequestScopesAddConnectionIDWhenCreatingQueueKeyLikeRust() {
+        let command = RequestSerializationQueueKey.from(
+            scope: .commandExecProcess(processID: "proc-1"),
+            connectionID: "connection-1"
+        )
+        XCTAssertEqual(command.0, .commandExecProcess(connectionID: "connection-1", processID: "proc-1"))
+        XCTAssertEqual(command.1, .exclusive)
+
+        let process = RequestSerializationQueueKey.from(
+            scope: .process(processHandle: "handle-1"),
+            connectionID: "connection-1"
+        )
+        XCTAssertEqual(process.0, .process(connectionID: "connection-1", processHandle: "handle-1"))
+        XCTAssertEqual(process.1, .exclusive)
+
+        let watch = RequestSerializationQueueKey.from(
+            scope: .fsWatch(watchID: "watch-1"),
+            connectionID: "connection-1"
+        )
+        XCTAssertEqual(watch.0, .fsWatch(connectionID: "connection-1", watchID: "watch-1"))
+        XCTAssertEqual(watch.1, .exclusive)
     }
 
     func testSameKeySharedReadsRunConcurrentlyLikeRust() async throws {
