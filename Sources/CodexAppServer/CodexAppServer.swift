@@ -18533,7 +18533,12 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        _ = refreshManagedChatGPTAuthIfNeeded(params: params, configuration: configuration)
+        let request = try getAccountParams(from: params)
+        _ = refreshManagedChatGPTAuthIfNeeded(
+            params: params,
+            configuration: configuration,
+            forceRefresh: request.refreshToken
+        )
 
         guard configuration.requiresOpenAIAuth else {
             return [
@@ -18576,6 +18581,12 @@ public enum CodexAppServer {
             "account": account,
             "requiresOpenAIAuth": true
         ]
+    }
+
+    private static func getAccountParams(from params: [String: Any]?) throws -> GetAccountParams {
+        try GetAccountParams(
+            refreshToken: rustDefaultBoolParam(params?["refreshToken"], defaultValue: false)
+        )
     }
 
     private static func isPermanentRefreshFailure(_ error: Error) -> Bool {

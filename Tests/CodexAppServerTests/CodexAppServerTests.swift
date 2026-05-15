@@ -20723,6 +20723,25 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(accountPayload["planType"] as? String, "pro")
     }
 
+    func testAccountReadRejectsMalformedRefreshTokenLikeRustV2Params() throws {
+        let temp = try TemporaryDirectory()
+        let cases: [(String, String)] = [
+            (#""refreshToken":null"#, "Invalid request: invalid type: null, expected a boolean"),
+            (#""refreshToken":1"#, "Invalid request: invalid type: integer `1`, expected a boolean"),
+            (#""refreshToken":"true""#, #"Invalid request: invalid type: string "true", expected a boolean"#)
+        ]
+
+        for (index, testCase) in cases.enumerated() {
+            let response = try appServerResponse(
+                #"{"id":\#(index + 1),"method":"account/read","params":{\#(testCase.0)}}"#,
+                codexHome: temp.url
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, testCase.1)
+        }
+    }
+
     func testAccountLoginManagedAuthRejectedWhenExternalAuthActive() throws {
         let temp = try TemporaryDirectory()
         let accessToken = try fakeJWT(email: "embedded@example.com", plan: "pro", accountID: "org-embedded")
