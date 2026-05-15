@@ -326,6 +326,83 @@ final class ApplyPatchTests: XCTestCase {
         XCTAssertEqual(result.stderr, "Invalid patch hunk on line 2: Update file hunk for path 'foo.txt' is empty\n")
     }
 
+    func testParsePatchReturnsRustShapedUpdateChunkErrors() {
+        assertParsePatchError(
+            """
+            *** Begin Patch
+            *** Update File: file.txt
+            @@
+            *** End Patch
+            """,
+            .invalidHunk(message: "Update hunk does not contain any lines", lineNumber: 4)
+        )
+
+        assertParsePatchError(
+            """
+            *** Begin Patch
+            *** Update File: file.txt
+            @@
+            bad
+            *** End Patch
+            """,
+            .invalidHunk(
+                message: "Unexpected line found in update hunk: 'bad'. Every line should start with ' ' (context line), '+' (added line), or '-' (removed line)",
+                lineNumber: 4
+            )
+        )
+
+        assertParsePatchError(
+            """
+            *** Begin Patch
+            *** Update File: file.txt
+            @@
+            *** End of File
+            *** End Patch
+            """,
+            .invalidHunk(message: "Update hunk does not contain any lines", lineNumber: 4)
+        )
+
+        assertParsePatchError(
+            """
+            *** Begin Patch
+            *** Update File: file.txt
+            @@
+            -old
+            bad
+            *** End Patch
+            """,
+            .invalidHunk(
+                message: "Expected update hunk to start with a @@ context marker, got: 'bad'",
+                lineNumber: 5
+            )
+        )
+
+        assertParsePatchError(
+            """
+            *** Begin Patch
+            *** Update File: file.txt
+            @@
+            *** Update File: other.txt
+            *** End Patch
+            """,
+            .invalidHunk(
+                message: "Unexpected line found in update hunk: '*** Update File: other.txt'. Every line should start with ' ' (context line), '+' (added line), or '-' (removed line)",
+                lineNumber: 4
+            )
+        )
+    }
+
+    private func assertParsePatchError(
+        _ patch: String,
+        _ expectedError: ApplyPatchError,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertThrowsError(try ApplyPatch.parsePatch(patch), file: file, line: line) { error in
+            XCTAssertEqual(error as? ApplyPatchError, expectedError, file: file, line: line)
+        }
+    }
+
     private func setPosixPermissions(_ permissions: Int, at url: URL) throws {
         try FileManager.default.setAttributes([.posixPermissions: permissions], ofItemAtPath: url.path)
     }
