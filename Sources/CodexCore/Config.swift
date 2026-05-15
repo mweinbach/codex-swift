@@ -1585,7 +1585,7 @@ private struct ParsedPermissionProfileToml: Equatable, Sendable {
             filesystemSortKey(left.path) < filesystemSortKey(right.path)
         }
         let globScanMaxDepth = try filesystem["glob_scan_max_depth"].map {
-            try nonNegativeInt($0, key: "permissions.\(profileName).filesystem.glob_scan_max_depth")
+            try positiveInt($0, key: "permissions.\(profileName).filesystem.glob_scan_max_depth")
         }
         let networkEnabled = try network["enabled"].map {
             try boolValue($0, key: "permissions.\(profileName).network.enabled")
@@ -1953,7 +1953,7 @@ private struct ParsedPermissionProfileToml: Equatable, Sendable {
         return parsed
     }
 
-    private func nonNegativeInt(_ value: ConfigValue, key: String) throws -> Int {
+    private func positiveInt(_ value: ConfigValue, key: String) throws -> Int {
         guard case let .integer(integer) = value, integer > 0, integer <= Int64(Int.max) else {
             throw CodexConfigLoadError.invalidConfigLine(key)
         }

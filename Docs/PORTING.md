@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust permission-profile `glob_scan_max_depth`
+  validation in `codex-rs/core/src/config/permissions.rs`. Swift config
+  loading now has focused coverage that custom permission profiles reject zero
+  scan depths at load time instead of accepting a deny-read glob expansion
+  setting Rust treats as invalid.
 - 2026-05-15: rechecked Rust v2 `ThreadItem::from(TurnItem)` supported
   variant conversion in
   `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift app-server

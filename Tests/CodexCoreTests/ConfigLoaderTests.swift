@@ -802,6 +802,27 @@ final class ConfigLoaderTests: XCTestCase {
         )
     }
 
+    func testPermissionProfileGlobScanDepthRejectsZeroLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        default_permissions = "workspace"
+
+        [permissions.workspace.filesystem]
+        glob_scan_max_depth = 0
+        """.write(
+            to: dir.url.appendingPathComponent("config.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, cwd: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "Invalid config line: permissions.workspace.filesystem.glob_scan_max_depth"
+            )
+        }
+    }
+
     func testPermissionProfilesRequireDefaultPermissionsLikeRust() throws {
         let dir = try CoreTemporaryDirectory()
         try """
