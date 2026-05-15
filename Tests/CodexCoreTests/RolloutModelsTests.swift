@@ -79,6 +79,24 @@ final class RolloutModelsTests: XCTestCase {
         XCTAssertNil(line.git)
     }
 
+    func testSessionMetaRejectsNullRustDefaultedSourceLikeSerde() throws {
+        XCTAssertThrowsError(try JSONDecoder().decode(SessionMetaLine.self, from: Data("""
+        {
+          "id": "67e55044-10b1-426f-9247-bb680e5fe0c8",
+          "timestamp": "",
+          "cwd": "",
+          "originator": "",
+          "cli_version": "",
+          "source": null,
+          "model_provider": null
+        }
+        """.utf8))) { error in
+            guard case DecodingError.valueNotFound = error else {
+                return XCTFail("expected valueNotFound, got \(error)")
+            }
+        }
+    }
+
     func testInitialHistoryReturnsFirstSessionMetaDynamicToolsLikeRust() throws {
         let id = try ConversationId(string: "67e55044-10b1-426f-9247-bb680e5fe0c8")
         let dynamicTools = [

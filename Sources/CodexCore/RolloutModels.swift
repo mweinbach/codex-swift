@@ -83,7 +83,7 @@ public struct SessionMeta: Equatable, Codable, Sendable {
         self.originator = try container.decode(String.self, forKey: .originator)
         self.cliVersion = try container.decode(String.self, forKey: .cliVersion)
         self.instructions = try container.decodeIfPresent(String.self, forKey: .instructions)
-        self.source = try container.decodeIfPresent(SessionSource.self, forKey: .source) ?? .default
+        self.source = try container.decodeRustDefaulted(SessionSource.self, forKey: .source, defaultValue: .default)
         self.threadSource = try container.decodeIfPresent(ThreadSource.self, forKey: .threadSource)
         self.agentNickname = try container.decodeIfPresent(String.self, forKey: .agentNickname)
         if container.contains(.agentRole), container.contains(.agentType) {

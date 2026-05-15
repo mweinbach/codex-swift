@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust `SessionMeta.source` in
+  `codex-rs/protocol/src/protocol.rs`. Swift rollout metadata now preserves
+  Serde's default boundary for `source`: omitted values default to `vscode`,
+  while explicit `null` rejects instead of silently defaulting.
 - 2026-05-15: rechecked the Rust baseline `models-manager/models.json` at
   `7c9731c9af`. The raw catalog still carries legacy
   `reasoning_summary_format` fields, while Rust's `ModelInfo` ignores them on
