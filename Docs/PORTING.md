@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust core `HookRunSummary.source` in
+  `codex-rs/protocol/src/protocol.rs`. Swift core hook rollout decoding now
+  matches Serde's default boundary: omitted `source` defaults to `unknown`,
+  while explicit `null` rejects like Rust.
 - 2026-05-15: rechecked Rust `SessionMeta.source` in
   `codex-rs/protocol/src/protocol.rs`. Swift rollout metadata now preserves
   Serde's default boundary for `source`: omitted values default to `vscode`,

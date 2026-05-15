@@ -159,7 +159,7 @@ public struct HookRunSummary: Codable, Equatable, Sendable {
         self.executionMode = try container.decode(HookExecutionMode.self, forKey: .executionMode)
         self.scope = try container.decode(HookScope.self, forKey: .scope)
         self.sourcePath = try container.decode(AbsolutePath.self, forKey: .sourcePath)
-        self.source = try container.decodeIfPresent(HookSource.self, forKey: .source) ?? .unknown
+        self.source = try container.decodeRustDefaulted(HookSource.self, forKey: .source, defaultValue: .unknown)
         self.displayOrder = try container.decode(Int64.self, forKey: .displayOrder)
         self.status = try container.decode(HookRunStatus.self, forKey: .status)
         self.statusMessage = try container.decodeIfPresent(String.self, forKey: .statusMessage)

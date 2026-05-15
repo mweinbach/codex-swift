@@ -131,6 +131,33 @@ final class HookEventsTests: XCTestCase {
         XCTAssertEqual(run.durationMs, 5)
     }
 
+    func testHookRunSummaryRejectsNullRustDefaultedSource() throws {
+        let json = """
+        {
+          "id": "run-2",
+          "event_name": "stop",
+          "handler_type": "agent",
+          "execution_mode": "async",
+          "scope": "thread",
+          "source_path": "/tmp/hook.json",
+          "source": null,
+          "display_order": 1,
+          "status": "completed",
+          "status_message": null,
+          "started_at": 10,
+          "completed_at": 15,
+          "duration_ms": 5,
+          "entries": []
+        }
+        """
+
+        XCTAssertThrowsError(try JSONDecoder().decode(HookRunSummary.self, from: Data(json.utf8))) { error in
+            guard case DecodingError.valueNotFound = error else {
+                return XCTFail("expected valueNotFound, got \(error)")
+            }
+        }
+    }
+
     func testHookStartedAndCompletedEventsUseTurnIDWireName() throws {
         let run = try HookRunSummary(
             id: "run-3",
