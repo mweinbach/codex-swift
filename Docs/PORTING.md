@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `SandboxPolicy`
+  core-bridge fixtures in
+  `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now pins
+  app-server-to-core-to-app-server conversion for `externalSandbox` with
+  enabled network access and `readOnly` with network access.
 - 2026-05-15: rechecked Rust app-server v2
   `CommandExecutionOutputDeltaNotification` in
   `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now pins the

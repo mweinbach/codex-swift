@@ -217,6 +217,16 @@ final class AppServerCommandExecProtocolTests: XCTestCase {
         ])
     }
 
+    func testCommandExecSandboxPolicyBridgesCoreNetworkAccessLikeRustProtocol() throws {
+        let external = AppServerCommandExecSandboxPolicy.externalSandbox(networkAccess: .enabled)
+        XCTAssertEqual(external.coreValue, .externalSandbox(networkAccess: .enabled))
+        XCTAssertEqual(AppServerCommandExecSandboxPolicy(core: external.coreValue), external)
+
+        let readOnly = AppServerCommandExecSandboxPolicy.readOnly(networkAccess: true)
+        XCTAssertEqual(readOnly.coreValue, .readOnlyWithNetworkAccess)
+        XCTAssertEqual(AppServerCommandExecSandboxPolicy(core: readOnly.coreValue), readOnly)
+    }
+
     func testCommandExecSandboxPolicyRejectsExplicitNullForRustDefaultedFields() {
         XCTAssertThrowsError(
             try JSONDecoder().decode(
