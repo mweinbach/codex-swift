@@ -406,6 +406,7 @@ final class ModelProviderInfoTests: XCTestCase {
             "OpenAI-Project": "OPENAI_PROJECT"
         ])
         XCTAssertTrue(provider.requiresOpenAIAuth)
+        XCTAssertTrue(provider.supportsWebsockets)
         XCTAssertTrue(provider.isOpenAI())
         XCTAssertEqual(provider.buildHeaderMap(environment: [
             "OPENAI_ORGANIZATION": "org",
@@ -426,6 +427,7 @@ final class ModelProviderInfoTests: XCTestCase {
         XCTAssertEqual(Set(providers.keys), ["openai", "amazon-bedrock", "ollama", "lmstudio"])
         XCTAssertEqual(providers["openai"]?.wireAPI, .responses)
         XCTAssertEqual(providers["openai"]?.requiresOpenAIAuth, true)
+        XCTAssertEqual(providers["openai"]?.supportsWebsockets, true)
         XCTAssertEqual(providers["amazon-bedrock"], ModelProviderInfo.createAmazonBedrockProvider())
         XCTAssertEqual(providers["amazon-bedrock"]?.aws, ModelProviderAWSAuthInfo())
         XCTAssertEqual(providers["ollama"], ModelProviderInfo.createOSSProvider(

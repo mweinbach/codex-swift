@@ -1550,6 +1550,48 @@ final class ToolSpecTests: XCTestCase {
         }
     }
 
+    func testToolSearchComputerUseDefaultLimitExpandsLikeRust() throws {
+        let entries = (0..<20).map { index in
+            makeToolSearchEntry(
+                name: "computer_action_\(index)",
+                searchText: "computer use action",
+                limitBucket: "computer-use"
+            )
+        }
+        let index = ToolSearchIndex(entries: entries)
+
+        let tools = try index.search(arguments: .object([
+            "query": .string("computer use")
+        ]))
+
+        XCTAssertEqual(tools.compactMap(toolName).count, 20)
+        XCTAssertEqual(tools.compactMap(toolName).first, "computer_action_0")
+        XCTAssertEqual(tools.compactMap(toolName).last, "computer_action_19")
+    }
+
+    func testToolSearchExplicitLimitBypassesBucketCapsLikeRust() throws {
+        let entries = (0..<12).map { index in
+            makeToolSearchEntry(
+                name: "docs_tool_\(index)",
+                searchText: "calendar docs tool",
+                limitBucket: "docs"
+            )
+        }
+        let index = ToolSearchIndex(entries: entries)
+
+        let defaultTools = try index.search(arguments: .object([
+            "query": .string("calendar docs")
+        ]))
+        let explicitTools = try index.search(arguments: .object([
+            "query": .string("calendar docs"),
+            "limit": .integer(12)
+        ]))
+
+        XCTAssertEqual(defaultTools.compactMap(toolName).count, 8)
+        XCTAssertEqual(explicitTools.compactMap(toolName).count, 12)
+        XCTAssertEqual(explicitTools.compactMap(toolName).last, "docs_tool_11")
+    }
+
     func testBuildSpecsHidesMCPNamespaceSpecsWhenNamespaceToolsDisabled() {
         let specs = ToolSpecFactory.buildSpecs(
             config: ToolsConfig(
@@ -1726,6 +1768,18 @@ final class ToolSpecTests: XCTestCase {
 
     private func makeMcpTool(name: String, description: String? = nil) -> McpTool {
         McpTool(name: name, inputSchema: McpToolInputSchema(), description: description)
+    }
+
+    private func makeToolSearchEntry(name: String, searchText: String, limitBucket: String?) -> ToolSearchEntry {
+        ToolSearchEntry(
+            searchText: searchText,
+            output: .function(ResponsesAPITool(
+                name: name,
+                description: "Deferred \(name)",
+                parameters: .object(properties: [:], required: nil, additionalProperties: .boolean(false))
+            )),
+            limitBucket: limitBucket
+        )
     }
 
     private func namespaceToolName(_ tool: ResponsesAPINamespaceTool) -> String {

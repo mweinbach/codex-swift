@@ -527,7 +527,8 @@ More info: https://github.com/openai/codex/discussions/7782
                 "OpenAI-Organization": "OPENAI_ORGANIZATION",
                 "OpenAI-Project": "OPENAI_PROJECT"
             ],
-            requiresOpenAIAuth: true
+            requiresOpenAIAuth: true,
+            supportsWebsockets: true
         )
     }
 
