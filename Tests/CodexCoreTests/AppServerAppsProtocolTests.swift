@@ -155,6 +155,56 @@ final class AppServerAppsProtocolTests: XCTestCase {
         XCTAssertEqual(response.nextCursor, "next")
     }
 
+    func testAppScreenshotRejectsDuplicateRustAliases() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AppsListResponse.self,
+                from: Data(
+                    #"""
+                    {
+                      "data": [{
+                        "id": "weather-app",
+                        "name": "Weather",
+                        "appMetadata": {
+                          "screenshots": [{
+                            "fileId": "file-camel",
+                            "file_id": "file-snake",
+                            "userPrompt": "show weather"
+                          }]
+                        }
+                      }],
+                      "nextCursor": null
+                    }
+                    """#.utf8
+                )
+            )
+        )
+
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AppsListResponse.self,
+                from: Data(
+                    #"""
+                    {
+                      "data": [{
+                        "id": "weather-app",
+                        "name": "Weather",
+                        "appMetadata": {
+                          "screenshots": [{
+                            "file_id": "file-1",
+                            "userPrompt": "show weather",
+                            "user_prompt": "legacy prompt"
+                          }]
+                        }
+                      }],
+                      "nextCursor": null
+                    }
+                    """#.utf8
+                )
+            )
+        )
+    }
+
     func testAppInfoRejectsExplicitNullForRustDefaultedAccessFlags() {
         XCTAssertThrowsError(
             try JSONDecoder().decode(

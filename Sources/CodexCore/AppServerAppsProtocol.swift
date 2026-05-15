@@ -129,8 +129,22 @@ extension AppScreenshot: Codable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         url = try container.decodeIfPresent(String.self, forKey: .url)
+        if container.contains(.fileID), container.contains(.legacyFileID) {
+            throw DecodingError.dataCorruptedError(
+                forKey: .fileID,
+                in: container,
+                debugDescription: "duplicate app screenshot fileId field"
+            )
+        }
         fileID = try container.decodeIfPresent(String.self, forKey: .fileID)
             ?? container.decodeIfPresent(String.self, forKey: .legacyFileID)
+        if container.contains(.userPrompt), container.contains(.legacyUserPrompt) {
+            throw DecodingError.dataCorruptedError(
+                forKey: .userPrompt,
+                in: container,
+                debugDescription: "duplicate app screenshot userPrompt field"
+            )
+        }
         userPrompt = try container.decodeIfPresent(String.self, forKey: .userPrompt)
             ?? container.decode(String.self, forKey: .legacyUserPrompt)
     }

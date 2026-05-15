@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 app screenshot aliases in
+  `codex-rs/app-server-protocol/src/protocol/v2/apps.rs`. Swift
+  `AppScreenshot` decoding now rejects duplicate camelCase/snake_case alias
+  spellings for `fileId`/`file_id` and `userPrompt`/`user_prompt` like Serde.
 - 2026-05-15: rechecked Rust's MCP image content conversion in
   `codex-rs/protocol/src/models.rs`. Swift `McpImageContent` decoding now
   rejects payloads that provide both `mimeType` and `mime_type`, while keeping
