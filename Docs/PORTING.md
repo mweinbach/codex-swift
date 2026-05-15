@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server `thread/resume` config override
+  handling in
+  `codex-rs/app-server/src/request_processors/thread_processor.rs`. Swift now
+  applies resume request `approvalPolicy` and `sandbox` overrides before
+  building the lifecycle response, matching Rust's resolved config snapshot
+  behavior for resumed threads.
 - 2026-05-15: rechecked Rust app-server v2 thread lifecycle
   `approval_policy: AskForApproval` response fields in
   `codex-rs/app-server-protocol/src/protocol/v2/thread.rs`. Swift now projects
