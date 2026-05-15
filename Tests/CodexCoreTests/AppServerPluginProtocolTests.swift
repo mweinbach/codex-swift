@@ -11,6 +11,19 @@ final class AppServerPluginProtocolTests: XCTestCase {
             "sparsePaths": NSNull()
         ])
 
+        try XCTAssertJSONObjectEqual(
+            MarketplaceAddParams(
+                source: "owner/repo",
+                refName: "main",
+                sparsePaths: ["plugins/foo"]
+            ),
+            [
+                "source": "owner/repo",
+                "refName": "main",
+                "sparsePaths": ["plugins/foo"]
+            ]
+        )
+
         let decoded = try JSONDecoder().decode(
             MarketplaceAddParams.self,
             from: Data(#"{"source":"openai/debug-marketplace","refName":"main","sparsePaths":["plugins/debug"]}"#.utf8)
