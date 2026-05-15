@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust HEAD `7c9731c9af` (`cargo shear`
+  `--deny-warnings`) plus the adjacent release/Python-SDK maintenance commits
+  `cf941ede15`, `9183503b97`, and `8956a928a1`. These touch Rust CI/release
+  hygiene and Python SDK artifact staging, not the SwiftPM runtime or protocol
+  port, so no Swift behavior change is required for this checkpoint.
 - 2026-05-15: rechecked Rust app-server v2 `PluginListResponse` in
   `codex-rs/app-server-protocol/src/protocol/v2/plugin.rs`. Swift now pins the
   Serde default boundary for `marketplaceLoadErrors` and `featuredPluginIds`:
