@@ -203,6 +203,7 @@ final class ApprovalsTests: XCTestCase {
         let missingDefault = """
         {
           "call_id": "exec-1",
+          "started_at_ms": 1,
           "command": ["pwd"],
           "cwd": "/repo",
           "parsed_cmd": []
@@ -210,8 +211,40 @@ final class ApprovalsTests: XCTestCase {
         """
         XCTAssertEqual(
             try JSONDecoder().decode(ExecApprovalRequestEvent.self, from: Data(missingDefault.utf8)),
-            ExecApprovalRequestEvent(callID: "exec-1", command: ["pwd"], cwd: "/repo", parsedCmd: [])
+            ExecApprovalRequestEvent(
+                callID: "exec-1",
+                startedAtMilliseconds: 1,
+                command: ["pwd"],
+                cwd: "/repo",
+                parsedCmd: []
+            )
         )
+    }
+
+    func testExecApprovalRequestRequiresStartedAtLikeRust() {
+        for payload in [
+            """
+            {
+              "call_id": "exec-1",
+              "command": ["pwd"],
+              "cwd": "/repo",
+              "parsed_cmd": []
+            }
+            """,
+            """
+            {
+              "call_id": "exec-1",
+              "started_at_ms": null,
+              "command": ["pwd"],
+              "cwd": "/repo",
+              "parsed_cmd": []
+            }
+            """
+        ] {
+            XCTAssertThrowsError(
+                try JSONDecoder().decode(ExecApprovalRequestEvent.self, from: Data(payload.utf8))
+            )
+        }
     }
 
     func testExecApprovalRequestRejectsNullRustDefaultedTurnID() {
@@ -312,13 +345,36 @@ final class ApprovalsTests: XCTestCase {
         let missingDefault = """
         {
           "call_id": "patch-1",
+          "started_at_ms": 1,
           "changes": {}
         }
         """
         XCTAssertEqual(
             try JSONDecoder().decode(ApplyPatchApprovalRequestEvent.self, from: Data(missingDefault.utf8)),
-            ApplyPatchApprovalRequestEvent(callID: "patch-1", changes: [:])
+            ApplyPatchApprovalRequestEvent(callID: "patch-1", startedAtMilliseconds: 1, changes: [:])
         )
+    }
+
+    func testApplyPatchApprovalRequestRequiresStartedAtLikeRust() {
+        for payload in [
+            """
+            {
+              "call_id": "patch-1",
+              "changes": {}
+            }
+            """,
+            """
+            {
+              "call_id": "patch-1",
+              "started_at_ms": null,
+              "changes": {}
+            }
+            """
+        ] {
+            XCTAssertThrowsError(
+                try JSONDecoder().decode(ApplyPatchApprovalRequestEvent.self, from: Data(payload.utf8))
+            )
+        }
     }
 
     func testApplyPatchApprovalRequestRejectsNullRustDefaultedTurnID() {

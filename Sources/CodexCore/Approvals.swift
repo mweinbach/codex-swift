@@ -195,7 +195,7 @@ public struct ExecApprovalRequestEvent: Equatable, Codable, Sendable {
         self.callID = try container.decode(String.self, forKey: .callID)
         self.approvalID = try container.decodeIfPresent(String.self, forKey: .approvalID)
         self.turnID = try container.decodeRustDefaulted(String.self, forKey: .turnID, defaultValue: "")
-        self.startedAtMilliseconds = try container.decodeIfPresent(Int64.self, forKey: .startedAtMilliseconds) ?? 0
+        self.startedAtMilliseconds = try container.decode(Int64.self, forKey: .startedAtMilliseconds)
         self.command = try container.decode([String].self, forKey: .command)
         self.cwd = try container.decode(String.self, forKey: .cwd)
         self.reason = try container.decodeIfPresent(String.self, forKey: .reason)
@@ -340,7 +340,7 @@ public struct ApplyPatchApprovalRequestEvent: Equatable, Codable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.callID = try container.decode(String.self, forKey: .callID)
         self.turnID = try container.decodeRustDefaulted(String.self, forKey: .turnID, defaultValue: "")
-        self.startedAtMilliseconds = try container.decodeIfPresent(Int64.self, forKey: .startedAtMilliseconds) ?? 0
+        self.startedAtMilliseconds = try container.decode(Int64.self, forKey: .startedAtMilliseconds)
         self.changes = try container.decode([String: FileChange].self, forKey: .changes)
         self.reason = try container.decodeIfPresent(String.self, forKey: .reason)
         self.grantRoot = try container.decodeIfPresent(String.self, forKey: .grantRoot)

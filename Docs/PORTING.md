@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's approval request event timing fields in
+  `codex-rs/protocol/src/approvals.rs`. Swift `ExecApprovalRequestEvent` and
+  `ApplyPatchApprovalRequestEvent` decoding now requires `started_at_ms` like
+  Rust while preserving the separate Rust default for omitted `turn_id`.
 - 2026-05-15: rechecked Rust's core exec and patch event defaults in
   `codex-rs/protocol/src/protocol.rs`. Swift `ExecCommandBeginEvent`,
   `ExecCommandEndEvent`, `PatchApplyBeginEvent`, and `PatchApplyEndEvent`
