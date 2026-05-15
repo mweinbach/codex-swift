@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `fs/changed` notification
+  round-trip coverage in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`.
+  Swift now pins the multiple changed-path decode and canonical re-encode path
+  alongside the existing watch/unwatch payload coverage.
 - 2026-05-15: rechecked Rust app-server v2 `fs/copy` recursive directory copy
   round-trip coverage in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`.
   Swift now pins the `recursive: true` decode and canonical re-encode path

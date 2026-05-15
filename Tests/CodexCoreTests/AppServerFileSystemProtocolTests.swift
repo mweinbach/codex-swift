@@ -185,6 +185,30 @@ final class AppServerFileSystemProtocolTests: XCTestCase {
         )
     }
 
+    func testFsChangedNotificationRoundTripsMultiplePathsLikeRustProtocol() throws {
+        let notification = try JSONDecoder().decode(
+            FsChangedNotification.self,
+            from: Data(
+                #"{"watchId":"0195ec6b-1d6f-7c2e-8c7a-56f2c4a8b9d1","changedPaths":["/tmp/codex-fs/repo/.git/HEAD","/tmp/codex-fs/repo/.git/FETCH_HEAD"]}"#.utf8
+            )
+        )
+
+        XCTAssertEqual(notification, FsChangedNotification(
+            watchID: "0195ec6b-1d6f-7c2e-8c7a-56f2c4a8b9d1",
+            changedPaths: [
+                try AbsolutePath(absolutePath: "/tmp/codex-fs/repo/.git/HEAD"),
+                try AbsolutePath(absolutePath: "/tmp/codex-fs/repo/.git/FETCH_HEAD")
+            ]
+        ))
+        try XCTAssertJSONObjectEqual(notification, [
+            "watchId": "0195ec6b-1d6f-7c2e-8c7a-56f2c4a8b9d1",
+            "changedPaths": [
+                "/tmp/codex-fs/repo/.git/HEAD",
+                "/tmp/codex-fs/repo/.git/FETCH_HEAD"
+            ]
+        ])
+    }
+
     func testFileSystemParamsDecodeRustDefaultsAndNulls() throws {
         let create = try JSONDecoder().decode(
             FsCreateDirectoryParams.self,
