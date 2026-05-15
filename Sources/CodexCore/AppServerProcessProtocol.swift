@@ -76,9 +76,9 @@ extension ProcessSpawnParams: Codable {
         command = try container.decode([String].self, forKey: .command)
         processHandle = try container.decode(String.self, forKey: .processHandle)
         cwd = try container.decode(AbsolutePath.self, forKey: .cwd)
-        tty = try container.decodeIfPresent(Bool.self, forKey: .tty) ?? false
-        streamStdin = try container.decodeIfPresent(Bool.self, forKey: .streamStdin) ?? false
-        streamStdoutStderr = try container.decodeIfPresent(Bool.self, forKey: .streamStdoutStderr) ?? false
+        tty = try container.decodeRustDefaulted(Bool.self, forKey: .tty, defaultValue: false)
+        streamStdin = try container.decodeRustDefaulted(Bool.self, forKey: .streamStdin, defaultValue: false)
+        streamStdoutStderr = try container.decodeRustDefaulted(Bool.self, forKey: .streamStdoutStderr, defaultValue: false)
         outputBytesCap = try container.decodeProcessOutputBytesCapIfPresent(forKey: .outputBytesCap) ?? .serverDefault
         timeoutMs = try container.decodeProcessTimeoutIfPresent(forKey: .timeoutMs) ?? .serverDefault
         env = try container.decodeIfPresent([String: String?].self, forKey: .env)
@@ -133,7 +133,7 @@ extension ProcessWriteStdinParams: Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         processHandle = try container.decode(String.self, forKey: .processHandle)
         deltaBase64 = try container.decodeIfPresent(String.self, forKey: .deltaBase64)
-        closeStdin = try container.decodeIfPresent(Bool.self, forKey: .closeStdin) ?? false
+        closeStdin = try container.decodeRustDefaulted(Bool.self, forKey: .closeStdin, defaultValue: false)
     }
 
     public func encode(to encoder: Encoder) throws {

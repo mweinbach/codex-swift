@@ -113,6 +113,33 @@ final class AppServerProcessProtocolTests: XCTestCase {
         XCTAssertEqual(limited.timeoutMs, .milliseconds(500))
     }
 
+    func testProcessParamsRejectExplicitNullForRustDefaultedFlags() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                ProcessSpawnParams.self,
+                from: Data(#"{"command":["/bin/echo"],"processHandle":"proc-1","cwd":"/tmp/codex-process","tty":null}"#.utf8)
+            )
+        )
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                ProcessSpawnParams.self,
+                from: Data(#"{"command":["/bin/echo"],"processHandle":"proc-1","cwd":"/tmp/codex-process","streamStdin":null}"#.utf8)
+            )
+        )
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                ProcessSpawnParams.self,
+                from: Data(#"{"command":["/bin/echo"],"processHandle":"proc-1","cwd":"/tmp/codex-process","streamStdoutStderr":null}"#.utf8)
+            )
+        )
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                ProcessWriteStdinParams.self,
+                from: Data(#"{"processHandle":"proc-1","closeStdin":null}"#.utf8)
+            )
+        )
+    }
+
     func testProcessControlPayloadsEncodeRustWireShapes() throws {
         try XCTAssertJSONObjectEqual(
             ProcessWriteStdinParams(processHandle: "proc-1"),

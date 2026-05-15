@@ -96,6 +96,24 @@ final class AppServerCommandExecProtocolTests: XCTestCase {
         XCTAssertNil(decoded.permissionProfile)
     }
 
+    func testCommandExecParamsRejectExplicitNullForRustDefaultedFlags() {
+        for field in ["tty", "streamStdin", "streamStdoutStderr", "disableOutputCap", "disableTimeout"] {
+            XCTAssertThrowsError(
+                try JSONDecoder().decode(
+                    CommandExecParams.self,
+                    from: Data(#"{"command":["/bin/echo"],"\#(field)":null}"#.utf8)
+                )
+            )
+        }
+
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                CommandExecWriteParams.self,
+                from: Data(#"{"processId":"cmd-1","closeStdin":null}"#.utf8)
+            )
+        )
+    }
+
     func testCommandExecSandboxPolicyEncodesRustCamelCaseVariants() throws {
         try XCTAssertJSONObjectEqual(AppServerCommandExecSandboxPolicy.dangerFullAccess, [
             "type": "dangerFullAccess"
@@ -115,6 +133,39 @@ final class AppServerCommandExecProtocolTests: XCTestCase {
             "excludeTmpdirEnvVar": false,
             "excludeSlashTmp": false
         ])
+    }
+
+    func testCommandExecSandboxPolicyRejectsExplicitNullForRustDefaultedFields() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AppServerCommandExecSandboxPolicy.self,
+                from: Data(#"{"type":"readOnly","networkAccess":null}"#.utf8)
+            )
+        )
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AppServerCommandExecSandboxPolicy.self,
+                from: Data(#"{"type":"externalSandbox","networkAccess":null}"#.utf8)
+            )
+        )
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AppServerCommandExecSandboxPolicy.self,
+                from: Data(#"{"type":"workspaceWrite","networkAccess":null}"#.utf8)
+            )
+        )
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AppServerCommandExecSandboxPolicy.self,
+                from: Data(#"{"type":"workspaceWrite","excludeTmpdirEnvVar":null}"#.utf8)
+            )
+        )
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AppServerCommandExecSandboxPolicy.self,
+                from: Data(#"{"type":"workspaceWrite","excludeSlashTmp":null}"#.utf8)
+            )
+        )
     }
 
     func testCommandExecResponsesControlsAndNotificationsEncodeRustShapes() throws {

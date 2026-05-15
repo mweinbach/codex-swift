@@ -44,6 +44,56 @@ final class AppServerNotificationProtocolTests: XCTestCase {
         )
     }
 
+    func testRemoteControlStatusChangedNotificationEncodesRustV2WireShape() throws {
+        try XCTAssertJSONObjectEqual(
+            RemoteControlStatusChangedNotification(
+                status: .connected,
+                installationID: "install-1",
+                environmentID: "env-1"
+            ),
+            [
+                "status": "connected",
+                "installationId": "install-1",
+                "environmentId": "env-1"
+            ]
+        )
+
+        try XCTAssertJSONObjectEqual(
+            RemoteControlStatusChangedNotification(
+                status: .disabled,
+                installationID: "install-2",
+                environmentID: nil
+            ),
+            [
+                "status": "disabled",
+                "installationId": "install-2",
+                "environmentId": NSNull()
+            ]
+        )
+
+        let decoded = try JSONDecoder().decode(
+            RemoteControlStatusChangedNotification.self,
+            from: Data(
+                #"""
+                {
+                  "status": "errored",
+                  "installationId": "install-3",
+                  "environmentId": null
+                }
+                """#.utf8
+            )
+        )
+
+        XCTAssertEqual(
+            decoded,
+            RemoteControlStatusChangedNotification(
+                status: .errored,
+                installationID: "install-3",
+                environmentID: nil
+            )
+        )
+    }
+
     func testErrorAndResolvedNotificationsEncodeRustWireShape() throws {
         try XCTAssertJSONObjectEqual(
             ErrorNotification(

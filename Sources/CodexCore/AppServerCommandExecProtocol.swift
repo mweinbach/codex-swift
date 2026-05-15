@@ -44,18 +44,40 @@ extension AppServerSandboxPolicy: Codable {
         case .dangerFullAccess:
             self = .dangerFullAccess
         case .readOnly:
-            self = .readOnly(networkAccess: try container.decodeIfPresent(Bool.self, forKey: .networkAccess) ?? false)
+            self = .readOnly(
+                networkAccess: try container.decodeRustDefaulted(
+                    Bool.self,
+                    forKey: .networkAccess,
+                    defaultValue: false
+                )
+            )
         case .externalSandbox:
             self = .externalSandbox(
-                networkAccess: try container.decodeIfPresent(NetworkAccess.self, forKey: .networkAccess) ?? .restricted
+                networkAccess: try container.decodeRustDefaulted(
+                    NetworkAccess.self,
+                    forKey: .networkAccess,
+                    defaultValue: .restricted
+                )
             )
         case .workspaceWrite:
             let writableRoots = try container.decodeIfPresent([AbsolutePath].self, forKey: .writableRoots) ?? []
             self = .workspaceWrite(
                 writableRoots: writableRoots.map(\.path),
-                networkAccess: try container.decodeIfPresent(Bool.self, forKey: .networkAccess) ?? false,
-                excludeTmpdirEnvVar: try container.decodeIfPresent(Bool.self, forKey: .excludeTmpdirEnvVar) ?? false,
-                excludeSlashTmp: try container.decodeIfPresent(Bool.self, forKey: .excludeSlashTmp) ?? false
+                networkAccess: try container.decodeRustDefaulted(
+                    Bool.self,
+                    forKey: .networkAccess,
+                    defaultValue: false
+                ),
+                excludeTmpdirEnvVar: try container.decodeRustDefaulted(
+                    Bool.self,
+                    forKey: .excludeTmpdirEnvVar,
+                    defaultValue: false
+                ),
+                excludeSlashTmp: try container.decodeRustDefaulted(
+                    Bool.self,
+                    forKey: .excludeSlashTmp,
+                    defaultValue: false
+                )
             )
         }
     }
@@ -195,12 +217,24 @@ extension CommandExecParams: Codable {
         self.init(
             command: try container.decode([String].self, forKey: .command),
             processID: try container.decodeIfPresent(String.self, forKey: .processID),
-            tty: try container.decodeIfPresent(Bool.self, forKey: .tty) ?? false,
-            streamStdin: try container.decodeIfPresent(Bool.self, forKey: .streamStdin) ?? false,
-            streamStdoutStderr: try container.decodeIfPresent(Bool.self, forKey: .streamStdoutStderr) ?? false,
+            tty: try container.decodeRustDefaulted(Bool.self, forKey: .tty, defaultValue: false),
+            streamStdin: try container.decodeRustDefaulted(Bool.self, forKey: .streamStdin, defaultValue: false),
+            streamStdoutStderr: try container.decodeRustDefaulted(
+                Bool.self,
+                forKey: .streamStdoutStderr,
+                defaultValue: false
+            ),
             outputBytesCap: try container.decodeIfPresent(Int.self, forKey: .outputBytesCap),
-            disableOutputCap: try container.decodeIfPresent(Bool.self, forKey: .disableOutputCap) ?? false,
-            disableTimeout: try container.decodeIfPresent(Bool.self, forKey: .disableTimeout) ?? false,
+            disableOutputCap: try container.decodeRustDefaulted(
+                Bool.self,
+                forKey: .disableOutputCap,
+                defaultValue: false
+            ),
+            disableTimeout: try container.decodeRustDefaulted(
+                Bool.self,
+                forKey: .disableTimeout,
+                defaultValue: false
+            ),
             timeoutMs: try container.decodeIfPresent(Int64.self, forKey: .timeoutMs),
             cwd: try container.decodeIfPresent(String.self, forKey: .cwd),
             env: try container.decodeIfPresent([String: String?].self, forKey: .env),
@@ -275,7 +309,7 @@ extension CommandExecWriteParams: Codable {
         self.init(
             processID: try container.decode(String.self, forKey: .processID),
             deltaBase64: try container.decodeIfPresent(String.self, forKey: .deltaBase64),
-            closeStdin: try container.decodeIfPresent(Bool.self, forKey: .closeStdin) ?? false
+            closeStdin: try container.decodeRustDefaulted(Bool.self, forKey: .closeStdin, defaultValue: false)
         )
     }
 

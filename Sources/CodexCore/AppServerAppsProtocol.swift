@@ -27,7 +27,7 @@ extension AppsListParams: Codable {
         cursor = try container.decodeIfPresent(String.self, forKey: .cursor)
         limit = try container.decodeIfPresent(UInt32.self, forKey: .limit)
         threadID = try container.decodeIfPresent(String.self, forKey: .threadID)
-        forceRefetch = try container.decodeIfPresent(Bool.self, forKey: .forceRefetch) ?? false
+        forceRefetch = try container.decodeRustDefaulted(Bool.self, forKey: .forceRefetch, defaultValue: false)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -310,8 +310,8 @@ extension AppInfo: Codable {
         appMetadata = try container.decodeIfPresent(AppMetadata.self, forKey: .appMetadata)
         labels = try container.decodeIfPresent([String: String].self, forKey: .labels)
         installURL = try container.decodeIfPresent(String.self, forKey: .installURL)
-        isAccessible = try container.decodeIfPresent(Bool.self, forKey: .isAccessible) ?? false
-        isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+        isAccessible = try container.decodeRustDefaulted(Bool.self, forKey: .isAccessible, defaultValue: false)
+        isEnabled = try container.decodeRustDefaulted(Bool.self, forKey: .isEnabled, defaultValue: true)
         pluginDisplayNames = try container.decodeIfPresent([String].self, forKey: .pluginDisplayNames) ?? []
     }
 

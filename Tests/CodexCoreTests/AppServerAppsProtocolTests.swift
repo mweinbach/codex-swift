@@ -27,6 +27,15 @@ final class AppServerAppsProtocolTests: XCTestCase {
         XCTAssertFalse(decoded.forceRefetch)
     }
 
+    func testAppsListParamsRejectsExplicitNullForRustDefaultedRefetchFlag() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AppsListParams.self,
+                from: Data(#"{"forceRefetch":null}"#.utf8)
+            )
+        )
+    }
+
     func testAppsListResponseShapeMatchesRustProtocol() throws {
         let app = AppInfo(
             id: "weather-app",
@@ -144,6 +153,21 @@ final class AppServerAppsProtocolTests: XCTestCase {
         XCTAssertEqual(app.appMetadata?.screenshots?.first?.fileID, "legacy-file")
         XCTAssertEqual(app.appMetadata?.screenshots?.first?.userPrompt, "legacy prompt")
         XCTAssertEqual(response.nextCursor, "next")
+    }
+
+    func testAppInfoRejectsExplicitNullForRustDefaultedAccessFlags() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AppsListResponse.self,
+                from: Data(#"{"data":[{"id":"weather-app","name":"Weather","isAccessible":null}],"nextCursor":null}"#.utf8)
+            )
+        )
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AppsListResponse.self,
+                from: Data(#"{"data":[{"id":"weather-app","name":"Weather","isEnabled":null}],"nextCursor":null}"#.utf8)
+            )
+        )
     }
 
     func testAppListUpdatedNotificationShapeMatchesRustProtocol() throws {

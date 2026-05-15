@@ -12,6 +12,16 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust's defaulted boolean fields in
+  `codex-rs/app-server-protocol/src/protocol/v2/{apps.rs,process.rs,command_exec.rs,permissions.rs}`.
+  Swift shared app-server protocol decoding now treats omitted
+  `#[serde(default)]` booleans as their Rust defaults while rejecting explicit
+  `null` instead of silently accepting it as the default.
+- 2026-05-15: rechecked Rust's remote-control status notification model in
+  `codex-rs/app-server-protocol/src/protocol/v2/remote_control.rs`. Swift
+  coverage now pins the typed `remoteControl/status/changed` payload to Rust's
+  camelCase `installationId` / `environmentId` fields and explicit nullable
+  `environmentId`.
 - 2026-05-15: rechecked Rust's tmux client terminal-name fallback in
   `codex-rs/terminal-detection/src/lib.rs`. Swift now classifies a tmux
   `client_termname` through the same `TERM` fallback path, so values like
