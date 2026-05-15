@@ -5,6 +5,7 @@ final class CompactTests: XCTestCase {
     func testBundledPromptResourcesMatchRustTemplates() {
         XCTAssertTrue(Compact.summarizationPrompt.hasPrefix("You are performing a CONTEXT CHECKPOINT COMPACTION."))
         XCTAssertTrue(Compact.summaryPrefix.hasPrefix("Another language model started to solve this problem"))
+        XCTAssertFalse(Compact.summaryPrefix.hasSuffix("\n"))
     }
 
     func testContentItemsToTextJoinsNonEmptySegments() {
