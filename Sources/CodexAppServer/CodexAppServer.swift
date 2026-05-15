@@ -21998,17 +21998,56 @@ public enum CodexAppServer {
         guard case let .table(table) = value else {
             return configValueObject(value)
         }
-        var object = table.mapValues(configValueObject)
-        if case let .table(toolsTable)? = table["tools"] {
-            object["tools"] = configReadToolsObject(toolsTable)
-        }
-        if case let .table(profilesTable)? = table["profiles"] {
-            object["profiles"] = configReadProfilesObject(profilesTable)
-        }
-        if case let .table(appsTable)? = table["apps"] {
-            object["apps"] = configReadAppsObject(appsTable)
+        var object = configReadDefaultConfigObject()
+        for key in table.keys.sorted() {
+            guard let value = table[key] else {
+                continue
+            }
+            switch (key, value) {
+            case ("tools", .table(let toolsTable)):
+                object[key] = configReadToolsObject(toolsTable)
+            case ("profiles", .table(let profilesTable)):
+                object[key] = configReadProfilesObject(profilesTable)
+            case ("sandbox_workspace_write", .table(let sandboxTable)):
+                object[key] = configReadSandboxWorkspaceWriteObject(sandboxTable)
+            case ("analytics", .table(let analyticsTable)):
+                object[key] = configReadAnalyticsObject(analyticsTable)
+            case ("apps", .table(let appsTable)):
+                object[key] = configReadAppsObject(appsTable)
+            default:
+                object[key] = configValueObject(value)
+            }
         }
         return object
+    }
+
+    private static func configReadDefaultConfigObject() -> [String: Any] {
+        [
+            "model": NSNull(),
+            "review_model": NSNull(),
+            "model_context_window": NSNull(),
+            "model_auto_compact_token_limit": NSNull(),
+            "model_provider": NSNull(),
+            "approval_policy": NSNull(),
+            "approvals_reviewer": NSNull(),
+            "sandbox_mode": NSNull(),
+            "sandbox_workspace_write": NSNull(),
+            "forced_chatgpt_workspace_id": NSNull(),
+            "forced_login_method": NSNull(),
+            "web_search": NSNull(),
+            "tools": NSNull(),
+            "profile": NSNull(),
+            "profiles": [String: Any](),
+            "instructions": NSNull(),
+            "developer_instructions": NSNull(),
+            "compact_prompt": NSNull(),
+            "model_reasoning_effort": NSNull(),
+            "model_reasoning_summary": NSNull(),
+            "model_verbosity": NSNull(),
+            "service_tier": NSNull(),
+            "analytics": NSNull(),
+            "apps": NSNull()
+        ]
     }
 
     private static func configReadProfilesObject(_ table: [String: ConfigValue]) -> [String: Any] {
@@ -22027,9 +22066,50 @@ public enum CodexAppServer {
     }
 
     private static func configReadProfileObject(_ table: [String: ConfigValue]) -> [String: Any] {
+        var object = configReadDefaultProfileObject()
+        for key in table.keys.sorted() {
+            guard let value = table[key] else {
+                continue
+            }
+            switch (key, value) {
+            case ("tools", .table(let toolsTable)):
+                object[key] = configReadToolsObject(toolsTable)
+            default:
+                object[key] = configValueObject(value)
+            }
+        }
+        return object
+    }
+
+    private static func configReadDefaultProfileObject() -> [String: Any] {
+        [
+            "model": NSNull(),
+            "model_provider": NSNull(),
+            "approval_policy": NSNull(),
+            "approvals_reviewer": NSNull(),
+            "service_tier": NSNull(),
+            "model_reasoning_effort": NSNull(),
+            "model_reasoning_summary": NSNull(),
+            "model_verbosity": NSNull(),
+            "web_search": NSNull(),
+            "tools": NSNull(),
+            "chatgpt_base_url": NSNull()
+        ]
+    }
+
+    private static func configReadSandboxWorkspaceWriteObject(_ table: [String: ConfigValue]) -> [String: Any] {
+        [
+            "writable_roots": stringArrayConfigValue(table["writable_roots"]) ?? [],
+            "network_access": boolConfigValue(table["network_access"]) ?? false,
+            "exclude_tmpdir_env_var": boolConfigValue(table["exclude_tmpdir_env_var"]) ?? false,
+            "exclude_slash_tmp": boolConfigValue(table["exclude_slash_tmp"]) ?? false
+        ]
+    }
+
+    private static func configReadAnalyticsObject(_ table: [String: ConfigValue]) -> [String: Any] {
         var object = table.mapValues(configValueObject)
-        if case let .table(toolsTable)? = table["tools"] {
-            object["tools"] = configReadToolsObject(toolsTable)
+        if object["enabled"] == nil {
+            object["enabled"] = NSNull()
         }
         return object
     }

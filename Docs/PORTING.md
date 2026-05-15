@@ -202,6 +202,13 @@ Recent upstream audit checkpoint:
   app-server config protocol now carries typed `config/read` response and layer
   config models, preserving Rust's snake_case fields, explicit-null optionals,
   defaulted bool/list/map behavior, and flattened additional fields.
+- 2026-05-15: rechecked Rust app-server `config/read` route serialization
+  against the typed `Config` graph in
+  `codex-rs/app-server-protocol/src/protocol/v2/config.rs`. Swift's live
+  app-server route now projects effective and per-layer configs with Rust's
+  typed top-level null/default fields, typed profile defaults, sandbox
+  workspace-write defaults, and flattened analytics fields instead of sparse
+  raw dictionaries.
 - 2026-05-15: rechecked Rust's global message-history record schema in
   `codex-rs/message-history/src/lib.rs`. Swift `HistoryEntry` now uses the
   Rust `session_id` JSON key and rejects the stale Swift-only

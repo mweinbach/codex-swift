@@ -25361,7 +25361,11 @@ final class CodexAppServerTests: XCTestCase {
         let result = try XCTUnwrap(response["result"] as? [String: Any])
         let config = try XCTUnwrap(result["config"] as? [String: Any])
         XCTAssertEqual(config["model"] as? String, "gpt-user")
+        XCTAssertTrue(config["review_model"] is NSNull)
+        XCTAssertTrue(config["approval_policy"] is NSNull)
         XCTAssertEqual(config["sandbox_mode"] as? String, "workspace-write")
+        XCTAssertEqual((config["profiles"] as? [String: Any])?.isEmpty, true)
+        XCTAssertTrue(config["apps"] is NSNull)
         let tools = try XCTUnwrap(config["tools"] as? [String: Any])
         let webSearch = try XCTUnwrap(tools["web_search"] as? [String: Any])
         XCTAssertEqual(webSearch["context_size"] as? String, "low")
@@ -25387,7 +25391,10 @@ final class CodexAppServerTests: XCTestCase {
 
         let layers = try XCTUnwrap(result["layers"] as? [[String: Any]])
         XCTAssertEqual(layers.first?["name"].flatMap { ($0 as? [String: Any])?["type"] as? String }, "user")
-        XCTAssertEqual((layers.first?["config"] as? [String: Any])?["model"] as? String, "gpt-user")
+        let layerConfig = try XCTUnwrap(layers.first?["config"] as? [String: Any])
+        XCTAssertEqual(layerConfig["model"] as? String, "gpt-user")
+        XCTAssertTrue(layerConfig["review_model"] is NSNull)
+        XCTAssertEqual((layerConfig["profiles"] as? [String: Any])?.isEmpty, true)
     }
 
     func testConfigReadIncludesNestedWebSearchToolConfigLikeRust() throws {
@@ -25482,6 +25489,8 @@ final class CodexAppServerTests: XCTestCase {
 
         let research = try XCTUnwrap(profiles["research"] as? [String: Any])
         XCTAssertEqual(research["model"] as? String, "gpt-profile")
+        XCTAssertTrue(research["model_provider"] is NSNull)
+        XCTAssertTrue(research["approval_policy"] is NSNull)
         XCTAssertEqual(research["web_search"] as? String, "cached")
         let researchTools = try XCTUnwrap(research["tools"] as? [String: Any])
         XCTAssertEqual(researchTools["view_image"] as? Bool, true)
@@ -25495,6 +25504,8 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(location["timezone"] is NSNull)
 
         let legacy = try XCTUnwrap(profiles["legacy"] as? [String: Any])
+        XCTAssertTrue(legacy["model"] is NSNull)
+        XCTAssertTrue(legacy["web_search"] is NSNull)
         let legacyTools = try XCTUnwrap(legacy["tools"] as? [String: Any])
         XCTAssertTrue(legacyTools["web_search"] is NSNull)
         XCTAssertTrue(legacyTools["view_image"] is NSNull)
@@ -25581,6 +25592,28 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(search["approval_mode"] as? String, "approve")
     }
 
+    func testConfigReadAnalyticsUsesTypedRustShapeAndPreservesAdditionalFields() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [analytics]
+        sink = "test"
+        """.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/read","params":{}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let config = try XCTUnwrap(result["config"] as? [String: Any])
+        let analytics = try XCTUnwrap(config["analytics"] as? [String: Any])
+        XCTAssertTrue(analytics["enabled"] is NSNull)
+        XCTAssertEqual(analytics["sink"] as? String, "test")
+    }
+
     func testConfigReadReportsManagedOverrideOverSessionFlagsLikeRust() throws {
         let temp = try TemporaryDirectory()
         let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
@@ -25655,6 +25688,8 @@ final class CodexAppServerTests: XCTestCase {
         let sandbox = try XCTUnwrap(config["sandbox_workspace_write"] as? [String: Any])
         XCTAssertEqual(sandbox["writable_roots"] as? [String], [managedRoot.path])
         XCTAssertEqual(sandbox["network_access"] as? Bool, true)
+        XCTAssertEqual(sandbox["exclude_tmpdir_env_var"] as? Bool, false)
+        XCTAssertEqual(sandbox["exclude_slash_tmp"] as? Bool, false)
 
         let origins = try XCTUnwrap(result["origins"] as? [String: Any])
         let modelOriginName = try XCTUnwrap((origins["model"] as? [String: Any])?["name"] as? [String: Any])
@@ -25679,6 +25714,9 @@ final class CodexAppServerTests: XCTestCase {
         let managedLayerConfig = try XCTUnwrap(layers[0]["config"] as? [String: Any])
         let managedSandbox = try XCTUnwrap(managedLayerConfig["sandbox_workspace_write"] as? [String: Any])
         XCTAssertEqual(managedSandbox["writable_roots"] as? [String], [managedRoot.path])
+        XCTAssertEqual(managedSandbox["network_access"] as? Bool, false)
+        XCTAssertEqual(managedSandbox["exclude_tmpdir_env_var"] as? Bool, false)
+        XCTAssertEqual(managedSandbox["exclude_slash_tmp"] as? Bool, false)
         let userLayerConfig = try XCTUnwrap(layers[1]["config"] as? [String: Any])
         let userSandbox = try XCTUnwrap(userLayerConfig["sandbox_workspace_write"] as? [String: Any])
         XCTAssertEqual(userSandbox["network_access"] as? Bool, true)
