@@ -277,13 +277,10 @@ public struct FileSystemPermissions: Codable, Equatable, Sendable {
     private static func rejectUnknownKeys(in decoder: Decoder, allowed: Set<String>) throws {
         let container = try decoder.container(keyedBy: DynamicCodingKey.self)
         if let unknown = container.allKeys.first(where: { !allowed.contains($0.stringValue) }) {
-            throw DecodingError.keyNotFound(
-                unknown,
-                DecodingError.Context(
-                    codingPath: decoder.codingPath,
-                    debugDescription: "Unknown field '\(unknown.stringValue)'"
-                )
-            )
+            throw DecodingError.dataCorrupted(DecodingError.Context(
+                codingPath: decoder.codingPath + [unknown],
+                debugDescription: "unknown field `\(unknown.stringValue)`"
+            ))
         }
     }
 }
@@ -1958,13 +1955,10 @@ public struct RequestPermissionProfile: Codable, Equatable, Sendable {
     private static func rejectUnknownKeys(in decoder: Decoder, allowed: Set<String>) throws {
         let container = try decoder.container(keyedBy: DynamicCodingKey.self)
         if let unknown = container.allKeys.first(where: { !allowed.contains($0.stringValue) }) {
-            throw DecodingError.keyNotFound(
-                unknown,
-                DecodingError.Context(
-                    codingPath: decoder.codingPath,
-                    debugDescription: "Unknown field '\(unknown.stringValue)'"
-                )
-            )
+            throw DecodingError.dataCorrupted(DecodingError.Context(
+                codingPath: decoder.codingPath + [unknown],
+                debugDescription: "unknown field `\(unknown.stringValue)`"
+            ))
         }
     }
 }

@@ -94,6 +94,11 @@ Recent upstream audit checkpoint:
   `request_permissions.started_at_ms` like Rust's non-defaulted `i64` field
   while preserving the separate omitted-field default for `turn_id` and the
   request-permissions response defaults.
+- 2026-05-15: rechecked Rust `deny_unknown_fields` on
+  `RequestPermissionProfile` and file-system permission payloads in
+  `codex-rs/protocol/src/{request_permissions,models}.rs`. Swift now uses the
+  Rust-shaped `unknown field \`...\`` decoding text for those strict permission
+  models.
 - 2026-05-15: rechecked Rust's collab agent event defaults in
   `codex-rs/protocol/src/protocol.rs`. Swift collab event decoding now keeps
   omitted `started_at_ms` / `completed_at_ms` timing defaults and waiting

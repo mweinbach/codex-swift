@@ -410,7 +410,9 @@ final class SubmissionTests: XCTestCase {
             "read": ["/repo"],
             "extra": true
         }
-        """#.utf8)))
+        """#.utf8))) { error in
+            XCTAssertTrue(String(describing: error).contains("unknown field `extra`"))
+        }
 
         XCTAssertThrowsError(try JSONDecoder().decode(FileSystemPermissions.self, from: Data(#"""
         {

@@ -235,7 +235,9 @@ final class AppServerPermissionsProtocolTests: XCTestCase {
         XCTAssertThrowsError(try JSONDecoder().decode(
             RequestPermissionProfile.self,
             from: Data(#"{"network":{"enabled":true},"extra":true}"#.utf8)
-        ))
+        )) { error in
+            XCTAssertTrue(String(describing: error).contains("unknown field `extra`"))
+        }
     }
 
     func testManagedPermissionProfileRejectsZeroGlobScanDepthLikeRust() {
