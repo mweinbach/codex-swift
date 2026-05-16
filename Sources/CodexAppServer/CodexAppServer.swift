@@ -12902,7 +12902,8 @@ public enum CodexAppServer {
 
     fileprivate static func mcpServerStatusListResult(
         params: [String: Any]?,
-        configuration: CodexAppServerConfiguration
+        configuration: CodexAppServerConfiguration,
+        liveToolsByServer: [String: [String: Any]] = [:]
     ) throws -> [String: Any] {
         let detail = try mcpServerStatusDetail(params?["detail"])
         let runtimeConfig: CodexRuntimeConfig
@@ -12941,7 +12942,8 @@ public enum CodexAppServer {
         let snapshot = mcpServerStatusSnapshot(
             effectiveServers: effectiveServers,
             detail: detail,
-            configuration: configuration
+            configuration: configuration,
+            liveToolsByServer: liveToolsByServer
         )
         let data = (start < end ? Array(serverNames[start..<end]) : []).map { name in
             mcpServerStatusObject(
@@ -13078,11 +13080,16 @@ public enum CodexAppServer {
     fileprivate static func mcpServerStatusSnapshot(
         effectiveServers: [String: EffectiveMcpServer],
         detail: AppServerMcpServerStatusDetail,
-        configuration: CodexAppServerConfiguration
+        configuration: CodexAppServerConfiguration,
+        liveToolsByServer: [String: [String: Any]] = [:]
     ) -> AppServerMcpServerStatusSnapshot {
         var snapshot = AppServerMcpServerStatusSnapshot()
         for name in effectiveServers.keys.sorted() {
             guard let server = effectiveServers[name] else {
+                continue
+            }
+            if detail == .toolsAndAuthOnly, let liveTools = liveToolsByServer[name] {
+                snapshot.toolsByServer[name] = liveTools
                 continue
             }
             switch server {
@@ -26941,6 +26948,19 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         liveMcpManagers[threadID]?.statusSnapshot.toolsByServer
     }
 
+    private func liveMcpToolsByServer() -> [String: [String: Any]] {
+        var toolsByServer: [String: [String: Any]] = [:]
+        for threadID in liveMcpManagers.keys.sorted() {
+            guard let state = liveMcpManagers[threadID] else {
+                continue
+            }
+            for server in state.statusSnapshot.toolsByServer.keys.sorted() {
+                toolsByServer[server] = state.statusSnapshot.toolsByServer[server]
+            }
+        }
+        return toolsByServer
+    }
+
     private func startLiveMcpManager(threadID: String, runtimeConfig: CodexRuntimeConfig) throws -> [[String: Any]] {
         let state = CodexAppServer.liveMcpManagerState(
             mcpServers: runtimeConfig.mcpServers,
@@ -28537,7 +28557,11 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                 case "mcpServerStatus/list":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.mcpServerStatusListResult(params: params, configuration: configuration)
+                        result: try CodexAppServer.mcpServerStatusListResult(
+                            params: params,
+                            configuration: configuration,
+                            liveToolsByServer: liveMcpToolsByServer()
+                        )
                     )
                 case "mcpServer/oauth/login":
                     response = CodexAppServer.responseObject(

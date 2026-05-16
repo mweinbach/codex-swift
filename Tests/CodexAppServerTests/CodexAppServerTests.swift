@@ -1841,6 +1841,53 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(startupStatuses[3]["error"] is NSNull)
     }
 
+    func testMcpServerStatusListReusesLiveManagerToolsForLoadedThread() throws {
+        let temp = try TemporaryDirectory()
+        let inventoryLog = temp.url.appendingPathComponent("mcp-inventory.log", isDirectory: false)
+        let workingServer = try writeMCPServerScript(
+            directory: temp.url,
+            name: "working-status-reuse-mcp.sh",
+            contents: """
+            #!/bin/sh
+            count=0
+            while IFS= read -r _line; do
+                printf 'request\\n' >> \(inventoryLog.path)
+                count=$((count + 1))
+                if [ "$count" -eq 1 ]; then
+                    printf '%s\\n' '{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"docs","version":"1.0.0"}}}'
+                elif [ "$count" -eq 2 ]; then
+                    printf '%s\\n' '{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"lookup","description":"Live cached docs.","inputSchema":{"type":"object"}}]}}'
+                    exit 0
+                fi
+            done
+            exit 1
+            """
+        )
+        try """
+        [mcp_servers.docs]
+        command = \(tomlTestString(workingServer.path))
+        startup_timeout_sec = 1
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        _ = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+        XCTAssertEqual(try String(contentsOf: inventoryLog, encoding: .utf8), "request\nrequest\n")
+
+        let response = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"mcpServerStatus/list","params":{"detail":"toolsAndAuthOnly"}}"#.utf8
+        )))
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        let status = try XCTUnwrap(data.first)
+        XCTAssertEqual(status["name"] as? String, "docs")
+        let tools = try XCTUnwrap(status["tools"] as? [String: [String: Any]])
+        XCTAssertEqual(tools["lookup"]?["description"] as? String, "Live cached docs.")
+        XCTAssertEqual(try String(contentsOf: inventoryLog, encoding: .utf8), "request\nrequest\n")
+    }
+
     func testThreadResumeFailsWhenRequiredMCPServerCommandCannotInitializeLikeRust() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(
