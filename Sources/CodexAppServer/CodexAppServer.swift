@@ -2948,7 +2948,7 @@ public enum CodexAppServer {
             threadID: ThreadId(uuid: conversationID.uuid),
             texts: hookOutcome.additionalContexts
         )
-        let hasUserInput = !input.text.isEmpty || !(input.images?.isEmpty ?? true)
+        let hasUserInput = !input.text.isEmpty || !(input.images?.isEmpty ?? true) || !input.localImages.isEmpty
         if !sessionStartContexts.isEmpty || hasUserInput || !spilledHookContexts.isEmpty {
             let recorder = try RolloutRecorder.resume(path: URL(fileURLWithPath: rolloutPath))
             var items: [RolloutRecordItem] = []
@@ -2961,7 +2961,14 @@ public enum CodexAppServer {
             if !sessionStartShouldStop,
                !hookOutcome.shouldStop,
                hasUserInput {
-                items.append(.eventMsg(.userMessage(UserMessageEvent(message: input.text, images: input.images))))
+                items.append(.eventMsg(.userMessage(UserMessageEvent(
+                    message: input.text,
+                    images: input.images,
+                    imageDetails: input.imageDetails,
+                    localImages: input.localImages,
+                    localImageDetails: input.localImageDetails,
+                    textElements: []
+                ))))
             }
             items.append(contentsOf: spilledHookContexts.map { context in
                 .responseItem(hookAdditionalContextItem(context))
@@ -2973,7 +2980,7 @@ public enum CodexAppServer {
             result: ["turn": inProgressTurnObject(id: turnID)],
             hookStartedEvents: hookStartedEvents,
             hookCompletedEvents: hookCompletedEvents,
-            hasInput: !input.text.isEmpty || !(input.images?.isEmpty ?? true)
+            hasInput: hasUserInput
         )
     }
 
@@ -3441,7 +3448,14 @@ public enum CodexAppServer {
         )
         let recorder = try RolloutRecorder.resume(path: URL(fileURLWithPath: steer.rolloutPath))
         try recorder.recordItems([
-            .eventMsg(.userMessage(UserMessageEvent(message: steer.input.text, images: steer.input.images)))
+            .eventMsg(.userMessage(UserMessageEvent(
+                message: steer.input.text,
+                images: steer.input.images,
+                imageDetails: steer.input.imageDetails,
+                localImages: steer.input.localImages,
+                localImageDetails: steer.input.localImageDetails,
+                textElements: []
+            )))
         ])
         try recorder.shutdown()
         return ["turnId": steer.turnID]
@@ -3472,7 +3486,7 @@ public enum CodexAppServer {
         configuration: CodexAppServerConfiguration
     ) throws -> (threadID: String, op: Op, hasInput: Bool) {
         let input = try v2UserInput(params?["input"])
-        try validateV2UserInputLimit((text: input.text, images: input.images))
+        try validateV2UserInputLimit(input)
         _ = try approvalsReviewerParam(params?["approvalsReviewer"])
         _ = try serviceTierParam(params?["serviceTier"], features: .withDefaults())
         let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
@@ -3595,7 +3609,14 @@ public enum CodexAppServer {
         threadID: String,
         rolloutPath: String,
         turnID: String,
-        input: (text: String, images: [String]?, items: [UserInput])
+        input: (
+            text: String,
+            images: [String]?,
+            localImages: [String],
+            imageDetails: [ImageDetail?],
+            localImageDetails: [ImageDetail?],
+            items: [UserInput]
+        )
     ) {
         let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
         let conversationID: ConversationId
@@ -3610,7 +3631,7 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("expectedTurnId must not be empty")
         }
         let input = try v2UserInput(params?["input"])
-        try validateV2UserInputLimit((text: input.text, images: input.images))
+        try validateV2UserInputLimit(input)
         guard let activeTurnID else {
             throw AppServerError.invalidRequest("no active turn to steer")
         }
@@ -3619,7 +3640,7 @@ public enum CodexAppServer {
                 "expected active turn id `\(expectedTurnID)` but found `\(activeTurnID)`"
             )
         }
-        guard !input.text.isEmpty || !(input.images?.isEmpty ?? true) else {
+        guard !input.text.isEmpty || !(input.images?.isEmpty ?? true) || !input.localImages.isEmpty else {
             throw AppServerError.invalidRequest("input must not be empty")
         }
         return (threadID, rolloutPath, activeTurnID, input)
@@ -20978,17 +20999,33 @@ public enum CodexAppServer {
         stringParam(value).flatMap(SandboxMode.init(rawValue:))
     }
 
-    fileprivate static func v2UserInputs(_ value: Any?) throws -> (text: String, images: [String]?) {
-        let input = try v2UserInput(value)
-        return (input.text, input.images)
+    fileprivate static func v2UserInputs(_ value: Any?) throws -> (
+        text: String,
+        images: [String]?,
+        localImages: [String],
+        imageDetails: [ImageDetail?],
+        localImageDetails: [ImageDetail?],
+        items: [UserInput]
+    ) {
+        try v2UserInput(value)
     }
 
-    private static func v2UserInput(_ value: Any?) throws -> (text: String, images: [String]?, items: [UserInput]) {
+    private static func v2UserInput(_ value: Any?) throws -> (
+        text: String,
+        images: [String]?,
+        localImages: [String],
+        imageDetails: [ImageDetail?],
+        localImageDetails: [ImageDetail?],
+        items: [UserInput]
+    ) {
         guard let items = value as? [[String: Any]] else {
-            return ("", nil, [])
+            return ("", nil, [], [], [], [])
         }
         var texts: [String] = []
         var images: [String] = []
+        var localImages: [String] = []
+        var imageDetails: [ImageDetail?] = []
+        var localImageDetails: [ImageDetail?] = []
         var userInputItems: [UserInput] = []
         for item in items {
             switch stringParam(item["type"]) {
@@ -21001,7 +21038,15 @@ public enum CodexAppServer {
                 if let url = stringParam(item["url"]), !url.isEmpty {
                     let detail = try appServerUserInputImageDetailParam(item["detail"])
                     images.append(url)
+                    imageDetails.append(detail)
                     userInputItems.append(.image(imageURL: url, detail: detail))
+                }
+            case "localImage":
+                if let path = stringParam(item["path"]), !path.isEmpty {
+                    let detail = try appServerUserInputImageDetailParam(item["detail"])
+                    localImages.append(path)
+                    localImageDetails.append(detail)
+                    userInputItems.append(.localImage(path: path, detail: detail))
                 }
             default:
                 continue
@@ -21010,6 +21055,9 @@ public enum CodexAppServer {
         return (
             texts.joined(),
             images.isEmpty ? nil : images,
+            localImages,
+            imageDetails.trimmingTrailingNilImageDetails(),
+            localImageDetails.trimmingTrailingNilImageDetails(),
             userInputItems
         )
     }
@@ -21040,7 +21088,16 @@ public enum CodexAppServer {
         }
     }
 
-    private static func validateV2UserInputLimit(_ input: (text: String, images: [String]?)) throws {
+    private static func validateV2UserInputLimit(
+        _ input: (
+            text: String,
+            images: [String]?,
+            localImages: [String],
+            imageDetails: [ImageDetail?],
+            localImageDetails: [ImageDetail?],
+            items: [UserInput]
+        )
+    ) throws {
         let actualScalars = input.text.unicodeScalars.count
         guard actualScalars <= maxUserInputTextScalars else {
             throw AppServerError.invalidParamsWithInputTooLargeData(
@@ -25910,7 +25967,8 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
     }
 
     private func recordTurnStartForAnalytics(threadID: String, turnID: String, params: [String: Any]?) {
-        let input = (try? CodexAppServer.v2UserInputs(params?["input"])) ?? (text: "", images: nil)
+        let input = (try? CodexAppServer.v2UserInputs(params?["input"]))
+            ?? (text: "", images: nil, localImages: [], imageDetails: [], localImageDetails: [], items: [])
         runtimeTurnInputMessages[threadID, default: [:]][turnID] = input.text.isEmpty ? [] : [input.text]
         guard let metadata = threadAnalyticsMetadata[threadID] else {
             return
@@ -25944,7 +26002,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                 sandboxNetworkAccess: metadata.sandboxNetworkAccess,
                 collaborationMode: metadata.collaborationMode,
                 personality: Self.analyticsNonDefaultMode(personality),
-                numInputImages: UInt64(input.images?.count ?? 0),
+                numInputImages: UInt64((input.images?.count ?? 0) + input.localImages.count),
                 isFirstTurn: priorTurnCount == 0,
                 steerCount: 0
             ),
@@ -26060,7 +26118,10 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
     }
 
     private static func turnSteerNumInputImagesForAnalytics(params: [String: Any]?) -> UInt64 {
-        UInt64(((try? CodexAppServer.v2UserInputs(params?["input"]))?.images?.count) ?? 0)
+        guard let input = try? CodexAppServer.v2UserInputs(params?["input"]) else {
+            return 0
+        }
+        return UInt64((input.images?.count ?? 0) + input.localImages.count)
     }
 
     private static func turnSteerRejectionReasonForAnalytics(_ error: Error) -> TurnSteerRejectionReason? {
@@ -29343,10 +29404,20 @@ private struct AppServerThreadHistoryBuilder {
                     "text": payload.message
                 ])
             }
-            for image in payload.images ?? [] {
+            for (index, image) in (payload.images ?? []).enumerated() {
+                let detail = payload.imageDetails[safe: index] ?? nil
                 content.append([
                     "type": "image",
-                    "url": image
+                    "url": image,
+                    "detail": detail?.rawValue as Any? ?? NSNull()
+                ])
+            }
+            for (index, localImage) in payload.localImages.enumerated() {
+                let detail = payload.localImageDetails[safe: index] ?? nil
+                content.append([
+                    "type": "localImage",
+                    "path": localImage,
+                    "detail": detail?.rawValue as Any? ?? NSNull()
                 ])
             }
             currentItems.append([
@@ -29618,6 +29689,22 @@ private struct AppServerThreadHistoryBuilder {
             nextItemIndex += 1
         }
         return "item-\(nextItemIndex)"
+    }
+}
+
+private extension Collection {
+    subscript(safe index: Index) -> Element? {
+        indices.contains(index) ? self[index] : nil
+    }
+}
+
+private extension Array where Element == ImageDetail? {
+    func trimmingTrailingNilImageDetails() -> [ImageDetail?] {
+        var result = self
+        while result.last == .some(nil) {
+            result.removeLast()
+        }
+        return result
     }
 }
 

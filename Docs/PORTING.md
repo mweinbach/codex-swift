@@ -12,6 +12,13 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `8543e39885` (`Preserve image detail in
+  app-server inputs`) against `codex-rs/app-server-protocol/src/protocol/v2/turn.rs`.
+  Swift's live app-server `turn/start` and `turn/steer` JSON-RPC parsers now
+  accept Rust's `localImage` user-input variant, preserve its optional
+  `high`/`original` detail hint in core submissions and rollout-backed
+  `thread/read` content, include local images when deciding whether input is
+  empty, and count remote plus local images for turn analytics.
 - 2026-05-16: rechecked Rust commit `7c57a59f51` (`Make multi_agent_v2
   wait_agent timeouts configurable`). Swift `[features.multi_agent_v2]`
   config now accepts `max_wait_timeout_ms` and `default_wait_timeout_ms`

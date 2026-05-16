@@ -36,6 +36,27 @@ final class TurnItemTests: XCTestCase {
         )))
     }
 
+    func testUserMessageItemLegacyEventPreservesImageDetails() throws {
+        let item = UserMessageItem(
+            id: "user-1",
+            content: [
+                .text("hello"),
+                .image(imageURL: "https://example.test/remote.png", detail: .original),
+                .localImage(path: "/tmp/local.png", detail: .high)
+            ]
+        )
+
+        try XCTAssertJSONObjectEqual(item.asLegacyEvent(), [
+            "type": "user_message",
+            "message": "hello",
+            "images": ["https://example.test/remote.png"],
+            "image_details": ["original"],
+            "local_images": ["/tmp/local.png"],
+            "local_image_details": ["high"],
+            "text_elements": []
+        ])
+    }
+
     func testUserMessageLegacyEventKeepsEmptyImagesArray() throws {
         let event = UserMessageItem(id: "user-1", content: [.text("hello")]).asLegacyEvent()
 

@@ -265,6 +265,16 @@ public struct UserMessageItem: Equatable, Codable, Sendable {
         }
     }
 
+    public var imageDetails: [ImageDetail?] {
+        var details: [ImageDetail?] = []
+        for input in content {
+            if case let .image(_, detail) = input {
+                details.append(detail)
+            }
+        }
+        return details.trimmingTrailingNilImageDetails()
+    }
+
     public var localImagePaths: [String] {
         content.compactMap { input in
             if case let .localImage(path, _) = input {
@@ -272,6 +282,16 @@ public struct UserMessageItem: Equatable, Codable, Sendable {
             }
             return nil
         }
+    }
+
+    public var localImageDetails: [ImageDetail?] {
+        var details: [ImageDetail?] = []
+        for input in content {
+            if case let .localImage(_, detail) = input {
+                details.append(detail)
+            }
+        }
+        return details.trimmingTrailingNilImageDetails()
     }
 
     public var textElements: [TextElement] {
@@ -290,9 +310,21 @@ public struct UserMessageItem: Equatable, Codable, Sendable {
         .userMessage(UserMessageEvent(
             message: message,
             images: imageURLs,
+            imageDetails: imageDetails,
             localImages: localImagePaths,
+            localImageDetails: localImageDetails,
             textElements: textElements
         ))
+    }
+}
+
+private extension Array where Element == ImageDetail? {
+    func trimmingTrailingNilImageDetails() -> [ImageDetail?] {
+        var result = self
+        while result.last == .some(nil) {
+            result.removeLast()
+        }
+        return result
     }
 }
 

@@ -11,32 +11,42 @@ public struct AgentMessageEvent: Equatable, Codable, Sendable {
 public struct UserMessageEvent: Equatable, Codable, Sendable {
     public let message: String
     public let images: [String]?
+    public let imageDetails: [ImageDetail?]
     public let localImages: [String]
+    public let localImageDetails: [ImageDetail?]
     public let textElements: [TextElement]
 
     private enum CodingKeys: String, CodingKey {
         case message
         case images
+        case imageDetails = "image_details"
         case localImages = "local_images"
+        case localImageDetails = "local_image_details"
         case textElements = "text_elements"
     }
 
     public init(message: String, images: [String]? = nil) {
         self.message = message
         self.images = images
+        self.imageDetails = []
         self.localImages = []
+        self.localImageDetails = []
         self.textElements = []
     }
 
     public init(
         message: String,
         images: [String]?,
+        imageDetails: [ImageDetail?] = [],
         localImages: [String],
+        localImageDetails: [ImageDetail?] = [],
         textElements: [TextElement]
     ) {
         self.message = message
         self.images = images
+        self.imageDetails = imageDetails
         self.localImages = localImages
+        self.localImageDetails = localImageDetails
         self.textElements = textElements
     }
 
@@ -44,7 +54,17 @@ public struct UserMessageEvent: Equatable, Codable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.message = try container.decode(String.self, forKey: .message)
         self.images = try container.decodeIfPresent([String].self, forKey: .images)
+        self.imageDetails = try container.decodeRustDefaulted(
+            [ImageDetail?].self,
+            forKey: .imageDetails,
+            defaultValue: []
+        )
         self.localImages = try container.decodeRustDefaulted([String].self, forKey: .localImages, defaultValue: [])
+        self.localImageDetails = try container.decodeRustDefaulted(
+            [ImageDetail?].self,
+            forKey: .localImageDetails,
+            defaultValue: []
+        )
         self.textElements = try container.decodeRustDefaulted(
             [TextElement].self,
             forKey: .textElements,
@@ -56,7 +76,13 @@ public struct UserMessageEvent: Equatable, Codable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(message, forKey: .message)
         try container.encodeIfPresent(images, forKey: .images)
+        if !imageDetails.isEmpty {
+            try container.encode(imageDetails, forKey: .imageDetails)
+        }
         try container.encode(localImages, forKey: .localImages)
+        if !localImageDetails.isEmpty {
+            try container.encode(localImageDetails, forKey: .localImageDetails)
+        }
         try container.encode(textElements, forKey: .textElements)
     }
 }

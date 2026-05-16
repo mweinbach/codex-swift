@@ -2833,7 +2833,7 @@ final class CodexAppServerTests: XCTestCase {
         let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
         let threadID = try XCTUnwrap(thread["id"] as? String)
 
-        let messages = try decodeMessages(processor.processLine(Data(#"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Hello"},{"type":"image","url":"https://example.test/one.png"}]}}"#.utf8)))
+        let messages = try decodeMessages(processor.processLine(Data(#"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Hello"},{"type":"image","url":"https://example.test/one.png"},{"type":"localImage","path":"/tmp/local-one.png","detail":"original"}]}}"#.utf8)))
 
         XCTAssertEqual(messages.count, 3)
         let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
@@ -2867,6 +2867,9 @@ final class CodexAppServerTests: XCTestCase {
         let content = try XCTUnwrap(items[0]["content"] as? [[String: Any]])
         XCTAssertEqual(content[0]["text"] as? String, "Hello")
         XCTAssertEqual(content[1]["url"] as? String, "https://example.test/one.png")
+        XCTAssertEqual(content[2]["type"] as? String, "localImage")
+        XCTAssertEqual(content[2]["path"] as? String, "/tmp/local-one.png")
+        XCTAssertEqual(content[2]["detail"] as? String, "original")
     }
 
     func testTurnStartRunsTrustedUserPromptSubmitHooksLikeRust() throws {
@@ -4122,7 +4125,8 @@ final class CodexAppServerTests: XCTestCase {
                 "threadId": threadID,
                 "input": [
                     ["type": "text", "text": "Live"],
-                    ["type": "image", "url": "https://example.test/live.png", "detail": "original"]
+                    ["type": "image", "url": "https://example.test/live.png", "detail": "original"],
+                    ["type": "localImage", "path": "/tmp/live-local.png", "detail": "high"]
                 ],
                 "responsesapiClientMetadata": ["fiber_run_id": "fiber-live-123"],
                 "outputSchema": ["type": "object"]
@@ -4146,7 +4150,8 @@ final class CodexAppServerTests: XCTestCase {
         }
         XCTAssertEqual(items, [
             .text("Live"),
-            .image(imageURL: "https://example.test/live.png", detail: .original)
+            .image(imageURL: "https://example.test/live.png", detail: .original),
+            .localImage(path: "/tmp/live-local.png", detail: .high)
         ])
         XCTAssertNil(environments)
         XCTAssertEqual(outputSchema, .object(["type": .string("object")]))
