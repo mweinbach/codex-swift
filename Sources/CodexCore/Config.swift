@@ -316,6 +316,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var permissionProfile: PermissionProfile?
     public var activePermissionProfile: ActivePermissionProfile?
     public var workspaceRoots: [AbsolutePath]
+    public var workspaceRootsExplicit: Bool
     public var profileWorkspaceRoots: [AbsolutePath]
     public var networkProxy: NetworkProxySpec?
     public var notify: [String]?
@@ -517,6 +518,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.permissionProfile = permissionProfile
         self.activePermissionProfile = activePermissionProfile
         self.workspaceRoots = []
+        self.workspaceRootsExplicit = false
         self.profileWorkspaceRoots = []
         self.networkProxy = nil
         self.notify = notify
@@ -1347,6 +1349,7 @@ public enum CodexConfigLoader {
         } ?? workspaceRoots
         config.profileWorkspaceRoots = profileWorkspaceRoots
         config.workspaceRoots = workspaceRoots
+        config.workspaceRootsExplicit = runtimeWorkspaceRoots != nil
 
         guard let profile = config.permissionProfile else {
             return

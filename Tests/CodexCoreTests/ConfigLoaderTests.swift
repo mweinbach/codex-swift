@@ -845,6 +845,10 @@ final class ConfigLoaderTests: XCTestCase {
             cwd.url.standardizedFileURL.path,
             profileRoot.url.standardizedFileURL.path
         ])
+        XCTAssertFalse(
+            config.workspaceRootsExplicit,
+            "profile workspace roots should not mark runtime workspace roots explicit"
+        )
         let policy = try XCTUnwrap(config.permissionProfile?.fileSystemSandboxPolicy)
         XCTAssertTrue(policy.canWritePathWithCwd(cwd.url.path, cwd: cwd.url.path))
         XCTAssertTrue(policy.canWritePathWithCwd(profileRoot.url.path, cwd: cwd.url.path))
@@ -917,6 +921,10 @@ final class ConfigLoaderTests: XCTestCase {
         )
 
         XCTAssertEqual(config.workspaceRoots, [runtimeWorkspaceRoot])
+        XCTAssertTrue(
+            config.workspaceRootsExplicit,
+            "caller-supplied runtime workspace roots should be tracked as explicit like Rust"
+        )
         let policy = try XCTUnwrap(config.permissionProfile?.fileSystemSandboxPolicy)
         XCTAssertTrue(policy.canWritePathWithCwd(runtimeRoot.url.path, cwd: cwd.url.path))
         XCTAssertFalse(
