@@ -4,6 +4,7 @@ public enum McpConfigError: Error, Equatable, CustomStringConvertible, Sendable 
     case invalidServerName(String)
     case invalidEnvPair(String)
     case invalidTransport(String)
+    case unsupportedFieldForTransport(field: String, transport: String)
     case unsupportedBearerToken(String)
     case invalidStringValue(String)
     case invalidBoolValue(String)
@@ -20,6 +21,8 @@ public enum McpConfigError: Error, Equatable, CustomStringConvertible, Sendable 
             return "environment entries must be in KEY=VALUE form"
         case let .invalidTransport(server):
             return "mcp_servers.\(server) has invalid transport"
+        case let .unsupportedFieldForTransport(field, transport):
+            return "\(field) is not supported for \(transport)"
         case let .unsupportedBearerToken(server):
             return "mcp_servers.\(server) uses unsupported `bearer_token`; set `bearer_token_env_var`."
         case let .invalidStringValue(key):
@@ -933,6 +936,8 @@ private struct McpServerBuilder {
         case "oauth":
             if key == "client_id" {
                 oauthClientID = rawValue
+            } else {
+                throw McpConfigError.invalidConfigLine("oauth.\(key)")
             }
         default:
             break
@@ -960,6 +965,9 @@ private struct McpServerBuilder {
         if let command {
             guard url == nil, bearerTokenEnvVar == nil, httpHeaders == nil, envHttpHeaders == nil, oauthResource == nil else {
                 throw McpConfigError.invalidTransport(serverName)
+            }
+            if oauthClientID != nil {
+                throw McpConfigError.unsupportedFieldForTransport(field: "oauth", transport: "stdio")
             }
             transport = .stdio(command: command, args: args, env: env, envVars: envVars, cwd: cwd)
         } else if let url {

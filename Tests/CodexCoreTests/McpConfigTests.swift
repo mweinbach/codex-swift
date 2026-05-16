@@ -253,6 +253,18 @@ final class McpConfigTests: XCTestCase {
         )
     }
 
+    func testStdioMcpServerRejectsOAuthClientIDLikeRust() throws {
+        XCTAssertThrowsError(try McpConfigStore.parseMcpServers(from: """
+        [mcp_servers.docs]
+        command = "echo"
+
+        [mcp_servers.docs.oauth]
+        client_id = "eci-prd-pub-codex-123"
+        """)) { error in
+            XCTAssertEqual(String(describing: error), "oauth is not supported for stdio")
+        }
+    }
+
     func testReplaceGlobalMcpServersPreservesUnrelatedConfigAndSerializesSorted() throws {
         let temp = try McpConfigTemporaryDirectory()
         let configFile = temp.url.appendingPathComponent("config.toml")

@@ -12,6 +12,26 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `cccde930ce` (`Move memory prompt
+  injection to app-server extension`) against
+  `codex-rs/ext/memories/src/extension.rs`,
+  `codex-rs/app-server/src/extensions.rs`, and
+  `codex-rs/core/src/session/mod.rs`. Swift already keeps the Rust-shaped
+  memory read-path developer prompt in `MemoryToolInstructions`, gates it on
+  the `memories` feature plus `[memories].use_memories`, and injects it in
+  non-interactive exec and `debug prompt-input` between configured developer
+  instructions and skills. Swift app-server memory startup remains wired as a
+  separate app-server concern, while a first-class live app-server extension
+  registry and config-change prompt contributor remain pending with the broader
+  live ThreadManager runtime port; no Swift protocol or persistence shape
+  changed for this Rust commit.
+- 2026-05-16: rechecked Rust commit `d8ddeb6869` (`Support explicit MCP
+  OAuth client IDs`) against `codex-rs/config/src/mcp_types.rs`. Swift already
+  threaded `oauth.client_id` through MCP config parsing, serialization, CLI
+  login, app-server login, plugin refresh config, and the OAuth PKCE flow; this
+  checkpoint closes the remaining stdio parity gap by rejecting
+  `[mcp_servers.<name>.oauth]` on stdio servers with Rust's
+  `oauth is not supported for stdio` error.
 - 2026-05-16: rechecked Rust commit `02a7205250` (`Support multiple forced
   ChatGPT workspaces`) across config loading, login helpers, auth enforcement,
   and app-server config protocol. Swift `forced_chatgpt_workspace_id` now keeps
