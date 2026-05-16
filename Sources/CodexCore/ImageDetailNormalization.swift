@@ -12,10 +12,8 @@ public func normalizeOutputImageDetail(
     case .original,
          .none:
         return nil
-    case .auto,
-         .low,
-         .high:
-        return detail
+    case .high:
+        return .high
     }
 }
 

@@ -127,17 +127,7 @@ public enum UserInput: Equatable, Codable, Sendable {
 
 extension KeyedDecodingContainer {
     func decodeUserInputImageDetailIfPresent(forKey key: Key) throws -> ImageDetail? {
-        let detail = try decodeIfPresent(ImageDetail.self, forKey: key)
-        switch detail {
-        case .high, .original, nil:
-            return detail
-        case .auto, .low:
-            throw DecodingError.dataCorruptedError(
-                forKey: key,
-                in: self,
-                debugDescription: "invalid image detail `\(detail?.rawValue ?? "")`, expected one of `high`, `original`"
-            )
-        }
+        try decodeIfPresent(ImageDetail.self, forKey: key)
     }
 }
 

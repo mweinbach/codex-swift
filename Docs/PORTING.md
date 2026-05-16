@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked the reusable core portion of Rust commit `8543e39885`
+  (`Preserve image detail in app-server inputs`). Swift now matches Rust's
+  current `ImageDetail` domain (`high` / `original`), accepts explicit
+  `view_image.detail = "high"` as the default resized path, reports Rust's
+  updated unsupported-detail message, and advertises the same high/original
+  detail contract in the view-image tool schema.
 - 2026-05-16: rechecked Rust commit `326e31ab65` (`Refine Python SDK
   user-facing docs`). The Python SDK documentation/docstring wording has no
   Swift package surface to port, but Swift app-server coverage now includes the

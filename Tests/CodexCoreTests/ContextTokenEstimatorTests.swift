@@ -135,7 +135,7 @@ final class ContextTokenEstimatorTests: XCTestCase {
         let payloadTwo = String(repeating: "F", count: 200)
         let item = ResponseItem.message(role: "user", content: [
             .inputImage(imageURL: "DATA:image/png;BASE64,\(payloadOne)", detail: .high),
-            .inputImage(imageURL: "data:image/jpeg;base64,\(payloadTwo)", detail: .auto)
+            .inputImage(imageURL: "data:image/jpeg;base64,\(payloadTwo)", detail: .high)
         ])
 
         let rawBytes = try encodedByteCount(item)

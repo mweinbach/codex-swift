@@ -2118,6 +2118,33 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(Data(base64Encoded: String(imageURL.dropFirst(prefix.count))), original)
     }
 
+    func testViewImageAcceptsExplicitHighDetailLikeRust() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        try Self.writeTinyPNG(to: temp.url.appendingPathComponent("image.png"))
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            .functionCall(
+                name: "view_image",
+                arguments: #"{"path":"image.png","detail":"high"}"#,
+                callID: "call-high"
+            ),
+            cwd: temp.url,
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: [:],
+            canRequestOriginalImageDetail: true
+        )
+
+        guard case let .functionCallOutput(_, payload) = output,
+              case let .inputImage(_, detail)? = payload.contentItems?.first
+        else {
+            return XCTFail("expected image output")
+        }
+        XCTAssertEqual(detail, defaultImageDetail)
+    }
+
     func testViewImageRejectsUnknownDetailLikeRust() async throws {
         let temp = try NonInteractiveExecTemporaryDirectory()
         try Self.writeTinyPNG(to: temp.url.appendingPathComponent("image.png"))
@@ -2142,7 +2169,7 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(payload.success, false)
         XCTAssertEqual(
             payload.content,
-            "view_image.detail only supports `original`; omit `detail` for default resized behavior, got `full`"
+            "view_image.detail only supports `high` or `original`; omit `detail` for default high resized behavior, got `full`"
         )
     }
 

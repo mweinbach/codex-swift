@@ -1597,11 +1597,13 @@ public enum NonInteractiveExec {
         switch params.detail {
         case nil:
             requestedOriginalDetail = false
+        case "high":
+            requestedOriginalDetail = false
         case "original":
             requestedOriginalDetail = true
         case let detail?:
             throw FunctionCallError.respondToModel(
-                "view_image.detail only supports `original`; omit `detail` for default resized behavior, got `\(detail)`"
+                "view_image.detail only supports `high` or `original`; omit `detail` for default high resized behavior, got `\(detail)`"
             )
         }
 

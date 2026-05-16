@@ -108,19 +108,17 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertNil(normalizeOutputImageDetail(modelInfo: modelInfo, detail: .original))
     }
 
-    func testNonOriginalImageDetailIsPreservedLikeRustToolsHelper() throws {
+    func testHighImageDetailIsPreservedLikeRustToolsHelper() throws {
         let modelInfo = try imageDetailModelInfo(supportsOriginal: true)
 
-        XCTAssertEqual(normalizeOutputImageDetail(modelInfo: modelInfo, detail: .low), .low)
         XCTAssertEqual(normalizeOutputImageDetail(modelInfo: modelInfo, detail: .high), .high)
-        XCTAssertEqual(normalizeOutputImageDetail(modelInfo: modelInfo, detail: .auto), .auto)
     }
 
     func testSanitizeOriginalImageDetailFallsBackToHighWithoutSupportLikeRustToolsHelper() {
         let items: [FunctionCallOutputContentItem] = [
             .inputText(text: "header"),
             .inputImage(imageURL: "data:image/png;base64,AAA", detail: .original),
-            .inputImage(imageURL: "data:image/png;base64,BBB", detail: .low),
+            .inputImage(imageURL: "data:image/png;base64,BBB", detail: .high),
             .inputImage(imageURL: "data:image/png;base64,CCC")
         ]
 
@@ -130,7 +128,7 @@ final class ResponseModelsTests: XCTestCase {
         ), [
             .inputText(text: "header"),
             .inputImage(imageURL: "data:image/png;base64,AAA", detail: defaultImageDetail),
-            .inputImage(imageURL: "data:image/png;base64,BBB", detail: .low),
+            .inputImage(imageURL: "data:image/png;base64,BBB", detail: .high),
             .inputImage(imageURL: "data:image/png;base64,CCC")
         ])
 

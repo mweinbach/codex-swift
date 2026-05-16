@@ -64,9 +64,7 @@ public enum ContextTokenEstimator {
             let replacement = switch detail {
             case .original:
                 estimateOriginalImageBytes(imageURL: imageURL) ?? resizedImageBytesEstimate
-            case .auto,
-                 .low,
-                 .high,
+            case .high,
                  .none:
                 resizedImageBytesEstimate
             }

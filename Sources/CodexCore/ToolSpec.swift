@@ -1521,7 +1521,7 @@ public enum ToolSpecFactory {
             "path": .string(description: "Local filesystem path to an image file")
         ]
         if canRequestOriginalImageDetail {
-            properties["detail"] = .string(description: "Optional detail override. The only supported value is `original`; omit this field for default resized behavior. Use `original` to preserve the file's original resolution instead of resizing to fit. This is important when high-fidelity image perception or precise localization is needed, especially for CUA agents.")
+            properties["detail"] = .string(description: "Optional detail override. Supported values are `high` and `original`. Omit this field for default high resized behavior. Use `original` to preserve the file's original resolution instead of resizing to fit. This is important when high-fidelity image perception or precise localization is needed, especially for CUA agents.")
         }
         if includeEnvironmentID {
             properties["environment_id"] = .string(description: "Optional selected environment id to target. Omit this to use the primary environment.")
@@ -1541,7 +1541,7 @@ public enum ToolSpecFactory {
                     ]),
                     "detail": .object([
                         "type": .array([.string("string"), .string("null")]),
-                        "description": .string("Image detail hint returned by view_image. Returns `original` when original resolution is preserved, otherwise `null`.")
+                        "description": .string("Image detail hint returned by view_image. Returns `original` when original resolution is preserved, otherwise `high`.")
                     ])
                 ]),
                 "required": .array([.string("image_url"), .string("detail")]),

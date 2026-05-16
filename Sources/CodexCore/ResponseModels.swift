@@ -69,8 +69,6 @@ public enum ContentItem: Equatable, Codable, Sendable {
 }
 
 public enum ImageDetail: String, Codable, Equatable, Sendable {
-    case auto
-    case low
     case high
     case original
 }
