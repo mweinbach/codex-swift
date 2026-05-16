@@ -23420,6 +23420,69 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(params["error"] as? String, "legacy Windows sandbox setup is only supported on Windows")
     }
 
+    func testWindowsSandboxSetupStartPersistsSuccessfulSetupModeLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml")
+        try """
+        profile = "work"
+
+        [features]
+        experimental_windows_sandbox = true
+
+        [profiles.work.features]
+        enable_experimental_windows_sandbox = true
+        elevated_windows_sandbox = true
+
+        [profiles.work.windows]
+        sandbox_private_desktop = false
+        """.write(to: configFile, atomically: true, encoding: .utf8)
+        let commandCwd = temp.url.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: commandCwd, withIntermediateDirectories: true)
+        let setupRunner = AppServerRecordingWindowsSandboxSetupRunner()
+        let processor = try initializedProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            cwd: temp.url,
+            activeProfile: "work",
+            windowsSandboxSetupRunner: setupRunner.run
+        ))
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"windowsSandbox/setupStart","params":{"mode":"elevated","cwd":"\#(commandCwd.path)"}}"#.utf8
+        )))
+
+        XCTAssertEqual(messages.count, 2)
+        let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
+        XCTAssertEqual(result["started"] as? Bool, true)
+        let params = try XCTUnwrap(messages[1]["params"] as? [String: Any])
+        XCTAssertEqual(params["mode"] as? String, "elevated")
+        XCTAssertEqual(params["success"] as? Bool, true)
+        XCTAssertTrue(params["error"] is NSNull)
+        XCTAssertEqual(setupRunner.requests, [
+            WindowsSandboxSetupRequest(
+                mode: .elevated,
+                codexHome: temp.url,
+                commandCwd: commandCwd,
+                activeProfile: "work"
+            )
+        ])
+
+        let config = try CodexConfigLayerLoader.readConfig(from: configFile)
+        XCTAssertEqual(config, .table([
+            "profile": .string("work"),
+            "features": .table([
+                "experimental_windows_sandbox": .bool(true)
+            ]),
+            "profiles": .table([
+                "work": .table([
+                    "windows": .table([
+                        "sandbox": .string("elevated"),
+                        "sandbox_private_desktop": .bool(false)
+                    ])
+                ])
+            ])
+        ]))
+    }
+
     func testWindowsSandboxSetupStartRejectsRelativeCwdBeforeStarting() throws {
         let temp = try TemporaryDirectory()
 
@@ -31157,6 +31220,7 @@ final class CodexAppServerTests: XCTestCase {
         authLoginTransport: ChatGPTLoginTransport? = nil,
         authDeviceCodeTransport: ChatGPTDeviceCodeLoginTransport? = nil,
         environment: [String: String] = [:],
+        activeProfile: String? = nil,
         mcpHTTPTransport: @escaping AppServerMcpHTTPTransport = CodexAppServer.defaultMcpHTTPTransport,
         pluginHTTPTransport: @escaping AppServerPluginHTTPTransport = CodexAppServer.defaultPluginHTTPTransport,
         accessibleConnectorProvider: @escaping AppServerAccessibleConnectorProvider = CodexAppServer.defaultAccessibleConnectorProvider,
@@ -31170,7 +31234,8 @@ final class CodexAppServerTests: XCTestCase {
         remoteControlStatusSnapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot? = nil,
         pluginStartupTasksEnabled: Bool = false,
         curatedPluginStartupSyncEnabled: Bool = false,
-        memoryStartupTaskStarter: AppServerMemoryStartupTaskStarter? = nil
+        memoryStartupTaskStarter: AppServerMemoryStartupTaskStarter? = nil,
+        windowsSandboxSetupRunner: @escaping AppServerWindowsSandboxSetupRunner = runWindowsSandboxSetup
     ) -> CodexAppServerConfiguration {
         var mergedEnvironment = [
             CodexConfigLayerLoader.managedConfigEnvironmentVariable: codexHome
@@ -31184,6 +31249,7 @@ final class CodexAppServerTests: XCTestCase {
             requiresOpenAIAuth: requiresOpenAIAuth,
             sessionSource: sessionSource,
             environment: mergedEnvironment,
+            activeProfile: activeProfile,
             feedback: feedback,
             feedbackUploadTransport: feedbackUploadTransport,
             acceptedLineAnalyticsUploader: acceptedLineAnalyticsUploader,
@@ -31206,7 +31272,8 @@ final class CodexAppServerTests: XCTestCase {
             remoteControlStatusSnapshot: remoteControlStatusSnapshot,
             pluginStartupTasksEnabled: pluginStartupTasksEnabled,
             curatedPluginStartupSyncEnabled: curatedPluginStartupSyncEnabled,
-            memoryStartupTaskStarter: memoryStartupTaskStarter
+            memoryStartupTaskStarter: memoryStartupTaskStarter,
+            windowsSandboxSetupRunner: windowsSandboxSetupRunner
         )
     }
 
@@ -32984,6 +33051,23 @@ private final class AppServerMemoryStartupCapture: @unchecked Sendable {
     }
 
     func start(_ request: AppServerMemoryStartupTaskRequest) {
+        lock.withLock {
+            recordedRequests.append(request)
+        }
+    }
+}
+
+private final class AppServerRecordingWindowsSandboxSetupRunner: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedRequests: [WindowsSandboxSetupRequest] = []
+
+    var requests: [WindowsSandboxSetupRequest] {
+        lock.withLock {
+            recordedRequests
+        }
+    }
+
+    func run(_ request: WindowsSandboxSetupRequest) throws {
         lock.withLock {
             recordedRequests.append(request)
         }

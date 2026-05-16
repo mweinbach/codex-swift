@@ -18,6 +18,7 @@ public typealias AppServerLiveRuntimeSubmitter = @Sendable (
     _ submission: AppServerLiveRuntimeSubmission
 ) throws -> [EventMessage]
 public typealias AppServerMemoryStartupTaskStarter = @Sendable (_ request: AppServerMemoryStartupTaskRequest) -> Void
+public typealias AppServerWindowsSandboxSetupRunner = @Sendable (_ request: WindowsSandboxSetupRequest) throws -> Void
 public typealias AppServerAccessibleConnectorProvider = @Sendable (
     _ runtimeConfig: CodexRuntimeConfig,
     _ usesChatGPTBackend: Bool
@@ -238,6 +239,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let pluginStartupTasksEnabled: Bool
     public let curatedPluginStartupSyncEnabled: Bool
     public let memoryStartupTaskStarter: AppServerMemoryStartupTaskStarter?
+    public let windowsSandboxSetupRunner: AppServerWindowsSandboxSetupRunner
 
     public init(
         codexHome: URL,
@@ -273,7 +275,8 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         remoteControlStatusBroadcaster: AppServerRemoteControlStatusBroadcaster? = nil,
         pluginStartupTasksEnabled: Bool = true,
         curatedPluginStartupSyncEnabled: Bool = true,
-        memoryStartupTaskStarter: AppServerMemoryStartupTaskStarter? = nil
+        memoryStartupTaskStarter: AppServerMemoryStartupTaskStarter? = nil,
+        windowsSandboxSetupRunner: @escaping AppServerWindowsSandboxSetupRunner = runWindowsSandboxSetup
     ) {
         self.codexHome = codexHome
         self.cwd = cwd
@@ -322,6 +325,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         self.pluginStartupTasksEnabled = pluginStartupTasksEnabled
         self.curatedPluginStartupSyncEnabled = curatedPluginStartupSyncEnabled
         self.memoryStartupTaskStarter = memoryStartupTaskStarter
+        self.windowsSandboxSetupRunner = windowsSandboxSetupRunner
     }
 
     public static func == (lhs: CodexAppServerConfiguration, rhs: CodexAppServerConfiguration) -> Bool {
@@ -13043,7 +13047,7 @@ public enum CodexAppServer {
         )
         let error: String? = {
             do {
-                try runWindowsSandboxSetup(request)
+                try configuration.windowsSandboxSetupRunner(request)
                 try persistWindowsSandboxSetupMode(
                     codexHome: request.codexHome,
                     activeProfile: request.activeProfile,
