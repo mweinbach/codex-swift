@@ -61,9 +61,13 @@ public enum AgentJobToolExecutor {
                 return functionOutput(callID: callID, content: "unsupported call: \(name)", success: false)
             }
             do {
+                let executionCwd = try spawnAgentsOnCSVExecutionCwd(
+                    selections: context.environments,
+                    defaultCwd: cwd
+                )
                 let inputCSVPath = resolvePath(
                     try AgentJobRuntime.decodeSpawnAgentsOnCSVArguments(arguments).csvPath,
-                    cwd: cwd
+                    cwd: executionCwd
                 )
                 let csvContent: String
                 do {
@@ -76,7 +80,7 @@ public enum AgentJobToolExecutor {
                 let prepared = try await AgentJobRuntime.createSpawnAgentsOnCSVJob(
                     argumentsJSON: arguments,
                     csvContent: csvContent,
-                    cwd: cwd.path,
+                    cwd: executionCwd.path,
                     store: context.store,
                     maxThreads: context.maxThreads,
                     sessionSource: context.sessionSource,
@@ -165,6 +169,19 @@ public enum AgentJobToolExecutor {
             ? URL(fileURLWithPath: path)
             : cwd.appendingPathComponent(path)
         return url.standardizedFileURL.path
+    }
+
+    private static func spawnAgentsOnCSVExecutionCwd(
+        selections: [TurnEnvironmentSelection]?,
+        defaultCwd: URL
+    ) throws -> URL {
+        guard let selections else {
+            return defaultCwd.standardizedFileURL
+        }
+        guard selections.count == 1, let selection = selections.first else {
+            throw FunctionCallError.respondToModel("spawn_agents_on_csv requires exactly one local environment")
+        }
+        return URL(fileURLWithPath: selection.cwd, isDirectory: true).standardizedFileURL
     }
 
     private static func functionOutput(callID: String, content: String, success: Bool) -> ResponseItem {

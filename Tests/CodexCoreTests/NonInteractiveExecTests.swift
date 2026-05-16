@@ -3076,8 +3076,10 @@ final class NonInteractiveExecTests: XCTestCase {
 
     func testSpawnAgentsOnCSVRunsJobLoopAndReturnsRustShapedResult() async throws {
         let temp = try NonInteractiveExecTemporaryDirectory()
-        let inputURL = temp.url.appendingPathComponent("input.csv")
-        let outputURL = temp.url.appendingPathComponent("results.csv")
+        let environmentCwd = temp.url.appendingPathComponent("selected-env", isDirectory: true)
+        try FileManager.default.createDirectory(at: environmentCwd, withIntermediateDirectories: true)
+        let inputURL = environmentCwd.appendingPathComponent("input.csv")
+        let outputURL = environmentCwd.appendingPathComponent("results.csv")
         try "id,value\nalpha,one\n".write(to: inputURL, atomically: true, encoding: .utf8)
         let store = try SQLiteAgentJobStore(databaseURL: temp.url.appendingPathComponent("state.sqlite3"))
         let workerThreadID = try ThreadId(string: "00000000-0000-4000-8000-000000000061")
@@ -3106,8 +3108,7 @@ final class NonInteractiveExecTests: XCTestCase {
             shellEnvironmentPolicy: shellEnvironmentPolicy
         )
         let environments = [
-            TurnEnvironmentSelection(environmentID: "local", cwd: temp.url.path),
-            TurnEnvironmentSelection(environmentID: "remote-dev", cwd: "/workspace")
+            TurnEnvironmentSelection(environmentID: "local", cwd: environmentCwd.path)
         ]
 
         let output = await NonInteractiveExec.executeFunctionCall(
@@ -3180,6 +3181,45 @@ final class NonInteractiveExecTests: XCTestCase {
         let exported = try String(contentsOf: outputURL, encoding: .utf8)
         XCTAssertTrue(exported.contains(#"alpha,one,"#))
         XCTAssertTrue(exported.contains(#"alpha,completed,1,,"{""passed"":true}""#))
+    }
+
+    func testSpawnAgentsOnCSVRejectsMultipleTurnEnvironmentsLikeRust() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let inputURL = temp.url.appendingPathComponent("input.csv")
+        try "id,value\nalpha,one\n".write(to: inputURL, atomically: true, encoding: .utf8)
+        let store = try SQLiteAgentJobStore(databaseURL: temp.url.appendingPathComponent("state.sqlite3"))
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            .functionCall(
+                name: "spawn_agents_on_csv",
+                arguments: #"{"csv_path":"input.csv","instruction":"check {id}"}"#,
+                callID: "call-spawn-multiple-envs"
+            ),
+            cwd: temp.url,
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: [:],
+            agentJobContext: NonInteractiveExec.AgentJobToolContext(
+                store: store,
+                reportingThreadID: "parent-thread",
+                environments: [
+                    TurnEnvironmentSelection(environmentID: "local", cwd: temp.url.path),
+                    TurnEnvironmentSelection(environmentID: "remote-dev", cwd: "/workspace")
+                ],
+                statusForThread: { _ in .running },
+                spawnWorker: { _ in .agentLimitReached },
+                shutdownThread: { _ in }
+            )
+        )
+
+        guard case let .functionCallOutput(callID, payload) = output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-spawn-multiple-envs")
+        XCTAssertEqual(payload.success, false)
+        XCTAssertEqual(payload.content, "spawn_agents_on_csv requires exactly one local environment")
     }
 
     func testUnsupportedCustomToolCallUsesRustRegistryMessage() async throws {

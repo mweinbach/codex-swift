@@ -12,6 +12,14 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `3ac1d15598` (`Use selected environment
+  cwd for filesystem helpers`) for `spawn_agents_on_csv`. Swift's shared
+  agent-job tool executor now resolves relative input and output CSV paths
+  against the single selected turn environment cwd and rejects multi-environment
+  calls with Rust's `spawn_agents_on_csv requires exactly one local environment`
+  model-facing error. The local/remote environment-object distinction remains
+  pending for live session tool registration, where Swift does not yet carry
+  the full Rust `TurnEnvironment` value into this shared executor.
 - 2026-05-16: rechecked Rust commit `e3bf0cfc63` (`[codex] Canonicalize
   shared workspace plugin IDs`) against `codex-rs/core-plugins/src/remote.rs`,
   `codex-rs/core-plugins/src/remote/remote_installed_plugin_sync.rs`, and the
