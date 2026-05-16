@@ -2661,7 +2661,17 @@ final class AppServerThreadProtocolTests: XCTestCase {
             ThreadGoalSetParams.self,
             from: Data(#"{"threadId":"\#(threadID.description)","objective":"keep going"}"#.utf8)
         )
+        XCTAssertEqual(preserve.objective, "keep going")
+        XCTAssertNil(preserve.status)
         XCTAssertEqual(preserve.tokenBudget, .preserve)
+
+        let nullPlainOptions = try JSONDecoder().decode(
+            ThreadGoalSetParams.self,
+            from: Data(#"{"threadId":"\#(threadID.description)","objective":null,"status":null}"#.utf8)
+        )
+        XCTAssertNil(nullPlainOptions.objective)
+        XCTAssertNil(nullPlainOptions.status)
+        XCTAssertEqual(nullPlainOptions.tokenBudget, .preserve)
 
         let clear = try JSONDecoder().decode(
             ThreadGoalSetParams.self,
@@ -2785,6 +2795,19 @@ final class AppServerThreadProtocolTests: XCTestCase {
             "limit": 50,
             "sortDirection": "asc"
         ])
+        let decodedParams = try JSONDecoder().decode(
+            ThreadTurnsItemsListParams.self,
+            from: Data(#"""
+            {
+              "threadId": "thr_123",
+              "turnId": "turn_456",
+              "cursor": "cursor_1",
+              "limit": 50,
+              "sortDirection": "asc"
+            }
+            """#.utf8)
+        )
+        XCTAssertEqual(decodedParams, params)
 
         let response = ThreadTurnsItemsListResponse(
             data: [.contextCompaction(id: "item_1")],
@@ -2802,6 +2825,17 @@ final class AppServerThreadProtocolTests: XCTestCase {
             "nextCursor": NSNull(),
             "backwardsCursor": "cursor_0"
         ])
+        let decodedResponse = try JSONDecoder().decode(
+            ThreadTurnsItemsListResponse.self,
+            from: Data(#"""
+            {
+              "data": [{"type": "contextCompaction", "id": "item_1"}],
+              "nextCursor": null,
+              "backwardsCursor": "cursor_0"
+            }
+            """#.utf8)
+        )
+        XCTAssertEqual(decodedResponse, response)
     }
 
     func testTurnItemsForThreadReturnsMatchingTurnItemsLikeRustExec() {

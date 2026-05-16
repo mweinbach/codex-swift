@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust app-server v2 `thread/turns/items/list`
+  protocol fixtures in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`.
+  Swift thread protocol coverage now pins both decode and encode behavior for
+  params and the unsupported-route response payload shape, including null
+  cursors and `contextCompaction` item tags.
 - 2026-05-16: rechecked Rust app-server v2 `AppScreenshot` in
   `codex-rs/app-server-protocol/src/protocol/v2/apps.rs`. Swift app-list
   protocol coverage now pins camel-case `userPrompt` screenshot decoding plus
@@ -971,7 +976,8 @@ Recent upstream audit checkpoint:
   `codex-rs/app-server-protocol/src/protocol/v2/thread.rs`. Swift now encodes
   missing `objective` and `status` fields as explicit `null` like Rust's plain
   `Option` fields while preserving `tokenBudget`'s omitted/null/value patch
-  semantics.
+  semantics, and focused protocol coverage now pins explicit-null decoding for
+  those plain optional fields.
 - 2026-05-15: rechecked Rust's
   `BackendClient::send_add_credits_nudge_email_url` in
   `codex-rs/backend-client/src/client.rs`. Swift app-server coverage now pins
