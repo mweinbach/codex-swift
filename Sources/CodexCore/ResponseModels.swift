@@ -80,17 +80,20 @@ public let defaultImageDetail: ImageDetail = .high
 public enum FunctionCallOutputContentItem: Equatable, Codable, Sendable {
     case inputText(text: String)
     case inputImage(imageURL: String, detail: ImageDetail? = nil)
+    case inputAudio(inputAudio: InputAudio)
 
     private enum CodingKeys: String, CodingKey {
         case type
         case text
         case imageURL = "image_url"
         case detail
+        case inputAudio = "input_audio"
     }
 
     private enum ItemType: String, Codable {
         case inputText = "input_text"
         case inputImage = "input_image"
+        case inputAudio = "input_audio"
     }
 
     public init(from decoder: Decoder) throws {
@@ -103,6 +106,8 @@ public enum FunctionCallOutputContentItem: Equatable, Codable, Sendable {
                 imageURL: try container.decode(String.self, forKey: .imageURL),
                 detail: try container.decodeIfPresent(ImageDetail.self, forKey: .detail)
             )
+        case .inputAudio:
+            self = .inputAudio(inputAudio: try container.decode(InputAudio.self, forKey: .inputAudio))
         }
     }
 
@@ -116,6 +121,9 @@ public enum FunctionCallOutputContentItem: Equatable, Codable, Sendable {
             try container.encode(ItemType.inputImage, forKey: .type)
             try container.encode(imageURL, forKey: .imageURL)
             try container.encodeIfPresent(detail, forKey: .detail)
+        case let .inputAudio(inputAudio):
+            try container.encode(ItemType.inputAudio, forKey: .type)
+            try container.encode(inputAudio, forKey: .inputAudio)
         }
     }
 
@@ -132,6 +140,8 @@ public enum FunctionCallOutputContentItem: Equatable, Codable, Sendable {
                 fields.append(#""detail":\#(Self.jsonString(detail.rawValue))"#)
             }
             return "{\(fields.joined(separator: ","))}"
+        case let .inputAudio(inputAudio):
+            return #"{"type":"input_audio","input_audio":{"data":\#(Self.jsonString(inputAudio.data)),"format":\#(Self.jsonString(inputAudio.format))}}"#
         }
     }
 
@@ -146,6 +156,95 @@ public enum FunctionCallOutputContentItem: Equatable, Codable, Sendable {
             return #""""#
         }
         return encoded
+    }
+}
+
+public struct InputAudio: Equatable, Codable, Sendable {
+    public let data: String
+    public let format: String
+
+    public init(data: String, format: String) {
+        self.data = data
+        self.format = format
+    }
+
+    public init?(data rawData: String, format rawFormat: String? = nil, mimeType rawMimeType: String? = nil) {
+        guard !rawData.isEmpty else {
+            return nil
+        }
+
+        let data: String
+        let dataURLFormat: String?
+        if let parsed = Self.parseAudioDataURL(rawData) {
+            data = parsed.data
+            dataURLFormat = parsed.format
+        } else if rawData.prefix("data:".count).caseInsensitiveCompare("data:") == .orderedSame {
+            return nil
+        } else {
+            data = rawData
+            dataURLFormat = nil
+        }
+        guard !data.isEmpty else {
+            return nil
+        }
+
+        guard let format = rawFormat.flatMap(Self.normalizedFormat)
+            ?? dataURLFormat
+            ?? rawMimeType.flatMap(Self.audioFormatFromMimeType)
+        else {
+            return nil
+        }
+
+        self.data = data
+        self.format = format
+    }
+
+    private static func parseAudioDataURL(_ dataURL: String) -> (data: String, format: String)? {
+        guard dataURL.prefix("data:".count).caseInsensitiveCompare("data:") == .orderedSame,
+              let commaIndex = dataURL.firstIndex(of: ",")
+        else {
+            return nil
+        }
+
+        let metadataStart = dataURL.index(dataURL.startIndex, offsetBy: "data:".count)
+        let metadata = String(dataURL[metadataStart..<commaIndex])
+        guard metadata.split(separator: ";").contains(where: { $0.caseInsensitiveCompare("base64") == .orderedSame }),
+              let mimeType = metadata.split(separator: ";").first,
+              let format = audioFormatFromMimeType(String(mimeType))
+        else {
+            return nil
+        }
+
+        return (String(dataURL[dataURL.index(after: commaIndex)...]), format)
+    }
+
+    private static func audioFormatFromMimeType(_ mimeType: String) -> String? {
+        let mediaType = mimeType.split(separator: ";", maxSplits: 1).first.map(String.init) ?? ""
+        let normalized = mediaType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard normalized.hasPrefix("audio/") else {
+            return nil
+        }
+        return normalizedFormat(String(normalized.dropFirst("audio/".count)))
+    }
+
+    private static func normalizedFormat(_ rawFormat: String) -> String? {
+        let trimmed = rawFormat.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+        if trimmed.contains("/") {
+            return audioFormatFromMimeType(trimmed)
+        }
+
+        let withoutPrefix = trimmed.hasPrefix("x-") ? String(trimmed.dropFirst(2)) : trimmed
+        switch withoutPrefix {
+        case "mpeg":
+            return "mp3"
+        case "wave":
+            return "wav"
+        default:
+            return withoutPrefix
+        }
     }
 }
 
@@ -239,6 +338,7 @@ public struct FunctionCallOutputPayload: Equatable, Codable, CustomStringConvert
         from blocks: [McpContentBlock]
     ) -> [FunctionCallOutputContentItem]? {
         var sawImage = false
+        var sawAudio = false
         var items: [FunctionCallOutputContentItem] = []
 
         for block in blocks {
@@ -257,8 +357,18 @@ public struct FunctionCallOutputPayload: Equatable, Codable, CustomStringConvert
                     imageURL: imageURL,
                     detail: Self.imageDetail(from: image.meta) ?? defaultImageDetail
                 ))
-            case .audio,
-                 .resourceLink,
+            case let .audio(audio):
+                if let inputAudio = InputAudio(data: audio.data, mimeType: audio.mimeType) {
+                    sawAudio = true
+                    items.append(.inputAudio(inputAudio: inputAudio))
+                } else {
+                    let content = (try? String(
+                        data: JSONEncoder.codexCompact.encode(block),
+                        encoding: .utf8
+                    )) ?? "<content>"
+                    items.append(.inputText(text: content))
+                }
+            case .resourceLink,
                  .embeddedResource,
                  .unknown:
                 let content = (try? String(
@@ -269,7 +379,7 @@ public struct FunctionCallOutputPayload: Equatable, Codable, CustomStringConvert
             }
         }
 
-        return sawImage ? items : nil
+        return sawImage || sawAudio ? items : nil
     }
 
     private static func textContent(from items: [FunctionCallOutputContentItem]) -> String? {

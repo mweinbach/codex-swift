@@ -137,6 +137,8 @@ public enum Truncation {
                 }
             case let .inputImage(imageURL, detail):
                 output.append(.inputImage(imageURL: imageURL, detail: detail))
+            case let .inputAudio(inputAudio):
+                output.append(.inputAudio(inputAudio: inputAudio))
             }
         }
 

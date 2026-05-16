@@ -169,6 +169,8 @@ public enum CodeMode {
                 return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : text
             case let .inputImage(imageURL, _):
                 return imageURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : imageURL
+            case .inputAudio:
+                return nil
             }
         }.joined(separator: "\n")
         return .string(text)

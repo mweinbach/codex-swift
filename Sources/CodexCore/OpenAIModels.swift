@@ -13,6 +13,7 @@ public struct ReasoningEffortPreset: Equatable, Codable, Sendable {
 public enum InputModality: String, Codable, CaseIterable, Equatable, Sendable {
     case text
     case image
+    case audio
 
     public static var defaultInputModalities: [InputModality] {
         [.text, .image]

@@ -47,7 +47,7 @@ final class AppServerModelProtocolTests: XCTestCase {
                 ReasoningEffortOption(reasoningEffort: .high, description: "Deep")
             ],
             defaultReasoningEffort: .medium,
-            inputModalities: [.text, .image],
+            inputModalities: [.text, .image, .audio],
             supportsPersonality: true,
             additionalSpeedTiers: ["fast"],
             serviceTiers: [
@@ -83,7 +83,7 @@ final class AppServerModelProtocolTests: XCTestCase {
                 ]
             ],
             "defaultReasoningEffort": "medium",
-            "inputModalities": ["text", "image"],
+            "inputModalities": ["text", "image", "audio"],
             "supportsPersonality": true,
             "additionalSpeedTiers": ["fast"],
             "serviceTiers": [
@@ -126,7 +126,7 @@ final class AppServerModelProtocolTests: XCTestCase {
                         ]
                     ],
                     "defaultReasoningEffort": "medium",
-                    "inputModalities": ["text", "image"],
+                    "inputModalities": ["text", "image", "audio"],
                     "supportsPersonality": true,
                     "additionalSpeedTiers": ["fast"],
                     "serviceTiers": [

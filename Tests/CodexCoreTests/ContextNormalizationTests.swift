@@ -297,6 +297,59 @@ final class ContextNormalizationTests: XCTestCase {
         ])
     }
 
+    func testStripUnsupportedMediaReplacesAudioOutputsLikeRust() {
+        var items: [ResponseItem] = [
+            .functionCallOutput(
+                callID: "call-1",
+                output: FunctionCallOutputPayload(
+                    content: "ignored when content items exist",
+                    contentItems: [
+                        .inputText(text: "caption"),
+                        .inputAudio(inputAudio: InputAudio(data: "BASE64", format: "wav"))
+                    ],
+                    success: true
+                )
+            ),
+            .imageGenerationCall(id: "ig-1", status: "completed", result: "BASE64")
+        ]
+
+        ContextNormalization.stripUnsupportedMediaContent(inputModalities: [.text, .image], items: &items)
+
+        XCTAssertEqual(items, [
+            .functionCallOutput(
+                callID: "call-1",
+                output: FunctionCallOutputPayload(
+                    content: "ignored when content items exist",
+                    contentItems: [
+                        .inputText(text: "caption"),
+                        .inputText(text: ContextNormalization.audioContentOmittedPlaceholder)
+                    ],
+                    success: true
+                )
+            ),
+            .imageGenerationCall(id: "ig-1", status: "completed", result: "BASE64")
+        ])
+    }
+
+    func testStripUnsupportedMediaKeepsAudioWhenModelSupportsItLikeRust() {
+        var items: [ResponseItem] = [
+            .functionCallOutput(
+                callID: "call-1",
+                output: FunctionCallOutputPayload(
+                    content: "ignored when content items exist",
+                    contentItems: [
+                        .inputAudio(inputAudio: InputAudio(data: "BASE64", format: "wav"))
+                    ]
+                )
+            )
+        ]
+        let original = items
+
+        ContextNormalization.stripUnsupportedMediaContent(inputModalities: [.text, .audio], items: &items)
+
+        XCTAssertEqual(items, original)
+    }
+
     private func shellAction(_ command: [String]) -> LocalShellAction {
         .exec(LocalShellExecAction(command: command))
     }

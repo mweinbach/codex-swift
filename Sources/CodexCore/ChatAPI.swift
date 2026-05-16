@@ -306,6 +306,14 @@ public struct ChatRequestBuilder: Equatable, Sendable {
                     "type": .string("image_url"),
                     "image_url": .object(["url": .string(imageURL)])
                 ])
+            case let .inputAudio(inputAudio):
+                return .object([
+                    "type": .string("input_audio"),
+                    "input_audio": .object([
+                        "data": .string(inputAudio.data),
+                        "format": .string(inputAudio.format)
+                    ])
+                ])
             }
         })
     }

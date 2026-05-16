@@ -32,7 +32,8 @@ public func sanitizeOriginalImageDetail(
         case let .inputImage(imageURL, .original):
             return .inputImage(imageURL: imageURL, detail: defaultImageDetail)
         case .inputText,
-             .inputImage:
+             .inputImage,
+             .inputAudio:
             return item
         }
     }

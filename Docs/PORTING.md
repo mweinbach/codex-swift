@@ -12,6 +12,14 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust branch commit `b42b2ff9ec` (`Support audio
+  input`). Swift now carries Rust's `audio` input modality tag, converts MCP
+  audio content blocks into Responses `input_audio` tool output content when a
+  format can be derived from `format`, `mimeType` / `mime_type`, or an audio
+  data URL, falls back to Rust's serialized text block when no audio format is
+  derivable, keeps structured-content precedence, and strips audio tool output
+  content to Rust's unsupported-audio placeholder when the selected model does
+  not advertise audio input support.
 - 2026-05-16: rechecked Rust MCP tool approval persistence in
   `codex-rs/core/src/mcp_tool_call.rs`. Swift now persists remembered MCP tool
   approvals as Rust-shaped `approval_mode = "approve"` overrides for

@@ -8,6 +8,7 @@ final class OpenAIModelsTests: XCTestCase {
         XCTAssertEqual(try encode(ModelVisibility.none), #""none""#)
         XCTAssertEqual(try encode(TruncationMode.bytes), #""bytes""#)
         XCTAssertEqual(try encode(TruncationMode.tokens), #""tokens""#)
+        XCTAssertEqual(try encode(InputModality.audio), #""audio""#)
 
         let version = ClientVersion(0, 62, 0)
         XCTAssertEqual(try encode(version), #"[0,62,0]"#)

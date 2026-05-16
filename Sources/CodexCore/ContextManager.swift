@@ -88,7 +88,7 @@ public struct ContextManager: Equatable, Sendable {
     public func forPrompt(inputModalities: [InputModality] = [.text, .image]) -> [ResponseItem] {
         var normalized = items
         ContextNormalization.normalizeHistory(&normalized)
-        ContextNormalization.stripImagesWhenUnsupported(inputModalities: inputModalities, items: &normalized)
+        ContextNormalization.stripUnsupportedMediaContent(inputModalities: inputModalities, items: &normalized)
         return normalized
     }
 
@@ -165,7 +165,8 @@ public struct ContextManager: Equatable, Sendable {
             case .inputImage:
                 replaced = true
                 return FunctionCallOutputContentItem.inputText(text: placeholder)
-            case .inputText:
+            case .inputText,
+                 .inputAudio:
                 return item
             }
         }

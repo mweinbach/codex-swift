@@ -2,6 +2,7 @@ import Foundation
 
 public enum ContextNormalization {
     public static let imageContentOmittedPlaceholder = "image content omitted because you do not support image input"
+    public static let audioContentOmittedPlaceholder = "audio content omitted because you do not support audio input"
 
     public static func ensureCallOutputsPresent(_ items: inout [ResponseItem]) {
         var missingOutputsToInsert: [(index: Int, item: ResponseItem)] = []
@@ -238,7 +239,16 @@ public enum ContextNormalization {
         inputModalities: [InputModality],
         items: inout [ResponseItem]
     ) {
-        guard !inputModalities.contains(.image) else {
+        stripUnsupportedMediaContent(inputModalities: inputModalities, items: &items)
+    }
+
+    public static func stripUnsupportedMediaContent(
+        inputModalities: [InputModality],
+        items: inout [ResponseItem]
+    ) {
+        let supportsImages = inputModalities.contains(.image)
+        let supportsAudio = inputModalities.contains(.audio)
+        guard !supportsImages || !supportsAudio else {
             return
         }
 
@@ -248,17 +258,32 @@ public enum ContextNormalization {
                 return .message(
                     id: id,
                     role: role,
-                    content: content.map(Self.strippingImageContent),
+                    content: content.map { Self.strippingMediaContent($0, supportsImages: supportsImages) },
                     phase: phase
                 )
 
             case let .functionCallOutput(callID, output):
-                return .functionCallOutput(callID: callID, output: Self.strippingImageOutput(from: output))
+                return .functionCallOutput(
+                    callID: callID,
+                    output: Self.strippingMediaOutput(
+                        from: output,
+                        supportsImages: supportsImages,
+                        supportsAudio: supportsAudio
+                    )
+                )
 
             case let .customToolCallOutput(callID, name, output):
-                return .customToolCallOutput(callID: callID, name: name, output: Self.strippingImageOutput(from: output))
+                return .customToolCallOutput(
+                    callID: callID,
+                    name: name,
+                    output: Self.strippingMediaOutput(
+                        from: output,
+                        supportsImages: supportsImages,
+                        supportsAudio: supportsAudio
+                    )
+                )
 
-            case let .imageGenerationCall(id, status, revisedPrompt, _):
+            case let .imageGenerationCall(id, status, revisedPrompt, _) where !supportsImages:
                 return .imageGenerationCall(
                     id: id,
                     status: status,
@@ -268,14 +293,15 @@ public enum ContextNormalization {
 
             case .reasoning,
                  .localShellCall,
-                 .functionCall,
-                 .toolSearchCall,
-                 .customToolCall,
-                 .toolSearchOutput,
-                 .webSearchCall,
-                 .ghostSnapshot,
-                 .compaction,
-                 .contextCompaction,
+             .functionCall,
+             .toolSearchCall,
+             .customToolCall,
+             .toolSearchOutput,
+             .webSearchCall,
+             .imageGenerationCall,
+             .ghostSnapshot,
+             .compaction,
+             .contextCompaction,
                  .knownPersisted,
                  .other:
                 return item
@@ -295,34 +321,51 @@ public enum ContextNormalization {
         return true
     }
 
-    private static func strippingImageContent(_ item: ContentItem) -> ContentItem {
+    private static func strippingMediaContent(_ item: ContentItem, supportsImages: Bool) -> ContentItem {
         switch item {
-        case .inputImage:
+        case .inputImage where !supportsImages:
             return .inputText(text: imageContentOmittedPlaceholder)
         case .inputText,
+             .inputImage,
              .outputText:
             return item
         }
     }
 
-    private static func strippingImageOutput(from output: FunctionCallOutputPayload) -> FunctionCallOutputPayload {
+    private static func strippingMediaOutput(
+        from output: FunctionCallOutputPayload,
+        supportsImages: Bool,
+        supportsAudio: Bool
+    ) -> FunctionCallOutputPayload {
         guard let contentItems = output.contentItems else {
             return output
         }
         return FunctionCallOutputPayload(
             content: output.content,
-            contentItems: contentItems.map(Self.strippingImageOutputContent),
+            contentItems: contentItems.map {
+                Self.strippingMediaOutputContent(
+                    $0,
+                    supportsImages: supportsImages,
+                    supportsAudio: supportsAudio
+                )
+            },
             success: output.success
         )
     }
 
-    private static func strippingImageOutputContent(
-        _ item: FunctionCallOutputContentItem
+    private static func strippingMediaOutputContent(
+        _ item: FunctionCallOutputContentItem,
+        supportsImages: Bool,
+        supportsAudio: Bool
     ) -> FunctionCallOutputContentItem {
         switch item {
-        case .inputImage:
+        case .inputImage where !supportsImages:
             return .inputText(text: imageContentOmittedPlaceholder)
-        case .inputText:
+        case .inputAudio where !supportsAudio:
+            return .inputText(text: audioContentOmittedPlaceholder)
+        case .inputText,
+             .inputImage,
+             .inputAudio:
             return item
         }
     }

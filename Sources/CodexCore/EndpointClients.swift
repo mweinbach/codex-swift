@@ -884,7 +884,7 @@ public struct ResponsesClient<Transport: APITransport, Auth: APIAuthProvider> {
         do {
             var input = prompt.input
             ContextNormalization.normalizeHistory(&input)
-            ContextNormalization.stripImagesWhenUnsupported(inputModalities: options.inputModalities, items: &input)
+            ContextNormalization.stripUnsupportedMediaContent(inputModalities: options.inputModalities, items: &input)
             let serviceTier = options.supportedServiceTierIDs.map { supportedIDs in
                 options.serviceTier.flatMap { supportedIDs.contains($0) ? $0 : nil }
             } ?? options.serviceTier

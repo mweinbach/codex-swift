@@ -288,6 +288,84 @@ final class ResponseModelsTests: XCTestCase {
         ])
     }
 
+    func testMcpCallToolResultAudioContentBecomesInputAudioLikeRust() throws {
+        let payload = FunctionCallOutputPayload(callToolResult: McpCallToolResult(
+            content: [
+                .text(McpTextContent(text: "caption")),
+                .audio(McpAudioContent(data: "BASE64", mimeType: "audio/mpeg"))
+            ]
+        ))
+
+        XCTAssertEqual(payload.success, true)
+        XCTAssertEqual(payload.contentItems, [
+            .inputText(text: "caption"),
+            .inputAudio(inputAudio: InputAudio(data: "BASE64", format: "mp3"))
+        ])
+
+        let encoded = try JSONObject(ResponseInputItem.functionCallOutput(callID: "call1", output: payload))
+        let output = try XCTUnwrap(encoded["output"] as? [[String: Any]])
+        XCTAssertEqual(output[1]["type"] as? String, "input_audio")
+        let audio = try XCTUnwrap(output[1]["input_audio"] as? [String: Any])
+        XCTAssertEqual(audio["data"] as? String, "BASE64")
+        XCTAssertEqual(audio["format"] as? String, "mp3")
+    }
+
+    func testMcpCallToolResultAudioDataURLDerivesFormatLikeRust() throws {
+        let payload = FunctionCallOutputPayload(callToolResult: McpCallToolResult(
+            content: [
+                .audio(McpAudioContent(data: "data:audio/ogg;base64,T2dnUw"))
+            ]
+        ))
+
+        XCTAssertEqual(payload.contentItems, [
+            .inputAudio(inputAudio: InputAudio(data: "T2dnUw", format: "ogg"))
+        ])
+    }
+
+    func testMcpCallToolResultAudioWithoutDerivableFormatStaysTextLikeRust() throws {
+        let payload = FunctionCallOutputPayload(callToolResult: McpCallToolResult(
+            content: [
+                .audio(McpAudioContent(data: "BASE64"))
+            ]
+        ))
+
+        XCTAssertNil(payload.contentItems)
+        let content = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(payload.content.utf8)) as? [[String: Any]])
+        XCTAssertEqual(content[0]["type"] as? String, "audio")
+        XCTAssertEqual(content[0]["data"] as? String, "BASE64")
+        XCTAssertNil(content[0]["mimeType"])
+    }
+
+    func testMcpCallToolResultMalformedAudioFallsBackInsideStructuredPayloadLikeRust() throws {
+        let payload = FunctionCallOutputPayload(callToolResult: McpCallToolResult(
+            content: [
+                .image(McpImageContent(data: "IMAGE", mimeType: "image/png")),
+                .audio(McpAudioContent(data: "data:image/png;base64,NOT_AUDIO"))
+            ]
+        ))
+
+        let items = try XCTUnwrap(payload.contentItems)
+        XCTAssertEqual(items.first, .inputImage(imageURL: "data:image/png;base64,IMAGE", detail: defaultImageDetail))
+        guard case let .inputText(audioText)? = items.dropFirst().first else {
+            return XCTFail("expected malformed audio fallback text")
+        }
+        let audioObject = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(audioText.utf8)) as? [String: Any])
+        XCTAssertEqual(audioObject["type"] as? String, "audio")
+        XCTAssertEqual(audioObject["data"] as? String, "data:image/png;base64,NOT_AUDIO")
+    }
+
+    func testMcpCallToolResultStructuredContentIgnoresAudioContentLikeRust() {
+        let payload = FunctionCallOutputPayload(callToolResult: McpCallToolResult(
+            content: [
+                .audio(McpAudioContent(data: "BASE64", mimeType: "audio/wav"))
+            ],
+            structuredContent: .object(["ok": .bool(true)])
+        ))
+
+        XCTAssertEqual(payload.content, #"{"ok":true}"#)
+        XCTAssertNil(payload.contentItems)
+    }
+
     func testMcpCallToolResultMixedUnsupportedBlocksBecomeTextWhenImagePresentLikeRust() throws {
         let resource = McpResourceLink(
             name: "readme",
