@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `772e034594` (`Update
+  models.json`). Swift's bundled model catalog already matches the current
+  Rust catalog: GPT-5.5 and GPT-5.4 expose only the `priority` service tier,
+  keep `additional_speed_tiers: ["fast"]`, and no longer carry the removed
+  `ultrafast` tier. Existing `ModelsManagerTests` coverage pins those details
+  on the Swift resource-backed presets.
 - 2026-05-16: rechecked Rust
   `original_detail_webp_images_scale_with_dimensions` in
   `codex-rs/core/src/context_manager/history_tests.rs`. Swift context token
