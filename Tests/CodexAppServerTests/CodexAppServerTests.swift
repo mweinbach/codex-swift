@@ -9316,6 +9316,93 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(shellResult.isEmpty)
     }
 
+    func testThreadShellCommandHistoryExcludesPersistedCommandExecutionsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T08-00-30",
+            timestamp: "2025-01-06T08:00:30Z",
+            preview: "run a shell command",
+            provider: "mock_provider"
+        )
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        let command = ["/bin/sh", "-lc", "printf hello"]
+        let cwd = temp.url.path
+        try appendRolloutEvents(
+            to: rolloutPath,
+            timestamp: "2025-01-06T08:00:31Z",
+            events: [
+                .execCommandBegin(ExecCommandBeginEvent(
+                    callID: "call-1",
+                    processID: "proc-1",
+                    turnID: "turn-1",
+                    startedAtMilliseconds: 1_736_152_832_000,
+                    command: command,
+                    cwd: cwd,
+                    parsedCmd: [],
+                    source: .userShell
+                )),
+                .execCommandOutputDelta(ExecCommandOutputDeltaEvent(
+                    callID: "call-1",
+                    stream: .stdout,
+                    chunk: Array("hello\n".utf8)
+                )),
+                .execCommandEnd(ExecCommandEndEvent(
+                    callID: "call-1",
+                    processID: "proc-1",
+                    turnID: "turn-1",
+                    completedAtMilliseconds: 1_736_152_833_000,
+                    command: command,
+                    cwd: cwd,
+                    parsedCmd: [],
+                    source: .userShell,
+                    stdout: "hello\n",
+                    stderr: "",
+                    aggregatedOutput: "hello\n",
+                    exitCode: 0,
+                    duration: ProtocolDuration(secs: 1),
+                    formattedOutput: "hello\n"
+                ))
+            ]
+        )
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
+        )
+
+        let read = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"thread/read","params":{"threadId":"\#(threadID)","includeTurns":true}}"#.utf8
+        )))
+        let readResult = try XCTUnwrap(read["result"] as? [String: Any])
+        let readThread = try XCTUnwrap(readResult["thread"] as? [String: Any])
+        let readTurns = try XCTUnwrap(readThread["turns"] as? [[String: Any]])
+        XCTAssertEqual(readTurns.count, 1)
+        XCTAssertEqual(turnUserText(readTurns[0]), "run a shell command")
+        assertNoCommandExecutionItems(readTurns)
+
+        let turnsList = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"thread/turns/list","params":{"threadId":"\#(threadID)","sortDirection":"asc","itemsView":"full"}}"#.utf8
+        )))
+        let turnsListResult = try XCTUnwrap(turnsList["result"] as? [String: Any])
+        let turnsListTurns = try XCTUnwrap(turnsListResult["data"] as? [[String: Any]])
+        XCTAssertEqual(turnsListTurns.count, 1)
+        XCTAssertEqual(turnUserText(turnsListTurns[0]), "run a shell command")
+        assertNoCommandExecutionItems(turnsListTurns)
+
+        let forkMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":3,"method":"thread/fork","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        let forkResult = try XCTUnwrap(forkMessages[0]["result"] as? [String: Any])
+        let forkThread = try XCTUnwrap(forkResult["thread"] as? [String: Any])
+        let forkTurns = try XCTUnwrap(forkThread["turns"] as? [[String: Any]])
+        XCTAssertEqual(forkTurns.count, 1)
+        XCTAssertEqual(turnUserText(forkTurns[0]), "run a shell command")
+        assertNoCommandExecutionItems(forkTurns)
+    }
+
     func testThreadOperationsSubmitRustCoreOpsWhenRuntimeSubmitterIsAvailable() throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(
@@ -32112,6 +32199,22 @@ final class CodexAppServerTests: XCTestCase {
                 return nil
             }
             return item["text"] as? String
+        }
+    }
+
+    private func assertNoCommandExecutionItems(
+        _ turns: [[String: Any]],
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        for turn in turns {
+            let items = turn["items"] as? [[String: Any]] ?? []
+            XCTAssertFalse(
+                items.contains { $0["type"] as? String == "commandExecution" },
+                "persisted commandExecution items must stay out of reconstructed thread history",
+                file: file,
+                line: line
+            )
         }
     }
 
