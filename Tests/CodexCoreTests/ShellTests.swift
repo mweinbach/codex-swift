@@ -115,6 +115,10 @@ final class ShellTests: XCTestCase {
             ShellResolver.extractPowerShellCommand(["pwsh", "-NoProfile", "-c", "Get-ChildItem | Select-String foo"])?.script,
             "Get-ChildItem | Select-String foo"
         )
+        XCTAssertEqual(
+            ShellResolver.extractPowerShellCommand(["/usr/local/bin/powershell.exe", "-Command", "Write-Host hi"])?.script,
+            "Write-Host hi"
+        )
         XCTAssertNil(ShellResolver.extractPowerShellCommand(["pwsh", "-EncodedCommand", "abc"]))
         XCTAssertNil(ShellResolver.extractPowerShellCommand(["pwsh", "-WindowStyle", "Hidden", "-Command", "Get-Location"]))
     }
