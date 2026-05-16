@@ -933,9 +933,9 @@ final class ConfigLoaderTests: XCTestCase {
         vim_mode_default = true
         raw_output_mode = true
         alternate_screen = "never"
-        status_line = ["model-with-reasoning", "current-dir"]
+        status_line = ["model-with-reasoning", "current-dir", "thread-id"]
         status_line_use_colors = false
-        terminal_title = ["activity", "project"]
+        terminal_title = ["activity", "project", "thread-id"]
         theme = "dark-plus"
         session_picker_view = "comfortable"
         terminal_resize_reflow_max_rows = 9000
@@ -1043,9 +1043,9 @@ final class ConfigLoaderTests: XCTestCase {
             vimModeDefault: true,
             rawOutputMode: true,
             alternateScreen: .never,
-            statusLine: ["model-with-reasoning", "current-dir"],
+            statusLine: ["model-with-reasoning", "current-dir", "thread-id"],
             statusLineUseColors: false,
-            terminalTitle: ["activity", "project"],
+            terminalTitle: ["activity", "project", "thread-id"],
             theme: "dark-plus",
             sessionPickerView: .comfortable,
             modelAvailabilityNuxShownCount: [
