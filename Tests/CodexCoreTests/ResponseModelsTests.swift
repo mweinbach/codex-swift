@@ -168,6 +168,41 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertEqual(object["answer"] as? Int, 42)
     }
 
+    func testMcpCallToolResultNullStructuredContentFallsBackToContentLikeRust() throws {
+        let payload = FunctionCallOutputPayload(callToolResult: McpCallToolResult(
+            content: [
+                .text(McpTextContent(text: "hello")),
+                .text(McpTextContent(text: "world"))
+            ],
+            structuredContent: .null
+        ))
+
+        XCTAssertEqual(payload.success, true)
+        XCTAssertNil(payload.contentItems)
+        let content = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(payload.content.utf8)) as? [[String: Any]])
+        XCTAssertEqual(content.count, 2)
+        XCTAssertEqual(content[0]["type"] as? String, "text")
+        XCTAssertEqual(content[0]["text"] as? String, "hello")
+        XCTAssertEqual(content[1]["type"] as? String, "text")
+        XCTAssertEqual(content[1]["text"] as? String, "world")
+    }
+
+    func testMcpCallToolResultSuccessFlagReflectsIsErrorLikeRust() {
+        let failed = FunctionCallOutputPayload(callToolResult: McpCallToolResult(
+            content: [.text(McpTextContent(text: "unused"))],
+            isError: true,
+            structuredContent: .object(["message": .string("bad")])
+        ))
+        XCTAssertEqual(failed.success, false)
+        XCTAssertEqual(failed.content, #"{"message":"bad"}"#)
+
+        let succeeded = FunctionCallOutputPayload(callToolResult: McpCallToolResult(
+            content: [.text(McpTextContent(text: "alpha"))],
+            isError: false
+        ))
+        XCTAssertEqual(succeeded.success, true)
+    }
+
     func testMcpCallToolResultImageContentBecomesContentItems() throws {
         let payload = FunctionCallOutputPayload(callToolResult: McpCallToolResult(
             content: [
