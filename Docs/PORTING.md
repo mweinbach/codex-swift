@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust MCP tool approval response parsing in
+  `codex-rs/core/src/mcp_tool_call.rs`. Swift now parses MCP approval
+  elicitation responses into Rust-shaped decisions, including `_meta.persist`
+  session/always overrides, request-user-input answer fallback, synthetic
+  decline priority, accepted-without-content defaulting to accept, and
+  prompt-mode normalization of remember decisions.
 - 2026-05-16: rechecked Rust app-server v2
   `turn_start_notify_payload_includes_initialize_client_name` in
   `codex-rs/app-server/tests/suite/v2/initialize.rs`. Swift now retains the

@@ -22,6 +22,23 @@ public enum McpToolApprovalMetaKey {
     public static let toolParamsDisplay = "tool_params_display"
 }
 
+public enum McpToolApprovalAnswer {
+    public static let questionIDPrefix = "mcp_tool_call_approval"
+    public static let accept = "Allow"
+    public static let acceptForSession = "Allow for this session"
+    public static let acceptAndRemember = "Allow and don't ask me again"
+    public static let declineSynthetic = "__codex_mcp_decline__"
+    public static let cancel = "Cancel"
+}
+
+public enum McpToolApprovalDecision: Equatable, Sendable {
+    case accept
+    case acceptForSession
+    case acceptAndRemember
+    case decline(message: String?)
+    case cancel
+}
+
 public struct McpToolApprovalMetadata: Equatable, Sendable {
     public let connectorID: String?
     public let connectorName: String?
@@ -147,4 +164,109 @@ public func buildMcpToolApprovalElicitationMeta(
     }
 
     return .object(meta)
+}
+
+public func parseMcpToolApprovalElicitationResponse(
+    _ response: AppServerProtocol.McpServerElicitationRequestResponse?,
+    questionID: String
+) -> McpToolApprovalDecision {
+    guard let response else {
+        return .cancel
+    }
+
+    switch response.action {
+    case .accept:
+        if case let .object(meta)? = response.meta,
+           case .string(McpToolApprovalMetaKey.persistSession)? = meta[McpToolApprovalMetaKey.persist]
+        {
+            return .acceptForSession
+        }
+        if case let .object(meta)? = response.meta,
+           case .string(McpToolApprovalMetaKey.persistAlways)? = meta[McpToolApprovalMetaKey.persist]
+        {
+            return .acceptAndRemember
+        }
+
+        let decision = parseMcpToolApprovalResponse(
+            requestUserInputResponseFromMcpElicitationContent(response.content),
+            questionID: questionID
+        )
+        if decision == .cancel {
+            return .accept
+        }
+        return decision
+    case .decline:
+        return .decline(message: nil)
+    case .cancel:
+        return .cancel
+    }
+}
+
+public func parseMcpToolApprovalResponse(
+    _ response: RequestUserInputResponse?,
+    questionID: String
+) -> McpToolApprovalDecision {
+    guard let answers = response?.answers[questionID]?.answers else {
+        return .cancel
+    }
+
+    if answers.contains(McpToolApprovalAnswer.declineSynthetic) {
+        return .decline(message: nil)
+    }
+    if answers.contains(McpToolApprovalAnswer.acceptForSession) {
+        return .acceptForSession
+    }
+    if answers.contains(McpToolApprovalAnswer.acceptAndRemember) {
+        return .acceptAndRemember
+    }
+    if answers.contains(McpToolApprovalAnswer.accept) {
+        return .accept
+    }
+    return .cancel
+}
+
+public func requestUserInputResponseFromMcpElicitationContent(
+    _ content: JSONValue?
+) -> RequestUserInputResponse? {
+    guard let content else {
+        return RequestUserInputResponse(answers: [:])
+    }
+    guard case let .object(contentObject) = content else {
+        return nil
+    }
+
+    var answers: [String: RequestUserInputAnswer] = [:]
+    for (questionID, value) in contentObject {
+        switch value {
+        case let .string(answer):
+            answers[questionID] = RequestUserInputAnswer(answers: [answer])
+        case let .array(values):
+            answers[questionID] = RequestUserInputAnswer(
+                answers: values.compactMap { value in
+                    if case let .string(answer) = value {
+                        return answer
+                    }
+                    return nil
+                }
+            )
+        default:
+            continue
+        }
+    }
+    return RequestUserInputResponse(answers: answers)
+}
+
+public func normalizeMcpToolApprovalDecision(
+    _ decision: McpToolApprovalDecision,
+    for approvalMode: AppToolApproval
+) -> McpToolApprovalDecision {
+    if approvalMode == .prompt {
+        switch decision {
+        case .acceptForSession, .acceptAndRemember:
+            return .accept
+        case .accept, .decline, .cancel:
+            return decision
+        }
+    }
+    return decision
 }
