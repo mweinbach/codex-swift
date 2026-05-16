@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 `AppBranding` in
+  `codex-rs/app-server-protocol/src/protocol/v2/apps.rs`. Swift app-list
+  protocol coverage now pins `isDiscoverableApp` as a required boolean,
+  rejecting omitted, explicit-null, or string payloads while leaving adjacent
+  branding metadata fields nullable like Rust.
 - 2026-05-15: rechecked Rust app-server v2
   `command_execution_request_approval_rejects_relative_additional_permission_paths`
   in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now pins

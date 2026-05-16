@@ -229,6 +229,21 @@ final class AppServerAppsProtocolTests: XCTestCase {
         )
     }
 
+    func testAppBrandingRequiresDiscoverableFlagLikeRustProtocol() {
+        for payload in [
+            #"{"data":[{"id":"weather-app","name":"Weather","branding":{}}],"nextCursor":null}"#,
+            #"{"data":[{"id":"weather-app","name":"Weather","branding":{"isDiscoverableApp":null}}],"nextCursor":null}"#,
+            #"{"data":[{"id":"weather-app","name":"Weather","branding":{"isDiscoverableApp":"true"}}],"nextCursor":null}"#
+        ] {
+            XCTAssertThrowsError(
+                try JSONDecoder().decode(
+                    AppsListResponse.self,
+                    from: Data(payload.utf8)
+                )
+            )
+        }
+    }
+
     func testAppListUpdatedNotificationShapeMatchesRustProtocol() throws {
         try XCTAssertJSONObjectEqual(
             AppListUpdatedNotification(data: [
