@@ -12,6 +12,13 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `249d50aafc` (`Soften SQLite
+  metadata sync failures`). Swift now keeps configured SQLite state-store
+  failures best-effort for transcript-derived thread-name and memory-mode
+  metadata sync, so JSONL/session-index durability still succeeds when the
+  optional state DB is corrupt. Explicit git-only `thread/metadata/update`
+  writes still surface the state-store failure like Rust because they need
+  SQLite to preserve unspecified git fields.
 - 2026-05-16: rechecked Rust commit `9025550709` (`app-server-protocol:
   remove PermissionProfile from API`). Swift app-server v2 now omits the full
   `permissionProfile` object from `thread/start`, `thread/resume`, and

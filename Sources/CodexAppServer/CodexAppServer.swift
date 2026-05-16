@@ -3955,7 +3955,7 @@ public enum CodexAppServer {
         }
 
         _ = try rolloutPathForConversation(threadID, configuration: configuration)
-        try updateStateStoreThreadNameIfConfigured(threadID: threadID, name: name, configuration: configuration)
+        updateStateStoreThreadNameIfConfigured(threadID: threadID, name: name, configuration: configuration)
         try appendThreadName(threadID: threadID, name: name, codexHome: configuration.codexHome)
         return ([:], threadID.description, name)
     }
@@ -4479,7 +4479,7 @@ public enum CodexAppServer {
         let recorder = try RolloutRecorder.resume(path: URL(fileURLWithPath: rolloutPath, isDirectory: false))
         try recorder.recordItems([.sessionMeta(SessionMetaLine(meta: updatedMeta, git: nil))])
         try recorder.shutdown()
-        try updateStateStoreMemoryModeIfConfigured(
+        updateStateStoreMemoryModeIfConfigured(
             rolloutPath: rolloutPath,
             memoryMode: mode,
             configuration: configuration
@@ -4503,17 +4503,19 @@ public enum CodexAppServer {
         rolloutPath: String,
         memoryMode: String,
         configuration: CodexAppServerConfiguration
-    ) throws {
+    ) {
         guard let stateStore = configuration.stateStore else {
             return
         }
         let item = ConversationItem(path: rolloutPath, head: [], createdAt: nil, updatedAt: nil)
-        let metadata = try threadMetadata(
+        guard let metadata = try? threadMetadata(
             for: item,
             defaultProvider: configuration.defaultModelProvider,
             archivedOnly: false
-        )
-        try runAsyncBlocking {
+        ) else {
+            return
+        }
+        try? runAsyncBlocking {
             try await stateStore.upsertThread(metadata)
             _ = try await stateStore.setThreadMemoryMode(threadID: metadata.id, memoryMode: memoryMode)
         }
@@ -22765,25 +22767,24 @@ public enum CodexAppServer {
         threadID: ConversationId,
         name: String,
         configuration: CodexAppServerConfiguration
-    ) throws {
+    ) {
         guard let stateStore = configuration.stateStore else {
             return
         }
-        let rolloutPath = try rolloutPathForConversation(threadID, configuration: configuration)
+        guard let rolloutPath = try? rolloutPathForConversation(threadID, configuration: configuration) else {
+            return
+        }
         let item = ConversationItem(path: rolloutPath, head: [], createdAt: nil, updatedAt: nil)
-        let metadata = try threadMetadata(
+        guard let metadata = try? threadMetadata(
             for: item,
             defaultProvider: configuration.defaultModelProvider,
             archivedOnly: false
-        )
-        try runAsyncBlocking {
+        ) else {
+            return
+        }
+        try? runAsyncBlocking {
             try await stateStore.upsertThread(metadata)
-            let updated = try await stateStore.updateThreadTitle(threadID: metadata.id, title: name)
-            if !updated {
-                throw AppServerError.internalError(
-                    "thread metadata unavailable before name update: \(threadID)"
-                )
-            }
+            _ = try await stateStore.updateThreadTitle(threadID: metadata.id, title: name)
         }
     }
 

@@ -8867,6 +8867,35 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(thread["name"] as? String, "Sharper thread name")
     }
 
+    func testThreadNameSetKeepsSessionIndexWhenStateDbWriteFailsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "Saved user message",
+            provider: "mock_provider"
+        )
+        let stateDatabaseURL = temp.url.appendingPathComponent("state.sqlite3", isDirectory: false)
+        let stateStore = try SQLiteAgentGraphStore(databaseURL: stateDatabaseURL, defaultProvider: "openai")
+        try dropThreadsTable(databaseURL: stateDatabaseURL)
+        let processor = try initializedProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            stateStore: stateStore
+        ))
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/name/set","params":{"threadId":"\#(threadID)","name":"  Durable name  "}}"#.utf8
+        )))
+
+        XCTAssertEqual(messages.count, 2)
+        let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
+        XCTAssertTrue(result.isEmpty)
+        XCTAssertEqual(messages[1]["method"] as? String, "thread/name/updated")
+        let index = try String(contentsOf: temp.url.appendingPathComponent("session_index.jsonl"), encoding: .utf8)
+        XCTAssertTrue(index.contains(#""thread_name":"Durable name""#))
+    }
+
     func testThreadNameUpdatedBroadcastsForLoadedThreadsLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(
@@ -9224,6 +9253,31 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(gitInfo["sha"] as? String, "new-sha")
         XCTAssertNil(gitInfo["branch"] as? String)
         XCTAssertEqual(gitInfo["originUrl"] as? String, "https://example.com/new.git")
+    }
+
+    func testThreadMetadataUpdateKeepsStateDbWriteFailuresHardForGitOnlyLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-15-00",
+            timestamp: "2025-01-05T12:15:00Z",
+            preview: "Saved user message",
+            provider: "openai",
+            gitInfo: GitInfo(commitHash: "old-sha", branch: "main", repositoryURL: "https://example.com/old.git"),
+            cwd: temp.url.path
+        )
+        let stateDatabaseURL = temp.url.appendingPathComponent("state.sqlite3", isDirectory: false)
+        let stateStore = try SQLiteAgentGraphStore(databaseURL: stateDatabaseURL, defaultProvider: "openai")
+        try dropThreadsTable(databaseURL: stateDatabaseURL)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"thread/metadata/update","params":{"threadId":"\#(threadID)","gitInfo":{"branch":"feature/state-hard-failure"}}}"#,
+            configuration: testConfiguration(codexHome: temp.url, stateStore: stateStore)
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32603)
+        XCTAssertTrue((error["message"] as? String)?.contains("no such table: threads") == true)
     }
 
     func testThreadMetadataUpdateCanClearAllGitInfo() throws {
@@ -10288,6 +10342,35 @@ final class CodexAppServerTests: XCTestCase {
 
         let memoryMode = try await stateStore.getThreadMemoryMode(threadID: try ThreadId(string: threadID))
         XCTAssertEqual(memoryMode, "enabled")
+    }
+
+    func testThreadMemoryModeSetKeepsRolloutWhenStateDbWriteFailsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T08-30-00",
+            timestamp: "2025-01-06T08:30:00Z",
+            preview: "Stored thread preview",
+            provider: "mock_provider"
+        )
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        let stateDatabaseURL = temp.url.appendingPathComponent("state.sqlite3", isDirectory: false)
+        let stateStore = try SQLiteAgentGraphStore(databaseURL: stateDatabaseURL, defaultProvider: "openai")
+        try dropThreadsTable(databaseURL: stateDatabaseURL)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"thread/memoryMode/set","params":{"threadId":"\#(threadID)","mode":"disabled"}}"#,
+            configuration: testConfiguration(codexHome: temp.url, stateStore: stateStore),
+            experimentalAPIEnabled: true
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertTrue(result.isEmpty)
+        let rollout = try String(contentsOfFile: rolloutPath, encoding: .utf8)
+        XCTAssertTrue(rollout.contains(#""memory_mode":"disabled""#))
     }
 
     func testThreadMemoryModeSetUpdatesStartedThreadStateLikeRust() async throws {
@@ -32596,6 +32679,16 @@ final class CodexAppServerTests: XCTestCase {
             )
             """
         XCTAssertEqual(sqlite3_exec(openedDatabase, query, nil, nil, nil), SQLITE_OK)
+    }
+
+    private func dropThreadsTable(databaseURL: URL) throws {
+        var database: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(databaseURL.path, &database), SQLITE_OK)
+        let openedDatabase = try XCTUnwrap(database)
+        defer {
+            sqlite3_close(openedDatabase)
+        }
+        XCTAssertEqual(sqlite3_exec(openedDatabase, "DROP TABLE threads", nil, nil, nil), SQLITE_OK)
     }
 
     private func createAppServerMemoryTables(databaseURL: URL) throws {
