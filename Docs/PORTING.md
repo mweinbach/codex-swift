@@ -13,8 +13,8 @@ Source baseline inspected for this scaffold:
 Recent upstream audit checkpoint:
 
 - 2026-05-16: rechecked Rust exec-policy amendment helpers in
-  `codex-rs/execpolicy/src/amend.rs`. Swift now preserves Rust's append-only
-  behavior for repeated prefix and network rule amendments instead of deduping
+  `codex-rs/execpolicy/src/amend.rs`. Swift preserves Rust's idempotent
+  append behavior for repeated prefix and network rule amendments by deduping
   identical generated policy lines, while keeping Rust's directory creation,
   newline insertion, host normalization, and `deny` serialization coverage.
 - 2026-05-16: rechecked Rust `build_ws_client_metadata` in

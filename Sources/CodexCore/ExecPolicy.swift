@@ -9638,6 +9638,10 @@ public final class ExecPolicyManager: @unchecked Sendable {
             existing = ""
         }
 
+        if existing.split(separator: "\n", omittingEmptySubsequences: false).contains(Substring(rule)) {
+            return
+        }
+
         let line = rule + "\n"
         let updated = existing.isEmpty || existing.hasSuffix("\n")
             ? existing + line
