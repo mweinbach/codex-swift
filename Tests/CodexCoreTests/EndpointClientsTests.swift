@@ -950,6 +950,36 @@ final class EndpointClientsTests: XCTestCase {
         XCTAssertEqual(calls, [Attestation.Context(threadID: "thread-456")])
     }
 
+    func testCompactClientUsesHyphenatedSessionHeaderForAttestationLikeRust() async throws {
+        let output: [ResponseItem] = [
+            .message(role: "assistant", content: [.outputText(text: "summary")])
+        ]
+        let transport = CapturingTransport(
+            executeResults: [
+                .success(APIResponse(
+                    statusCode: 200,
+                    body: try JSONEncoder().encode(CompactHistoryResponse(output: output))
+                ))
+            ]
+        )
+        let attestation = CountingAttestationProvider()
+        let client = CompactClient(
+            transport: transport,
+            provider: provider(),
+            auth: StaticAPIAuthProvider(bearerToken: "chatgpt-token", accountID: "acct"),
+            attestationProvider: attestation
+        )
+
+        _ = await client.compactInput(
+            CompactionInput(model: "gpt-test", input: [], instructions: "compact"),
+            extraHeaders: ["session-id": "thread-hyphenated"]
+        )
+
+        XCTAssertEqual(transport.executeRequests.first?.headers[Attestation.headerName], "v1.thread-hyphenated.1")
+        let calls = await attestation.recordedCalls()
+        XCTAssertEqual(calls, [Attestation.Context(threadID: "thread-hyphenated")])
+    }
+
     func testCompactClientSkipsInvalidAttestationHeaderLikeRustHeaderValue() async throws {
         let output: [ResponseItem] = [
             .message(role: "assistant", content: [.outputText(text: "summary")])
