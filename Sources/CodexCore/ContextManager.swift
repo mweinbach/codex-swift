@@ -298,6 +298,7 @@ public struct ContextManager: Equatable, Sendable {
         case .functionCallOutput,
              .customToolCallOutput,
              .toolSearchOutput,
+             .compactionTrigger,
              .ghostSnapshot,
              .knownPersisted,
              .other:
@@ -321,6 +322,7 @@ public struct ContextManager: Equatable, Sendable {
              .webSearchCall,
              .imageGenerationCall,
              .compaction,
+             .compactionTrigger,
              .contextCompaction,
              .ghostSnapshot,
              .knownPersisted,
@@ -356,6 +358,7 @@ public struct ContextManager: Equatable, Sendable {
              .customToolCall,
              .ghostSnapshot,
              .compaction,
+             .compactionTrigger,
              .contextCompaction,
              .knownPersisted,
              .other:
@@ -399,7 +402,8 @@ public struct ContextManager: Equatable, Sendable {
              .contextCompaction,
              .knownPersisted:
             return true
-        case .other:
+        case .compactionTrigger,
+             .other:
             return false
         }
     }

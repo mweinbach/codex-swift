@@ -746,6 +746,16 @@ final class ResponseModelsTests: XCTestCase {
         ])
     }
 
+    func testRoundTripsCompactionTriggerLikeRustRemoteCompactionV2() throws {
+        let json = #"{"type":"compaction_trigger"}"#
+        let item = try JSONDecoder().decode(ResponseItem.self, from: Data(json.utf8))
+        XCTAssertEqual(item, .compactionTrigger)
+
+        try XCTAssertJSONObjectEqual(ResponseItem.compactionTrigger, [
+            "type": "compaction_trigger"
+        ])
+    }
+
     func testRoundTripsFunctionCallNamespaceLikeRust() throws {
         let json = #"""
         {

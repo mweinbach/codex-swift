@@ -102,6 +102,7 @@ public enum StreamEventUtils {
              .customToolCall,
              .ghostSnapshot,
              .compaction,
+             .compactionTrigger,
              .contextCompaction,
              .knownPersisted,
              .other:

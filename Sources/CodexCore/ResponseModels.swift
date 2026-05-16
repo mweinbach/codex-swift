@@ -1043,6 +1043,7 @@ public enum ResponseItem: Equatable, Codable, Sendable {
     case imageGenerationCall(id: String, status: String, revisedPrompt: String? = nil, result: String)
     case ghostSnapshot(ghostCommit: GhostCommit)
     case compaction(encryptedContent: String)
+    case compactionTrigger
     case contextCompaction(encryptedContent: String? = nil)
     case knownPersisted(type: String)
     case other
@@ -1152,6 +1153,8 @@ public enum ResponseItem: Equatable, Codable, Sendable {
             )
         case "compaction", "compaction_summary":
             self = .compaction(encryptedContent: try container.decode(String.self, forKey: .encryptedContent))
+        case "compaction_trigger":
+            self = .compactionTrigger
         case "context_compaction":
             self = .contextCompaction(encryptedContent: try container.decodeIfPresent(String.self, forKey: .encryptedContent))
         case "ghost_snapshot":
@@ -1230,6 +1233,8 @@ public enum ResponseItem: Equatable, Codable, Sendable {
         case let .compaction(encryptedContent):
             try container.encode("compaction", forKey: .type)
             try container.encode(encryptedContent, forKey: .encryptedContent)
+        case .compactionTrigger:
+            try container.encode("compaction_trigger", forKey: .type)
         case let .contextCompaction(encryptedContent):
             try container.encode("context_compaction", forKey: .type)
             try container.encodeIfPresent(encryptedContent, forKey: .encryptedContent)

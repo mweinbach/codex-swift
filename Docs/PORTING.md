@@ -95,6 +95,12 @@ Recent upstream audit checkpoint:
   legacy `[profiles.<name>]` table in the base config with Rust's hard
   `--profile-v2` error message, and still allows unrelated legacy profile
   tables.
+- 2026-05-16: rechecked Rust commit `0322ac3df8` (`Use compaction_trigger item
+  for remote compaction v2`). Swift response models now round-trip the transient
+  `compaction_trigger` item, remote compaction v2 output collection now accepts
+  exactly one backend `compaction` item instead of legacy `context_compaction`,
+  preserves Rust's completed-response-id handling for `response.processed`, and
+  keeps the trigger out of persistence/model-generated accounting.
 - 2026-05-16: ported the reusable portion of Rust commit `bbb5c2811d`
   (`tui: pass active permission profiles through app commands`) from
   `codex-rs/utils/approval-presets/src/lib.rs`. Swift approval presets now pair

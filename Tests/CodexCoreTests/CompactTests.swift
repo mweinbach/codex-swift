@@ -218,7 +218,7 @@ final class CompactTests: XCTestCase {
             .functionCall(name: "shell", arguments: "{}", callID: "call_1"),
             .compaction(encryptedContent: "old"),
         ]
-        let output = ResponseItem.contextCompaction(encryptedContent: "new")
+        let output = ResponseItem.compaction(encryptedContent: "new")
 
         XCTAssertEqual(
             Compact.buildRemoteV2CompactedHistory(promptInput: input, compactionOutput: output),
@@ -231,25 +231,25 @@ final class CompactTests: XCTestCase {
         )
     }
 
-    func testCollectRemoteV2ContextCompactionOutputReturnsResponseIDAndIgnoresOtherItems() {
-        let contextCompaction = ResponseItem.contextCompaction(encryptedContent: "encrypted")
-        let result = Compact.collectRemoteV2ContextCompactionOutput(from: [
+    func testCollectRemoteV2CompactionOutputReturnsResponseIDAndIgnoresOtherItems() {
+        let compaction = ResponseItem.compaction(encryptedContent: "encrypted")
+        let result = Compact.collectRemoteV2CompactionOutput(from: [
             .success(.created),
             .success(.outputItemDone(.message(role: "assistant", content: [.outputText(text: "ignored")], phase: .finalAnswer))),
-            .success(.outputItemDone(contextCompaction)),
+            .success(.outputItemDone(compaction)),
             .success(.completed(responseID: "resp-compact", tokenUsage: nil, endTurn: true)),
-            .success(.outputItemDone(.contextCompaction(encryptedContent: "ignored-after-complete"))),
+            .success(.outputItemDone(.compaction(encryptedContent: "ignored-after-complete"))),
         ])
 
         XCTAssertEqual(
             try XCTUnwrap(result.successValue),
-            RemoteCompactionV2Output(item: contextCompaction, responseID: "resp-compact")
+            RemoteCompactionV2Output(item: compaction, responseID: "resp-compact")
         )
     }
 
     func testRemoteV2ResponseProcessedRequestIsFeatureGatedLikeRust() throws {
         let output = RemoteCompactionV2Output(
-            item: .contextCompaction(encryptedContent: "encrypted"),
+            item: .compaction(encryptedContent: "encrypted"),
             responseID: "resp-compact"
         )
         var features = FeatureStates.withDefaults()
@@ -265,37 +265,37 @@ final class CompactTests: XCTestCase {
     }
 
     func testRemoteV2ResponseProcessedRequestUsesCollectedCompletedResponseIDLikeRust() throws {
-        let contextCompaction = ResponseItem.contextCompaction(encryptedContent: "encrypted")
-        let output = try XCTUnwrap(Compact.collectRemoteV2ContextCompactionOutput(from: [
-            .success(.outputItemDone(contextCompaction)),
+        let compaction = ResponseItem.compaction(encryptedContent: "encrypted")
+        let output = try XCTUnwrap(Compact.collectRemoteV2CompactionOutput(from: [
+            .success(.outputItemDone(compaction)),
             .success(.completed(responseID: "resp-compact", tokenUsage: nil)),
             .failure(.stream("ignored after response.completed")),
         ]).successValue)
         var features = FeatureStates.withDefaults()
         features.set(.responsesWebsocketResponseProcessed, enabled: true)
 
-        XCTAssertEqual(output, RemoteCompactionV2Output(item: contextCompaction, responseID: "resp-compact"))
+        XCTAssertEqual(output, RemoteCompactionV2Output(item: compaction, responseID: "resp-compact"))
         XCTAssertEqual(
             Compact.remoteV2ResponseProcessedRequest(output: output, features: features),
             .responseProcessed(ResponseProcessedWebSocketRequest(responseID: "resp-compact"))
         )
     }
 
-    func testCollectRemoteV2ContextCompactionOutputRejectsMissingEncryptedContent() {
-        let result = Compact.collectRemoteV2ContextCompactionOutput(from: [
+    func testCollectRemoteV2CompactionOutputIgnoresLegacyContextCompaction() {
+        let result = Compact.collectRemoteV2CompactionOutput(from: [
             .success(.outputItemDone(.contextCompaction())),
             .success(.completed(responseID: "resp-compact", tokenUsage: nil)),
         ])
 
         XCTAssertEqual(
             result.failureValue,
-            .stream("remote compaction v2 returned context_compaction without encrypted_content")
+            .stream("remote compaction v2 expected exactly one compaction output item, got 0 from 1 output items")
         )
     }
 
-    func testCollectRemoteV2ContextCompactionOutputRequiresCompletion() {
-        let result = Compact.collectRemoteV2ContextCompactionOutput(from: [
-            .success(.outputItemDone(.contextCompaction(encryptedContent: "encrypted"))),
+    func testCollectRemoteV2CompactionOutputRequiresCompletion() {
+        let result = Compact.collectRemoteV2CompactionOutput(from: [
+            .success(.outputItemDone(.compaction(encryptedContent: "encrypted"))),
         ])
 
         XCTAssertEqual(
@@ -304,24 +304,24 @@ final class CompactTests: XCTestCase {
         )
     }
 
-    func testCollectRemoteV2ContextCompactionOutputRequiresExactlyOneContextCompactionItem() {
-        let none = Compact.collectRemoteV2ContextCompactionOutput(from: [
+    func testCollectRemoteV2CompactionOutputRequiresExactlyOneCompactionItem() {
+        let none = Compact.collectRemoteV2CompactionOutput(from: [
             .success(.outputItemDone(.message(role: "assistant", content: [.outputText(text: "ignored")]))),
             .success(.completed(responseID: "resp-compact", tokenUsage: nil)),
         ])
         XCTAssertEqual(
             none.failureValue,
-            .stream("remote compaction v2 expected exactly one context_compaction output item, got 0 from 1 output items")
+            .stream("remote compaction v2 expected exactly one compaction output item, got 0 from 1 output items")
         )
 
-        let two = Compact.collectRemoteV2ContextCompactionOutput(from: [
-            .success(.outputItemDone(.contextCompaction(encryptedContent: "first"))),
-            .success(.outputItemDone(.contextCompaction(encryptedContent: "second"))),
+        let two = Compact.collectRemoteV2CompactionOutput(from: [
+            .success(.outputItemDone(.compaction(encryptedContent: "first"))),
+            .success(.outputItemDone(.compaction(encryptedContent: "second"))),
             .success(.completed(responseID: "resp-compact", tokenUsage: nil)),
         ])
         XCTAssertEqual(
             two.failureValue,
-            .stream("remote compaction v2 expected exactly one context_compaction output item, got 2 from 2 output items")
+            .stream("remote compaction v2 expected exactly one compaction output item, got 2 from 2 output items")
         )
     }
 

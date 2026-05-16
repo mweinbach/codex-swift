@@ -50,6 +50,7 @@ public enum EventMapping {
             ))
 
         case .compaction,
+             .compactionTrigger,
              .contextCompaction,
              .localShellCall,
              .functionCall,

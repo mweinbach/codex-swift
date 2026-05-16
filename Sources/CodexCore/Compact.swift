@@ -131,12 +131,12 @@ public enum Compact {
         return history
     }
 
-    public static func collectRemoteV2ContextCompactionOutput(
+    public static func collectRemoteV2CompactionOutput(
         from events: [Result<ResponseEvent, APIError>]
     ) -> Result<RemoteCompactionV2Output, APIError> {
         var outputItemCount = 0
-        var contextCompactionCount = 0
-        var contextCompactionOutput: ResponseItem?
+        var compactionCount = 0
+        var compactionOutput: ResponseItem?
         var completedResponseID: String?
 
         for result in events {
@@ -145,17 +145,9 @@ public enum Compact {
                 switch event {
                 case let .outputItemDone(item):
                     outputItemCount += 1
-                    switch item {
-                    case let .contextCompaction(encryptedContent):
-                        guard encryptedContent != nil else {
-                            return .failure(.stream(
-                                "remote compaction v2 returned context_compaction without encrypted_content"
-                            ))
-                        }
-                        contextCompactionCount += 1
-                        contextCompactionOutput = contextCompactionOutput ?? item
-                    default:
-                        continue
+                    if case .compaction = item {
+                        compactionCount += 1
+                        compactionOutput = compactionOutput ?? item
                     }
                 case let .completed(responseID, _, _):
                     completedResponseID = responseID
@@ -176,17 +168,17 @@ public enum Compact {
             return .failure(.stream("remote compaction v2 stream closed before response.completed"))
         }
 
-        guard contextCompactionCount == 1 else {
+        guard compactionCount == 1 else {
             return .failure(.stream(
-                "remote compaction v2 expected exactly one context_compaction output item, got \(contextCompactionCount) from \(outputItemCount) output items"
+                "remote compaction v2 expected exactly one compaction output item, got \(compactionCount) from \(outputItemCount) output items"
             ))
         }
 
-        guard let contextCompactionOutput else {
-            preconditionFailure("context compaction output must exist when count is exactly one")
+        guard let compactionOutput else {
+            preconditionFailure("compaction output must exist when count is exactly one")
         }
 
-        return .success(RemoteCompactionV2Output(item: contextCompactionOutput, responseID: responseID))
+        return .success(RemoteCompactionV2Output(item: compactionOutput, responseID: responseID))
     }
 
     public static func buildRemoteV2CompactedHistory(

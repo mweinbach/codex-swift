@@ -15,6 +15,7 @@ public enum ContextTokenEstimator {
             return estimateReasoningLength(encodedLength: encryptedContent.count)
 
         case .reasoning,
+             .compactionTrigger,
              .contextCompaction,
              .message,
              .localShellCall,
@@ -101,6 +102,7 @@ public enum ContextTokenEstimator {
              .imageGenerationCall,
              .ghostSnapshot,
              .compaction,
+             .compactionTrigger,
              .contextCompaction,
              .knownPersisted,
              .other:

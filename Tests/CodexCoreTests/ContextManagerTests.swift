@@ -92,6 +92,8 @@ final class ContextManagerTests: XCTestCase {
         XCTAssertFalse(ContextManager.isCodexGeneratedItem(userMessage("user input")))
         XCTAssertFalse(ContextManager.isCodexGeneratedItem(functionCall(callID: "call-2")))
         XCTAssertFalse(ContextManager.isCodexGeneratedItem(customToolCall(callID: "tool-2")))
+        XCTAssertFalse(ContextManager.isCodexGeneratedItem(.compactionTrigger))
+        XCTAssertFalse(ContextManager.isModelGeneratedItem(.compactionTrigger))
     }
 
     func testDropLastUserTurnsPreservesPrefixLikeRust() {

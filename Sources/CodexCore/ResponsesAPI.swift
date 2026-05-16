@@ -789,6 +789,7 @@ private extension ResponseItem {
              .toolSearchOutput,
              .ghostSnapshot,
              .compaction,
+             .compactionTrigger,
              .contextCompaction,
              .knownPersisted,
              .other:

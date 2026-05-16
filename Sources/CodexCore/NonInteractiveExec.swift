@@ -2198,6 +2198,7 @@ public enum NonInteractiveExec {
                  .imageGenerationCall,
                  .ghostSnapshot,
                  .compaction,
+                 .compactionTrigger,
                  .contextCompaction,
                  .knownPersisted,
                  .other:

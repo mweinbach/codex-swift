@@ -296,7 +296,8 @@ public enum RolloutPolicy {
              .contextCompaction,
              .knownPersisted:
             return true
-        case .ghostSnapshot,
+        case .compactionTrigger,
+             .ghostSnapshot,
              .other:
             return false
         }
@@ -329,6 +330,7 @@ public enum RolloutPolicy {
         case .reasoning,
              .imageGenerationCall,
              .compaction,
+             .compactionTrigger,
              .contextCompaction,
              .ghostSnapshot,
              .other:

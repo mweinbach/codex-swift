@@ -152,6 +152,7 @@ public struct ChatRequestBuilder: Equatable, Sendable {
                  .imageGenerationCall,
                  .ghostSnapshot,
                  .compaction,
+                 .compactionTrigger,
                  .contextCompaction,
                  .knownPersisted,
                  .other:
@@ -248,6 +249,7 @@ public struct ChatRequestBuilder: Equatable, Sendable {
                  .imageGenerationCall,
                  .ghostSnapshot,
                  .compaction,
+                 .compactionTrigger,
                  .contextCompaction,
                  .knownPersisted,
                  .other:

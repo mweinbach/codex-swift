@@ -16,6 +16,7 @@ final class RolloutPolicyTests: XCTestCase {
         XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(.imageGenerationCall(id: "ig-1", status: "completed", result: "Zm9v")))
         XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(.compaction(encryptedContent: "encrypted")))
         XCTAssertTrue(RolloutPolicy.shouldPersistResponseItem(.contextCompaction(encryptedContent: "encrypted")))
+        XCTAssertFalse(RolloutPolicy.shouldPersistResponseItem(.compactionTrigger))
         XCTAssertFalse(RolloutPolicy.shouldPersistResponseItem(.ghostSnapshot(ghostCommit: GhostCommit(
             id: "ghost-1",
             preexistingUntrackedFiles: [],
@@ -62,6 +63,7 @@ final class RolloutPolicyTests: XCTestCase {
         XCTAssertFalse(RolloutPolicy.shouldPersistResponseItemForMemories(.imageGenerationCall(id: "ig-1", status: "completed", result: "Zm9v")))
         XCTAssertFalse(RolloutPolicy.shouldPersistResponseItemForMemories(.compaction(encryptedContent: "encrypted")))
         XCTAssertFalse(RolloutPolicy.shouldPersistResponseItemForMemories(.contextCompaction(encryptedContent: "encrypted")))
+        XCTAssertFalse(RolloutPolicy.shouldPersistResponseItemForMemories(.compactionTrigger))
         XCTAssertFalse(RolloutPolicy.shouldPersistResponseItemForMemories(.ghostSnapshot(ghostCommit: GhostCommit(
             id: "ghost-1",
             preexistingUntrackedFiles: [],
