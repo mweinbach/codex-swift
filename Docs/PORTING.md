@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `326e31ab65` (`Refine Python SDK
+  user-facing docs`). The Python SDK documentation/docstring wording has no
+  Swift package surface to port, but Swift app-server coverage now includes the
+  same quickstart-style behavioral smoke: default `thread/start`, text
+  `turn/start`, live runtime completion, and a final agent-message response.
 - 2026-05-16: rechecked Rust commit `8df2d96860` (`core: construct test
   permission profiles directly`) and
   `codex-rs/core/src/config/network_proxy_spec_tests.rs`. Swift

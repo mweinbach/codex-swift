@@ -4303,6 +4303,83 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(steerError["message"] as? String, "no active turn to steer")
     }
 
+    func testQuickstartStyleThreadStartAndRunFlowUsesDefaultsLikeRustPythonSDK() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let coreOpCapture = AppServerCoreOpCapture()
+        let liveRuntime = AppServerLiveRuntimeCapture { submission in
+            let eventThreadID = try ConversationId(string: submission.threadID)
+            return [
+                .taskStarted(TaskStartedEvent(
+                    turnID: submission.turnID,
+                    startedAt: 1_778_600_000,
+                    modelContextWindow: nil
+                )),
+                .itemCompleted(ItemCompletedEvent(
+                    threadID: eventThreadID,
+                    turnID: submission.turnID,
+                    item: .agentMessage(AgentMessageItem(
+                        id: "agent-quickstart-1",
+                        content: [.text("Hello from the quickstart flow.")],
+                        phase: .finalAnswer
+                    )),
+                    completedAtMilliseconds: 1_778_600_125
+                )),
+                .taskComplete(TaskCompleteEvent(
+                    turnID: submission.turnID,
+                    lastAgentMessage: "Hello from the quickstart flow.",
+                    completedAt: 1_778_600_200,
+                    durationMilliseconds: 200
+                ))
+            ]
+        }
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url, requiresOpenAIAuth: false),
+            notificationSink: { data in await notificationCapture.append(data) },
+            coreOpSubmitter: coreOpCapture.submit,
+            liveRuntimeSubmitter: liveRuntime.submit,
+            experimentalAPIEnabled: true
+        )
+
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let startedThread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(startedThread["id"] as? String)
+
+        let turnMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Say hello in one sentence."}]}}"#.utf8
+        )))
+        let turnResult = try XCTUnwrap(turnMessages[0]["result"] as? [String: Any])
+        let startedTurn = try XCTUnwrap(turnResult["turn"] as? [String: Any])
+        let turnID = try XCTUnwrap(startedTurn["id"] as? String)
+
+        XCTAssertEqual(coreOpCapture.submissions.map(\.requestID), [.integer(2)])
+        XCTAssertEqual(liveRuntime.submissions.map(\.threadID), [threadID])
+        XCTAssertEqual(liveRuntime.submissions.map(\.turnID), [turnID])
+        guard case let .userInput(items, _, _, _) = try XCTUnwrap(liveRuntime.submissions.first).op else {
+            return XCTFail("expected quickstart flow to submit user input")
+        }
+        XCTAssertEqual(items, [.text("Say hello in one sentence.")])
+
+        _ = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        _ = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        let itemCompleted = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        let itemParams = try XCTUnwrap(itemCompleted[0]["params"] as? [String: Any])
+        let item = try XCTUnwrap(itemParams["item"] as? [String: Any])
+        XCTAssertEqual(item["type"] as? String, "agentMessage")
+        XCTAssertEqual(item["text"] as? String, "Hello from the quickstart flow.")
+        XCTAssertEqual(item["phase"] as? String, "FinalAnswer")
+
+        _ = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        let completed = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        let completedTurn = try XCTUnwrap((completed[0]["params"] as? [String: Any])?["turn"] as? [String: Any])
+        XCTAssertEqual(completedTurn["id"] as? String, turnID)
+        XCTAssertEqual(completedTurn["status"] as? String, "completed")
+        XCTAssertEqual(completedTurn["completedAt"] as? Int, 1_778_600_200)
+    }
+
     func testTurnStartLiveRuntimeAutoDeniesMcpElicitationsForXcode264LikeRust() throws {
         struct Case {
             let clientName: String
