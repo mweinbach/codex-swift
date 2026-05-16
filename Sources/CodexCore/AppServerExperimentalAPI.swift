@@ -74,6 +74,9 @@ public extension ThreadStartParams {
         if let reason = approvalPolicy?.appServerExperimentalReason {
             return reason
         }
+        if runtimeWorkspaceRoots != nil {
+            return "thread/start.runtimeWorkspaceRoots"
+        }
         if permissions != nil {
             return "thread/start.permissions"
         }
@@ -107,6 +110,9 @@ public extension ThreadResumeParams {
         if let reason = approvalPolicy?.appServerExperimentalReason {
             return reason
         }
+        if runtimeWorkspaceRoots != nil {
+            return "thread/resume.runtimeWorkspaceRoots"
+        }
         if permissions != nil {
             return "thread/resume.permissions"
         }
@@ -127,6 +133,9 @@ public extension ThreadForkParams {
         }
         if let reason = approvalPolicy?.appServerExperimentalReason {
             return reason
+        }
+        if runtimeWorkspaceRoots != nil {
+            return "thread/fork.runtimeWorkspaceRoots"
         }
         if permissions != nil {
             return "thread/fork.permissions"
@@ -151,6 +160,9 @@ public extension AppServerTurnStartParams {
         }
         if let reason = approvalPolicy?.appServerExperimentalReason {
             return reason
+        }
+        if runtimeWorkspaceRoots != nil {
+            return "turn/start.runtimeWorkspaceRoots"
         }
         if permissions != nil {
             return "turn/start.permissions"

@@ -143,6 +143,7 @@ final class AppServerThreadProtocolTests: XCTestCase {
                 "modelProvider": "mock_provider",
                 "serviceTier": NSNull(),
                 "cwd": "/repo",
+                "runtimeWorkspaceRoots": NSNull(),
                 "approvalPolicy": "never",
                 "approvalsReviewer": "guardian_subagent",
                 "sandbox": "workspace-write",
@@ -206,6 +207,7 @@ final class AppServerThreadProtocolTests: XCTestCase {
                     ]
                 ],
                 "cwd": NSNull(),
+                "runtimeWorkspaceRoots": NSNull(),
                 "approvalPolicy": NSNull(),
                 "approvalsReviewer": NSNull(),
                 "sandboxPolicy": NSNull(),
@@ -238,6 +240,7 @@ final class AppServerThreadProtocolTests: XCTestCase {
                 "responsesapiClientMetadata": NSNull(),
                 "environments": [],
                 "cwd": NSNull(),
+                "runtimeWorkspaceRoots": NSNull(),
                 "approvalPolicy": NSNull(),
                 "approvalsReviewer": NSNull(),
                 "sandboxPolicy": NSNull(),
@@ -292,6 +295,7 @@ final class AppServerThreadProtocolTests: XCTestCase {
                 "model": NSNull(),
                 "modelProvider": NSNull(),
                 "cwd": NSNull(),
+                "runtimeWorkspaceRoots": NSNull(),
                 "approvalPolicy": NSNull(),
                 "approvalsReviewer": NSNull(),
                 "sandbox": NSNull(),
@@ -419,6 +423,7 @@ final class AppServerThreadProtocolTests: XCTestCase {
                 "modelProvider": NSNull(),
                 "serviceTier": "priority",
                 "cwd": NSNull(),
+                "runtimeWorkspaceRoots": NSNull(),
                 "approvalPolicy": NSNull(),
                 "approvalsReviewer": NSNull(),
                 "sandbox": NSNull(),
@@ -1631,6 +1636,18 @@ final class AppServerThreadProtocolTests: XCTestCase {
             "thread/start.environments"
         )
         XCTAssertEqual(
+            ThreadStartParams(runtimeWorkspaceRoots: ["tmp"]).appServerExperimentalReason,
+            "thread/start.runtimeWorkspaceRoots"
+        )
+        XCTAssertEqual(
+            ThreadResumeParams(threadID: "thr_123", runtimeWorkspaceRoots: ["tmp"]).appServerExperimentalReason,
+            "thread/resume.runtimeWorkspaceRoots"
+        )
+        XCTAssertEqual(
+            ThreadForkParams(threadID: "thr_456", runtimeWorkspaceRoots: ["tmp"]).appServerExperimentalReason,
+            "thread/fork.runtimeWorkspaceRoots"
+        )
+        XCTAssertEqual(
             ThreadStartParams(dynamicTools: []).appServerExperimentalReason,
             "thread/start.dynamicTools"
         )
@@ -1676,6 +1693,7 @@ final class AppServerThreadProtocolTests: XCTestCase {
                 "model": NSNull(),
                 "modelProvider": NSNull(),
                 "cwd": NSNull(),
+                "runtimeWorkspaceRoots": NSNull(),
                 "approvalPolicy": NSNull(),
                 "approvalsReviewer": NSNull(),
                 "sandbox": NSNull(),
@@ -1962,6 +1980,7 @@ final class AppServerThreadProtocolTests: XCTestCase {
                 "modelProvider": "mock_provider",
                 "serviceTier": NSNull(),
                 "cwd": "/repo",
+                "runtimeWorkspaceRoots": [],
                 "instructionSources": [],
                 "approvalPolicy": "never",
                 "approvalsReviewer": "guardian_subagent",
@@ -1983,6 +2002,7 @@ final class AppServerThreadProtocolTests: XCTestCase {
             "modelProvider": "mock_provider",
             "serviceTier": "priority",
             "cwd": "/repo",
+            "runtimeWorkspaceRoots": [],
             "instructionSources": ["/repo/AGENTS.md"],
             "approvalPolicy": "on-request",
             "approvalsReviewer": "user",

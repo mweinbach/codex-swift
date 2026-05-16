@@ -158,6 +158,7 @@ final class AppServerTurnProtocolTests: XCTestCase {
             "responsesapiClientMetadata": NSNull(),
             "environments": NSNull(),
             "cwd": NSNull(),
+            "runtimeWorkspaceRoots": NSNull(),
             "approvalPolicy": NSNull(),
             "approvalsReviewer": NSNull(),
             "sandboxPolicy": NSNull(),
@@ -183,6 +184,7 @@ final class AppServerTurnProtocolTests: XCTestCase {
                 "responsesapiClientMetadata": NSNull(),
                 "environments": NSNull(),
                 "cwd": NSNull(),
+                "runtimeWorkspaceRoots": NSNull(),
                 "approvalPolicy": NSNull(),
                 "approvalsReviewer": NSNull(),
                 "sandboxPolicy": NSNull(),
@@ -278,6 +280,7 @@ final class AppServerTurnProtocolTests: XCTestCase {
             "responsesapiClientMetadata": NSNull(),
             "environments": [],
             "cwd": NSNull(),
+            "runtimeWorkspaceRoots": NSNull(),
             "approvalPolicy": NSNull(),
             "approvalsReviewer": NSNull(),
             "sandboxPolicy": NSNull(),
@@ -374,6 +377,11 @@ final class AppServerTurnProtocolTests: XCTestCase {
             AppServerTurnStartParams(threadID: "thr_123", input: [], environments: [])
                 .appServerExperimentalReason,
             "turn/start.environments"
+        )
+        XCTAssertEqual(
+            AppServerTurnStartParams(threadID: "thr_123", input: [], runtimeWorkspaceRoots: ["tmp"])
+                .appServerExperimentalReason,
+            "turn/start.runtimeWorkspaceRoots"
         )
         XCTAssertEqual(
             AppServerTurnStartParams(

@@ -1783,6 +1783,7 @@ public struct ThreadStartParams: Equatable, Sendable {
     public let modelProvider: String?
     public let serviceTier: AppServerServiceTierOverride?
     public let cwd: String?
+    public let runtimeWorkspaceRoots: [String]?
     public let approvalPolicy: AskForApproval?
     public let approvalsReviewer: ApprovalsReviewer?
     public let sandbox: SandboxMode?
@@ -1806,6 +1807,7 @@ public struct ThreadStartParams: Equatable, Sendable {
         case modelProvider
         case serviceTier
         case cwd
+        case runtimeWorkspaceRoots
         case approvalPolicy
         case approvalsReviewer
         case sandbox
@@ -1830,6 +1832,7 @@ public struct ThreadStartParams: Equatable, Sendable {
         modelProvider: String? = nil,
         serviceTier: AppServerServiceTierOverride? = nil,
         cwd: String? = nil,
+        runtimeWorkspaceRoots: [String]? = nil,
         approvalPolicy: AskForApproval? = nil,
         approvalsReviewer: ApprovalsReviewer? = nil,
         sandbox: SandboxMode? = nil,
@@ -1852,6 +1855,7 @@ public struct ThreadStartParams: Equatable, Sendable {
         self.modelProvider = modelProvider
         self.serviceTier = serviceTier
         self.cwd = cwd
+        self.runtimeWorkspaceRoots = runtimeWorkspaceRoots
         self.approvalPolicy = approvalPolicy
         self.approvalsReviewer = approvalsReviewer
         self.sandbox = sandbox
@@ -1879,6 +1883,7 @@ extension ThreadStartParams: Codable {
         modelProvider = try container.decodeIfPresent(String.self, forKey: .modelProvider)
         serviceTier = try Self.decodeServiceTier(from: container)
         cwd = try container.decodeIfPresent(String.self, forKey: .cwd)
+        runtimeWorkspaceRoots = try container.decodeIfPresent([String].self, forKey: .runtimeWorkspaceRoots)
         approvalPolicy = try container.decodeIfPresent(AskForApproval.self, forKey: .approvalPolicy)
         approvalsReviewer = try container.decodeIfPresent(ApprovalsReviewer.self, forKey: .approvalsReviewer)
         sandbox = try container.decodeIfPresent(SandboxMode.self, forKey: .sandbox)
@@ -1947,6 +1952,7 @@ extension ThreadStartParams: Codable {
             break
         }
         try container.encodeNilOrValue(cwd, forKey: .cwd)
+        try container.encodeNilOrValue(runtimeWorkspaceRoots, forKey: .runtimeWorkspaceRoots)
         try container.encodeNilOrValue(approvalPolicy, forKey: .approvalPolicy)
         try container.encodeNilOrValue(approvalsReviewer, forKey: .approvalsReviewer)
         try container.encodeNilOrValue(sandbox, forKey: .sandbox)
@@ -1998,6 +2004,7 @@ public struct ThreadResumeParams: Equatable, Sendable {
     public let modelProvider: String?
     public let serviceTier: AppServerServiceTierOverride?
     public let cwd: String?
+    public let runtimeWorkspaceRoots: [String]?
     public let approvalPolicy: AskForApproval?
     public let approvalsReviewer: ApprovalsReviewer?
     public let sandbox: SandboxMode?
@@ -2017,6 +2024,7 @@ public struct ThreadResumeParams: Equatable, Sendable {
         case modelProvider
         case serviceTier
         case cwd
+        case runtimeWorkspaceRoots
         case approvalPolicy
         case approvalsReviewer
         case sandbox
@@ -2037,6 +2045,7 @@ public struct ThreadResumeParams: Equatable, Sendable {
         modelProvider: String? = nil,
         serviceTier: AppServerServiceTierOverride? = nil,
         cwd: String? = nil,
+        runtimeWorkspaceRoots: [String]? = nil,
         approvalPolicy: AskForApproval? = nil,
         approvalsReviewer: ApprovalsReviewer? = nil,
         sandbox: SandboxMode? = nil,
@@ -2055,6 +2064,7 @@ public struct ThreadResumeParams: Equatable, Sendable {
         self.modelProvider = modelProvider
         self.serviceTier = serviceTier
         self.cwd = cwd
+        self.runtimeWorkspaceRoots = runtimeWorkspaceRoots
         self.approvalPolicy = approvalPolicy
         self.approvalsReviewer = approvalsReviewer
         self.sandbox = sandbox
@@ -2078,6 +2088,7 @@ extension ThreadResumeParams: Codable {
         modelProvider = try container.decodeIfPresent(String.self, forKey: .modelProvider)
         serviceTier = try Self.decodeServiceTier(from: container)
         cwd = try container.decodeIfPresent(String.self, forKey: .cwd)
+        runtimeWorkspaceRoots = try container.decodeIfPresent([String].self, forKey: .runtimeWorkspaceRoots)
         approvalPolicy = try container.decodeIfPresent(AskForApproval.self, forKey: .approvalPolicy)
         approvalsReviewer = try container.decodeIfPresent(ApprovalsReviewer.self, forKey: .approvalsReviewer)
         sandbox = try container.decodeIfPresent(SandboxMode.self, forKey: .sandbox)
@@ -2133,6 +2144,7 @@ extension ThreadResumeParams: Codable {
             break
         }
         try container.encodeNilOrValue(cwd, forKey: .cwd)
+        try container.encodeNilOrValue(runtimeWorkspaceRoots, forKey: .runtimeWorkspaceRoots)
         try container.encodeNilOrValue(approvalPolicy, forKey: .approvalPolicy)
         try container.encodeNilOrValue(approvalsReviewer, forKey: .approvalsReviewer)
         try container.encodeNilOrValue(sandbox, forKey: .sandbox)
@@ -2148,6 +2160,7 @@ public struct ThreadForkParams: Equatable, Sendable {
     public let modelProvider: String?
     public let serviceTier: AppServerServiceTierOverride?
     public let cwd: String?
+    public let runtimeWorkspaceRoots: [String]?
     public let approvalPolicy: AskForApproval?
     public let approvalsReviewer: ApprovalsReviewer?
     public let sandbox: SandboxMode?
@@ -2167,6 +2180,7 @@ public struct ThreadForkParams: Equatable, Sendable {
         case modelProvider
         case serviceTier
         case cwd
+        case runtimeWorkspaceRoots
         case approvalPolicy
         case approvalsReviewer
         case sandbox
@@ -2187,6 +2201,7 @@ public struct ThreadForkParams: Equatable, Sendable {
         modelProvider: String? = nil,
         serviceTier: AppServerServiceTierOverride? = nil,
         cwd: String? = nil,
+        runtimeWorkspaceRoots: [String]? = nil,
         approvalPolicy: AskForApproval? = nil,
         approvalsReviewer: ApprovalsReviewer? = nil,
         sandbox: SandboxMode? = nil,
@@ -2205,6 +2220,7 @@ public struct ThreadForkParams: Equatable, Sendable {
         self.modelProvider = modelProvider
         self.serviceTier = serviceTier
         self.cwd = cwd
+        self.runtimeWorkspaceRoots = runtimeWorkspaceRoots
         self.approvalPolicy = approvalPolicy
         self.approvalsReviewer = approvalsReviewer
         self.sandbox = sandbox
@@ -2228,6 +2244,7 @@ extension ThreadForkParams: Codable {
         modelProvider = try container.decodeIfPresent(String.self, forKey: .modelProvider)
         serviceTier = try Self.decodeServiceTier(from: container)
         cwd = try container.decodeIfPresent(String.self, forKey: .cwd)
+        runtimeWorkspaceRoots = try container.decodeIfPresent([String].self, forKey: .runtimeWorkspaceRoots)
         approvalPolicy = try container.decodeIfPresent(AskForApproval.self, forKey: .approvalPolicy)
         approvalsReviewer = try container.decodeIfPresent(ApprovalsReviewer.self, forKey: .approvalsReviewer)
         sandbox = try container.decodeIfPresent(SandboxMode.self, forKey: .sandbox)
@@ -2286,6 +2303,7 @@ extension ThreadForkParams: Codable {
             break
         }
         try container.encodeNilOrValue(cwd, forKey: .cwd)
+        try container.encodeNilOrValue(runtimeWorkspaceRoots, forKey: .runtimeWorkspaceRoots)
         try container.encodeNilOrValue(approvalPolicy, forKey: .approvalPolicy)
         try container.encodeNilOrValue(approvalsReviewer, forKey: .approvalsReviewer)
         try container.encodeNilOrValue(sandbox, forKey: .sandbox)
@@ -2300,6 +2318,7 @@ public struct ThreadStartResponse: Equatable, Codable, Sendable {
     public let modelProvider: String
     public let serviceTier: String?
     public let cwd: AbsolutePath
+    public let runtimeWorkspaceRoots: [AbsolutePath]
     public let instructionSources: [AbsolutePath]
     public let approvalPolicy: AskForApproval
     public let approvalsReviewer: ApprovalsReviewer
@@ -2313,6 +2332,7 @@ public struct ThreadStartResponse: Equatable, Codable, Sendable {
         case modelProvider
         case serviceTier
         case cwd
+        case runtimeWorkspaceRoots
         case instructionSources
         case approvalPolicy
         case approvalsReviewer
@@ -2327,6 +2347,7 @@ public struct ThreadStartResponse: Equatable, Codable, Sendable {
         modelProvider: String,
         serviceTier: String?,
         cwd: AbsolutePath,
+        runtimeWorkspaceRoots: [AbsolutePath] = [],
         instructionSources: [AbsolutePath] = [],
         approvalPolicy: AskForApproval,
         approvalsReviewer: ApprovalsReviewer,
@@ -2339,6 +2360,7 @@ public struct ThreadStartResponse: Equatable, Codable, Sendable {
         self.modelProvider = modelProvider
         self.serviceTier = serviceTier
         self.cwd = cwd
+        self.runtimeWorkspaceRoots = runtimeWorkspaceRoots
         self.instructionSources = instructionSources
         self.approvalPolicy = approvalPolicy
         self.approvalsReviewer = approvalsReviewer
@@ -2354,6 +2376,11 @@ public struct ThreadStartResponse: Equatable, Codable, Sendable {
         modelProvider = try container.decode(String.self, forKey: .modelProvider)
         serviceTier = try container.decodeIfPresent(String.self, forKey: .serviceTier)
         cwd = try container.decode(AbsolutePath.self, forKey: .cwd)
+        runtimeWorkspaceRoots = try container.decodeRustDefaulted(
+            [AbsolutePath].self,
+            forKey: .runtimeWorkspaceRoots,
+            defaultValue: []
+        )
         instructionSources = try container.decodeRustDefaulted(
             [AbsolutePath].self,
             forKey: .instructionSources,
@@ -2376,6 +2403,7 @@ public struct ThreadStartResponse: Equatable, Codable, Sendable {
         try container.encode(modelProvider, forKey: .modelProvider)
         try container.encodeNilOrValue(serviceTier, forKey: .serviceTier)
         try container.encode(cwd, forKey: .cwd)
+        try container.encode(runtimeWorkspaceRoots, forKey: .runtimeWorkspaceRoots)
         try container.encode(instructionSources, forKey: .instructionSources)
         try container.encode(approvalPolicy, forKey: .approvalPolicy)
         try container.encode(approvalsReviewer, forKey: .approvalsReviewer)
@@ -2391,6 +2419,7 @@ public struct ThreadResumeResponse: Equatable, Codable, Sendable {
     public let modelProvider: String
     public let serviceTier: String?
     public let cwd: AbsolutePath
+    public let runtimeWorkspaceRoots: [AbsolutePath]
     public let instructionSources: [AbsolutePath]
     public let approvalPolicy: AskForApproval
     public let approvalsReviewer: ApprovalsReviewer
@@ -2404,6 +2433,7 @@ public struct ThreadResumeResponse: Equatable, Codable, Sendable {
         case modelProvider
         case serviceTier
         case cwd
+        case runtimeWorkspaceRoots
         case instructionSources
         case approvalPolicy
         case approvalsReviewer
@@ -2418,6 +2448,7 @@ public struct ThreadResumeResponse: Equatable, Codable, Sendable {
         modelProvider: String,
         serviceTier: String?,
         cwd: AbsolutePath,
+        runtimeWorkspaceRoots: [AbsolutePath] = [],
         instructionSources: [AbsolutePath] = [],
         approvalPolicy: AskForApproval,
         approvalsReviewer: ApprovalsReviewer,
@@ -2430,6 +2461,7 @@ public struct ThreadResumeResponse: Equatable, Codable, Sendable {
         self.modelProvider = modelProvider
         self.serviceTier = serviceTier
         self.cwd = cwd
+        self.runtimeWorkspaceRoots = runtimeWorkspaceRoots
         self.instructionSources = instructionSources
         self.approvalPolicy = approvalPolicy
         self.approvalsReviewer = approvalsReviewer
@@ -2445,6 +2477,11 @@ public struct ThreadResumeResponse: Equatable, Codable, Sendable {
         modelProvider = try container.decode(String.self, forKey: .modelProvider)
         serviceTier = try container.decodeIfPresent(String.self, forKey: .serviceTier)
         cwd = try container.decode(AbsolutePath.self, forKey: .cwd)
+        runtimeWorkspaceRoots = try container.decodeRustDefaulted(
+            [AbsolutePath].self,
+            forKey: .runtimeWorkspaceRoots,
+            defaultValue: []
+        )
         instructionSources = try container.decodeRustDefaulted(
             [AbsolutePath].self,
             forKey: .instructionSources,
@@ -2467,6 +2504,7 @@ public struct ThreadResumeResponse: Equatable, Codable, Sendable {
         try container.encode(modelProvider, forKey: .modelProvider)
         try container.encodeNilOrValue(serviceTier, forKey: .serviceTier)
         try container.encode(cwd, forKey: .cwd)
+        try container.encode(runtimeWorkspaceRoots, forKey: .runtimeWorkspaceRoots)
         try container.encode(instructionSources, forKey: .instructionSources)
         try container.encode(approvalPolicy, forKey: .approvalPolicy)
         try container.encode(approvalsReviewer, forKey: .approvalsReviewer)
@@ -2482,6 +2520,7 @@ public struct ThreadForkResponse: Equatable, Codable, Sendable {
     public let modelProvider: String
     public let serviceTier: String?
     public let cwd: AbsolutePath
+    public let runtimeWorkspaceRoots: [AbsolutePath]
     public let instructionSources: [AbsolutePath]
     public let approvalPolicy: AskForApproval
     public let approvalsReviewer: ApprovalsReviewer
@@ -2495,6 +2534,7 @@ public struct ThreadForkResponse: Equatable, Codable, Sendable {
         case modelProvider
         case serviceTier
         case cwd
+        case runtimeWorkspaceRoots
         case instructionSources
         case approvalPolicy
         case approvalsReviewer
@@ -2509,6 +2549,7 @@ public struct ThreadForkResponse: Equatable, Codable, Sendable {
         modelProvider: String,
         serviceTier: String?,
         cwd: AbsolutePath,
+        runtimeWorkspaceRoots: [AbsolutePath] = [],
         instructionSources: [AbsolutePath] = [],
         approvalPolicy: AskForApproval,
         approvalsReviewer: ApprovalsReviewer,
@@ -2521,6 +2562,7 @@ public struct ThreadForkResponse: Equatable, Codable, Sendable {
         self.modelProvider = modelProvider
         self.serviceTier = serviceTier
         self.cwd = cwd
+        self.runtimeWorkspaceRoots = runtimeWorkspaceRoots
         self.instructionSources = instructionSources
         self.approvalPolicy = approvalPolicy
         self.approvalsReviewer = approvalsReviewer
@@ -2536,6 +2578,11 @@ public struct ThreadForkResponse: Equatable, Codable, Sendable {
         modelProvider = try container.decode(String.self, forKey: .modelProvider)
         serviceTier = try container.decodeIfPresent(String.self, forKey: .serviceTier)
         cwd = try container.decode(AbsolutePath.self, forKey: .cwd)
+        runtimeWorkspaceRoots = try container.decodeRustDefaulted(
+            [AbsolutePath].self,
+            forKey: .runtimeWorkspaceRoots,
+            defaultValue: []
+        )
         instructionSources = try container.decodeRustDefaulted(
             [AbsolutePath].self,
             forKey: .instructionSources,
@@ -2558,6 +2605,7 @@ public struct ThreadForkResponse: Equatable, Codable, Sendable {
         try container.encode(modelProvider, forKey: .modelProvider)
         try container.encodeNilOrValue(serviceTier, forKey: .serviceTier)
         try container.encode(cwd, forKey: .cwd)
+        try container.encode(runtimeWorkspaceRoots, forKey: .runtimeWorkspaceRoots)
         try container.encode(instructionSources, forKey: .instructionSources)
         try container.encode(approvalPolicy, forKey: .approvalPolicy)
         try container.encode(approvalsReviewer, forKey: .approvalsReviewer)

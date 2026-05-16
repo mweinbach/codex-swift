@@ -26,6 +26,7 @@ public struct AppServerTurnStartParams: Equatable, Sendable {
     public let responsesapiClientMetadata: [String: String]?
     public let environments: [AppServerTurnEnvironmentParams]?
     public let cwd: String?
+    public let runtimeWorkspaceRoots: [String]?
     public let approvalPolicy: AskForApproval?
     public let approvalsReviewer: ApprovalsReviewer?
     public let sandboxPolicy: AppServerSandboxPolicy?
@@ -44,6 +45,7 @@ public struct AppServerTurnStartParams: Equatable, Sendable {
         case responsesapiClientMetadata
         case environments
         case cwd
+        case runtimeWorkspaceRoots
         case approvalPolicy
         case approvalsReviewer
         case sandboxPolicy
@@ -63,6 +65,7 @@ public struct AppServerTurnStartParams: Equatable, Sendable {
         responsesapiClientMetadata: [String: String]? = nil,
         environments: [AppServerTurnEnvironmentParams]? = nil,
         cwd: String? = nil,
+        runtimeWorkspaceRoots: [String]? = nil,
         approvalPolicy: AskForApproval? = nil,
         approvalsReviewer: ApprovalsReviewer? = nil,
         sandboxPolicy: AppServerSandboxPolicy? = nil,
@@ -80,6 +83,7 @@ public struct AppServerTurnStartParams: Equatable, Sendable {
         self.responsesapiClientMetadata = responsesapiClientMetadata
         self.environments = environments
         self.cwd = cwd
+        self.runtimeWorkspaceRoots = runtimeWorkspaceRoots
         self.approvalPolicy = approvalPolicy
         self.approvalsReviewer = approvalsReviewer
         self.sandboxPolicy = sandboxPolicy
@@ -105,6 +109,7 @@ extension AppServerTurnStartParams: Codable {
         )
         environments = try container.decodeIfPresent([AppServerTurnEnvironmentParams].self, forKey: .environments)
         cwd = try container.decodeIfPresent(String.self, forKey: .cwd)
+        runtimeWorkspaceRoots = try container.decodeIfPresent([String].self, forKey: .runtimeWorkspaceRoots)
         approvalPolicy = try container.decodeIfPresent(AskForApproval.self, forKey: .approvalPolicy)
         approvalsReviewer = try container.decodeIfPresent(ApprovalsReviewer.self, forKey: .approvalsReviewer)
         sandboxPolicy = try container.decodeIfPresent(AppServerSandboxPolicy.self, forKey: .sandboxPolicy)
@@ -136,6 +141,7 @@ extension AppServerTurnStartParams: Codable {
         try container.encodeNilOrValue(responsesapiClientMetadata, forKey: .responsesapiClientMetadata)
         try container.encodeNilOrValue(environments, forKey: .environments)
         try container.encodeNilOrValue(cwd, forKey: .cwd)
+        try container.encodeNilOrValue(runtimeWorkspaceRoots, forKey: .runtimeWorkspaceRoots)
         try container.encodeNilOrValue(approvalPolicy, forKey: .approvalPolicy)
         try container.encodeNilOrValue(approvalsReviewer, forKey: .approvalsReviewer)
         try container.encodeNilOrValue(sandboxPolicy, forKey: .sandboxPolicy)

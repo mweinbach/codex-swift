@@ -1297,6 +1297,7 @@ public enum CodexAppServer {
             "modelProvider": started.modelProvider,
             "serviceTier": nullable(started.serviceTier),
             "cwd": started.cwd.path,
+            "runtimeWorkspaceRoots": started.runtimeWorkspaceRoots,
             "instructionSources": started.instructionSources,
             "approvalPolicy": try appServerApprovalPolicyObject(started.approvalPolicy),
             "approvalsReviewer": started.approvalsReviewer.appServerRawValue,
@@ -1330,6 +1331,7 @@ public enum CodexAppServer {
     ) throws -> AppServerStartedConversation {
         let cwd = stringParam(params?["cwd"]).map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        let runtimeWorkspaceRoots = try runtimeWorkspaceRootPathsParam(params?["runtimeWorkspaceRoots"], cwd: cwd) ?? []
         let permissionSelection = try permissionProfileSelectionParam(params?["permissions"])
         let runtimeConfig = try loadRuntimeConfigForThreadStartup(
             configuration: configuration,
@@ -1416,6 +1418,7 @@ public enum CodexAppServer {
                 sessionStartSource: sessionStartSource,
                 threadSource: threadSource,
                 instructionSources: instructionSources,
+                runtimeWorkspaceRoots: runtimeWorkspaceRoots,
                 ephemeral: true,
                 runtimeConfig: runtimeConfig
             )
@@ -1457,6 +1460,7 @@ public enum CodexAppServer {
             sessionStartSource: sessionStartSource,
             threadSource: threadSource,
             instructionSources: instructionSources,
+            runtimeWorkspaceRoots: runtimeWorkspaceRoots,
             ephemeral: false,
             runtimeConfig: runtimeConfig
         )
@@ -1740,6 +1744,9 @@ public enum CodexAppServer {
         guard let raw, !(raw is NSNull) else {
             return nil
         }
+        if let id = raw as? String {
+            return PermissionProfileSelection(id: id, modifications: [], additionalWritableRoots: [])
+        }
         guard let object = raw as? [String: Any],
               stringParam(object["type"]) == "profile",
               let id = try strictStringParam(object["id"], fieldName: "permissions.id")
@@ -1778,6 +1785,26 @@ public enum CodexAppServer {
             modifications: modifications,
             additionalWritableRoots: additionalWritableRoots
         )
+    }
+
+    private static func runtimeWorkspaceRootPathsParam(_ raw: Any?, cwd: URL) throws -> [String]? {
+        guard let raw, !(raw is NSNull) else {
+            return nil
+        }
+        guard let roots = raw as? [String] else {
+            throw AppServerError.invalidRequest("invalid runtimeWorkspaceRoots")
+        }
+        var resolvedRoots: [String] = []
+        for root in roots {
+            let url = root.hasPrefix("/")
+                ? URL(fileURLWithPath: root, isDirectory: true)
+                : cwd.appendingPathComponent(root, isDirectory: true)
+            let path = url.standardizedFileURL.path
+            if !resolvedRoots.contains(path) {
+                resolvedRoots.append(path)
+            }
+        }
+        return resolvedRoots
     }
 
     private static func dynamicToolsParam(_ raw: Any?) throws -> [DynamicToolSpec]? {
@@ -2174,6 +2201,10 @@ public enum CodexAppServer {
             fileURLWithPath: stringParam(params?["cwd"]) ?? thread["cwd"] as? String ?? summary.cwd,
             isDirectory: true
         )
+        let runtimeWorkspaceRoots = try runtimeWorkspaceRootPathsParam(
+            params?["runtimeWorkspaceRoots"],
+            cwd: resumeCwd
+        ) ?? []
         let permissionSelection = try permissionProfileSelectionParam(params?["permissions"])
         var runtimeConfig = try loadRuntimeConfigForThreadStartup(
             configuration: configuration,
@@ -2242,6 +2273,7 @@ public enum CodexAppServer {
             "modelProvider": modelProvider,
             "serviceTier": nullable(serviceTier),
             "cwd": resumeCwd.path,
+            "runtimeWorkspaceRoots": runtimeWorkspaceRoots,
             "instructionSources": instructionSourcePaths(
                 codexHome: configuration.codexHome,
                 runtimeConfig: runtimeConfig,
@@ -2310,6 +2342,7 @@ public enum CodexAppServer {
             fileURLWithPath: stringParam(params?["cwd"]) ?? sourceSummary.cwd,
             isDirectory: true
         )
+        let runtimeWorkspaceRoots = try runtimeWorkspaceRootPathsParam(params?["runtimeWorkspaceRoots"], cwd: cwd) ?? []
         let permissionSelection = try permissionProfileSelectionParam(params?["permissions"])
         var runtimeConfig = try loadRuntimeConfigForThreadStartup(
             configuration: configuration,
@@ -2417,6 +2450,7 @@ public enum CodexAppServer {
             "modelProvider": modelProvider,
             "serviceTier": nullable(serviceTier),
             "cwd": cwd.path,
+            "runtimeWorkspaceRoots": runtimeWorkspaceRoots,
             "instructionSources": instructionSourcePaths(
                 codexHome: configuration.codexHome,
                 runtimeConfig: runtimeConfig,
@@ -3238,6 +3272,9 @@ public enum CodexAppServer {
         if let dynamicTools = params?["dynamicTools"], !(dynamicTools is NSNull) {
             throw AppServerError.invalidRequest("thread/start.dynamicTools requires experimentalApi capability")
         }
+        if let runtimeWorkspaceRoots = params?["runtimeWorkspaceRoots"], !(runtimeWorkspaceRoots is NSNull) {
+            throw AppServerError.invalidRequest("thread/start.runtimeWorkspaceRoots requires experimentalApi capability")
+        }
         if let permissions = params?["permissions"], !(permissions is NSNull) {
             throw AppServerError.invalidRequest("thread/start.permissions requires experimentalApi capability")
         }
@@ -3276,6 +3313,9 @@ public enum CodexAppServer {
         if let path = params?["path"], !(path is NSNull) {
             throw AppServerError.invalidRequest("thread/resume.path requires experimentalApi capability")
         }
+        if let runtimeWorkspaceRoots = params?["runtimeWorkspaceRoots"], !(runtimeWorkspaceRoots is NSNull) {
+            throw AppServerError.invalidRequest("thread/resume.runtimeWorkspaceRoots requires experimentalApi capability")
+        }
         if let permissions = params?["permissions"], !(permissions is NSNull) {
             throw AppServerError.invalidRequest("thread/resume.permissions requires experimentalApi capability")
         }
@@ -3300,6 +3340,9 @@ public enum CodexAppServer {
         try requireGranularApprovalPolicyExperimentalAPI(params: params, experimentalAPIEnabled: experimentalAPIEnabled)
         if let path = params?["path"], !(path is NSNull) {
             throw AppServerError.invalidRequest("thread/fork.path requires experimentalApi capability")
+        }
+        if let runtimeWorkspaceRoots = params?["runtimeWorkspaceRoots"], !(runtimeWorkspaceRoots is NSNull) {
+            throw AppServerError.invalidRequest("thread/fork.runtimeWorkspaceRoots requires experimentalApi capability")
         }
         if let permissions = params?["permissions"], !(permissions is NSNull) {
             throw AppServerError.invalidRequest("thread/fork.permissions requires experimentalApi capability")
@@ -3349,6 +3392,9 @@ public enum CodexAppServer {
         }
         if let environments = params?["environments"], !(environments is NSNull) {
             throw AppServerError.invalidRequest("turn/start.environments requires experimentalApi capability")
+        }
+        if let runtimeWorkspaceRoots = params?["runtimeWorkspaceRoots"], !(runtimeWorkspaceRoots is NSNull) {
+            throw AppServerError.invalidRequest("turn/start.runtimeWorkspaceRoots requires experimentalApi capability")
         }
         if let permissions = params?["permissions"], !(permissions is NSNull) {
             throw AppServerError.invalidRequest("turn/start.permissions requires experimentalApi capability")
@@ -24285,6 +24331,7 @@ private struct AppServerStartedConversation {
     let sessionStartSource: HookSessionStartSource
     let threadSource: ThreadSource?
     let instructionSources: [String]
+    let runtimeWorkspaceRoots: [String]
     let ephemeral: Bool
     let runtimeConfig: CodexRuntimeConfig
 }

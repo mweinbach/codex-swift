@@ -12,6 +12,17 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `8a5306ff88` (`app-server: use
+  permission ids and runtime workspace roots`). Swift app-server protocol
+  params now carry `runtimeWorkspaceRoots` on `thread/start`,
+  `thread/resume`, `thread/fork`, and `turn/start` with matching experimental
+  markers, thread lifecycle responses encode Rust's default-empty
+  `runtimeWorkspaceRoots`, and live thread lifecycle responses resolve relative
+  roots against the request cwd while preserving order and dropping duplicates.
+  Permission profile selections now also accept Rust's string id shape while
+  continuing to decode the prior object form for legacy callers. Applying
+  `turn/start.runtimeWorkspaceRoots` to the running-thread runtime remains
+  pending with the broader live runtime context port.
 - 2026-05-16: rechecked Rust commit `5d30764fe9` (`Run compact hooks for
   remote compaction v2`). Swift core remote-v2 compaction orchestration now
   runs trusted `PreCompact` hooks before collecting the v2 compaction stream,

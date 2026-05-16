@@ -1334,6 +1334,50 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(forkResult["instructionSources"] as? [String], startResult["instructionSources"] as? [String])
     }
 
+    func testThreadLifecycleResponsesResolveRuntimeWorkspaceRootsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let workspace = try TemporaryDirectory()
+        let external = try TemporaryDirectory()
+        retainedTemporaryDirectories.append(workspace)
+        retainedTemporaryDirectories.append(external)
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
+        )
+
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider","cwd":"\#(workspace.url.path)","runtimeWorkspaceRoots":["logs","\#(external.url.path)","logs"]}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        XCTAssertEqual(
+            startResult["runtimeWorkspaceRoots"] as? [String],
+            [
+                workspace.url.appendingPathComponent("logs", isDirectory: true).standardizedFileURL.path,
+                external.url.standardizedFileURL.path
+            ]
+        )
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let resumeMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"thread/resume","params":{"threadId":"\#(threadID)","cwd":"\#(workspace.url.path)","runtimeWorkspaceRoots":["tmp"]}}"#.utf8
+        )))
+        let resumeResult = try XCTUnwrap(resumeMessages[0]["result"] as? [String: Any])
+        XCTAssertEqual(
+            resumeResult["runtimeWorkspaceRoots"] as? [String],
+            [workspace.url.appendingPathComponent("tmp", isDirectory: true).standardizedFileURL.path]
+        )
+
+        let forkMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":3,"method":"thread/fork","params":{"threadId":"\#(threadID)","cwd":"\#(workspace.url.path)","runtimeWorkspaceRoots":["fork-root"]}}"#.utf8
+        )))
+        let forkResult = try XCTUnwrap(forkMessages[0]["result"] as? [String: Any])
+        XCTAssertEqual(
+            forkResult["runtimeWorkspaceRoots"] as? [String],
+            [workspace.url.appendingPathComponent("fork-root", isDirectory: true).standardizedFileURL.path]
+        )
+    }
+
     func testThreadStartUsesSessionThreadConfigModelProviderLikeRust() throws {
         let temp = try TemporaryDirectory()
         let requestProvider = ModelProviderInfo(
@@ -1445,6 +1489,12 @@ final class CodexAppServerTests: XCTestCase {
         )))
         let forkResult = try XCTUnwrap(forkMessages[0]["result"] as? [String: Any])
         assertPermissionSelection(forkResult, activeID: "limited", extraPath: extra.url.path)
+
+        let stringSelectionMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":4,"method":"thread/start","params":{"modelProvider":"mock_provider","cwd":"\#(cwd.url.path)","permissions":"limited"}}"#.utf8
+        )))
+        let stringSelectionResult = try XCTUnwrap(stringSelectionMessages[0]["result"] as? [String: Any])
+        assertPermissionSelection(stringSelectionResult, activeID: "limited", extraPath: extra.url.path)
     }
 
     func testTurnStartPermissionsSelectionPersistsEffectiveTurnContextLikeRust() throws {
@@ -1986,6 +2036,7 @@ final class CodexAppServerTests: XCTestCase {
             (#"{"approvalPolicy":{"type":"granular","sandboxApproval":true}}"#, "askForApproval.granular"),
             (#"{"environments":[]}"#, "thread/start.environments"),
             (#"{"dynamicTools":[]}"#, "thread/start.dynamicTools"),
+            (#"{"runtimeWorkspaceRoots":["tmp"]}"#, "thread/start.runtimeWorkspaceRoots"),
             (#"{"permissions":{"profile":"readOnly"}}"#, "thread/start.permissions"),
             (#"{"mockExperimentalField":"mock"}"#, "thread/start.mockExperimentalField"),
             (#"{"experimentalRawEvents":true}"#, "thread/start.experimentalRawEvents"),
@@ -3430,6 +3481,7 @@ final class CodexAppServerTests: XCTestCase {
             (#""responsesapiClientMetadata":{"k":"v"}"#, "turn/start.responsesapiClientMetadata"),
             (#""environments":[]"#, "turn/start.environments"),
             (#""approvalPolicy":{"type":"granular","sandboxApproval":true}"#, "askForApproval.granular"),
+            (#""runtimeWorkspaceRoots":["tmp"]"#, "turn/start.runtimeWorkspaceRoots"),
             (#""permissions":{"profile":"readOnly"}"#, "turn/start.permissions"),
             (#""collaborationMode":{"mode":"plan"}"#, "turn/start.collaborationMode")
         ]
@@ -8234,6 +8286,7 @@ final class CodexAppServerTests: XCTestCase {
             (#""approvalPolicy":{"type":"granular","sandboxApproval":true}"#, "askForApproval.granular"),
             (#""history":[]"#, "thread/resume.history"),
             (#""path":"/tmp/rollout.jsonl""#, "thread/resume.path"),
+            (#""runtimeWorkspaceRoots":["tmp"]"#, "thread/resume.runtimeWorkspaceRoots"),
             (#""permissions":{"profile":"readOnly"}"#, "thread/resume.permissions"),
             (#""excludeTurns":true"#, "thread/resume.excludeTurns"),
             (#""persistFullHistory":true"#, "thread/resume.persistFullHistory"),
@@ -8432,6 +8485,7 @@ final class CodexAppServerTests: XCTestCase {
         let cases: [(String, String)] = [
             (#""path":"/tmp/source.jsonl""#, "thread/fork.path"),
             (#""approvalPolicy":{"type":"granular","sandboxApproval":true}"#, "askForApproval.granular"),
+            (#""runtimeWorkspaceRoots":["tmp"]"#, "thread/fork.runtimeWorkspaceRoots"),
             (#""permissions":{"profile":"readOnly"}"#, "thread/fork.permissions"),
             (#""excludeTurns":true"#, "thread/fork.excludeTurns"),
             (#""persistFullHistory":true"#, "thread/fork.persistFullHistory"),
