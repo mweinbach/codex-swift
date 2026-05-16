@@ -2793,7 +2793,7 @@ public enum CodexAppServer {
         hookCompletedEvents: [HookCompletedEvent],
         hasInput: Bool
     ) {
-        let input = v2UserInputs(params?["input"])
+        let input = try v2UserInputs(params?["input"])
         try validateV2UserInputLimit(input)
         _ = try approvalsReviewerParam(params?["approvalsReviewer"])
         _ = try serviceTierParam(params?["serviceTier"], features: .withDefaults())
@@ -3421,7 +3421,7 @@ public enum CodexAppServer {
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
     ) throws -> (threadID: String, op: Op, hasInput: Bool) {
-        let input = v2UserInput(params?["input"])
+        let input = try v2UserInput(params?["input"])
         try validateV2UserInputLimit((text: input.text, images: input.images))
         _ = try approvalsReviewerParam(params?["approvalsReviewer"])
         _ = try serviceTierParam(params?["serviceTier"], features: .withDefaults())
@@ -3546,7 +3546,7 @@ public enum CodexAppServer {
         guard !expectedTurnID.isEmpty else {
             throw AppServerError.invalidRequest("expectedTurnId must not be empty")
         }
-        let input = v2UserInput(params?["input"])
+        let input = try v2UserInput(params?["input"])
         try validateV2UserInputLimit((text: input.text, images: input.images))
         guard let activeTurnID else {
             throw AppServerError.invalidRequest("no active turn to steer")
@@ -15737,23 +15737,17 @@ public enum CodexAppServer {
                 "textElements": textElements.map(textElementObject)
             ]
         case let .image(imageURL, detail):
-            var object: [String: Any] = [
+            return [
                 "type": "image",
-                "url": imageURL
+                "url": imageURL,
+                "detail": detail?.rawValue as Any? ?? NSNull()
             ]
-            if let detail {
-                object["detail"] = detail.rawValue
-            }
-            return object
         case let .localImage(path, detail):
-            var object: [String: Any] = [
+            return [
                 "type": "localImage",
-                "path": path
+                "path": path,
+                "detail": detail?.rawValue as Any? ?? NSNull()
             ]
-            if let detail {
-                object["detail"] = detail.rawValue
-            }
-            return object
         case let .skill(name, path):
             return [
                 "type": "skill",
@@ -20921,12 +20915,12 @@ public enum CodexAppServer {
         stringParam(value).flatMap(SandboxMode.init(rawValue:))
     }
 
-    fileprivate static func v2UserInputs(_ value: Any?) -> (text: String, images: [String]?) {
-        let input = v2UserInput(value)
+    fileprivate static func v2UserInputs(_ value: Any?) throws -> (text: String, images: [String]?) {
+        let input = try v2UserInput(value)
         return (input.text, input.images)
     }
 
-    private static func v2UserInput(_ value: Any?) -> (text: String, images: [String]?, items: [UserInput]) {
+    private static func v2UserInput(_ value: Any?) throws -> (text: String, images: [String]?, items: [UserInput]) {
         guard let items = value as? [[String: Any]] else {
             return ("", nil, [])
         }
@@ -20942,7 +20936,7 @@ public enum CodexAppServer {
                 }
             case "image":
                 if let url = stringParam(item["url"]), !url.isEmpty {
-                    let detail = stringParam(item["detail"]).flatMap(ImageDetail.init(rawValue:))
+                    let detail = try appServerUserInputImageDetailParam(item["detail"])
                     images.append(url)
                     userInputItems.append(.image(imageURL: url, detail: detail))
                 }
@@ -20955,6 +20949,20 @@ public enum CodexAppServer {
             images.isEmpty ? nil : images,
             userInputItems
         )
+    }
+
+    private static func appServerUserInputImageDetailParam(_ value: Any?) throws -> ImageDetail? {
+        guard let rawValue = stringParam(value) else {
+            return nil
+        }
+        guard let detail = ImageDetail(rawValue: rawValue),
+              detail == .high || detail == .original
+        else {
+            throw AppServerError.invalidRequest(
+                "invalid image detail `\(rawValue)`, expected one of `high`, `original`"
+            )
+        }
+        return detail
     }
 
     private static func responsesAPIClientMetadataParam(_ value: Any?) -> [String: String]? {
@@ -25842,7 +25850,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
     }
 
     private func recordTurnStartForAnalytics(threadID: String, turnID: String, params: [String: Any]?) {
-        let input = CodexAppServer.v2UserInputs(params?["input"])
+        let input = (try? CodexAppServer.v2UserInputs(params?["input"])) ?? (text: "", images: nil)
         runtimeTurnInputMessages[threadID, default: [:]][turnID] = input.text.isEmpty ? [] : [input.text]
         guard let metadata = threadAnalyticsMetadata[threadID] else {
             return
@@ -25992,7 +26000,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
     }
 
     private static func turnSteerNumInputImagesForAnalytics(params: [String: Any]?) -> UInt64 {
-        UInt64(CodexAppServer.v2UserInputs(params?["input"]).images?.count ?? 0)
+        UInt64(((try? CodexAppServer.v2UserInputs(params?["input"]))?.images?.count) ?? 0)
     }
 
     private static func turnSteerRejectionReasonForAnalytics(_ error: Error) -> TurnSteerRejectionReason? {

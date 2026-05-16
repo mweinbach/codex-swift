@@ -366,12 +366,12 @@ extension AppServerUserInput: Codable {
         case .image:
             self = .image(
                 url: try container.decode(String.self, forKey: .url),
-                detail: try container.decodeIfPresent(ImageDetail.self, forKey: .detail)
+                detail: try container.decodeUserInputImageDetailIfPresent(forKey: .detail)
             )
         case .localImage:
             self = .localImage(
                 path: try container.decode(String.self, forKey: .path),
-                detail: try container.decodeIfPresent(ImageDetail.self, forKey: .detail)
+                detail: try container.decodeUserInputImageDetailIfPresent(forKey: .detail)
             )
         case .skill:
             self = .skill(
@@ -396,11 +396,11 @@ extension AppServerUserInput: Codable {
         case let .image(url, detail):
             try container.encode(InputType.image, forKey: .type)
             try container.encode(url, forKey: .url)
-            try container.encodeIfPresent(detail, forKey: .detail)
+            try container.encodeNilOrValue(detail, forKey: .detail)
         case let .localImage(path, detail):
             try container.encode(InputType.localImage, forKey: .type)
             try container.encode(path, forKey: .path)
-            try container.encodeIfPresent(detail, forKey: .detail)
+            try container.encodeNilOrValue(detail, forKey: .detail)
         case let .skill(name, path):
             try container.encode(InputType.skill, forKey: .type)
             try container.encode(name, forKey: .name)

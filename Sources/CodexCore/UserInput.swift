@@ -78,12 +78,12 @@ public enum UserInput: Equatable, Codable, Sendable {
         case .image:
             self = .image(
                 imageURL: try container.decode(String.self, forKey: .imageURL),
-                detail: try container.decodeIfPresent(ImageDetail.self, forKey: .detail)
+                detail: try container.decodeUserInputImageDetailIfPresent(forKey: .detail)
             )
         case .localImage:
             self = .localImage(
                 path: try container.decode(String.self, forKey: .path),
-                detail: try container.decodeIfPresent(ImageDetail.self, forKey: .detail)
+                detail: try container.decodeUserInputImageDetailIfPresent(forKey: .detail)
             )
         case .skill:
             self = .skill(
@@ -121,6 +121,22 @@ public enum UserInput: Equatable, Codable, Sendable {
             try container.encode(InputType.mention, forKey: .type)
             try container.encode(name, forKey: .name)
             try container.encode(path, forKey: .path)
+        }
+    }
+}
+
+extension KeyedDecodingContainer {
+    func decodeUserInputImageDetailIfPresent(forKey key: Key) throws -> ImageDetail? {
+        let detail = try decodeIfPresent(ImageDetail.self, forKey: key)
+        switch detail {
+        case .high, .original, nil:
+            return detail
+        case .auto, .low:
+            throw DecodingError.dataCorruptedError(
+                forKey: key,
+                in: self,
+                debugDescription: "invalid image detail `\(detail?.rawValue ?? "")`, expected one of `high`, `original`"
+            )
         }
     }
 }

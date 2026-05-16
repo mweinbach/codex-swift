@@ -28,6 +28,21 @@ final class UserInputTests: XCTestCase {
         ])
     }
 
+    func testImageInputsRejectUnsupportedDetailValuesLikeRust() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                UserInput.self,
+                from: Data(#"{"type":"image","image_url":"https://example.com/image.png","detail":"low"}"#.utf8)
+            )
+        )
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                UserInput.self,
+                from: Data(#"{"type":"local_image","path":"local/image.png","detail":"auto"}"#.utf8)
+            )
+        )
+    }
+
     func testImageInputsPreserveOptionalDetailLikeRust() throws {
         let remoteJSON = #"{"type":"image","image_url":"https://example.com/image.png","detail":"original"}"#
         let decodedRemote = try JSONDecoder().decode(UserInput.self, from: Data(remoteJSON.utf8))

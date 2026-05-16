@@ -26,11 +26,13 @@ final class AppServerTurnProtocolTests: XCTestCase {
 
         try XCTAssertJSONObjectEqual(AppServerUserInput.image(url: "https://example.com/image.png"), [
             "type": "image",
-            "url": "https://example.com/image.png"
+            "url": "https://example.com/image.png",
+            "detail": NSNull()
         ])
         try XCTAssertJSONObjectEqual(AppServerUserInput.localImage(path: "/tmp/image.png"), [
             "type": "localImage",
-            "path": "/tmp/image.png"
+            "path": "/tmp/image.png",
+            "detail": NSNull()
         ])
         try XCTAssertJSONObjectEqual(AppServerUserInput.image(url: "https://example.com/original.png", detail: .original), [
             "type": "image",
@@ -77,12 +79,14 @@ final class AppServerTurnProtocolTests: XCTestCase {
 
         try XCTAssertJSONObjectEqual(AppServerUserInput(core: .image(imageURL: "data:image/png;base64,abc")), [
             "type": "image",
-            "url": "data:image/png;base64,abc"
+            "url": "data:image/png;base64,abc",
+            "detail": NSNull()
         ])
         XCTAssertEqual(AppServerUserInput(core: .image(imageURL: "data:image/png;base64,abc")).textCharacterCount, 0)
         try XCTAssertJSONObjectEqual(AppServerUserInput(core: .localImage(path: "/tmp/a.png")), [
             "type": "localImage",
-            "path": "/tmp/a.png"
+            "path": "/tmp/a.png",
+            "detail": NSNull()
         ])
 
         let remoteOriginal = AppServerUserInput(core: .image(
@@ -122,6 +126,21 @@ final class AppServerTurnProtocolTests: XCTestCase {
             try JSONDecoder().decode(
                 AppServerUserInput.self,
                 from: Data(#"{"type":"text","text":"hello","textElements":null}"#.utf8)
+            )
+        )
+    }
+
+    func testUserInputRejectsUnsupportedImageDetailValuesLikeRust() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AppServerUserInput.self,
+                from: Data(#"{"type":"image","url":"https://example.com/image.png","detail":"low"}"#.utf8)
+            )
+        )
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AppServerUserInput.self,
+                from: Data(#"{"type":"localImage","path":"local/image.png","detail":"auto"}"#.utf8)
             )
         )
     }

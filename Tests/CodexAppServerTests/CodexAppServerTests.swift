@@ -4075,7 +4075,7 @@ final class CodexAppServerTests: XCTestCase {
                 "threadId": threadID,
                 "input": [
                     ["type": "text", "text": "Live"],
-                    ["type": "image", "url": "https://example.test/live.png"]
+                    ["type": "image", "url": "https://example.test/live.png", "detail": "original"]
                 ],
                 "responsesapiClientMetadata": ["fiber_run_id": "fiber-live-123"],
                 "outputSchema": ["type": "object"]
@@ -4099,11 +4099,36 @@ final class CodexAppServerTests: XCTestCase {
         }
         XCTAssertEqual(items, [
             .text("Live"),
-            .image(imageURL: "https://example.test/live.png")
+            .image(imageURL: "https://example.test/live.png", detail: .original)
         ])
         XCTAssertNil(environments)
         XCTAssertEqual(outputSchema, .object(["type": .string("object")]))
         XCTAssertEqual(metadata, ["fiber_run_id": "fiber-live-123"])
+    }
+
+    func testTurnStartRejectsUnsupportedImageDetailLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let capture = AppServerCoreOpCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            coreOpSubmitter: capture.submit,
+            experimentalAPIEnabled: true
+        )
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let response = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"image","url":"https://example.test/live.png","detail":"low"}]}}"#.utf8
+        )))
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "invalid image detail `low`, expected one of `high`, `original`")
+        XCTAssertEqual(capture.submissions.map(\.requestID), [])
     }
 
     func testTurnStartOutputSchemaDoesNotLeakToNextRuntimeTurn() async throws {
@@ -6696,7 +6721,9 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual((textElements[0]["byteRange"] as? [String: Any])?["end"] as? Int, 5)
         XCTAssertEqual(textElements[0]["placeholder"] as? String, "hello")
         XCTAssertEqual(content[1]["url"] as? String, "https://example.test/image.png")
+        XCTAssertEqual(content[1]["detail"] as? NSNull, NSNull())
         XCTAssertEqual(content[2]["path"] as? String, "local/image.png")
+        XCTAssertEqual(content[2]["detail"] as? NSNull, NSNull())
         XCTAssertEqual(content[3]["name"] as? String, "skill-creator")
         XCTAssertEqual(content[4]["type"] as? String, "mention")
         XCTAssertEqual(content[4]["name"] as? String, "Demo App")
