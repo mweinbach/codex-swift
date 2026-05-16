@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust app-server v2 `initialize` fixtures in
+  `codex-rs/app-server/tests/suite/v2/initialize.rs`. Swift now builds the
+  initialized `userAgent` with `clientInfo.name` as the originator, while
+  preserving `CODEX_INTERNAL_ORIGINATOR_OVERRIDE` precedence, matching Rust's
+  `set_default_originator` boundary.
 - 2026-05-16: rechecked upstream Rust HEAD `7c9731c9af` (`Enable
   --deny-warnings for cargo shear`). This is Rust workspace tooling coverage
   for unused Cargo dependencies and has no Swift runtime or SwiftPM manifest

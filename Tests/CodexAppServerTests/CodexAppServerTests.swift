@@ -20943,7 +20943,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNil(response["jsonrpc"])
         let result = try XCTUnwrap(response["result"] as? [String: Any])
         let userAgent = try XCTUnwrap(result["userAgent"] as? String)
-        XCTAssertTrue(userAgent.hasPrefix("codex_swift/0.0.0 "))
+        XCTAssertTrue(userAgent.hasPrefix("test/0.0.0 "))
         XCTAssertTrue(userAgent.hasSuffix(" (test; 0)"))
         XCTAssertEqual(result["codexHome"] as? String, temp.url.standardizedFileURL.path)
         XCTAssertEqual(result["platformFamily"] as? String, "unix")
@@ -21545,6 +21545,35 @@ final class CodexAppServerTests: XCTestCase {
 
         XCTAssertEqual(result["userAgent"] as? String, initializedAgent)
         XCTAssertTrue(initializedAgent.hasSuffix(" (codex-app-server-tests; 0.1.0)"))
+    }
+
+    func testInitializeUserAgentUsesClientInfoNameAsOriginatorLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let initialize = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"codex_vscode","title":"Codex VS Code Extension","version":"0.1.0"}}}"#.utf8
+        )))
+        let result = try XCTUnwrap(initialize["result"] as? [String: Any])
+        let userAgent = try XCTUnwrap(result["userAgent"] as? String)
+        XCTAssertTrue(userAgent.hasPrefix("codex_vscode/"))
+    }
+
+    func testInitializeUserAgentRespectsOriginatorOverrideLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            environment: [
+                ChatGPTLogin.originatorOverrideEnvironmentVariable: "codex_originator_via_env_var"
+            ]
+        ))
+
+        let initialize = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"codex_vscode","title":"Codex VS Code Extension","version":"0.1.0"}}}"#.utf8
+        )))
+        let result = try XCTUnwrap(initialize["result"] as? [String: Any])
+        let userAgent = try XCTUnwrap(result["userAgent"] as? String)
+        XCTAssertTrue(userAgent.hasPrefix("codex_originator_via_env_var/"))
     }
 
     func testGetAuthStatusReportsAPIKeyAndOptionalToken() throws {

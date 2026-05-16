@@ -18710,12 +18710,16 @@ public enum CodexAppServer {
         params: [String: Any]?,
         environment: [String: String]? = nil
     ) -> String {
+        let environment = environment ?? configuration.environment
         let clientInfo = params?["clientInfo"] as? [String: Any]
         let clientName = (clientInfo?["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let clientVersion = (clientInfo?["version"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let originator = environment[ChatGPTLogin.originatorOverrideEnvironmentVariable].flatMap { override in
+            ChatGPTLogin.defaultOriginator(environment: [ChatGPTLogin.originatorOverrideEnvironmentVariable: override])
+        } ?? (clientName.isEmpty ? configuration.originator : clientName)
         let suffix = clientName.isEmpty && clientVersion.isEmpty ? "" : " (\(clientName); \(clientVersion))"
         return sanitizeHeaderValue(
-            "\(configuration.originator)/\(configuration.version) \(Terminal.userAgent(environment: environment ?? configuration.environment))\(suffix)"
+            "\(originator)/\(configuration.version) \(Terminal.userAgent(environment: environment))\(suffix)"
         )
     }
 
