@@ -103,6 +103,20 @@ final class DoctorCommandRuntimeTests: XCTestCase {
                         effectiveWorkspaceRoots: [],
                         helperPaths: DoctorSandboxHelperPaths()
                     ),
+                    DoctorCommandRuntime.statePathsCheck(inputs: DoctorStatePathsCheckInputs(
+                        codexHomePath: "/tmp/codex",
+                        logDirPath: "/tmp/logs",
+                        sqliteHomePath: "/tmp/state",
+                        codexHome: .directory,
+                        logDir: .directory,
+                        sqliteHome: .directory,
+                        stateDB: .missing,
+                        logDB: .missing,
+                        stateDBIntegrity: .skippedMissing,
+                        logDBIntegrity: .skippedMissing,
+                        activeRollouts: DoctorStateRolloutStats(files: 2, totalBytes: 21),
+                        archivedRollouts: DoctorStateRolloutStats(files: 0, totalBytes: 0)
+                    )),
                     DoctorCommandRuntime.backgroundServerCheck(inputs: DoctorBackgroundServerCheckInputs(
                         codexHomePath: "/tmp/codex",
                         settingsFile: .missing,
@@ -213,6 +227,21 @@ final class DoctorCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(sandboxDetails["network sandbox"] as? String, "restricted")
         XCTAssertEqual(sandboxDetails["codex-linux-sandbox helper"] as? String, "none")
         XCTAssertEqual(sandboxDetails["execve wrapper helper"] as? String, "none")
+
+        let state = try XCTUnwrap(checks["state.paths"] as? [String: Any])
+        XCTAssertEqual(state["category"] as? String, "state")
+        XCTAssertEqual(state["status"] as? String, "ok")
+        XCTAssertEqual(state["summary"] as? String, "state paths and databases are inspectable")
+        let stateDetails = try XCTUnwrap(state["details"] as? [String: Any])
+        XCTAssertEqual(stateDetails["CODEX_HOME"] as? String, "/tmp/codex (dir)")
+        XCTAssertEqual(stateDetails["log dir"] as? String, "/tmp/logs (dir)")
+        XCTAssertEqual(stateDetails["sqlite home"] as? String, "/tmp/state (dir)")
+        XCTAssertEqual(stateDetails["state DB"] as? String, "/tmp/state/state_5.sqlite (missing)")
+        XCTAssertEqual(stateDetails["log DB"] as? String, "/tmp/state/logs_2.sqlite (missing)")
+        XCTAssertEqual(stateDetails["state DB integrity"] as? String, "skipped (missing)")
+        XCTAssertEqual(stateDetails["log DB integrity"] as? String, "skipped (missing)")
+        XCTAssertEqual(stateDetails["active rollout files"] as? String, "2 files, 21 total bytes, 10 average bytes")
+        XCTAssertEqual(stateDetails["archived rollout files"] as? String, "0 files, 0 total bytes, 0 average bytes")
 
         let appServer = try XCTUnwrap(checks["app_server.status"] as? [String: Any])
         XCTAssertEqual(appServer["category"] as? String, "app-server")
@@ -634,6 +663,77 @@ final class DoctorCommandRuntimeTests: XCTestCase {
             "failed to resolve CODEX_HOME"
         ])
         XCTAssertNil(check.remediation)
+    }
+
+    func testStatePathsCheckReportsInspectablePathsLikeRustDoctor() {
+        let check = DoctorCommandRuntime.statePathsCheck(inputs: DoctorStatePathsCheckInputs(
+            codexHomePath: "/tmp/codex",
+            logDirPath: "/tmp/codex/log",
+            sqliteHomePath: "/tmp/codex",
+            codexHome: .directory,
+            logDir: .missing,
+            sqliteHome: .directory,
+            stateDB: .file,
+            logDB: .missing,
+            stateDBIntegrity: .rows(["ok"]),
+            logDBIntegrity: .skippedMissing,
+            activeRollouts: DoctorStateRolloutStats(files: 3, totalBytes: 30),
+            archivedRollouts: DoctorStateRolloutStats(files: 1, totalBytes: 4),
+            standaloneReleaseCache: "standalone release cache: 2 entries in /tmp/codex/releases"
+        ))
+
+        XCTAssertEqual(check.id, "state.paths")
+        XCTAssertEqual(check.category, "state")
+        XCTAssertEqual(check.status, .ok)
+        XCTAssertEqual(check.summary, "state paths and databases are inspectable")
+        XCTAssertEqual(check.details, [
+            "CODEX_HOME: /tmp/codex (dir)",
+            "log dir: /tmp/codex/log (missing)",
+            "sqlite home: /tmp/codex (dir)",
+            "state DB: /tmp/codex/state_5.sqlite (file)",
+            "log DB: /tmp/codex/logs_2.sqlite (missing)",
+            "state DB integrity: ok",
+            "log DB integrity: skipped (missing)",
+            "active rollout files: 3 files, 30 total bytes, 10 average bytes",
+            "archived rollout files: 1 files, 4 total bytes, 4 average bytes",
+            "standalone release cache: 2 entries in /tmp/codex/releases"
+        ])
+        XCTAssertNil(check.remediation)
+    }
+
+    func testStatePathsCheckFailsWhenSQLiteIntegrityFailsLikeRustDoctor() {
+        let check = DoctorCommandRuntime.statePathsCheck(inputs: DoctorStatePathsCheckInputs(
+            codexHomePath: "/tmp/codex",
+            logDirPath: "/tmp/codex/log",
+            sqliteHomePath: "/tmp/state",
+            codexHome: .directory,
+            logDir: .directory,
+            sqliteHome: .directory,
+            stateDB: .file,
+            logDB: .file,
+            stateDBIntegrity: .rows(["ok"]),
+            logDBIntegrity: .rows(["row 2 missing", "wrong page count"]),
+            activeRollouts: DoctorStateRolloutStats(files: 0, totalBytes: 0),
+            archivedRollouts: DoctorStateRolloutStats(files: 0, totalBytes: 0, error: "permission denied")
+        ))
+
+        XCTAssertEqual(check.status, .fail)
+        XCTAssertEqual(check.summary, "state database integrity check failed")
+        XCTAssertEqual(check.details, [
+            "CODEX_HOME: /tmp/codex (dir)",
+            "log dir: /tmp/codex/log (dir)",
+            "sqlite home: /tmp/state (dir)",
+            "state DB: /tmp/state/state_5.sqlite (file)",
+            "log DB: /tmp/state/logs_2.sqlite (file)",
+            "state DB integrity: ok",
+            "log DB integrity: row 2 missing; wrong page count",
+            "active rollout files: 0 files, 0 total bytes, 0 average bytes",
+            "archived rollout files: scan failed (permission denied)"
+        ])
+        XCTAssertEqual(
+            check.remediation,
+            "Back up CODEX_HOME, then remove or repair the affected SQLite database."
+        )
     }
 
     func testInstallationCheckIgnoresInheritedManagedEnvironmentForCargoBuiltBinaryLikeRustDoctor() {
