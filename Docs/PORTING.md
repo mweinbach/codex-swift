@@ -145,8 +145,9 @@ Recent upstream audit checkpoint:
   endpoint/auth planning, unsupported-provider OK reporting, and deterministic
   handshake outcome rendering, including Rust's proxy-present detail key,
   endpoint-build failure row, timeout detail, and transport/API/stream error
-  prefixes, plus Rust-shaped DNS IPv4/IPv6 family detail rows for the planned
-  WebSocket endpoint. When config loading fails, Swift now mirrors Rust's
+  prefixes, provider-setup/auth-resolution warning rows, plus Rust-shaped DNS
+  IPv4/IPv6 family detail rows for the planned WebSocket endpoint. When config
+  loading fails, Swift now mirrors Rust's
   fallback `state.paths` row, default ChatGPT reachability plan, and default
   WebSocket planning row before emitting the failed `config.load` row. The
   report emits the redacted `--json` support map keyed by check id, renders

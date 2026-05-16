@@ -1122,6 +1122,77 @@ final class DoctorCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(timedOut.details.last, "handshake timed out")
     }
 
+    func testWebsocketReachabilityCheckReportsRustSetupAndAuthFailures() {
+        let setupFailed = DoctorCommandRuntime.websocketReachabilityCheck(inputs: DoctorWebsocketReachabilityInputs(
+            providerID: "custom",
+            providerName: "Custom",
+            wireAPI: .responses,
+            supportsWebsockets: true,
+            connectTimeoutMilliseconds: 15_000,
+            authModeDescription: "none",
+            outcome: .providerSetupFailed("invalid provider")
+        ))
+
+        XCTAssertEqual(setupFailed.status, .warning)
+        XCTAssertEqual(setupFailed.summary, "Responses WebSocket provider setup failed")
+        XCTAssertEqual(setupFailed.details.last, "provider setup failed: invalid provider")
+        XCTAssertEqual(
+            setupFailed.remediation,
+            "Check proxy, VPN, firewall, DNS, custom CA, and WebSocket policy support."
+        )
+
+        let authFailed = DoctorCommandRuntime.websocketReachabilityCheck(inputs: DoctorWebsocketReachabilityInputs(
+            providerID: "custom",
+            providerName: "Custom",
+            wireAPI: .responses,
+            supportsWebsockets: true,
+            connectTimeoutMilliseconds: 15_000,
+            authModeDescription: "none",
+            endpoint: "wss://api.example/v1/responses",
+            dnsDetails: "DNS: 1 IPv4, 0 IPv6, first IPv4",
+            outcome: .authResolutionFailed("Missing environment variable CUSTOM_API_KEY")
+        ))
+
+        XCTAssertEqual(authFailed.status, .warning)
+        XCTAssertEqual(authFailed.summary, "Responses WebSocket auth could not be resolved")
+        XCTAssertEqual(authFailed.details.suffix(2), [
+            "DNS: 1 IPv4, 0 IPv6, first IPv4",
+            "auth resolution failed: Missing environment variable CUSTOM_API_KEY"
+        ])
+        XCTAssertEqual(
+            authFailed.remediation,
+            "Check proxy, VPN, firewall, DNS, custom CA, and WebSocket policy support."
+        )
+    }
+
+    func testWebsocketRuntimeReportsMissingEnvKeyAsRustAuthResolutionFailure() {
+        let temporaryHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let missingEnvKey = "CODEX_SWIFT_DOCTOR_TEST_\(UUID().uuidString.replacingOccurrences(of: "-", with: "_"))"
+        let settings = CodexRuntimeConfig(
+            modelProvider: "custom",
+            modelProviders: [
+                "custom": ModelProviderInfo(
+                    name: "Custom",
+                    baseURL: "https://api.example/v1",
+                    envKey: missingEnvKey,
+                    wireAPI: .responses,
+                    supportsWebsockets: true
+                )
+            ]
+        )
+
+        let check = DoctorCommandRuntime.websocketReachabilityCheck(
+            codexHome: temporaryHome,
+            settings: settings
+        )
+
+        XCTAssertEqual(check.status, .warning)
+        XCTAssertEqual(check.summary, "Responses WebSocket auth could not be resolved")
+        XCTAssertTrue(check.details.contains("endpoint: wss://api.example/v1/responses"))
+        XCTAssertEqual(check.details.last, "auth resolution failed: Missing environment variable \(missingEnvKey)")
+    }
+
     func testWebsocketReachabilityCheckReportsEndpointBuildFailureLikeRustDoctor() {
         let check = DoctorCommandRuntime.websocketReachabilityCheck(inputs: DoctorWebsocketReachabilityInputs(
             providerID: "custom",

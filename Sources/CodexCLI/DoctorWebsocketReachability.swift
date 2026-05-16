@@ -34,6 +34,8 @@ public enum DoctorWebsocketProbeOutcome: Equatable, Sendable {
     case notAttempted(String)
     case handshakeSucceeded(DoctorWebsocketHandshakeResult)
     case closedImmediately(DoctorWebsocketHandshakeResult, code: UInt16, reason: String)
+    case providerSetupFailed(String)
+    case authResolutionFailed(String)
     case transportError(String)
     case apiError(status: Int, message: String)
     case streamError(String)
@@ -100,6 +102,17 @@ extension DoctorCommandRuntime {
         let apiProvider = provider.toAPIProvider(authMode: authMode, environment: environment)
         let endpoint = websocketURLForResponsesPath(apiProvider: apiProvider)
         let dnsDetails = endpoint.flatMap(websocketDNSDetailsForEndpoint)
+        let outcome: DoctorWebsocketProbeOutcome
+        if endpoint == nil {
+            outcome = .notAttempted("handshake probe is not implemented in Swift doctor yet")
+        } else {
+            do {
+                _ = try APIAuthResolver.authProvider(auth: storedAuth ?? nil, provider: provider, environment: environment)
+                outcome = .notAttempted("handshake probe is not implemented in Swift doctor yet")
+            } catch {
+                outcome = .authResolutionFailed(String(describing: error))
+            }
+        }
         return websocketReachabilityCheck(inputs: DoctorWebsocketReachabilityInputs(
             providerID: settings.selectedModelProviderID,
             providerName: provider.name,
@@ -110,7 +123,7 @@ extension DoctorCommandRuntime {
             authModeDescription: websocketAuthModeDescription(authMode),
             endpoint: endpoint,
             dnsDetails: dnsDetails,
-            outcome: .notAttempted("handshake probe is not implemented in Swift doctor yet")
+            outcome: outcome
         ))
     }
 
@@ -139,6 +152,17 @@ extension DoctorCommandRuntime {
         if let authModeDescription = inputs.authModeDescription {
             details.append("auth mode: \(authModeDescription)")
         }
+        if case let .providerSetupFailed(message) = inputs.outcome {
+            details.append("provider setup failed: \(message)")
+            return DoctorCheck(
+                id: "network.websocket_reachability",
+                category: "websocket",
+                status: .warning,
+                summary: "Responses WebSocket provider setup failed",
+                details: details,
+                remediation: websocketReachabilityRemediation
+            )
+        }
         guard let endpoint = inputs.endpoint else {
             details.append("endpoint build failed: invalid URL")
             return DoctorCheck(
@@ -156,6 +180,26 @@ extension DoctorCommandRuntime {
         }
 
         switch inputs.outcome {
+        case let .providerSetupFailed(message):
+            details.append("provider setup failed: \(message)")
+            return DoctorCheck(
+                id: "network.websocket_reachability",
+                category: "websocket",
+                status: .warning,
+                summary: "Responses WebSocket provider setup failed",
+                details: details,
+                remediation: websocketReachabilityRemediation
+            )
+        case let .authResolutionFailed(message):
+            details.append("auth resolution failed: \(message)")
+            return DoctorCheck(
+                id: "network.websocket_reachability",
+                category: "websocket",
+                status: .warning,
+                summary: "Responses WebSocket auth could not be resolved",
+                details: details,
+                remediation: websocketReachabilityRemediation
+            )
         case let .handshakeSucceeded(result):
             details.append(contentsOf: websocketHandshakeDetails(result))
             return DoctorCheck(
