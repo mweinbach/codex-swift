@@ -5659,7 +5659,7 @@ public enum CodexAppServer {
             guard let plugin else {
                 return nil
             }
-            return remotePluginSummary(plugin, installed: installedByID[id])
+            return remotePluginSummary(plugin, installed: installedByID[id], marketplaceName: name)
         }
         .sorted { left, right in
             let leftDisplay = remotePluginDisplayName(left)
@@ -5690,9 +5690,13 @@ public enum CodexAppServer {
         }
     }
 
-    private static func remotePluginSummary(_ plugin: [String: Any], installed: [String: Any]?) -> [String: Any] {
+    private static func remotePluginSummary(
+        _ plugin: [String: Any],
+        installed: [String: Any]?,
+        marketplaceName: String? = nil
+    ) -> [String: Any] {
         [
-            "id": plugin["id"] as? String ?? "",
+            "id": remotePluginSummaryID(plugin, marketplaceName: marketplaceName),
             "name": plugin["name"] as? String ?? "",
             "shareContext": remotePluginShareContext(plugin),
             "source": ["type": "remote"],
@@ -5704,6 +5708,30 @@ public enum CodexAppServer {
             "interface": remotePluginInterface(plugin),
             "keywords": (plugin["release"] as? [String: Any])?["keywords"] as? [String] ?? []
         ].nullStripped()
+    }
+
+    private static func remotePluginSummaryID(_ plugin: [String: Any], marketplaceName: String?) -> String {
+        guard let pluginName = plugin["name"] as? String, !pluginName.isEmpty else {
+            return plugin["id"] as? String ?? ""
+        }
+        guard remotePluginUsesSharedWithMeNamespace(plugin, marketplaceName: marketplaceName) else {
+            return plugin["id"] as? String ?? ""
+        }
+        return "\(pluginName)@\(remoteWorkspaceSharedWithMeMarketplaceName)"
+    }
+
+    private static func remotePluginUsesSharedWithMeNamespace(
+        _ plugin: [String: Any],
+        marketplaceName: String?
+    ) -> Bool {
+        if let marketplaceName, isSharedWithMeMarketplaceName(marketplaceName) {
+            return true
+        }
+        guard plugin["scope"] as? String == "WORKSPACE" else {
+            return false
+        }
+        let discoverability = plugin["discoverability"] as? String
+        return discoverability == "PRIVATE" || discoverability == "UNLISTED"
     }
 
     private static func remotePluginShareContext(_ plugin: [String: Any]) -> Any {
@@ -6853,7 +6881,7 @@ public enum CodexAppServer {
             failurePrefix: "read remote plugin details"
         )
         let scope = plugin["scope"] as? String ?? "GLOBAL"
-        let marketplaceName = remotePluginMarketplaceName(forScope: scope)
+        let marketplaceName = remotePluginMarketplaceName(for: plugin, requestedMarketplaceName: remoteMarketplaceName)
         let installedPlugins = try remotePluginPagesOrThrow(
             path: "/ps/plugins/installed",
             queryItems: [URLQueryItem(name: "scope", value: scope == "WORKSPACE" ? "WORKSPACE" : "GLOBAL")],
@@ -6869,7 +6897,7 @@ public enum CodexAppServer {
             "plugin": [
                 "marketplaceName": marketplaceName,
                 "marketplacePath": NSNull(),
-                "summary": remotePluginSummary(plugin, installed: installedPlugin),
+                "summary": remotePluginSummary(plugin, installed: installedPlugin, marketplaceName: marketplaceName),
                 "description": nullable(remotePluginDescription(plugin)),
                 "skills": remotePluginSkills(plugin, disabledSkillNames: disabledSkillNames),
                 "hooks": [],
@@ -6900,11 +6928,40 @@ public enum CodexAppServer {
         scope == "WORKSPACE" ? "workspace-directory" : "chatgpt-global"
     }
 
+    private static let remoteWorkspaceSharedWithMeMarketplaceName = "workspace-shared-with-me"
+    private static let remoteWorkspaceSharedWithMePrivateMarketplaceName = "workspace-shared-with-me-private"
+    private static let remoteWorkspaceSharedWithMeUnlistedMarketplaceName = "workspace-shared-with-me-unlisted"
+
+    private static func remotePluginMarketplaceName(
+        for plugin: [String: Any],
+        requestedMarketplaceName: String? = nil
+    ) -> String {
+        let scopeMarketplaceName = remotePluginMarketplaceName(forScope: plugin["scope"] as? String ?? "GLOBAL")
+        guard scopeMarketplaceName == "workspace-directory" else {
+            return scopeMarketplaceName
+        }
+        if let requestedMarketplaceName, isSharedWithMeMarketplaceName(requestedMarketplaceName) {
+            return remoteWorkspaceSharedWithMeMarketplaceName
+        }
+        return remotePluginUsesSharedWithMeNamespace(plugin, marketplaceName: nil)
+            ? remoteWorkspaceSharedWithMeMarketplaceName
+            : scopeMarketplaceName
+    }
+
+    private static func isSharedWithMeMarketplaceName(_ marketplaceName: String) -> Bool {
+        marketplaceName == "shared-with-me"
+            || marketplaceName == remoteWorkspaceSharedWithMeMarketplaceName
+            || marketplaceName == remoteWorkspaceSharedWithMePrivateMarketplaceName
+            || marketplaceName == remoteWorkspaceSharedWithMeUnlistedMarketplaceName
+    }
+
     private static func remotePluginScope(forMarketplaceName marketplaceName: String) -> String? {
         switch marketplaceName {
         case "chatgpt-global":
             return "GLOBAL"
-        case "workspace-directory", "shared-with-me":
+        case "workspace-directory":
+            return "WORKSPACE"
+        case _ where isSharedWithMeMarketplaceName(marketplaceName):
             return "WORKSPACE"
         default:
             return nil
@@ -8457,7 +8514,11 @@ public enum CodexAppServer {
             let pluginID = plugin["id"] as? String ?? ""
             let installed = installedPlugins.first { $0["id"] as? String == pluginID }
             return [
-                "plugin": remotePluginSummary(plugin, installed: installed),
+                "plugin": remotePluginSummary(
+                    plugin,
+                    installed: installed,
+                    marketplaceName: remoteWorkspaceSharedWithMeMarketplaceName
+                ),
                 "shareUrl": plugin["share_url"] as? String ?? "",
                 "localPluginPath": localPluginPaths[pluginID]?.path ?? NSNull()
             ].nullStripped(keepNulls: true)
@@ -8834,10 +8895,12 @@ public enum CodexAppServer {
         var outcome = RemoteInstalledPluginCacheRefreshOutcome()
         var installedPluginNamesByMarketplace: [String: Set<String>] = [
             "chatgpt-global": [],
-            "workspace-directory": []
+            "workspace-directory": [],
+            remoteWorkspaceSharedWithMeMarketplaceName: [],
+            remoteWorkspaceSharedWithMePrivateMarketplaceName: [],
+            remoteWorkspaceSharedWithMeUnlistedMarketplaceName: []
         ]
         for scope in ["GLOBAL", "WORKSPACE"] {
-            let marketplaceName = remotePluginMarketplaceName(forScope: scope)
             let plugins: [[String: Any]]
             do {
                 plugins = try remotePluginPagesOrThrow(
@@ -8864,6 +8927,7 @@ public enum CodexAppServer {
                     }
                     continue
                 }
+                let marketplaceName = remotePluginMarketplaceName(for: plugin)
                 installedPluginNamesByMarketplace[marketplaceName, default: []].insert(pluginName)
                 let localPluginID = "\(pluginName)@\(marketplaceName)"
                 outcome.installedPluginReferences.append(RemoteInstalledPluginReference(
@@ -8911,7 +8975,13 @@ public enum CodexAppServer {
     ) -> Set<String> {
         let cacheRoot = codexHome.appendingPathComponent("plugins/cache", isDirectory: true)
         var removed: Set<String> = []
-        for marketplaceName in ["chatgpt-global", "workspace-directory"] {
+        for marketplaceName in [
+            "chatgpt-global",
+            "workspace-directory",
+            remoteWorkspaceSharedWithMeMarketplaceName,
+            remoteWorkspaceSharedWithMePrivateMarketplaceName,
+            remoteWorkspaceSharedWithMeUnlistedMarketplaceName
+        ] {
             let marketplaceRoot = cacheRoot.appendingPathComponent(marketplaceName, isDirectory: true)
             guard let entries = try? FileManager.default.contentsOfDirectory(
                 at: marketplaceRoot,
@@ -8954,7 +9024,7 @@ public enum CodexAppServer {
         environment: [String: String]
     ) throws -> RemotePluginBundleMetadata {
         let pluginName = detail["name"] as? String ?? ""
-        let marketplaceName = remotePluginMarketplaceName(forScope: detail["scope"] as? String ?? "GLOBAL")
+        let marketplaceName = remotePluginMarketplaceName(for: detail)
         if let message = pluginSegmentValidationMessage(pluginName, kind: "plugin name") {
             throw AppServerError.internalError(
                 "install remote plugin bundle: backend returned an invalid local plugin id for remote plugin `\(remotePluginID)`: \(message)"
@@ -9686,7 +9756,7 @@ public enum CodexAppServer {
             failurePrefix: "uninstall remote plugin"
         )
         let pluginName = detail["name"] as? String ?? pluginID
-        let marketplaceName = remotePluginMarketplaceName(forScope: detail["scope"] as? String ?? "GLOBAL")
+        let marketplaceName = remotePluginMarketplaceName(for: detail)
         let response = try remotePluginObject(
             path: "/plugins/\(pluginID)/uninstall",
             queryItems: [],

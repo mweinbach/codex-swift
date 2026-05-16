@@ -12,6 +12,16 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `e3bf0cfc63` (`[codex] Canonicalize
+  shared workspace plugin IDs`) against `codex-rs/core-plugins/src/remote.rs`,
+  `codex-rs/core-plugins/src/remote/remote_installed_plugin_sync.rs`, and the
+  app-server plugin list/read/share tests. Swift now accepts legacy
+  `workspace-shared-with-me-private` plus canonical
+  `workspace-shared-with-me` remote marketplace names for workspace share
+  reads, returns shared workspace plugin summaries as
+  `<plugin>@workspace-shared-with-me`, keeps raw remote plugin ids in share
+  context, and prunes stale old private/unlisted remote cache roots while
+  preserving canonical shared-with-me cache roots.
 - 2026-05-16: rechecked Rust commit `0a2d751fc2` (`Add callback ids to
   local MCP OAuth redirects`) against
   `codex-rs/rmcp-client/src/perform_oauth_login.rs`. Swift MCP OAuth login now

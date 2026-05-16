@@ -13063,12 +13063,33 @@ final class CodexAppServerTests: XCTestCase {
         let sharedBody = workspaceRemotePluginPageBody(
             id: "plugins~Plugin_22222222222222222222222222222222",
             name: "shared-linear",
-            displayName: "Shared Linear"
+            displayName: "Shared Linear",
+            discoverability: "PRIVATE"
         )
+        let sharedUnlistedBody = workspaceRemotePluginPageBody(
+            id: "plugins~Plugin_44444444444444444444444444444444",
+            name: "shared-unlisted-linear",
+            displayName: "Shared Unlisted Linear",
+            discoverability: "UNLISTED"
+        )
+        var sharedPayload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(sharedBody.utf8)) as? [String: Any]
+        )
+        let sharedUnlistedPayload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(sharedUnlistedBody.utf8)) as? [String: Any]
+        )
+        var sharedPlugins = try XCTUnwrap(sharedPayload["plugins"] as? [[String: Any]])
+        sharedPlugins.append(try XCTUnwrap((sharedUnlistedPayload["plugins"] as? [[String: Any]])?.first))
+        sharedPayload["plugins"] = sharedPlugins
+        let combinedSharedBody = String(
+            data: try JSONSerialization.data(withJSONObject: sharedPayload),
+            encoding: .utf8
+        ) ?? sharedBody
         let installedBody = workspaceRemotePluginPageBody(
             id: "plugins~Plugin_22222222222222222222222222222222",
             name: "shared-linear",
             displayName: "Shared Linear",
+            discoverability: "PRIVATE",
             enabled: true
         )
         let capture = MCPHTTPTransportCapture()
@@ -13078,7 +13099,7 @@ final class CodexAppServerTests: XCTestCase {
                 capture.append(request)
                 switch (request.url?.path, request.url?.query) {
                 case ("/backend-api/ps/plugins/workspace/shared", "limit=200"):
-                    return URLSessionTransportResponse(statusCode: 200, body: Data(sharedBody.utf8))
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(combinedSharedBody.utf8))
                 case ("/backend-api/ps/plugins/installed", "scope=WORKSPACE"):
                     return URLSessionTransportResponse(statusCode: 200, body: Data(installedBody.utf8))
                 default:
@@ -13098,7 +13119,8 @@ final class CodexAppServerTests: XCTestCase {
         let marketplaceInterface = try XCTUnwrap(marketplaces[0]["interface"] as? [String: Any])
         XCTAssertEqual(marketplaceInterface["displayName"] as? String, "Shared with me")
         let plugins = try XCTUnwrap(marketplaces[0]["plugins"] as? [[String: Any]])
-        XCTAssertEqual(plugins.count, 1)
+        XCTAssertEqual(plugins.count, 2)
+        XCTAssertEqual(plugins[0]["id"] as? String, "shared-linear@workspace-shared-with-me")
         XCTAssertEqual(plugins[0]["name"] as? String, "shared-linear")
         XCTAssertEqual(plugins[0]["installed"] as? Bool, true)
         XCTAssertEqual(plugins[0]["enabled"] as? Bool, true)
@@ -13112,6 +13134,12 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(shareTargets[0]["principalType"] as? String, "user")
         XCTAssertEqual(shareTargets[0]["principalId"] as? String, "user-ada__account-123")
         XCTAssertEqual(shareTargets[0]["name"] as? String, "Ada")
+        XCTAssertEqual(plugins[1]["id"] as? String, "shared-unlisted-linear@workspace-shared-with-me")
+        XCTAssertEqual(plugins[1]["name"] as? String, "shared-unlisted-linear")
+        XCTAssertEqual(plugins[1]["installed"] as? Bool, false)
+        XCTAssertEqual(plugins[1]["enabled"] as? Bool, false)
+        let unlistedShareContext = try XCTUnwrap(plugins[1]["shareContext"] as? [String: Any])
+        XCTAssertEqual(unlistedShareContext["remotePluginId"] as? String, "plugins~Plugin_44444444444444444444444444444444")
         XCTAssertEqual(result["featuredPluginIds"] as? [String], [])
 
         let requests = capture.requests
@@ -14107,7 +14135,13 @@ final class CodexAppServerTests: XCTestCase {
         }
         """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
         let pluginID = "plugins~Plugin_11111111111111111111111111111111"
-        let detailBody = remotePluginDetailBody(id: pluginID, name: "shared-linear", displayName: "Shared Linear", scope: "WORKSPACE")
+        let detailBody = remotePluginDetailBody(
+            id: pluginID,
+            name: "shared-linear",
+            displayName: "Shared Linear",
+            scope: "WORKSPACE",
+            discoverability: "PRIVATE"
+        )
         let installedBody = """
         {
           "plugins": [],
@@ -14133,30 +14167,37 @@ final class CodexAppServerTests: XCTestCase {
             }
         )
 
-        let response = try appServerResponse(
-            #"{"id":1,"method":"plugin/read","params":{"remoteMarketplaceName":"shared-with-me","pluginName":"\#(pluginID)"}}"#,
-            configuration: configuration
-        )
-        let result = try XCTUnwrap(response["result"] as? [String: Any])
-        let plugin = try XCTUnwrap(result["plugin"] as? [String: Any])
-        XCTAssertEqual(plugin["marketplaceName"] as? String, "workspace-directory")
-        let summary = try XCTUnwrap(plugin["summary"] as? [String: Any])
+        for remoteMarketplaceName in [
+            "shared-with-me",
+            "workspace-shared-with-me-private",
+            "workspace-shared-with-me"
+        ] {
+            let response = try appServerResponse(
+                #"{"id":1,"method":"plugin/read","params":{"remoteMarketplaceName":"\#(remoteMarketplaceName)","pluginName":"\#(pluginID)"}}"#,
+                configuration: configuration
+            )
+            let result = try XCTUnwrap(response["result"] as? [String: Any])
+            let plugin = try XCTUnwrap(result["plugin"] as? [String: Any])
+            XCTAssertEqual(plugin["marketplaceName"] as? String, "workspace-shared-with-me")
+            let summary = try XCTUnwrap(plugin["summary"] as? [String: Any])
+            XCTAssertEqual(summary["id"] as? String, "shared-linear@workspace-shared-with-me")
+            let shareContext = try XCTUnwrap(summary["shareContext"] as? [String: Any])
+            XCTAssertEqual(shareContext["remotePluginId"] as? String, pluginID)
+            XCTAssertEqual(shareContext["creatorAccountUserId"] as? String, "user-gavin__account-123")
+            XCTAssertEqual(shareContext["creatorName"] as? String, "Gavin")
+            XCTAssertEqual(shareContext["shareUrl"] as? String, "https://chatgpt.example/plugins/share/share-key-1")
+            let shareTargets = try XCTUnwrap(shareContext["shareTargets"] as? [[String: Any]])
+            XCTAssertEqual(shareTargets.count, 1)
+            XCTAssertEqual(shareTargets[0]["principalType"] as? String, "user")
+            XCTAssertEqual(shareTargets[0]["principalId"] as? String, "user-ada__account-123")
+            XCTAssertEqual(shareTargets[0]["name"] as? String, "Ada")
+        }
         let capturedRequests = capture.requests.map { request in
             (path: request.url?.path, query: request.url?.query)
         }
         XCTAssertTrue(capturedRequests.contains { $0.path == "/backend-api/ps/plugins/\(pluginID)" && $0.query == nil })
         XCTAssertTrue(capturedRequests.contains { $0.path == "/backend-api/ps/plugins/installed" && $0.query == "scope=WORKSPACE" })
         XCTAssertFalse(capture.requests.contains { $0.url?.query?.contains("includeDownloadUrls") == true })
-        let shareContext = try XCTUnwrap(summary["shareContext"] as? [String: Any])
-        XCTAssertEqual(shareContext["remotePluginId"] as? String, pluginID)
-        XCTAssertEqual(shareContext["creatorAccountUserId"] as? String, "user-gavin__account-123")
-        XCTAssertEqual(shareContext["creatorName"] as? String, "Gavin")
-        XCTAssertEqual(shareContext["shareUrl"] as? String, "https://chatgpt.example/plugins/share/share-key-1")
-        let shareTargets = try XCTUnwrap(shareContext["shareTargets"] as? [[String: Any]])
-        XCTAssertEqual(shareTargets.count, 1)
-        XCTAssertEqual(shareTargets[0]["principalType"] as? String, "user")
-        XCTAssertEqual(shareTargets[0]["principalId"] as? String, "user-ada__account-123")
-        XCTAssertEqual(shareTargets[0]["name"] as? String, "Ada")
     }
 
     func testPluginSkillReadReadsRemoteSkillContents() throws {
@@ -14865,6 +14906,8 @@ final class CodexAppServerTests: XCTestCase {
         let listResult = try XCTUnwrap(listResponse["result"] as? [String: Any])
         let data = try XCTUnwrap(listResult["data"] as? [[String: Any]])
         XCTAssertEqual(data.first?["localPluginPath"] as? String, pluginPath.path)
+        let listedPlugin = try XCTUnwrap(data.first?["plugin"] as? [String: Any])
+        XCTAssertEqual(listedPlugin["id"] as? String, "demo-plugin@workspace-shared-with-me")
     }
 
     func testPluginShareSaveUnlistedWithoutTargetsAddsWorkspacePrincipal() throws {
@@ -15114,7 +15157,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(data[0]["shareUrl"] as? String, "https://chatgpt.example/plugins/share/share-key-1")
         XCTAssertTrue(data[0]["localPluginPath"] is NSNull)
         let plugin = try XCTUnwrap(data[0]["plugin"] as? [String: Any])
-        XCTAssertEqual(plugin["id"] as? String, pluginID)
+        XCTAssertEqual(plugin["id"] as? String, "demo-plugin@workspace-shared-with-me")
         XCTAssertEqual(plugin["source"] as? [String: String], ["type": "remote"])
         XCTAssertEqual(plugin["installed"] as? Bool, true)
         XCTAssertEqual(plugin["enabled"] as? Bool, true)
@@ -33905,6 +33948,7 @@ private func workspaceRemotePluginPageBody(
     id: String,
     name: String,
     displayName: String,
+    discoverability: String = "LISTED",
     enabled: Bool? = nil
 ) -> String {
     let enabledField = enabled.map { #", "enabled": \#($0), "disabled_skill_names": []"# } ?? ""
@@ -33915,6 +33959,7 @@ private func workspaceRemotePluginPageBody(
           "id": "\(id)",
           "name": "\(name)",
           "scope": "WORKSPACE",
+          "discoverability": "\(discoverability)",
           "creator_account_user_id": "user-gavin__account-123",
           "share_url": "https://chatgpt.example/plugins/share/share-key-1",
           "installation_policy": "AVAILABLE",
@@ -33995,12 +34040,14 @@ private func remotePluginDetailBody(
     scope: String,
     status: String = "ENABLED",
     installationPolicy: String = "AVAILABLE",
+    discoverability: String? = nil,
     releaseVersion: String? = nil,
     bundleDownloadURL: String? = nil,
     appIDs: [String] = []
 ) -> String {
     let workspaceFields = scope == "WORKSPACE" ? """
     ,
+      \(discoverability.map { #""discoverability": "\#($0)","# } ?? "")
       "creator_account_user_id": "user-gavin__account-123",
       "creator_name": "Gavin",
       "share_url": "https://chatgpt.example/plugins/share/share-key-1",
