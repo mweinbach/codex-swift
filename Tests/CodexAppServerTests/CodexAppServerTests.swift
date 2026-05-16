@@ -1141,11 +1141,6 @@ final class CodexAppServerTests: XCTestCase {
             atomically: true,
             encoding: .utf8
         )
-        try "experimental instructions".write(
-            to: temp.url.appendingPathComponent("experimental-instructions.md"),
-            atomically: true,
-            encoding: .utf8
-        )
         try "compact prompt".write(
             to: temp.url.appendingPathComponent("compact.md"),
             atomically: true,
@@ -1155,7 +1150,6 @@ final class CodexAppServerTests: XCTestCase {
         profile = "work"
         model = "gpt-user"
         model_instructions_file = "instructions.md"
-        experimental_instructions_file = "experimental-instructions.md"
         experimental_compact_prompt_file = "compact.md"
         model_catalog_json = "catalog.json"
         sandbox_mode = "workspace-write"
@@ -1195,7 +1189,6 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNil(config["profile"])
         XCTAssertNil(config["profiles"])
         XCTAssertNil(config["model_instructions_file"])
-        XCTAssertNil(config["experimental_instructions_file"])
         XCTAssertNil(config["experimental_compact_prompt_file"])
         XCTAssertNil(config["model_catalog_json"])
         XCTAssertNil(config["sandbox_mode"])

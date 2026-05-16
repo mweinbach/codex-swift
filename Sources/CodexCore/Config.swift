@@ -343,7 +343,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var cliAuthCredentialsStoreMode: AuthCredentialsStoreMode
     public var forcedLoginMethod: ForcedLoginMethod?
     public var forcedChatGPTWorkspaceID: String?
-    public var experimentalInstructionsFile: String?
+    public var modelInstructionsFile: String?
     public var experimentalCompactPromptFile: String?
     public var baseInstructions: String?
     public var developerInstructions: String?
@@ -472,7 +472,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         cliAuthCredentialsStoreMode: AuthCredentialsStoreMode = .file,
         forcedLoginMethod: ForcedLoginMethod? = nil,
         forcedChatGPTWorkspaceID: String? = nil,
-        experimentalInstructionsFile: String? = nil,
+        modelInstructionsFile: String? = nil,
         experimentalCompactPromptFile: String? = nil,
         baseInstructions: String? = nil,
         developerInstructions: String? = nil,
@@ -553,7 +553,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.cliAuthCredentialsStoreMode = cliAuthCredentialsStoreMode
         self.forcedLoginMethod = forcedLoginMethod
         self.forcedChatGPTWorkspaceID = forcedChatGPTWorkspaceID
-        self.experimentalInstructionsFile = experimentalInstructionsFile
+        self.modelInstructionsFile = modelInstructionsFile
         self.experimentalCompactPromptFile = experimentalCompactPromptFile
         self.baseInstructions = baseInstructions
         self.developerInstructions = developerInstructions
@@ -640,7 +640,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         cliAuthCredentialsStoreMode: AuthCredentialsStoreMode = .file,
         forcedLoginMethod: ForcedLoginMethod? = nil,
         forcedChatGPTWorkspaceID: String? = nil,
-        experimentalInstructionsFile: String? = nil,
+        modelInstructionsFile: String? = nil,
         experimentalCompactPromptFile: String? = nil,
         baseInstructions: String? = nil,
         developerInstructions: String? = nil,
@@ -703,7 +703,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
             cliAuthCredentialsStoreMode: cliAuthCredentialsStoreMode,
             forcedLoginMethod: forcedLoginMethod,
             forcedChatGPTWorkspaceID: forcedChatGPTWorkspaceID,
-            experimentalInstructionsFile: experimentalInstructionsFile,
+            modelInstructionsFile: modelInstructionsFile,
             experimentalCompactPromptFile: experimentalCompactPromptFile,
             baseInstructions: baseInstructions,
             developerInstructions: developerInstructions,
@@ -762,7 +762,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         cliAuthCredentialsStoreMode: AuthCredentialsStoreMode = .file,
         forcedLoginMethod: ForcedLoginMethod? = nil,
         forcedChatGPTWorkspaceID: String? = nil,
-        experimentalInstructionsFile: String? = nil,
+        modelInstructionsFile: String? = nil,
         experimentalCompactPromptFile: String? = nil,
         baseInstructions: String? = nil,
         developerInstructions: String? = nil,
@@ -813,7 +813,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
             cliAuthCredentialsStoreMode: cliAuthCredentialsStoreMode,
             forcedLoginMethod: forcedLoginMethod,
             forcedChatGPTWorkspaceID: forcedChatGPTWorkspaceID,
-            experimentalInstructionsFile: experimentalInstructionsFile,
+            modelInstructionsFile: modelInstructionsFile,
             experimentalCompactPromptFile: experimentalCompactPromptFile,
             baseInstructions: baseInstructions,
             developerInstructions: developerInstructions,
@@ -870,7 +870,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         cliAuthCredentialsStoreMode: AuthCredentialsStoreMode,
         forcedLoginMethod: ForcedLoginMethod?,
         forcedChatGPTWorkspaceID: String?,
-        experimentalInstructionsFile: String?,
+        modelInstructionsFile: String?,
         experimentalCompactPromptFile: String?,
         baseInstructions: String?,
         developerInstructions: String?,
@@ -913,7 +913,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
             cliAuthCredentialsStoreMode: cliAuthCredentialsStoreMode,
             forcedLoginMethod: forcedLoginMethod,
             forcedChatGPTWorkspaceID: forcedChatGPTWorkspaceID,
-            experimentalInstructionsFile: experimentalInstructionsFile,
+            modelInstructionsFile: modelInstructionsFile,
             experimentalCompactPromptFile: experimentalCompactPromptFile,
             baseInstructions: baseInstructions,
             developerInstructions: developerInstructions,
@@ -965,7 +965,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         cliAuthCredentialsStoreMode: AuthCredentialsStoreMode,
         forcedLoginMethod: ForcedLoginMethod?,
         forcedChatGPTWorkspaceID: String?,
-        experimentalInstructionsFile: String?,
+        modelInstructionsFile: String?,
         experimentalCompactPromptFile: String?,
         baseInstructions: String?,
         developerInstructions: String?,
@@ -1013,7 +1013,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
             cliAuthCredentialsStoreMode: cliAuthCredentialsStoreMode,
             forcedLoginMethod: forcedLoginMethod,
             forcedChatGPTWorkspaceID: forcedChatGPTWorkspaceID,
-            experimentalInstructionsFile: experimentalInstructionsFile,
+            modelInstructionsFile: modelInstructionsFile,
             experimentalCompactPromptFile: experimentalCompactPromptFile,
             baseInstructions: baseInstructions,
             developerInstructions: developerInstructions,
@@ -2690,7 +2690,6 @@ private struct ParsedCodexConfigToml {
     private static func normalizePathLikeValue(_ value: ConfigValue, key: String, baseURL: URL?) throws -> ConfigValue {
         guard [
             "model_instructions_file",
-            "experimental_instructions_file",
             "experimental_compact_prompt_file",
             "zsh_path",
             "sqlite_home",
@@ -3588,8 +3587,8 @@ private struct ParsedCodexConfigToml {
         }
 
         config.baseInstructions = try config.baseInstructions ?? Self.readNonEmptyFile(
-            config.experimentalInstructionsFile,
-            description: "experimental instructions file"
+            config.modelInstructionsFile,
+            description: "model instructions file"
         )
         config.compactPrompt = try config.compactPrompt ?? Self.readNonEmptyFile(
             config.experimentalCompactPromptFile,
@@ -4373,14 +4372,8 @@ private struct ParsedCodexConfigToml {
                 key: "\(keyPrefix)personality"
             )
         }
-        if let instructionsFile = values["experimental_instructions_file"] {
-            config.experimentalInstructionsFile = try stringValue(
-                instructionsFile,
-                key: "\(keyPrefix)experimental_instructions_file"
-            )
-        }
         if let instructionsFile = values["model_instructions_file"] {
-            config.experimentalInstructionsFile = try stringValue(
+            config.modelInstructionsFile = try stringValue(
                 instructionsFile,
                 key: "\(keyPrefix)model_instructions_file"
             )
@@ -4560,7 +4553,6 @@ private struct ParsedCodexConfigToml {
             || key == "model_instructions_file"
             || key == "developer_instructions"
             || key == "compact_prompt"
-            || key == "experimental_instructions_file"
             || key == "experimental_compact_prompt_file"
             || key == "include_permissions_instructions"
             || key == "include_apps_instructions"
@@ -4613,7 +4605,6 @@ private struct ParsedCodexConfigToml {
             || key == "chatgpt_base_url"
             || key == "zsh_path"
             || key == "model_instructions_file"
-            || key == "experimental_instructions_file"
             || key == "experimental_compact_prompt_file"
             || key == "include_permissions_instructions"
             || key == "include_apps_instructions"

@@ -1607,7 +1607,6 @@ public enum CodexAppServer {
         table.removeValue(forKey: "profile")
         table.removeValue(forKey: "profiles")
         table.removeValue(forKey: "model_instructions_file")
-        table.removeValue(forKey: "experimental_instructions_file")
         table.removeValue(forKey: "experimental_compact_prompt_file")
         table.removeValue(forKey: "model_catalog_json")
         table.removeValue(forKey: "sandbox_mode")

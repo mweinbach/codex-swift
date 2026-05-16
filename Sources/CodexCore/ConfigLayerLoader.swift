@@ -418,7 +418,7 @@ public enum CodexConfigLayerLoader {
     }
 
     private static let configPathKeys: Set<String> = [
-        "experimental_instructions_file",
+        "model_instructions_file",
         "experimental_compact_prompt_file"
     ]
 

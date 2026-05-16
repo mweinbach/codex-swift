@@ -113,25 +113,25 @@ final class ConfigLayerLoaderTests: XCTestCase {
         let dir = try ConfigLayerTemporaryDirectory()
         let file = dir.url.appendingPathComponent("config.toml")
         try """
-        experimental_instructions_file = "./some_file.md"
+        model_instructions_file = "./some_file.md"
         experimental_compact_prompt_file = "../compact.md"
         model = "gpt-1000"
         foo = "xyzzy"
 
         [profiles.work]
-        experimental_instructions_file = "profile.md"
+        model_instructions_file = "profile.md"
         """.write(to: file, atomically: true, encoding: .utf8)
 
         XCTAssertEqual(
             try CodexConfigLayerLoader.readConfig(from: file),
             .table([
-                "experimental_instructions_file": .string(dir.url.appendingPathComponent("some_file.md").path),
+                "model_instructions_file": .string(dir.url.appendingPathComponent("some_file.md").path),
                 "experimental_compact_prompt_file": .string(dir.url.deletingLastPathComponent().appendingPathComponent("compact.md").path),
                 "model": .string("gpt-1000"),
                 "foo": .string("xyzzy"),
                 "profiles": .table([
                     "work": .table([
-                        "experimental_instructions_file": .string(dir.url.appendingPathComponent("profile.md").path)
+                        "model_instructions_file": .string(dir.url.appendingPathComponent("profile.md").path)
                     ])
                 ])
             ])
@@ -335,7 +335,7 @@ final class ConfigLayerLoaderTests: XCTestCase {
             encoding: .utf8
         )
         let managedPreferences = Data("""
-        experimental_instructions_file = "./managed.md"
+        model_instructions_file = "./managed.md"
 
         [nested]
         value = "mdm"
@@ -355,7 +355,7 @@ final class ConfigLayerLoaderTests: XCTestCase {
         XCTAssertEqual(
             stack.effectiveConfig(),
             .table([
-                "experimental_instructions_file": .string(home.appendingPathComponent("managed.md").path),
+                "model_instructions_file": .string(home.appendingPathComponent("managed.md").path),
                 "nested": .table([
                     "value": .string("mdm"),
                     "flag": .bool(false)
@@ -364,7 +364,7 @@ final class ConfigLayerLoaderTests: XCTestCase {
         )
         XCTAssertEqual(stack.layersHighToLow().first?.name, .legacyManagedConfigTomlFromMdm)
         XCTAssertEqual(stack.layersHighToLow().first?.rawToml, """
-        experimental_instructions_file = "./managed.md"
+        model_instructions_file = "./managed.md"
 
         [nested]
         value = "mdm"

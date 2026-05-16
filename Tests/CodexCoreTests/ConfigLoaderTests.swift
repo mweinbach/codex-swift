@@ -49,7 +49,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.cliAuthCredentialsStoreMode, .file)
         XCTAssertNil(config.forcedLoginMethod)
         XCTAssertNil(config.forcedChatGPTWorkspaceID)
-        XCTAssertNil(config.experimentalInstructionsFile)
+        XCTAssertNil(config.modelInstructionsFile)
         XCTAssertNil(config.experimentalCompactPromptFile)
         XCTAssertNil(config.baseInstructions)
         XCTAssertNil(config.developerInstructions)
@@ -287,7 +287,7 @@ final class ConfigLoaderTests: XCTestCase {
         let config = try CodexConfigLoader.load(codexHome: configDir, systemConfigFile: nil)
 
         XCTAssertEqual(config.baseInstructions, "custom instructions")
-        XCTAssertEqual(config.experimentalInstructionsFile, configDir.appendingPathComponent("instructions.md").path)
+        XCTAssertEqual(config.modelInstructionsFile, configDir.appendingPathComponent("instructions.md").path)
         XCTAssertEqual(config.sqliteHome, configDir.appendingPathComponent("state", isDirectory: true).path)
         XCTAssertEqual(config.logDir, configDir.appendingPathComponent("logs", isDirectory: true).path)
         XCTAssertEqual(config.zshPath, configDir.appendingPathComponent("bin/zsh").path)
@@ -527,7 +527,7 @@ final class ConfigLoaderTests: XCTestCase {
         let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
 
         XCTAssertEqual(config.baseInstructions, "profile instructions")
-        XCTAssertEqual(config.experimentalInstructionsFile, dir.url.appendingPathComponent("profile.md").path)
+        XCTAssertEqual(config.modelInstructionsFile, dir.url.appendingPathComponent("profile.md").path)
         XCTAssertEqual(config.zshPath, dir.url.appendingPathComponent("profile-zsh").path)
         XCTAssertEqual(config.modelCatalogJSON, dir.url.appendingPathComponent("profile-models.json").path)
         XCTAssertEqual(config.modelCatalog, profileCatalog)
@@ -1011,7 +1011,7 @@ final class ConfigLoaderTests: XCTestCase {
         forced_chatgpt_workspace_id = "org_workspace"
         developer_instructions = "  Use developer override.  "
         compact_prompt = "  Summarize differently.  "
-        experimental_instructions_file = "instructions.md"
+        model_instructions_file = "instructions.md"
         experimental_compact_prompt_file = "compact.md"
         include_permissions_instructions = false
         include_apps_instructions = false
@@ -1132,7 +1132,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.forcedChatGPTWorkspaceID, "org_workspace")
         XCTAssertEqual(config.developerInstructions, "Use developer override.")
         XCTAssertEqual(config.compactPrompt, "Summarize differently.")
-        XCTAssertEqual(config.experimentalInstructionsFile, instructions.path)
+        XCTAssertEqual(config.modelInstructionsFile, instructions.path)
         XCTAssertEqual(config.experimentalCompactPromptFile, compact.path)
         XCTAssertEqual(config.baseInstructions, "file instructions")
         XCTAssertFalse(config.includePermissionsInstructions)
@@ -2416,7 +2416,7 @@ final class ConfigLoaderTests: XCTestCase {
         model_verbosity = "medium"
         service_tier = "experimental-tier-id"
         notify = ["notify-send", "top"]
-        experimental_instructions_file = "top-instructions.md"
+        model_instructions_file = "top-instructions.md"
         experimental_compact_prompt_file = "top-compact.md"
         include_apply_patch_tool = true
         experimental_use_unified_exec_tool = false
@@ -2439,7 +2439,7 @@ final class ConfigLoaderTests: XCTestCase {
         model_reasoning_summary = "auto"
         model_verbosity = "high"
         service_tier = "flex"
-        experimental_instructions_file = "profile-instructions.md"
+        model_instructions_file = "profile-instructions.md"
         experimental_compact_prompt_file = "profile-compact.md"
         include_apply_patch_tool = false
         experimental_use_unified_exec_tool = true
@@ -2467,7 +2467,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.modelVerbosity, .high)
         XCTAssertEqual(config.serviceTier, "flex")
         XCTAssertEqual(config.notify, ["notify-send", "top"])
-        XCTAssertEqual(config.experimentalInstructionsFile, dir.url.appendingPathComponent("profile-instructions.md").path)
+        XCTAssertEqual(config.modelInstructionsFile, dir.url.appendingPathComponent("profile-instructions.md").path)
         XCTAssertEqual(config.experimentalCompactPromptFile, dir.url.appendingPathComponent("profile-compact.md").path)
         XCTAssertEqual(config.baseInstructions, "profile-instructions.md")
         XCTAssertEqual(config.compactPrompt, "profile-compact.md")
@@ -2536,16 +2536,33 @@ final class ConfigLoaderTests: XCTestCase {
         try "  use file instructions  ".write(to: instructions, atomically: true, encoding: .utf8)
         try "  compact from file  ".write(to: compact, atomically: true, encoding: .utf8)
         try """
-        experimental_instructions_file = "instructions.txt"
+        model_instructions_file = "instructions.txt"
         experimental_compact_prompt_file = "compact.txt"
         """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
 
         let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
 
-        XCTAssertEqual(config.experimentalInstructionsFile, instructions.path)
+        XCTAssertEqual(config.modelInstructionsFile, instructions.path)
         XCTAssertEqual(config.experimentalCompactPromptFile, compact.path)
         XCTAssertEqual(config.baseInstructions, "use file instructions")
         XCTAssertEqual(config.compactPrompt, "compact from file")
+    }
+
+    func testExperimentalInstructionsFileIsIgnoredLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try "ignored instructions".write(
+            to: dir.url.appendingPathComponent("instructions.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        experimental_instructions_file = "instructions.txt"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertNil(config.modelInstructionsFile)
+        XCTAssertNil(config.baseInstructions)
     }
 
     func testProjectPromptFilesResolveRelativeToDotCodexLikeRust() throws {
@@ -2558,7 +2575,7 @@ final class ConfigLoaderTests: XCTestCase {
         try FileManager.default.createDirectory(at: dotCodex, withIntermediateDirectories: true)
         try "gitdir: here\n".write(to: project.appendingPathComponent(".git"), atomically: true, encoding: .utf8)
         try """
-        experimental_instructions_file = "child-instructions.txt"
+        model_instructions_file = "child-instructions.txt"
         experimental_compact_prompt_file = "child-compact.txt"
         """.write(to: dotCodex.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
         try " child instructions ".write(
@@ -2576,7 +2593,7 @@ final class ConfigLoaderTests: XCTestCase {
 
         XCTAssertEqual(config.baseInstructions, "child instructions")
         XCTAssertEqual(config.compactPrompt, "child compact")
-        XCTAssertEqual(config.experimentalInstructionsFile, dotCodex.appendingPathComponent("child-instructions.txt").path)
+        XCTAssertEqual(config.modelInstructionsFile, dotCodex.appendingPathComponent("child-instructions.txt").path)
         XCTAssertEqual(config.experimentalCompactPromptFile, dotCodex.appendingPathComponent("child-compact.txt").path)
     }
 
@@ -3158,11 +3175,11 @@ final class ConfigLoaderTests: XCTestCase {
         try FileManager.default.createDirectory(at: childDotCodex, withIntermediateDirectories: true)
         try "gitdir: here\n".write(to: project.appendingPathComponent(".git"), atomically: true, encoding: .utf8)
         try """
-        experimental_instructions_file = "root.txt"
+        model_instructions_file = "root.txt"
         experimental_compact_prompt_file = "root-compact.txt"
         """.write(to: rootDotCodex.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
         try """
-        experimental_instructions_file = "child.txt"
+        model_instructions_file = "child.txt"
         experimental_compact_prompt_file = "child-compact.txt"
         """.write(to: childDotCodex.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
         try "root instructions".write(to: rootDotCodex.appendingPathComponent("root.txt"), atomically: true, encoding: .utf8)
@@ -3177,7 +3194,7 @@ final class ConfigLoaderTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            config.experimentalInstructionsFile,
+            config.modelInstructionsFile,
             childDotCodex.appendingPathComponent("child.txt").path
         )
         XCTAssertEqual(

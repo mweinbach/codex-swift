@@ -197,7 +197,6 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
     public var jsReplNodePath: String?
     public var jsReplNodeModuleDirs: [String]?
     public var zshPath: String?
-    public var experimentalInstructionsFile: String?
     public var experimentalCompactPromptFile: String?
     public var includePermissionsInstructions: Bool?
     public var includeAppsInstructions: Bool?
@@ -233,7 +232,6 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         case jsReplNodePath = "js_repl_node_path"
         case jsReplNodeModuleDirs = "js_repl_node_module_dirs"
         case zshPath = "zsh_path"
-        case experimentalInstructionsFile = "experimental_instructions_file"
         case experimentalCompactPromptFile = "experimental_compact_prompt_file"
         case includePermissionsInstructions = "include_permissions_instructions"
         case includeAppsInstructions = "include_apps_instructions"
@@ -270,7 +268,6 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         jsReplNodePath: String? = nil,
         jsReplNodeModuleDirs: [String]? = nil,
         zshPath: String? = nil,
-        experimentalInstructionsFile: String? = nil,
         experimentalCompactPromptFile: String? = nil,
         includePermissionsInstructions: Bool? = nil,
         includeAppsInstructions: Bool? = nil,
@@ -305,7 +302,6 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         self.jsReplNodePath = jsReplNodePath
         self.jsReplNodeModuleDirs = jsReplNodeModuleDirs
         self.zshPath = zshPath
-        self.experimentalInstructionsFile = experimentalInstructionsFile
         self.experimentalCompactPromptFile = experimentalCompactPromptFile
         self.includePermissionsInstructions = includePermissionsInstructions
         self.includeAppsInstructions = includeAppsInstructions
@@ -344,7 +340,6 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         self.jsReplNodePath = try container.decodeIfPresent(String.self, forKey: .jsReplNodePath)
         self.jsReplNodeModuleDirs = try container.decodeIfPresent([String].self, forKey: .jsReplNodeModuleDirs)
         self.zshPath = try container.decodeIfPresent(String.self, forKey: .zshPath)
-        self.experimentalInstructionsFile = try container.decodeIfPresent(String.self, forKey: .experimentalInstructionsFile)
         self.experimentalCompactPromptFile = try container.decodeIfPresent(String.self, forKey: .experimentalCompactPromptFile)
         self.includePermissionsInstructions = try container.decodeIfPresent(Bool.self, forKey: .includePermissionsInstructions)
         self.includeAppsInstructions = try container.decodeIfPresent(Bool.self, forKey: .includeAppsInstructions)
@@ -389,7 +384,6 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         try encodeOptional(jsReplNodePath, into: &container, forKey: .jsReplNodePath)
         try encodeOptional(jsReplNodeModuleDirs, into: &container, forKey: .jsReplNodeModuleDirs)
         try encodeOptional(zshPath, into: &container, forKey: .zshPath)
-        try encodeOptional(experimentalInstructionsFile, into: &container, forKey: .experimentalInstructionsFile)
         try encodeOptional(experimentalCompactPromptFile, into: &container, forKey: .experimentalCompactPromptFile)
         try encodeOptional(includePermissionsInstructions, into: &container, forKey: .includePermissionsInstructions)
         try encodeOptional(includeAppsInstructions, into: &container, forKey: .includeAppsInstructions)

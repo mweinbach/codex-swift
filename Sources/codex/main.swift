@@ -1153,8 +1153,8 @@ private func runNonInteractiveExec(
     if let baseInstructionsOverride {
         prompt.baseInstructionsOverride = baseInstructionsOverride
     } else {
-        prompt.baseInstructionsOverride = try readExperimentalInstructionsFile(
-            settings.experimentalInstructionsFile,
+        prompt.baseInstructionsOverride = try readModelInstructionsFile(
+            settings.modelInstructionsFile,
             cwd: cwd
         )
     }
@@ -1558,7 +1558,7 @@ private func sandboxPolicy(from mode: SandboxMode) -> SandboxPolicy {
     SandboxPolicy.fromSandboxMode(mode)
 }
 
-private func readExperimentalInstructionsFile(_ path: String?, cwd: URL) throws -> String? {
+private func readModelInstructionsFile(_ path: String?, cwd: URL) throws -> String? {
     guard let path else {
         return nil
     }
