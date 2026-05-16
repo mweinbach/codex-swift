@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `10cf1f79dd` (`Add
+  user_input_requested_during_turn to MCP turn metadata`). Swift turn metadata
+  state now tracks when user input was requested during the current turn and
+  includes Rust's `user_input_requested_during_turn: true` only in MCP request
+  metadata, while leaving the normal Responses turn metadata header unchanged.
 - 2026-05-16: rechecked Rust commit `6a331a66eb` (`feat(app-server):
   update remote control APIs for better UX`). Swift remote-control status
   snapshots and `remoteControl/status/changed` payloads now include Rust's

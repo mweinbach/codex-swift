@@ -3,6 +3,7 @@ import Foundation
 private let modelKey = "model"
 private let reasoningEffortKey = "reasoning_effort"
 private let turnStartedAtUnixMsKey = "turn_started_at_unix_ms"
+private let userInputRequestedDuringTurnKey = "user_input_requested_during_turn"
 
 public func buildTurnMetadataHeader(cwd: URL, sandbox: String? = nil) -> String? {
     buildTurnMetadataHeaderWithIdentity(cwd: cwd, sandbox: sandbox)
@@ -63,6 +64,7 @@ public final class TurnMetadataState: @unchecked Sendable {
     private var enrichedHeader: String?
     private var turnStartedAtUnixMs: Int64?
     private var responsesAPIClientMetadata: [String: String]?
+    private var userInputRequestedDuringTurn = false
     private var enrichmentTask: Task<Void, Never>?
 
     public init(
@@ -138,10 +140,21 @@ public final class TurnMetadataState: @unchecked Sendable {
         } else {
             metadata.removeValue(forKey: reasoningEffortKey)
         }
+        if userInputWasRequestedDuringTurn() {
+            metadata[userInputRequestedDuringTurnKey] = true
+        } else {
+            metadata.removeValue(forKey: userInputRequestedDuringTurnKey)
+        }
         guard let data = try? JSONSerialization.data(withJSONObject: metadata, options: [.sortedKeys]) else {
             return nil
         }
         return try? JSONDecoder().decode(JSONValue.self, from: data)
+    }
+
+    public func markUserInputRequestedDuringTurn() {
+        lock.lock()
+        userInputRequestedDuringTurn = true
+        lock.unlock()
     }
 
     public func setResponsesAPIClientMetadata(_ metadata: [String: String]) {
@@ -194,6 +207,13 @@ public final class TurnMetadataState: @unchecked Sendable {
         enrichmentTask = nil
         lock.unlock()
         task?.cancel()
+    }
+
+    private func userInputWasRequestedDuringTurn() -> Bool {
+        lock.lock()
+        let value = userInputRequestedDuringTurn
+        lock.unlock()
+        return value
     }
 
     private func setEnrichedHeaderIfNotCancelled(_ headerValue: String) {

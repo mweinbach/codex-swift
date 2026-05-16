@@ -279,6 +279,37 @@ final class TurnMetadataTests: XCTestCase {
         }
         XCTAssertNil(noEffortObject["reasoning_effort"])
     }
+
+    func testMcpMetadataAddsUserInputRequestedFlagOnlyAfterMarkLikeRust() throws {
+        let state = TurnMetadataState(
+            sessionID: "session-a",
+            threadID: "thread-a",
+            threadSource: .user,
+            turnID: "turn-a"
+        )
+
+        let before = try XCTUnwrap(state.currentMetaValueForMcpRequest(
+            context: McpTurnMetadataContext(model: "gpt-5.4")
+        ))
+        guard case let .object(beforeObject) = before else {
+            return XCTFail("expected object metadata")
+        }
+        XCTAssertNil(beforeObject["user_input_requested_during_turn"])
+
+        state.markUserInputRequestedDuringTurn()
+
+        let after = try XCTUnwrap(state.currentMetaValueForMcpRequest(
+            context: McpTurnMetadataContext(model: "gpt-5.4")
+        ))
+        guard case let .object(afterObject) = after else {
+            return XCTFail("expected object metadata")
+        }
+        XCTAssertEqual(afterObject["user_input_requested_during_turn"], .bool(true))
+
+        let normalHeader = try XCTUnwrap(state.currentHeaderValue())
+        let normalObject = try jsonObject(normalHeader)
+        XCTAssertNil(normalObject["user_input_requested_during_turn"])
+    }
 }
 
 private func jsonObject(_ text: String) throws -> [String: Any] {
