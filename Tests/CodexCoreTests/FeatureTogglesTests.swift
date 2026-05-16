@@ -298,6 +298,45 @@ final class FeatureTogglesTests: XCTestCase {
             """
         )
     }
+
+    func testConfigFeatureEditorCanonicalizesLegacyFeatureAliasesLikeRustMaterialization() {
+        let input = """
+        [features]
+        include_apply_patch_tool = true
+        experimental_use_freeform_apply_patch = false
+        shell_tool = true
+
+        """
+
+        XCTAssertEqual(
+            ConfigFeatureEditor.setFeatureEnabled(in: input, feature: "include_apply_patch_tool", enabled: true),
+            """
+            [features]
+            apply_patch_freeform = true
+            shell_tool = true
+
+            """
+        )
+    }
+
+    func testConfigFeatureEditorClearsLegacyAliasesWhenDisablingDefaultFalseFeature() {
+        let input = """
+        [features]
+        request_permissions = true
+        exec_permission_approvals = true
+        shell_tool = true
+
+        """
+
+        XCTAssertEqual(
+            ConfigFeatureEditor.setFeatureEnabled(in: input, feature: "exec_permission_approvals", enabled: false),
+            """
+            [features]
+            shell_tool = true
+
+            """
+        )
+    }
 }
 
 private final class FeatureToggleTemporaryDirectory {

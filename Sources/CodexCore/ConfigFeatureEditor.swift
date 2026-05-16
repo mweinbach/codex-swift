@@ -38,8 +38,9 @@ public enum ConfigFeatureEditor {
         enabled: Bool,
         profile: String? = nil
     ) -> String {
-        if shouldClearRootFeature(feature: feature, enabled: enabled, profile: profile) {
-            return clearFeature(in: contents, feature: feature, profile: profile)
+        let targetKey = canonicalFeatureKey(for: feature) ?? feature
+        if shouldClearRootFeature(feature: targetKey, enabled: enabled, profile: profile) {
+            return clearFeature(in: contents, feature: targetKey, profile: profile)
         }
 
         let sectionName = featureSectionName(profile: profile)
@@ -48,7 +49,8 @@ public enum ConfigFeatureEditor {
         var inTargetSection = false
         var foundSection = false
         var wroteFeature = false
-        let assignment = "\(tomlKey(feature)) = \(enabled ? "true" : "false")"
+        let assignment = "\(tomlKey(targetKey)) = \(enabled ? "true" : "false")"
+        let replacedKeys = featureKeysMatching(targetKey)
 
         for line in lines {
             let trimmed = stripComment(from: line).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -65,9 +67,11 @@ public enum ConfigFeatureEditor {
 
             if inTargetSection, let equalsIndex = firstEqualsIndex(in: trimmed) {
                 let key = String(trimmed[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-                if key == tomlKey(feature) || key == feature {
-                    output.append(assignment)
-                    wroteFeature = true
+                if replacedKeys.contains(normalizedKey(key)) {
+                    if !wroteFeature {
+                        output.append(assignment)
+                        wroteFeature = true
+                    }
                     continue
                 }
             }
@@ -100,6 +104,7 @@ public enum ConfigFeatureEditor {
         let lines = contents.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         var output: [String] = []
         var inTargetSection = false
+        let removedKeys = featureKeysMatching(feature)
 
         for line in lines {
             let trimmed = stripComment(from: line).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -111,7 +116,7 @@ public enum ConfigFeatureEditor {
 
             if inTargetSection, let equalsIndex = firstEqualsIndex(in: trimmed) {
                 let key = String(trimmed[..<equalsIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-                if key == tomlKey(feature) || key == feature {
+                if removedKeys.contains(normalizedKey(key)) || key == tomlKey(feature) || key == feature {
                     continue
                 }
             }
@@ -132,6 +137,33 @@ public enum ConfigFeatureEditor {
         return FeatureRegistry.specs
             .first(where: { $0.key == feature })
             .map { !$0.defaultEnabled } ?? false
+    }
+
+    private static func canonicalFeatureKey(for key: String) -> String? {
+        guard let feature = FeatureRegistry.feature(forKey: key) else {
+            return nil
+        }
+        return FeatureRegistry.specs.first { $0.id == feature }?.key
+    }
+
+    private static func featureKeysMatching(_ key: String) -> Set<String> {
+        guard let feature = FeatureRegistry.feature(forKey: key),
+              let canonical = FeatureRegistry.specs.first(where: { $0.id == feature })?.key
+        else {
+            return [key]
+        }
+        let aliases = FeatureKeys.legacyAliases.compactMap { alias, aliasFeature in
+            aliasFeature == feature ? alias : nil
+        }
+        return Set([canonical] + aliases)
+    }
+
+    private static func normalizedKey(_ key: String) -> String {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("\""), trimmed.hasSuffix("\""), trimmed.count >= 2 {
+            return String(trimmed.dropFirst().dropLast())
+        }
+        return trimmed
     }
 
     private static func featureSectionName(profile: String?) -> String {

@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust feature materialization in
+  `codex-rs/features/src/tests.rs`. Swift's config feature editor now writes
+  canonical feature keys when called with a legacy alias and removes stale
+  legacy aliases for the same feature from the edited feature table, matching
+  Rust's materialized feature config cleanup while preserving legacy alias
+  reads.
 - 2026-05-16: rechecked Rust branch commit `b42b2ff9ec` (`Support audio
   input`). Swift now carries Rust's `audio` input modality tag, converts MCP
   audio content blocks into Responses `input_audio` tool output content when a
