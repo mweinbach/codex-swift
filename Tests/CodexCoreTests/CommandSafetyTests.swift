@@ -445,6 +445,11 @@ final class CommandSafetyTests: XCTestCase {
         XCTAssertTrue(CommandSafety.isKnownSafeCommand([
             "pwsh.exe",
             "-Command",
+            "Write-Output foo | Measure-Object"
+        ]))
+        XCTAssertTrue(CommandSafety.isKnownSafeCommand([
+            "pwsh.exe",
+            "-Command",
             "pwd && ls"
         ]))
         XCTAssertTrue(CommandSafety.isKnownSafeCommand([
