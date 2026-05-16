@@ -19,6 +19,11 @@ Recent upstream audit checkpoint:
   in the deprecated `notify` `agent-turn-complete` payload emitted from runtime
   task completion, matching Rust's app-server session metadata handoff into
   turn context.
+- 2026-05-16: rechecked Rust app-server protocol fixtures that reject relative
+  `AbsolutePathBuf` fields. Swift's shared `AbsolutePath` decoder now exposes
+  Rust's `AbsolutePathBuf deserialized without a base path` text for relative
+  path payloads without a decoding base, and app-server thread/turn protocol
+  tests pin the environment cwd, thread cwd, and runtime response boundaries.
 - 2026-05-16: rechecked Rust app-server v2 `initialize` fixtures in
   `codex-rs/app-server/tests/suite/v2/initialize.rs`. Swift now builds the
   initialized `userAgent` with `clientInfo.name` as the originator, while

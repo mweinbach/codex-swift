@@ -283,7 +283,7 @@ final class AppServerTurnProtocolTests: XCTestCase {
                 from: Data(#"{"threadId":"thread_123","input":[],"environments":[{"environmentId":"local","cwd":"relative"}]}"#.utf8)
             )
         ) { error in
-            XCTAssertTrue(String(describing: error).contains("decoded relative path without a base path"))
+            XCTAssertTrue(String(describing: error).contains("AbsolutePathBuf deserialized without a base path"))
         }
     }
 

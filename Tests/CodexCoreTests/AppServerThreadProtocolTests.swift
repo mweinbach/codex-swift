@@ -274,7 +274,7 @@ final class AppServerThreadProtocolTests: XCTestCase {
             )
         ) { error in
             XCTAssertTrue(
-                String(describing: error).contains("AbsolutePath"),
+                String(describing: error).contains("AbsolutePathBuf deserialized without a base path"),
                 "unexpected error: \(error)"
             )
         }
@@ -356,7 +356,7 @@ final class AppServerThreadProtocolTests: XCTestCase {
             )
         ) { error in
             XCTAssertTrue(
-                String(describing: error).contains("AbsolutePath"),
+                String(describing: error).contains("AbsolutePathBuf deserialized without a base path"),
                 "unexpected error: \(error)"
             )
         }
@@ -1828,7 +1828,12 @@ final class AppServerThreadProtocolTests: XCTestCase {
         }
         """#.utf8)
 
-        XCTAssertThrowsError(try JSONDecoder().decode(AppServerThread.self, from: payload))
+        XCTAssertThrowsError(try JSONDecoder().decode(AppServerThread.self, from: payload)) { error in
+            XCTAssertTrue(
+                String(describing: error).contains("AbsolutePathBuf deserialized without a base path"),
+                "unexpected error: \(error)"
+            )
+        }
     }
 
     func testThreadDataRequiresSessionIDLikeRustProtocol() throws {
@@ -2062,35 +2067,20 @@ final class AppServerThreadProtocolTests: XCTestCase {
     }
 
     func testThreadRuntimeResponsesRejectRelativeCwdAndInstructionSourcesLikeRustAbsolutePathBuf() throws {
-        let baseResponse = """
-        {
-          "thread": {
-            "id": "thread_123",
-            "archived": false,
-            "source": "user",
-            "metadata": {
-              "createdAt": "2026-05-14T00:00:00Z",
-              "updatedAt": "2026-05-14T00:00:00Z",
-              "git": null
-            },
-            "turns": []
-          },
-          "model": "gpt-5",
-          "modelProvider": "mock_provider",
-          "serviceTier": null,
-          "approvalPolicy": "never",
-          "approvalsReviewer": "guardian_subagent",
-          "sandbox": {
-            "type": "readOnly"
-          },
-          "permissionProfile": null,
-          "activePermissionProfile": null,
-          "reasoningEffort": null
-        }
-        """
-        let baseObject = try XCTUnwrap(
-            JSONSerialization.jsonObject(with: Data(baseResponse.utf8)) as? [String: Any]
-        )
+        let baseObject: [String: Any] = [
+            "thread": expectedRuntimeThreadJSON(),
+            "model": "gpt-5",
+            "modelProvider": "mock_provider",
+            "serviceTier": NSNull(),
+            "approvalPolicy": "never",
+            "approvalsReviewer": "guardian_subagent",
+            "sandbox": [
+                "type": "readOnly"
+            ],
+            "permissionProfile": NSNull(),
+            "activePermissionProfile": NSNull(),
+            "reasoningEffort": NSNull()
+        ]
 
         func payload(cwd: String = "/repo", instructionSources: [String] = []) throws -> Data {
             var object = baseObject
@@ -2099,14 +2089,29 @@ final class AppServerThreadProtocolTests: XCTestCase {
             return try JSONSerialization.data(withJSONObject: object)
         }
 
-        XCTAssertThrowsError(try JSONDecoder().decode(ThreadStartResponse.self, from: try payload(cwd: "repo")))
+        XCTAssertThrowsError(try JSONDecoder().decode(ThreadStartResponse.self, from: try payload(cwd: "repo"))) { error in
+            XCTAssertTrue(
+                String(describing: error).contains("AbsolutePathBuf deserialized without a base path"),
+                "unexpected error: \(error)"
+            )
+        }
         XCTAssertThrowsError(
             try JSONDecoder().decode(
                 ThreadResumeResponse.self,
                 from: try payload(instructionSources: ["AGENTS.md"])
             )
-        )
-        XCTAssertThrowsError(try JSONDecoder().decode(ThreadForkResponse.self, from: try payload(cwd: "repo")))
+        ) { error in
+            XCTAssertTrue(
+                String(describing: error).contains("AbsolutePathBuf deserialized without a base path"),
+                "unexpected error: \(error)"
+            )
+        }
+        XCTAssertThrowsError(try JSONDecoder().decode(ThreadForkResponse.self, from: try payload(cwd: "repo"))) { error in
+            XCTAssertTrue(
+                String(describing: error).contains("AbsolutePathBuf deserialized without a base path"),
+                "unexpected error: \(error)"
+            )
+        }
     }
 
     func testThreadStatusRoundTripLikeRustProtocol() throws {

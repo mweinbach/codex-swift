@@ -8,8 +8,8 @@ public enum AbsolutePathError: Error, Equatable, CustomStringConvertible, Sendab
         switch self {
         case let .basePathIsNotAbsolute(path):
             return "Base path is not absolute: \(path)"
-        case let .decodedRelativePathWithoutBase(path):
-            return "AbsolutePath decoded relative path without a base path: \(path)"
+        case .decodedRelativePathWithoutBase:
+            return "AbsolutePathBuf deserialized without a base path"
         }
     }
 }
