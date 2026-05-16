@@ -12,6 +12,13 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `7c0e54bf59` service-tier request
+  filtering in `codex-rs/core/src/session/turn_context.rs` and
+  `codex-rs/core/tests/suite/model_switching.rs`. Swift already filtered
+  unsupported `service_tier` request values at the Responses client boundary;
+  `NonInteractiveExecTests` now also pins the active model metadata handoff so
+  a selected unsupported tier is paired with the model's advertised tier IDs
+  before the request is built.
 - 2026-05-16: rechecked Rust
   `provider_capability_methods_disable_provider_bound_tool_surfaces` in
   `codex-rs/tools/src/tool_config_tests.rs` plus turn-context provider

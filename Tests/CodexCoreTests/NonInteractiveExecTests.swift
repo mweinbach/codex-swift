@@ -656,6 +656,29 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(options.serviceTier, "flex")
     }
 
+    func testResponsesOptionsCarriesModelSupportedServiceTiersLikeRust() {
+        let modelFamily = ModelFamily(
+            slug: "gpt-test",
+            family: "test",
+            serviceTiers: [
+                ModelServiceTier(id: "flex", name: "flex", description: "Flexible processing.")
+            ]
+        )
+
+        let options = NonInteractiveExec.responsesOptions(
+            conversationID: ConversationId(),
+            modelFamily: modelFamily,
+            reasoningEffort: nil,
+            reasoningSummary: nil,
+            verbosity: nil,
+            serviceTier: "priority",
+            outputSchema: nil
+        )
+
+        XCTAssertEqual(options.serviceTier, "priority")
+        XCTAssertEqual(options.supportedServiceTierIDs, ["flex"])
+    }
+
     func testResponsesOptionsHonorsReasoningSummarySupportOverrideLikeRust() {
         let stillEnabledFamily = ModelFamily(
             slug: "still-enabled",
