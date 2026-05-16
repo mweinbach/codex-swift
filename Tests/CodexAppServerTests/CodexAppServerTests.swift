@@ -4682,6 +4682,55 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNil(params.profileWorkspaceRoots)
     }
 
+    func testTurnStartRuntimeSubmitterPreservesProfileWorkspaceRootsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let workspace = temp.url.appendingPathComponent("workspace", isDirectory: true)
+        let profileRoot = temp.url.appendingPathComponent("profile-root", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: profileRoot, withIntermediateDirectories: true)
+        try """
+        default_permissions = "limited"
+
+        [permissions.limited.workspace_roots]
+        "\(profileRoot.path)" = true
+
+        [permissions.limited.filesystem.":workspace_roots"]
+        "." = "write"
+        ".git" = "read"
+        """.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let capture = AppServerCoreOpCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            coreOpSubmitter: capture.submit,
+            experimentalAPIEnabled: true
+        )
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider","cwd":"\#(workspace.path)"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        _ = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Use profile roots"}],"permissions":{"type":"profile","id":"limited"}}}"#.utf8
+        )))
+
+        let submissions = capture.submissions
+        XCTAssertEqual(submissions.count, 1)
+        guard case let .userInputWithTurnContext(params) = submissions[0].op else {
+            XCTFail("expected profile workspace roots to use context-aware user input")
+            return
+        }
+        XCTAssertEqual(params.items, [.text("Use profile roots")])
+        XCTAssertNil(params.workspaceRoots)
+        XCTAssertEqual(params.profileWorkspaceRoots?.map(\.path), [profileRoot.standardizedFileURL.path])
+        XCTAssertEqual(params.activePermissionProfile, ActivePermissionProfile(id: "limited"))
+    }
+
     func testTurnStartRuntimeSubmitterPreservesGranularApprovalPolicyLikeRust() throws {
         let temp = try TemporaryDirectory()
         let capture = AppServerCoreOpCapture()

@@ -3508,6 +3508,7 @@ public enum CodexAppServer {
 
         let permissionProfile: PermissionProfile?
         let activePermissionProfile: ActivePermissionProfile?
+        let profileWorkspaceRoots: [AbsolutePath]?
         if let permissionSelection {
             let runtimeConfig = try loadRuntimeConfigForThreadStartup(
                 configuration: configuration,
@@ -3520,9 +3521,13 @@ public enum CodexAppServer {
                 cwd: contextCwd
             )
             activePermissionProfile = runtimeConfig.activePermissionProfile
+            profileWorkspaceRoots = runtimeConfig.profileWorkspaceRoots.isEmpty
+                ? nil
+                : runtimeConfig.profileWorkspaceRoots
         } else {
             permissionProfile = nil
             activePermissionProfile = nil
+            profileWorkspaceRoots = nil
         }
         try validateTurnContextOverrideRequirements(
             configuration: configuration,
@@ -3553,7 +3558,7 @@ public enum CodexAppServer {
                 responsesAPIClientMetadata: metadata,
                 cwd: cwd,
                 workspaceRoots: runtimeWorkspaceRoots,
-                profileWorkspaceRoots: nil,
+                profileWorkspaceRoots: profileWorkspaceRoots,
                 approvalPolicy: approvalPolicy,
                 approvalsReviewer: approvalsReviewer.map { .string($0.appServerRawValue) },
                 sandboxPolicy: sandboxPolicy,

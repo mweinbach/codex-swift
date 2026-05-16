@@ -804,6 +804,62 @@ final class ConfigLoaderTests: XCTestCase {
         )
     }
 
+    func testPermissionProfileWorkspaceRootsMaterializeProjectRootsLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let cwd = try CoreTemporaryDirectory()
+        let profileRoot = try CoreTemporaryDirectory()
+        let disabledRoot = try CoreTemporaryDirectory()
+        for root in [cwd.url, profileRoot.url] {
+            try FileManager.default.createDirectory(
+                at: root.appendingPathComponent(".git", isDirectory: true),
+                withIntermediateDirectories: true
+            )
+            try FileManager.default.createDirectory(
+                at: root.appendingPathComponent(".codex", isDirectory: true),
+                withIntermediateDirectories: true
+            )
+        }
+        try """
+        default_permissions = "workspace"
+
+        [permissions.workspace.workspace_roots]
+        "\(profileRoot.url.path)" = true
+        "\(disabledRoot.url.path)" = false
+
+        [permissions.workspace.filesystem.":workspace_roots"]
+        "." = "write"
+        ".git" = "read"
+        ".codex" = "read"
+        """.write(
+            to: dir.url.appendingPathComponent("config.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, cwd: cwd.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.activePermissionProfile, ActivePermissionProfile(id: "workspace"))
+        XCTAssertEqual(config.profileWorkspaceRoots.map(\.path), [profileRoot.url.standardizedFileURL.path])
+        XCTAssertEqual(config.workspaceRoots.map(\.path), [
+            cwd.url.standardizedFileURL.path,
+            profileRoot.url.standardizedFileURL.path
+        ])
+        let policy = try XCTUnwrap(config.permissionProfile?.fileSystemSandboxPolicy)
+        XCTAssertTrue(policy.canWritePathWithCwd(cwd.url.path, cwd: cwd.url.path))
+        XCTAssertTrue(policy.canWritePathWithCwd(profileRoot.url.path, cwd: cwd.url.path))
+        XCTAssertFalse(policy.canWritePathWithCwd(disabledRoot.url.path, cwd: cwd.url.path))
+        for root in [cwd.url, profileRoot.url] {
+            XCTAssertFalse(policy.canWritePathWithCwd(
+                root.appendingPathComponent(".git", isDirectory: true).path,
+                cwd: cwd.url.path
+            ))
+            XCTAssertFalse(policy.canWritePathWithCwd(
+                root.appendingPathComponent(".codex", isDirectory: true).path,
+                cwd: cwd.url.path
+            ))
+        }
+    }
+
     func testPermissionProfileGlobScanDepthRejectsZeroLikeRust() throws {
         let dir = try CoreTemporaryDirectory()
         try """

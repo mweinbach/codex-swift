@@ -23,9 +23,14 @@ Recent upstream audit checkpoint:
   continuing to decode the prior object form for legacy callers. Live
   `turn/start` submissions now forward resolved runtime workspace roots through
   Rust's `user_input_with_turn_context.workspace_roots` core-op field so
-  running-thread runtime context receives the same deduped absolute roots.
-  Profile-defined workspace root materialization remains pending with the
-  broader Swift permission-state port.
+  running-thread runtime context receives the same deduped absolute roots. Swift
+  now also parses `[permissions.<profile>.workspace_roots]`, preserves the
+  enabled profile roots separately from the combined runtime workspace roots,
+  materializes profile `:workspace_roots` filesystem rules across cwd plus
+  profile roots, and forwards profile roots on live `turn/start` submissions
+  through Rust's `profile_workspace_roots` core-op field. The broader symbolic
+  permission-state representation and runtime `workspace_roots_explicit` flag
+  remain pending.
 - 2026-05-16: rechecked Rust commit `5d30764fe9` (`Run compact hooks for
   remote compaction v2`). Swift core remote-v2 compaction orchestration now
   runs trusted `PreCompact` hooks before collecting the v2 compaction stream,

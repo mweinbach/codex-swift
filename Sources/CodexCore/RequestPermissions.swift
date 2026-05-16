@@ -1101,6 +1101,36 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
         return .restricted(entries: entries, globScanMaxDepth: globScanMaxDepth)
     }
 
+    public func materializeProjectRoots(withWorkspaceRoots workspaceRoots: [AbsolutePath]) -> FileSystemSandboxPolicy {
+        guard case let .restricted(currentEntries, globScanMaxDepth) = self,
+              !workspaceRoots.isEmpty
+        else {
+            return self
+        }
+
+        var entries: [FileSystemSandboxEntry] = []
+        for entry in currentEntries {
+            guard case let .special(value) = entry.path,
+                  case let .projectRoots(subpath) = FileSystemSpecialPath(jsonValue: value)
+            else {
+                if !entries.contains(entry) {
+                    entries.append(entry)
+                }
+                continue
+            }
+
+            for root in workspaceRoots {
+                let resolvedPath = subpath.flatMap { try? root.join($0) } ?? root
+                let materialized = FileSystemSandboxEntry(path: .path(resolvedPath.path), access: entry.access)
+                if !entries.contains(materialized) {
+                    entries.append(materialized)
+                }
+            }
+        }
+
+        return .restricted(entries: entries, globScanMaxDepth: globScanMaxDepth)
+    }
+
     private static func appendDefaultReadOnlyProjectRootSubpathIfNoExplicitRule(
         _ subpath: String,
         to entries: inout [FileSystemSandboxEntry]

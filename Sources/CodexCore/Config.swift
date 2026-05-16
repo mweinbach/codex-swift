@@ -315,6 +315,8 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var defaultPermissions: String?
     public var permissionProfile: PermissionProfile?
     public var activePermissionProfile: ActivePermissionProfile?
+    public var workspaceRoots: [AbsolutePath]
+    public var profileWorkspaceRoots: [AbsolutePath]
     public var networkProxy: NetworkProxySpec?
     public var notify: [String]?
     public var allowLoginShell: Bool
@@ -514,6 +516,8 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.defaultPermissions = defaultPermissions
         self.permissionProfile = permissionProfile
         self.activePermissionProfile = activePermissionProfile
+        self.workspaceRoots = []
+        self.profileWorkspaceRoots = []
         self.networkProxy = nil
         self.notify = notify
         self.allowLoginShell = allowLoginShell
@@ -1297,6 +1301,12 @@ public enum CodexConfigLoader {
                 fileManager: fileManager
             )
             config.activePermissionProfile = ActivePermissionProfile(id: defaultPermissions)
+            try applyProfileWorkspaceRoots(
+                from: parsed,
+                profileName: defaultPermissions,
+                to: &config,
+                cwd: cwd ?? codexHome
+            )
             let networkProxyConfig = try parsed.networkProxyConfig(named: defaultPermissions)
             if networkProxyConfig.network.enabled {
                 config.networkProxy = NetworkProxySpec.fromConfigAndRequirements(
@@ -1317,6 +1327,49 @@ public enum CodexConfigLoader {
         )
         applyNetworkRequirements(requirements, to: &config)
         return config
+    }
+
+    private static func applyProfileWorkspaceRoots(
+        from parsed: ParsedCodexConfigToml,
+        profileName: String,
+        to config: inout CodexRuntimeConfig,
+        cwd: URL
+    ) throws {
+        let profileWorkspaceRoots = try parsed.profileWorkspaceRoots(named: profileName, cwd: cwd)
+        guard !profileWorkspaceRoots.isEmpty else {
+            return
+        }
+
+        let cwdRoot = try AbsolutePath(absolutePath: cwd.standardizedFileURL.path)
+        let workspaceRoots = deduplicatedAbsolutePaths([cwdRoot] + profileWorkspaceRoots)
+        config.profileWorkspaceRoots = profileWorkspaceRoots
+        config.workspaceRoots = workspaceRoots
+
+        guard let profile = config.permissionProfile else {
+            return
+        }
+        let fileSystemPolicy = profile.fileSystemSandboxPolicy.materializeProjectRoots(withWorkspaceRoots: workspaceRoots)
+        let effectiveProfile = PermissionProfile.fromRuntimePermissionsWithEnforcement(
+            profile.enforcement,
+            fileSystem: fileSystemPolicy,
+            network: profile.networkSandboxPolicy
+        )
+        config.permissionProfile = effectiveProfile
+        if let legacyPolicy = try? fileSystemPolicy.toLegacySandboxPolicy(
+            networkPolicy: effectiveProfile.networkSandboxPolicy,
+            cwd: cwdRoot.path
+        ) {
+            config.sandboxPolicy = legacyPolicy
+        }
+    }
+
+    private static func deduplicatedAbsolutePaths(_ paths: [AbsolutePath]) -> [AbsolutePath] {
+        var seen: Set<String> = []
+        var result: [AbsolutePath] = []
+        for path in paths where seen.insert(path.path).inserted {
+            result.append(path)
+        }
+        return result
     }
 
     public static func validateForConfigWrite(
@@ -1561,6 +1614,7 @@ public enum CodexConfigLoader {
 private struct ParsedPermissionProfileToml: Equatable, Sendable {
     var filesystem: [String: ConfigValue] = [:]
     var network: [String: ConfigValue] = [:]
+    var workspaceRoots: [String: ConfigValue] = [:]
 
     mutating func merge(_ overlay: ParsedPermissionProfileToml) {
         for (key, value) in overlay.filesystem {
@@ -1568,6 +1622,9 @@ private struct ParsedPermissionProfileToml: Equatable, Sendable {
         }
         for (key, value) in overlay.network {
             network[key] = value
+        }
+        for (key, value) in overlay.workspaceRoots {
+            workspaceRoots[key] = value
         }
     }
 
@@ -1595,6 +1652,17 @@ private struct ParsedPermissionProfileToml: Equatable, Sendable {
             fileSystem: .restricted(entries: entries, globScanMaxDepth: globScanMaxDepth),
             network: networkEnabled ? .enabled : .restricted
         )
+    }
+
+    func enabledWorkspaceRoots(profileName: String, cwd: URL) throws -> [AbsolutePath] {
+        var roots: [AbsolutePath] = []
+        for (rawPath, rawEnabled) in workspaceRoots.sorted(by: { $0.key < $1.key }) {
+            guard try boolValue(rawEnabled, key: "permissions.\(profileName).workspace_roots.\(rawPath)") else {
+                continue
+            }
+            roots.append(try AbsolutePath.resolve(rawPath, against: cwd.standardizedFileURL.path))
+        }
+        return roots
     }
 
     func networkProxyConfig(profileName: String) throws -> NetworkProxyConfig {
@@ -1854,7 +1922,7 @@ private struct ParsedPermissionProfileToml: Equatable, Sendable {
             return .minimal
         case ":root":
             return .root
-        case ":project_roots", ":cwd":
+        case ":project_roots", ":workspace_roots", ":cwd":
             return .projectRoots(subpath: nil)
         case ":tmpdir":
             return .tmpdir
@@ -2420,6 +2488,10 @@ private struct ParsedCodexConfigToml {
                 existing.merge(overlay: .table([scopedKey: scopedValue]))
                 parsed.permissions[name, default: ParsedPermissionProfileToml()]
                     .filesystem[path] = existing
+            case let .permissionWorkspaceRoots(name):
+                let workspaceRootKey = try parseDottedKey(key).joined(separator: ".")
+                parsed.permissions[name, default: ParsedPermissionProfileToml()]
+                    .workspaceRoots[workspaceRootKey] = try ConfigValueParser.parseTomlLiteral(valueText)
             case let .permissionNetwork(name):
                 let networkKey = try parseDottedKey(key).joined(separator: ".")
                 parsed.permissions[name, default: ParsedPermissionProfileToml()]
@@ -2781,6 +2853,11 @@ private struct ParsedCodexConfigToml {
                     .filesystem[parts[3]] ?? .table([:])
                 existing.merge(overlay: .table([parts[4]: value]))
                 permissions[parts[1], default: ParsedPermissionProfileToml()].filesystem[parts[3]] = existing
+                continue
+            }
+
+            if parts.count == 4, parts[0] == "permissions", parts[2] == "workspace_roots" {
+                permissions[parts[1], default: ParsedPermissionProfileToml()].workspaceRoots[parts[3]] = value
                 continue
             }
 
@@ -3174,6 +3251,11 @@ private struct ParsedCodexConfigToml {
                 if case let .table(networkTable)? = profileTable["network"] {
                     for (key, value) in networkTable {
                         parsedProfile.network[key] = value
+                    }
+                }
+                if case let .table(workspaceRootsTable)? = profileTable["workspace_roots"] {
+                    for (key, value) in workspaceRootsTable {
+                        parsedProfile.workspaceRoots[key] = value
                     }
                 }
                 permissions[profileName] = parsedProfile
@@ -3697,6 +3779,21 @@ private struct ParsedCodexConfigToml {
                 throw CodexConfigLoadError.invalidConfigLine(message)
             }
             return try profile.networkProxyConfig(profileName: profileName)
+        }
+    }
+
+    func profileWorkspaceRoots(named profileName: String, cwd: URL) throws -> [AbsolutePath] {
+        switch profileName {
+        case ":read-only", ":workspace", ":danger-no-sandbox":
+            return []
+        default:
+            guard !profileName.hasPrefix(":") else {
+                return []
+            }
+            guard let profile = permissions[profileName] else {
+                return []
+            }
+            return try profile.enabledWorkspaceRoots(profileName: profileName, cwd: cwd)
         }
     }
 
@@ -6015,6 +6112,9 @@ private struct ParsedCodexConfigToml {
         if parts.count == 4, parts[0] == "permissions", parts[2] == "filesystem" {
             return .permissionFilesystemScoped(parts[1], parts[3])
         }
+        if parts.count == 3, parts[0] == "permissions", parts[2] == "workspace_roots" {
+            return .permissionWorkspaceRoots(parts[1])
+        }
         if parts.count == 3, parts[0] == "permissions", parts[2] == "network" {
             return .permissionNetwork(parts[1])
         }
@@ -6299,6 +6399,7 @@ private enum ConfigSection {
     case agentRole(String)
     case permissionFilesystem(String)
     case permissionFilesystemScoped(String, String)
+    case permissionWorkspaceRoots(String)
     case permissionNetwork(String)
     case permissionNetworkMap(String, String)
     case audio
