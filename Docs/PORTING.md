@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust unavailable MCP dummy-tool routing in
+  `codex-rs/core/src/session/turn.rs`, `unavailable_tool.rs`, and
+  `tools/router.rs`. Swift now refreshes non-interactive request tools after a
+  missing MCP function call so the next Responses request exposes the same
+  Rust-style unavailable placeholder function tool, while preserving the
+  existing failure output for the attempted call.
 - 2026-05-16: rechecked Rust commit `314229fd72` (`Remove skills list
   extra roots`) and app-server v2 `SkillsListParams` decoding in
   `codex-rs/app-server-protocol/src/protocol/v2/plugin.rs`. Swift shared

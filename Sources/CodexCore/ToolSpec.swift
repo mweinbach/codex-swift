@@ -1091,6 +1091,30 @@ public enum ToolSpecFactory {
         }
     }
 
+    public static func exposedUnavailableToolNames(from specs: [ToolSpec]) -> [UnavailableToolName] {
+        var names: [UnavailableToolName] = []
+        for spec in specs {
+            switch spec {
+            case let .function(tool):
+                names.append(.plain(tool.name))
+            case let .namespace(namespace):
+                for tool in namespace.tools {
+                    guard case let .function(function) = tool else {
+                        continue
+                    }
+                    names.append(.namespaced(namespace.name, function.name))
+                }
+            case .toolSearch,
+                 .localShell,
+                 .imageGeneration,
+                 .webSearch,
+                 .freeform:
+                continue
+            }
+        }
+        return names
+    }
+
     public static func createToolsJSONForResponsesAPI(_ tools: [ToolSpec]) throws -> [Any] {
         try tools.map { tool in
             let data = try JSONEncoder().encode(tool)
