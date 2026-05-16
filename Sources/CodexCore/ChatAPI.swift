@@ -44,7 +44,7 @@ public struct ChatRequestBuilder: Equatable, Sendable {
         return copy
     }
 
-    public func build(provider _: APIProvider) -> ChatRequest {
+    public func build(provider: APIProvider) -> ChatRequest {
         var messages: [JSONValue] = [
             .object([
                 "role": .string("system"),
@@ -163,6 +163,8 @@ public struct ChatRequestBuilder: Equatable, Sendable {
         if let subagent = CodexRequestHeaders.subagentHeader(for: sessionSource) {
             headers[CodexRequestHeaders.subagentHeaderName] = subagent
         }
+
+        headers = CodexRequestHeaders.filterForProvider(headers, provider: provider)
 
         return ChatRequest(
             body: .object([

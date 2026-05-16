@@ -136,6 +136,13 @@ Recent upstream audit checkpoint:
   status-line and terminal-title item parsers that accept Rust's legacy
   aliases, including `session-id`, while canonicalizing the current thread
   identifier item back to `thread-id` for the eventual Swift TUI renderer.
+- 2026-05-16: rechecked Rust commit `9cbd4c0371` Bedrock Mantle header
+  filtering in `codex-rs/model-provider/src/amazon_bedrock/auth.rs`. Swift now
+  applies the snake_case compatibility-header filter through a shared request
+  header helper and pins both Responses and chat request builders to preserve
+  hyphenated session/thread headers while dropping `conversation_id`,
+  `session_id`, `thread_id`, and future underscore-bearing headers for the
+  Amazon Bedrock provider.
 - 2026-05-16: rechecked Rust commit `7c0e54bf59` service-tier request
   filtering in `codex-rs/core/src/session/turn_context.rs` and
   `codex-rs/core/tests/suite/model_switching.rs`. Swift already filtered

@@ -458,6 +458,13 @@ public enum CodexRequestHeaders {
         return headers
     }
 
+    public static func filterForProvider(_ headers: [String: String], provider: APIProvider) -> [String: String] {
+        guard provider.name == ModelProviderInfo.amazonBedrockProviderName else {
+            return headers
+        }
+        return headers.filter { name, _ in !name.contains("_") }
+    }
+
     public static func subagentHeader(for source: SessionSource?) -> String? {
         switch source {
         case let .subagent(subagent):

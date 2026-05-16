@@ -24,6 +24,36 @@ final class ChatAPITests: XCTestCase {
         XCTAssertEqual(request.headers["x-openai-subagent"], "review")
     }
 
+    func testStripsSnakeCaseHeadersForAmazonBedrockMantleLikeRustSigV4Auth() throws {
+        let request = ChatRequestBuilder(
+            model: "gpt-test",
+            instructions: "inst",
+            input: [.message(role: "user", content: [.inputText(text: "hi")])]
+        )
+        .conversationID("conv-1")
+        .sessionSource(.subagent(.review))
+        .build(provider: APIProvider(
+            name: ModelProviderInfo.amazonBedrockProviderName,
+            baseURL: ModelProviderInfo.amazonBedrockDefaultBaseURL,
+            wireAPI: .chat,
+            retry: ProviderRetryConfig(
+                maxAttempts: 1,
+                baseDelayMilliseconds: 10,
+                retry429: false,
+                retry5xx: true,
+                retryTransport: true
+            ),
+            streamIdleTimeoutMilliseconds: 1_000
+        ))
+
+        XCTAssertNil(request.headers["conversation_id"])
+        XCTAssertNil(request.headers["thread_id"])
+        XCTAssertNil(request.headers["session_id"])
+        XCTAssertEqual(request.headers["thread-id"], "conv-1")
+        XCTAssertEqual(request.headers["session-id"], "conv-1")
+        XCTAssertEqual(request.headers["x-openai-subagent"], "review")
+    }
+
     func testUserImagesBecomeChatImageURLContent() throws {
         let request = ChatRequestBuilder(
             model: "gpt-test",
