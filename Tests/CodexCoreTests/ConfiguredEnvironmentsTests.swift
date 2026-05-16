@@ -37,6 +37,28 @@ final class ConfiguredEnvironmentsTests: XCTestCase {
         XCTAssertEqual(snapshot.defaultEnvironmentIDs(), [])
     }
 
+    func testPresentEnvironmentsTomlOwnsDefaultEvenWithLegacyExecServerURL() throws {
+        let temp = try ConfiguredEnvironmentTemporaryDirectory()
+        try """
+        default = "none"
+        """.write(
+            to: temp.url.appendingPathComponent("environments.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let snapshot = try ConfiguredEnvironmentLoader.load(
+            codexHome: temp.url,
+            environment: [
+                ConfiguredEnvironmentLoader.codexExecServerURLEnvironmentVariable: "ws://legacy.example"
+            ]
+        )
+
+        XCTAssertEqual(snapshot.environments.map(\.id), ["local"])
+        XCTAssertEqual(snapshot.defaultEnvironment, .disabled)
+        XCTAssertEqual(snapshot.defaultEnvironmentIDs(), [])
+    }
+
     func testInvalidCodexHomePathWrapsEnvironmentConfigInspectErrorLikeRust() throws {
         let temp = try ConfiguredEnvironmentTemporaryDirectory()
         let codexHomeFile = temp.url.appendingPathComponent("codex-home", isDirectory: false)

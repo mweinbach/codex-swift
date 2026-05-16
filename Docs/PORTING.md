@@ -265,6 +265,10 @@ Recent upstream audit checkpoint:
   coverage now pins configured `CODEX_HOME/environments.toml` snapshots as
   default-first multi-environment context rather than collapsing to a single
   legacy cwd/shell pair.
+- 2026-05-16: rechecked Rust's `environment_provider_from_codex_home_uses_present_environments_file`
+  fixture from `codex-rs/exec-server/src/environment_toml.rs`. Swift now pins
+  the provider boundary where a present `CODEX_HOME/environments.toml` owns
+  default selection and ignores the legacy `CODEX_EXEC_SERVER_URL` fallback.
 - 2026-05-15: rechecked Rust app-server v2 additional filesystem
   permission conversion in
   `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now pins
