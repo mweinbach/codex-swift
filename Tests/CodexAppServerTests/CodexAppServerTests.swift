@@ -14157,6 +14157,85 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(data.first?["localPluginPath"] as? String, pluginPath.path)
     }
 
+    func testPluginShareSaveUnlistedWithoutTargetsAddsWorkspacePrincipal() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        plugins = true
+        remote_plugin = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+        let pluginSource = temp.url.appendingPathComponent("share-source", isDirectory: true)
+        try writePluginFixture(
+            root: pluginSource,
+            relativePath: "demo-plugin",
+            pluginName: "demo-plugin",
+            version: "0.1.0",
+            marker: "from-share-upload"
+        )
+        let pluginPath = pluginSource.appendingPathComponent("demo-plugin", isDirectory: true)
+        let pluginID = "plugins_implicit_workspace"
+        let uploadURLBody = """
+        {
+          "file_id": "file_workspace",
+          "upload_url": "https://uploads.example/upload/file_workspace",
+          "etag": ""
+        }
+        """
+        let createBody = """
+        {
+          "plugin_id": "\(pluginID)",
+          "share_url": "https://chatgpt.example/plugins/share/share-key-workspace"
+        }
+        """
+        let capture = MCPHTTPTransportCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                capture.append(request)
+                switch (request.httpMethod, request.url?.path, request.url?.host, request.url?.query) {
+                case ("POST", "/backend-api/public/plugins/workspace/upload-url", "chatgpt.example", nil):
+                    return URLSessionTransportResponse(statusCode: 201, body: Data(uploadURLBody.utf8))
+                case ("PUT", "/upload/file_workspace", "uploads.example", nil):
+                    return URLSessionTransportResponse(statusCode: 201, headers: ["etag": "\"blob_etag_workspace\""])
+                case ("POST", "/backend-api/public/plugins/workspace", "chatgpt.example", nil):
+                    return URLSessionTransportResponse(statusCode: 201, body: Data(createBody.utf8))
+                default:
+                    return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
+                }
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/share/save","params":{"pluginPath":"\#(pluginPath.path)","discoverability":"UNLISTED"}}"#,
+            configuration: configuration
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["remotePluginId"] as? String, pluginID)
+
+        let requests = capture.requests
+        XCTAssertEqual(requests.map { $0.httpMethod ?? "" }, ["POST", "PUT", "POST"])
+        let finalizeRequest = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(requests[2].httpBody)) as? [String: Any])
+        XCTAssertEqual(finalizeRequest["discoverability"] as? String, "UNLISTED")
+        let targets = try XCTUnwrap(finalizeRequest["share_targets"] as? [[String: Any]])
+        XCTAssertEqual(targets.count, 1)
+        XCTAssertEqual(targets[0]["principal_type"] as? String, "workspace")
+        XCTAssertEqual(targets[0]["principal_id"] as? String, "account-123")
+    }
+
     func testPluginShareSaveUpdatesExistingWorkspacePlugin() throws {
         let temp = try TemporaryDirectory()
         try """
