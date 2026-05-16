@@ -217,8 +217,12 @@ public enum NonInteractiveExec {
         let shellType: ConfigShellToolType
         if !config.features.isEnabled(.shellTool) {
             shellType = .disabled
+        } else if config.features.isEnabled(.shellZshFork) {
+            shellType = .shellCommand
         } else if config.features.isEnabled(.unifiedExec) || config.experimentalUseUnifiedExecTool == true {
             shellType = .unifiedExec
+        } else if modelFamily.shellType == .unifiedExec {
+            shellType = .shellCommand
         } else {
             shellType = modelFamily.shellType
         }

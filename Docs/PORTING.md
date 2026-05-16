@@ -115,6 +115,12 @@ Recent upstream audit checkpoint:
   capabilities before tool-spec construction, disabling namespace tools,
   image-generation, and both explicit/legacy web-search surfaces while keeping
   independent `tool_search` and `request_plugin_install` toggles unchanged.
+- 2026-05-16: rechecked Rust `model_provided_unified_exec_requires_feature_flag`
+  and `shell_zsh_fork_prefers_shell_command_over_unified_exec` in
+  `codex-rs/tools/src/tool_config_tests.rs`. Swift non-interactive tool config
+  now keeps model-provided `unified_exec` behind the `unified_exec` feature and
+  lets `shell_zsh_fork` force the classic shell-command surface even when
+  unified exec is otherwise enabled.
 - 2026-05-16: rechecked Rust `extract_powershell_command` in
   `codex-rs/shell-command/src/powershell.rs`. Swift parsed-command
   PowerShell wrapper handling now uses the shared `ShellResolver` helper

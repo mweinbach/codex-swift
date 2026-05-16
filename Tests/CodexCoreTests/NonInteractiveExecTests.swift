@@ -522,6 +522,37 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertFalse(names.contains("view_image"))
     }
 
+    func testToolsConfigRequiresUnifiedExecFeatureForModelProvidedUnifiedExecLikeRust() {
+        var features = FeatureStates.withDefaults()
+        features.set(.unifiedExec, enabled: false)
+        let config = CodexRuntimeConfig(features: features)
+        let modelFamily = ModelFamily(
+            slug: "test-model",
+            family: "test",
+            shellType: .unifiedExec
+        )
+
+        let toolsConfig = NonInteractiveExec.toolsConfig(modelFamily: modelFamily, config: config)
+
+        XCTAssertEqual(toolsConfig.shellType, .shellCommand)
+    }
+
+    func testToolsConfigShellZshForkPrefersShellCommandOverUnifiedExecLikeRust() {
+        var features = FeatureStates.withDefaults()
+        features.set(.unifiedExec, enabled: true)
+        features.set(.shellZshFork, enabled: true)
+        let config = CodexRuntimeConfig(features: features)
+        let modelFamily = ModelFamily(
+            slug: "test-model",
+            family: "test",
+            shellType: .unifiedExec
+        )
+
+        let toolsConfig = NonInteractiveExec.toolsConfig(modelFamily: modelFamily, config: config)
+
+        XCTAssertEqual(toolsConfig.shellType, .shellCommand)
+    }
+
     func testFallbackApplyPatchModelsUseFreeformToolLikeRust() throws {
         let modelFamily = ModelFamily(
             slug: "fallback-model",
