@@ -29,7 +29,6 @@ public enum FeatureKey: String, CaseIterable, Hashable, Sendable {
     case runtimeMetrics = "runtime_metrics"
     case sqlite
     case memoryTool = "memories"
-    case builtInMcp = "builtin_mcp"
     case chronicle
     case childAgentsMd = "child_agents_md"
     case applyPatchFreeform = "apply_patch_freeform"
@@ -44,6 +43,7 @@ public enum FeatureKey: String, CaseIterable, Hashable, Sendable {
     case windowsSandboxElevated = "elevated_windows_sandbox"
     case remoteModels = "remote_models"
     case enableRequestCompression = "enable_request_compression"
+    case networkProxy = "network_proxy"
     case collab = "multi_agent"
     case multiAgentV2 = "multi_agent_v2"
     case spawnCsv = "enable_fanout"
@@ -66,6 +66,7 @@ public enum FeatureKey: String, CaseIterable, Hashable, Sendable {
     case imageGeneration = "image_generation"
     case skillMcpDependencyInstall = "skill_mcp_dependency_install"
     case skillEnvVarDependencyPrompt = "skill_env_var_dependency_prompt"
+    case mentionsV2 = "mentions_v2"
     case steer
     case defaultModeRequestUserInput = "default_mode_request_user_input"
     case guardianApproval = "guardian_approval"
@@ -147,6 +148,8 @@ public struct FeatureStates: Equatable, Sendable {
         "undo",
         "js_repl",
         "js_repl_tools_only",
+        "remote_control",
+        "apply_patch_freeform",
         "image_detail_original"
     ]
 
@@ -196,8 +199,6 @@ public enum FeatureKeys {
         "connectors": .apps,
         "enable_experimental_windows_sandbox": .windowsSandbox,
         "experimental_use_unified_exec_tool": .unifiedExec,
-        "experimental_use_freeform_apply_patch": .applyPatchFreeform,
-        "include_apply_patch_tool": .applyPatchFreeform,
         "request_permissions": .execPermissionApprovals,
         "web_search": .webSearchRequest,
         "collab": .collab,
@@ -234,7 +235,7 @@ public enum FeatureRegistry {
         FeatureSpec(id: .webSearchRequest, key: "web_search_request", stage: .deprecated, defaultEnabled: false),
         FeatureSpec(id: .webSearchCached, key: "web_search_cached", stage: .deprecated, defaultEnabled: false),
         FeatureSpec(id: .searchTool, key: "search_tool", stage: .removed, defaultEnabled: false),
-        FeatureSpec(id: .codexGitCommit, key: "codex_git_commit", stage: .underDevelopment, defaultEnabled: false),
+        FeatureSpec(id: .codexGitCommit, key: "codex_git_commit", stage: .removed, defaultEnabled: false),
         FeatureSpec(id: .runtimeMetrics, key: "runtime_metrics", stage: .underDevelopment, defaultEnabled: false),
         FeatureSpec(id: .sqlite, key: "sqlite", stage: .removed, defaultEnabled: true),
         FeatureSpec(
@@ -246,10 +247,9 @@ public enum FeatureRegistry {
             description: "Allow Codex to create new memories from conversations and bring relevant memories into new conversations.",
             announcement: "NEW: Codex can now generate and use memories. Try it now with `/memories`"
         ),
-        FeatureSpec(id: .builtInMcp, key: "builtin_mcp", stage: .underDevelopment, defaultEnabled: false),
         FeatureSpec(id: .chronicle, key: "chronicle", stage: .underDevelopment, defaultEnabled: false),
         FeatureSpec(id: .childAgentsMd, key: "child_agents_md", stage: .underDevelopment, defaultEnabled: false),
-        FeatureSpec(id: .applyPatchFreeform, key: "apply_patch_freeform", stage: .stable, defaultEnabled: true),
+        FeatureSpec(id: .applyPatchFreeform, key: "apply_patch_freeform", stage: .removed, defaultEnabled: false),
         FeatureSpec(id: .applyPatchStreamingEvents, key: "apply_patch_streaming_events", stage: .underDevelopment, defaultEnabled: false),
         FeatureSpec(id: .execPermissionApprovals, key: "exec_permission_approvals", stage: .underDevelopment, defaultEnabled: false),
         FeatureSpec(id: .codexHooks, key: "hooks", stage: .stable, defaultEnabled: true),
@@ -261,6 +261,15 @@ public enum FeatureRegistry {
         FeatureSpec(id: .windowsSandboxElevated, key: "elevated_windows_sandbox", stage: .removed, defaultEnabled: false),
         FeatureSpec(id: .remoteModels, key: "remote_models", stage: .removed, defaultEnabled: false),
         FeatureSpec(id: .enableRequestCompression, key: "enable_request_compression", stage: .stable, defaultEnabled: true),
+        FeatureSpec(
+            id: .networkProxy,
+            key: "network_proxy",
+            stage: .experimental,
+            defaultEnabled: false,
+            displayName: "Network proxy",
+            description: "Apply network proxy restrictions to sandboxed sessions that already have network access.",
+            announcement: "NEW: Network proxy can now be enabled from /experimental. Restart Codex after enabling it."
+        ),
         FeatureSpec(id: .collab, key: "multi_agent", stage: .stable, defaultEnabled: true),
         FeatureSpec(id: .multiAgentV2, key: "multi_agent_v2", stage: .underDevelopment, defaultEnabled: false),
         FeatureSpec(id: .spawnCsv, key: "enable_fanout", stage: .underDevelopment, defaultEnabled: false),
@@ -269,10 +278,10 @@ public enum FeatureRegistry {
         FeatureSpec(id: .appsMcpPathOverride, key: "apps_mcp_path_override", stage: .underDevelopment, defaultEnabled: false),
         FeatureSpec(id: .toolSearch, key: "tool_search", stage: .stable, defaultEnabled: true),
         FeatureSpec(id: .toolSearchAlwaysDeferMcpTools, key: "tool_search_always_defer_mcp_tools", stage: .underDevelopment, defaultEnabled: false),
-        FeatureSpec(id: .unavailableDummyTools, key: "unavailable_dummy_tools", stage: .stable, defaultEnabled: true),
+        FeatureSpec(id: .unavailableDummyTools, key: "unavailable_dummy_tools", stage: .removed, defaultEnabled: false),
         FeatureSpec(id: .toolSuggest, key: "tool_suggest", stage: .stable, defaultEnabled: true),
         FeatureSpec(id: .plugins, key: "plugins", stage: .stable, defaultEnabled: true),
-        FeatureSpec(id: .pluginHooks, key: "plugin_hooks", stage: .underDevelopment, defaultEnabled: false),
+        FeatureSpec(id: .pluginHooks, key: "plugin_hooks", stage: .stable, defaultEnabled: true),
         FeatureSpec(id: .inAppBrowser, key: "in_app_browser", stage: .stable, defaultEnabled: true),
         FeatureSpec(id: .browserUse, key: "browser_use", stage: .stable, defaultEnabled: true),
         FeatureSpec(id: .browserUseExternal, key: "browser_use_external", stage: .stable, defaultEnabled: true),
@@ -291,6 +300,15 @@ public enum FeatureRegistry {
         FeatureSpec(id: .imageGeneration, key: "image_generation", stage: .stable, defaultEnabled: true),
         FeatureSpec(id: .skillMcpDependencyInstall, key: "skill_mcp_dependency_install", stage: .stable, defaultEnabled: true),
         FeatureSpec(id: .skillEnvVarDependencyPrompt, key: "skill_env_var_dependency_prompt", stage: .underDevelopment, defaultEnabled: false),
+        FeatureSpec(
+            id: .mentionsV2,
+            key: "mentions_v2",
+            stage: .experimental,
+            defaultEnabled: false,
+            displayName: "Mentions v2",
+            description: "Use a unified @ mention popup for files, folders, apps, plugins, and skills.",
+            announcement: ""
+        ),
         FeatureSpec(id: .steer, key: "steer", stage: .removed, defaultEnabled: true),
         FeatureSpec(id: .defaultModeRequestUserInput, key: "default_mode_request_user_input", stage: .underDevelopment, defaultEnabled: false),
         FeatureSpec(id: .guardianApproval, key: "guardian_approval", stage: .stable, defaultEnabled: true),
@@ -310,7 +328,7 @@ public enum FeatureRegistry {
         FeatureSpec(id: .artifact, key: "artifact", stage: .underDevelopment, defaultEnabled: false),
         FeatureSpec(id: .fastMode, key: "fast_mode", stage: .stable, defaultEnabled: true),
         FeatureSpec(id: .realtimeConversation, key: "realtime_conversation", stage: .underDevelopment, defaultEnabled: false),
-        FeatureSpec(id: .remoteControl, key: "remote_control", stage: .underDevelopment, defaultEnabled: false),
+        FeatureSpec(id: .remoteControl, key: "remote_control", stage: .removed, defaultEnabled: false),
         FeatureSpec(id: .imageDetailOriginal, key: "image_detail_original", stage: .removed, defaultEnabled: false),
         FeatureSpec(id: .tuiAppServer, key: "tui_app_server", stage: .removed, defaultEnabled: true),
         FeatureSpec(
@@ -322,7 +340,7 @@ public enum FeatureRegistry {
             description: "Keep your computer awake while Codex is running a thread.",
             announcement: "NEW: Prevent sleep while running is now available in /experimental."
         ),
-        FeatureSpec(id: .workspaceOwnerUsageNudge, key: "workspace_owner_usage_nudge", stage: .underDevelopment, defaultEnabled: false),
+        FeatureSpec(id: .workspaceOwnerUsageNudge, key: "workspace_owner_usage_nudge", stage: .removed, defaultEnabled: false),
         FeatureSpec(id: .responsesWebsockets, key: "responses_websockets", stage: .removed, defaultEnabled: false),
         FeatureSpec(id: .responsesWebsocketsV2, key: "responses_websockets_v2", stage: .removed, defaultEnabled: false),
         FeatureSpec(id: .responsesWebsocketResponseProcessed, key: "responses_websocket_response_processed", stage: .underDevelopment, defaultEnabled: false),

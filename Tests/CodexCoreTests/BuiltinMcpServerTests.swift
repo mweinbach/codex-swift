@@ -23,24 +23,22 @@ final class BuiltinMcpServerTests: XCTestCase {
         XCTAssertFalse(BuiltinMcpServer.memories.pollutesMemory)
     }
 
-    func testRuntimeMcpConfigEnablesMemoriesOnlyWhenBothFeaturesAreEnabled() {
+    func testRuntimeMcpConfigEnablesMemoriesWhenMemoriesFeatureIsEnabled() {
         let configuredMemories = McpServerConfig(transport: .stdio(command: "user-memories", args: [], env: nil, envVars: [], cwd: nil))
-        var onlyMemoriesFeature = FeatureStates()
-        onlyMemoriesFeature.set(.memoryTool, enabled: true)
+        let disabledFeatures = FeatureStates()
         XCTAssertEqual(
-            CodexRuntimeConfig(features: onlyMemoriesFeature, mcpServers: [
+            CodexRuntimeConfig(features: disabledFeatures, mcpServers: [
                 memoriesMcpServerName: configuredMemories
             ]).runtimeMcpConfig,
             RuntimeMcpConfig(configuredMcpServers: [memoriesMcpServerName: configuredMemories], builtinMcpServers: [])
         )
 
-        var bothFeatures = FeatureStates()
-        bothFeatures.set(.builtInMcp, enabled: true)
-        bothFeatures.set(.memoryTool, enabled: true)
+        var memoryFeatures = FeatureStates()
+        memoryFeatures.set(.memoryTool, enabled: true)
 
         XCTAssertEqual(
             CodexRuntimeConfig(
-                features: bothFeatures,
+                features: memoryFeatures,
                 memories: MemoriesConfig(useMemories: false),
                 mcpServers: [memoriesMcpServerName: configuredMemories]
             ).runtimeMcpConfig,
@@ -48,7 +46,7 @@ final class BuiltinMcpServerTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            CodexRuntimeConfig(features: bothFeatures, mcpServers: [
+            CodexRuntimeConfig(features: memoryFeatures, mcpServers: [
                 memoriesMcpServerName: configuredMemories,
                 "docs": McpServerConfig(transport: .stdio(command: "docs", args: [], env: nil, envVars: [], cwd: nil))
             ]).runtimeMcpConfig,

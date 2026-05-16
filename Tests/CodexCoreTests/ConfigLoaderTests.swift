@@ -2623,11 +2623,10 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertFalse(config.features.isEnabled(.memoryTool))
     }
 
-    func testRuntimeMcpConfigIncludesBuiltinMemoriesWhenFeatureFlagsEnableIt() throws {
+    func testRuntimeMcpConfigIncludesBuiltinMemoriesWhenMemoriesFeatureEnablesIt() throws {
         let dir = try CoreTemporaryDirectory()
         try """
         [features]
-        builtin_mcp = true
         memories = true
 
         [mcp_servers.memories]
@@ -2762,7 +2761,6 @@ final class ConfigLoaderTests: XCTestCase {
         let dir = try CoreTemporaryDirectory()
         try """
         [features]
-        builtin_mcp = true
         memories = true
 
         [memories]

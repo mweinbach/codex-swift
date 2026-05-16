@@ -19094,7 +19094,6 @@ final class CodexAppServerTests: XCTestCase {
         )
         try """
         [features]
-        builtin_mcp = true
         memories = true
 
         [memories]
@@ -25615,7 +25614,6 @@ final class CodexAppServerTests: XCTestCase {
         let temp = try TemporaryDirectory()
         try """
         [features]
-        builtin_mcp = true
         memories = true
 
         [memories]

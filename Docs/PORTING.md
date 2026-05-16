@@ -5,13 +5,23 @@ Objective: port `/Users/mweinbach/Projects/codex` from Rust to native Swift with
 Source baseline inspected for this scaffold:
 
 - Repository: `/Users/mweinbach/Projects/codex`
-- HEAD: `7c9731c9af879e2ee4fd4bf92312bbd690a55336`
+- HEAD: `de9c5c0226f8f31b9ce7dfef8b9ad401126ca3b5`
 - Rust workspace: `codex-rs`
 - Rust workspace member count: 115 Cargo manifests
 - Rust source size: 1,827 tracked `.rs` files
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: refreshed Rust `main` to `de9c5c0226` (`Fix Windows doctor npm
+  root probe`) and rechecked `codex-rs/features/src/lib.rs`,
+  `features/src/legacy.rs`, and feature tests. Swift's feature registry now
+  matches Rust's current keys, order, stages, and defaults: `builtin_mcp` is
+  removed from the registry, `network_proxy` and `mentions_v2` are present,
+  removed `apply_patch_freeform` / `remote_control` toggles are config no-ops,
+  `unavailable_dummy_tools` and `workspace_owner_usage_nudge` are removed and
+  off by default, and plugin hooks are stable/on by default. Built-in memories
+  MCP selection now follows Rust's `memories` feature plus `[memories]`
+  `use_memories`, without the old `builtin_mcp` double gate.
 - 2026-05-16: rechecked Rust branch commit `40fd064ce2` (`Simplify remote
   installed scope gating`) and `codex-rs/features/src/lib.rs`. Swift now
   includes Rust's stable `plugin_sharing` feature flag, omits the explicit

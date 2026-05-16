@@ -411,9 +411,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
 
     public var runtimeMcpConfig: RuntimeMcpConfig {
         let builtinMcpServers = enabledBuiltinMcpServers(options: BuiltinMcpServerOptions(
-            memoriesEnabled: features.isEnabled(.builtInMcp)
-                && features.isEnabled(.memoryTool)
-                && memories.useMemories
+            memoriesEnabled: features.isEnabled(.memoryTool) && memories.useMemories
         ))
         var configuredMcpServers = mcpServers
         for builtinServer in builtinMcpServers {

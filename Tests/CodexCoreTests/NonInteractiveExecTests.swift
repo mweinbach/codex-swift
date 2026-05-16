@@ -553,7 +553,7 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(toolsConfig.shellType, .shellCommand)
     }
 
-    func testFallbackApplyPatchModelsUseFreeformToolLikeRust() throws {
+    func testFallbackApplyPatchModelsDoNotUseRemovedFreeformToolByDefaultLikeRust() throws {
         let modelFamily = ModelFamily(
             slug: "fallback-model",
             family: "fallback",
@@ -562,10 +562,17 @@ final class NonInteractiveExecTests: XCTestCase {
 
         let defaultConfig = CodexRuntimeConfig(features: .withDefaults())
         let defaultToolsConfig = NonInteractiveExec.toolsConfig(modelFamily: modelFamily, config: defaultConfig)
-        XCTAssertEqual(defaultToolsConfig.applyPatchToolType, .freeform)
+        XCTAssertNil(defaultToolsConfig.applyPatchToolType)
 
-        var disabledFeatures = FeatureStates.withDefaults()
-        disabledFeatures.set(.applyPatchFreeform, enabled: false)
+        var enabledFeatures = FeatureStates.withDefaults()
+        enabledFeatures.set(.applyPatchFreeform, enabled: true)
+        let enabledToolsConfig = NonInteractiveExec.toolsConfig(
+            modelFamily: modelFamily,
+            config: CodexRuntimeConfig(features: enabledFeatures)
+        )
+        XCTAssertEqual(enabledToolsConfig.applyPatchToolType, .freeform)
+
+        let disabledFeatures = FeatureStates.withDefaults()
         let disabledToolsConfig = NonInteractiveExec.toolsConfig(
             modelFamily: modelFamily,
             config: CodexRuntimeConfig(features: disabledFeatures)
@@ -973,6 +980,8 @@ final class NonInteractiveExecTests: XCTestCase {
     }
 
     func testResponsesLoopExposesUnavailableMcpToolPlaceholderOnNextRequestLikeRust() async throws {
+        var features = FeatureStates.withDefaults()
+        features.set(.unavailableDummyTools, enabled: true)
         let initial = Prompt(input: [
             .message(role: "user", content: [.inputText(text: "retry prior MCP call")])
         ])
@@ -989,6 +998,7 @@ final class NonInteractiveExecTests: XCTestCase {
 
         _ = await NonInteractiveExec.runResponsesLoopWithTranscript(
             initialPrompt: initial,
+            features: features,
             streamPrompt: { prompt in
                 .success(await script.next(prompt))
             },
@@ -2762,7 +2772,7 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("created.txt").path))
     }
 
-    func testUnavailableMcpToolCallUsesRustPlaceholderMessage() async throws {
+    func testUnavailableMcpToolCallFallsBackToUnsupportedByDefaultLikeRustRemovedFeature() async throws {
         let output = await NonInteractiveExec.executeFunctionCall(
             .functionCall(
                 name: "_create_event",
@@ -2783,15 +2793,12 @@ final class NonInteractiveExecTests: XCTestCase {
         }
         XCTAssertEqual(callID, "call-mcp")
         XCTAssertEqual(payload.success, false)
-        XCTAssertEqual(
-            payload.content,
-            "Tool `mcp__codex_apps__calendar_create_event` is not currently available. It appeared in earlier tool calls in this conversation, but its implementation is not available in the current request. Retry after the tool becomes available or ask the user to re-enable it."
-        )
+        XCTAssertEqual(payload.content, "unsupported call: mcp__codex_apps__calendar_create_event")
     }
 
-    func testUnavailableMcpToolCallFallsBackToUnsupportedWhenFeatureDisabled() async throws {
+    func testUnavailableMcpToolCallUsesRustPlaceholderMessageWhenFeatureEnabled() async throws {
         var features = FeatureStates.withDefaults()
-        features.set(.unavailableDummyTools, enabled: false)
+        features.set(.unavailableDummyTools, enabled: true)
 
         let output = await NonInteractiveExec.executeFunctionCall(
             .functionCall(
@@ -2814,7 +2821,10 @@ final class NonInteractiveExecTests: XCTestCase {
         }
         XCTAssertEqual(callID, "call-mcp")
         XCTAssertEqual(payload.success, false)
-        XCTAssertEqual(payload.content, "unsupported call: mcp__codex_apps__calendar_create_event")
+        XCTAssertEqual(
+            payload.content,
+            "Tool `mcp__codex_apps__calendar_create_event` is not currently available. It appeared in earlier tool calls in this conversation, but its implementation is not available in the current request. Retry after the tool becomes available or ask the user to re-enable it."
+        )
     }
 
     func testReportAgentJobResultRequiresAgentJobContext() async throws {

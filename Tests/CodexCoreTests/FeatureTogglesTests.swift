@@ -5,162 +5,45 @@ import XCTest
 final class FeatureTogglesTests: XCTestCase {
     func testFeatureRegistryMatchesRustListOrderStagesAndDefaults() {
         XCTAssertEqual(FeatureRegistry.specs.map(\.key), [
-            "undo",
-            "shell_tool",
-            "unified_exec",
-            "shell_zsh_fork",
-            "shell_snapshot",
-            "js_repl",
-            "code_mode",
-            "code_mode_only",
-            "js_repl_tools_only",
-            "terminal_resize_reflow",
-            "web_search_request",
-            "web_search_cached",
-            "search_tool",
-            "codex_git_commit",
-            "runtime_metrics",
-            "sqlite",
-            "memories",
-            "builtin_mcp",
-            "chronicle",
-            "child_agents_md",
-            "apply_patch_freeform",
-            "apply_patch_streaming_events",
-            "exec_permission_approvals",
-            "hooks",
-            "request_permissions_tool",
-            "use_linux_sandbox_bwrap",
-            "use_legacy_landlock",
-            "request_rule",
-            "experimental_windows_sandbox",
-            "elevated_windows_sandbox",
-            "remote_models",
-            "enable_request_compression",
-            "multi_agent",
-            "multi_agent_v2",
-            "enable_fanout",
-            "apps",
-            "enable_mcp_apps",
-            "apps_mcp_path_override",
-            "tool_search",
-            "tool_search_always_defer_mcp_tools",
-            "unavailable_dummy_tools",
-            "tool_suggest",
-            "plugins",
-            "plugin_hooks",
-            "in_app_browser",
-            "browser_use",
-            "browser_use_external",
-            "computer_use",
-            "remote_plugin",
-            "plugin_sharing",
-            "external_migration",
-            "image_generation",
-            "skill_mcp_dependency_install",
-            "skill_env_var_dependency_prompt",
-            "steer",
-            "default_mode_request_user_input",
-            "guardian_approval",
-            "goals",
-            "collaboration_modes",
-            "tool_call_mcp_elicitation",
-            "auth_elicitation",
-            "personality",
-            "artifact",
-            "fast_mode",
-            "realtime_conversation",
-            "remote_control",
-            "image_detail_original",
-            "tui_app_server",
-            "prevent_idle_sleep",
-            "workspace_owner_usage_nudge",
-            "responses_websockets",
-            "responses_websockets_v2",
-            "responses_websocket_response_processed",
-            "remote_compaction_v2",
-            "workspace_dependencies"
+            "undo", "shell_tool", "unified_exec", "shell_zsh_fork", "shell_snapshot", "js_repl",
+            "code_mode", "code_mode_only", "js_repl_tools_only", "terminal_resize_reflow",
+            "web_search_request", "web_search_cached", "search_tool", "codex_git_commit",
+            "runtime_metrics", "sqlite", "memories", "chronicle", "child_agents_md",
+            "apply_patch_freeform", "apply_patch_streaming_events", "exec_permission_approvals",
+            "hooks", "request_permissions_tool", "use_linux_sandbox_bwrap", "use_legacy_landlock",
+            "request_rule", "experimental_windows_sandbox", "elevated_windows_sandbox",
+            "remote_models", "enable_request_compression", "network_proxy", "multi_agent",
+            "multi_agent_v2", "enable_fanout", "apps", "enable_mcp_apps", "apps_mcp_path_override",
+            "tool_search", "tool_search_always_defer_mcp_tools", "unavailable_dummy_tools",
+            "tool_suggest", "plugins", "plugin_hooks", "in_app_browser", "browser_use",
+            "browser_use_external", "computer_use", "remote_plugin", "plugin_sharing",
+            "external_migration", "image_generation", "skill_mcp_dependency_install",
+            "skill_env_var_dependency_prompt", "mentions_v2", "steer", "default_mode_request_user_input",
+            "guardian_approval", "goals", "collaboration_modes", "tool_call_mcp_elicitation",
+            "auth_elicitation", "personality", "artifact", "fast_mode", "realtime_conversation",
+            "remote_control", "image_detail_original", "tui_app_server", "prevent_idle_sleep",
+            "workspace_owner_usage_nudge", "responses_websockets", "responses_websockets_v2",
+            "responses_websocket_response_processed", "remote_compaction_v2", "workspace_dependencies"
         ])
         XCTAssertEqual(FeatureRegistry.specs.map(\.stage.listName), [
-            "removed",
-            "stable",
-            "stable",
-            "under development",
-            "stable",
-            "removed",
-            "under development",
-            "under development",
-            "removed",
-            "experimental",
-            "deprecated",
-            "deprecated",
-            "removed",
-            "under development",
-            "under development",
-            "removed",
-            "experimental",
-            "under development",
-            "under development",
-            "under development",
-            "stable",
-            "under development",
-            "under development",
-            "stable",
-            "under development",
-            "removed",
-            "deprecated",
-            "removed",
-            "removed",
-            "removed",
-            "removed",
-            "stable",
-            "stable",
-            "under development",
-            "under development",
-            "stable",
-            "under development",
-            "under development",
-            "stable",
-            "under development",
-            "stable",
-            "stable",
-            "stable",
-            "under development",
-            "stable",
-            "stable",
-            "stable",
-            "stable",
-            "under development",
-            "stable",
-            "experimental",
-            "stable",
-            "stable",
-            "under development",
-            "removed",
-            "under development",
-            "stable",
-            "experimental",
-            "removed",
-            "stable",
-            "under development",
-            "stable",
-            "under development",
-            "stable",
-            "under development",
-            "under development",
-            "removed",
-            "removed",
-            "experimental",
-            "under development",
-            "removed",
-            "removed",
-            "under development",
-            "under development",
-            "stable"
+            "removed", "stable", "stable", "under development", "stable", "removed",
+            "under development", "under development", "removed", "experimental", "deprecated",
+            "deprecated", "removed", "removed", "under development", "removed", "experimental",
+            "under development", "under development", "removed", "under development",
+            "under development", "stable", "under development", "removed", "deprecated",
+            "removed", "removed", "removed", "removed", "stable", "experimental", "stable",
+            "under development", "under development", "stable", "under development",
+            "under development", "stable", "under development", "removed", "stable", "stable",
+            "stable", "stable", "stable", "stable", "stable", "under development", "stable",
+            "experimental", "stable", "stable", "under development", "experimental", "removed",
+            "under development", "stable", "experimental", "removed", "stable", "under development",
+            "stable", "under development", "stable", "under development", "removed", "removed",
+            "removed", "experimental", "removed", "removed", "removed", "under development",
+            "under development", "stable"
         ])
         XCTAssertTrue(FeatureStates.withDefaults().isEnabled(.shellTool))
         XCTAssertTrue(FeatureStates.withDefaults().isEnabled(.unifiedExec))
-        XCTAssertTrue(FeatureStates.withDefaults().isEnabled(.applyPatchFreeform))
+        XCTAssertFalse(FeatureStates.withDefaults().isEnabled(.applyPatchFreeform))
         XCTAssertTrue(FeatureStates.withDefaults().isEnabled(.toolSearch))
         XCTAssertFalse(FeatureStates.withDefaults().isEnabled(.webSearchRequest))
     }
@@ -200,6 +83,8 @@ final class FeatureTogglesTests: XCTestCase {
             "undo": true,
             "js_repl": true,
             "js_repl_tools_only": true,
+            "remote_control": true,
+            "apply_patch_freeform": true,
             "image_detail_original": true
         ])
 
@@ -207,6 +92,8 @@ final class FeatureTogglesTests: XCTestCase {
         XCTAssertFalse(states.isEnabled(.undo))
         XCTAssertFalse(states.isEnabled(.jsRepl))
         XCTAssertFalse(states.isEnabled(.jsReplToolsOnly))
+        XCTAssertFalse(states.isEnabled(.remoteControl))
+        XCTAssertFalse(states.isEnabled(.applyPatchFreeform))
         XCTAssertFalse(states.isEnabled(.imageDetailOriginal))
     }
 
@@ -304,17 +191,16 @@ final class FeatureTogglesTests: XCTestCase {
     func testConfigFeatureEditorCanonicalizesLegacyFeatureAliasesLikeRustMaterialization() {
         let input = """
         [features]
-        include_apply_patch_tool = true
-        experimental_use_freeform_apply_patch = false
+        collab = true
         shell_tool = true
 
         """
 
         XCTAssertEqual(
-            ConfigFeatureEditor.setFeatureEnabled(in: input, feature: "include_apply_patch_tool", enabled: true),
+            ConfigFeatureEditor.setFeatureEnabled(in: input, feature: "collab", enabled: true),
             """
             [features]
-            apply_patch_freeform = true
+            multi_agent = true
             shell_tool = true
 
             """
