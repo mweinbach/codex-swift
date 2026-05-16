@@ -155,6 +155,50 @@ final class AppServerAppsProtocolTests: XCTestCase {
         XCTAssertEqual(response.nextCursor, "next")
     }
 
+    func testAppScreenshotRequiresUserPromptLikeRustProtocol() throws {
+        let response = try JSONDecoder().decode(
+            AppsListResponse.self,
+            from: Data(
+                #"""
+                {
+                  "data": [{
+                    "id": "weather-app",
+                    "name": "Weather",
+                    "appMetadata": {
+                      "screenshots": [{
+                        "url": null,
+                        "fileId": null,
+                        "userPrompt": "show weather"
+                      }]
+                    }
+                  }],
+                  "nextCursor": null
+                }
+                """#.utf8
+            )
+        )
+
+        XCTAssertEqual(response.data.first?.appMetadata?.screenshots?.first, AppScreenshot(
+            url: nil,
+            fileID: nil,
+            userPrompt: "show weather"
+        ))
+
+        for payload in [
+            #"{"data":[{"id":"weather-app","name":"Weather","appMetadata":{"screenshots":[{}]}}],"nextCursor":null}"#,
+            #"{"data":[{"id":"weather-app","name":"Weather","appMetadata":{"screenshots":[{"userPrompt":null}]}}],"nextCursor":null}"#,
+            #"{"data":[{"id":"weather-app","name":"Weather","appMetadata":{"screenshots":[{"user_prompt":null}]}}],"nextCursor":null}"#
+        ] {
+            XCTAssertThrowsError(
+                try JSONDecoder().decode(
+                    AppsListResponse.self,
+                    from: Data(payload.utf8)
+                ),
+                "Rust AppScreenshot requires a non-null userPrompt/user_prompt string: \(payload)"
+            )
+        }
+    }
+
     func testAppScreenshotRejectsDuplicateRustAliases() {
         XCTAssertThrowsError(
             try JSONDecoder().decode(
@@ -267,5 +311,35 @@ final class AppServerAppsProtocolTests: XCTestCase {
                 ]]
             ]
         )
+    }
+
+    func testAppSummaryRequiresNeedsAuthFlagLikeRustProtocol() throws {
+        try XCTAssertJSONObjectEqual(
+            AppSummary(
+                id: "weather-app",
+                name: "Weather",
+                description: nil,
+                installURL: "https://example.test/install",
+                needsAuth: false
+            ),
+            [
+                "id": "weather-app",
+                "name": "Weather",
+                "description": NSNull(),
+                "installUrl": "https://example.test/install",
+                "needsAuth": false
+            ]
+        )
+
+        for payload in [
+            #"{"id":"weather-app","name":"Weather"}"#,
+            #"{"id":"weather-app","name":"Weather","needsAuth":null}"#,
+            #"{"id":"weather-app","name":"Weather","needsAuth":"false"}"#
+        ] {
+            XCTAssertThrowsError(
+                try JSONDecoder().decode(AppSummary.self, from: Data(payload.utf8)),
+                "Rust AppSummary requires needsAuth as a bool: \(payload)"
+            )
+        }
     }
 }

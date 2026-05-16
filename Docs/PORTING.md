@@ -12,6 +12,21 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust app-server v2 `AppScreenshot` in
+  `codex-rs/app-server-protocol/src/protocol/v2/apps.rs`. Swift app-list
+  protocol coverage now pins camel-case `userPrompt` screenshot decoding plus
+  rejection of omitted or explicit-null `userPrompt` / `user_prompt` values,
+  matching Rust's required `user_prompt: String` with serde aliases.
+- 2026-05-15: rechecked Rust app-server v2 `mcpServer/resource/read`
+  params and response models in `codex-rs/app-server-protocol/src/protocol/v2/mcp.rs`.
+  Swift MCP protocol coverage now pins explicit-null and concrete `threadId`
+  decode/re-encode behavior plus typed text/blob resource read responses,
+  matching Rust's nullable `thread_id` params and `McpResourceContent` payload.
+- 2026-05-15: rechecked Rust app-server v2 `AppSummary` in
+  `codex-rs/app-server-protocol/src/protocol/v2/apps.rs`. Swift apps-protocol
+  coverage now pins `needsAuth` as a required boolean on app summaries,
+  rejecting omitted, explicit-null, or string payloads while preserving the
+  Rust camelCase wire shape shared by plugin responses.
 - 2026-05-15: rechecked Rust app-server v2 `AppBranding` in
   `codex-rs/app-server-protocol/src/protocol/v2/apps.rs`. Swift app-list
   protocol coverage now pins `isDiscoverableApp` as a required boolean,

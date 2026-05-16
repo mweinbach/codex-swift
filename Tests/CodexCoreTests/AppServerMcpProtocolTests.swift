@@ -85,6 +85,28 @@ final class AppServerMcpProtocolTests: XCTestCase {
             "uri": "file:///guide.md"
         ])
 
+        let decodedNullThread = try JSONDecoder().decode(
+            AppServerProtocol.McpResourceReadParams.self,
+            from: Data(#"{"threadId":null,"server":"docs","uri":"file:///guide.md"}"#.utf8)
+        )
+        XCTAssertNil(decodedNullThread.threadID)
+        try XCTAssertJSONObjectEqual(decodedNullThread, [
+            "threadId": NSNull(),
+            "server": "docs",
+            "uri": "file:///guide.md"
+        ])
+
+        let decodedThread = try JSONDecoder().decode(
+            AppServerProtocol.McpResourceReadParams.self,
+            from: Data(#"{"threadId":"thr_1","server":"docs","uri":"file:///guide.md"}"#.utf8)
+        )
+        XCTAssertEqual(decodedThread.threadID, "thr_1")
+        try XCTAssertJSONObjectEqual(decodedThread, [
+            "threadId": "thr_1",
+            "server": "docs",
+            "uri": "file:///guide.md"
+        ])
+
         let response = AppServerProtocol.McpResourceReadResponse(contents: [
             .text(McpTextResourceContents(
                 text: "# Guide",
@@ -99,6 +121,41 @@ final class AppServerMcpProtocolTests: XCTestCase {
         ])
 
         try XCTAssertJSONObjectEqual(response, [
+            "contents": [
+                [
+                    "mimeType": "text/markdown",
+                    "text": "# Guide",
+                    "uri": "file:///guide.md"
+                ],
+                [
+                    "blob": "AAEC",
+                    "mimeType": "image/png",
+                    "uri": "file:///image.png"
+                ]
+            ]
+        ])
+
+        let decodedResponse = try JSONDecoder().decode(
+            AppServerProtocol.McpResourceReadResponse.self,
+            from: Data(#"""
+            {
+              "contents": [
+                {
+                  "text": "# Guide",
+                  "uri": "file:///guide.md",
+                  "mimeType": "text/markdown"
+                },
+                {
+                  "blob": "AAEC",
+                  "uri": "file:///image.png",
+                  "mimeType": "image/png"
+                }
+              ]
+            }
+            """#.utf8)
+        )
+        XCTAssertEqual(decodedResponse, response)
+        try XCTAssertJSONObjectEqual(decodedResponse, [
             "contents": [
                 [
                     "mimeType": "text/markdown",
