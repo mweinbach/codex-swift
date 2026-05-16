@@ -1104,6 +1104,9 @@ public enum McpToolCallResult: Equatable, Codable, Sendable {
 }
 
 public struct McpCallToolResult: Equatable, Codable, Sendable {
+    public static let imageContentOmittedForModelPlaceholder =
+        "<image content omitted because you do not support image input>"
+
     public let content: [McpContentBlock]
     public let isError: Bool?
     public let structuredContent: JSONValue?
@@ -1139,6 +1142,30 @@ public struct McpCallToolResult: Equatable, Codable, Sendable {
         return McpCallToolResult(
             content: [.text(McpTextContent(text: Truncation.truncateText(serialized, policy: .bytes(maxBytes))))],
             isError: isError
+        )
+    }
+
+    public func sanitizedForModel(supportsImageInput: Bool) -> McpCallToolResult {
+        guard !supportsImageInput else {
+            return self
+        }
+
+        return McpCallToolResult(
+            content: content.map { block in
+                switch block {
+                case .image:
+                    return .text(McpTextContent(text: Self.imageContentOmittedForModelPlaceholder))
+                case .text,
+                     .audio,
+                     .resourceLink,
+                     .embeddedResource,
+                     .unknown:
+                    return block
+                }
+            },
+            isError: isError,
+            structuredContent: structuredContent,
+            meta: meta
         )
     }
 }

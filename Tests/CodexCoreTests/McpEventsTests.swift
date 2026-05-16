@@ -977,6 +977,39 @@ final class McpEventsTests: XCTestCase {
         XCTAssertTrue(message.contains("truncated"))
     }
 
+    func testCallToolResultSanitizesImagesForTextOnlyModelsLikeRust() {
+        let original = McpCallToolResult(
+            content: [
+                .image(McpImageContent(data: "Zm9v", mimeType: "image/png")),
+                .text(McpTextContent(text: "hello"))
+            ],
+            isError: false
+        )
+
+        let sanitized = original.sanitizedForModel(supportsImageInput: false)
+
+        XCTAssertEqual(sanitized, McpCallToolResult(
+            content: [
+                .text(McpTextContent(text: McpCallToolResult.imageContentOmittedForModelPlaceholder)),
+                .text(McpTextContent(text: "hello"))
+            ],
+            isError: false
+        ))
+    }
+
+    func testCallToolResultPreservesImagesWhenModelSupportsImageInputLikeRust() {
+        let original = McpCallToolResult(
+            content: [
+                .image(McpImageContent(data: "Zm9v", mimeType: "image/png"))
+            ],
+            isError: false,
+            structuredContent: .object(["x": .integer(1)]),
+            meta: .object(["k": .string("v")])
+        )
+
+        XCTAssertEqual(original.sanitizedForModel(supportsImageInput: true), original)
+    }
+
     func testMcpContentBlocksCoverRustUntaggedVariantEncoding() throws {
         let result = McpCallToolResult(content: [
             .image(McpImageContent(data: "iVBORw0=", mimeType: "image/png")),
