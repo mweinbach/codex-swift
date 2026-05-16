@@ -8,10 +8,15 @@ Source baseline inspected for this scaffold:
 - HEAD: `7c9731c9af879e2ee4fd4bf92312bbd690a55336`
 - Rust workspace: `codex-rs`
 - Rust workspace member count: 115 Cargo manifests
-- Rust source size: 1,816 tracked `.rs` files
+- Rust source size: 1,827 tracked `.rs` files
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked upstream Rust HEAD `7c9731c9af` (`Enable
+  --deny-warnings for cargo shear`). This is Rust workspace tooling coverage
+  for unused Cargo dependencies and has no Swift runtime or SwiftPM manifest
+  behavior to port; the Swift package manifest still resolves cleanly under
+  SwiftPM.
 - 2026-05-16: rechecked upstream Rust commit `c15613f2b6` (`Forward apps
   MCP product SKU from Codex config`). Swift config now loads the top-level
   `apps_mcp_product_sku`, blocks project-local config from setting it, carries
