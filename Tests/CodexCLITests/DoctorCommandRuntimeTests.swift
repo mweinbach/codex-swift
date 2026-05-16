@@ -62,6 +62,14 @@ final class DoctorCommandRuntimeTests: XCTestCase {
                             streamSupportsColor: true,
                             terminalSize: .available(DoctorTerminalSize(columns: 120, rows: 40))
                         )
+                    ),
+                    DoctorCommandRuntime.sandboxHelpersCheck(
+                        approvalPolicy: .onRequest,
+                        sandboxPolicy: .newWorkspaceWritePolicy(),
+                        permissionProfile: nil,
+                        cwd: "/tmp/project",
+                        effectiveWorkspaceRoots: [],
+                        helperPaths: DoctorSandboxHelperPaths()
                     )
                 ]
             }
@@ -120,6 +128,17 @@ final class DoctorCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(terminalDetails["terminal size"] as? String, "120x40")
         XCTAssertEqual(terminalDetails["color output"] as? String, "enabled")
 
+        let sandbox = try XCTUnwrap(checks["sandbox.helpers"] as? [String: Any])
+        XCTAssertEqual(sandbox["category"] as? String, "sandbox")
+        XCTAssertEqual(sandbox["status"] as? String, "ok")
+        XCTAssertEqual(sandbox["summary"] as? String, "sandbox configuration is readable")
+        let sandboxDetails = try XCTUnwrap(sandbox["details"] as? [String: Any])
+        XCTAssertEqual(sandboxDetails["approval policy"] as? String, "on-request")
+        XCTAssertEqual(sandboxDetails["filesystem sandbox"] as? String, "restricted")
+        XCTAssertEqual(sandboxDetails["network sandbox"] as? String, "restricted")
+        XCTAssertEqual(sandboxDetails["codex-linux-sandbox helper"] as? String, "none")
+        XCTAssertEqual(sandboxDetails["execve wrapper helper"] as? String, "none")
+
         let config = try XCTUnwrap(checks["config.load"] as? [String: Any])
         XCTAssertEqual(config["id"] as? String, "config.load")
         XCTAssertEqual(config["category"] as? String, "config")
@@ -169,6 +188,32 @@ final class DoctorCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(check.details, [
             "proxy env vars: none",
             "SSL_CERT_FILE: /definitely/missing/cert.pem (No such file or directory)"
+        ])
+    }
+
+    func testSandboxHelpersCheckReportsRustWarningForMissingLinuxHelper() {
+        let check = DoctorCommandRuntime.sandboxHelpersCheck(
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            permissionProfile: nil,
+            cwd: "/tmp/project",
+            effectiveWorkspaceRoots: [],
+            helperPaths: DoctorSandboxHelperPaths(
+                codexLinuxSandbox: "/definitely/missing/codex-linux-sandbox",
+                execveWrapper: "/tmp/main-execve-wrapper"
+            )
+        )
+
+        XCTAssertEqual(check.id, "sandbox.helpers")
+        XCTAssertEqual(check.category, "sandbox")
+        XCTAssertEqual(check.status, .warning)
+        XCTAssertEqual(check.summary, "Linux sandbox helper path does not exist")
+        XCTAssertEqual(check.details, [
+            "approval policy: never",
+            "filesystem sandbox: unrestricted",
+            "network sandbox: enabled",
+            "codex-linux-sandbox helper: /definitely/missing/codex-linux-sandbox",
+            "execve wrapper helper: /tmp/main-execve-wrapper"
         ])
     }
 

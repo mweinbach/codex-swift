@@ -225,17 +225,16 @@ private func runLoginCommand(_ request: CodexCLI.LoginCommandRequest) async thro
 }
 
 private func runDoctorCommand(_ request: CodexCLI.DoctorCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
-    DoctorCommandRuntime.run(
+    let baseDiagnosticChecks = [
+        DoctorCommandRuntime.runtimeProvenanceCheck(codexVersion: CodexCLI.version),
+        DoctorCommandRuntime.searchCheck(),
+        DoctorCommandRuntime.networkEnvironmentCheck(),
+        DoctorCommandRuntime.terminalEnvironmentCheck(noColorFlag: request.noColor)
+    ]
+    return DoctorCommandRuntime.run(
         request: request,
         codexVersion: CodexCLI.version,
-        diagnosticChecks: {
-            [
-                DoctorCommandRuntime.runtimeProvenanceCheck(codexVersion: CodexCLI.version),
-                DoctorCommandRuntime.searchCheck(),
-                DoctorCommandRuntime.networkEnvironmentCheck(),
-                DoctorCommandRuntime.terminalEnvironmentCheck(noColorFlag: request.noColor)
-            ]
-        }
+        diagnosticChecks: { baseDiagnosticChecks + doctorConfigDependentChecks(request) }
     ) {
         do {
             let (codexHome, settings) = try resolvedAuthSettings(overrides: request.configOverrides)
@@ -253,6 +252,25 @@ private func runDoctorCommand(_ request: CodexCLI.DoctorCommandRequest) async th
         } catch {
             return DoctorCommandRuntime.configLoadFailedCheck(error)
         }
+    }
+}
+
+private func doctorConfigDependentChecks(_ request: CodexCLI.DoctorCommandRequest) -> [DoctorCheck] {
+    do {
+        let (_, settings) = try resolvedAuthSettings(overrides: request.configOverrides)
+        let cwd = FileManager.default.currentDirectoryPath
+        return [
+            DoctorCommandRuntime.sandboxHelpersCheck(
+                approvalPolicy: settings.approvalPolicy,
+                sandboxPolicy: settings.legacySandboxPolicy(),
+                permissionProfile: settings.permissionProfile,
+                cwd: cwd,
+                effectiveWorkspaceRoots: settings.workspaceRoots.map(\.path),
+                helperPaths: .detect()
+            )
+        ]
+    } catch {
+        return []
     }
 }
 

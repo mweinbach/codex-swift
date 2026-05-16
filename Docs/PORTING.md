@@ -133,8 +133,9 @@ Recent upstream audit checkpoint:
   carries the same npm global-root probe command selection: `npm.cmd` on
   Windows, `npm` elsewhere. The executable `codex doctor` path now also builds
   the first Rust-shaped diagnostic report slice for config loading, runtime
-  provenance, search-command readiness, network environment readability, and
-  terminal environment metadata/issues, emits the redacted `--json`
+  provenance, search-command readiness, network environment readability,
+  terminal environment metadata/issues, and sandbox helper/config readability,
+  emits the redacted `--json`
   support-report map keyed by check id, renders compact grouped human summary
   output, and exits nonzero when config loading fails. Full diagnostic report
   generation beyond those local checks remains a broader `codex doctor`
