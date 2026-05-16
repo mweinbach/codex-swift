@@ -500,6 +500,7 @@ final class CommandSafetyTests: XCTestCase {
             ["powershell.exe", "-Command", "git --namespace=attacker show HEAD:foo.rs"],
             ["powershell.exe", "-Command", "git --super-prefix attacker/ show HEAD:foo.rs"],
             ["powershell.exe", "-Command", "git --super-prefix=attacker/ show HEAD:foo.rs"],
+            ["powershell.exe", "-Command", "git log --% HEAD"],
             ["powershell.exe", "-Command", "git diff --output codex_poc.txt"],
             ["powershell.exe", "-Command", "git diff --ext-diff HEAD"],
             ["powershell.exe", "-Command", "git log --textconv -1"],
@@ -512,6 +513,14 @@ final class CommandSafetyTests: XCTestCase {
         ] {
             XCTAssertFalse(CommandSafety.isKnownSafeCommand(args), "expected \(args) to be unsafe")
         }
+    }
+
+    func testWindowsPowerShellAllowsQuotedStopParsingMarkerAsLiteral() {
+        XCTAssertTrue(CommandSafety.isKnownSafeCommand([
+            "powershell.exe",
+            "-Command",
+            "Write-Output '--%'"
+        ]))
     }
 
     func testWindowsPowerShellAllowsConstantExpressionArguments() {

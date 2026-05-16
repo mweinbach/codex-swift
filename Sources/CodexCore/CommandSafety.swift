@@ -527,6 +527,7 @@ public enum CommandSafety {
         var escaped = false
         var tokenStarted = false
         var tokenIsDynamic = false
+        var tokenUsedLiteralSyntax = false
         let characters = Array(segment)
         var index = 0
 
@@ -538,9 +539,10 @@ public enum CommandSafety {
                 current.removeAll(keepingCapacity: true)
                 tokenStarted = false
                 tokenIsDynamic = false
+                tokenUsedLiteralSyntax = false
             }
 
-            guard !current.isEmpty, !tokenIsDynamic else {
+            guard !current.isEmpty, !tokenIsDynamic, current != "--%" || tokenUsedLiteralSyntax else {
                 return false
             }
             words.append(current)
@@ -604,6 +606,7 @@ public enum CommandSafety {
             if character == "'" || character == "\"" {
                 quote = character
                 tokenStarted = true
+                tokenUsedLiteralSyntax = true
                 index += 1
                 continue
             }
@@ -611,6 +614,7 @@ public enum CommandSafety {
             if character == "`" {
                 escaped = true
                 tokenStarted = true
+                tokenUsedLiteralSyntax = true
                 index += 1
                 continue
             }

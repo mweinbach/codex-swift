@@ -390,6 +390,11 @@ Recent upstream audit checkpoint:
   `-Command`, lowercase `-nologo` / `-command`, `-NoProfile` / `-c`, and
   full-path `powershell.exe` helper extraction plus unsupported-flag rejection
   behavior.
+- 2026-05-16: rechecked Rust commit `9ea38136b0`
+  (`treat PowerShell stop-parsing forms as unsupported`). Swift PowerShell
+  command-safety tokenization now treats an unquoted `--%` stop-parsing token as
+  unsupported before lowering to argv-like words, while preserving quoted
+  literal `--%` arguments.
 - 2026-05-16: rechecked Rust commit `772e034594` (`Update
   models.json`). Swift's bundled model catalog already matches the current
   Rust catalog: GPT-5.5 and GPT-5.4 expose only the `priority` service tier,
