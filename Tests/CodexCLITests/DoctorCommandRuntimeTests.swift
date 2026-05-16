@@ -95,6 +95,32 @@ final class DoctorCommandRuntimeTests: XCTestCase {
                         versionCache: .missing,
                         latestVersion: .success("0.0.0")
                     )),
+                    DoctorCommandRuntime.mcpConfigCheck(inputs: DoctorMcpConfigCheckInputs(
+                        servers: [
+                            "docs": McpServerConfig(
+                                transport: .stdio(
+                                    command: "docs-mcp",
+                                    args: [],
+                                    env: nil,
+                                    envVars: ["DOCS_TOKEN"],
+                                    cwd: nil
+                                )
+                            ),
+                            "remote": McpServerConfig(
+                                transport: .streamableHttp(
+                                    url: "https://mcp.example/sse",
+                                    bearerTokenEnvVar: "REMOTE_TOKEN",
+                                    httpHeaders: nil,
+                                    envHttpHeaders: nil
+                                )
+                            )
+                        ],
+                        environment: [
+                            "DOCS_TOKEN": "present",
+                            "REMOTE_TOKEN": "present"
+                        ],
+                        pathExecutableNames: ["docs-mcp"]
+                    )),
                     DoctorCommandRuntime.sandboxHelpersCheck(
                         approvalPolicy: .onRequest,
                         sandboxPolicy: .newWorkspaceWritePolicy(),
@@ -216,6 +242,16 @@ final class DoctorCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(updateDetails["version cache"] as? [String], ["/tmp/codex/version.json", "missing"])
         XCTAssertEqual(updateDetails["latest version"] as? String, "0.0.0")
         XCTAssertEqual(updateDetails["latest version status"] as? String, "current version is not older")
+
+        let mcp = try XCTUnwrap(checks["mcp.config"] as? [String: Any])
+        XCTAssertEqual(mcp["category"] as? String, "mcp")
+        XCTAssertEqual(mcp["status"] as? String, "ok")
+        XCTAssertEqual(mcp["summary"] as? String, "MCP configuration is locally consistent")
+        let mcpDetails = try XCTUnwrap(mcp["details"] as? [String: Any])
+        XCTAssertEqual(mcpDetails["configured servers"] as? String, "2")
+        XCTAssertEqual(mcpDetails["disabled servers"] as? String, "0")
+        XCTAssertEqual(mcpDetails["stdio servers"] as? String, "1")
+        XCTAssertEqual(mcpDetails["streamable_http servers"] as? String, "1")
 
         let sandbox = try XCTUnwrap(checks["sandbox.helpers"] as? [String: Any])
         XCTAssertEqual(sandbox["category"] as? String, "sandbox")
@@ -663,6 +699,99 @@ final class DoctorCommandRuntimeTests: XCTestCase {
             "failed to resolve CODEX_HOME"
         ])
         XCTAssertNil(check.remediation)
+    }
+
+    func testMcpConfigCheckReportsNoServersLikeRustDoctor() {
+        let check = DoctorCommandRuntime.mcpConfigCheck(inputs: DoctorMcpConfigCheckInputs(servers: [:]))
+
+        XCTAssertEqual(check.id, "mcp.config")
+        XCTAssertEqual(check.category, "mcp")
+        XCTAssertEqual(check.status, .ok)
+        XCTAssertEqual(check.summary, "no MCP servers configured")
+        XCTAssertEqual(check.details, [])
+        XCTAssertNil(check.remediation)
+    }
+
+    func testMcpConfigCheckWarnsForOptionalLocalIssuesLikeRustDoctor() {
+        let check = DoctorCommandRuntime.mcpConfigCheck(inputs: DoctorMcpConfigCheckInputs(
+            servers: [
+                "docs": McpServerConfig(
+                    transport: .stdio(
+                        command: "docs-mcp",
+                        args: [],
+                        env: ["": "blank"],
+                        envVars: ["DOCS_TOKEN"],
+                        cwd: "/tmp/missing"
+                    )
+                ),
+                "remote": McpServerConfig(
+                    transport: .streamableHttp(
+                        url: "https://mcp.example/sse",
+                        bearerTokenEnvVar: "REMOTE_TOKEN",
+                        httpHeaders: nil,
+                        envHttpHeaders: ["x-api-key": "HEADER_TOKEN"]
+                    ),
+                    enabled: false,
+                    disabledReason: "requirements (managed)"
+                )
+            ],
+            environment: [:]
+        ))
+
+        XCTAssertEqual(check.status, .warning)
+        XCTAssertEqual(check.summary, "MCP configuration has optional issues")
+        XCTAssertEqual(check.details, [
+            "configured servers: 2",
+            "disabled servers: 1",
+            "stdio servers: 1",
+            "streamable_http servers: 1",
+            "docs: cwd does not exist (/tmp/missing)",
+            "docs: stdio command \"docs-mcp\" is not resolvable (PATH is not set)",
+            "docs: empty env key ",
+            "docs: env var DOCS_TOKEN is not set"
+        ])
+        XCTAssertEqual(check.remediation, "Set the missing MCP env vars or disable the affected server.")
+    }
+
+    func testMcpConfigCheckFailsForRequiredMissingInputsLikeRustDoctor() {
+        let check = DoctorCommandRuntime.mcpConfigCheck(inputs: DoctorMcpConfigCheckInputs(
+            servers: [
+                "required_http": McpServerConfig(
+                    transport: .streamableHttp(
+                        url: "https://mcp.example/sse",
+                        bearerTokenEnvVar: "MCP_TOKEN",
+                        httpHeaders: nil,
+                        envHttpHeaders: ["x-api-key": "HEADER_TOKEN"]
+                    ),
+                    required: true
+                ),
+                "working_stdio": McpServerConfig(
+                    transport: .stdio(
+                        command: "docs-mcp",
+                        args: [],
+                        env: nil,
+                        envVars: [],
+                        cwd: "/tmp/work"
+                    )
+                )
+            ],
+            environment: [
+                "HEADER_TOKEN": "present"
+            ],
+            pathExecutableNames: ["docs-mcp"],
+            existingDirectories: ["/tmp/work"]
+        ))
+
+        XCTAssertEqual(check.status, .fail)
+        XCTAssertEqual(check.summary, "MCP configuration has failing required inputs or reachability")
+        XCTAssertEqual(check.details, [
+            "configured servers: 2",
+            "disabled servers: 0",
+            "stdio servers: 1",
+            "streamable_http servers: 1",
+            "required_http: bearer token env var MCP_TOKEN is not set"
+        ])
+        XCTAssertEqual(check.remediation, "Set the missing MCP env vars or disable the affected server.")
     }
 
     func testStatePathsCheckReportsInspectablePathsLikeRustDoctor() {

@@ -270,6 +270,7 @@ private func doctorConfigDependentChecks(_ request: CodexCLI.DoctorCommandReques
                 settings: settings,
                 codexVersion: CodexCLI.version
             ),
+            DoctorCommandRuntime.mcpConfigCheck(settings: settings),
             DoctorCommandRuntime.sandboxHelpersCheck(
                 approvalPolicy: settings.approvalPolicy,
                 sandboxPolicy: settings.legacySandboxPolicy(),
