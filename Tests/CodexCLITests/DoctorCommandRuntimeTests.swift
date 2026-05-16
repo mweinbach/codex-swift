@@ -176,6 +176,23 @@ final class DoctorCommandRuntimeTests: XCTestCase {
                         routeProbeResults: [
                             "https://api.openai.com/v1/models": .ok("HTTP 401")
                         ]
+                    )),
+                    DoctorCommandRuntime.websocketReachabilityCheck(inputs: DoctorWebsocketReachabilityInputs(
+                        providerID: "openai",
+                        providerName: "OpenAI",
+                        wireAPI: .responses,
+                        supportsWebsockets: true,
+                        proxyEnvironment: ["HTTPS_PROXY": "https://proxy.example"],
+                        connectTimeoutMilliseconds: 15_000,
+                        authModeDescription: "api_key",
+                        endpoint: "wss://api.openai.com/v1/responses",
+                        dnsDetails: "DNS: 1 IPv4, 0 IPv6, first IPv4",
+                        outcome: .handshakeSucceeded(DoctorWebsocketHandshakeResult(
+                            httpStatus: 101,
+                            reasoningHeaderPresent: true,
+                            modelsETagPresent: true,
+                            serverModelPresent: false
+                        ))
                     ))
                 ]
             }
@@ -333,6 +350,21 @@ final class DoctorCommandRuntimeTests: XCTestCase {
             reachabilityDetails["openai API route probe"] as? String,
             "https://api.openai.com/v1/models route exists (HTTP 401)"
         )
+
+        let websocket = try XCTUnwrap(checks["network.websocket_reachability"] as? [String: Any])
+        XCTAssertEqual(websocket["category"] as? String, "websocket")
+        XCTAssertEqual(websocket["status"] as? String, "ok")
+        XCTAssertEqual(websocket["summary"] as? String, "Responses WebSocket handshake succeeded")
+        let websocketDetails = try XCTUnwrap(websocket["details"] as? [String: Any])
+        XCTAssertEqual(websocketDetails["model provider"] as? String, "openai")
+        XCTAssertEqual(websocketDetails["provider name"] as? String, "OpenAI")
+        XCTAssertEqual(websocketDetails["wire API"] as? String, "responses")
+        XCTAssertEqual(websocketDetails["supports websockets"] as? String, "true")
+        XCTAssertEqual(websocketDetails["connect timeout"] as? String, "15000 ms")
+        XCTAssertEqual(websocketDetails["auth mode"] as? String, "api_key")
+        XCTAssertEqual(websocketDetails["endpoint"] as? String, "wss://api.openai.com/v1/responses")
+        XCTAssertEqual(websocketDetails["handshake result"] as? String, "HTTP 101")
+        XCTAssertEqual(websocketDetails["reasoning header"] as? String, "true")
 
         let config = try XCTUnwrap(checks["config.load"] as? [String: Any])
         XCTAssertEqual(config["id"] as? String, "config.load")
@@ -987,6 +1019,106 @@ final class DoctorCommandRuntimeTests: XCTestCase {
             "active provider endpoint: none configured"
         ])
         XCTAssertNil(check.remediation)
+    }
+
+    func testWebsocketReachabilityCheckReportsUnsupportedProviderLikeRustDoctor() {
+        let check = DoctorCommandRuntime.websocketReachabilityCheck(inputs: DoctorWebsocketReachabilityInputs(
+            providerID: "ollama",
+            providerName: "gpt-oss",
+            wireAPI: .responses,
+            supportsWebsockets: false,
+            proxyEnvironment: ["HTTPS_PROXY": "https://proxy.example"]
+        ))
+
+        XCTAssertEqual(check.id, "network.websocket_reachability")
+        XCTAssertEqual(check.category, "websocket")
+        XCTAssertEqual(check.status, .ok)
+        XCTAssertEqual(check.summary, "Responses WebSocket is not enabled for the active provider")
+        XCTAssertEqual(check.details, [
+            "model provider: ollama",
+            "provider name: gpt-oss",
+            "wire API: responses",
+            "supports websockets: false",
+            "proxy env vars: HTTPS_PROXY"
+        ])
+        XCTAssertNil(check.remediation)
+    }
+
+    func testWebsocketReachabilityCheckReportsImmediateCloseWarningLikeRustDoctor() {
+        let check = DoctorCommandRuntime.websocketReachabilityCheck(inputs: DoctorWebsocketReachabilityInputs(
+            providerID: "openai",
+            providerName: "OpenAI",
+            wireAPI: .responses,
+            supportsWebsockets: true,
+            connectTimeoutMilliseconds: 15_000,
+            authModeDescription: "chatgpt",
+            endpoint: "wss://chatgpt.com/backend-api/codex/responses",
+            dnsDetails: "DNS: 2 IPv4, 1 IPv6, first IPv4",
+            outcome: .closedImmediately(
+                DoctorWebsocketHandshakeResult(
+                    httpStatus: 101,
+                    reasoningHeaderPresent: true,
+                    modelsETagPresent: false,
+                    serverModelPresent: true
+                ),
+                code: 1008,
+                reason: "policy violation"
+            )
+        ))
+
+        XCTAssertEqual(check.status, .warning)
+        XCTAssertEqual(check.summary, "Responses WebSocket closed immediately after handshake")
+        XCTAssertEqual(check.details, [
+            "model provider: openai",
+            "provider name: OpenAI",
+            "wire API: responses",
+            "supports websockets: true",
+            "proxy env vars: none",
+            "connect timeout: 15000 ms",
+            "auth mode: chatgpt",
+            "endpoint: wss://chatgpt.com/backend-api/codex/responses",
+            "DNS: 2 IPv4, 1 IPv6, first IPv4",
+            "handshake result: HTTP 101",
+            "reasoning header: true",
+            "models etag present: false",
+            "server model present: true",
+            "immediate close code: 1008",
+            "immediate close reason: policy violation"
+        ])
+        XCTAssertEqual(
+            check.remediation,
+            "Check proxy, VPN, firewall, DNS, custom CA, and WebSocket policy support."
+        )
+    }
+
+    func testWebsocketURLForResponsesPathPreservesRustSchemeConversion() {
+        let retry = ProviderRetryConfig(
+            maxAttempts: 1,
+            baseDelayMilliseconds: 200,
+            retry429: false,
+            retry5xx: true,
+            retryTransport: true
+        )
+        XCTAssertEqual(
+            DoctorCommandRuntime.websocketURLForResponsesPath(apiProvider: APIProvider(
+                name: "OpenAI",
+                baseURL: "https://api.openai.com/v1",
+                wireAPI: .responses,
+                retry: retry,
+                streamIdleTimeoutMilliseconds: 300_000
+            )),
+            "wss://api.openai.com/v1/responses"
+        )
+        XCTAssertEqual(
+            DoctorCommandRuntime.websocketURLForResponsesPath(apiProvider: APIProvider(
+                name: "local",
+                baseURL: "http://127.0.0.1:11434/v1/",
+                wireAPI: .responses,
+                retry: retry,
+                streamIdleTimeoutMilliseconds: 300_000
+            )),
+            "ws://127.0.0.1:11434/v1/responses"
+        )
     }
 
     func testStatePathsCheckReportsInspectablePathsLikeRustDoctor() {

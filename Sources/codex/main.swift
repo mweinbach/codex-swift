@@ -293,12 +293,27 @@ private func doctorConfigDependentChecks(_ request: CodexCLI.DoctorCommandReques
             DoctorCommandRuntime.providerReachabilityCheck(
                 codexHome: codexHome,
                 settings: settings
+            ),
+            DoctorCommandRuntime.websocketReachabilityCheck(
+                codexHome: codexHome,
+                settings: settings
             )
         ]
     } catch {
         return [
             DoctorCommandRuntime.fallbackStatePathsCheck(),
-            DoctorCommandRuntime.defaultProviderReachabilityCheck()
+            DoctorCommandRuntime.defaultProviderReachabilityCheck(),
+            DoctorCommandRuntime.websocketReachabilityCheck(inputs: DoctorWebsocketReachabilityInputs(
+                providerID: "openai",
+                providerName: ModelProviderInfo.openAIProviderName,
+                wireAPI: .responses,
+                supportsWebsockets: true,
+                proxyEnvironment: ProcessInfo.processInfo.environment,
+                connectTimeoutMilliseconds: ModelProviderInfo.defaultWebsocketConnectTimeoutMilliseconds,
+                authModeDescription: "none",
+                endpoint: "wss://api.openai.com/v1/responses",
+                outcome: .notAttempted("handshake probe is not implemented in Swift doctor yet")
+            ))
         ]
     }
 }
