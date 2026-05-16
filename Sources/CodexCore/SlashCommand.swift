@@ -23,7 +23,6 @@ public enum SlashCommand: String, CaseIterable, Equatable, Sendable {
     case compact
     case plan
     case goal
-    case collab
     case agent
     case side
     case copy
@@ -120,8 +119,6 @@ public enum SlashCommand: String, CaseIterable, Equatable, Sendable {
             return "switch to Plan mode"
         case .goal:
             return "set or view the goal for a long-running task"
-        case .collab:
-            return "change collaboration mode (experimental)"
         case .agent, .multiAgents:
             return "switch the active agent thread"
         case .side:
@@ -162,7 +159,7 @@ public enum SlashCommand: String, CaseIterable, Equatable, Sendable {
         case .review, .rename, .plan, .goal, .ide, .keymap, .mcp, .raw, .side, .resume, .sandboxAddReadDir:
             return true
         case .model, .permissions, .vim, .setupDefaultSandbox, .experimental, .autoReview, .memories, .skills,
-             .hooks, .new, .fork, .`init`, .compact, .collab, .agent, .copy, .diff, .mention, .status,
+             .hooks, .new, .fork, .`init`, .compact, .agent, .copy, .diff, .mention, .status,
              .debugConfig, .title, .statusline, .theme, .apps, .plugins, .logout, .quit, .exit, .feedback,
              .rollout, .ps, .stop, .clear, .personality, .realtime, .settings, .testApproval, .multiAgents,
              .memoryDrop, .memoryUpdate:
@@ -176,7 +173,7 @@ public enum SlashCommand: String, CaseIterable, Equatable, Sendable {
             return true
         case .model, .permissions, .keymap, .vim, .setupDefaultSandbox, .sandboxAddReadDir, .experimental,
              .autoReview, .memories, .skills, .hooks, .review, .rename, .new, .resume, .fork, .`init`,
-             .compact, .plan, .goal, .collab, .agent, .side, .debugConfig, .title, .statusline, .theme,
+             .compact, .plan, .goal, .agent, .side, .debugConfig, .title, .statusline, .theme,
              .mcp, .apps, .plugins, .logout, .quit, .exit, .feedback, .rollout, .ps, .stop, .clear,
              .personality, .realtime, .settings, .testApproval, .multiAgents, .memoryDrop, .memoryUpdate:
             return false
@@ -191,7 +188,7 @@ public enum SlashCommand: String, CaseIterable, Equatable, Sendable {
             return false
         case .diff, .copy, .raw, .rename, .mention, .skills, .hooks, .status, .debugConfig, .ps, .stop,
              .goal, .mcp, .apps, .plugins, .title, .statusline, .autoReview, .feedback, .ide, .quit, .exit,
-             .side, .rollout, .testApproval, .realtime, .settings, .collab, .agent, .multiAgents:
+             .side, .rollout, .testApproval, .realtime, .settings, .agent, .multiAgents:
             return true
         }
     }
@@ -218,7 +215,7 @@ public enum SlashCommand: String, CaseIterable, Equatable, Sendable {
     public static func builtInCommands(options: SlashCommandOptions) -> [(String, SlashCommand)] {
         builtInCommands(includeDebugCommands: options.includeDebugCommands)
             .filter { _, command in options.allowElevateSandbox || command != .setupDefaultSandbox }
-            .filter { _, command in options.collaborationModesEnabled || !(command == .collab || command == .plan) }
+            .filter { _, command in options.collaborationModesEnabled || command != .plan }
             .filter { _, command in options.connectorsEnabled || command != .apps }
             .filter { _, command in options.pluginsCommandEnabled || command != .plugins }
             .filter { _, command in options.goalCommandEnabled || command != .goal }
@@ -246,7 +243,7 @@ public enum SlashCommand: String, CaseIterable, Equatable, Sendable {
             return includeDebugCommands
         case .model, .ide, .permissions, .keymap, .vim, .setupDefaultSandbox, .experimental, .autoReview,
              .memories, .skills, .hooks, .review, .rename, .new, .resume, .fork, .`init`, .compact, .plan,
-             .goal, .collab, .agent, .side, .raw, .diff, .mention, .status, .debugConfig, .title,
+             .goal, .agent, .side, .raw, .diff, .mention, .status, .debugConfig, .title,
              .statusline, .theme, .mcp, .apps, .plugins, .logout, .quit, .exit, .feedback, .ps, .stop,
              .clear, .personality, .realtime, .settings, .multiAgents, .memoryDrop, .memoryUpdate:
             return true

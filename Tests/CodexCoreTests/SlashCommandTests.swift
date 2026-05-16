@@ -30,7 +30,6 @@ final class SlashCommandTests: XCTestCase {
             "compact",
             "plan",
             "goal",
-            "collab",
             "agent",
             "side",
             "copy",
@@ -78,6 +77,7 @@ final class SlashCommandTests: XCTestCase {
         XCTAssertEqual(SlashCommand.from(commandName: "clean"), .stop)
         XCTAssertEqual(SlashCommand.autoReview.command, "approve")
         XCTAssertEqual(SlashCommand.from(commandName: "approve"), .autoReview)
+        XCTAssertNil(SlashCommand.from(commandName: "collab"))
     }
 
     func testAvailabilityDuringTaskMatchesRustLogic() {
@@ -215,6 +215,7 @@ final class SlashCommandTests: XCTestCase {
             )
         )
         XCTAssertEqual(SlashCommandCatalog.find("goal", options: allEnabledOptions()), .builtIn(.goal))
+        XCTAssertNil(SlashCommandCatalog.find("collab", options: allEnabledOptions()))
     }
 
     func testSideConversationExactLookupStillResolvesHiddenCommandsForDispatch() {

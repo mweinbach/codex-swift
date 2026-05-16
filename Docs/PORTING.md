@@ -20,6 +20,11 @@ Recent upstream audit checkpoint:
   polls emit `PostToolUse` as Bash using the original `exec_command` call id,
   original command input, and raw collected terminal output, including
   parallel-session-safe metadata carried with the persisted exec session.
+- 2026-05-16: rechecked Rust commit `efdcbba053` (`Remove resurrected
+  /collab slash command`). Swift slash-command catalog parity now removes the
+  `collab` command from the built-in command enum, presentation order,
+  description/availability tables, and exact lookup path while keeping the
+  app-server `collaborationMode/list` API surface intact.
 - 2026-05-16: rechecked Rust live turn metadata construction in
   `codex-rs/core/src/session/turn_context.rs`,
   `codex-rs/core/src/session/handlers.rs`,
