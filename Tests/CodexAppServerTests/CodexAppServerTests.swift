@@ -25023,6 +25023,76 @@ final class CodexAppServerTests: XCTestCase {
         ])
     }
 
+    func testMcpServerStatusListKeepsToolsWhenResourceInventoryFailsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [mcp_servers.docs]
+        url = "https://mcp.example.test/mcp"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let configuration = CodexAppServerConfiguration(
+            codexHome: temp.url,
+            requiresOpenAIAuth: false,
+            environment: [
+                CodexConfigLayerLoader.managedConfigEnvironmentVariable: temp.url
+                    .appendingPathComponent("missing-managed-config.toml", isDirectory: false)
+                    .path
+            ],
+            mcpHTTPTransport: { request in
+                let body = try XCTUnwrap(request.httpBody)
+                let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                let params = object["params"] as? [String: Any]
+                switch (object["method"] as? String, params?["cursor"] as? String) {
+                case ("initialize", nil):
+                    return URLSessionTransportResponse(
+                        statusCode: 200,
+                        headers: ["mcp-session-id": "partial-session"],
+                        body: Data(#"{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"docs","version":"1.0.0"}}}"#.utf8)
+                    )
+                case ("tools/list", nil):
+                    return URLSessionTransportResponse(
+                        statusCode: 200,
+                        body: Data(#"{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"lookup","description":"Look up docs.","inputSchema":{"type":"object"}}]}}"#.utf8)
+                    )
+                case ("resources/list", nil):
+                    return URLSessionTransportResponse(
+                        statusCode: 200,
+                        body: Data(#"{"jsonrpc":"2.0","id":2,"result":{"resources":[{"name":"manual-1","uri":"test://docs/manual-1"}],"nextCursor":"stuck"}}"#.utf8)
+                    )
+                case ("resources/list", "stuck"):
+                    return URLSessionTransportResponse(
+                        statusCode: 200,
+                        body: Data(#"{"jsonrpc":"2.0","id":3,"result":{"resources":[{"name":"manual-2","uri":"test://docs/manual-2"}],"nextCursor":"stuck"}}"#.utf8)
+                    )
+                case ("resources/templates/list", nil):
+                    return URLSessionTransportResponse(
+                        statusCode: 200,
+                        body: Data(#"{"jsonrpc":"2.0","id":4,"result":{"resourceTemplates":[{"name":"memo","uriTemplate":"test://docs/{id}"}]}}"#.utf8)
+                    )
+                default:
+                    return URLSessionTransportResponse(
+                        statusCode: 500,
+                        body: Data(#"{"jsonrpc":"2.0","id":99,"error":{"code":-32601,"message":"unexpected partial inventory request"}}"#.utf8)
+                    )
+                }
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"mcpServerStatus/list","params":{"detail":"full"}}"#,
+            configuration: configuration
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        let status = try XCTUnwrap(data.first)
+        let tools = try XCTUnwrap(status["tools"] as? [String: [String: Any]])
+        XCTAssertEqual(Set(tools.keys), ["lookup"])
+        XCTAssertEqual((status["resources"] as? [Any])?.count, 0)
+        let templates = try XCTUnwrap(status["resourceTemplates"] as? [[String: Any]])
+        XCTAssertEqual(templates.map { $0["uriTemplate"] as? String }, ["test://docs/{id}"])
+    }
+
     func testMcpServerStatusListToolsAndAuthOnlySkipsResourceInventory() throws {
         let temp = try TemporaryDirectory()
         try """

@@ -22,6 +22,11 @@ Recent upstream audit checkpoint:
   fixture. Swift `mcpServerStatus/list` coverage now pins raw per-server tool
   maps for configured MCP server names that would collide after sanitization,
   such as `some-server` and `some_server`.
+- 2026-05-16: rechecked Rust's MCP status snapshot collection in
+  `codex-rs/codex-mcp/src/mcp/mod.rs` and `connection_manager.rs`. Swift
+  `mcpServerStatus/list` now preserves discovered tools when `full`
+  resource or resource-template inventory fails, matching Rust's independent
+  best-effort collection instead of dropping the whole server snapshot.
 - 2026-05-16: rechecked upstream Rust commit `c15613f2b6` (`Forward apps
   MCP product SKU from Codex config`). Swift config now loads the top-level
   `apps_mcp_product_sku`, blocks project-local config from setting it, carries

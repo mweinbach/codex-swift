@@ -13290,30 +13290,38 @@ public enum CodexAppServer {
 
         if detail == .full {
             var requestID = 2
-            snapshot.resources[server] = try mcpReadStdioPaginatedArray(
-                key: "resources",
-                method: "resources/list",
-                nextRequestID: &requestID,
-                stdin: stdin.fileHandleForWriting,
-                stdout: stdout,
-                stderr: stderr,
-                process: process,
-                timeout: timeout,
-                server: server,
-                as: McpResource.self
-            )
-            snapshot.resourceTemplates[server] = try mcpReadStdioPaginatedArray(
-                key: "resourceTemplates",
-                method: "resources/templates/list",
-                nextRequestID: &requestID,
-                stdin: stdin.fileHandleForWriting,
-                stdout: stdout,
-                stderr: stderr,
-                process: process,
-                timeout: timeout,
-                server: server,
-                as: McpResourceTemplate.self
-            )
+            do {
+                snapshot.resources[server] = try mcpReadStdioPaginatedArray(
+                    key: "resources",
+                    method: "resources/list",
+                    nextRequestID: &requestID,
+                    stdin: stdin.fileHandleForWriting,
+                    stdout: stdout,
+                    stderr: stderr,
+                    process: process,
+                    timeout: timeout,
+                    server: server,
+                    as: McpResource.self
+                )
+            } catch {
+                snapshot.resources[server] = []
+            }
+            do {
+                snapshot.resourceTemplates[server] = try mcpReadStdioPaginatedArray(
+                    key: "resourceTemplates",
+                    method: "resources/templates/list",
+                    nextRequestID: &requestID,
+                    stdin: stdin.fileHandleForWriting,
+                    stdout: stdout,
+                    stderr: stderr,
+                    process: process,
+                    timeout: timeout,
+                    server: server,
+                    as: McpResourceTemplate.self
+                )
+            } catch {
+                snapshot.resourceTemplates[server] = []
+            }
         }
 
         stdin.fileHandleForWriting.closeFile()
@@ -13361,30 +13369,38 @@ public enum CodexAppServer {
 
         if detail == .full {
             var requestID = 2
-            snapshot.resources[server] = try await mcpReadHTTPPaginatedArray(
-                key: "resources",
-                method: "resources/list",
-                nextRequestID: &requestID,
-                url: url,
-                headers: headers,
-                sessionID: sessionID,
-                transport: configuration.mcpHTTPTransport,
-                timeoutSeconds: timeoutSeconds,
-                server: server,
-                as: McpResource.self
-            )
-            snapshot.resourceTemplates[server] = try await mcpReadHTTPPaginatedArray(
-                key: "resourceTemplates",
-                method: "resources/templates/list",
-                nextRequestID: &requestID,
-                url: url,
-                headers: headers,
-                sessionID: sessionID,
-                transport: configuration.mcpHTTPTransport,
-                timeoutSeconds: timeoutSeconds,
-                server: server,
-                as: McpResourceTemplate.self
-            )
+            do {
+                snapshot.resources[server] = try await mcpReadHTTPPaginatedArray(
+                    key: "resources",
+                    method: "resources/list",
+                    nextRequestID: &requestID,
+                    url: url,
+                    headers: headers,
+                    sessionID: sessionID,
+                    transport: configuration.mcpHTTPTransport,
+                    timeoutSeconds: timeoutSeconds,
+                    server: server,
+                    as: McpResource.self
+                )
+            } catch {
+                snapshot.resources[server] = []
+            }
+            do {
+                snapshot.resourceTemplates[server] = try await mcpReadHTTPPaginatedArray(
+                    key: "resourceTemplates",
+                    method: "resources/templates/list",
+                    nextRequestID: &requestID,
+                    url: url,
+                    headers: headers,
+                    sessionID: sessionID,
+                    transport: configuration.mcpHTTPTransport,
+                    timeoutSeconds: timeoutSeconds,
+                    server: server,
+                    as: McpResourceTemplate.self
+                )
+            } catch {
+                snapshot.resourceTemplates[server] = []
+            }
         }
 
         return snapshot
