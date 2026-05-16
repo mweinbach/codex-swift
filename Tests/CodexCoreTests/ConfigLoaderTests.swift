@@ -789,11 +789,11 @@ final class ConfigLoaderTests: XCTestCase {
                             access: .read
                         ),
                         FileSystemSandboxEntry(
-                            path: .special(FileSystemSpecialPath.projectRoots(subpath: "docs").jsonValue),
+                            path: .path(dir.url.appendingPathComponent("docs", isDirectory: true).standardizedFileURL.path),
                             access: .read
                         ),
                         FileSystemSandboxEntry(
-                            path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue),
+                            path: .path(dir.url.standardizedFileURL.path),
                             access: .write
                         )
                     ],
@@ -830,6 +830,7 @@ final class ConfigLoaderTests: XCTestCase {
         "." = "write"
         ".git" = "read"
         ".codex" = "read"
+        "**/*.env" = "none"
         """.write(
             to: dir.url.appendingPathComponent("config.toml"),
             atomically: true,
@@ -858,6 +859,38 @@ final class ConfigLoaderTests: XCTestCase {
                 cwd: cwd.url.path
             ))
         }
+        XCTAssertEqual(
+            policy.getUnreadableGlobsWithCwd(cwd.url.path),
+            [
+                "\(cwd.url.standardizedFileURL.path)/**/*.env",
+                "\(profileRoot.url.standardizedFileURL.path)/**/*.env"
+            ].sorted()
+        )
+    }
+
+    func testPermissionProfileWorkspaceRootGlobsMaterializeAgainstCwdWithoutProfileRootsLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let cwd = try CoreTemporaryDirectory()
+        try """
+        default_permissions = "workspace"
+
+        [permissions.workspace.filesystem.":workspace_roots"]
+        "." = "write"
+        "**/*.env" = "none"
+        """.write(
+            to: dir.url.appendingPathComponent("config.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, cwd: cwd.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.workspaceRoots.map(\.path), [cwd.url.standardizedFileURL.path])
+        let policy = try XCTUnwrap(config.permissionProfile?.fileSystemSandboxPolicy)
+        XCTAssertEqual(
+            policy.getUnreadableGlobsWithCwd(cwd.url.path),
+            ["\(cwd.url.standardizedFileURL.path)/**/*.env"]
+        )
     }
 
     func testPermissionProfileGlobScanDepthRejectsZeroLikeRust() throws {

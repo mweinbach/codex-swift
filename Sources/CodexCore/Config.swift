@@ -1301,7 +1301,7 @@ public enum CodexConfigLoader {
                 fileManager: fileManager
             )
             config.activePermissionProfile = ActivePermissionProfile(id: defaultPermissions)
-            try applyProfileWorkspaceRoots(
+            try applyEffectiveWorkspaceRoots(
                 from: parsed,
                 profileName: defaultPermissions,
                 to: &config,
@@ -1329,17 +1329,13 @@ public enum CodexConfigLoader {
         return config
     }
 
-    private static func applyProfileWorkspaceRoots(
+    private static func applyEffectiveWorkspaceRoots(
         from parsed: ParsedCodexConfigToml,
         profileName: String,
         to config: inout CodexRuntimeConfig,
         cwd: URL
     ) throws {
         let profileWorkspaceRoots = try parsed.profileWorkspaceRoots(named: profileName, cwd: cwd)
-        guard !profileWorkspaceRoots.isEmpty else {
-            return
-        }
-
         let cwdRoot = try AbsolutePath(absolutePath: cwd.standardizedFileURL.path)
         let workspaceRoots = deduplicatedAbsolutePaths([cwdRoot] + profileWorkspaceRoots)
         config.profileWorkspaceRoots = profileWorkspaceRoots
@@ -1895,7 +1891,7 @@ private struct ParsedPermissionProfileToml: Equatable, Sendable {
         if let special = filesystemSpecialPath(raw) {
             switch special {
             case .projectRoots:
-                return try AbsolutePath.resolve(relativeSubpath, against: cwd.standardizedFileURL.path).path
+                return projectRootsGlobPattern(relativeSubpath)
             case .root, .minimal, .tmpdir, .slashTmp, .unknown:
                 throw CodexConfigLoadError.invalidConfigLine(
                     "filesystem path `\(raw)` does not support nested entries"

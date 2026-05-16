@@ -112,6 +112,23 @@ public enum FileSystemPath: Equatable, Codable, Sendable {
     }
 }
 
+let projectRootsGlobPatternPrefix = "codex-project-roots://"
+
+func projectRootsGlobPattern(_ subpath: String) -> String {
+    "\(projectRootsGlobPatternPrefix)\(subpath)"
+}
+
+func parseProjectRootsGlobPattern(_ pattern: String) -> String? {
+    guard pattern.hasPrefix(projectRootsGlobPatternPrefix) else {
+        return nil
+    }
+    return String(pattern.dropFirst(projectRootsGlobPatternPrefix.count))
+}
+
+func resolveProjectRootsGlobPattern(_ subpath: String, root: AbsolutePath) -> String {
+    (try? root.join(subpath).path) ?? root.path
+}
+
 extension String {
     var isRustAbsolutePath: Bool {
         if hasPrefix("/") || hasPrefix(#"\\"#) {
@@ -1088,14 +1105,24 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
         }
 
         let entries = currentEntries.map { entry in
-            guard case let .special(value) = entry.path,
-                  case let .projectRoots(subpath) = FileSystemSpecialPath(jsonValue: value)
-            else {
+            switch entry.path {
+            case let .special(value):
+                guard case let .projectRoots(subpath) = FileSystemSpecialPath(jsonValue: value) else {
+                    return entry
+                }
+                let resolvedPath = subpath.flatMap { try? cwdPath.join($0) } ?? cwdPath
+                return FileSystemSandboxEntry(path: .path(resolvedPath.path), access: entry.access)
+            case let .globPattern(pattern):
+                guard let subpath = parseProjectRootsGlobPattern(pattern) else {
+                    return entry
+                }
+                return FileSystemSandboxEntry(
+                    path: .globPattern(resolveProjectRootsGlobPattern(subpath, root: cwdPath)),
+                    access: entry.access
+                )
+            case .path:
                 return entry
             }
-
-            let resolvedPath = subpath.flatMap { try? cwdPath.join($0) } ?? cwdPath
-            return FileSystemSandboxEntry(path: .path(resolvedPath.path), access: entry.access)
         }
 
         return .restricted(entries: entries, globScanMaxDepth: globScanMaxDepth)
@@ -1110,20 +1137,40 @@ public enum FileSystemSandboxPolicy: Equatable, Sendable {
 
         var entries: [FileSystemSandboxEntry] = []
         for entry in currentEntries {
-            guard case let .special(value) = entry.path,
-                  case let .projectRoots(subpath) = FileSystemSpecialPath(jsonValue: value)
-            else {
+            switch entry.path {
+            case let .special(value):
+                guard case let .projectRoots(subpath) = FileSystemSpecialPath(jsonValue: value) else {
+                    if !entries.contains(entry) {
+                        entries.append(entry)
+                    }
+                    continue
+                }
+                for root in workspaceRoots {
+                    let resolvedPath = subpath.flatMap { try? root.join($0) } ?? root
+                    let materialized = FileSystemSandboxEntry(path: .path(resolvedPath.path), access: entry.access)
+                    if !entries.contains(materialized) {
+                        entries.append(materialized)
+                    }
+                }
+            case let .globPattern(pattern):
+                guard let subpath = parseProjectRootsGlobPattern(pattern) else {
+                    if !entries.contains(entry) {
+                        entries.append(entry)
+                    }
+                    continue
+                }
+                for root in workspaceRoots {
+                    let materialized = FileSystemSandboxEntry(
+                        path: .globPattern(resolveProjectRootsGlobPattern(subpath, root: root)),
+                        access: entry.access
+                    )
+                    if !entries.contains(materialized) {
+                        entries.append(materialized)
+                    }
+                }
+            case .path:
                 if !entries.contains(entry) {
                     entries.append(entry)
-                }
-                continue
-            }
-
-            for root in workspaceRoots {
-                let resolvedPath = subpath.flatMap { try? root.join($0) } ?? root
-                let materialized = FileSystemSandboxEntry(path: .path(resolvedPath.path), access: entry.access)
-                if !entries.contains(materialized) {
-                    entries.append(materialized)
                 }
             }
         }

@@ -1247,6 +1247,53 @@ final class SubmissionTests: XCTestCase {
         XCTAssertTrue(isReadDenied(aliasSecret.path, policy: policy, cwd: root.path))
     }
 
+    func testMaterializeProjectRootsWithWorkspaceRootsExpandsExactAndGlobEntriesLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let first = try AbsolutePath(absolutePath: temp.url.appendingPathComponent("first").path)
+        let second = try AbsolutePath(absolutePath: temp.url.appendingPathComponent("second").path)
+        let policy = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(
+                path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue),
+                access: .write
+            ),
+            FileSystemSandboxEntry(
+                path: .special(FileSystemSpecialPath.projectRoots(subpath: ".git").jsonValue),
+                access: .read
+            ),
+            FileSystemSandboxEntry(
+                path: .globPattern("codex-project-roots://**/*.env"),
+                access: .none
+            )
+        ])
+
+        XCTAssertEqual(
+            policy.materializeProjectRoots(withWorkspaceRoots: [first, second]),
+            FileSystemSandboxPolicy.restricted(entries: [
+                FileSystemSandboxEntry(path: .path(first.path), access: .write),
+                FileSystemSandboxEntry(path: .path(second.path), access: .write),
+                FileSystemSandboxEntry(path: .path(try first.join(".git").path), access: .read),
+                FileSystemSandboxEntry(path: .path(try second.join(".git").path), access: .read),
+                FileSystemSandboxEntry(path: .globPattern(try first.join("**/*.env").path), access: .none),
+                FileSystemSandboxEntry(path: .globPattern(try second.join("**/*.env").path), access: .none)
+            ])
+        )
+    }
+
+    func testMaterializeProjectRootsWithCwdExpandsSymbolicGlobEntriesLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try AbsolutePath(absolutePath: temp.url.path)
+        let policy = FileSystemSandboxPolicy.restricted(entries: [
+            FileSystemSandboxEntry(path: .globPattern("codex-project-roots://**/*.env"), access: .none)
+        ])
+
+        XCTAssertEqual(
+            policy.materializeProjectRootsWithCwd(cwd.path),
+            FileSystemSandboxPolicy.restricted(entries: [
+                FileSystemSandboxEntry(path: .globPattern(try cwd.join("**/*.env").path), access: .none)
+            ])
+        )
+    }
+
     func testReadDenyMatcherLiteralPatternsAndGlobsMatchRust() throws {
         let temp = try TemporaryDirectory()
         let root = try AbsolutePath(absolutePath: temp.url.path)

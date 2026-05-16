@@ -27,6 +27,8 @@ Recent upstream audit checkpoint:
   now also parses `[permissions.<profile>.workspace_roots]`, preserves the
   enabled profile roots separately from the combined runtime workspace roots,
   materializes profile `:workspace_roots` filesystem rules across cwd plus
+  profile roots, keeps deny-read globs symbolic until materialization using
+  Rust's `codex-project-roots://` prefix, expands those globs across cwd and
   profile roots, and forwards profile roots on live `turn/start` submissions
   through Rust's `profile_workspace_roots` core-op field. The broader symbolic
   permission-state representation and runtime `workspace_roots_explicit` flag
