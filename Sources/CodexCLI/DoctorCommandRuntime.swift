@@ -95,6 +95,11 @@ public struct DoctorReport: Codable, Equatable, Sendable {
     }
 }
 
+public enum DoctorCommandOutput: Equatable, Sendable {
+    case success(String)
+    case failure(String)
+}
+
 public enum DoctorCommandRuntime {
     public static var npmGlobalRootArguments: [String] {
         ["root", "-g"]
@@ -112,12 +117,13 @@ public enum DoctorCommandRuntime {
         request: CodexCLI.DoctorCommandRequest,
         codexVersion: String,
         generatedAt: String = generatedAt(),
+        diagnosticChecks: () -> [DoctorCheck] = { [] },
         configCheck: () -> DoctorCheck
     ) -> CodexCLI.CommandExecutionResult {
         let report = DoctorReport(
             generatedAt: generatedAt,
             codexVersion: codexVersion,
-            checks: [configCheck()]
+            checks: diagnosticChecks() + [configCheck()]
         )
         let output: String
         if request.json {
@@ -129,6 +135,111 @@ public enum DoctorCommandRuntime {
             exitCode: report.overallStatus == .fail ? 1 : 0,
             stdoutMessage: output
         )
+    }
+
+    public static func runtimeProvenanceCheck(
+        codexVersion: String,
+        currentExecutablePath: String? = CommandLine.arguments.first,
+        osName: String? = nil,
+        architecture: String? = nil,
+        installMethod: String = "local build",
+        installDescription: String = "other",
+        buildCommit: String? = nil
+    ) -> DoctorCheck {
+        let osName = osName ?? defaultOSName
+        let architecture = architecture ?? defaultArchitecture
+        let buildCommit = buildCommit ?? defaultBuildCommit
+        let platform = "\(osName)-\(architecture)"
+        var details = [
+            "version: \(codexVersion)",
+            "platform: \(platform)",
+            "install method: \(installDescription)",
+            "commit: \(buildCommit)"
+        ]
+        if let currentExecutablePath, !currentExecutablePath.isEmpty {
+            details.append("current executable: \(currentExecutablePath)")
+        } else {
+            details.append("current executable: unavailable")
+        }
+        return DoctorCheck(
+            id: "runtime.provenance",
+            category: "runtime",
+            status: .ok,
+            summary: "running \(installMethod) on \(platform)",
+            details: details
+        )
+    }
+
+    public static func searchCheck(
+        rgCommand: String = "rg",
+        searchProvider: String = "system",
+        commandOutput: ((String, [String]) -> DoctorCommandOutput)? = nil
+    ) -> DoctorCheck {
+        let commandOutput = commandOutput ?? runCommand
+        var details = [
+            "search command: \(rgCommand)",
+            "search provider: \(searchProvider)"
+        ]
+        let readiness: DoctorCommandOutput
+        if rgCommand.contains("/") {
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: rgCommand, isDirectory: &isDirectory), !isDirectory.boolValue {
+                readiness = .success("file exists")
+            } else if isDirectory.boolValue {
+                readiness = .failure("path is not a file")
+            } else {
+                readiness = .failure("No such file or directory")
+            }
+        } else {
+            switch commandOutput(rgCommand, ["--version"]) {
+            case let .success(output):
+                let version = output
+                    .split(whereSeparator: { $0.isNewline })
+                    .first
+                    .map(String.init) ?? "rg version unknown"
+                readiness = .success(version)
+            case let .failure(error):
+                readiness = .failure(error)
+            }
+        }
+
+        let status: DoctorCheckStatus
+        switch readiness {
+        case let .success(value):
+            details.append("search command readiness: \(value)")
+            status = .ok
+        case let .failure(error):
+            details.append("search command readiness: \(error)")
+            status = .warning
+        }
+        let summary = switch status {
+        case .ok:
+            "search is OK (\(searchProvider))"
+        case .warning:
+            "search command could not be verified"
+        case .fail:
+            "search command could not be verified"
+        }
+        var check = DoctorCheck(
+            id: "runtime.search",
+            category: "search",
+            status: status,
+            summary: summary,
+            details: details
+        )
+        if status != .ok {
+            check = DoctorCheck(
+                id: check.id,
+                category: check.category,
+                status: check.status,
+                summary: check.summary,
+                details: check.details,
+                issues: check.issues,
+                remediation: "Install ripgrep or repair the bundled standalone resources.",
+                durationMS: check.durationMS
+            )
+        }
+        return check
     }
 
     public static func configLoadedCheck(
@@ -190,17 +301,23 @@ public enum DoctorCommandRuntime {
     }
 
     private static func renderHumanReport(report: DoctorReport, summary: Bool, ascii: Bool) -> String {
-        var lines = [
-            "Codex Doctor \(report.codexVersion)",
-            "",
-            "Configuration"
-        ]
-        for check in report.checks where check.category == "config" {
-            lines.append("  \(statusMarker(check.status, ascii: ascii)) config      \(check.summary)")
-            if !summary {
-                lines.append(contentsOf: check.details.map { "      \($0)" })
-                if let remediation = check.remediation {
-                    lines.append("      \(ascii ? "->" : "->") \(remediation)")
+        var lines = ["Codex Doctor \(report.codexVersion)", ""]
+        var wroteGroup = false
+        for group in outputGroups {
+            let checks = report.checks.filter { group.categories.contains($0.category) }
+            guard !checks.isEmpty else { continue }
+            if wroteGroup {
+                lines.append("")
+            }
+            wroteGroup = true
+            lines.append(group.title)
+            for check in checks {
+                lines.append("  \(statusMarker(check.status, ascii: ascii)) \(check.category.padding(toLength: 12, withPad: " ", startingAt: 0)) \(check.summary)")
+                if !summary {
+                    lines.append(contentsOf: check.details.map { "      \($0)" })
+                    if let remediation = check.remediation {
+                        lines.append("      \(ascii ? "->" : "->") \(remediation)")
+                    }
                 }
             }
         }
@@ -221,11 +338,11 @@ public enum DoctorCommandRuntime {
     private static func statusMarker(_ status: DoctorCheckStatus, ascii: Bool) -> String {
         switch status {
         case .ok:
-            ascii ? "[OK]" : "OK"
+            ascii ? "[ok]" : "OK"
         case .warning:
-            ascii ? "[WARN]" : "WARN"
+            ascii ? "[!!]" : "WARN"
         case .fail:
-            ascii ? "[FAIL]" : "FAIL"
+            ascii ? "[XX]" : "FAIL"
         }
     }
 
@@ -252,6 +369,75 @@ public enum DoctorCommandRuntime {
         #else
             false
         #endif
+    }
+
+    private static var defaultOSName: String {
+        #if os(macOS)
+            "darwin"
+        #elseif os(Linux)
+            "linux"
+        #elseif os(Windows)
+            "windows"
+        #else
+            "unknown"
+        #endif
+    }
+
+    private static var defaultArchitecture: String {
+        #if arch(arm64)
+            "arm64"
+        #elseif arch(x86_64)
+            "x86_64"
+        #elseif arch(arm)
+            "arm"
+        #else
+            "unknown"
+        #endif
+    }
+
+    private static var defaultBuildCommit: String {
+        ProcessInfo.processInfo.environment["CODEX_BUILD_COMMIT"]
+            ?? ProcessInfo.processInfo.environment["GIT_COMMIT"]
+            ?? "unknown"
+    }
+
+    private static let outputGroups: [(title: String, categories: Set<String>)] = [
+        ("Environment", ["runtime", "install", "search", "terminal", "state"]),
+        ("Configuration", ["config", "auth", "mcp", "sandbox"]),
+        ("Updates", ["updates"]),
+        ("Connectivity", ["network", "websocket", "reachability"]),
+        ("Background Server", ["app-server"])
+    ]
+
+    private static func runCommand(_ command: String, _ arguments: [String]) -> DoctorCommandOutput {
+        let process = Process()
+        if command.contains("/") {
+            process.executableURL = URL(fileURLWithPath: command)
+            process.arguments = arguments
+        } else {
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = [command] + arguments
+        }
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+        do {
+            try process.run()
+        } catch {
+            return .failure(error.localizedDescription)
+        }
+        process.waitUntilExit()
+        let output = String(decoding: stdout.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        if process.terminationStatus == 0 {
+            return .success(output)
+        }
+        let error = String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if error.isEmpty {
+            return .failure("exited with status \(process.terminationStatus)")
+        }
+        return .failure(error)
     }
 }
 

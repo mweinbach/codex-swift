@@ -17,7 +17,25 @@ final class DoctorCommandRuntimeTests: XCTestCase {
         let result = DoctorCommandRuntime.run(
             request: CodexCLI.DoctorCommandRequest(json: true),
             codexVersion: "0.0.0",
-            generatedAt: "0s since unix epoch"
+            generatedAt: "0s since unix epoch",
+            diagnosticChecks: {
+                [
+                    DoctorCommandRuntime.runtimeProvenanceCheck(
+                        codexVersion: "0.0.0",
+                        currentExecutablePath: "/tmp/codex",
+                        osName: "darwin",
+                        architecture: "arm64",
+                        buildCommit: "abc123"
+                    ),
+                    DoctorCommandRuntime.searchCheck(
+                        commandOutput: { command, arguments in
+                            XCTAssertEqual(command, "rg")
+                            XCTAssertEqual(arguments, ["--version"])
+                            return .success("ripgrep 14.1.1\n")
+                        }
+                    )
+                ]
+            }
         ) {
             DoctorCommandRuntime.configLoadedCheck(
                 model: "gpt-test",
@@ -39,6 +57,22 @@ final class DoctorCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(json["codexVersion"] as? String, "0.0.0")
 
         let checks = try XCTUnwrap(json["checks"] as? [String: Any])
+        let runtime = try XCTUnwrap(checks["runtime.provenance"] as? [String: Any])
+        XCTAssertEqual(runtime["category"] as? String, "runtime")
+        XCTAssertEqual(runtime["status"] as? String, "ok")
+        XCTAssertEqual(runtime["summary"] as? String, "running local build on darwin-arm64")
+        let runtimeDetails = try XCTUnwrap(runtime["details"] as? [String: Any])
+        XCTAssertEqual(runtimeDetails["current executable"] as? String, "/tmp/codex")
+        XCTAssertEqual(runtimeDetails["commit"] as? String, "abc123")
+
+        let search = try XCTUnwrap(checks["runtime.search"] as? [String: Any])
+        XCTAssertEqual(search["category"] as? String, "search")
+        XCTAssertEqual(search["status"] as? String, "ok")
+        XCTAssertEqual(search["summary"] as? String, "search is OK (system)")
+        let searchDetails = try XCTUnwrap(search["details"] as? [String: Any])
+        XCTAssertEqual(searchDetails["search command"] as? String, "rg")
+        XCTAssertEqual(searchDetails["search command readiness"] as? String, "ripgrep 14.1.1")
+
         let config = try XCTUnwrap(checks["config.load"] as? [String: Any])
         XCTAssertEqual(config["id"] as? String, "config.load")
         XCTAssertEqual(config["category"] as? String, "config")
@@ -50,6 +84,27 @@ final class DoctorCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(details["mcp servers"] as? String, "2")
         XCTAssertEqual(details["config.toml"] as? String, "/tmp/codex/config.toml")
         XCTAssertEqual(details["config.toml parse"] as? String, "ok")
+    }
+
+    func testSearchCheckWarnsWithRustRemediationWhenRgCannotRun() {
+        let check = DoctorCommandRuntime.searchCheck(
+            commandOutput: { command, arguments in
+                XCTAssertEqual(command, "rg")
+                XCTAssertEqual(arguments, ["--version"])
+                return .failure("No such file or directory")
+            }
+        )
+
+        XCTAssertEqual(check.id, "runtime.search")
+        XCTAssertEqual(check.category, "search")
+        XCTAssertEqual(check.status, .warning)
+        XCTAssertEqual(check.summary, "search command could not be verified")
+        XCTAssertEqual(check.details, [
+            "search command: rg",
+            "search provider: system",
+            "search command readiness: No such file or directory"
+        ])
+        XCTAssertEqual(check.remediation, "Install ripgrep or repair the bundled standalone resources.")
     }
 
     func testRunJsonReturnsFailWhenConfigLoadFailsLikeRustDoctor() throws {
@@ -98,7 +153,7 @@ final class DoctorCommandRuntimeTests: XCTestCase {
         Codex Doctor 0.0.0
 
         Configuration
-          [OK] config      config loaded
+          [ok] config       config loaded
 
         -------------------------------------------------------------
         1 ok | 0 warn | 0 fail ok

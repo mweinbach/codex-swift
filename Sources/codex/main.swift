@@ -227,7 +227,13 @@ private func runLoginCommand(_ request: CodexCLI.LoginCommandRequest) async thro
 private func runDoctorCommand(_ request: CodexCLI.DoctorCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
     DoctorCommandRuntime.run(
         request: request,
-        codexVersion: CodexCLI.version
+        codexVersion: CodexCLI.version,
+        diagnosticChecks: {
+            [
+                DoctorCommandRuntime.runtimeProvenanceCheck(codexVersion: CodexCLI.version),
+                DoctorCommandRuntime.searchCheck()
+            ]
+        }
     ) {
         do {
             let (codexHome, settings) = try resolvedAuthSettings(overrides: request.configOverrides)
