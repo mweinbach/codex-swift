@@ -256,6 +256,8 @@ public enum NonInteractiveExec {
             agentJobTools: config.features.isEnabled(.spawnCsv),
             agentJobWorkerTools: config.features.isEnabled(.spawnCsv)
                 && AgentJobRuntime.isAgentJobWorkerSessionSource(sessionSource)
+        ).applyingProviderCapabilities(
+            config.selectedModelProvider?.capabilities() ?? ModelProviderCapabilities()
         )
     }
 

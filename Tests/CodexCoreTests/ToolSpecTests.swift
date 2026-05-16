@@ -986,6 +986,78 @@ final class ToolSpecTests: XCTestCase {
         ])
     }
 
+    func testBuildSpecsIncludesImageGenerationToolWhenEnabledLikeRust() throws {
+        let specs = ToolSpecFactory.buildSpecs(config: ToolsConfig(
+            shellType: .disabled,
+            webSearchMode: .cached,
+            includeViewImageTool: false,
+            includeImageGenerationTool: true
+        ))
+
+        XCTAssertEqual(
+            specs.map(\.spec.name),
+            [
+                "list_mcp_resources",
+                "list_mcp_resource_templates",
+                "read_mcp_resource",
+                "update_plan",
+                "web_search",
+                "image_generation"
+            ]
+        )
+        XCTAssertEqual(specs.last?.spec, .imageGeneration(outputFormat: "png"))
+        XCTAssertEqual(specs.last?.supportsParallelToolCalls, false)
+    }
+
+    func testProviderCapabilitiesDisableProviderBoundToolSurfacesLikeRust() throws {
+        let config = ToolsConfig(
+            shellType: .disabled,
+            webSearchMode: .cached,
+            webSearchRequest: true,
+            includeViewImageTool: false,
+            includeImageGenerationTool: true,
+            namespaceTools: true,
+            toolSearch: true,
+            toolSuggest: true
+        ).applyingProviderCapabilities(ModelProviderCapabilities(
+            namespaceTools: false,
+            imageGeneration: false,
+            webSearch: false
+        ))
+
+        XCTAssertNil(config.webSearchMode)
+        XCTAssertFalse(config.webSearchRequest)
+        XCTAssertFalse(config.includeImageGenerationTool)
+        XCTAssertFalse(config.namespaceTools)
+        XCTAssertTrue(config.toolSearch)
+        XCTAssertTrue(config.toolSuggest)
+
+        let specs = ToolSpecFactory.buildSpecs(
+            config: config,
+            mcpTools: [
+                "mcp__docs__search": makeMcpTool(name: "search")
+            ],
+            deferredMcpTools: [
+                "mcp__deferred__lookup": makeMcpTool(name: "lookup")
+            ],
+            discoverableTools: [
+                .connector(DiscoverableConnectorInfo(
+                    id: "connector_2128aebfecb84f64a069897515042a44",
+                    name: "Google Calendar",
+                    description: "Plan events and schedules.",
+                    isAccessible: false,
+                    isEnabled: true
+                ))
+            ]
+        )
+
+        XCTAssertFalse(specs.contains { $0.spec.name == "web_search" })
+        XCTAssertFalse(specs.contains { $0.spec.name == "image_generation" })
+        XCTAssertFalse(specs.contains { $0.spec.name == "mcp__docs__" })
+        XCTAssertFalse(specs.contains { $0.spec.name == "tool_search" })
+        XCTAssertTrue(specs.contains { $0.spec.name == requestPluginInstallToolName })
+    }
+
     private func webSearchSpecs(in specs: [ConfiguredToolSpec]) -> [ToolSpec] {
         specs.map(\.spec).filter { $0.name == "web_search" }
     }

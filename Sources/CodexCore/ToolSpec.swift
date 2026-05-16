@@ -797,6 +797,7 @@ public struct ToolsConfig: Equatable, Sendable {
     public let canRequestOriginalImageDetail: Bool
     public let environmentMode: ToolEnvironmentMode
     public let includeComputerUseTools: Bool
+    public let includeImageGenerationTool: Bool
     public let experimentalSupportedTools: [String]
     public let namespaceTools: Bool
     public let toolSearch: Bool
@@ -821,6 +822,7 @@ public struct ToolsConfig: Equatable, Sendable {
         canRequestOriginalImageDetail: Bool = false,
         environmentMode: ToolEnvironmentMode = .single,
         includeComputerUseTools: Bool = false,
+        includeImageGenerationTool: Bool = false,
         experimentalSupportedTools: [String] = [],
         namespaceTools: Bool = true,
         toolSearch: Bool = true,
@@ -844,6 +846,7 @@ public struct ToolsConfig: Equatable, Sendable {
         self.canRequestOriginalImageDetail = canRequestOriginalImageDetail
         self.environmentMode = environmentMode
         self.includeComputerUseTools = includeComputerUseTools
+        self.includeImageGenerationTool = includeImageGenerationTool
         self.experimentalSupportedTools = experimentalSupportedTools
         self.namespaceTools = namespaceTools
         self.toolSearch = toolSearch
@@ -857,6 +860,34 @@ public struct ToolsConfig: Equatable, Sendable {
         self.waitAgentMinTimeoutMS = waitAgentMinTimeoutMS
         self.agentJobTools = agentJobTools
         self.agentJobWorkerTools = agentJobWorkerTools
+    }
+
+    public func applyingProviderCapabilities(_ capabilities: ModelProviderCapabilities) -> ToolsConfig {
+        ToolsConfig(
+            shellType: shellType,
+            applyPatchToolType: applyPatchToolType,
+            webSearchMode: capabilities.webSearch ? webSearchMode : nil,
+            webSearchConfig: webSearchConfig,
+            webSearchRequest: capabilities.webSearch ? webSearchRequest : false,
+            includeViewImageTool: includeViewImageTool,
+            canRequestOriginalImageDetail: canRequestOriginalImageDetail,
+            environmentMode: environmentMode,
+            includeComputerUseTools: includeComputerUseTools,
+            includeImageGenerationTool: capabilities.imageGeneration ? includeImageGenerationTool : false,
+            experimentalSupportedTools: experimentalSupportedTools,
+            namespaceTools: namespaceTools && capabilities.namespaceTools,
+            toolSearch: toolSearch,
+            toolSuggest: toolSuggest,
+            allowLoginShell: allowLoginShell,
+            multiAgentV2Tools: multiAgentV2Tools,
+            spawnAgentUsageHint: spawnAgentUsageHint,
+            spawnAgentUsageHintText: spawnAgentUsageHintText,
+            hideSpawnAgentMetadata: hideSpawnAgentMetadata,
+            maxConcurrentThreadsPerSession: maxConcurrentThreadsPerSession,
+            waitAgentMinTimeoutMS: waitAgentMinTimeoutMS,
+            agentJobTools: agentJobTools,
+            agentJobWorkerTools: agentJobWorkerTools
+        )
     }
 }
 
@@ -985,6 +1016,13 @@ public enum ToolSpecFactory {
             ))
         case .disabled, nil:
             break
+        }
+
+        if config.includeImageGenerationTool {
+            specs.append(ConfiguredToolSpec(
+                spec: .imageGeneration(outputFormat: "png"),
+                supportsParallelToolCalls: false
+            ))
         }
 
         if config.includeViewImageTool {
