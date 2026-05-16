@@ -5142,7 +5142,7 @@ public enum CodexAppServer {
         let marketplaces = result["marketplaces"] as? [[String: Any]] ?? []
         let includeDefaultRemote = marketplaceKinds == nil && runtimeConfig.features.isEnabled(.remotePlugin)
         let includeWorkspaceDirectory = kinds.contains("workspace-directory")
-        let includeSharedWithMe = kinds.contains("shared-with-me")
+        let includeSharedWithMe = kinds.contains("shared-with-me") && runtimeConfig.features.isEnabled(.pluginSharing)
         if includeDefaultRemote || includeWorkspaceDirectory || includeSharedWithMe {
             let remoteMarketplaces = remotePluginMarketplaces(
                 includeGlobal: includeDefaultRemote,
@@ -8010,7 +8010,8 @@ public enum CodexAppServer {
         try validatePluginShareTargetsDoNotIncludeWorkspace(validatedShareTargets)
         let (runtimeConfig, auth) = try pluginShareRuntimeConfigAndAuth(
             configuration: configuration,
-            failurePrefix: "save remote plugin share"
+            failurePrefix: "save remote plugin share",
+            requirePluginSharing: true
         )
         let result = try saveRemotePluginShare(
             pluginPath: pluginPath,
@@ -8297,7 +8298,8 @@ public enum CodexAppServer {
         try validatePluginShareTargetsDoNotIncludeWorkspace(shareTargets)
         let (runtimeConfig, auth) = try pluginShareRuntimeConfigAndAuth(
             configuration: configuration,
-            failurePrefix: "update remote plugin share targets"
+            failurePrefix: "update remote plugin share targets",
+            requirePluginSharing: true
         )
         let requestedTargets = shareTargets
         let discoverability = stringParam(params?["discoverability"]) ?? ""
@@ -8553,11 +8555,15 @@ public enum CodexAppServer {
 
     private static func pluginShareRuntimeConfigAndAuth(
         configuration: CodexAppServerConfiguration,
-        failurePrefix: String
+        failurePrefix: String,
+        requirePluginSharing: Bool = false
     ) throws -> (CodexRuntimeConfig, AppServerAuth) {
         let runtimeConfig = try pluginRuntimeConfig(configuration: configuration)
         guard runtimeConfig.features.isEnabled(.plugins) else {
             throw AppServerError.invalidRequest("plugin sharing is not enabled")
+        }
+        if requirePluginSharing && !runtimeConfig.features.isEnabled(.pluginSharing) {
+            throw AppServerError.invalidRequest("plugin sharing is disabled")
         }
         guard let auth = try? currentAuth(configuration: configuration) else {
             throw AppServerError.invalidRequest(

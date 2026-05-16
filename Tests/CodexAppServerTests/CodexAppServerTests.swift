@@ -12743,6 +12743,47 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(requests.allSatisfy { $0.value(forHTTPHeaderField: "chatgpt-account-id") == "account-123" })
     }
 
+    func testPluginListOmitsSharedWithMeWhenPluginSharingDisabledLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        plugins = true
+        plugin_sharing = false
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+        let capture = MCPHTTPTransportCapture()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            pluginHTTPTransport: { request in
+                capture.append(request)
+                return URLSessionTransportResponse(statusCode: 404)
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/list","params":{"marketplaceKinds":["shared-with-me"]}}"#,
+            configuration: configuration
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual((result["marketplaces"] as? [[String: Any]])?.count, 0)
+        XCTAssertEqual((result["marketplaceLoadErrors"] as? [[String: Any]])?.count, 0)
+        XCTAssertEqual(result["featuredPluginIds"] as? [String], [])
+        XCTAssertTrue(capture.requests.isEmpty)
+    }
+
     func testPluginListValidatesMarketplaceKindsAndAbsoluteCwds() throws {
         let temp = try TemporaryDirectory()
 
@@ -14051,6 +14092,32 @@ final class CodexAppServerTests: XCTestCase {
             apiKeySaveError["message"] as? String,
             "save remote plugin share: chatgpt authentication required for remote plugin catalog; api key auth is not supported"
         )
+    }
+
+    func testPluginShareMutationsRejectWhenPluginSharingDisabledLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [features]
+        plugins = true
+        plugin_sharing = false
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let pluginPath = temp.url.appendingPathComponent("plugin").path
+
+        let save = try appServerResponse(
+            #"{"id":1,"method":"plugin/share/save","params":{"pluginPath":"\#(pluginPath)"}}"#,
+            codexHome: temp.url
+        )
+        let saveError = try XCTUnwrap(save["error"] as? [String: Any])
+        XCTAssertEqual(saveError["code"] as? Int, -32600)
+        XCTAssertEqual(saveError["message"] as? String, "plugin sharing is disabled")
+
+        let update = try appServerResponse(
+            #"{"id":2,"method":"plugin/share/updateTargets","params":{"remotePluginId":"plugins~Plugin_gmail","discoverability":"UNLISTED","shareTargets":[{"principalType":"user","principalId":"user-1"}]}}"#,
+            codexHome: temp.url
+        )
+        let updateError = try XCTUnwrap(update["error"] as? [String: Any])
+        XCTAssertEqual(updateError["code"] as? Int, -32600)
+        XCTAssertEqual(updateError["message"] as? String, "plugin sharing is disabled")
     }
 
     func testPluginShareRoutesValidateRustRequestRulesBeforeDisabledRemoteFallback() throws {

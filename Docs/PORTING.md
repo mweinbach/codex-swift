@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust branch commit `40fd064ce2` (`Simplify remote
+  installed scope gating`) and `codex-rs/features/src/lib.rs`. Swift now
+  includes Rust's stable `plugin_sharing` feature flag, omits the explicit
+  `shared-with-me` remote marketplace when that feature is disabled, and
+  rejects `plugin/share/save` plus `plugin/share/updateTargets` with Rust's
+  `plugin sharing is disabled` message before ChatGPT-auth checks.
 - 2026-05-16: rechecked Rust feature materialization in
   `codex-rs/features/src/tests.rs`. Swift's config feature editor now writes
   canonical feature keys when called with a legacy alias and removes stale

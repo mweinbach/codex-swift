@@ -61,6 +61,7 @@ public enum FeatureKey: String, CaseIterable, Hashable, Sendable {
     case browserUseExternal = "browser_use_external"
     case computerUse = "computer_use"
     case remotePlugin = "remote_plugin"
+    case pluginSharing = "plugin_sharing"
     case externalMigration = "external_migration"
     case imageGeneration = "image_generation"
     case skillMcpDependencyInstall = "skill_mcp_dependency_install"
@@ -277,6 +278,7 @@ public enum FeatureRegistry {
         FeatureSpec(id: .browserUseExternal, key: "browser_use_external", stage: .stable, defaultEnabled: true),
         FeatureSpec(id: .computerUse, key: "computer_use", stage: .stable, defaultEnabled: true),
         FeatureSpec(id: .remotePlugin, key: "remote_plugin", stage: .underDevelopment, defaultEnabled: false),
+        FeatureSpec(id: .pluginSharing, key: "plugin_sharing", stage: .stable, defaultEnabled: true),
         FeatureSpec(
             id: .externalMigration,
             key: "external_migration",
