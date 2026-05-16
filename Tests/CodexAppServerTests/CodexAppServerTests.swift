@@ -9839,7 +9839,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNil(persistedGoal?.tokenBudget)
     }
 
-    func testThreadResumeEmitsGoalSnapshotWhenFeatureEnabled() async throws {
+    func testThreadResumeKeepsPausedGoalPausedLikeRust() async throws {
         let temp = try TemporaryDirectory()
         try """
         [features]
@@ -9879,6 +9879,9 @@ final class CodexAppServerTests: XCTestCase {
         let goal = try XCTUnwrap(updateParams["goal"] as? [String: Any])
         XCTAssertEqual(goal["objective"] as? String, "keep polishing")
         XCTAssertEqual(goal["status"] as? String, "paused")
+        XCTAssertFalse(resume.contains { $0["method"] as? String == "turn/started" })
+        let persistedGoalAfterResume = try await stateStore.getThreadGoal(threadID: try ThreadId(string: threadID))
+        XCTAssertEqual(persistedGoalAfterResume?.status, .paused)
 
         _ = try decodeMessages(processor.processLine(Data(
             #"{"id":3,"method":"thread/goal/clear","params":{"threadId":"\#(threadID)"}}"#.utf8
