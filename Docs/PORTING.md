@@ -13,6 +13,12 @@ Source baseline inspected for this scaffold:
 Recent upstream audit checkpoint:
 
 - 2026-05-15: rechecked Rust app-server v2
+  `sandbox_policy_round_trips_workspace_write_access` in
+  `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift command-exec
+  protocol coverage now pins the `workspaceWrite` app-server/core sandbox bridge
+  with Rust's empty writable-root default, enabled network access, and false tmp
+  exclusion flags.
+- 2026-05-15: rechecked Rust app-server v2
   `additional_file_system_permissions_rejects_zero_glob_scan_depth`,
   `permission_profile_file_system_permissions_preserves_glob_scan_depth`, and
   read-directory payload round trips in

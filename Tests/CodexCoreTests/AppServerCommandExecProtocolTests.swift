@@ -305,6 +305,18 @@ final class AppServerCommandExecProtocolTests: XCTestCase {
         let readOnly = AppServerCommandExecSandboxPolicy.readOnly(networkAccess: true)
         XCTAssertEqual(readOnly.coreValue, .readOnlyWithNetworkAccess)
         XCTAssertEqual(AppServerCommandExecSandboxPolicy(core: readOnly.coreValue), readOnly)
+
+        let workspaceWrite = AppServerCommandExecSandboxPolicy.workspaceWrite(networkAccess: true)
+        XCTAssertEqual(
+            workspaceWrite.coreValue,
+            .workspaceWrite(
+                writableRoots: [],
+                networkAccess: true,
+                excludeTmpdirEnvVar: false,
+                excludeSlashTmp: false
+            )
+        )
+        XCTAssertEqual(AppServerCommandExecSandboxPolicy(core: workspaceWrite.coreValue), workspaceWrite)
     }
 
     func testCommandExecSandboxPolicyRejectsExplicitNullForRustDefaultedFields() {
