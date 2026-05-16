@@ -518,7 +518,7 @@ public struct CodexCLI: Sendable {
                     return .resolved(defaultPolicy)
                 }
                 return .resolved(.newWorkspaceWritePolicy())
-            case ":danger-no-sandbox":
+            case ":danger-full-access":
                 return .resolved(.dangerFullAccess)
             default:
                 if permissionsProfile.hasPrefix(":") {

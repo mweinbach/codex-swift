@@ -3742,7 +3742,7 @@ private struct ParsedCodexConfigToml {
                 sandboxMode: .workspaceWrite
             ) ?? .newWorkspaceWritePolicy()
             return .fromLegacySandboxPolicyForCwd(policy, cwd: cwd.standardizedFileURL.path)
-        case ":danger-no-sandbox":
+        case ":danger-full-access":
             return .disabled
         default:
             if profileName.hasPrefix(":") {
@@ -3762,7 +3762,7 @@ private struct ParsedCodexConfigToml {
 
     func networkProxyConfig(named profileName: String) throws -> NetworkProxyConfig {
         switch profileName {
-        case ":read-only", ":workspace", ":danger-no-sandbox":
+        case ":read-only", ":workspace", ":danger-full-access":
             return NetworkProxyConfig()
         default:
             if profileName.hasPrefix(":") {
@@ -3782,7 +3782,7 @@ private struct ParsedCodexConfigToml {
 
     func profileWorkspaceRoots(named profileName: String, cwd: URL) throws -> [AbsolutePath] {
         switch profileName {
-        case ":read-only", ":workspace", ":danger-no-sandbox":
+        case ":read-only", ":workspace", ":danger-full-access":
             return []
         default:
             guard !profileName.hasPrefix(":") else {

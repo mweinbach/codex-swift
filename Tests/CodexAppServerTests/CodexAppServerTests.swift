@@ -3708,7 +3708,7 @@ final class CodexAppServerTests: XCTestCase {
         let threadID = try XCTUnwrap(thread["id"] as? String)
 
         let messages = try decodeMessages(processor.processLine(Data(
-            #"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"blocked"}],"permissions":{"type":"profile","id":":danger-no-sandbox"}}}"#.utf8
+            #"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"blocked"}],"permissions":{"type":"profile","id":":danger-full-access"}}}"#.utf8
         )))
 
         XCTAssertEqual(messages.count, 1)
@@ -3749,7 +3749,7 @@ final class CodexAppServerTests: XCTestCase {
         let threadID = try XCTUnwrap(thread["id"] as? String)
 
         let messages = try decodeMessages(processor.processLine(Data(
-            #"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"blocked"}],"permissions":{"type":"profile","id":":danger-no-sandbox"}}}"#.utf8
+            #"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"blocked"}],"permissions":{"type":"profile","id":":danger-full-access"}}}"#.utf8
         )))
 
         XCTAssertEqual(messages.count, 1)

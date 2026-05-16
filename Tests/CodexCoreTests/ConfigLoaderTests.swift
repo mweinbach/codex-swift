@@ -3484,7 +3484,7 @@ final class ConfigLoaderTests: XCTestCase {
         )
     }
 
-    func testRequirementsTomlFilesystemDenyReadFallsBackFromDangerNoSandboxLikeRust() throws {
+    func testRequirementsTomlFilesystemDenyReadFallsBackFromDangerFullAccessLikeRust() throws {
         let dir = try CoreTemporaryDirectory()
         let secret = dir.url.appendingPathComponent("private", isDirectory: true)
         try FileManager.default.createDirectory(at: secret, withIntermediateDirectories: true)
@@ -3495,7 +3495,7 @@ final class ConfigLoaderTests: XCTestCase {
         deny_read = ["\(secret.path)"]
         """.write(to: requirementsPath, atomically: true, encoding: .utf8)
         try """
-        default_permissions = ":danger-no-sandbox"
+        default_permissions = ":danger-full-access"
         """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
 
         let config = try CodexConfigLoader.load(
@@ -3519,6 +3519,20 @@ final class ConfigLoaderTests: XCTestCase {
             permissionProfile.fileSystemSandboxPolicy.getUnreadableRootsWithCwd(dir.url.path),
             [try AbsolutePath(absolutePath: normalizedSecretPath)]
         )
+    }
+
+    func testLegacyDangerNoSandboxDefaultPermissionsIsRejectedLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        default_permissions = ":danger-no-sandbox"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, cwd: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "Invalid config line: default_permissions refers to unknown built-in profile `:danger-no-sandbox`"
+            )
+        }
     }
 
     func testRequirementsTomlBuildsManagedNetworkProxySpecLikeRust() throws {

@@ -170,9 +170,14 @@ final class SandboxCLITests: XCTestCase {
             .resolved(.newWorkspaceWritePolicy())
         )
         XCTAssertEqual(
-            CodexCLI.SandboxProfileOptions(permissionsProfile: ":danger-no-sandbox")
+            CodexCLI.SandboxProfileOptions(permissionsProfile: ":danger-full-access")
                 .resolveBuiltInPolicy(defaultPolicy: .readOnly),
             .resolved(.dangerFullAccess)
+        )
+        XCTAssertEqual(
+            CodexCLI.SandboxProfileOptions(permissionsProfile: ":danger-no-sandbox")
+                .resolveBuiltInPolicy(defaultPolicy: .readOnly),
+            .unknownBuiltinProfile(":danger-no-sandbox")
         )
         XCTAssertEqual(
             CodexCLI.SandboxProfileOptions(permissionsProfile: ":typo")
@@ -239,12 +244,12 @@ final class SandboxCLITests: XCTestCase {
         XCTAssertTrue(configuration.permissionProfile.networkSandboxPolicy.isEnabled)
     }
 
-    func testResolveDebugSandboxConfigurationDerivesPermissionProfileForDangerNoSandboxBuiltIn() throws {
+    func testResolveDebugSandboxConfigurationDerivesPermissionProfileForDangerFullAccessBuiltIn() throws {
         let codexHome = try SandboxTemporaryDirectory()
         let processCwd = try SandboxTemporaryDirectory()
 
         let configuration = try CodexCLI.resolveDebugSandboxConfiguration(
-            profile: CodexCLI.SandboxProfileOptions(permissionsProfile: ":danger-no-sandbox"),
+            profile: CodexCLI.SandboxProfileOptions(permissionsProfile: ":danger-full-access"),
             configOverrides: CliConfigOverrides(),
             codexHome: codexHome.url,
             processCwd: processCwd.url,
