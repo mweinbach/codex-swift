@@ -15,6 +15,8 @@ public struct ConfigSummaryInput: Equatable, Sendable {
     public let modelProviderID: String
     public let approvalPolicy: AskForApproval
     public let sandboxPolicy: SandboxPolicy
+    public let permissionProfile: PermissionProfile?
+    public let effectiveWorkspaceRoots: [String]
     public let modelProviderWireAPI: WireAPI
     public let modelReasoningEffort: ReasoningEffort?
     public let modelReasoningSummary: ReasoningSummary
@@ -24,6 +26,8 @@ public struct ConfigSummaryInput: Equatable, Sendable {
         modelProviderID: String,
         approvalPolicy: AskForApproval,
         sandboxPolicy: SandboxPolicy,
+        permissionProfile: PermissionProfile? = nil,
+        effectiveWorkspaceRoots: [String] = [],
         modelProviderWireAPI: WireAPI,
         modelReasoningEffort: ReasoningEffort?,
         modelReasoningSummary: ReasoningSummary
@@ -32,6 +36,8 @@ public struct ConfigSummaryInput: Equatable, Sendable {
         self.modelProviderID = modelProviderID
         self.approvalPolicy = approvalPolicy
         self.sandboxPolicy = sandboxPolicy
+        self.permissionProfile = permissionProfile
+        self.effectiveWorkspaceRoots = effectiveWorkspaceRoots
         self.modelProviderWireAPI = modelProviderWireAPI
         self.modelReasoningEffort = modelReasoningEffort
         self.modelReasoningSummary = modelReasoningSummary
@@ -49,12 +55,22 @@ public enum ConfigSummary {
     }
 
     public static func createEntries(config: ConfigSummaryInput, model: String) -> [ConfigSummaryEntry] {
+        let sandboxSummary = config.permissionProfile.map {
+            SandboxSummary.summarize(
+                permissionProfile: $0,
+                cwd: config.workdir,
+                effectiveWorkspaceRoots: config.effectiveWorkspaceRoots.isEmpty
+                    ? [config.workdir]
+                    : config.effectiveWorkspaceRoots
+            )
+        } ?? SandboxSummary.summarize(config.sandboxPolicy)
+
         var entries = [
             ConfigSummaryEntry("workdir", config.workdir),
             ConfigSummaryEntry("model", model),
             ConfigSummaryEntry("provider", config.modelProviderID),
             ConfigSummaryEntry("approval", config.approvalPolicy.rawValue),
-            ConfigSummaryEntry("sandbox", SandboxSummary.summarize(config.sandboxPolicy))
+            ConfigSummaryEntry("sandbox", sandboxSummary)
         ]
 
         if config.modelProviderWireAPI == .responses {

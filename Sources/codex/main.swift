@@ -954,6 +954,7 @@ private func runNonInteractiveExec(
         sandboxPolicy: sandboxPolicy,
         cwd: cwd
     )
+    let effectiveWorkspaceRoots = resolveExecEffectiveWorkspaceRoots(cwd: cwd, arguments: arguments)
     let shell = ShellSnapshot.attachSnapshotIfEnabled(
         codexHome: codexHome,
         sessionID: ThreadId(uuid: conversationID.uuid),
@@ -974,6 +975,8 @@ private func runNonInteractiveExec(
                 modelProviderID: providerResolution.id,
                 approvalPolicy: approvalPolicy,
                 sandboxPolicy: sandboxPolicy,
+                permissionProfile: permissionProfile,
+                effectiveWorkspaceRoots: effectiveWorkspaceRoots.map(\.path),
                 modelProviderWireAPI: providerResolution.info.wireAPI,
                 modelReasoningEffort: settings.modelReasoningEffort,
                 modelReasoningSummary: settings.modelReasoningSummary ?? modelFamily.defaultReasoningSummary
@@ -1434,6 +1437,17 @@ private func resolveExecPermissionProfile(
     return settings.permissionProfile ?? PermissionProfile.fromLegacySandboxPolicyForCwd(sandboxPolicy, cwd: cwd.path)
 }
 
+private func resolveExecEffectiveWorkspaceRoots(cwd: URL, arguments: [String]) -> [AbsolutePath] {
+    var roots = [try? AbsolutePath(absolutePath: cwd.standardizedFileURL.path)].compactMap(\.self)
+    let additionalRoots = execLongOptionValues("--add-dir", in: arguments).compactMap {
+        try? AbsolutePath.resolve($0, against: cwd.standardizedFileURL.path)
+    }
+    for root in additionalRoots where !roots.contains(root) {
+        roots.append(root)
+    }
+    return roots
+}
+
 private func sandboxPolicy(from mode: SandboxMode) -> SandboxPolicy {
     SandboxPolicy.fromSandboxMode(mode)
 }
@@ -1489,6 +1503,27 @@ private func execLongOptionValue(_ long: String, in arguments: [String]) -> Stri
         index += 1
     }
     return nil
+}
+
+private func execLongOptionValues(_ long: String, in arguments: [String]) -> [String] {
+    var values: [String] = []
+    var index = 0
+    while index < arguments.count {
+        let argument = arguments[index]
+        if argument == long {
+            if index + 1 < arguments.count {
+                values.append(arguments[index + 1])
+                index += 2
+                continue
+            }
+            return values
+        }
+        if argument.hasPrefix("\(long)=") {
+            values.append(String(argument.dropFirst(long.count + 1)))
+        }
+        index += 1
+    }
+    return values
 }
 
 private func runExecPolicyCommand(_ request: CodexCLI.ExecPolicyCommandRequest) async throws -> CodexCLI.CommandExecutionResult {

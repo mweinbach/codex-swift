@@ -45,6 +45,62 @@ final class ConfigSummaryTests: XCTestCase {
         ])
     }
 
+    func testPermissionProfileSummaryUsesRuntimeWorkspaceRootsLikeRust() throws {
+        let hiddenRoot = try AbsolutePath(absolutePath: "/repo/.hidden-write")
+        let permissionProfile = PermissionProfile.workspaceWriteWith(
+            writableRoots: [hiddenRoot],
+            network: .restricted
+        )
+
+        let summary = SandboxSummary.summarize(
+            permissionProfile: permissionProfile,
+            cwd: "/repo",
+            effectiveWorkspaceRoots: ["/repo", "/repo-extra"]
+        )
+
+        XCTAssertEqual(summary, "workspace-write [workdir, /tmp, $TMPDIR, /repo-extra]")
+        XCTAssertFalse(summary.contains(hiddenRoot.path))
+    }
+
+    func testConfigEntriesUsePermissionProfileRuntimeWorkspaceRootsLikeRust() {
+        let entries = ConfigSummary.createEntries(
+            config: ConfigSummaryInput(
+                workdir: "/repo",
+                modelProviderID: "openai",
+                approvalPolicy: .onRequest,
+                sandboxPolicy: .newWorkspaceWritePolicy(),
+                permissionProfile: .workspaceWrite(),
+                effectiveWorkspaceRoots: ["/repo", "/repo-extra"],
+                modelProviderWireAPI: .responses,
+                modelReasoningEffort: .high,
+                modelReasoningSummary: .detailed
+            ),
+            model: "gpt-5.1-codex"
+        )
+
+        XCTAssertEqual(entries[4], ConfigSummaryEntry("sandbox", "workspace-write [workdir, /tmp, $TMPDIR, /repo-extra]"))
+    }
+
+    func testPermissionProfileSummaryFallsBackToCustomPermissionsLikeRust() {
+        let permissionProfile = PermissionProfile.managed(
+            fileSystem: .restricted(
+                entries: [
+                    FileSystemSandboxEntry(path: .path("/outside"), access: .write)
+                ],
+                globScanMaxDepth: nil
+            ),
+            network: .enabled
+        )
+
+        let summary = SandboxSummary.summarize(
+            permissionProfile: permissionProfile,
+            cwd: "/repo",
+            effectiveWorkspaceRoots: ["/repo"]
+        )
+
+        XCTAssertEqual(summary, "custom permissions (network access enabled)")
+    }
+
     func testResponsesProviderSummaryUsesNoneWhenReasoningEffortIsMissing() {
         let entries = ConfigSummary.createEntries(
             config: ConfigSummaryInput(
