@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust app-server v2
+  `core_turn_item_into_thread_item_converts_supported_variants` in
+  `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now has a
+  shared typed `TurnItem` to app-server `ThreadItem` conversion helper covering
+  user, agent, reasoning, web-search, image-view, file-change, and MCP
+  tool-call variants with Rust's memory-citation and duration projections.
 - 2026-05-16: rechecked Rust `AgentPath` validation in
   `codex-rs/protocol/src/agent_path.rs`. Swift coverage now pins reserved
   agent names, slash-containing names, and trailing-slash absolute/relative

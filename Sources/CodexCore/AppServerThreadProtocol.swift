@@ -876,6 +876,106 @@ public enum AppServerThreadItem: Equatable, Sendable {
     }
 }
 
+extension AppServerThreadItem {
+    public static func converted(from item: TurnItem) throws -> Self {
+        switch item {
+        case let .userMessage(item):
+            return .userMessage(id: item.id, content: item.content.map(AppServerUserInput.init(core:)))
+        case let .hookPrompt(item):
+            return .hookPrompt(id: item.id, fragments: item.fragments)
+        case let .agentMessage(item):
+            return .agentMessage(
+                id: item.id,
+                text: item.text,
+                phase: item.phase,
+                memoryCitation: item.memoryCitation.map(AppServerMemoryCitation.init)
+            )
+        case let .plan(item):
+            return .plan(id: item.id, text: item.text)
+        case let .reasoning(item):
+            return .reasoning(id: item.id, summary: item.summaryText, content: item.rawContent)
+        case let .fileChange(item):
+            return .fileChange(
+                id: item.id,
+                changes: AppServerFileUpdateChange.converted(from: item.changes),
+                status: AppServerPatchApplyStatus(item.status)
+            )
+        case let .mcpToolCall(item):
+            return .mcpToolCall(
+                id: item.id,
+                server: item.server,
+                tool: item.tool,
+                status: item.status,
+                arguments: item.arguments,
+                mcpAppResourceURI: item.mcpAppResourceURI,
+                result: try item.result.map(Self.convertMcpResult),
+                error: item.error.map { AppServerProtocol.McpToolCallError(message: $0.message) },
+                durationMs: item.duration.flatMap(Self.durationMilliseconds)
+            )
+        case let .webSearch(item):
+            return .webSearch(
+                id: item.id,
+                query: item.query,
+                action: AppServerWebSearchAction(item.action)
+            )
+        case let .imageView(item):
+            return .imageView(id: item.id, path: item.path)
+        case let .imageGeneration(item):
+            return .imageGeneration(
+                id: item.id,
+                status: item.status,
+                revisedPrompt: item.revisedPrompt,
+                result: item.result,
+                savedPath: item.savedPath
+            )
+        case let .contextCompaction(item):
+            return .contextCompaction(id: item.id)
+        }
+    }
+
+    private static func convertMcpResult(_ result: McpCallToolResult) throws -> AppServerProtocol.McpToolCallResult {
+        AppServerProtocol.McpToolCallResult(
+            content: try result.content.map(jsonValue),
+            structuredContent: result.structuredContent,
+            meta: result.meta
+        )
+    }
+
+    private static func jsonValue(_ value: some Encodable) throws -> JSONValue {
+        let data = try JSONEncoder().encode(value)
+        return try JSONDecoder().decode(JSONValue.self, from: data)
+    }
+
+    private static func durationMilliseconds(_ duration: ProtocolDuration) -> Int64? {
+        let maxMilliseconds = UInt64(Int64.max)
+        guard duration.secs <= maxMilliseconds / 1_000 else {
+            return nil
+        }
+
+        let secondsMilliseconds = duration.secs * 1_000
+        let nanosMilliseconds = UInt64(duration.nanos) / 1_000_000
+        guard secondsMilliseconds <= maxMilliseconds - nanosMilliseconds else {
+            return nil
+        }
+        return Int64(secondsMilliseconds + nanosMilliseconds)
+    }
+}
+
+extension AppServerWebSearchAction {
+    public init(_ action: WebSearchAction) {
+        switch action {
+        case let .search(query, queries):
+            self = .search(query: query, queries: queries)
+        case let .openPage(url):
+            self = .openPage(url: url)
+        case let .findInPage(url, pattern):
+            self = .findInPage(url: url, pattern: pattern)
+        case .other:
+            self = .other
+        }
+    }
+}
+
 extension AppServerThreadItem: Codable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)

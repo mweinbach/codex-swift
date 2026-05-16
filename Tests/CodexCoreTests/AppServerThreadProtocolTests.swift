@@ -933,6 +933,197 @@ final class AppServerThreadProtocolTests: XCTestCase {
         ))
     }
 
+    func testCoreTurnItemConversionMatchesRustThreadItemVariants() throws {
+        XCTAssertEqual(
+            try AppServerThreadItem.converted(from: .userMessage(UserMessageItem(
+                id: "user-1",
+                content: [
+                    .text("hello"),
+                    .image(imageURL: "https://example.com/image.png"),
+                    .localImage(path: "local/image.png"),
+                    .skill(name: "skill-creator", path: "/repo/.codex/skills/skill-creator/SKILL.md"),
+                    .mention(name: "Demo App", path: "app://demo-app")
+                ]
+            ))),
+            .userMessage(id: "user-1", content: [
+                .text("hello"),
+                .image(url: "https://example.com/image.png"),
+                .localImage(path: "local/image.png"),
+                .skill(name: "skill-creator", path: "/repo/.codex/skills/skill-creator/SKILL.md"),
+                .mention(name: "Demo App", path: "app://demo-app")
+            ])
+        )
+        let hookFragments = [HookPromptFragment(text: "Review this", hookRunID: "hook-run-1")]
+        XCTAssertEqual(
+            try AppServerThreadItem.converted(from: .hookPrompt(HookPromptItem(
+                id: "hook-1",
+                fragments: hookFragments
+            ))),
+            .hookPrompt(id: "hook-1", fragments: hookFragments)
+        )
+
+        let citation = MemoryCitation(
+            entries: [
+                MemoryCitationEntry(path: "MEMORY.md", lineStart: 1, lineEnd: 2, note: "summary")
+            ],
+            rolloutIDs: ["rollout-1"]
+        )
+        XCTAssertEqual(
+            try AppServerThreadItem.converted(from: .agentMessage(AgentMessageItem(
+                id: "agent-1",
+                content: [.text("Hello "), .text("world")],
+                phase: .finalAnswer,
+                memoryCitation: citation
+            ))),
+            .agentMessage(
+                id: "agent-1",
+                text: "Hello world",
+                phase: .finalAnswer,
+                memoryCitation: AppServerMemoryCitation(citation)
+            )
+        )
+        XCTAssertEqual(
+            try AppServerThreadItem.converted(from: .plan(PlanItem(
+                id: "plan-1",
+                text: "1. inspect\n2. test"
+            ))),
+            .plan(id: "plan-1", text: "1. inspect\n2. test")
+        )
+
+        XCTAssertEqual(
+            try AppServerThreadItem.converted(from: .reasoning(ReasoningItem(
+                id: "reasoning-1",
+                summaryText: ["line one", "line two"]
+            ))),
+            .reasoning(id: "reasoning-1", summary: ["line one", "line two"], content: [])
+        )
+        XCTAssertEqual(
+            try AppServerThreadItem.converted(from: .webSearch(WebSearchItem(
+                id: "search-1",
+                query: "docs",
+                action: .search(query: "docs")
+            ))),
+            .webSearch(id: "search-1", query: "docs", action: .search(query: "docs"))
+        )
+        XCTAssertEqual(
+            try AppServerThreadItem.converted(from: .imageView(ImageViewItem(
+                id: "view-image-1",
+                path: try AbsolutePath(absolutePath: "/tmp/view-image.png")
+            ))),
+            .imageView(id: "view-image-1", path: try AbsolutePath(absolutePath: "/tmp/view-image.png"))
+        )
+        XCTAssertEqual(
+            try AppServerThreadItem.converted(from: .imageGeneration(ImageGenerationItem(
+                id: "image-generation-1",
+                status: "completed",
+                revisedPrompt: "a sharper prompt",
+                result: "image-result",
+                savedPath: try AbsolutePath(absolutePath: "/tmp/generated.png")
+            ))),
+            .imageGeneration(
+                id: "image-generation-1",
+                status: "completed",
+                revisedPrompt: "a sharper prompt",
+                result: "image-result",
+                savedPath: try AbsolutePath(absolutePath: "/tmp/generated.png")
+            )
+        )
+        XCTAssertEqual(
+            try AppServerThreadItem.converted(from: .fileChange(FileChangeItem(
+                id: "patch-1",
+                changes: ["README.md": .add(content: "hello\n")],
+                status: .completed,
+                stdout: "Done!",
+                stderr: ""
+            ))),
+            .fileChange(
+                id: "patch-1",
+                changes: [
+                    AppServerFileUpdateChange(path: "README.md", kind: .add, diff: "hello\n")
+                ],
+                status: .completed
+            )
+        )
+        XCTAssertEqual(
+            try AppServerThreadItem.converted(from: .fileChange(FileChangeItem(
+                id: "patch-2",
+                changes: [:]
+            ))),
+            .fileChange(id: "patch-2", changes: [], status: .inProgress)
+        )
+
+        XCTAssertEqual(
+            try AppServerThreadItem.converted(from: .mcpToolCall(McpToolCallItem(
+                id: "mcp-1",
+                server: "server",
+                tool: "tool",
+                arguments: .object(["arg": .string("value")]),
+                mcpAppResourceURI: "app://connector",
+                status: .inProgress
+            ))),
+            .mcpToolCall(
+                id: "mcp-1",
+                server: "server",
+                tool: "tool",
+                status: .inProgress,
+                arguments: .object(["arg": .string("value")]),
+                mcpAppResourceURI: "app://connector"
+            )
+        )
+
+        let mcpResult = McpCallToolResult(
+            content: [.text(McpTextContent(text: "ok"))],
+            isError: false,
+            structuredContent: .object(["ok": .bool(true)]),
+            meta: .object(["trace": .string("1")])
+        )
+        XCTAssertEqual(
+            try AppServerThreadItem.converted(from: .mcpToolCall(McpToolCallItem(
+                id: "mcp-2",
+                server: "server",
+                tool: "tool",
+                arguments: .null,
+                status: .completed,
+                result: mcpResult,
+                duration: ProtocolDuration(secs: 0, nanos: 42_000_000)
+            ))),
+            .mcpToolCall(
+                id: "mcp-2",
+                server: "server",
+                tool: "tool",
+                status: .completed,
+                arguments: .null,
+                result: AppServerProtocol.McpToolCallResult(
+                    content: [.object(["text": .string("ok"), "type": .string("text")])],
+                    structuredContent: .object(["ok": .bool(true)]),
+                    meta: .object(["trace": .string("1")])
+                ),
+                durationMs: 42
+            )
+        )
+        XCTAssertEqual(
+            try AppServerThreadItem.converted(from: .mcpToolCall(McpToolCallItem(
+                id: "mcp-3",
+                server: "server",
+                tool: "tool",
+                arguments: .null,
+                status: .completed,
+                duration: ProtocolDuration(secs: UInt64(Int64.max) / 1_000 + 1)
+            ))),
+            .mcpToolCall(
+                id: "mcp-3",
+                server: "server",
+                tool: "tool",
+                status: .completed,
+                arguments: .null
+            )
+        )
+        XCTAssertEqual(
+            try AppServerThreadItem.converted(from: .contextCompaction(ContextCompactionItem(id: "compact-1"))),
+            .contextCompaction(id: "compact-1")
+        )
+    }
+
     func testDynamicToolCallItemUsesRustThreadItemShape() throws {
         let inProgressItem = AppServerThreadItem.dynamicToolCall(
             id: "dynamic-1",
