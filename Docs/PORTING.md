@@ -136,6 +136,13 @@ Recent upstream audit checkpoint:
   by id/extends and reloads config for the command cwd before sandbox
   selection, preserving configured deny-read restrictions while retaining the
   Rust conflict with per-request `sandboxPolicy`.
+- 2026-05-16: rechecked Rust commit `83bbb4f326` (`app-server: stop returning
+  thread permission profiles`). Swift lifecycle result builders and typed
+  response models already match the no-`permissionProfile` response shape while
+  preserving the legacy `sandbox` compatibility projection and
+  `activePermissionProfile` identity. Refreshed the SwiftPort app-server README
+  so clients no longer treat lifecycle response `permissionProfile` as an
+  available field.
 - 2026-05-16: refreshed Rust `main` to `de9c5c0226` (`Fix Windows doctor npm
   root probe`) and rechecked `codex-rs/features/src/lib.rs`,
   `features/src/legacy.rs`, and feature tests. Swift's feature registry now
@@ -594,8 +601,8 @@ Recent upstream audit checkpoint:
 - 2026-05-15: rechecked Rust app-server v2 thread lifecycle response defaulting
   in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now pins
   the `reasoningEffort: null` decode boundary alongside missing
-  `instructionSources`, `permissionProfile`, and `activePermissionProfile`
-  defaults across start/resume/fork responses.
+  `instructionSources` and `activePermissionProfile` defaults across
+  start/resume/fork responses.
 - 2026-05-15: rechecked Rust app-server v2 `command/exec` default
   streaming flag decoding in
   `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now pins
@@ -1586,7 +1593,7 @@ Recent upstream audit checkpoint:
 - 2026-05-14: rechecked Rust's `thread/goal/set`, `thread/goal/get`, `thread/goal/clear`, and `thread/memoryMode/set` protocol surfaces from `codex-rs/app-server-protocol/src/protocol/v2/thread.rs`. Swift already had experimental route behavior and validation tests; the shared protocol model layer now carries the goal params/responses, memory-mode params/empty response, and Rust's omitted/null/value token-budget patch semantics.
 - 2026-05-14: rechecked Rust's `thread/read`, `thread/unarchive`, `thread/rollback`, `thread/metadata/update`, and `memory/reset` protocol surfaces from `codex-rs/app-server-protocol/src/protocol/v2/thread.rs`. Swift already had route behavior and validation tests; the shared protocol model layer now carries the request params, Rust-shaped thread-returning responses for read/unarchive/rollback/metadata update, and empty memory reset response, including Rust's `includeTurns = false` default and omitted/null/value Git metadata patch semantics.
 - 2026-05-14: rechecked Rust's `thread/list` request/response, `thread/read` response, thread data, request filter, and thread status protocol surfaces from `codex-rs/app-server-protocol/src/protocol/v2/thread.rs` and `thread_data.rs`. Swift already had route behavior and validation tests; the shared protocol model layer now carries typed list params, source/sort enums, Rust's untagged `cwd` string-or-array filter, `useStateDbOnly` default/omission behavior, tagged thread status/active-flag wire shapes, Rust-shaped app-server `Thread` metadata, explicit-null optional thread/git/turn fields, `SessionSource` app-server variants, and typed list/read response wrappers.
-- 2026-05-14: rechecked Rust's `thread/start`, `thread/resume`, and `thread/fork` response protocol surfaces from `codex-rs/app-server-protocol/src/protocol/v2/thread.rs`. Swift route behavior already returned these runtime fields; the shared protocol model layer now carries typed start/resume/fork response wrappers with Rust's thread metadata payload, model/provider/service tier, cwd, instruction sources, approval reviewer, sandbox, app-server permission profile, active permission profile, and explicit-null optional reasoning/permission fields.
+- 2026-05-14: rechecked Rust's `thread/start`, `thread/resume`, and `thread/fork` response protocol surfaces from `codex-rs/app-server-protocol/src/protocol/v2/thread.rs`. Swift route behavior already returned these runtime fields; the shared protocol model layer now carries typed start/resume/fork response wrappers with Rust's thread metadata payload, model/provider/service tier, cwd, instruction sources, approval reviewer, sandbox compatibility projection, active permission profile, and explicit-null optional reasoning fields.
 - 2026-05-14: rechecked Rust's `ThreadStartSource` and `mock/experimentalMethod` protocol test surface from `codex-rs/app-server-protocol/src/protocol/v2/thread.rs`. Swift already had the experimental route gate and echo behavior; the shared protocol model layer now carries the `startup`/`clear` enum plus mock params/response payloads with Rust's explicit-null optional serialization.
 - 2026-05-14: rechecked Rust commits `bbb6bf0a37` (accepted-line fingerprint analytics), `bd8fc9adb9` (hyphenated session/thread request headers), `7c0e54bf59` (catalog-driven service-tier commands), `5733e00c79` (Seatbelt network policy without Darwin user-cache writes), `d2e71db22a` (exec banner wording), `cce059467a` / `e783341b70` (freeform-only `apply_patch` defaults), `607b0dd1f0` (OTEL span-attribute preflight), and `61142b6169` (structural dynamic tool-name ordering). Swift parity remains covered by `AcceptedLines`, Responses/Chat request-header, slash-command service-tier, Seatbelt, config-summary, tool-spec/apply-patch, OTEL config, and dynamic-tool-search tests. Rust TUI-only status-line commits `e6312d44f0` and `f86d95a242` have no current Swift renderer counterpart beyond the already ported slash-command and token-usage helpers.
 - 2026-05-16: tightened coverage for Rust commit `bd8fc9adb9` by pinning the attestation lookup boundary against hyphenated request headers too: compact requests now have focused coverage that a `session-id` header alone is enough to derive the desktop-attestation thread context.
@@ -2838,7 +2845,7 @@ Recent upstream audit checkpoint:
 - `codex-rs/app-server-protocol` thread-start response reviewer
   - added Rust's required `approvalsReviewer` field to the `thread/start` response with the default `user` reviewer.
 - `codex-rs/app-server-protocol` thread-start response shape
-  - added Rust's required `thread/start` response fields for service tier, instruction sources, permission profile, and active permission profile; the response now carries the effective managed permission profile and active profile id instead of placeholder nulls.
+  - added Rust's required `thread/start` response fields for service tier, instruction sources, and active permission profile; the response now carries the active profile id instead of placeholder nulls.
 - `codex-rs/app-server` turn-start override compatibility
   - matched Rust's `turn/start` rejection when experimental `permissions` are combined with legacy `sandboxPolicy`, preserving null-as-absent handling.
 - `codex-rs/app-server` turn-start cwd context overrides
@@ -2854,7 +2861,7 @@ Recent upstream audit checkpoint:
 - `codex-rs/app-server` thread resume/fork override compatibility
   - matched Rust's `thread/resume` and `thread/fork` rejection when experimental `permissions` are combined with legacy `sandbox`, preserving null-as-absent handling.
 - `codex-rs/app-server-protocol` thread-resume response shape
-  - added Rust's required `thread/resume` response fields for service tier, instruction sources, approvals reviewer, permission profile, and active permission profile; `thread/resume` and `thread/fork` now return the effective permission profile and configured active profile id instead of placeholder nulls.
+  - added Rust's required `thread/resume` response fields for service tier, instruction sources, approvals reviewer, and active permission profile; `thread/resume` and `thread/fork` now return the configured active profile id instead of placeholder nulls.
 - `AGENTS.md` and `Docs/SwiftPort` Swift guidance
   - expanded the copied agent/app-server maintainer docs into Swift-native guidance for argument-label clarity, exact argument comments for unavoidable positional literals, exhaustive `switch` usage, protocol documentation, Swift concurrency/sendability, `Codable` omitted/null/value semantics, and experimental API gating through explicit Swift guard helpers instead of Rust macro annotations.
   - tightened the SwiftPort agent and contributing docs so upstream Rust lint guidance is rewritten into concrete Swift review rules: prefer labels/enums/options over opaque literals, match Swift argument-comment text to the callee label/local name when unavoidable, avoid broad concurrency escape annotations, and model Rust `Option` wire behavior explicitly when plain Swift optionals would lose information.
@@ -2994,7 +3001,7 @@ Recent upstream audit checkpoint:
 - `codex-rs/app-server-protocol/src/protocol/v2/tests.rs` turn/start environments
   - pinned Swift `turn/start.environments` protocol parity for Rust's environment payload edge cases: absolute `cwd` round trips, empty arrays are preserved, `null` and omission decode to the default unset state, and relative environment working directories are rejected through the shared `AbsolutePath` contract.
 - `codex-rs/app-server-protocol/src/protocol/v2/tests.rs` thread lifecycle response defaults
-  - pinned Swift `thread/start`, `thread/resume`, and `thread/fork` response decoding for Rust's missing optional lifecycle fields: absent `instructionSources` defaults to an empty list while absent `permissionProfile` and `activePermissionProfile` decode as `nil`; explicit `null` remains rejected for the Rust-defaulted `instructionSources` vector.
+  - pinned Swift `thread/start`, `thread/resume`, and `thread/fork` response decoding for Rust's missing optional lifecycle fields: absent `instructionSources` defaults to an empty list while absent `activePermissionProfile` decodes as `nil`; explicit `null` remains rejected for the Rust-defaulted `instructionSources` vector.
 - `codex-rs/core/src/mcp_tool_approval_templates.rs` MCP approval template rendering
   - added Swift parity for bundled consequential tool approval templates, exact connector/server/tool-title matching, connector-name substitution, literal templates without connector names, template parameter relabeling, duplicate display-label rejection, object-only tool params, and sorted fallback display parameters.
 - `codex-rs/protocol/src/mcp_approval_meta.rs` / `codex-rs/core/src/mcp_tool_call.rs` MCP approval elicitation metadata
