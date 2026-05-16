@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import CodexCore
 
@@ -79,6 +80,31 @@ final class ConfigSummaryTests: XCTestCase {
         )
 
         XCTAssertEqual(entries[4], ConfigSummaryEntry("sandbox", "workspace-write [workdir, /tmp, $TMPDIR, /repo-extra]"))
+    }
+
+    func testResolveEffectiveWorkspaceRootsIncludesProfileRootsAndAddDirLikeRust() throws {
+        var config = CodexRuntimeConfig()
+        config.workspaceRoots = [
+            try AbsolutePath(absolutePath: "/repo")
+        ]
+        config.profileWorkspaceRoots = [
+            try AbsolutePath(absolutePath: "/profile-root")
+        ]
+
+        let roots = ConfigSummary.resolveEffectiveWorkspaceRoots(
+            config: config,
+            cwd: URL(fileURLWithPath: "/repo", isDirectory: true),
+            additionalWritableRootArguments: [
+                "relative-extra",
+                "/profile-root"
+            ]
+        )
+
+        XCTAssertEqual(roots.map(\.path), [
+            "/repo",
+            "/profile-root",
+            "/repo/relative-extra"
+        ])
     }
 
     func testPermissionProfileSummaryFallsBackToCustomPermissionsLikeRust() {

@@ -45,6 +45,29 @@ public struct ConfigSummaryInput: Equatable, Sendable {
 }
 
 public enum ConfigSummary {
+    public static func resolveEffectiveWorkspaceRoots(
+        config: CodexRuntimeConfig,
+        cwd: URL,
+        additionalWritableRootArguments: [String]
+    ) -> [AbsolutePath] {
+        var roots = config.effectiveWorkspaceRoots
+        if roots.isEmpty,
+           let cwdRoot = try? AbsolutePath(absolutePath: cwd.standardizedFileURL.path)
+        {
+            roots.append(cwdRoot)
+        }
+
+        for argument in additionalWritableRootArguments {
+            guard let root = try? AbsolutePath.resolve(argument, against: cwd.standardizedFileURL.path),
+                  !roots.contains(root)
+            else {
+                continue
+            }
+            roots.append(root)
+        }
+        return roots
+    }
+
     public static func renderStartupBanner(version: String, entries: [ConfigSummaryEntry]) -> String {
         var lines = [
             "OpenAI Codex v\(version)",

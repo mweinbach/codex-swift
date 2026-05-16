@@ -73,12 +73,13 @@ exit(exitCode)
 
 private func resolvedAuthSettings(
     overrides: CliConfigOverrides,
-    loaderOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides()
+    loaderOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides(),
+    cwd: URL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
 ) throws -> (codexHome: URL, settings: CodexRuntimeConfig) {
     let codexHome = try CodexHome.find()
     let settings = try CodexConfigLoader.load(
         codexHome: codexHome,
-        cwd: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true),
+        cwd: cwd,
         overrides: overrides,
         managedConfigOverrides: loaderOverrides
     )
@@ -859,7 +860,8 @@ private func runNonInteractiveExec(
     let loaderOverrides = execLoaderOverrides(options: options)
     let (codexHome, settings) = try resolvedAuthSettings(
         overrides: configOverrides,
-        loaderOverrides: loaderOverrides
+        loaderOverrides: loaderOverrides,
+        cwd: cwd
     )
     let configStack = try CodexConfigLayerLoader.loadConfigLayerStack(
         codexHome: codexHome,
@@ -954,7 +956,11 @@ private func runNonInteractiveExec(
         sandboxPolicy: sandboxPolicy,
         cwd: cwd
     )
-    let effectiveWorkspaceRoots = resolveExecEffectiveWorkspaceRoots(cwd: cwd, arguments: arguments)
+    let effectiveWorkspaceRoots = ConfigSummary.resolveEffectiveWorkspaceRoots(
+        config: settings,
+        cwd: cwd,
+        additionalWritableRootArguments: execLongOptionValues("--add-dir", in: arguments)
+    )
     let shell = ShellSnapshot.attachSnapshotIfEnabled(
         codexHome: codexHome,
         sessionID: ThreadId(uuid: conversationID.uuid),
@@ -1435,17 +1441,6 @@ private func resolveExecPermissionProfile(
         return PermissionProfile.fromLegacySandboxPolicyForCwd(sandboxPolicy, cwd: cwd.path)
     }
     return settings.permissionProfile ?? PermissionProfile.fromLegacySandboxPolicyForCwd(sandboxPolicy, cwd: cwd.path)
-}
-
-private func resolveExecEffectiveWorkspaceRoots(cwd: URL, arguments: [String]) -> [AbsolutePath] {
-    var roots = [try? AbsolutePath(absolutePath: cwd.standardizedFileURL.path)].compactMap(\.self)
-    let additionalRoots = execLongOptionValues("--add-dir", in: arguments).compactMap {
-        try? AbsolutePath.resolve($0, against: cwd.standardizedFileURL.path)
-    }
-    for root in additionalRoots where !roots.contains(root) {
-        roots.append(root)
-    }
-    return roots
 }
 
 private func sandboxPolicy(from mode: SandboxMode) -> SandboxPolicy {
