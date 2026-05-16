@@ -575,6 +575,7 @@ final class ConfigLoaderTests: XCTestCase {
         try """
         model = "project-model"
         chatgpt_base_url = "https://project.example/backend-api/"
+        apps_mcp_product_sku = "project-sku"
         model_provider = "unsafe-provider"
         notify = ["unsafe"]
         profile = "unsafe"
@@ -600,10 +601,11 @@ final class ConfigLoaderTests: XCTestCase {
 
         XCTAssertEqual(config.model, "project-model")
         XCTAssertEqual(config.chatgptBaseURL, "https://chatgpt.com/backend-api/")
+        XCTAssertNil(config.appsMcpProductSKU)
         XCTAssertEqual(config.selectedModelProviderID, "openai")
         XCTAssertNil(config.modelProviders["unsafe-provider"])
         XCTAssertEqual(config.startupWarnings, [
-            "Ignored unsupported project-local config keys in \(projectConfigFile.standardizedFileURL.path): chatgpt_base_url, model_provider, model_providers, notify, profile, profiles, otel. If you want these settings to apply, manually set them in your user-level config.toml."
+            "Ignored unsupported project-local config keys in \(projectConfigFile.standardizedFileURL.path): chatgpt_base_url, apps_mcp_product_sku, model_provider, model_providers, notify, profile, profiles, otel. If you want these settings to apply, manually set them in your user-level config.toml."
         ])
     }
 
@@ -2680,6 +2682,21 @@ final class ConfigLoaderTests: XCTestCase {
 
         XCTAssertFalse(config.features.isEnabled(.appsMcpPathOverride))
         XCTAssertNil(config.appsMcpPathOverride)
+    }
+
+    func testLoadsAppsMcpProductSKUFromRustTopLevelConfig() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        apps_mcp_product_sku = "tpp"
+
+        [features]
+        apps = true
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.appsMcpProductSKU, "tpp")
+        XCTAssertEqual(config.runtimeMcpConfig.appsMcpProductSKU, "tpp")
     }
 
     func testMemoriesConfigParsesRustSettingsAndLegacyAlias() throws {

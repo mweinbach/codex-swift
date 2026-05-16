@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked upstream Rust commit `c15613f2b6` (`Forward apps
+  MCP product SKU from Codex config`). Swift config now loads the top-level
+  `apps_mcp_product_sku`, blocks project-local config from setting it, carries
+  it into runtime MCP config, and forwards it as `X-OpenAI-Product-Sku` on the
+  host-owned `codex_apps` MCP transport.
 - 2026-05-16: rechecked upstream Rust commit `9facdccb37` (`Ignore
   configured hooks in git helpers`). Swift core git-info collection now runs
   internal git commands with configured hooks disabled, optional locks off, and

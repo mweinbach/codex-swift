@@ -141,4 +141,24 @@ final class BuiltinMcpServerTests: XCTestCase {
             envHttpHeaders: nil
         ))
     }
+
+    func testCodexAppsServerConfigForwardsConfiguredProductSKUHeaderLikeRust() {
+        let config = RuntimeMcpConfig(
+            chatgptBaseURL: "https://chatgpt.com/backend-api/",
+            appsMcpProductSKU: "tpp",
+            appsEnabled: true,
+            configuredMcpServers: [:],
+            builtinMcpServers: []
+        )
+
+        let effective = config.effectiveMcpServers(usesCodexBackend: true)
+        let codexApps = effective[codexAppsMCPServerName]?.configuredConfig
+
+        XCTAssertEqual(codexApps?.transport, .streamableHttp(
+            url: "https://chatgpt.com/backend-api/wham/apps",
+            bearerTokenEnvVar: nil,
+            httpHeaders: ["X-OpenAI-Product-Sku": "tpp"],
+            envHttpHeaders: nil
+        ))
+    }
 }

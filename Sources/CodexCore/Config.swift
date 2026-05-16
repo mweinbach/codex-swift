@@ -335,6 +335,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var modelCatalog: ModelsResponse?
     public var personality: Personality?
     public var appsMcpPathOverride: String?
+    public var appsMcpProductSKU: String?
     public var realtimeAudio: RealtimeAudioConfig
     public var cliAuthCredentialsStoreMode: AuthCredentialsStoreMode
     public var forcedLoginMethod: ForcedLoginMethod?
@@ -421,6 +422,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         return RuntimeMcpConfig(
             chatgptBaseURL: chatgptBaseURL,
             appsMcpPathOverride: appsMcpPathOverride,
+            appsMcpProductSKU: appsMcpProductSKU,
             appsEnabled: features.isEnabled(.apps),
             configuredMcpServers: configuredMcpServers,
             builtinMcpServers: builtinMcpServers
@@ -534,6 +536,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.modelCatalog = modelCatalog
         self.personality = personality
         self.appsMcpPathOverride = appsMcpPathOverride
+        self.appsMcpProductSKU = nil
         self.realtimeAudio = realtimeAudio
         self.cliAuthCredentialsStoreMode = cliAuthCredentialsStoreMode
         self.forcedLoginMethod = forcedLoginMethod
@@ -1994,6 +1997,7 @@ private struct ParsedCodexConfigToml {
     private static let projectLocalConfigDenylist: [String] = [
         "openai_base_url",
         "chatgpt_base_url",
+        "apps_mcp_product_sku",
         "model_provider",
         "model_providers",
         "notify",
@@ -4229,6 +4233,9 @@ private struct ParsedCodexConfigToml {
         if let baseURL = values["chatgpt_base_url"] {
             config.chatgptBaseURL = try stringValue(baseURL, key: "\(keyPrefix)chatgpt_base_url")
         }
+        if let productSKU = values["apps_mcp_product_sku"] {
+            config.appsMcpProductSKU = try stringValue(productSKU, key: "\(keyPrefix)apps_mcp_product_sku")
+        }
         if let baseURL = values["openai_base_url"] {
             let value = try stringValue(baseURL, key: "\(keyPrefix)openai_base_url")
             config.openAIBaseURL = value.isEmpty ? nil : value
@@ -4431,6 +4438,7 @@ private struct ParsedCodexConfigToml {
             || key == "personality"
             || key == "service_tier"
             || key == "chatgpt_base_url"
+            || key == "apps_mcp_product_sku"
             || key == "openai_base_url"
             || key == "sqlite_home"
             || key == "log_dir"

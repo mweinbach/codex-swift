@@ -40,6 +40,7 @@ public struct BuiltinMcpServerOptions: Equatable, Sendable {
 public struct RuntimeMcpConfig: Equatable, Sendable {
     public var chatgptBaseURL: String
     public var appsMcpPathOverride: String?
+    public var appsMcpProductSKU: String?
     public var appsEnabled: Bool
     public var configuredMcpServers: [String: McpServerConfig]
     public var builtinMcpServers: [BuiltinMcpServer]
@@ -47,12 +48,14 @@ public struct RuntimeMcpConfig: Equatable, Sendable {
     public init(
         chatgptBaseURL: String = CodexConfigDefaults.chatgptBaseURL,
         appsMcpPathOverride: String? = nil,
+        appsMcpProductSKU: String? = nil,
         appsEnabled: Bool = false,
         configuredMcpServers: [String: McpServerConfig],
         builtinMcpServers: [BuiltinMcpServer]
     ) {
         self.chatgptBaseURL = chatgptBaseURL
         self.appsMcpPathOverride = appsMcpPathOverride
+        self.appsMcpProductSKU = appsMcpProductSKU
         self.appsEnabled = appsEnabled
         self.configuredMcpServers = configuredMcpServers
         self.builtinMcpServers = builtinMcpServers
@@ -90,7 +93,7 @@ public struct RuntimeMcpConfig: Equatable, Sendable {
                     appsMcpPathOverride: appsMcpPathOverride
                 ),
                 bearerTokenEnvVar: Self.codexAppsMcpBearerTokenEnvVar(environment: environment),
-                httpHeaders: nil,
+                httpHeaders: appsMcpProductSKU.map { ["X-OpenAI-Product-Sku": $0] },
                 envHttpHeaders: nil
             ),
             startupTimeoutSec: 30

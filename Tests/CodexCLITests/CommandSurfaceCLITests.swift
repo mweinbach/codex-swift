@@ -1725,9 +1725,14 @@ final class CommandSurfaceCLITests: XCTestCase {
     }
 
     func testDebugRuntimeModelsOnlineUsesRawCatalogLoader() async throws {
+        let codexHome = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: codexHome, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: codexHome) }
         let result = try await DebugCommandRuntime.run(CodexCLI.DebugCommandRequest(
             action: .models(bundled: false)
         ), dependencies: Self.debugModelDependencies(
+            findCodexHome: { codexHome },
+            loadConfig: { _, _ in CodexRuntimeConfig() },
             loadRawModelCatalog: { _, _ in ModelsResponse(models: [], etag: "online-fixture") }
         ))
 
@@ -1813,13 +1818,17 @@ final class CommandSurfaceCLITests: XCTestCase {
     }
 
     private static func debugModelDependencies(
+        findCodexHome: @escaping () throws -> URL = { URL(fileURLWithPath: "/tmp/codex-home", isDirectory: true) },
+        loadConfig: @escaping (URL, CliConfigOverrides) throws -> CodexRuntimeConfig = { _, _ in
+            CodexRuntimeConfig(modelProvider: "openai")
+        },
         loadRawModelCatalog: @escaping (URL, CodexRuntimeConfig) async throws -> ModelsResponse = { _, _ in
             ModelsResponse(models: [])
         }
     ) -> DebugCommandRuntime.Dependencies {
         DebugCommandRuntime.Dependencies(
-            findCodexHome: { URL(fileURLWithPath: "/tmp/codex-home", isDirectory: true) },
-            loadConfig: { _, _ in CodexRuntimeConfig(modelProvider: "openai") },
+            findCodexHome: findCodexHome,
+            loadConfig: loadConfig,
             loadConfigLayerStack: { codexHome, _ in
                 try ConfigLayerStack(layers: [
                     ConfigLayerEntry(
