@@ -4636,6 +4636,52 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(params.personality, .string("pragmatic"))
     }
 
+    func testTurnStartRuntimeSubmitterPreservesRuntimeWorkspaceRootsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let capture = AppServerCoreOpCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            coreOpSubmitter: capture.submit,
+            experimentalAPIEnabled: true
+        )
+        let workspace = temp.url.appendingPathComponent("workspace", isDirectory: true)
+        let external = temp.url.appendingPathComponent("external", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: external, withIntermediateDirectories: true)
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider","cwd":"\#(workspace.path)"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let request: [String: Any] = [
+            "id": 2,
+            "method": "turn/start",
+            "params": [
+                "threadId": threadID,
+                "input": [["type": "text", "text": "Use runtime roots"]],
+                "runtimeWorkspaceRoots": ["logs", external.path, "logs"]
+            ]
+        ]
+
+        _ = try decodeMessages(processor.processLine(try JSONSerialization.data(withJSONObject: request)))
+
+        let submissions = capture.submissions
+        XCTAssertEqual(submissions.count, 1)
+        guard case let .userInputWithTurnContext(params) = submissions[0].op else {
+            XCTFail("expected runtime workspace roots to use context-aware user input")
+            return
+        }
+        XCTAssertEqual(params.items, [.text("Use runtime roots")])
+        XCTAssertNil(params.cwd)
+        XCTAssertEqual(params.workspaceRoots?.map(\.path), [
+            workspace.appendingPathComponent("logs", isDirectory: true).standardizedFileURL.path,
+            external.standardizedFileURL.path
+        ])
+        XCTAssertNil(params.profileWorkspaceRoots)
+    }
+
     func testTurnStartRuntimeSubmitterPreservesGranularApprovalPolicyLikeRust() throws {
         let temp = try TemporaryDirectory()
         let capture = AppServerCoreOpCapture()

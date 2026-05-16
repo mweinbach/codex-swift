@@ -6,6 +6,8 @@ public struct UserInputWithTurnContextParams: Codable, Equatable, Sendable {
     public let finalOutputJSONSchema: JSONValue?
     public let responsesAPIClientMetadata: [String: String]?
     public let cwd: String?
+    public let workspaceRoots: [AbsolutePath]?
+    public let profileWorkspaceRoots: [AbsolutePath]?
     public let approvalPolicy: AskForApproval?
     public let approvalsReviewer: JSONValue?
     public let sandboxPolicy: SandboxPolicy?
@@ -25,6 +27,8 @@ public struct UserInputWithTurnContextParams: Codable, Equatable, Sendable {
         case finalOutputJSONSchema = "final_output_json_schema"
         case responsesAPIClientMetadata = "responsesapi_client_metadata"
         case cwd
+        case workspaceRoots = "workspace_roots"
+        case profileWorkspaceRoots = "profile_workspace_roots"
         case approvalPolicy = "approval_policy"
         case approvalsReviewer = "approvals_reviewer"
         case sandboxPolicy = "sandbox_policy"
@@ -45,6 +49,8 @@ public struct UserInputWithTurnContextParams: Codable, Equatable, Sendable {
         finalOutputJSONSchema: JSONValue? = nil,
         responsesAPIClientMetadata: [String: String]? = nil,
         cwd: String? = nil,
+        workspaceRoots: [AbsolutePath]? = nil,
+        profileWorkspaceRoots: [AbsolutePath]? = nil,
         approvalPolicy: AskForApproval? = nil,
         approvalsReviewer: JSONValue? = nil,
         sandboxPolicy: SandboxPolicy? = nil,
@@ -63,6 +69,8 @@ public struct UserInputWithTurnContextParams: Codable, Equatable, Sendable {
         self.finalOutputJSONSchema = finalOutputJSONSchema
         self.responsesAPIClientMetadata = responsesAPIClientMetadata
         self.cwd = cwd
+        self.workspaceRoots = workspaceRoots
+        self.profileWorkspaceRoots = profileWorkspaceRoots
         self.approvalPolicy = approvalPolicy
         self.approvalsReviewer = approvalsReviewer
         self.sandboxPolicy = sandboxPolicy
@@ -87,6 +95,8 @@ public struct UserInputWithTurnContextParams: Codable, Equatable, Sendable {
             forKey: .responsesAPIClientMetadata
         )
         cwd = try container.decodeIfPresent(String.self, forKey: .cwd)
+        workspaceRoots = try container.decodeIfPresent([AbsolutePath].self, forKey: .workspaceRoots)
+        profileWorkspaceRoots = try container.decodeIfPresent([AbsolutePath].self, forKey: .profileWorkspaceRoots)
         approvalPolicy = try container.decodeIfPresent(AskForApproval.self, forKey: .approvalPolicy)
         approvalsReviewer = try Self.decodeNullableJSON(from: container, forKey: .approvalsReviewer)
         sandboxPolicy = try container.decodeIfPresent(SandboxPolicy.self, forKey: .sandboxPolicy)
@@ -111,6 +121,8 @@ public struct UserInputWithTurnContextParams: Codable, Equatable, Sendable {
         try container.encodeIfPresent(finalOutputJSONSchema, forKey: .finalOutputJSONSchema)
         try container.encodeIfPresent(responsesAPIClientMetadata, forKey: .responsesAPIClientMetadata)
         try container.encodeIfPresent(cwd, forKey: .cwd)
+        try container.encodeIfPresent(workspaceRoots, forKey: .workspaceRoots)
+        try container.encodeIfPresent(profileWorkspaceRoots, forKey: .profileWorkspaceRoots)
         try container.encodeIfPresent(approvalPolicy, forKey: .approvalPolicy)
         try Self.encodeNullableJSON(approvalsReviewer, into: &container, forKey: .approvalsReviewer)
         try container.encodeIfPresent(sandboxPolicy, forKey: .sandboxPolicy)

@@ -3482,11 +3482,16 @@ public enum CodexAppServer {
         let existing = try RolloutSummary(path: rolloutPath, defaultProvider: configuration.defaultModelProvider)
         let environments = try turnEnvironmentSelections(params?["environments"], configuration: configuration)
         let cwd = try optionalAbsolutePathParam(params?["cwd"], name: "cwd")
+        let contextCwd = cwd ?? existing.cwd
+        let runtimeWorkspaceRoots = try runtimeWorkspaceRootPathsParam(
+            params?["runtimeWorkspaceRoots"],
+            cwd: URL(fileURLWithPath: contextCwd, isDirectory: true)
+        )?.map { try AbsolutePath(absolutePath: $0) }
         let serviceTierFeatures = params?["serviceTier"] == nil
             ? FeatureStates.withDefaults()
             : try loadRuntimeConfigForThreadStartup(
                 configuration: configuration,
-                cwd: URL(fileURLWithPath: cwd ?? existing.cwd, isDirectory: true)
+                cwd: URL(fileURLWithPath: contextCwd, isDirectory: true)
             ).features
         let approvalPolicy = try turnStartApprovalPolicyParam(params?["approvalPolicy"])
         let approvalsReviewer = try approvalsReviewerParam(params?["approvalsReviewer"])
@@ -3504,7 +3509,6 @@ public enum CodexAppServer {
         let permissionProfile: PermissionProfile?
         let activePermissionProfile: ActivePermissionProfile?
         if let permissionSelection {
-            let contextCwd = cwd ?? existing.cwd
             let runtimeConfig = try loadRuntimeConfigForThreadStartup(
                 configuration: configuration,
                 cwd: URL(fileURLWithPath: contextCwd, isDirectory: true),
@@ -3529,6 +3533,7 @@ public enum CodexAppServer {
         )
 
         let hasAnyOverrides = cwd != nil
+            || runtimeWorkspaceRoots != nil
             || approvalPolicy != nil
             || approvalsReviewer != nil
             || sandboxPolicy != nil
@@ -3547,6 +3552,8 @@ public enum CodexAppServer {
                 finalOutputJSONSchema: outputSchema,
                 responsesAPIClientMetadata: metadata,
                 cwd: cwd,
+                workspaceRoots: runtimeWorkspaceRoots,
+                profileWorkspaceRoots: nil,
                 approvalPolicy: approvalPolicy,
                 approvalsReviewer: approvalsReviewer.map { .string($0.appServerRawValue) },
                 sandboxPolicy: sandboxPolicy,

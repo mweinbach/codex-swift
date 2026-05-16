@@ -254,6 +254,13 @@ final class SubmissionTests: XCTestCase {
             ]),
             responsesAPIClientMetadata: ["surface": "app"],
             cwd: "/repo",
+            workspaceRoots: [
+                try AbsolutePath(absolutePath: "/repo"),
+                try AbsolutePath(absolutePath: "/repo/tmp")
+            ],
+            profileWorkspaceRoots: [
+                try AbsolutePath(absolutePath: "/repo/profile")
+            ],
             approvalPolicy: .onRequest,
             approvalsReviewer: .string("native"),
             sandboxPolicy: .readOnly,
@@ -317,6 +324,13 @@ final class SubmissionTests: XCTestCase {
                         "path": "/repo/tmp"
                     ]
                 ]
+            ],
+            "workspace_roots": [
+                "/repo",
+                "/repo/tmp"
+            ],
+            "profile_workspace_roots": [
+                "/repo/profile"
             ],
             "windows_sandbox_level": "read_only",
             "model": "gpt-5.4",

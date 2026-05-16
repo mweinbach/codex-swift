@@ -20,9 +20,12 @@ Recent upstream audit checkpoint:
   `runtimeWorkspaceRoots`, and live thread lifecycle responses resolve relative
   roots against the request cwd while preserving order and dropping duplicates.
   Permission profile selections now also accept Rust's string id shape while
-  continuing to decode the prior object form for legacy callers. Applying
-  `turn/start.runtimeWorkspaceRoots` to the running-thread runtime remains
-  pending with the broader live runtime context port.
+  continuing to decode the prior object form for legacy callers. Live
+  `turn/start` submissions now forward resolved runtime workspace roots through
+  Rust's `user_input_with_turn_context.workspace_roots` core-op field so
+  running-thread runtime context receives the same deduped absolute roots.
+  Profile-defined workspace root materialization remains pending with the
+  broader Swift permission-state port.
 - 2026-05-16: rechecked Rust commit `5d30764fe9` (`Run compact hooks for
   remote compaction v2`). Swift core remote-v2 compaction orchestration now
   runs trusted `PreCompact` hooks before collecting the v2 compaction stream,
