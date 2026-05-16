@@ -231,7 +231,8 @@ private func runDoctorCommand(_ request: CodexCLI.DoctorCommandRequest) async th
         diagnosticChecks: {
             [
                 DoctorCommandRuntime.runtimeProvenanceCheck(codexVersion: CodexCLI.version),
-                DoctorCommandRuntime.searchCheck()
+                DoctorCommandRuntime.searchCheck(),
+                DoctorCommandRuntime.networkEnvironmentCheck()
             ]
         }
     ) {

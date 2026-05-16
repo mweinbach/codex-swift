@@ -33,6 +33,9 @@ final class DoctorCommandRuntimeTests: XCTestCase {
                             XCTAssertEqual(arguments, ["--version"])
                             return .success("ripgrep 14.1.1\n")
                         }
+                    ),
+                    DoctorCommandRuntime.networkEnvironmentCheck(
+                        environment: ["HTTPS_PROXY": "https://proxy.example"]
                     )
                 ]
             }
@@ -73,6 +76,13 @@ final class DoctorCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(searchDetails["search command"] as? String, "rg")
         XCTAssertEqual(searchDetails["search command readiness"] as? String, "ripgrep 14.1.1")
 
+        let network = try XCTUnwrap(checks["network.env"] as? [String: Any])
+        XCTAssertEqual(network["category"] as? String, "network")
+        XCTAssertEqual(network["status"] as? String, "ok")
+        XCTAssertEqual(network["summary"] as? String, "network-related environment looks readable")
+        let networkDetails = try XCTUnwrap(network["details"] as? [String: Any])
+        XCTAssertEqual(networkDetails["proxy env vars present"] as? String, "HTTPS_PROXY")
+
         let config = try XCTUnwrap(checks["config.load"] as? [String: Any])
         XCTAssertEqual(config["id"] as? String, "config.load")
         XCTAssertEqual(config["category"] as? String, "config")
@@ -105,6 +115,24 @@ final class DoctorCommandRuntimeTests: XCTestCase {
             "search command readiness: No such file or directory"
         ])
         XCTAssertEqual(check.remediation, "Install ripgrep or repair the bundled standalone resources.")
+    }
+
+    func testNetworkEnvironmentCheckWarnsForUnreadableCustomCAPathLikeRustDoctor() {
+        let check = DoctorCommandRuntime.networkEnvironmentCheck(
+            environment: [
+                "HTTP_PROXY": "",
+                "SSL_CERT_FILE": "/definitely/missing/cert.pem"
+            ]
+        )
+
+        XCTAssertEqual(check.id, "network.env")
+        XCTAssertEqual(check.category, "network")
+        XCTAssertEqual(check.status, .warning)
+        XCTAssertEqual(check.summary, "custom CA env var points at an unreadable path")
+        XCTAssertEqual(check.details, [
+            "proxy env vars: none",
+            "SSL_CERT_FILE: /definitely/missing/cert.pem (No such file or directory)"
+        ])
     }
 
     func testRunJsonReturnsFailWhenConfigLoadFailsLikeRustDoctor() throws {

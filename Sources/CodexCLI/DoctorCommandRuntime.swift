@@ -242,6 +242,58 @@ public enum DoctorCommandRuntime {
         return check
     }
 
+    public static func networkEnvironmentCheck(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> DoctorCheck {
+        var details: [String] = []
+        let presentProxyVariables = proxyEnvironmentVariables.filter { name in
+            guard let value = environment[name] else { return false }
+            return !value.isEmpty
+        }
+        if presentProxyVariables.isEmpty {
+            details.append("proxy env vars: none")
+        } else {
+            details.append("proxy env vars present: \(presentProxyVariables.joined(separator: ", "))")
+        }
+
+        var status = DoctorCheckStatus.ok
+        var summary = "network-related environment looks readable"
+        for name in customCertificateEnvironmentVariables {
+            guard let rawPath = environment[name] else { continue }
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: rawPath, isDirectory: &isDirectory) {
+                if isDirectory.boolValue {
+                    status = .warning
+                    summary = "custom CA env var does not point at a file"
+                    details.append("\(name): not a file \(rawPath)")
+                } else {
+                    do {
+                        let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: rawPath))
+                        _ = try handle.read(upToCount: 1)
+                        try handle.close()
+                        details.append("\(name): readable file \(rawPath)")
+                    } catch {
+                        status = .warning
+                        summary = "custom CA env var points at an unreadable file"
+                        details.append("\(name): \(rawPath) (\(error.localizedDescription))")
+                    }
+                }
+            } else {
+                status = .warning
+                summary = "custom CA env var points at an unreadable path"
+                details.append("\(name): \(rawPath) (No such file or directory)")
+            }
+        }
+
+        return DoctorCheck(
+            id: "network.env",
+            category: "network",
+            status: status,
+            summary: summary,
+            details: details
+        )
+    }
+
     public static func configLoadedCheck(
         model: String?,
         modelProviderID: String?,
@@ -407,6 +459,22 @@ public enum DoctorCommandRuntime {
         ("Updates", ["updates"]),
         ("Connectivity", ["network", "websocket", "reachability"]),
         ("Background Server", ["app-server"])
+    ]
+
+    private static let proxyEnvironmentVariables = [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "no_proxy"
+    ]
+
+    private static let customCertificateEnvironmentVariables = [
+        "CODEX_CA_CERTIFICATE",
+        "SSL_CERT_FILE"
     ]
 
     private static func runCommand(_ command: String, _ arguments: [String]) -> DoctorCommandOutput {
