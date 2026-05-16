@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust `extract_powershell_command` in
+  `codex-rs/shell-command/src/powershell.rs`. Swift parsed-command
+  PowerShell wrapper handling now uses the shared `ShellResolver` helper
+  instead of carrying a duplicate extractor, and focused coverage pins basic
+  `-Command`, lowercase `-nologo` / `-command`, `-NoProfile` / `-c`, and
+  unsupported-flag rejection behavior.
 - 2026-05-16: rechecked Rust commit `772e034594` (`Update
   models.json`). Swift's bundled model catalog already matches the current
   Rust catalog: GPT-5.5 and GPT-5.4 expose only the `priority` service tier,

@@ -118,7 +118,7 @@ private func collapseUnknowns(_ parsed: [ParsedCommand], originalCommand: [Strin
 }
 
 private func singleUnknown(for command: [String]) -> ParsedCommand {
-    if let (_, script) = extractShellCommand(command) ?? extractPowerShellCommand(command) {
+    if let (_, script) = extractShellCommand(command) ?? ShellResolver.extractPowerShellCommand(command) {
         return .unknown(cmd: script)
     }
     return .unknown(cmd: shlexJoin(command))
@@ -129,7 +129,7 @@ private func parseCommandImpl(_ command: [String]) -> [ParsedCommand] {
         return parsed
     }
 
-    if let (_, script) = extractPowerShellCommand(command) {
+    if let (_, script) = ShellResolver.extractPowerShellCommand(command) {
         return [.unknown(cmd: script)]
     }
 
@@ -465,28 +465,6 @@ private func extractShellCommand(_ command: [String]) -> (String, String)? {
         return nil
     }
     return (shell, command[2])
-}
-
-private func extractPowerShellCommand(_ command: [String]) -> (String, String)? {
-    guard command.count >= 3 else {
-        return nil
-    }
-    guard detectParsedShellKind(command[0]) == .powerShell else {
-        return nil
-    }
-
-    var index = 1
-    while index + 1 < command.count {
-        let flag = command[index].lowercased()
-        guard ["-nologo", "-noprofile", "-command", "-c"].contains(flag) else {
-            return nil
-        }
-        if flag == "-command" || flag == "-c" {
-            return (command[0], command[index + 1])
-        }
-        index += 1
-    }
-    return nil
 }
 
 private func executableName(_ path: String) -> String {

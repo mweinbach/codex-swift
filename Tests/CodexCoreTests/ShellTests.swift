@@ -102,6 +102,23 @@ final class ShellTests: XCTestCase {
         )
     }
 
+    func testExtractPowerShellCommandMatchesRustHelper() {
+        XCTAssertEqual(
+            ShellResolver.extractPowerShellCommand(["powershell", "-Command", "Write-Host hi"])?.script,
+            "Write-Host hi"
+        )
+        XCTAssertEqual(
+            ShellResolver.extractPowerShellCommand(["powershell", "-nologo", "-command", "Write-Host hi"])?.script,
+            "Write-Host hi"
+        )
+        XCTAssertEqual(
+            ShellResolver.extractPowerShellCommand(["pwsh", "-NoProfile", "-c", "Get-ChildItem | Select-String foo"])?.script,
+            "Get-ChildItem | Select-String foo"
+        )
+        XCTAssertNil(ShellResolver.extractPowerShellCommand(["pwsh", "-EncodedCommand", "abc"]))
+        XCTAssertNil(ShellResolver.extractPowerShellCommand(["pwsh", "-WindowStyle", "Hidden", "-Command", "Get-Location"]))
+    }
+
     func testShellCodableShapeMatchesRustSerde() throws {
         let shell = Shell(shellType: .powerShell, shellPath: "pwsh.exe")
 
