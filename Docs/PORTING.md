@@ -47,6 +47,14 @@ Recent upstream audit checkpoint:
   off by default, and plugin hooks are stable/on by default. Built-in memories
   MCP selection now follows Rust's `memories` feature plus `[memories]`
   `use_memories`, without the old `builtin_mcp` double gate.
+- 2026-05-16: ported the reusable portion of Rust commit `bbb5c2811d`
+  (`tui: pass active permission profiles through app commands`) from
+  `codex-rs/utils/approval-presets/src/lib.rs`. Swift approval presets now pair
+  each built-in preset with Rust's built-in active permission profile id and
+  concrete `PermissionProfile`, preserve the current legacy sandbox projection,
+  and expose the Rust helper that maps built-in active profile selections back
+  to read-only, workspace-write, or disabled permission profiles while rejecting
+  extended/custom selections.
 - 2026-05-16: rechecked Rust branch commit `40fd064ce2` (`Simplify remote
   installed scope gating`) and `codex-rs/features/src/lib.rs`. Swift now
   includes Rust's stable `plugin_sharing` feature flag, omits the explicit
@@ -2337,6 +2345,11 @@ Recent upstream audit checkpoint:
   - Added app-server v2 permission wrappers for additional network/filesystem permissions, managed profile filesystem permissions, active-profile selections, and granted permissions. App-server request/response payloads now preserve Rust's explicit nullable `read`/`write` and `enabled` fields, camelCase `globScanMaxDepth`, `additionalWritableRoot` modification tags, `NonZeroUsize` rejection for zero `globScanMaxDepth`, and granted-profile skip-if-nil behavior while converting back to the core rollout permission models at runtime boundaries.
 - `codex-rs/protocol/src/models.rs` permission profile helpers
   - Added `SandboxEnforcement` and Swift helpers for `PermissionProfile.enforcement` and `networkSandboxPolicy`, including Rust's disabled-profile behavior of reporting enabled network access.
+- `codex-rs/utils/approval-presets/src/lib.rs` built-in active profile presets
+  - Swift approval presets now carry Rust's built-in active permission profile
+    selection alongside the concrete typed permission profile and existing
+    legacy sandbox projection. Added the built-in active-profile-to-profile
+    lookup helper with Rust's extended-profile rejection behavior.
 - `codex-rs/protocol/src/models.rs` permission profile constructors
   - Added Swift constructors for Rust's canonical read-only and workspace-write typed permission profiles, including special-path entries for project roots, temp roots, and protected metadata subpaths.
 - `codex-rs/protocol/src/models.rs` legacy sandbox to permission profile conversion
