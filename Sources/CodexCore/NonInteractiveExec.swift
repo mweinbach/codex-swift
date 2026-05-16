@@ -2260,7 +2260,12 @@ public enum NonInteractiveExec {
                 toolUseID: hookPayload.toolUseID,
                 toolInput: hookPayload.toolInput
             )
-            return await HookPreToolUse.run(handlers: handlers, shell: HookCommandShell(), request: request)
+            var outcome = await HookPreToolUse.run(handlers: handlers, shell: HookCommandShell(), request: request)
+            outcome.additionalContexts = HookOutputSpiller().maybeSpillTexts(
+                threadID: ThreadId(uuid: conversationID.uuid),
+                texts: outcome.additionalContexts
+            )
+            return outcome
         } catch {
             return HookPreToolUseOutcome(
                 hookEvents: [],

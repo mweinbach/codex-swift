@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `23bb524973` (`Spill oversized PreToolUse
+  additionalContext`). Swift `PreToolUse` hook contexts now pass through the
+  same hook-output spiller used by session, prompt-submit, and post-tool
+  contexts before being appended as model-visible developer messages, with
+  regression coverage that the full oversized context is preserved on disk and
+  only a truncated preview plus path is forwarded.
 - 2026-05-16: rechecked Rust commit `64d8f387f9` (`Remove connector_openai
   prefix filtering`). Swift connector discovery no longer filters connector
   ids only because they start with `connector_openai_`; explicit global and

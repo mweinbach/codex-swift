@@ -1318,6 +1318,58 @@ final class NonInteractiveExecTests: XCTestCase {
         ])
     }
 
+    func testPreToolUseHooksSpillLargeAdditionalContextLikeRust() async throws {
+        let item = ResponseItem.functionCall(
+            name: "shell_command",
+            arguments: #"{"command":"printf should-not-run","login":false}"#,
+            callID: "call-shell"
+        )
+        let largeContext = String(repeating: "remember the pre tool context ", count: 800)
+
+        let result = await NonInteractiveExec.executeFunctionCallWithHooks(
+            item,
+            handlers: [
+                ConfiguredHookHandler(
+                    eventName: .preToolUse,
+                    matcher: "Bash",
+                    command: "cat <<'JSON'\n"
+                        + #"{"decision":"block","reason":"policy","hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"#
+                        + (try Self.jsonString(largeContext))
+                        + #"}}"#
+                        + "\nJSON",
+                    timeoutSec: 5,
+                    sourcePath: try AbsolutePath(absolutePath: "/tmp/hooks.json"),
+                    displayOrder: 0
+                )
+            ],
+            conversationID: ConversationId(),
+            turnID: "turn-1",
+            cwd: FileManager.default.temporaryDirectory,
+            model: "gpt-test",
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000)
+        )
+
+        let itemMessage = try XCTUnwrap(result.additionalContextItems.first)
+        guard case let .message(_, role, content, _) = itemMessage else {
+            return XCTFail("expected developer message")
+        }
+        XCTAssertEqual(role, "developer")
+        XCTAssertEqual(content.count, 1)
+        guard case let .inputText(spilledContext) = content[0] else {
+            return XCTFail("expected spilled context text")
+        }
+
+        let marker = "Full hook output saved to: "
+        XCTAssertTrue(spilledContext.contains(marker), spilledContext)
+        XCTAssertNotEqual(spilledContext, largeContext)
+        let savedPath = try XCTUnwrap(spilledContext.components(separatedBy: marker).last)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        XCTAssertEqual(try String(contentsOfFile: savedPath, encoding: .utf8), largeContext)
+    }
+
     func testPostToolUseHooksAppendAdditionalContextAndReplaceFeedback() async throws {
         let item = ResponseItem.functionCall(
             name: "shell_command",
