@@ -12,6 +12,14 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust `ThreadStartParams.environments` in
+  `codex-rs/app-server-protocol/src/protocol/v2/thread.rs`, matching the
+  adjacent `turn_start_params_*_environments` fixtures in
+  `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift thread-start
+  protocol coverage now pins sticky thread environments as omitted/null =>
+  default inheritance, empty array => explicit no environments and experimental
+  marker, absolute cwd requirement, and canonical `environmentId`/`cwd`
+  re-encoding.
 - 2026-05-16: rechecked Rust `function_call_deserializes_optional_namespace`
   in `codex-rs/protocol/src/models.rs`. Swift response-item coverage now pins
   the exact namespaced MCP-style `function_call` fixture so optional
