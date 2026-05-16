@@ -12,6 +12,13 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `8df2d96860` (`core: construct test
+  permission profiles directly`) and
+  `codex-rs/core/src/config/network_proxy_spec_tests.rs`. Swift
+  `NetworkProxySpecTests` now covers the missing managed-unrestricted profile,
+  full-access fixed allow/deny baselines, allow-only full-access denylist
+  non-constraint, and default-mode deny baseline cases while constructing
+  full-access expectations from `PermissionProfile.disabled` directly.
 - 2026-05-16: rechecked Rust commit `aeca1cba6f` (`context: remove legacy
   permissions instructions helper`). Swift permission-instruction rendering now
   consumes the effective `PermissionProfile` directly during non-interactive
