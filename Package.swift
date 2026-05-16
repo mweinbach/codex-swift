@@ -94,7 +94,7 @@ let package = Package(
         ),
         .testTarget(
             name: "CodexCLITests",
-            dependencies: ["CodexCLI"]
+            dependencies: ["CodexCLI", "CodexCore"]
         ),
         .testTarget(
             name: "CodexMCPServerTests",

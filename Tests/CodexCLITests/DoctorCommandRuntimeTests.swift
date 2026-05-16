@@ -1,4 +1,5 @@
 import CodexCLI
+import CodexCore
 import Foundation
 import XCTest
 
@@ -36,6 +37,31 @@ final class DoctorCommandRuntimeTests: XCTestCase {
                     ),
                     DoctorCommandRuntime.networkEnvironmentCheck(
                         environment: ["HTTPS_PROXY": "https://proxy.example"]
+                    ),
+                    DoctorCommandRuntime.terminalEnvironmentCheck(
+                        noColorFlag: false,
+                        inputs: DoctorTerminalCheckInputs(
+                            terminalInfo: TerminalInfo(
+                                name: .iterm2,
+                                termProgram: "iTerm.app",
+                                version: "3.5",
+                                term: nil,
+                                multiplexer: nil
+                            ),
+                            environment: [
+                                "TERM": "xterm-256color",
+                                "LANG": "en_US.UTF-8",
+                                "COLUMNS": "120",
+                                "LINES": "40"
+                            ],
+                            presentEnvironment: ["TERM", "LANG", "COLUMNS", "LINES"],
+                            noColorFlag: false,
+                            stdinIsTerminal: true,
+                            stdoutIsTerminal: true,
+                            stderrIsTerminal: true,
+                            streamSupportsColor: true,
+                            terminalSize: .available(DoctorTerminalSize(columns: 120, rows: 40))
+                        )
                     )
                 ]
             }
@@ -82,6 +108,17 @@ final class DoctorCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(network["summary"] as? String, "network-related environment looks readable")
         let networkDetails = try XCTUnwrap(network["details"] as? [String: Any])
         XCTAssertEqual(networkDetails["proxy env vars present"] as? String, "HTTPS_PROXY")
+
+        let terminal = try XCTUnwrap(checks["terminal.env"] as? [String: Any])
+        XCTAssertEqual(terminal["category"] as? String, "terminal")
+        XCTAssertEqual(terminal["status"] as? String, "ok")
+        XCTAssertEqual(terminal["summary"] as? String, "terminal metadata was detected")
+        let terminalDetails = try XCTUnwrap(terminal["details"] as? [String: Any])
+        XCTAssertEqual(terminalDetails["terminal"] as? String, "iTerm2")
+        XCTAssertEqual(terminalDetails["TERM_PROGRAM"] as? String, "iTerm.app")
+        XCTAssertEqual(terminalDetails["terminal version"] as? String, "3.5")
+        XCTAssertEqual(terminalDetails["terminal size"] as? String, "120x40")
+        XCTAssertEqual(terminalDetails["color output"] as? String, "enabled")
 
         let config = try XCTUnwrap(checks["config.load"] as? [String: Any])
         XCTAssertEqual(config["id"] as? String, "config.load")
@@ -132,6 +169,49 @@ final class DoctorCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(check.details, [
             "proxy env vars: none",
             "SSL_CERT_FILE: /definitely/missing/cert.pem (No such file or directory)"
+        ])
+    }
+
+    func testTerminalEnvironmentCheckReportsRustIssuesForDumbTerminalAndNarrowSize() {
+        let check = DoctorCommandRuntime.terminalEnvironmentCheck(
+            noColorFlag: false,
+            inputs: DoctorTerminalCheckInputs(
+                terminalInfo: TerminalInfo(name: .dumb, term: "dumb"),
+                environment: [
+                    "TERM": "dumb",
+                    "LANG": "C",
+                    "COLUMNS": "79",
+                    "LINES": "20",
+                    "TERMINFO": "/definitely/missing/terminfo"
+                ],
+                presentEnvironment: ["TERM", "LANG", "COLUMNS", "LINES", "TERMINFO"],
+                noColorFlag: false,
+                stdinIsTerminal: true,
+                stdoutIsTerminal: true,
+                stderrIsTerminal: true,
+                streamSupportsColor: true,
+                terminalSize: .available(DoctorTerminalSize(columns: 79, rows: 20))
+            )
+        )
+
+        XCTAssertEqual(check.id, "terminal.env")
+        XCTAssertEqual(check.category, "terminal")
+        XCTAssertEqual(check.status, .fail)
+        XCTAssertEqual(check.summary, "TERM=dumb - colors and cursor control are disabled")
+        XCTAssertTrue(check.details.contains("terminal: dumb"))
+        XCTAssertTrue(check.details.contains("TERM: dumb"))
+        XCTAssertTrue(check.details.contains("terminal size: 79x20"))
+        XCTAssertTrue(check.details.contains("color output: disabled (TERM=dumb)"))
+        XCTAssertTrue(check.details.contains("effective locale: C"))
+        XCTAssertTrue(check.details.contains("TERMINFO: /definitely/missing/terminfo (missing)"))
+        XCTAssertEqual(check.issues.map(\.cause), [
+            "TERM=dumb - colors and cursor control are disabled",
+            "locale is not UTF-8 - unicode glyphs may render incorrectly",
+            "TERMINFO unreadable - terminal capabilities are unknown",
+            "width 79 cols - output may wrap (recommended >=80)",
+            "height 20 rows - content may scroll off (recommended >=24)",
+            "COLUMNS=79 - output may wrap (recommended >=80)",
+            "LINES=20 - content may scroll off (recommended >=24)"
         ])
     }
 
