@@ -2916,6 +2916,7 @@ Recent upstream audit checkpoint:
   - added Swift PowerShell command prefixing with Rust's `[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;` prelude, including idempotence, accepted flag validation, and non-interactive shell/unified exec wiring.
 - `codex-rs/core/src/tools/runtimes/mod.rs` elevated Windows PowerShell profile suppression
   - matched Rust commit `8ae0c837f0` by inserting `-NoProfile` into selected PowerShell runtime argv only for the elevated Windows restricted-token sandbox, preserving existing case-insensitive `-NoProfile` flags and leaving unelevated, unsandboxed, and non-PowerShell commands unchanged.
+  - tightened the runtime wiring so `-NoProfile` is applied after the final execution sandbox policy is known, matching Rust's behavior when an approval or sandbox override bypasses the Windows restricted-token sandbox; permission-request hook checks still see the original model command while the executed command receives the UTF-8 prelude and, only when applicable, elevated restricted-token profile suppression.
 - `codex-rs/shell-command/src/powershell.rs` wrapper command extraction
   - Swift PowerShell safe-command parsing now matches Rust's `-Command`/`-c` extraction by evaluating the script argument immediately after the command flag and ignoring later wrapper argv entries, while still rejecting unknown or unsafe flags before the script.
 - `codex-rs/core/src/exec_policy.rs` PowerShell command-origin lowering

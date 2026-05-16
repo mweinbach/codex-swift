@@ -166,6 +166,31 @@ final class ShellTests: XCTestCase {
         )
     }
 
+    func testRuntimePowerShellPreparationUsesFinalSandboxPolicyLikeRust() {
+        let command = ["powershell.exe", "-Command", "Write-Host hi"]
+        let prefix = ShellResolver.powerShellUTF8OutputPrefix
+
+        XCTAssertEqual(
+            NonInteractiveExec.prepareRuntimeCommand(
+                command,
+                shellType: .powerShell,
+                sandboxType: .windowsRestrictedToken,
+                windowsSandboxLevel: .elevated
+            ),
+            ["powershell.exe", "-NoProfile", "-Command", prefix + "Write-Host hi"]
+        )
+
+        XCTAssertEqual(
+            NonInteractiveExec.prepareRuntimeCommand(
+                command,
+                shellType: .powerShell,
+                sandboxType: .none,
+                windowsSandboxLevel: .elevated
+            ),
+            ["powershell.exe", "-Command", prefix + "Write-Host hi"]
+        )
+    }
+
     func testExtractPowerShellCommandMatchesRustHelper() {
         XCTAssertEqual(
             ShellResolver.extractPowerShellCommand(["powershell", "-Command", "Write-Host hi"])?.script,

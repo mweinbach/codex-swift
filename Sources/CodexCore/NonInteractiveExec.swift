@@ -862,6 +862,7 @@ public enum NonInteractiveExec {
             return await executeShellCommand(
                 toolName: "local_shell",
                 command: params.command,
+                runtimeShellType: ShellResolver.detectShellType(params.command.first ?? ""),
                 sessionShell: shell,
                 workdir: params.workingDirectory,
                 timeoutMS: params.timeoutMS,
@@ -875,6 +876,7 @@ public enum NonInteractiveExec {
                 features: features,
                 execPolicyManager: execPolicyManager,
                 approvalGranted: approvalGranted,
+                windowsSandboxLevel: windowsSandboxLevel,
                 truncationPolicy: truncationPolicy,
                 environment: environment,
                 shellEnvironmentPolicy: shellEnvironmentPolicy,
@@ -959,7 +961,6 @@ public enum NonInteractiveExec {
                 sandboxPolicy: sandboxPolicy,
                 shell: shell,
                 allowLoginShell: allowLoginShell,
-                windowsSandboxLevel: windowsSandboxLevel,
                 features: features,
                 execPolicyManager: execPolicyManager
             )
@@ -1303,7 +1304,6 @@ public enum NonInteractiveExec {
         sandboxPolicy: SandboxPolicy,
         shell: Shell,
         allowLoginShell: Bool,
-        windowsSandboxLevel: WindowsSandboxLevel,
         features: FeatureStates,
         execPolicyManager: ExecPolicyManager
     ) -> ShellApprovalHookContext? {
@@ -1325,12 +1325,7 @@ public enum NonInteractiveExec {
                     return nil
                 }
                 let requestedShell = params.shell.map(ShellResolver.getShellByModelProvidedPath) ?? shell
-                command = prepareRuntimeCommand(
-                    requestedShell.deriveExecArgs(command: params.cmd, useLoginShell: useLoginShell),
-                    shellType: requestedShell.shellType,
-                    sandboxPolicy: sandboxPolicy,
-                    windowsSandboxLevel: windowsSandboxLevel
-                )
+                command = requestedShell.deriveExecArgs(command: params.cmd, useLoginShell: useLoginShell)
                 sandboxPermissions = params.sandboxPermissions
                 prefixRule = params.prefixRule
 
@@ -1340,12 +1335,7 @@ public enum NonInteractiveExec {
                 else {
                     return nil
                 }
-                command = prepareRuntimeCommand(
-                    shell.deriveExecArgs(command: params.command, useLoginShell: useLoginShell),
-                    shellType: shell.shellType,
-                    sandboxPolicy: sandboxPolicy,
-                    windowsSandboxLevel: windowsSandboxLevel
-                )
+                command = shell.deriveExecArgs(command: params.command, useLoginShell: useLoginShell)
                 sandboxPermissions = params.sandboxPermissions ?? .useDefault
                 prefixRule = params.prefixRule
 
@@ -1420,14 +1410,10 @@ public enum NonInteractiveExec {
                 let useLoginShell = try resolveUseLoginShell(params.requestedLogin, allowLoginShell: allowLoginShell)
                 let requestedShell = params.shell.map(ShellResolver.getShellByModelProvidedPath) ?? shell
                 let snapshotShell = params.shell == nil ? shell : nil
-                let command = prepareRuntimeCommand(
-                    requestedShell.deriveExecArgs(command: params.cmd, useLoginShell: useLoginShell),
-                    shellType: requestedShell.shellType,
-                    sandboxPolicy: sandboxPolicy,
-                    windowsSandboxLevel: windowsSandboxLevel
-                )
+                let command = requestedShell.deriveExecArgs(command: params.cmd, useLoginShell: useLoginShell)
                 return await executeUnifiedExecCommand(
                     command: command,
+                    runtimeShellType: requestedShell.shellType,
                     sessionShell: snapshotShell,
                     workdir: params.workdir,
                     timeoutMS: params.yieldTimeMS,
@@ -1442,6 +1428,7 @@ public enum NonInteractiveExec {
                     features: features,
                     execPolicyManager: execPolicyManager,
                     approvalGranted: approvalGranted,
+                    windowsSandboxLevel: windowsSandboxLevel,
                     truncationPolicy: params.maxOutputTokens.map { .tokens($0) } ?? truncationPolicy,
                     environment: environment,
                     shellEnvironmentPolicy: shellEnvironmentPolicy,
@@ -1451,15 +1438,11 @@ public enum NonInteractiveExec {
             case "shell_command":
                 let params = try decoder.decode(ShellCommandToolCallParams.self, from: Data(arguments.utf8))
                 let useLoginShell = try resolveUseLoginShell(params.login, allowLoginShell: allowLoginShell)
-                let command = prepareRuntimeCommand(
-                    shell.deriveExecArgs(command: params.command, useLoginShell: useLoginShell),
-                    shellType: shell.shellType,
-                    sandboxPolicy: sandboxPolicy,
-                    windowsSandboxLevel: windowsSandboxLevel
-                )
+                let command = shell.deriveExecArgs(command: params.command, useLoginShell: useLoginShell)
                 return await executeShellCommand(
                     toolName: name,
                     command: command,
+                    runtimeShellType: shell.shellType,
                     sessionShell: shell,
                     workdir: params.workdir,
                     timeoutMS: params.timeoutMS,
@@ -1473,6 +1456,7 @@ public enum NonInteractiveExec {
                     features: features,
                     execPolicyManager: execPolicyManager,
                     approvalGranted: approvalGranted,
+                    windowsSandboxLevel: windowsSandboxLevel,
                     truncationPolicy: truncationPolicy,
                     environment: environment,
                     shellEnvironmentPolicy: shellEnvironmentPolicy,
@@ -1485,6 +1469,7 @@ public enum NonInteractiveExec {
                 return await executeShellCommand(
                     toolName: name,
                     command: params.command,
+                    runtimeShellType: ShellResolver.detectShellType(params.command.first ?? ""),
                     sessionShell: shell,
                     workdir: params.workdir,
                     timeoutMS: params.timeoutMS,
@@ -1498,6 +1483,7 @@ public enum NonInteractiveExec {
                     features: features,
                     execPolicyManager: execPolicyManager,
                     approvalGranted: approvalGranted,
+                    windowsSandboxLevel: windowsSandboxLevel,
                     truncationPolicy: truncationPolicy,
                     environment: environment,
                     shellEnvironmentPolicy: shellEnvironmentPolicy,
@@ -1593,15 +1579,14 @@ public enum NonInteractiveExec {
         return login ?? allowLoginShell
     }
 
-    private static func prepareRuntimeCommand(
+    static func prepareRuntimeCommand(
         _ command: [String],
         shellType: ShellType?,
         sandboxPolicy: SandboxPolicy,
         windowsSandboxLevel: WindowsSandboxLevel
     ) -> [String] {
-        let utf8Command = ShellResolver.prefixPowerShellScriptWithUTF8(command)
-        return ShellResolver.disablePowerShellProfileForElevatedWindowsSandbox(
-            utf8Command,
+        prepareRuntimeCommand(
+            command,
             shellType: shellType,
             sandboxType: runtimeSandboxType(
                 sandboxPolicy: sandboxPolicy,
@@ -1609,6 +1594,21 @@ public enum NonInteractiveExec {
             ),
             windowsSandboxLevel: windowsSandboxLevel
         )
+    }
+
+    static func prepareRuntimeCommand(
+        _ command: [String],
+        shellType: ShellType?,
+        sandboxType: SandboxType,
+        windowsSandboxLevel: WindowsSandboxLevel
+    ) -> [String] {
+        let sandboxPreparedCommand = ShellResolver.disablePowerShellProfileForElevatedWindowsSandbox(
+            command,
+            shellType: shellType,
+            sandboxType: sandboxType,
+            windowsSandboxLevel: windowsSandboxLevel
+        )
+        return ShellResolver.prefixPowerShellScriptWithUTF8(sandboxPreparedCommand)
     }
 
     private static func runtimeSandboxType(
@@ -1992,6 +1992,7 @@ public enum NonInteractiveExec {
     private static func executeShellCommand(
         toolName: String,
         command: [String],
+        runtimeShellType: ShellType?,
         sessionShell: Shell?,
         workdir: String?,
         timeoutMS: UInt64?,
@@ -2005,6 +2006,7 @@ public enum NonInteractiveExec {
         features: FeatureStates,
         execPolicyManager: ExecPolicyManager,
         approvalGranted: Bool,
+        windowsSandboxLevel: WindowsSandboxLevel,
         truncationPolicy: TruncationPolicy,
         environment: [String: String],
         shellEnvironmentPolicy: ShellEnvironmentPolicy,
@@ -2096,7 +2098,7 @@ public enum NonInteractiveExec {
             break
         }
 
-        let command = sessionShell.map {
+        let wrappedCommand = sessionShell.map {
             ShellSnapshotCommandWrapper.maybeWrapShellLCWithSnapshot(
                 command: command,
                 sessionShell: $0,
@@ -2105,15 +2107,22 @@ public enum NonInteractiveExec {
                 environment: childEnvironment
             )
         } ?? command
+        let executionSandboxPolicy = shouldBypassSandbox(
+            sandboxPermissions: sandboxPermissions,
+            approvalRequirement: approvalRequirement
+        ) ? SandboxPolicy.dangerFullAccess : commandSandboxPolicy
+        let runtimeCommand = prepareRuntimeCommand(
+            wrappedCommand,
+            shellType: runtimeShellType,
+            sandboxPolicy: executionSandboxPolicy,
+            windowsSandboxLevel: windowsSandboxLevel
+        )
 
         let output = await Task.detached(priority: .userInitiated) {
             runCommandSync(
-                command: command,
+                command: runtimeCommand,
                 cwd: commandCwd,
-                sandboxPolicy: shouldBypassSandbox(
-                    sandboxPermissions: sandboxPermissions,
-                    approvalRequirement: approvalRequirement
-                ) ? .dangerFullAccess : commandSandboxPolicy,
+                sandboxPolicy: executionSandboxPolicy,
                 timeoutMS: timeoutMS,
                 environment: childEnvironment
             )
@@ -2128,6 +2137,7 @@ public enum NonInteractiveExec {
 
     private static func executeUnifiedExecCommand(
         command: [String],
+        runtimeShellType: ShellType,
         sessionShell: Shell?,
         workdir: String?,
         timeoutMS: UInt64?,
@@ -2142,6 +2152,7 @@ public enum NonInteractiveExec {
         features: FeatureStates,
         execPolicyManager: ExecPolicyManager,
         approvalGranted: Bool,
+        windowsSandboxLevel: WindowsSandboxLevel,
         truncationPolicy: TruncationPolicy,
         environment: [String: String],
         shellEnvironmentPolicy: ShellEnvironmentPolicy,
@@ -2195,7 +2206,7 @@ public enum NonInteractiveExec {
         }
 
         let childEnvironment = ExecEnvironment.createEnv(policy: shellEnvironmentPolicy, environment: environment)
-        let command = sessionShell.map {
+        let wrappedCommand = sessionShell.map {
             ShellSnapshotCommandWrapper.maybeWrapShellLCWithSnapshot(
                 command: command,
                 sessionShell: $0,
@@ -2204,14 +2215,21 @@ public enum NonInteractiveExec {
                 environment: childEnvironment
             )
         } ?? command
+        let executionSandboxPolicy = shouldBypassSandbox(
+            sandboxPermissions: sandboxPermissions,
+            approvalRequirement: approvalRequirement
+        ) ? SandboxPolicy.dangerFullAccess : commandSandboxPolicy
+        let runtimeCommand = prepareRuntimeCommand(
+            wrappedCommand,
+            shellType: runtimeShellType,
+            sandboxPolicy: executionSandboxPolicy,
+            windowsSandboxLevel: windowsSandboxLevel
+        )
         do {
             let output = try await unifiedExecSessions.start(
-                command: command,
+                command: runtimeCommand,
                 cwd: commandCwd,
-                sandboxPolicy: shouldBypassSandbox(
-                    sandboxPermissions: sandboxPermissions,
-                    approvalRequirement: approvalRequirement
-                ) ? .dangerFullAccess : commandSandboxPolicy,
+                sandboxPolicy: executionSandboxPolicy,
                 tty: tty,
                 yieldTimeMS: UnifiedExecTiming.clampInitialYieldTimeMS(timeoutMS ?? 10_000),
                 truncationPolicy: truncationPolicy,
