@@ -178,6 +178,25 @@ final class ContextTokenEstimatorTests: XCTestCase {
         XCTAssertEqual(estimated, expected)
     }
 
+    func testOriginalDetailWebPImagesScaleWithDimensionsLikeRust() throws {
+        let imageData = makeWebP2304By864()
+        let payload = imageData.base64EncodedString()
+        let imageURL = "data:image/webp;base64,\(payload)"
+        let item = ResponseItem.functionCallOutput(
+            callID: "call-original-webp",
+            output: FunctionCallOutputPayload(content: "image", contentItems: [
+                .inputImage(imageURL: imageURL, detail: .original)
+            ])
+        )
+
+        let rawBytes = try encodedByteCount(item)
+        let estimated = ContextTokenEstimator.estimateResponseItemModelVisibleBytes(item)
+        let expectedOriginalDetailImageBytes = 7_776
+        let expected = rawBytes - payload.count + expectedOriginalDetailImageBytes
+
+        XCTAssertEqual(estimated, expected)
+    }
+
     func testOriginalDetailImageEstimateIsCappedLikeRust() throws {
         let imageData = try makePNG(width: 3_201, height: 3_201)
         let payload = imageData.base64EncodedString()
@@ -237,6 +256,15 @@ private func makePNG(width: Int, height: Int) throws -> Data {
         throw TestImageError.imageEncoding
     }
     return data as Data
+}
+
+private func makeWebP2304By864() -> Data {
+    Data([
+        0x52, 0x49, 0x46, 0x46, 0x16, 0x00, 0x00, 0x00,
+        0x57, 0x45, 0x42, 0x50, 0x56, 0x50, 0x38, 0x20,
+        0x0a, 0x00, 0x00, 0x00, 0x30, 0xa7, 0x01, 0x9d,
+        0x01, 0x2a, 0x00, 0x09, 0x60, 0x03,
+    ])
 }
 
 private enum TestImageError: Error {
