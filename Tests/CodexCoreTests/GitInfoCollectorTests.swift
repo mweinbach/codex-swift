@@ -61,6 +61,26 @@ final class GitInfoCollectorTests: XCTestCase {
         #endif
     }
 
+    func testHasChangesIgnoresRepoFSMonitorConfigLikeRust() throws {
+        #if os(Windows)
+        throw XCTSkip("POSIX fsmonitor helper scripts are not used on Windows")
+        #else
+        let repo = try createRepository()
+        let marker = repo.appendingPathComponent("fsmonitor-ran")
+        let helper = try installFSMonitorHelper(in: repo, marker: marker)
+        try runGit(["config", "core.fsmonitor", helper.path], cwd: repo)
+
+        let trackedFile = repo.appendingPathComponent("test.txt")
+        try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: trackedFile.path)
+
+        XCTAssertEqual(GitInfoCollector.hasChanges(cwd: repo), true)
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: marker.path),
+            "GitInfoCollector.hasChanges should disable repository fsmonitor helpers for internal git status calls"
+        )
+        #endif
+    }
+
     func testRemoteURLsByNameParsesFetchRemotesLikeRust() throws {
         let repo = try createRepository()
         try runGit(["remote", "add", "origin", "https://github.com/OpenAI/Codex.git"], cwd: repo)
@@ -259,6 +279,17 @@ final class GitInfoCollectorTests: XCTestCase {
         """.write(to: hook, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hook.path)
         return hook
+    }
+
+    private func installFSMonitorHelper(in repo: URL, marker: URL) throws -> URL {
+        let helper = repo.appendingPathComponent("fsmonitor-helper.sh")
+        let markerPath = marker.path.replacingOccurrences(of: "'", with: "'\\''")
+        try """
+        #!/bin/sh
+        printf ran > '\(markerPath)'
+        """.write(to: helper, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
+        return helper
     }
 
     @discardableResult

@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `6ec8c4a6ec` (`Ignore fsmonitor
+  config in Git metadata reads`). Swift `GitInfoCollector` already disables
+  repository `core.fsmonitor` for internal Git subprocesses alongside the
+  disabled hooks path; added Rust-parity regression coverage that a configured
+  repo fsmonitor helper is not invoked by `hasChanges`.
 - 2026-05-16: rechecked Rust commit `8c7a176b55` (`Unqueue plugin list and
   read requests`). Swift app-server request serialization now leaves
   `plugin/list` and `plugin/read` unscoped so those read-only plugin requests
