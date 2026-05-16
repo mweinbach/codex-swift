@@ -31,6 +31,7 @@ public actor ProviderAuthCommandRunner {
     }
 
     private var cachedTokens: [ModelProviderAuthInfo: CachedToken] = [:]
+    private var inFlightTokenFetches: [ModelProviderAuthInfo: Task<String, Error>] = [:]
     private let now: @Sendable () -> Date
 
     public init(now: @escaping @Sendable () -> Date = Date.init) {
@@ -48,7 +49,22 @@ public actor ProviderAuthCommandRunner {
             }
         }
 
-        let token = try await Self.runProviderAuthCommand(config)
+        if let inFlight = inFlightTokenFetches[config] {
+            return try await inFlight.value
+        }
+
+        let inFlight = Task<String, Error> {
+            try await Self.runProviderAuthCommand(config)
+        }
+        inFlightTokenFetches[config] = inFlight
+        let token: String
+        do {
+            token = try await inFlight.value
+        } catch {
+            inFlightTokenFetches[config] = nil
+            throw error
+        }
+        inFlightTokenFetches[config] = nil
         cachedTokens[config] = CachedToken(accessToken: token, fetchedAt: now())
         return token
     }

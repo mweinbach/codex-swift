@@ -217,6 +217,41 @@ final class APIAuthTests: XCTestCase {
         XCTAssertEqual(second, StaticAPIAuthProvider(bearerToken: "provider-token"))
     }
 
+    func testProviderCommandAuthCoalescesConcurrentCacheMissesLikeRust() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-provider-auth-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let scriptURL = directory.appendingPathComponent("count-token.sh")
+        try ProviderAuthScript.writeExecutable(
+            """
+            #!/bin/sh
+            printf x >> invocations.txt
+            count=$(wc -c < invocations.txt | tr -d ' ')
+            sleep 0.2
+            printf 'token-%s\\n' "$count"
+            """,
+            to: scriptURL
+        )
+        let config = try ModelProviderAuthInfo(
+            command: "./count-token.sh",
+            timeoutMilliseconds: 10_000,
+            refreshIntervalMilliseconds: 60_000,
+            cwd: AbsolutePath(absolutePath: directory.path)
+        )
+        let runner = ProviderAuthCommandRunner()
+
+        async let firstToken = runner.resolveToken(config: config)
+        async let secondToken = runner.resolveToken(config: config)
+        let tokens = try await [firstToken, secondToken]
+
+        XCTAssertEqual(tokens, ["token-1", "token-1"])
+        let invocations = try String(
+            contentsOf: directory.appendingPathComponent("invocations.txt"),
+            encoding: .utf8
+        )
+        XCTAssertEqual(invocations, "x")
+    }
+
     func testProviderCommandAuthFailuresReturnUnauthenticatedLikeRust() async throws {
         let script = try ProviderAuthScript.failing()
         let provider = try ModelProviderInfo(name: "Provider", auth: script.authConfig())
@@ -322,7 +357,7 @@ private struct ProviderAuthScript {
         )
     }
 
-    private static func writeExecutable(_ contents: String, to url: URL) throws {
+    fileprivate static func writeExecutable(_ contents: String, to url: URL) throws {
         try contents.write(to: url, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
     }
