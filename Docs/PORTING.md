@@ -2729,6 +2729,8 @@ Recent upstream audit checkpoint:
   - pinned Swift `turn/start.environments` protocol parity for Rust's environment payload edge cases: absolute `cwd` round trips, empty arrays are preserved, `null` and omission decode to the default unset state, and relative environment working directories are rejected through the shared `AbsolutePath` contract.
 - `codex-rs/app-server-protocol/src/protocol/v2/tests.rs` thread lifecycle response defaults
   - pinned Swift `thread/start`, `thread/resume`, and `thread/fork` response decoding for Rust's missing optional lifecycle fields: absent `instructionSources` defaults to an empty list while absent `permissionProfile` and `activePermissionProfile` decode as `nil`; explicit `null` remains rejected for the Rust-defaulted `instructionSources` vector.
+- `codex-rs/core/src/mcp_tool_approval_templates.rs` MCP approval template rendering
+  - added Swift parity for bundled consequential tool approval templates, exact connector/server/tool-title matching, connector-name substitution, literal templates without connector names, template parameter relabeling, duplicate display-label rejection, object-only tool params, and sorted fallback display parameters.
 
 ## Known Gaps
 
