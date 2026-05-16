@@ -21,6 +21,15 @@ final class DoctorCommandRuntimeTests: XCTestCase {
             generatedAt: "0s since unix epoch",
             diagnosticChecks: {
                 [
+                    DoctorCommandRuntime.installationCheck(
+                        showDetails: true,
+                        inputs: DoctorInstallationInputs(
+                            currentExecutablePath: "/tmp/codex",
+                            environment: [:],
+                            pathEntries: ["/tmp/codex"],
+                            installContext: "other"
+                        )
+                    ),
                     DoctorCommandRuntime.runtimeProvenanceCheck(
                         codexVersion: "0.0.0",
                         currentExecutablePath: "/tmp/codex",
@@ -94,6 +103,18 @@ final class DoctorCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(json["codexVersion"] as? String, "0.0.0")
 
         let checks = try XCTUnwrap(json["checks"] as? [String: Any])
+        let installation = try XCTUnwrap(checks["installation"] as? [String: Any])
+        XCTAssertEqual(installation["category"] as? String, "install")
+        XCTAssertEqual(installation["status"] as? String, "ok")
+        XCTAssertEqual(installation["summary"] as? String, "installation looks consistent")
+        let installationDetails = try XCTUnwrap(installation["details"] as? [String: Any])
+        XCTAssertEqual(installationDetails["current executable"] as? String, "/tmp/codex")
+        XCTAssertEqual(installationDetails["install context"] as? String, "other")
+        XCTAssertEqual(installationDetails["managed by npm"] as? String, "false")
+        XCTAssertEqual(installationDetails["managed by bun"] as? String, "false")
+        XCTAssertEqual(installationDetails["managed package root"] as? String, "not set")
+        XCTAssertEqual(installationDetails["PATH codex #1"] as? String, "/tmp/codex")
+
         let runtime = try XCTUnwrap(checks["runtime.provenance"] as? [String: Any])
         XCTAssertEqual(runtime["category"] as? String, "runtime")
         XCTAssertEqual(runtime["status"] as? String, "ok")
@@ -171,6 +192,100 @@ final class DoctorCommandRuntimeTests: XCTestCase {
             "search command readiness: No such file or directory"
         ])
         XCTAssertEqual(check.remediation, "Install ripgrep or repair the bundled standalone resources.")
+    }
+
+    func testInstallationCheckWarnsForNpmManagedMissingPackageRootLikeRustDoctor() {
+        let check = DoctorCommandRuntime.installationCheck(
+            showDetails: false,
+            inputs: DoctorInstallationInputs(
+                currentExecutablePath: "/usr/local/bin/codex",
+                environment: ["CODEX_MANAGED_BY_NPM": "1"],
+                pathEntries: [],
+                installContext: "npm"
+            )
+        )
+
+        XCTAssertEqual(check.id, "installation")
+        XCTAssertEqual(check.category, "install")
+        XCTAssertEqual(check.status, .warning)
+        XCTAssertEqual(check.summary, "npm-managed launch is missing package-root provenance")
+        XCTAssertEqual(check.details, [
+            "current executable: /usr/local/bin/codex",
+            "install context: npm",
+            "managed by npm: true",
+            "managed by bun: false",
+            "managed package root: not set"
+        ])
+        XCTAssertEqual(
+            check.remediation,
+            "Reinstall or update Codex so the JS shim provides CODEX_MANAGED_PACKAGE_ROOT."
+        )
+    }
+
+    func testInstallationCheckFailsForNpmRootMismatchLikeRustDoctor() {
+        let check = DoctorCommandRuntime.installationCheck(
+            showDetails: false,
+            inputs: DoctorInstallationInputs(
+                currentExecutablePath: "/opt/codex/bin/codex",
+                environment: [
+                    "CODEX_MANAGED_BY_NPM": "1",
+                    "CODEX_MANAGED_PACKAGE_ROOT": "/opt/codex/lib/node_modules/@openai/codex"
+                ],
+                pathEntries: ["/opt/codex/bin/codex", "/usr/local/bin/codex"],
+                installContext: "npm",
+                npmRootCheck: .mismatch(
+                    runningPackageRoot: "/opt/codex/lib/node_modules/@openai/codex",
+                    npmPackageRoot: "/usr/local/lib/node_modules/@openai/codex"
+                )
+            )
+        )
+
+        XCTAssertEqual(check.status, .fail)
+        XCTAssertEqual(check.summary, "npm install -g @openai/codex would update a different install")
+        XCTAssertEqual(check.details, [
+            "current executable: /opt/codex/bin/codex",
+            "install context: npm",
+            "managed by npm: true",
+            "managed by bun: false",
+            "managed package root: /opt/codex/lib/node_modules/@openai/codex",
+            "PATH codex entries: 2",
+            "PATH codex #1: /opt/codex/bin/codex",
+            "PATH codex #2: /usr/local/bin/codex",
+            "running package root: /opt/codex/lib/node_modules/@openai/codex",
+            "npm package root: /usr/local/lib/node_modules/@openai/codex"
+        ])
+        XCTAssertEqual(
+            check.remediation,
+            "Fix PATH or npm prefix so the running package root (/opt/codex/lib/node_modules/@openai/codex) matches the npm global package root (/usr/local/lib/node_modules/@openai/codex)."
+        )
+    }
+
+    func testInstallationCheckIgnoresInheritedManagedEnvironmentForCargoBuiltBinaryLikeRustDoctor() {
+        let check = DoctorCommandRuntime.installationCheck(
+            showDetails: false,
+            inputs: DoctorInstallationInputs(
+                currentExecutablePath: "/repo/target/debug/codex",
+                environment: [
+                    "CODEX_MANAGED_BY_NPM": "1",
+                    "CODEX_MANAGED_PACKAGE_ROOT": "/wrong/root"
+                ],
+                pathEntries: [],
+                installContext: "other",
+                npmRootCheck: .mismatch(runningPackageRoot: "/wrong/root", npmPackageRoot: "/npm/root")
+            )
+        )
+
+        XCTAssertEqual(check.status, .ok)
+        XCTAssertEqual(check.summary, "installation looks consistent")
+        XCTAssertEqual(check.remediation, nil)
+        XCTAssertEqual(check.details, [
+            "current executable: /repo/target/debug/codex",
+            "install context: other",
+            "ignored inherited package-manager launch env for cargo-built binary",
+            "managed by npm: false",
+            "managed by bun: false",
+            "managed package root: /wrong/root"
+        ])
     }
 
     func testNetworkEnvironmentCheckWarnsForUnreadableCustomCAPathLikeRustDoctor() {

@@ -226,6 +226,7 @@ private func runLoginCommand(_ request: CodexCLI.LoginCommandRequest) async thro
 
 private func runDoctorCommand(_ request: CodexCLI.DoctorCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
     let baseDiagnosticChecks = [
+        DoctorCommandRuntime.installationCheck(showDetails: !request.summary),
         DoctorCommandRuntime.runtimeProvenanceCheck(codexVersion: CodexCLI.version),
         DoctorCommandRuntime.searchCheck(),
         DoctorCommandRuntime.networkEnvironmentCheck(),

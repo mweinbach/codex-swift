@@ -132,10 +132,10 @@ Recent upstream audit checkpoint:
   `--no-color`, and `--ascii` flags into an injectable command request, and
   carries the same npm global-root probe command selection: `npm.cmd` on
   Windows, `npm` elsewhere. The executable `codex doctor` path now also builds
-  the first Rust-shaped diagnostic report slice for config loading, runtime
-  provenance, search-command readiness, network environment readability,
-  terminal environment metadata/issues, and sandbox helper/config readability,
-  emits the redacted `--json`
+  the first Rust-shaped diagnostic report slice for installation/package-manager
+  provenance, config loading, runtime provenance, search-command readiness,
+  network environment readability, terminal environment metadata/issues, and
+  sandbox helper/config readability, emits the redacted `--json`
   support-report map keyed by check id, renders compact grouped human summary
   output, and exits nonzero when config loading fails. Full diagnostic report
   generation beyond those local checks remains a broader `codex doctor`
