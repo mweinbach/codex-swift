@@ -165,6 +165,27 @@ final class ApprovalsTests: XCTestCase {
     }
 
     func testNetworkApprovalContextFromPayloadMatchesRustAskFromDeciderRule() {
+        let protocolCases: [(NetworkApprovalProtocol, NetworkApprovalContext)] = [
+            (.http, NetworkApprovalContext(host: "example.com", protocol: .http)),
+            (.https, NetworkApprovalContext(host: "example.com", protocol: .https)),
+            (.socks5Tcp, NetworkApprovalContext(host: "example.com", protocol: .socks5Tcp)),
+            (.socks5Udp, NetworkApprovalContext(host: "example.com", protocol: .socks5Udp)),
+        ]
+
+        for (approvalProtocol, expectedContext) in protocolCases {
+            XCTAssertEqual(
+                NetworkPolicyDecisionPayload(
+                    decision: .ask,
+                    source: .decider,
+                    protocol: approvalProtocol,
+                    host: "example.com",
+                    reason: "not_allowed",
+                    port: 443
+                ).networkApprovalContext,
+                expectedContext
+            )
+        }
+
         XCTAssertEqual(
             NetworkPolicyDecisionPayload(
                 decision: .ask,

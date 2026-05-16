@@ -516,6 +516,11 @@ Recent upstream audit checkpoint:
   `codex-rs/protocol/src/network_policy.rs`. Swift network-policy decision
   encoding now preserves Rust's ordinary `Option` wire shape by emitting
   explicit `null` for absent `protocol`, `host`, `reason`, and `port` fields.
+- 2026-05-16: rechecked Rust's network approval context mapping in
+  `codex-rs/core/src/network_policy_decision.rs`. Swift now pins the Rust
+  ask-from-decider boundary across `http`, `https`, `socks5_tcp`, and
+  `socks5_udp` payloads while continuing to reject deny decisions, non-decider
+  sources, missing protocols, and blank hosts.
 - 2026-05-15: rechecked Rust's `TurnStartedEvent.collaboration_mode_kind` in
   `codex-rs/protocol/src/protocol.rs`. Swift task-started event decoding now
   preserves Serde's default boundary for the non-optional collaboration mode:
