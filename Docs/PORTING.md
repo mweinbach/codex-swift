@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked current Rust `SessionMeta` in
+  `codex-rs/protocol/src/protocol.rs`. Swift session metadata now ignores
+  legacy `instructions` fields when decoding old rollout records and no longer
+  persists `instructions` on new `session_meta` lines, preserving Rust's split
+  where user/developer instructions live on `turn_context`.
 - 2026-05-16: rechecked Rust exec-policy amendment helpers in
   `codex-rs/execpolicy/src/amend.rs`. Swift preserves Rust's idempotent
   append behavior for repeated prefix and network rule amendments by deduping

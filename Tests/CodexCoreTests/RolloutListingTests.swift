@@ -315,7 +315,6 @@ final class RolloutListingTests: XCTestCase {
             "cwd": .string("."),
             "originator": .string("test_originator"),
             "cli_version": .string("test_version"),
-            "instructions": .null,
             "source": sourceJSONValue(source),
             "model_provider": provider.map(JSONValue.string) ?? .null,
             "base_instructions": .null

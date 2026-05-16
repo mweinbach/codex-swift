@@ -900,7 +900,7 @@ final class CodexAppServerTests: XCTestCase {
         ))
         let rollout = try String(contentsOfFile: rolloutPath, encoding: .utf8)
         XCTAssertTrue(rollout.contains(#""originator":"codex_app_server""#))
-        XCTAssertTrue(rollout.contains(#""instructions":"dev notes""#))
+        XCTAssertFalse(rollout.contains(#""instructions":"dev notes""#))
     }
 
     func testThreadStartReturnsGranularApprovalPolicyObjectLikeRust() throws {
@@ -2620,7 +2620,7 @@ final class CodexAppServerTests: XCTestCase {
 
         let rollout = try String(contentsOfFile: rolloutPath, encoding: .utf8)
         XCTAssertTrue(rollout.contains(#""originator":"codex_app_server""#))
-        XCTAssertTrue(rollout.contains(#""instructions":"legacy dev notes""#))
+        XCTAssertFalse(rollout.contains(#""instructions":"legacy dev notes""#))
         XCTAssertTrue(rollout.contains(#""message":"Hello legacy""#))
         XCTAssertTrue(rollout.contains(#""https:\/\/example.test\/legacy.png""#))
     }
@@ -2751,7 +2751,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(String(describing: initialMessages).contains("Resume me"))
 
         let resumedRollout = try String(contentsOfFile: resumedPath, encoding: .utf8)
-        XCTAssertTrue(resumedRollout.contains(#""instructions":"resume notes""#))
+        XCTAssertFalse(resumedRollout.contains(#""instructions":"resume notes""#))
         XCTAssertTrue(resumedRollout.contains(#""message":"Resume me""#))
 
         let resumedByID = try decode(processor.processLine(Data(#"{"id":4,"method":"resumeConversation","params":{"conversationId":"\#(originalID)","overrides":{"model":"gpt-resumed-id"}}}"#.utf8)))

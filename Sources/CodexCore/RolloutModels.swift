@@ -7,7 +7,6 @@ public struct SessionMeta: Equatable, Codable, Sendable {
     public let cwd: String
     public let originator: String
     public let cliVersion: String
-    public let instructions: String?
     public let source: SessionSource
     public let threadSource: ThreadSource?
     public let agentNickname: String?
@@ -25,7 +24,6 @@ public struct SessionMeta: Equatable, Codable, Sendable {
         case cwd
         case originator
         case cliVersion = "cli_version"
-        case instructions
         case source
         case threadSource = "thread_source"
         case agentNickname = "agent_nickname"
@@ -45,7 +43,7 @@ public struct SessionMeta: Equatable, Codable, Sendable {
         cwd: String,
         originator: String,
         cliVersion: String,
-        instructions: String? = nil,
+        instructions _: String? = nil,
         source: SessionSource = .default,
         threadSource: ThreadSource? = nil,
         agentNickname: String? = nil,
@@ -62,7 +60,6 @@ public struct SessionMeta: Equatable, Codable, Sendable {
         self.cwd = cwd
         self.originator = originator
         self.cliVersion = cliVersion
-        self.instructions = instructions
         self.source = source
         self.threadSource = threadSource
         self.agentNickname = agentNickname
@@ -82,7 +79,6 @@ public struct SessionMeta: Equatable, Codable, Sendable {
         self.cwd = try container.decode(String.self, forKey: .cwd)
         self.originator = try container.decode(String.self, forKey: .originator)
         self.cliVersion = try container.decode(String.self, forKey: .cliVersion)
-        self.instructions = try container.decodeIfPresent(String.self, forKey: .instructions)
         self.source = try container.decodeRustDefaulted(SessionSource.self, forKey: .source, defaultValue: .default)
         self.threadSource = try container.decodeIfPresent(ThreadSource.self, forKey: .threadSource)
         self.agentNickname = try container.decodeIfPresent(String.self, forKey: .agentNickname)
@@ -111,7 +107,6 @@ public struct SessionMeta: Equatable, Codable, Sendable {
         try container.encode(cwd, forKey: .cwd)
         try container.encode(originator, forKey: .originator)
         try container.encode(cliVersion, forKey: .cliVersion)
-        try container.encode(instructions, forKey: .instructions)
         try container.encode(source, forKey: .source)
         try container.encodeIfPresent(threadSource, forKey: .threadSource)
         try container.encodeIfPresent(agentNickname, forKey: .agentNickname)

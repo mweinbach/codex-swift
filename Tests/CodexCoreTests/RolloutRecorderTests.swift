@@ -54,10 +54,13 @@ final class RolloutRecorderTests: XCTestCase {
         XCTAssertEqual(sessionMetaLine.meta.cwd, "/repo")
         XCTAssertEqual(sessionMetaLine.meta.originator, "codex_swift")
         XCTAssertEqual(sessionMetaLine.meta.cliVersion, "0.1.0")
-        XCTAssertEqual(sessionMetaLine.meta.instructions, "be exact")
         XCTAssertEqual(sessionMetaLine.meta.source, .cli)
         XCTAssertEqual(sessionMetaLine.meta.modelProvider, "openai")
         XCTAssertEqual(sessionMetaLine.git, GitInfo(commitHash: "abc123", branch: "main"))
+
+        let firstLineObject = try XCTUnwrap(jsonObjects(at: recorder.rolloutPath).first)
+        let firstPayload = try XCTUnwrap(firstLineObject["payload"] as? [String: Any])
+        XCTAssertNil(firstPayload["instructions"])
 
         XCTAssertEqual(
             lines[1].item,
@@ -537,6 +540,15 @@ private func rolloutLines(at path: URL) throws -> [RolloutLine] {
         .split(whereSeparator: \.isNewline)
         .map { line in
             try JSONDecoder().decode(RolloutLine.self, from: Data(line.utf8))
+        }
+}
+
+private func jsonObjects(at path: URL) throws -> [[String: Any]] {
+    try String(contentsOf: path, encoding: .utf8)
+        .split(whereSeparator: \.isNewline)
+        .map { line in
+            let object = try JSONSerialization.jsonObject(with: Data(line.utf8))
+            return try XCTUnwrap(object as? [String: Any])
         }
 }
 

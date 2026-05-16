@@ -4411,7 +4411,6 @@ public enum CodexAppServer {
             cwd: meta.cwd,
             originator: meta.originator,
             cliVersion: meta.cliVersion,
-            instructions: meta.instructions,
             source: meta.source,
             threadSource: meta.threadSource,
             agentNickname: meta.agentNickname,

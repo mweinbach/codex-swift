@@ -32,7 +32,6 @@ final class RolloutModelsTests: XCTestCase {
             "cwd": "/repo",
             "originator": "codex_swift",
             "cli_version": "0.1.0",
-            "instructions": NSNull(),
             "source": "cli",
             "thread_source": "subagent",
             "agent_nickname": "reviewer",
@@ -76,6 +75,33 @@ final class RolloutModelsTests: XCTestCase {
         XCTAssertNil(line.meta.dynamicTools)
         XCTAssertNil(line.meta.memoryMode)
         XCTAssertNil(line.git)
+    }
+
+    func testSessionMetaIgnoresLegacyInstructionsLikeRust() throws {
+        let line = try JSONDecoder().decode(SessionMetaLine.self, from: Data("""
+        {
+          "id": "67e55044-10b1-426f-9247-bb680e5fe0c8",
+          "timestamp": "",
+          "cwd": "/repo",
+          "originator": "",
+          "cli_version": "",
+          "instructions": "legacy user instructions",
+          "source": "cli",
+          "model_provider": null,
+          "base_instructions": null
+        }
+        """.utf8))
+
+        try XCTAssertJSONObjectEqual(line, [
+            "id": "67e55044-10b1-426f-9247-bb680e5fe0c8",
+            "timestamp": "",
+            "cwd": "/repo",
+            "originator": "",
+            "cli_version": "",
+            "source": "cli",
+            "model_provider": NSNull(),
+            "base_instructions": NSNull()
+        ])
     }
 
     func testSessionMetaRejectsNullRustDefaultedSourceLikeSerde() throws {
@@ -241,7 +267,6 @@ final class RolloutModelsTests: XCTestCase {
                 cwd: "/repo",
                 originator: "codex_swift",
                 cliVersion: "0.1.0",
-                instructions: "be nice",
                 source: .subagent(.review)
             ),
             git: GitInfo(commitHash: "abc123", branch: "main")
@@ -253,7 +278,6 @@ final class RolloutModelsTests: XCTestCase {
             "cwd": "/repo",
             "originator": "codex_swift",
             "cli_version": "0.1.0",
-            "instructions": "be nice",
             "source": [
                 "subagent": "review"
             ],
