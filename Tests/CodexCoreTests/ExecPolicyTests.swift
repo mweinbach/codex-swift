@@ -5143,6 +5143,27 @@ final class ExecPolicyTests: XCTestCase {
             )
         )
     }
+
+    func testDangerousUnmatchedPowerShellInnerCommandRequiresApprovalLikeRust() {
+        let command = tokens("powershell.exe", "-NoProfile", "-Command", "Remove-Item test -Force")
+
+        XCTAssertEqual(
+            ExecPolicyManager()
+                .createExecApprovalRequirementForCommand(
+                    features: .withDefaults(),
+                    command: command,
+                    approvalPolicy: .onRequest,
+                    sandboxPolicy: .dangerFullAccess,
+                    sandboxPermissions: .useDefault
+                ),
+            .needsApproval(
+                reason: nil,
+                proposedExecPolicyAmendment: ExecPolicyAmendment(
+                    command: tokens("Remove-Item", "test", "-Force")
+                )
+            )
+        )
+    }
 }
 
 private func parsePolicy(_ source: String) throws -> ExecPolicy {

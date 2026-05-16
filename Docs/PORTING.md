@@ -2477,7 +2477,7 @@ Recent upstream audit checkpoint:
 - `codex-rs/shell-command/src/powershell.rs` wrapper command extraction
   - Swift PowerShell safe-command parsing now matches Rust's `-Command`/`-c` extraction by evaluating the script argument immediately after the command flag and ignoring later wrapper argv entries, while still rejecting unknown or unsafe flags before the script.
 - `codex-rs/core/src/exec_policy.rs` PowerShell command-origin lowering
-  - routed Swift exec-policy checks through the Rust-style PowerShell `-Command`/`-c` body parser so prefix rules, heuristics, and proposed amendments evaluate inner PowerShell words such as `Get-Content Cargo.toml` instead of the wrapper argv.
+  - routed Swift exec-policy checks through the Rust-style PowerShell `-Command`/`-c` body parser so prefix rules, heuristics, and proposed amendments evaluate inner PowerShell words such as `Get-Content Cargo.toml` instead of the wrapper argv. Swift now also pins Rust's unmatched dangerous PowerShell inner-command path where `Remove-Item test -Force` requires approval and proposes the inner command as the exec-policy amendment.
 - `codex-rs/shell-command/src/command_safety/windows_dangerous_commands.rs` PowerShell force-delete heuristic
   - matched Rust's detection of `Remove-Item`/alias commands paired with `-Force`, including chained or punctuation-adjacent forms, so Windows PowerShell delete operations are classified as dangerous while non-force deletes remain unflagged.
 - `codex-rs/shell-command/src/command_safety/windows_dangerous_commands.rs` Cmd delete/removal heuristics
