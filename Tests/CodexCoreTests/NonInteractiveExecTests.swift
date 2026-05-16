@@ -3430,6 +3430,87 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertTrue(payload.content.contains("got:hello"))
     }
 
+    func testWriteStdinPostToolUseUsesOriginalExecCommandLikeRust() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let preHookMarker = temp.url.appendingPathComponent("pre-hook-ran")
+        let postHookLog = temp.url.appendingPathComponent("post-hook.json")
+        let start = ResponseItem.functionCall(
+            name: "exec_command",
+            arguments: #"{"cmd":"read line; echo got:$line","tty":true,"yield_time_ms":100}"#,
+            callID: "call-start"
+        )
+
+        let startOutput = await NonInteractiveExec.executeFunctionCallWithHooks(
+            start,
+            handlers: [],
+            conversationID: ConversationId(),
+            turnID: "turn-1",
+            cwd: temp.url,
+            model: "gpt-test",
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: ["PATH": "/bin:/usr/bin", "HOME": temp.url.path]
+        )
+
+        guard case let .functionCallOutput(_, startPayload) = startOutput.output else {
+            return XCTFail("expected function call output")
+        }
+        let sessionID = try XCTUnwrap(Self.sessionID(from: startPayload.content))
+
+        let write = ResponseItem.functionCall(
+            name: "write_stdin",
+            arguments: #"{"session_id":\#(sessionID),"chars":"hello\n","yield_time_ms":2500}"#,
+            callID: "call-write"
+        )
+        let writeOutput = await NonInteractiveExec.executeFunctionCallWithHooks(
+            write,
+            handlers: [
+                ConfiguredHookHandler(
+                    eventName: .preToolUse,
+                    matcher: "write_stdin",
+                    command: "touch \(shellSingleQuote(preHookMarker.path)); printf '{}'",
+                    timeoutSec: 5,
+                    sourcePath: try AbsolutePath(absolutePath: "/tmp/hooks.json"),
+                    displayOrder: 0
+                ),
+                ConfiguredHookHandler(
+                    eventName: .postToolUse,
+                    matcher: "Bash",
+                    command: "cat > \(shellSingleQuote(postHookLog.path)); printf '{}'",
+                    timeoutSec: 5,
+                    sourcePath: try AbsolutePath(absolutePath: "/tmp/hooks.json"),
+                    displayOrder: 1
+                )
+            ],
+            conversationID: ConversationId(),
+            turnID: "turn-1",
+            cwd: temp.url,
+            model: "gpt-test",
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: ["PATH": "/bin:/usr/bin", "HOME": temp.url.path]
+        )
+
+        guard case let .functionCallOutput(callID, payload) = writeOutput.output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-write")
+        XCTAssertEqual(payload.success, true)
+        XCTAssertTrue(payload.content.contains("got:hello"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: preHookMarker.path))
+
+        let object = try hookInputObject(at: postHookLog)
+        XCTAssertEqual(object["tool_name"] as? String, "Bash")
+        XCTAssertEqual(object["tool_use_id"] as? String, "call-start")
+        XCTAssertEqual(object["tool_response"] as? String, "hello\r\ngot:hello\r\n")
+        let input = try XCTUnwrap(object["tool_input"] as? [String: Any])
+        XCTAssertEqual(input["command"] as? String, "read line; echo got:$line")
+    }
+
     func testUnifiedExecRejectsNonTTYStdinWritesLikeRust() async throws {
         let temp = try NonInteractiveExecTemporaryDirectory()
         let start = ResponseItem.functionCall(

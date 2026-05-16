@@ -786,7 +786,19 @@ public enum NonInteractiveExec {
             execPolicyManager: execPolicyManager,
             windowsSandboxLevel: windowsSandboxLevel,
             approvalGranted: false
-        )
+        ).output
+    }
+
+    private struct ExecutedFunctionCall: Sendable {
+        var output: ResponseItem
+        var unifiedExecOutput: UnifiedExecToolOutput?
+    }
+
+    private static func executed(
+        _ output: ResponseItem,
+        unifiedExecOutput: UnifiedExecToolOutput? = nil
+    ) -> ExecutedFunctionCall {
+        ExecutedFunctionCall(output: output, unifiedExecOutput: unifiedExecOutput)
     }
 
     private static func executeFunctionCallWithApproval(
@@ -811,7 +823,7 @@ public enum NonInteractiveExec {
         execPolicyManager: ExecPolicyManager,
         windowsSandboxLevel: WindowsSandboxLevel,
         approvalGranted: Bool
-    ) async -> ResponseItem {
+    ) async -> ExecutedFunctionCall {
         switch item {
         case let .functionCall(_, name, namespace, arguments, callID):
             return await executeFunctionCall(
@@ -841,7 +853,7 @@ public enum NonInteractiveExec {
             )
 
         case let .customToolCall(_, _, callID, name, input):
-            return executeCustomToolCall(
+            return executed(executeCustomToolCall(
                 name: name,
                 input: input,
                 callID: callID,
@@ -849,17 +861,17 @@ public enum NonInteractiveExec {
                 approvalPolicy: approvalPolicy,
                 sandboxPolicy: sandboxPolicy,
                 environment: environment
-            )
+            ))
 
         case let .localShellCall(id, callID, _, action):
             guard case let .exec(params) = action else {
-                return functionOutput(
+                return executed(functionOutput(
                     callID: callID ?? id ?? "local_shell",
                     content: "unsupported local_shell action",
                     success: false
-                )
+                ))
             }
-            return await executeShellCommand(
+            return executed(await executeShellCommand(
                 toolName: "local_shell",
                 command: params.command,
                 runtimeShellType: ShellResolver.detectShellType(params.command.first ?? ""),
@@ -882,32 +894,32 @@ public enum NonInteractiveExec {
                 shellEnvironmentPolicy: shellEnvironmentPolicy,
                 explicitEnvOverrides: explicitEnvOverrides,
                 responseFormat: .structured
-            )
+            ))
 
         case let .toolSearchCall(_, callID, _, execution, arguments):
             guard let callID, execution == "client" else {
-                return .toolSearchOutput(callID: callID, status: "completed", execution: execution, tools: [])
+                return executed(.toolSearchOutput(callID: callID, status: "completed", execution: execution, tools: []))
             }
             guard let toolSearchIndex else {
-                return .toolSearchOutput(callID: callID, status: "completed", execution: "client", tools: [])
+                return executed(.toolSearchOutput(callID: callID, status: "completed", execution: "client", tools: []))
             }
             do {
-                return .toolSearchOutput(
+                return executed(.toolSearchOutput(
                     callID: callID,
                     status: "completed",
                     execution: "client",
                     tools: try toolSearchIndex.search(arguments: arguments)
-                )
+                ))
             } catch {
-                return functionOutput(callID: callID, content: String(describing: error), success: false)
+                return executed(functionOutput(callID: callID, content: String(describing: error), success: false))
             }
 
         default:
-            return functionOutput(
+            return executed(functionOutput(
                 callID: "unknown",
                 content: "unsupported tool response item",
                 success: false
-            )
+            ))
         }
     }
 
@@ -938,6 +950,8 @@ public enum NonInteractiveExec {
         windowsSandboxLevel: WindowsSandboxLevel = .disabled
     ) async -> FunctionCallExecutionResult {
         let hookPayload = toolHookPayload(for: item)
+        var additionalItems: [ResponseItem] = []
+        var approvalGranted = false
         if let hookPayload {
             let preOutcome = await runPreToolUseHooks(
                 handlers: handlers,
@@ -948,7 +962,7 @@ public enum NonInteractiveExec {
                 model: model,
                 approvalPolicy: approvalPolicy
             )
-            var additionalItems = hookAdditionalContextItems(preOutcome.additionalContexts)
+            additionalItems = hookAdditionalContextItems(preOutcome.additionalContexts)
             if preOutcome.shouldBlock {
                 return FunctionCallExecutionResult(
                     output: blockedToolOutput(for: item, hookPayload: hookPayload, reason: preOutcome.blockReason),
@@ -964,7 +978,6 @@ public enum NonInteractiveExec {
                 features: features,
                 execPolicyManager: execPolicyManager
             )
-            var approvalGranted = false
             if shouldRunPermissionRequestHooks(
                 approvalContext: approvalContext,
                 approvalPolicy: approvalPolicy
@@ -989,53 +1002,9 @@ public enum NonInteractiveExec {
                     )
                 }
             }
-
-            let output = await executeFunctionCallWithApproval(
-                item,
-                cwd: cwd,
-                approvalPolicy: approvalPolicy,
-                sandboxPolicy: sandboxPolicy,
-                shell: shell,
-                truncationPolicy: truncationPolicy,
-                environment: environment,
-                shellEnvironmentPolicy: shellEnvironmentPolicy,
-                explicitEnvOverrides: explicitEnvOverrides,
-                allowLoginShell: allowLoginShell,
-                canRequestOriginalImageDetail: canRequestOriginalImageDetail,
-                backgroundTerminalMaxTimeoutMS: backgroundTerminalMaxTimeoutMS,
-                toolSearchIndex: toolSearchIndex,
-                agentJobContext: agentJobContext,
-                turnEnvironmentSelections: turnEnvironmentSelections,
-                configuredEnvironmentSnapshot: configuredEnvironmentSnapshot,
-                remoteEnvironmentFileSystems: remoteEnvironmentFileSystems,
-                features: features,
-                execPolicyManager: execPolicyManager,
-                windowsSandboxLevel: windowsSandboxLevel,
-                approvalGranted: approvalGranted
-            )
-            guard toolOutputSucceeded(output),
-                  let postPayload = postToolHookPayload(for: item, output: output, prePayload: hookPayload)
-            else {
-                return FunctionCallExecutionResult(output: output, additionalContextItems: additionalItems)
-            }
-
-            let postOutcome = await runPostToolUseHooks(
-                handlers: handlers,
-                hookPayload: postPayload,
-                conversationID: conversationID,
-                turnID: turnID,
-                cwd: cwd,
-                model: model,
-                approvalPolicy: approvalPolicy
-            )
-            additionalItems.append(contentsOf: hookAdditionalContextItems(postOutcome.additionalContexts))
-            return FunctionCallExecutionResult(
-                output: replacingToolOutputIfNeeded(output, with: postOutcome),
-                additionalContextItems: additionalItems
-            )
         }
 
-        let output = await executeFunctionCallWithApproval(
+        let execution = await executeFunctionCallWithApproval(
             item,
             cwd: cwd,
             approvalPolicy: approvalPolicy,
@@ -1056,9 +1025,29 @@ public enum NonInteractiveExec {
             features: features,
             execPolicyManager: execPolicyManager,
             windowsSandboxLevel: windowsSandboxLevel,
-            approvalGranted: false
+            approvalGranted: approvalGranted
         )
-        return FunctionCallExecutionResult(output: output)
+        let output = execution.output
+        guard toolOutputSucceeded(output),
+              let postPayload = postToolHookPayload(for: item, execution: execution, prePayload: hookPayload)
+        else {
+            return FunctionCallExecutionResult(output: output, additionalContextItems: additionalItems)
+        }
+
+        let postOutcome = await runPostToolUseHooks(
+            handlers: handlers,
+            hookPayload: postPayload,
+            conversationID: conversationID,
+            turnID: turnID,
+            cwd: cwd,
+            model: model,
+            approvalPolicy: approvalPolicy
+        )
+        additionalItems.append(contentsOf: hookAdditionalContextItems(postOutcome.additionalContexts))
+        return FunctionCallExecutionResult(
+            output: replacingToolOutputIfNeeded(output, with: postOutcome),
+            additionalContextItems: additionalItems
+        )
     }
 
     public static func finish(
@@ -1401,7 +1390,7 @@ public enum NonInteractiveExec {
         execPolicyManager: ExecPolicyManager,
         windowsSandboxLevel: WindowsSandboxLevel,
         approvalGranted: Bool
-    ) async -> ResponseItem {
+    ) async -> ExecutedFunctionCall {
         let decoder = JSONDecoder()
         do {
             switch name {
@@ -1422,6 +1411,7 @@ public enum NonInteractiveExec {
                     prefixRule: params.prefixRule,
                     additionalPermissions: params.additionalPermissions,
                     callID: callID,
+                    hookCommand: params.cmd,
                     cwd: cwd,
                     approvalPolicy: approvalPolicy,
                     sandboxPolicy: sandboxPolicy,
@@ -1439,7 +1429,7 @@ public enum NonInteractiveExec {
                 let params = try decoder.decode(ShellCommandToolCallParams.self, from: Data(arguments.utf8))
                 let useLoginShell = try resolveUseLoginShell(params.login, allowLoginShell: allowLoginShell)
                 let command = shell.deriveExecArgs(command: params.command, useLoginShell: useLoginShell)
-                return await executeShellCommand(
+                return executed(await executeShellCommand(
                     toolName: name,
                     command: command,
                     runtimeShellType: shell.shellType,
@@ -1462,11 +1452,11 @@ public enum NonInteractiveExec {
                     shellEnvironmentPolicy: shellEnvironmentPolicy,
                     explicitEnvOverrides: explicitEnvOverrides,
                     responseFormat: .freeform
-                )
+                ))
 
             case "shell", "container.exec":
                 let params = try decoder.decode(ShellToolCallParams.self, from: Data(arguments.utf8))
-                return await executeShellCommand(
+                return executed(await executeShellCommand(
                     toolName: name,
                     command: params.command,
                     runtimeShellType: ShellResolver.detectShellType(params.command.first ?? ""),
@@ -1489,7 +1479,7 @@ public enum NonInteractiveExec {
                     shellEnvironmentPolicy: shellEnvironmentPolicy,
                     explicitEnvOverrides: explicitEnvOverrides,
                     responseFormat: .structured
-                )
+                ))
 
             case "write_stdin":
                 let params = try decoder.decode(WriteStdinToolCallParams.self, from: Data(arguments.utf8))
@@ -1501,22 +1491,22 @@ public enum NonInteractiveExec {
                         maxEmptyYieldTimeMS: backgroundTerminalMaxTimeoutMS,
                         truncationPolicy: params.maxOutputTokens.map { .tokens($0) } ?? truncationPolicy
                     )
-                    return functionOutput(
+                    return executed(functionOutput(
                         callID: callID,
                         content: formatUnifiedExecResponse(output),
                         success: true
-                    )
+                    ), unifiedExecOutput: output)
                 } catch {
-                    return functionOutput(
+                    return executed(functionOutput(
                         callID: callID,
                         content: "write_stdin failed: \(String(describing: error))",
                         success: false
-                    )
+                    ))
                 }
 
             case "view_image":
                 let params = try decoder.decode(ViewImageToolCallParams.self, from: Data(arguments.utf8))
-                return try await executeViewImageTool(
+                return executed(try await executeViewImageTool(
                     params: params,
                     callID: callID,
                     cwd: cwd,
@@ -1525,7 +1515,7 @@ public enum NonInteractiveExec {
                     turnEnvironmentSelections: turnEnvironmentSelections,
                     configuredEnvironmentSnapshot: configuredEnvironmentSnapshot,
                     remoteEnvironmentFileSystems: remoteEnvironmentFileSystems
-                )
+                ))
 
             default:
                 if let agentJobOutput = await AgentJobToolExecutor.execute(
@@ -1535,35 +1525,35 @@ public enum NonInteractiveExec {
                     cwd: cwd,
                     context: agentJobContext
                 ) {
-                    return agentJobOutput
+                    return executed(agentJobOutput)
                 }
                 if features.isEnabled(.unavailableDummyTools),
                    ToolSpecFactory.shouldCollectUnavailableTool(name: name, namespace: namespace)
                 {
                     let toolName = UnavailableToolName(namespace: namespace, name: name).flatName
-                    return functionOutput(
+                    return executed(functionOutput(
                         callID: callID,
                         content: ToolSpecFactory.unavailableToolMessage(
                             toolName: toolName,
                             nextStep: "Retry after the tool becomes available or ask the user to re-enable it."
                         ),
                         success: false
-                    )
+                    ))
                 }
-                return functionOutput(
+                return executed(functionOutput(
                     callID: callID,
                     content: "unsupported call: \(toolNameDisplay(namespace: namespace, name: name))",
                     success: false
-                )
+                ))
             }
         } catch let error as FunctionCallError {
-            return functionOutput(callID: callID, content: error.description, success: false)
+            return executed(functionOutput(callID: callID, content: error.description, success: false))
         } catch {
-            return functionOutput(
+            return executed(functionOutput(
                 callID: callID,
                 content: "failed to parse \(name) arguments: \(String(describing: error))",
                 success: false
-            )
+            ))
         }
     }
 
@@ -2146,6 +2136,7 @@ public enum NonInteractiveExec {
         prefixRule: [String]?,
         additionalPermissions: RequestPermissionProfile?,
         callID: String,
+        hookCommand: String,
         cwd: URL,
         approvalPolicy: AskForApproval,
         sandboxPolicy: SandboxPolicy,
@@ -2157,9 +2148,9 @@ public enum NonInteractiveExec {
         environment: [String: String],
         shellEnvironmentPolicy: ShellEnvironmentPolicy,
         explicitEnvOverrides: [String: String]
-    ) async -> ResponseItem {
+    ) async -> ExecutedFunctionCall {
         guard !command.isEmpty else {
-            return functionOutput(callID: callID, content: "exec_command command is empty", success: false)
+            return executed(functionOutput(callID: callID, content: "exec_command command is empty", success: false))
         }
 
         let commandCwd = resolveWorkdir(workdir, relativeTo: cwd)
@@ -2178,9 +2169,9 @@ public enum NonInteractiveExec {
                 additionalPermissions: normalizedAdditionalPermissions
             )
         } catch let error as FunctionCallError {
-            return functionOutput(callID: callID, content: error.description, success: false)
+            return executed(functionOutput(callID: callID, content: error.description, success: false))
         } catch {
-            return functionOutput(callID: callID, content: String(describing: error), success: false)
+            return executed(functionOutput(callID: callID, content: String(describing: error), success: false))
         }
 
         let approvalRequirement = shellApprovalRequirement(
@@ -2198,11 +2189,11 @@ public enum NonInteractiveExec {
             approvalPolicy: approvalPolicy,
             approvalGranted: approvalGranted
         ) {
-            return functionOutput(
+            return executed(functionOutput(
                 callID: callID,
                 content: rejection,
                 success: false
-            )
+            ))
         }
 
         let childEnvironment = ExecEnvironment.createEnv(policy: shellEnvironmentPolicy, environment: environment)
@@ -2233,19 +2224,21 @@ public enum NonInteractiveExec {
                 tty: tty,
                 yieldTimeMS: UnifiedExecTiming.clampInitialYieldTimeMS(timeoutMS ?? 10_000),
                 truncationPolicy: truncationPolicy,
-                environment: childEnvironment
+                environment: childEnvironment,
+                eventCallID: callID,
+                hookCommand: hookCommand
             )
-            return functionOutput(
+            return executed(functionOutput(
                 callID: callID,
                 content: formatUnifiedExecResponse(output),
                 success: output.exitCode.map { $0 == 0 } ?? true
-            )
+            ), unifiedExecOutput: output)
         } catch {
-            return functionOutput(
+            return executed(functionOutput(
                 callID: callID,
                 content: "exec_command failed: \(String(describing: error))",
                 success: false
-            )
+            ))
         }
     }
 
@@ -2486,7 +2479,7 @@ public enum NonInteractiveExec {
                     approvalDescription: params.justification
                 )
 
-            case "apply_patch":
+            case "apply_patch", "write_stdin":
                 return nil
 
             default:
@@ -2530,16 +2523,41 @@ public enum NonInteractiveExec {
 
     private static func postToolHookPayload(
         for item: ResponseItem,
-        output: ResponseItem,
-        prePayload: ToolHookPayload
+        execution: ExecutedFunctionCall,
+        prePayload: ToolHookPayload?
     ) -> PostToolHookPayload? {
-        switch output {
+        switch execution.output {
         case let .functionCallOutput(_, payload):
-            guard let toolResponse = postToolUseResponse(for: item, output: payload) else {
+            guard let toolResponse = postToolUseResponse(
+                for: item,
+                output: payload,
+                unifiedExecOutput: execution.unifiedExecOutput
+            ) else {
                 return nil
             }
-            return PostToolHookPayload(prePayload: prePayload, toolResponse: toolResponse)
+            if let prePayload {
+                return PostToolHookPayload(prePayload: prePayload, toolResponse: toolResponse)
+            }
+            guard case .functionCall(_, "write_stdin", _, _, _) = item,
+                  let unifiedExecOutput = execution.unifiedExecOutput,
+                  unifiedExecOutput.processID == nil,
+                  let hookCommand = unifiedExecOutput.hookCommand
+            else {
+                return nil
+            }
+            return PostToolHookPayload(
+                prePayload: ToolHookPayload(
+                    toolName: "Bash",
+                    matcherAliases: [],
+                    toolUseID: unifiedExecOutput.eventCallID,
+                    toolInput: .object(["command": .string(hookCommand)])
+                ),
+                toolResponse: toolResponse
+            )
         case let .customToolCallOutput(_, _, output):
+            guard let prePayload else {
+                return nil
+            }
             return PostToolHookPayload(prePayload: prePayload, toolResponse: .string(output.content))
         default:
             if case .toolSearchCall = item {
@@ -2551,16 +2569,33 @@ public enum NonInteractiveExec {
 
     private static func postToolUseResponse(
         for item: ResponseItem,
-        output: FunctionCallOutputPayload
+        output: FunctionCallOutputPayload,
+        unifiedExecOutput: UnifiedExecToolOutput?
     ) -> JSONValue? {
         switch item {
         case let .functionCall(_, name, _, _, _):
             switch name {
             case "exec_command":
+                if let unifiedExecOutput {
+                    guard unifiedExecOutput.processID == nil,
+                          unifiedExecOutput.hookCommand != nil
+                    else {
+                        return nil
+                    }
+                    return .string(unifiedExecOutput.output)
+                }
                 guard !unifiedExecOutputIsStillRunning(output.content) else {
                     return nil
                 }
                 return .string(outputTextAfterHeader(in: output.content))
+            case "write_stdin":
+                guard let unifiedExecOutput,
+                      unifiedExecOutput.processID == nil,
+                      unifiedExecOutput.hookCommand != nil
+                else {
+                    return nil
+                }
+                return .string(unifiedExecOutput.output)
             case "shell_command":
                 return .string(outputTextAfterHeader(in: output.content))
             case "shell", "container.exec":
@@ -3061,12 +3096,14 @@ private final class DataCapture: @unchecked Sendable {
 }
 
 private struct UnifiedExecToolOutput: Sendable {
+    let eventCallID: String
     let chunkID: String
     let duration: TimeInterval
     let output: String
     let processID: String?
     let exitCode: Int?
     let originalTokenCount: Int?
+    let hookCommand: String?
 }
 
 private actor UnifiedExecSessionRegistry {
@@ -3083,6 +3120,8 @@ private actor UnifiedExecSessionRegistry {
         var stdoutOffset: Int
         var stderrOffset: Int
         let startedAt: Date
+        let eventCallID: String
+        let hookCommand: String
     }
 
     private var sessions: [String: Session] = [:]
@@ -3094,7 +3133,9 @@ private actor UnifiedExecSessionRegistry {
         tty: Bool,
         yieldTimeMS: UInt64,
         truncationPolicy: TruncationPolicy,
-        environment: [String: String]
+        environment: [String: String],
+        eventCallID: String,
+        hookCommand: String
     ) throws -> UnifiedExecToolOutput {
         let start = Date()
         let sessionID = allocateSessionID()
@@ -3174,7 +3215,9 @@ private actor UnifiedExecSessionRegistry {
                 stderrCapture: stderrCapture,
                 stdoutOffset: stdout.count,
                 stderrOffset: stderr.count,
-                startedAt: start
+                startedAt: start,
+                eventCallID: eventCallID,
+                hookCommand: hookCommand
             )
             return makeOutput(
                 stdout: stdout,
@@ -3182,7 +3225,9 @@ private actor UnifiedExecSessionRegistry {
                 duration: Date().timeIntervalSince(start),
                 processID: sessionID,
                 exitCode: nil,
-                truncationPolicy: truncationPolicy
+                truncationPolicy: truncationPolicy,
+                eventCallID: eventCallID,
+                hookCommand: hookCommand
             )
         }
 
@@ -3196,7 +3241,9 @@ private actor UnifiedExecSessionRegistry {
             duration: Date().timeIntervalSince(start),
             processID: nil,
             exitCode: Int(process.terminationStatus),
-            truncationPolicy: truncationPolicy
+            truncationPolicy: truncationPolicy,
+            eventCallID: eventCallID,
+            hookCommand: hookCommand
         )
     }
 
@@ -3247,7 +3294,9 @@ private actor UnifiedExecSessionRegistry {
                 duration: Date().timeIntervalSince(start),
                 processID: sessionID,
                 exitCode: nil,
-                truncationPolicy: truncationPolicy
+                truncationPolicy: truncationPolicy,
+                eventCallID: session.eventCallID,
+                hookCommand: session.hookCommand
             )
         }
 
@@ -3266,7 +3315,9 @@ private actor UnifiedExecSessionRegistry {
             duration: Date().timeIntervalSince(start),
             processID: nil,
             exitCode: Int(session.process.terminationStatus),
-            truncationPolicy: truncationPolicy
+            truncationPolicy: truncationPolicy,
+            eventCallID: session.eventCallID,
+            hookCommand: session.hookCommand
         )
     }
 
@@ -3345,19 +3396,23 @@ private actor UnifiedExecSessionRegistry {
         duration: TimeInterval,
         processID: String?,
         exitCode: Int?,
-        truncationPolicy: TruncationPolicy
+        truncationPolicy: TruncationPolicy,
+        eventCallID: String,
+        hookCommand: String?
     ) -> UnifiedExecToolOutput {
         let stdoutText = String(decoding: stdout, as: UTF8.self)
         let stderrText = String(decoding: stderr, as: UTF8.self)
         let rawOutput = stdoutText.isEmpty ? stderrText : (stderrText.isEmpty ? stdoutText : stdoutText + stderrText)
         let output = Truncation.formattedTruncateText(rawOutput, policy: truncationPolicy)
         return UnifiedExecToolOutput(
+            eventCallID: eventCallID,
             chunkID: randomChunkID(),
             duration: duration,
             output: output,
             processID: processID,
             exitCode: exitCode,
-            originalTokenCount: rawOutput.split(whereSeparator: \.isWhitespace).count
+            originalTokenCount: rawOutput.split(whereSeparator: \.isWhitespace).count,
+            hookCommand: hookCommand
         )
     }
 

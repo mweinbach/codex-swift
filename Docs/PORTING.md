@@ -12,6 +12,14 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `6f1a01fbdd` (`Simplify tool executor
+  and registry plumbing`) for unified-exec hook payload behavior in
+  `codex-rs/core/src/tools/handlers/unified_exec{.rs,/write_stdin.rs}` and
+  `codex-rs/core/src/tools/context.rs`. Swift non-interactive unified exec now
+  skips `PreToolUse` hooks for `write_stdin`, while completed `write_stdin`
+  polls emit `PostToolUse` as Bash using the original `exec_command` call id,
+  original command input, and raw collected terminal output, including
+  parallel-session-safe metadata carried with the persisted exec session.
 - 2026-05-16: rechecked Rust live turn metadata construction in
   `codex-rs/core/src/session/turn_context.rs`,
   `codex-rs/core/src/session/handlers.rs`,
