@@ -1155,7 +1155,6 @@ final class CodexAppServerTests: XCTestCase {
         sandbox_mode = "workspace-write"
         default_permissions = "limited"
         experimental_use_unified_exec_tool = false
-        experimental_use_freeform_apply_patch = false
 
         [sandbox_workspace_write]
         writable_roots = ["\(cwd.url.path)"]
@@ -1196,7 +1195,6 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNil(config["default_permissions"])
         XCTAssertNil(config["permissions"])
         XCTAssertNil(config["experimental_use_unified_exec_tool"])
-        XCTAssertNil(config["experimental_use_freeform_apply_patch"])
         XCTAssertEqual(config["model"], .string("catalog-model"))
         XCTAssertEqual(config["instructions"], .string("base instructions"))
         XCTAssertNil(config["developer_instructions"])

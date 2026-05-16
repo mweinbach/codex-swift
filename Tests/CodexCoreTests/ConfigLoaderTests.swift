@@ -58,9 +58,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertTrue(config.includeAppsInstructions)
         XCTAssertTrue(config.includeSkillInstructions)
         XCTAssertTrue(config.includeEnvironmentContext)
-        XCTAssertNil(config.includeApplyPatchTool)
         XCTAssertNil(config.experimentalUseUnifiedExecTool)
-        XCTAssertNil(config.experimentalUseFreeformApplyPatch)
         XCTAssertNil(config.experimentalRealtimeWSBaseURL)
         XCTAssertNil(config.experimentalRealtimeWSModel)
         XCTAssertNil(config.experimentalRealtimeWSBackendPrompt)
@@ -1016,9 +1014,7 @@ final class ConfigLoaderTests: XCTestCase {
         include_permissions_instructions = false
         include_apps_instructions = false
         include_environment_context = false
-        include_apply_patch_tool = true
         experimental_use_unified_exec_tool = true
-        experimental_use_freeform_apply_patch = false
         experimental_realtime_ws_base_url = "http://127.0.0.1:8011"
         experimental_realtime_ws_model = "realtime-test-model"
         experimental_realtime_ws_backend_prompt = "prompt from config"
@@ -1139,9 +1135,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertFalse(config.includeAppsInstructions)
         XCTAssertFalse(config.includeSkillInstructions)
         XCTAssertFalse(config.includeEnvironmentContext)
-        XCTAssertEqual(config.includeApplyPatchTool, true)
         XCTAssertEqual(config.experimentalUseUnifiedExecTool, true)
-        XCTAssertEqual(config.experimentalUseFreeformApplyPatch, false)
         XCTAssertEqual(config.experimentalRealtimeWSBaseURL, "http://127.0.0.1:8011")
         XCTAssertEqual(config.experimentalRealtimeWSModel, "realtime-test-model")
         XCTAssertEqual(config.experimentalRealtimeWSBackendPrompt, "prompt from config")
@@ -2418,9 +2412,7 @@ final class ConfigLoaderTests: XCTestCase {
         notify = ["notify-send", "top"]
         model_instructions_file = "top-instructions.md"
         experimental_compact_prompt_file = "top-compact.md"
-        include_apply_patch_tool = true
         experimental_use_unified_exec_tool = false
-        experimental_use_freeform_apply_patch = false
         tools_web_search = false
         tools_view_image = false
         oss_provider = "top-oss"
@@ -2441,9 +2433,7 @@ final class ConfigLoaderTests: XCTestCase {
         service_tier = "flex"
         model_instructions_file = "profile-instructions.md"
         experimental_compact_prompt_file = "profile-compact.md"
-        include_apply_patch_tool = false
         experimental_use_unified_exec_tool = true
-        experimental_use_freeform_apply_patch = true
         tools_web_search = true
         tools_view_image = true
         oss_provider = "profile-oss"
@@ -2471,9 +2461,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.experimentalCompactPromptFile, dir.url.appendingPathComponent("profile-compact.md").path)
         XCTAssertEqual(config.baseInstructions, "profile-instructions.md")
         XCTAssertEqual(config.compactPrompt, "profile-compact.md")
-        XCTAssertEqual(config.includeApplyPatchTool, false)
         XCTAssertEqual(config.experimentalUseUnifiedExecTool, true)
-        XCTAssertEqual(config.experimentalUseFreeformApplyPatch, true)
         XCTAssertEqual(config.toolsWebSearch, true)
         XCTAssertEqual(config.toolsViewImage, true)
         XCTAssertEqual(config.ossProvider, "profile-oss")

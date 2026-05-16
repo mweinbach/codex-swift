@@ -235,11 +235,6 @@ public enum NonInteractiveExec {
         }
 
         let applyPatchToolType = modelFamily.applyPatchToolType
-            ?? ((config.features.isEnabled(.applyPatchFreeform)
-                 || config.includeApplyPatchTool == true
-                 || config.experimentalUseFreeformApplyPatch == true)
-                ? .freeform
-                : nil)
         let multiAgentV2Enabled = config.features.isEnabled(.multiAgentV2)
 
         return ToolsConfig(

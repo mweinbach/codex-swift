@@ -12,6 +12,14 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commits `e33cf9ae28`
+  (`chore(config) rm experimental_use_freeform_apply_patch`) and `51b0e94105`
+  (`chore(features) rm Feature::ApplyPatchFreeform`). Swift now removes
+  `include_apply_patch_tool` and `experimental_use_freeform_apply_patch` from
+  runtime/profile config surfaces, no longer treats those TOML keys as relevant
+  config, and selects the freeform `apply_patch` tool only from
+  `model.apply_patch_tool_type`. The `apply_patch_freeform` feature remains a
+  removed/no-op tombstone to match Rust compatibility behavior.
 - 2026-05-16: rechecked Rust commit `7dbe1c9498` (`Remove experimental
   instructions file config`). Swift now removes `experimental_instructions_file`
   from typed profile/config surfaces and no longer treats it as a path-valued

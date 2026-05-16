@@ -1614,7 +1614,6 @@ public enum CodexAppServer {
         table.removeValue(forKey: "default_permissions")
         table.removeValue(forKey: "permissions")
         table.removeValue(forKey: "experimental_use_unified_exec_tool")
-        table.removeValue(forKey: "experimental_use_freeform_apply_patch")
         return .table(table)
     }
 

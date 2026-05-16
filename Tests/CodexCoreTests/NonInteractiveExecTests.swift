@@ -518,7 +518,6 @@ final class NonInteractiveExecTests: XCTestCase {
         features.set(.unifiedExec, enabled: true)
         features.set(.webSearchRequest, enabled: true)
         let config = CodexRuntimeConfig(
-            includeApplyPatchTool: true,
             toolsViewImage: false,
             features: features
         )
@@ -526,6 +525,7 @@ final class NonInteractiveExecTests: XCTestCase {
             slug: "test-model",
             family: "test",
             supportsParallelToolCalls: true,
+            applyPatchToolType: .freeform,
             experimentalSupportedTools: ["grep_files", "read_file", "list_dir", "test_sync_tool"],
             shellType: .shellCommand
         )
@@ -586,14 +586,6 @@ final class NonInteractiveExecTests: XCTestCase {
         let defaultToolsConfig = NonInteractiveExec.toolsConfig(modelFamily: modelFamily, config: defaultConfig)
         XCTAssertNil(defaultToolsConfig.applyPatchToolType)
 
-        var enabledFeatures = FeatureStates.withDefaults()
-        enabledFeatures.set(.applyPatchFreeform, enabled: true)
-        let enabledToolsConfig = NonInteractiveExec.toolsConfig(
-            modelFamily: modelFamily,
-            config: CodexRuntimeConfig(features: enabledFeatures)
-        )
-        XCTAssertEqual(enabledToolsConfig.applyPatchToolType, .freeform)
-
         let disabledFeatures = FeatureStates.withDefaults()
         let disabledToolsConfig = NonInteractiveExec.toolsConfig(
             modelFamily: modelFamily,
@@ -601,11 +593,27 @@ final class NonInteractiveExecTests: XCTestCase {
         )
         XCTAssertNil(disabledToolsConfig.applyPatchToolType)
 
-        let legacyConfig = CodexRuntimeConfig(includeApplyPatchTool: true, features: disabledFeatures)
-        let legacyToolsConfig = NonInteractiveExec.toolsConfig(modelFamily: modelFamily, config: legacyConfig)
-        XCTAssertEqual(legacyToolsConfig.applyPatchToolType, .freeform)
+        var removedFeatures = FeatureStates.withDefaults()
+        removedFeatures.set(.applyPatchFreeform, enabled: true)
+        let removedFeatureToolsConfig = NonInteractiveExec.toolsConfig(
+            modelFamily: modelFamily,
+            config: CodexRuntimeConfig(features: removedFeatures)
+        )
+        XCTAssertNil(removedFeatureToolsConfig.applyPatchToolType)
 
-        let specs = ToolSpecFactory.buildSpecs(config: legacyToolsConfig).map(\.spec)
+        let configuredModelFamily = ModelFamily(
+            slug: "apply-patch-model",
+            family: "apply-patch",
+            applyPatchToolType: .freeform,
+            shellType: .disabled
+        )
+        let modelToolsConfig = NonInteractiveExec.toolsConfig(
+            modelFamily: configuredModelFamily,
+            config: CodexRuntimeConfig(features: disabledFeatures)
+        )
+        XCTAssertEqual(modelToolsConfig.applyPatchToolType, .freeform)
+
+        let specs = ToolSpecFactory.buildSpecs(config: modelToolsConfig).map(\.spec)
         let applyPatchSpec = try XCTUnwrap(specs.first { $0.name == "apply_patch" })
         guard case let .freeform(tool) = applyPatchSpec else {
             return XCTFail("expected apply_patch to use the freeform custom tool shape")

@@ -201,9 +201,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
     public var includePermissionsInstructions: Bool?
     public var includeAppsInstructions: Bool?
     public var includeEnvironmentContext: Bool?
-    public var includeApplyPatchTool: Bool?
     public var experimentalUseUnifiedExecTool: Bool?
-    public var experimentalUseFreeformApplyPatch: Bool?
     public var webSearchMode: WebSearchMode?
     public var toolsWebSearch: Bool?
     public var toolsViewImage: Bool?
@@ -236,9 +234,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         case includePermissionsInstructions = "include_permissions_instructions"
         case includeAppsInstructions = "include_apps_instructions"
         case includeEnvironmentContext = "include_environment_context"
-        case includeApplyPatchTool = "include_apply_patch_tool"
         case experimentalUseUnifiedExecTool = "experimental_use_unified_exec_tool"
-        case experimentalUseFreeformApplyPatch = "experimental_use_freeform_apply_patch"
         case webSearchMode = "web_search"
         case toolsWebSearch = "tools_web_search"
         case toolsViewImage = "tools_view_image"
@@ -272,9 +268,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         includePermissionsInstructions: Bool? = nil,
         includeAppsInstructions: Bool? = nil,
         includeEnvironmentContext: Bool? = nil,
-        includeApplyPatchTool: Bool? = nil,
         experimentalUseUnifiedExecTool: Bool? = nil,
-        experimentalUseFreeformApplyPatch: Bool? = nil,
         webSearchMode: WebSearchMode? = nil,
         toolsWebSearch: Bool? = nil,
         toolsViewImage: Bool? = nil,
@@ -306,9 +300,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         self.includePermissionsInstructions = includePermissionsInstructions
         self.includeAppsInstructions = includeAppsInstructions
         self.includeEnvironmentContext = includeEnvironmentContext
-        self.includeApplyPatchTool = includeApplyPatchTool
         self.experimentalUseUnifiedExecTool = experimentalUseUnifiedExecTool
-        self.experimentalUseFreeformApplyPatch = experimentalUseFreeformApplyPatch
         self.webSearchMode = webSearchMode
         self.toolsWebSearch = toolsWebSearch
         self.toolsViewImage = toolsViewImage
@@ -344,9 +336,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         self.includePermissionsInstructions = try container.decodeIfPresent(Bool.self, forKey: .includePermissionsInstructions)
         self.includeAppsInstructions = try container.decodeIfPresent(Bool.self, forKey: .includeAppsInstructions)
         self.includeEnvironmentContext = try container.decodeIfPresent(Bool.self, forKey: .includeEnvironmentContext)
-        self.includeApplyPatchTool = try container.decodeIfPresent(Bool.self, forKey: .includeApplyPatchTool)
         self.experimentalUseUnifiedExecTool = try container.decodeIfPresent(Bool.self, forKey: .experimentalUseUnifiedExecTool)
-        self.experimentalUseFreeformApplyPatch = try container.decodeIfPresent(Bool.self, forKey: .experimentalUseFreeformApplyPatch)
         self.webSearchMode = try container.decodeIfPresent(WebSearchMode.self, forKey: .webSearchMode)
         self.toolsWebSearch = try container.decodeIfPresent(Bool.self, forKey: .toolsWebSearch)
         self.toolsViewImage = try container.decodeIfPresent(Bool.self, forKey: .toolsViewImage)
@@ -388,9 +378,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         try encodeOptional(includePermissionsInstructions, into: &container, forKey: .includePermissionsInstructions)
         try encodeOptional(includeAppsInstructions, into: &container, forKey: .includeAppsInstructions)
         try encodeOptional(includeEnvironmentContext, into: &container, forKey: .includeEnvironmentContext)
-        try encodeOptional(includeApplyPatchTool, into: &container, forKey: .includeApplyPatchTool)
         try encodeOptional(experimentalUseUnifiedExecTool, into: &container, forKey: .experimentalUseUnifiedExecTool)
-        try encodeOptional(experimentalUseFreeformApplyPatch, into: &container, forKey: .experimentalUseFreeformApplyPatch)
         try encodeOptional(webSearchMode, into: &container, forKey: .webSearchMode)
         try encodeOptional(toolsWebSearch, into: &container, forKey: .toolsWebSearch)
         try encodeOptional(toolsViewImage, into: &container, forKey: .toolsViewImage)

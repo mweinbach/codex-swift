@@ -353,9 +353,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var includeAppsInstructions: Bool
     public var includeSkillInstructions: Bool
     public var includeEnvironmentContext: Bool
-    public var includeApplyPatchTool: Bool?
     public var experimentalUseUnifiedExecTool: Bool?
-    public var experimentalUseFreeformApplyPatch: Bool?
     public var experimentalRealtimeWSBaseURL: String?
     public var experimentalRealtimeWSModel: String?
     public var realtime: RealtimeConfig
@@ -482,9 +480,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         includeAppsInstructions: Bool = true,
         includeSkillInstructions: Bool = true,
         includeEnvironmentContext: Bool = true,
-        includeApplyPatchTool: Bool? = nil,
         experimentalUseUnifiedExecTool: Bool? = nil,
-        experimentalUseFreeformApplyPatch: Bool? = nil,
         experimentalRealtimeWSBaseURL: String? = nil,
         experimentalRealtimeWSModel: String? = nil,
         realtime: RealtimeConfig = RealtimeConfig(),
@@ -563,9 +559,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.includeAppsInstructions = includeAppsInstructions
         self.includeSkillInstructions = includeSkillInstructions
         self.includeEnvironmentContext = includeEnvironmentContext
-        self.includeApplyPatchTool = includeApplyPatchTool
         self.experimentalUseUnifiedExecTool = experimentalUseUnifiedExecTool
-        self.experimentalUseFreeformApplyPatch = experimentalUseFreeformApplyPatch
         self.experimentalRealtimeWSBaseURL = experimentalRealtimeWSBaseURL
         self.experimentalRealtimeWSModel = experimentalRealtimeWSModel
         self.realtime = realtime
@@ -649,9 +643,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         includeAppsInstructions: Bool = true,
         includeSkillInstructions: Bool = true,
         includeEnvironmentContext: Bool = true,
-        includeApplyPatchTool: Bool? = nil,
         experimentalUseUnifiedExecTool: Bool? = nil,
-        experimentalUseFreeformApplyPatch: Bool? = nil,
         experimentalRealtimeWSBaseURL: String? = nil,
         experimentalRealtimeWSModel: String? = nil,
         realtime: RealtimeConfig = RealtimeConfig(),
@@ -712,9 +704,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
             includeAppsInstructions: includeAppsInstructions,
             includeSkillInstructions: includeSkillInstructions,
             includeEnvironmentContext: includeEnvironmentContext,
-            includeApplyPatchTool: includeApplyPatchTool,
             experimentalUseUnifiedExecTool: experimentalUseUnifiedExecTool,
-            experimentalUseFreeformApplyPatch: experimentalUseFreeformApplyPatch,
             experimentalRealtimeWSBaseURL: experimentalRealtimeWSBaseURL,
             experimentalRealtimeWSModel: experimentalRealtimeWSModel,
             realtime: realtime,
@@ -767,9 +757,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         baseInstructions: String? = nil,
         developerInstructions: String? = nil,
         compactPrompt: String? = nil,
-        includeApplyPatchTool: Bool? = nil,
         experimentalUseUnifiedExecTool: Bool? = nil,
-        experimentalUseFreeformApplyPatch: Bool? = nil,
         experimentalRealtimeWSBaseURL: String? = nil,
         experimentalRealtimeWSModel: String? = nil,
         realtime: RealtimeConfig = RealtimeConfig(),
@@ -822,9 +810,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
             includeAppsInstructions: true,
             includeSkillInstructions: true,
             includeEnvironmentContext: true,
-            includeApplyPatchTool: includeApplyPatchTool,
             experimentalUseUnifiedExecTool: experimentalUseUnifiedExecTool,
-            experimentalUseFreeformApplyPatch: experimentalUseFreeformApplyPatch,
             experimentalRealtimeWSBaseURL: experimentalRealtimeWSBaseURL,
             experimentalRealtimeWSModel: experimentalRealtimeWSModel,
             realtime: realtime,
@@ -875,9 +861,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         baseInstructions: String?,
         developerInstructions: String?,
         compactPrompt: String?,
-        includeApplyPatchTool: Bool?,
         experimentalUseUnifiedExecTool: Bool?,
-        experimentalUseFreeformApplyPatch: Bool?,
         webSearchMode: WebSearchMode?,
         webSearchConfig: WebSearchConfig?,
         toolsWebSearch: Bool?,
@@ -918,9 +902,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
             baseInstructions: baseInstructions,
             developerInstructions: developerInstructions,
             compactPrompt: compactPrompt,
-            includeApplyPatchTool: includeApplyPatchTool,
             experimentalUseUnifiedExecTool: experimentalUseUnifiedExecTool,
-            experimentalUseFreeformApplyPatch: experimentalUseFreeformApplyPatch,
             experimentalRealtimeWSBaseURL: nil,
             experimentalRealtimeWSModel: nil,
             experimentalRealtimeWSBackendPrompt: nil,
@@ -970,9 +952,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         baseInstructions: String?,
         developerInstructions: String?,
         compactPrompt: String?,
-        includeApplyPatchTool: Bool?,
         experimentalUseUnifiedExecTool: Bool?,
-        experimentalUseFreeformApplyPatch: Bool?,
         experimentalRealtimeWSBaseURL: String?,
         experimentalRealtimeWSModel: String?,
         experimentalRealtimeWSBackendPrompt: String?,
@@ -1018,9 +998,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
             baseInstructions: baseInstructions,
             developerInstructions: developerInstructions,
             compactPrompt: compactPrompt,
-            includeApplyPatchTool: includeApplyPatchTool,
             experimentalUseUnifiedExecTool: experimentalUseUnifiedExecTool,
-            experimentalUseFreeformApplyPatch: experimentalUseFreeformApplyPatch,
             experimentalRealtimeWSBaseURL: experimentalRealtimeWSBaseURL,
             experimentalRealtimeWSModel: experimentalRealtimeWSModel,
             experimentalRealtimeWSBackendPrompt: experimentalRealtimeWSBackendPrompt,
@@ -4402,22 +4380,10 @@ private struct ParsedCodexConfigToml {
                 key: "\(keyPrefix)include_environment_context"
             )
         }
-        if let includeApplyPatchTool = values["include_apply_patch_tool"] {
-            config.includeApplyPatchTool = try boolValue(
-                includeApplyPatchTool,
-                key: "\(keyPrefix)include_apply_patch_tool"
-            )
-        }
         if let unifiedExecTool = values["experimental_use_unified_exec_tool"] {
             config.experimentalUseUnifiedExecTool = try boolValue(
                 unifiedExecTool,
                 key: "\(keyPrefix)experimental_use_unified_exec_tool"
-            )
-        }
-        if let freeformApplyPatch = values["experimental_use_freeform_apply_patch"] {
-            config.experimentalUseFreeformApplyPatch = try boolValue(
-                freeformApplyPatch,
-                key: "\(keyPrefix)experimental_use_freeform_apply_patch"
             )
         }
         if values["experimental_thread_store_endpoint"] != nil {
@@ -4557,9 +4523,7 @@ private struct ParsedCodexConfigToml {
             || key == "include_permissions_instructions"
             || key == "include_apps_instructions"
             || key == "include_environment_context"
-            || key == "include_apply_patch_tool"
             || key == "experimental_use_unified_exec_tool"
-            || key == "experimental_use_freeform_apply_patch"
             || key == "experimental_realtime_ws_base_url"
             || key == "experimental_realtime_ws_model"
             || key == "experimental_realtime_ws_backend_prompt"
@@ -4609,9 +4573,7 @@ private struct ParsedCodexConfigToml {
             || key == "include_permissions_instructions"
             || key == "include_apps_instructions"
             || key == "include_environment_context"
-            || key == "include_apply_patch_tool"
             || key == "experimental_use_unified_exec_tool"
-            || key == "experimental_use_freeform_apply_patch"
             || key == "web_search"
             || key == "tools_web_search"
             || key == "tools_view_image"
