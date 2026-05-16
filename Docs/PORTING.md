@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2
+  `permissions_request_approval_response_accepts_strict_auto_review` in
+  `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift permissions
+  protocol coverage now decodes `strictAutoReview: true` while preserving the
+  default turn scope.
 - 2026-05-15: rechecked Rust app-server v2 `fs/createDirectory`
   default-recursive round-trip coverage in
   `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift filesystem

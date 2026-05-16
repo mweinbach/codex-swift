@@ -429,6 +429,13 @@ final class AppServerPermissionsProtocolTests: XCTestCase {
                 globScanMaxDepth: 2
             )
         )
+
+        let strictAutoReview = try JSONDecoder().decode(
+            AppServerProtocol.PermissionsRequestApprovalResponse.self,
+            from: Data(#"{"permissions":{},"strictAutoReview":true}"#.utf8)
+        )
+        XCTAssertEqual(strictAutoReview.scope, .turn)
+        XCTAssertEqual(strictAutoReview.strictAutoReview, true)
     }
 
     func testPermissionsRequestApprovalRejectsMacOSPermissionFieldLikeRust() {
