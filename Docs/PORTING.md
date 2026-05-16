@@ -2534,6 +2534,8 @@ Recent upstream audit checkpoint:
   - tightened `turn/start` and `review/start` responses to include Rust's `itemsView: "notLoaded"` plus nullable `startedAt`, `completedAt`, and `durationMs` fields while preserving the existing empty/plain review item projections.
 - `codex-rs/app-server-protocol` thread-start experimental field gating
   - matched Rust's field-level experimental API guards for `thread/start.environments`, `thread/start.dynamicTools`, `thread/start.permissions`, `thread/start.mockExperimentalField`, `thread/start.experimentalRawEvents`, `thread/start.persistFullHistory`, and nested `askForApproval.granular`.
+- `codex-rs/app-server` legacy conversation summaries
+  - matched Rust's legacy `getConversationSummary` `updatedAt` field for rollout-backed and state-store-backed summaries, and preserved stored-thread fractional-second timestamps in the legacy `timestamp` / `updatedAt` strings.
 - `codex-rs/app-server` thread-start dynamic tool validation
   - matched Rust's `thread/start.dynamicTools` validation for Responses-compatible identifiers, reserved names/namespaces, duplicate names within a namespace, deferred tools requiring a namespace, and singleton-null input schemas, and persisted accepted non-empty specs into rollout session metadata.
   - matched Rust's canonical `deferLoading` and legacy inverted `exposeToContext` dynamic-tool decode path in the Swift protocol model and `thread/start`, including Rust's accepted explicit-null compatibility behavior, and verified accepted specs re-encode and persist through the canonical `deferLoading` field.

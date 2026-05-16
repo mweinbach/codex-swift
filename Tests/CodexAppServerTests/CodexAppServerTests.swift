@@ -2608,12 +2608,15 @@ final class CodexAppServerTests: XCTestCase {
             URL(fileURLWithPath: rolloutPath).standardizedFileURL.path
         )
         XCTAssertEqual(summary["preview"] as? String, "Hello legacy")
+        XCTAssertNotNil(summary["timestamp"] as? String)
+        XCTAssertNotNil(summary["updatedAt"] as? String)
         XCTAssertEqual(summary["modelProvider"] as? String, "mock_provider")
         XCTAssertEqual(summary["cwd"] as? String, cwd.url.path)
 
         let summaryByPath = try decode(processor.processLine(Data(#"{"id":5,"method":"getConversationSummary","params":{"rolloutPath":"\#(rolloutPath)"}}"#.utf8)))
         let pathSummary = try XCTUnwrap((summaryByPath["result"] as? [String: Any])?["summary"] as? [String: Any])
         XCTAssertEqual(pathSummary["conversationId"] as? String, conversationID)
+        XCTAssertNotNil(pathSummary["updatedAt"] as? String)
 
         let removeListener = try decode(processor.processLine(Data(#"{"id":6,"method":"removeConversationListener","params":{"subscriptionId":"\#(try XCTUnwrap(listenerResult["subscriptionId"] as? String))"}}"#.utf8)))
         XCTAssertTrue(try XCTUnwrap(removeListener["result"] as? [String: Any]).isEmpty)
@@ -2682,8 +2685,8 @@ final class CodexAppServerTests: XCTestCase {
         try await stateStore.upsertThread(ThreadMetadata(
             id: threadID,
             rolloutPath: "",
-            createdAt: try appServerDate("2025-01-02T12:00:00Z"),
-            updatedAt: try appServerDate("2025-01-02T12:30:00Z"),
+            createdAt: try appServerDate("2025-01-02T12:00:00.678Z"),
+            updatedAt: try appServerDate("2025-01-02T12:30:00.789Z"),
             source: "cli",
             modelProvider: "pathless-provider",
             cwd: "",
@@ -2706,6 +2709,8 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(summary["conversationId"] as? String, threadID.description)
         XCTAssertEqual(summary["path"] as? String, "")
         XCTAssertEqual(summary["preview"] as? String, "stored preview")
+        XCTAssertEqual(summary["timestamp"] as? String, "2025-01-02T12:00:00.678Z")
+        XCTAssertEqual(summary["updatedAt"] as? String, "2025-01-02T12:30:00.789Z")
         XCTAssertEqual(summary["modelProvider"] as? String, "pathless-provider")
         XCTAssertEqual(summary["cwd"] as? String, "")
         XCTAssertEqual(summary["source"] as? String, "cli")

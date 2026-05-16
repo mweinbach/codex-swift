@@ -19616,7 +19616,8 @@ public enum CodexAppServer {
             "conversationId": summary.id,
             "path": item.path,
             "preview": summary.preview,
-            "timestamp": item.createdAt as Any,
+            "timestamp": (item.createdAt ?? summary.createdAtTimestamp) as Any,
+            "updatedAt": (item.updatedAt ?? modificationDate(forPath: item.path).map(iso8601String) ?? summary.createdAtTimestamp) as Any,
             "modelProvider": summary.modelProvider,
             "cwd": summary.cwd,
             "cliVersion": summary.cliVersion,
@@ -19631,6 +19632,7 @@ public enum CodexAppServer {
             "path": metadata.rolloutPath,
             "preview": metadata.firstUserMessage ?? metadata.title,
             "timestamp": iso8601String(from: metadata.createdAt),
+            "updatedAt": iso8601String(from: metadata.updatedAt),
             "modelProvider": metadata.modelProvider.isEmpty ? defaultProvider : metadata.modelProvider,
             "cwd": metadata.cwd,
             "cliVersion": metadata.cliVersion,
@@ -29626,6 +29628,7 @@ private struct RolloutSummary {
     let model: String?
     let reasoningEffort: ReasoningEffort?
     let modelProvider: String
+    let createdAtTimestamp: String?
     let createdAtUnixSeconds: Int
     let cwd: String
     let cliVersion: String
@@ -29687,6 +29690,7 @@ private struct RolloutSummary {
         self.model = latestTurnContextModel
         self.reasoningEffort = latestTurnContextReasoningEffort
         self.modelProvider = meta.meta.modelProvider ?? defaultProvider
+        self.createdAtTimestamp = meta.meta.timestamp.isEmpty ? nil : meta.meta.timestamp
         self.createdAtUnixSeconds = Self.unixSeconds(meta.meta.timestamp)
         self.cwd = latestTurnContextCwd ?? meta.meta.cwd
         self.cliVersion = meta.meta.cliVersion
