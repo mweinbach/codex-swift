@@ -1841,7 +1841,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(startupStatuses[3]["error"] is NSNull)
     }
 
-    func testMcpServerStatusListReusesLiveManagerToolsForLoadedThread() throws {
+    func testMcpServerStatusListReusesLiveManagerInventoryForLoadedThread() throws {
         let temp = try TemporaryDirectory()
         let inventoryLog = temp.url.appendingPathComponent("mcp-inventory.log", isDirectory: false)
         let workingServer = try writeMCPServerScript(
@@ -1857,6 +1857,10 @@ final class CodexAppServerTests: XCTestCase {
                     printf '%s\\n' '{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"docs","version":"1.0.0"}}}'
                 elif [ "$count" -eq 2 ]; then
                     printf '%s\\n' '{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"lookup","description":"Live cached docs.","inputSchema":{"type":"object"}}]}}'
+                elif [ "$count" -eq 3 ]; then
+                    printf '%s\\n' '{"jsonrpc":"2.0","id":2,"result":{"resources":[{"name":"manual","uri":"test://docs/manual","mimeType":"text/markdown"}]}}'
+                elif [ "$count" -eq 4 ]; then
+                    printf '%s\\n' '{"jsonrpc":"2.0","id":3,"result":{"resourceTemplates":[{"name":"memo","uriTemplate":"test://docs/{id}","mimeType":"text/plain"}]}}'
                     exit 0
                 fi
             done
@@ -1886,6 +1890,25 @@ final class CodexAppServerTests: XCTestCase {
         let tools = try XCTUnwrap(status["tools"] as? [String: [String: Any]])
         XCTAssertEqual(tools["lookup"]?["description"] as? String, "Live cached docs.")
         XCTAssertEqual(try String(contentsOf: inventoryLog, encoding: .utf8), "request\nrequest\n")
+
+        let fullResponse = try decode(processor.processLine(Data(
+            #"{"id":3,"method":"mcpServerStatus/list","params":{"detail":"full"}}"#.utf8
+        )))
+
+        let fullResult = try XCTUnwrap(fullResponse["result"] as? [String: Any])
+        let fullData = try XCTUnwrap(fullResult["data"] as? [[String: Any]])
+        let fullStatus = try XCTUnwrap(fullData.first)
+        XCTAssertEqual(fullStatus["name"] as? String, "docs")
+        let fullTools = try XCTUnwrap(fullStatus["tools"] as? [String: [String: Any]])
+        XCTAssertEqual(fullTools["lookup"]?["description"] as? String, "Live cached docs.")
+        let resources = try XCTUnwrap(fullStatus["resources"] as? [[String: Any]])
+        XCTAssertEqual(resources.map { $0["uri"] as? String }, ["test://docs/manual"])
+        let resourceTemplates = try XCTUnwrap(fullStatus["resourceTemplates"] as? [[String: Any]])
+        XCTAssertEqual(resourceTemplates.map { $0["uriTemplate"] as? String }, ["test://docs/{id}"])
+        XCTAssertEqual(
+            try String(contentsOf: inventoryLog, encoding: .utf8),
+            "request\nrequest\nrequest\nrequest\nrequest\nrequest\n"
+        )
     }
 
     func testThreadResumeFailsWhenRequiredMCPServerCommandCannotInitializeLikeRust() throws {
