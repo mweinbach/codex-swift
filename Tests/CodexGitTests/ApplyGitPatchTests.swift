@@ -122,6 +122,46 @@ final class ApplyGitPatchTests: XCTestCase {
         XCTAssertNotEqual(direct.exitCode, 0)
         XCTAssertFalse(direct.commandForLog.contains("--check"))
     }
+
+    func testStagePathsIgnoresConfiguredHooksPathLikeRust() throws {
+        #if os(Windows)
+        throw XCTSkip("POSIX hook scripts are not used on Windows")
+        #else
+        let repo = try GitTestRepository()
+        let marker = repo.url.appendingPathComponent("post-index-change-ran")
+        let hooksDirectory = repo.url.appendingPathComponent(".git/hooks-path-test", isDirectory: true)
+        try FileManager.default.createDirectory(at: hooksDirectory, withIntermediateDirectories: true)
+        let hook = hooksDirectory.appendingPathComponent("post-index-change")
+        let markerPath = marker.path.replacingOccurrences(of: "'", with: "'\\''")
+        try """
+        #!/bin/sh
+        printf hook > '\(markerPath)'
+        """.write(to: hook, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hook.path)
+
+        try "hello\n".write(to: repo.url.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+        try repo.git(["add", "file.txt"])
+        try repo.git(["commit", "-m", "initial"])
+        try repo.git(["config", "core.hooksPath", hooksDirectory.path])
+        try "world\n".write(to: repo.url.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+
+        let diff = """
+        diff --git a/file.txt b/file.txt
+        --- a/file.txt
+        +++ b/file.txt
+        @@ -1 +1 @@
+        -hello
+        +world
+        """ + "\n"
+
+        try CodexGit.stagePaths(gitRoot: repo.url, diff: diff)
+
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: marker.path),
+            "CodexGit.stagePaths should disable configured hooks for internal git add calls"
+        )
+        #endif
+    }
 }
 
 final class GitTestRepository {

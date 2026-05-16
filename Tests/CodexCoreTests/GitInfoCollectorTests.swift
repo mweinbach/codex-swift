@@ -41,6 +41,26 @@ final class GitInfoCollectorTests: XCTestCase {
         XCTAssertEqual(info.repositoryURL, expectedRemote)
     }
 
+    func testHasChangesIgnoresConfiguredHooksPathLikeRust() throws {
+        #if os(Windows)
+        throw XCTSkip("POSIX hook scripts are not used on Windows")
+        #else
+        let repo = try createRepository()
+        let marker = repo.appendingPathComponent("post-index-change-ran")
+        let hook = try installPostIndexChangeHook(in: repo, marker: marker)
+        try runGit(["config", "core.hooksPath", hook.deletingLastPathComponent().path], cwd: repo)
+
+        let trackedFile = repo.appendingPathComponent("test.txt")
+        try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: trackedFile.path)
+
+        XCTAssertEqual(GitInfoCollector.hasChanges(cwd: repo), false)
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: marker.path),
+            "GitInfoCollector.hasChanges should disable configured hooks for internal git status calls"
+        )
+        #endif
+    }
+
     func testRemoteURLsByNameParsesFetchRemotesLikeRust() throws {
         let repo = try createRepository()
         try runGit(["remote", "add", "origin", "https://github.com/OpenAI/Codex.git"], cwd: repo)
@@ -226,6 +246,19 @@ final class GitInfoCollectorTests: XCTestCase {
         try contents.write(to: cwd.appendingPathComponent(name), atomically: true, encoding: .utf8)
         try runGit(["add", name], cwd: cwd)
         try runGit(["commit", "-m", message], cwd: cwd)
+    }
+
+    private func installPostIndexChangeHook(in repo: URL, marker: URL) throws -> URL {
+        let hooksDirectory = repo.appendingPathComponent(".git/hooks-path-test", isDirectory: true)
+        try FileManager.default.createDirectory(at: hooksDirectory, withIntermediateDirectories: true)
+        let hook = hooksDirectory.appendingPathComponent("post-index-change")
+        let markerPath = marker.path.replacingOccurrences(of: "'", with: "'\\''")
+        try """
+        #!/bin/sh
+        printf hook > '\(markerPath)'
+        """.write(to: hook, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hook.path)
+        return hook
     }
 
     @discardableResult

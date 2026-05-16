@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked upstream Rust commit `9facdccb37` (`Ignore
+  configured hooks in git helpers`). Swift core git-info collection now runs
+  internal git commands with configured hooks disabled, optional locks off, and
+  file-system monitoring disabled, while `CodexGit` patch/staging helpers also
+  disable configured hooks for their internal git invocations.
 - 2026-05-16: rechecked upstream Rust commit `8543e39885` (`Preserve
   image detail in app-server inputs`). Swift core and app-server user-input
   models now preserve optional `detail` on both remote and local images,

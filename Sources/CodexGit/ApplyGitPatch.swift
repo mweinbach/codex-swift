@@ -260,7 +260,7 @@ public enum CodexGit {
     private static func runGit(cwd: URL, gitConfig: [String], args: [String]) throws -> (exitCode: Int32, stdout: String, stderr: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = gitConfig + args
+        process.arguments = disabledHooksConfig + gitConfig + args
         process.currentDirectoryURL = cwd
 
         let stdoutPipe = Pipe()
@@ -280,6 +280,14 @@ public enum CodexGit {
             String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "",
             String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         )
+    }
+
+    private static var disabledHooksConfig: [String] {
+        #if os(Windows)
+        ["-c", "core.hooksPath=NUL"]
+        #else
+        ["-c", "core.hooksPath=/dev/null"]
+        #endif
     }
 
     private static func gitConfigPartsFromEnvironment() -> [String] {

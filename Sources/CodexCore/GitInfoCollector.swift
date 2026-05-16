@@ -648,11 +648,25 @@ public enum GitInfoCollector {
         let stdout: String
     }
 
+    private static var disabledHooksPath: String {
+        #if os(Windows)
+        "NUL"
+        #else
+        "/dev/null"
+        #endif
+    }
+
     private static func runGit(_ args: [String], cwd: URL) -> GitCommandOutput? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = args
+        process.arguments = [
+            "-c", "core.hooksPath=\(disabledHooksPath)",
+            "-c", "core.fsmonitor=false"
+        ] + args
         process.currentDirectoryURL = cwd
+        var environment = ProcessInfo.processInfo.environment
+        environment["GIT_OPTIONAL_LOCKS"] = "0"
+        process.environment = environment
 
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
