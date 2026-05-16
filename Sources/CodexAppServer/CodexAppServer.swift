@@ -537,6 +537,7 @@ private struct AppServerMcpServerStatusSnapshot: @unchecked Sendable {
 private struct AppServerLiveMcpManagerState: @unchecked Sendable {
     var statusSnapshot = AppServerMcpServerStatusSnapshot()
     var startupFailures: [McpStartupFailure] = []
+    var startupUpdates: [McpStartupUpdateEvent] = []
 
     var requiredStartupFailureMessage: String? {
         McpRequiredStartupValidator.requiredStartupFailureMessage(for: startupFailures)
@@ -13174,6 +13175,7 @@ public enum CodexAppServer {
             guard let server = mcpServers[name], server.enabled else {
                 continue
             }
+            state.startupUpdates.append(McpStartupUpdateEvent(server: name, status: .starting))
             do {
                 let inventory = try mcpServerInventorySnapshot(
                     name: name,
@@ -13182,11 +13184,14 @@ public enum CodexAppServer {
                     configuration: configuration
                 )
                 state.statusSnapshot.toolsByServer[name] = inventory.toolsByServer[name] ?? [:]
+                state.startupUpdates.append(McpStartupUpdateEvent(server: name, status: .ready))
             } catch {
+                let message = mcpStartupFailureMessage(error)
+                state.startupUpdates.append(McpStartupUpdateEvent(server: name, status: .failed(error: message)))
                 if server.required {
                     state.startupFailures.append(McpStartupFailure(
                         server: name,
-                        error: mcpStartupFailureMessage(error)
+                        error: message
                     ))
                 }
             }
@@ -26927,15 +26932,17 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         liveMcpManagers[threadID]?.statusSnapshot.toolsByServer
     }
 
-    private func startLiveMcpManager(threadID: String, runtimeConfig: CodexRuntimeConfig) throws {
+    private func startLiveMcpManager(threadID: String, runtimeConfig: CodexRuntimeConfig) throws -> [[String: Any]] {
         let state = CodexAppServer.liveMcpManagerState(
             mcpServers: runtimeConfig.mcpServers,
             configuration: configuration
         )
+        let notifications = state.startupUpdates.map(CodexAppServer.mcpServerStatusUpdatedNotification)
         liveMcpManagers[threadID] = state
         if let message = state.requiredStartupFailureMessage {
             throw AppServerError.internalError(message)
         }
+        return notifications
     }
 
     private func refreshLiveMcpManager(threadID: String, config: McpServerRefreshConfig) throws {
@@ -27739,7 +27746,10 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                     let result = outcome.result
                     if let thread = result["thread"] as? [String: Any],
                        let threadID = thread["id"] as? String {
-                        try startLiveMcpManager(threadID: threadID, runtimeConfig: outcome.runtimeConfig)
+                        notifications.append(contentsOf: try startLiveMcpManager(
+                            threadID: threadID,
+                            runtimeConfig: outcome.runtimeConfig
+                        ))
                     }
                     response = CodexAppServer.responseObject(id: id, result: result)
                     if let thread = result["thread"] as? [String: Any] {
@@ -27848,7 +27858,10 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                     let result = resumeOutcome.result
                     if let thread = result["thread"] as? [String: Any],
                        let threadID = thread["id"] as? String {
-                        try startLiveMcpManager(threadID: threadID, runtimeConfig: resumeOutcome.runtimeConfig)
+                        notifications.append(contentsOf: try startLiveMcpManager(
+                            threadID: threadID,
+                            runtimeConfig: resumeOutcome.runtimeConfig
+                        ))
                     }
                     response = CodexAppServer.responseObject(id: id, result: result)
                     if let thread = result["thread"] as? [String: Any],
@@ -27883,7 +27896,10 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                     let result = forkOutcome.result
                     if let thread = result["thread"] as? [String: Any],
                        let threadID = thread["id"] as? String {
-                        try startLiveMcpManager(threadID: threadID, runtimeConfig: forkOutcome.runtimeConfig)
+                        notifications.append(contentsOf: try startLiveMcpManager(
+                            threadID: threadID,
+                            runtimeConfig: forkOutcome.runtimeConfig
+                        ))
                     }
                     response = CodexAppServer.responseObject(id: id, result: result)
                     if let thread = result["thread"] as? [String: Any] {

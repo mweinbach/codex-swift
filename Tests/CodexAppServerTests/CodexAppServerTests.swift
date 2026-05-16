@@ -1820,6 +1820,25 @@ final class CodexAppServerTests: XCTestCase {
         let docsTools = try XCTUnwrap(toolsByServer["optional_docs"])
         let lookup = try XCTUnwrap(docsTools["lookup"] as? [String: Any])
         XCTAssertEqual(lookup["description"] as? String, "Look up docs.")
+        let startupStatuses = messages.compactMap { message -> [String: Any]? in
+            guard message["method"] as? String == "mcpServer/startupStatus/updated" else {
+                return nil
+            }
+            return message["params"] as? [String: Any]
+        }
+        XCTAssertEqual(startupStatuses.count, 4)
+        XCTAssertEqual(startupStatuses[0]["name"] as? String, "optional_broken")
+        XCTAssertEqual(startupStatuses[0]["status"] as? String, "starting")
+        XCTAssertTrue(startupStatuses[0]["error"] is NSNull)
+        XCTAssertEqual(startupStatuses[1]["name"] as? String, "optional_broken")
+        XCTAssertEqual(startupStatuses[1]["status"] as? String, "failed")
+        XCTAssertTrue((startupStatuses[1]["error"] as? String)?.contains("optional_broken") == true)
+        XCTAssertEqual(startupStatuses[2]["name"] as? String, "optional_docs")
+        XCTAssertEqual(startupStatuses[2]["status"] as? String, "starting")
+        XCTAssertTrue(startupStatuses[2]["error"] is NSNull)
+        XCTAssertEqual(startupStatuses[3]["name"] as? String, "optional_docs")
+        XCTAssertEqual(startupStatuses[3]["status"] as? String, "ready")
+        XCTAssertTrue(startupStatuses[3]["error"] is NSNull)
     }
 
     func testThreadResumeFailsWhenRequiredMCPServerCommandCannotInitializeLikeRust() throws {
