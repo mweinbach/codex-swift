@@ -292,7 +292,10 @@ private func doctorConfigDependentChecks(_ request: CodexCLI.DoctorCommandReques
             )
         ]
     } catch {
-        return []
+        return [
+            DoctorCommandRuntime.fallbackStatePathsCheck(),
+            DoctorCommandRuntime.defaultProviderReachabilityCheck()
+        ]
     }
 }
 

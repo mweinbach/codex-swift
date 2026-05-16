@@ -74,6 +74,29 @@ public struct DoctorStatePathsCheckInputs: Equatable, Sendable {
 }
 
 extension DoctorCommandRuntime {
+    public static func fallbackStatePathsCheck(
+        codexHomeResolver: () throws -> URL = { try CodexHome.find() }
+    ) -> DoctorCheck {
+        do {
+            let path = try codexHomeResolver().standardizedFileURL.path
+            return DoctorCheck(
+                id: "state.paths",
+                category: "state",
+                status: .ok,
+                summary: "CODEX_HOME was resolved without config",
+                details: ["CODEX_HOME: \(path)"]
+            )
+        } catch {
+            return DoctorCheck(
+                id: "state.paths",
+                category: "state",
+                status: .warning,
+                summary: "CODEX_HOME could not be resolved",
+                details: [String(describing: error)]
+            )
+        }
+    }
+
     public static func statePathsCheck(codexHome: URL, settings: CodexRuntimeConfig) -> DoctorCheck {
         let codexHomePath = codexHome.standardizedFileURL.path
         let logDirPath = settings.logDir ?? codexHome.appendingPathComponent("log", isDirectory: true).path

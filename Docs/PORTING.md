@@ -139,9 +139,11 @@ Recent upstream audit checkpoint:
   sandbox helper/config readability, local MCP configuration consistency,
   state path/database/rollout stats, passive background app-server daemon
   state/socket diagnostics, and provider HTTP reachability planning/base/route
-  probe reporting, emits the redacted `--json` support-report map keyed by
-  check id, renders compact grouped human summary output, and exits nonzero
-  when config loading fails.
+  probe reporting. When config loading fails, Swift now mirrors Rust's fallback
+  `state.paths` row and default ChatGPT reachability plan before emitting the
+  failed `config.load` row. The report emits the redacted `--json` support map
+  keyed by check id, renders compact grouped human summary output, and exits
+  nonzero when config loading fails.
   Full diagnostic report
   generation beyond those local checks remains a broader `codex doctor`
   runtime gap.

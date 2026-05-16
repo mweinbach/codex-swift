@@ -1130,7 +1130,20 @@ final class DoctorCommandRuntimeTests: XCTestCase {
         let result = DoctorCommandRuntime.run(
             request: CodexCLI.DoctorCommandRequest(json: true),
             codexVersion: "0.0.0",
-            generatedAt: "0s since unix epoch"
+            generatedAt: "0s since unix epoch",
+            diagnosticChecks: {
+                [
+                    DoctorCommandRuntime.fallbackStatePathsCheck {
+                        URL(fileURLWithPath: "/tmp/codex", isDirectory: true)
+                    },
+                    DoctorCommandRuntime.providerReachabilityCheck(inputs: DoctorProviderReachabilityCheckInputs(
+                        plan: DoctorCommandRuntime.defaultProviderReachabilityPlan(),
+                        baseProbeResults: [
+                            "https://chatgpt.com/backend-api/": .reachable("HTTP 200")
+                        ]
+                    ))
+                ]
+            }
         ) {
             DoctorCommandRuntime.configLoadFailedCheck(TestError())
         }
@@ -1144,6 +1157,50 @@ final class DoctorCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(config["status"] as? String, "fail")
         XCTAssertEqual(config["summary"] as? String, "config could not be loaded")
         XCTAssertEqual(config["remediation"] as? String, "Fix the reported config error, then rerun codex doctor.")
+
+        let state = try XCTUnwrap(checks["state.paths"] as? [String: Any])
+        XCTAssertEqual(state["status"] as? String, "ok")
+        XCTAssertEqual(state["summary"] as? String, "CODEX_HOME was resolved without config")
+        let stateDetails = try XCTUnwrap(state["details"] as? [String: Any])
+        XCTAssertEqual(stateDetails["CODEX_HOME"] as? String, "/tmp/codex")
+
+        let reachability = try XCTUnwrap(checks["network.provider_reachability"] as? [String: Any])
+        XCTAssertEqual(reachability["status"] as? String, "ok")
+        XCTAssertEqual(reachability["summary"] as? String, "active provider endpoints are reachable over HTTP")
+        let reachabilityDetails = try XCTUnwrap(reachability["details"] as? [String: Any])
+        XCTAssertEqual(reachabilityDetails["reachability mode"] as? String, "ChatGPT auth")
+        XCTAssertEqual(
+            reachabilityDetails["ChatGPT base URL"] as? String,
+            "https://chatgpt.com/backend-api/ reachable (HTTP 200)"
+        )
+    }
+
+    func testFallbackStatePathsCheckMatchesRustConfigFailurePath() {
+        let check = DoctorCommandRuntime.fallbackStatePathsCheck {
+            URL(fileURLWithPath: "/tmp/codex", isDirectory: true)
+        }
+
+        XCTAssertEqual(check.id, "state.paths")
+        XCTAssertEqual(check.category, "state")
+        XCTAssertEqual(check.status, .ok)
+        XCTAssertEqual(check.summary, "CODEX_HOME was resolved without config")
+        XCTAssertEqual(check.details, ["CODEX_HOME: /tmp/codex"])
+    }
+
+    func testDefaultProviderReachabilityPlanMatchesRustConfigFailurePath() {
+        XCTAssertEqual(
+            DoctorCommandRuntime.defaultProviderReachabilityPlan(),
+            DoctorProviderReachabilityPlan(
+                modeDescription: "ChatGPT auth",
+                endpoints: [
+                    DoctorProviderReachabilityEndpoint(
+                        label: "ChatGPT",
+                        url: "https://chatgpt.com/backend-api/",
+                        required: true
+                    )
+                ]
+            )
+        )
     }
 
     func testRunHumanSummaryUsesAsciiCompactFooter() {

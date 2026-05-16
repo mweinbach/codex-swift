@@ -76,6 +76,28 @@ private enum DoctorProbeStatus {
 }
 
 extension DoctorCommandRuntime {
+    public static func defaultProviderReachabilityPlan(
+        chatGPTBaseURL: String = "https://chatgpt.com/backend-api/"
+    ) -> DoctorProviderReachabilityPlan {
+        providerReachabilityPlan(
+            mode: .chatGPT,
+            providerID: "openai",
+            providerName: ModelProviderInfo.openAIProviderName,
+            providerBaseURL: nil,
+            providerQueryParams: nil,
+            isAmazonBedrock: false,
+            chatGPTBaseURL: chatGPTBaseURL
+        )
+    }
+
+    public static func defaultProviderReachabilityCheck() -> DoctorCheck {
+        providerReachabilityCheck(
+            plan: defaultProviderReachabilityPlan(),
+            baseProbe: { httpProbeURL($0, method: "HEAD") },
+            routeProbe: providerRouteProbe
+        )
+    }
+
     public static func providerReachabilityCheck(codexHome: URL, settings: CodexRuntimeConfig) -> DoctorCheck {
         let storedAuth = try? CodexAuthStorage.loadAuthDotJSON(
             codexHome: codexHome,
