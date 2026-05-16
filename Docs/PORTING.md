@@ -12,6 +12,13 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `5d30764fe9` (`Run compact hooks for
+  remote compaction v2`). Swift core remote-v2 compaction orchestration now
+  runs trusted `PreCompact` hooks before collecting the v2 compaction stream,
+  aborts without issuing the request when a pre-hook stops, runs `PostCompact`
+  after successful v2 output collection, and aborts on a stopping post-hook
+  while preserving collected hook events and the feature-gated
+  `response.processed` follow-up request.
 - 2026-05-16: rechecked the reusable core portion of Rust commit `8543e39885`
   (`Preserve image detail in app-server inputs`). Swift now matches Rust's
   current `ImageDetail` domain (`high` / `original`), accepts explicit

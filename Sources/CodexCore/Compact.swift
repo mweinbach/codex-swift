@@ -198,6 +198,53 @@ public enum Compact {
         return .responseProcessed(ResponseProcessedWebSocketRequest(responseID: output.responseID))
     }
 
+    public static func runRemoteV2CompactionWithHooks(
+        handlers: [ConfiguredHookHandler],
+        shell: HookCommandShell,
+        request: RemoteCompactionV2HookRequest,
+        features: FeatureStates,
+        collectEvents: @Sendable () async -> [Result<ResponseEvent, APIError>]
+    ) async -> Result<RemoteCompactionV2HookedOutput, RemoteCompactionV2HookError> {
+        var hookEvents: [HookCompletedEvent] = []
+
+        let preOutcome = await HookPreCompact.run(
+            handlers: handlers,
+            shell: shell,
+            request: request.preCompactRequest
+        )
+        hookEvents.append(contentsOf: preOutcome.hookEvents)
+        if preOutcome.shouldStop {
+            return .failure(.preCompactStopped(
+                reason: preOutcome.stopReason ?? "PreCompact hook stopped execution",
+                hookEvents: hookEvents
+            ))
+        }
+
+        let output: RemoteCompactionV2Output
+        switch collectRemoteV2CompactionOutput(from: await collectEvents()) {
+        case let .success(collected):
+            output = collected
+        case let .failure(error):
+            return .failure(.compactionFailed(error: error, hookEvents: hookEvents))
+        }
+
+        let postOutcome = await HookPostCompact.run(
+            handlers: handlers,
+            shell: shell,
+            request: request.postCompactRequest
+        )
+        hookEvents.append(contentsOf: postOutcome.hookEvents)
+        if postOutcome.shouldStop {
+            return .failure(.postCompactStopped(hookEvents: hookEvents))
+        }
+
+        return .success(RemoteCompactionV2HookedOutput(
+            output: output,
+            responseProcessedRequest: remoteV2ResponseProcessedRequest(output: output, features: features),
+            hookEvents: hookEvents
+        ))
+    }
+
     private static func shouldKeepUserMessage(_ content: [ContentItem]) -> Bool {
         if UserInstructions.isUserInstructions(message: content)
             || SkillInstructions.isSkillInstructions(message: content)
@@ -249,4 +296,73 @@ public struct RemoteCompactionV2Output: Equatable, Sendable {
         self.item = item
         self.responseID = responseID
     }
+}
+
+public struct RemoteCompactionV2HookRequest: Equatable, Sendable {
+    public var sessionID: ThreadId
+    public var turnID: String
+    public var cwd: AbsolutePath
+    public var transcriptPath: String?
+    public var model: String
+    public var trigger: String
+
+    public init(
+        sessionID: ThreadId,
+        turnID: String,
+        cwd: AbsolutePath,
+        transcriptPath: String? = nil,
+        model: String,
+        trigger: String
+    ) {
+        self.sessionID = sessionID
+        self.turnID = turnID
+        self.cwd = cwd
+        self.transcriptPath = transcriptPath
+        self.model = model
+        self.trigger = trigger
+    }
+
+    fileprivate var preCompactRequest: HookPreCompactRequest {
+        HookPreCompactRequest(
+            sessionID: sessionID,
+            turnID: turnID,
+            cwd: cwd,
+            transcriptPath: transcriptPath,
+            model: model,
+            trigger: trigger
+        )
+    }
+
+    fileprivate var postCompactRequest: HookPostCompactRequest {
+        HookPostCompactRequest(
+            sessionID: sessionID,
+            turnID: turnID,
+            cwd: cwd,
+            transcriptPath: transcriptPath,
+            model: model,
+            trigger: trigger
+        )
+    }
+}
+
+public struct RemoteCompactionV2HookedOutput: Equatable, Sendable {
+    public var output: RemoteCompactionV2Output
+    public var responseProcessedRequest: ResponsesWebSocketRequest?
+    public var hookEvents: [HookCompletedEvent]
+
+    public init(
+        output: RemoteCompactionV2Output,
+        responseProcessedRequest: ResponsesWebSocketRequest?,
+        hookEvents: [HookCompletedEvent]
+    ) {
+        self.output = output
+        self.responseProcessedRequest = responseProcessedRequest
+        self.hookEvents = hookEvents
+    }
+}
+
+public enum RemoteCompactionV2HookError: Error, Equatable, Sendable {
+    case preCompactStopped(reason: String, hookEvents: [HookCompletedEvent])
+    case compactionFailed(error: APIError, hookEvents: [HookCompletedEvent])
+    case postCompactStopped(hookEvents: [HookCompletedEvent])
 }

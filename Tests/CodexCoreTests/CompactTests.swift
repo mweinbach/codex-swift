@@ -281,6 +281,100 @@ final class CompactTests: XCTestCase {
         )
     }
 
+    func testRunRemoteV2CompactionWithHooksRunsPrePostAroundSuccessLikeRust() async throws {
+        let compaction = ResponseItem.compaction(encryptedContent: "encrypted")
+        var features = FeatureStates.withDefaults()
+        features.set(.responsesWebsocketResponseProcessed, enabled: true)
+
+        let result = await Compact.runRemoteV2CompactionWithHooks(
+            handlers: try [
+                compactHook(eventName: .preCompact, command: #"printf %s '{"systemMessage":"pre"}'"#),
+                compactHook(eventName: .postCompact, command: #"printf %s '{"systemMessage":"post"}'"#),
+            ],
+            shell: HookCommandShell(program: "/bin/sh", arguments: ["-c"]),
+            request: try remoteV2HookRequest(),
+            features: features
+        ) {
+            [
+                .success(.outputItemDone(compaction)),
+                .success(.completed(responseID: "resp-compact", tokenUsage: nil)),
+            ]
+        }
+
+        let output = try XCTUnwrap(result.successValue)
+        XCTAssertEqual(output.output, RemoteCompactionV2Output(item: compaction, responseID: "resp-compact"))
+        XCTAssertEqual(
+            output.responseProcessedRequest,
+            .responseProcessed(ResponseProcessedWebSocketRequest(responseID: "resp-compact"))
+        )
+        XCTAssertEqual(output.hookEvents.map(\.run.eventName), [.preCompact, .postCompact])
+        XCTAssertEqual(output.hookEvents.map(\.run.status), [.completed, .completed])
+        XCTAssertEqual(output.hookEvents.map(\.run.entries.first?.text), ["pre", "post"])
+    }
+
+    func testRunRemoteV2CompactionWithHooksStopsBeforeRequestWhenPreHookStopsLikeRust() async throws {
+        let calls = RemoteV2CompactionCallCounter()
+
+        let result = await Compact.runRemoteV2CompactionWithHooks(
+            handlers: try [
+                compactHook(
+                    eventName: .preCompact,
+                    command: #"printf %s '{"continue":false,"stopReason":"pause before compact"}'"#
+                ),
+                compactHook(eventName: .postCompact, command: #"printf %s '{"systemMessage":"post"}'"#),
+            ],
+            shell: HookCommandShell(program: "/bin/sh", arguments: ["-c"]),
+            request: try remoteV2HookRequest(),
+            features: .withDefaults()
+        ) {
+            await calls.record()
+            return [
+                .success(.outputItemDone(.compaction(encryptedContent: "should-not-run"))),
+                .success(.completed(responseID: "resp-compact", tokenUsage: nil)),
+            ]
+        }
+
+        let callCount = await calls.count
+        XCTAssertEqual(callCount, 0)
+        guard case let .preCompactStopped(reason, hookEvents)? = result.failureValue else {
+            return XCTFail("expected pre compact stop, got \(String(describing: result.failureValue))")
+        }
+        XCTAssertEqual(reason, "pause before compact")
+        XCTAssertEqual(hookEvents.map(\.run.eventName), [.preCompact])
+        XCTAssertEqual(hookEvents.map(\.run.status), [.stopped])
+    }
+
+    func testRunRemoteV2CompactionWithHooksStopsAfterSuccessfulPostHookStopLikeRust() async throws {
+        let calls = RemoteV2CompactionCallCounter()
+
+        let result = await Compact.runRemoteV2CompactionWithHooks(
+            handlers: try [
+                compactHook(eventName: .preCompact, command: #"printf %s '{"systemMessage":"pre"}'"#),
+                compactHook(eventName: .postCompact, command: #"printf %s '{"continue":false}'"#),
+            ],
+            shell: HookCommandShell(program: "/bin/sh", arguments: ["-c"]),
+            request: try remoteV2HookRequest(),
+            features: .withDefaults()
+        ) {
+            await calls.record()
+            return [
+                .success(.outputItemDone(.compaction(encryptedContent: "encrypted"))),
+                .success(.completed(responseID: "resp-compact", tokenUsage: nil)),
+            ]
+        }
+
+        let callCount = await calls.count
+        XCTAssertEqual(callCount, 1)
+        guard case let .postCompactStopped(hookEvents)? = result.failureValue else {
+            return XCTFail("expected post compact stop, got \(String(describing: result.failureValue))")
+        }
+        XCTAssertEqual(hookEvents.map(\.run.eventName), [.preCompact, .postCompact])
+        XCTAssertEqual(hookEvents.map(\.run.status), [.completed, .stopped])
+        XCTAssertEqual(hookEvents.last?.run.entries, [
+            HookOutputEntry(kind: .stop, text: "PostCompact hook stopped execution")
+        ])
+    }
+
     func testCollectRemoteV2CompactionOutputIgnoresLegacyContextCompaction() {
         let result = Compact.collectRemoteV2CompactionOutput(from: [
             .success(.outputItemDone(.contextCompaction())),
@@ -332,6 +426,29 @@ final class CompactTests: XCTestCase {
         }
         return Compact.contentItemsToText(content) ?? ""
     }
+
+    private func remoteV2HookRequest() throws -> RemoteCompactionV2HookRequest {
+        try RemoteCompactionV2HookRequest(
+            sessionID: ThreadId(string: "00000000-0000-4000-8000-0000000000c0"),
+            turnID: "turn-compact",
+            cwd: AbsolutePath(absolutePath: "/tmp"),
+            model: "gpt-test",
+            trigger: "manual"
+        )
+    }
+
+    private func compactHook(eventName: HookEventName, command: String) throws -> ConfiguredHookHandler {
+        try ConfiguredHookHandler(
+            eventName: eventName,
+            matcher: "manual",
+            command: command,
+            timeoutSec: 5,
+            statusMessage: "running compact hook",
+            sourcePath: AbsolutePath(absolutePath: "/tmp/hooks.json"),
+            source: .user,
+            displayOrder: eventName == .preCompact ? 0 : 1
+        )
+    }
 }
 
 private extension Result {
@@ -347,5 +464,17 @@ private extension Result {
             return error
         }
         return nil
+    }
+}
+
+private actor RemoteV2CompactionCallCounter {
+    private var value = 0
+
+    var count: Int {
+        value
+    }
+
+    func record() {
+        value += 1
     }
 }
