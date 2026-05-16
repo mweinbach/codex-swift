@@ -45,8 +45,7 @@ final class RolloutModelsTests: XCTestCase {
             "dynamic_tools": [[
                 "name": "lookup",
                 "description": "Look up things",
-                "inputSchema": [:],
-                "deferLoading": false
+                "inputSchema": [:]
             ]],
             "memory_mode": "read_write"
         ])

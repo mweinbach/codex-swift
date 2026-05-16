@@ -59,7 +59,9 @@ public struct DynamicToolSpec: Codable, Equatable, Sendable {
         try container.encode(name, forKey: .name)
         try container.encode(description, forKey: .description)
         try container.encode(inputSchema, forKey: .inputSchema)
-        try container.encode(deferLoading, forKey: .deferLoading)
+        if deferLoading {
+            try container.encode(true, forKey: .deferLoading)
+        }
     }
 
     public static func validate(_ tools: [DynamicToolSpec]) throws {

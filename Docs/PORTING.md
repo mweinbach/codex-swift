@@ -12,6 +12,17 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust app-server v2
+  `permissions_request_approval_response_uses_granted_permission_profile_without_macos`
+  in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift
+  permissions protocol coverage now pins legacy `fileSystem.read/write` grant
+  roots decoding back to the core additional-permission shape, alongside the
+  newer `entries`/`globScanMaxDepth` grant path.
+- 2026-05-16: rechecked Rust `DynamicToolSpec` serialization in both
+  `codex-rs/app-server-protocol/src/protocol/v2/thread.rs` and
+  `codex-rs/protocol/src/dynamic_tools.rs`. Swift now omits `deferLoading`
+  when false and only serializes it when true, while preserving the existing
+  canonical decode and legacy `exposeToContext` inverse fallback behavior.
 - 2026-05-16: rechecked Rust app-server v2 `thread/turns/items/list`
   protocol fixtures in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`.
   Swift thread protocol coverage now pins both decode and encode behavior for

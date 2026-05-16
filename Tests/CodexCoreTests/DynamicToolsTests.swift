@@ -155,8 +155,35 @@ final class DynamicToolsTests: XCTestCase {
                         "type": "string"
                     ]
                 ]
+            ]
+        ])
+
+        try XCTAssertJSONObjectEqual(DynamicToolSpec(
+            namespace: "codex_app",
+            name: "lookup_ticket",
+            description: "Fetch a ticket",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "id": .object([
+                        "type": .string("string")
+                    ])
+                ])
+            ]),
+            deferLoading: true
+        ), [
+            "namespace": "codex_app",
+            "name": "lookup_ticket",
+            "description": "Fetch a ticket",
+            "inputSchema": [
+                "type": "object",
+                "properties": [
+                    "id": [
+                        "type": "string"
+                    ]
+                ]
             ],
-            "deferLoading": false
+            "deferLoading": true
         ])
     }
 

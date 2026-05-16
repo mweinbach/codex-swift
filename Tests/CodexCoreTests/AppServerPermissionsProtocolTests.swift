@@ -490,6 +490,23 @@ final class AppServerPermissionsProtocolTests: XCTestCase {
         XCTAssertEqual(strictAutoReview.strictAutoReview, true)
     }
 
+    func testPermissionsRequestApprovalResponseConvertsLegacyReadWriteRootsLikeRustProtocol() throws {
+        let decoded = try JSONDecoder().decode(
+            AppServerProtocol.PermissionsRequestApprovalResponse.self,
+            from: Data(
+                #"{"permissions":{"network":{"enabled":true},"fileSystem":{"read":["/tmp/read-only"],"write":["/tmp/read-write"]}}}"#.utf8
+            )
+        )
+
+        XCTAssertEqual(decoded.scope, .turn)
+        XCTAssertNil(decoded.strictAutoReview)
+        XCTAssertEqual(decoded.permissions.network?.requestPermissions, RequestPermissionNetworkPermissions(enabled: true))
+        XCTAssertEqual(
+            decoded.permissions.fileSystem?.fileSystemPermissions,
+            FileSystemPermissions(read: ["/tmp/read-only"], write: ["/tmp/read-write"])
+        )
+    }
+
     func testPermissionsRequestApprovalRejectsMacOSPermissionFieldLikeRust() {
         XCTAssertThrowsError(
             try JSONDecoder().decode(
