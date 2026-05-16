@@ -26,11 +26,26 @@ final class AgentPathTests: XCTestCase {
         XCTAssertThrowsError(try AgentPath.root.join("BadName")) { error in
             XCTAssertEqual(String(describing: error), "agent_name must use only lowercase letters, digits, and underscores")
         }
+        XCTAssertThrowsError(try AgentPath.root.join("root")) { error in
+            XCTAssertEqual(String(describing: error), "agent_name `root` is reserved")
+        }
+        XCTAssertThrowsError(try AgentPath.root.join(".")) { error in
+            XCTAssertEqual(String(describing: error), "agent_name `.` is reserved")
+        }
+        XCTAssertThrowsError(try AgentPath.root.join("nested/worker")) { error in
+            XCTAssertEqual(String(describing: error), "agent_name must not contain `/`")
+        }
         XCTAssertThrowsError(try AgentPath(validating: "/not-root")) { error in
             XCTAssertEqual(String(describing: error), "absolute agent paths must start with `/root` or be `/morpheus`")
         }
+        XCTAssertThrowsError(try AgentPath(validating: "/root/")) { error in
+            XCTAssertEqual(String(describing: error), "absolute agent path must not end with `/`")
+        }
         XCTAssertThrowsError(try AgentPath.root.resolve("../sibling")) { error in
             XCTAssertEqual(String(describing: error), "agent_name `..` is reserved")
+        }
+        XCTAssertThrowsError(try AgentPath.root.resolve("worker/")) { error in
+            XCTAssertEqual(String(describing: error), "relative agent path must not end with `/`")
         }
         XCTAssertThrowsError(try AgentPath.root.resolve("")) { error in
             XCTAssertEqual(String(describing: error), "agent path must not be empty")

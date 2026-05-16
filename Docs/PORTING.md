@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust `AgentPath` validation in
+  `codex-rs/protocol/src/agent_path.rs`. Swift coverage now pins reserved
+  agent names, slash-containing names, and trailing-slash absolute/relative
+  path rejection with Rust error strings.
 - 2026-05-16: rechecked Rust accepted-line analytics in
   `codex-rs/analytics/src/accepted_lines.rs`. Swift coverage now pins the
   delete-only diff path where the reducer still emits a
