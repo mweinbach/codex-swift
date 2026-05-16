@@ -37,6 +37,25 @@ public enum McpToolApprovalDecision: Equatable, Sendable {
     case acceptAndRemember
     case decline(message: String?)
     case cancel
+    case blockedBySafetyMonitor(String)
+}
+
+public struct McpToolApprovalKey: Equatable, Codable, Sendable {
+    public let server: String
+    public let connectorID: String?
+    public let toolName: String
+
+    private enum CodingKeys: String, CodingKey {
+        case server
+        case connectorID = "connector_id"
+        case toolName = "tool_name"
+    }
+
+    public init(server: String, connectorID: String?, toolName: String) {
+        self.server = server
+        self.connectorID = connectorID
+        self.toolName = toolName
+    }
 }
 
 public struct McpToolApprovalMetadata: Equatable, Sendable {
@@ -69,6 +88,59 @@ public struct McpToolApprovalPromptOptions: Equatable, Sendable {
         self.allowSessionRemember = allowSessionRemember
         self.allowPersistentApproval = allowPersistentApproval
     }
+}
+
+public func isMcpToolApprovalQuestionID(_ questionID: String) -> Bool {
+    let prefix = McpToolApprovalAnswer.questionIDPrefix
+    guard questionID.hasPrefix(prefix) else {
+        return false
+    }
+    let suffix = questionID.dropFirst(prefix.count)
+    return suffix.first == "_"
+}
+
+public func mcpToolApprovalPromptOptions(
+    sessionApprovalKey: McpToolApprovalKey?,
+    persistentApprovalKey: McpToolApprovalKey?,
+    toolCallMcpElicitationEnabled: Bool
+) -> McpToolApprovalPromptOptions {
+    McpToolApprovalPromptOptions(
+        allowSessionRemember: sessionApprovalKey != nil,
+        allowPersistentApproval: toolCallMcpElicitationEnabled && persistentApprovalKey != nil
+    )
+}
+
+public func sessionMcpToolApprovalKey(
+    invocation: McpInvocation,
+    metadata: McpToolApprovalMetadata?,
+    approvalMode: AppToolApproval
+) -> McpToolApprovalKey? {
+    guard approvalMode == .auto else {
+        return nil
+    }
+
+    let connectorID = metadata?.connectorID
+    if invocation.server == codexAppsMCPServerName && connectorID == nil {
+        return nil
+    }
+
+    return McpToolApprovalKey(
+        server: invocation.server,
+        connectorID: connectorID,
+        toolName: invocation.tool
+    )
+}
+
+public func persistentMcpToolApprovalKey(
+    invocation: McpInvocation,
+    metadata: McpToolApprovalMetadata?,
+    approvalMode: AppToolApproval
+) -> McpToolApprovalKey? {
+    sessionMcpToolApprovalKey(
+        invocation: invocation,
+        metadata: metadata,
+        approvalMode: approvalMode
+    )
 }
 
 public func buildMcpToolApprovalElicitationRequest(
@@ -164,6 +236,84 @@ public func buildMcpToolApprovalElicitationMeta(
     }
 
     return .object(meta)
+}
+
+public func buildMcpToolApprovalQuestion(
+    id questionID: String,
+    serverName: String,
+    toolName: String,
+    connectorName: String?,
+    promptOptions: McpToolApprovalPromptOptions,
+    questionOverride: String? = nil
+) -> RequestUserInputQuestion {
+    let baseQuestion = questionOverride
+        ?? buildMcpToolApprovalFallbackMessage(
+            serverName: serverName,
+            toolName: toolName,
+            connectorName: connectorName
+        )
+    let question = "\(baseQuestion.trimmingTrailingQuestionMarks())?"
+
+    var options = [
+        RequestUserInputQuestionOption(
+            label: McpToolApprovalAnswer.accept,
+            description: "Run the tool and continue."
+        ),
+    ]
+    if promptOptions.allowSessionRemember {
+        options.append(RequestUserInputQuestionOption(
+            label: McpToolApprovalAnswer.acceptForSession,
+            description: "Run the tool and remember this choice for this session."
+        ))
+    }
+    if promptOptions.allowPersistentApproval {
+        options.append(RequestUserInputQuestionOption(
+            label: McpToolApprovalAnswer.acceptAndRemember,
+            description: "Run the tool and remember this choice for future tool calls."
+        ))
+    }
+    options.append(RequestUserInputQuestionOption(
+        label: McpToolApprovalAnswer.cancel,
+        description: "Cancel this tool call."
+    ))
+
+    return RequestUserInputQuestion(
+        id: questionID,
+        header: "Approve app tool call?",
+        question: question,
+        isOther: false,
+        isSecret: false,
+        options: options
+    )
+}
+
+public func buildMcpToolApprovalFallbackMessage(
+    serverName: String,
+    toolName: String,
+    connectorName: String?
+) -> String {
+    let trimmedConnectorName = connectorName?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let actor: String
+    if let trimmedConnectorName, !trimmedConnectorName.isEmpty {
+        actor = trimmedConnectorName
+    } else if serverName == codexAppsMCPServerName {
+        actor = "this app"
+    } else {
+        actor = "the \(serverName) MCP server"
+    }
+    return "Allow \(actor) to run tool \"\(toolName)\"?"
+}
+
+public func mcpToolApprovalQuestionText(
+    question: String,
+    monitorReason: String?
+) -> String {
+    if let reason = monitorReason?.trimmingCharacters(in: .whitespacesAndNewlines),
+       !reason.isEmpty
+    {
+        return "Tool call needs your approval. Reason: \(reason)"
+    }
+    return question
 }
 
 public func parseMcpToolApprovalElicitationResponse(
@@ -264,9 +414,19 @@ public func normalizeMcpToolApprovalDecision(
         switch decision {
         case .acceptForSession, .acceptAndRemember:
             return .accept
-        case .accept, .decline, .cancel:
+        case .accept, .decline, .cancel, .blockedBySafetyMonitor:
             return decision
         }
     }
     return decision
+}
+
+private extension String {
+    func trimmingTrailingQuestionMarks() -> String {
+        var result = self
+        while result.last == "?" {
+            result.removeLast()
+        }
+        return result
+    }
 }

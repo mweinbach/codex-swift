@@ -12,6 +12,13 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust MCP tool approval prompt helpers in
+  `codex-rs/core/src/mcp_tool_call.rs`. Swift now recognizes MCP approval
+  question ids with Rust's prefix/underscore boundary, derives session and
+  persistent approval keys for custom MCP servers and `codex_apps` connectors,
+  calculates prompt remember options from key availability plus the MCP
+  elicitation feature gate, builds Rust-shaped request-user-input approval
+  questions and fallback text, and preserves safety-monitor decision text.
 - 2026-05-16: rechecked Rust MCP tool approval response parsing in
   `codex-rs/core/src/mcp_tool_call.rs`. Swift now parses MCP approval
   elicitation responses into Rust-shaped decisions, including `_meta.persist`
