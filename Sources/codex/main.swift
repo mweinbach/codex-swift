@@ -277,6 +277,9 @@ private func doctorConfigDependentChecks(_ request: CodexCLI.DoctorCommandReques
                 cwd: cwd,
                 effectiveWorkspaceRoots: settings.workspaceRoots.map(\.path),
                 helperPaths: .detect()
+            ),
+            DoctorCommandRuntime.backgroundServerCheck(
+                codexHome: codexHome
             )
         ]
     } catch {

@@ -102,7 +102,17 @@ final class DoctorCommandRuntimeTests: XCTestCase {
                         cwd: "/tmp/project",
                         effectiveWorkspaceRoots: [],
                         helperPaths: DoctorSandboxHelperPaths()
-                    )
+                    ),
+                    DoctorCommandRuntime.backgroundServerCheck(inputs: DoctorBackgroundServerCheckInputs(
+                        codexHomePath: "/tmp/codex",
+                        settingsFile: .missing,
+                        pidFile: .missing,
+                        updatePidFile: .missing,
+                        controlSocket: .resolved(
+                            path: "/tmp/codex/app-server-control/app-server-control.sock",
+                            status: .notRunning
+                        )
+                    ))
                 ]
             }
         ) {
@@ -203,6 +213,22 @@ final class DoctorCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(sandboxDetails["network sandbox"] as? String, "restricted")
         XCTAssertEqual(sandboxDetails["codex-linux-sandbox helper"] as? String, "none")
         XCTAssertEqual(sandboxDetails["execve wrapper helper"] as? String, "none")
+
+        let appServer = try XCTUnwrap(checks["app_server.status"] as? [String: Any])
+        XCTAssertEqual(appServer["category"] as? String, "app-server")
+        XCTAssertEqual(appServer["status"] as? String, "ok")
+        XCTAssertEqual(appServer["summary"] as? String, "background server is not running")
+        let appServerDetails = try XCTUnwrap(appServer["details"] as? [String: Any])
+        XCTAssertEqual(appServerDetails["daemon state dir"] as? String, "/tmp/codex/app-server-daemon")
+        XCTAssertEqual(appServerDetails["settings"] as? String, "/tmp/codex/app-server-daemon/settings.json (missing)")
+        XCTAssertEqual(appServerDetails["pid file"] as? String, "/tmp/codex/app-server-daemon/app-server.pid (missing)")
+        XCTAssertEqual(
+            appServerDetails["update-loop pid file"] as? String,
+            "/tmp/codex/app-server-daemon/app-server-updater.pid (missing)"
+        )
+        XCTAssertEqual(appServerDetails["control socket"] as? String, "/tmp/codex/app-server-control/app-server-control.sock")
+        XCTAssertEqual(appServerDetails["status"] as? String, "not running")
+        XCTAssertEqual(appServerDetails["mode"] as? String, "ephemeral")
 
         let config = try XCTUnwrap(checks["config.load"] as? [String: Any])
         XCTAssertEqual(config["id"] as? String, "config.load")
@@ -533,6 +559,81 @@ final class DoctorCommandRuntimeTests: XCTestCase {
             check.remediation,
             "Fix PATH or npm prefix so the running package root (/opt/codex/lib/node_modules/@openai/codex) matches the npm global package root (/usr/local/lib/node_modules/@openai/codex)."
         )
+    }
+
+    func testBackgroundServerCheckReportsPersistentRunningLikeRustDoctor() {
+        let check = DoctorCommandRuntime.backgroundServerCheck(inputs: DoctorBackgroundServerCheckInputs(
+            codexHomePath: "/tmp/codex",
+            settingsFile: .file,
+            pidFile: .file,
+            updatePidFile: .missing,
+            controlSocket: .resolved(
+                path: "/tmp/codex/app-server-control/app-server-control.sock",
+                status: .running
+            )
+        ))
+
+        XCTAssertEqual(check.id, "app_server.status")
+        XCTAssertEqual(check.category, "app-server")
+        XCTAssertEqual(check.status, .ok)
+        XCTAssertEqual(check.summary, "background server is running")
+        XCTAssertEqual(check.details, [
+            "daemon state dir: /tmp/codex/app-server-daemon",
+            "settings: /tmp/codex/app-server-daemon/settings.json (file)",
+            "pid file: /tmp/codex/app-server-daemon/app-server.pid (file)",
+            "update-loop pid file: /tmp/codex/app-server-daemon/app-server-updater.pid (missing)",
+            "control socket: /tmp/codex/app-server-control/app-server-control.sock",
+            "status: running",
+            "mode: persistent"
+        ])
+        XCTAssertNil(check.remediation)
+    }
+
+    func testBackgroundServerCheckWarnsForStaleSocketLikeRustDoctor() {
+        let check = DoctorCommandRuntime.backgroundServerCheck(inputs: DoctorBackgroundServerCheckInputs(
+            codexHomePath: "/tmp/codex",
+            settingsFile: .missing,
+            pidFile: .notFile,
+            updatePidFile: .failed("permission denied"),
+            controlSocket: .resolved(
+                path: "/tmp/codex/app-server-control/app-server-control.sock",
+                status: .staleOrUnreachable
+            )
+        ))
+
+        XCTAssertEqual(check.status, .warning)
+        XCTAssertEqual(check.summary, "background server socket is stale or unreachable")
+        XCTAssertEqual(check.details, [
+            "daemon state dir: /tmp/codex/app-server-daemon",
+            "settings: /tmp/codex/app-server-daemon/settings.json (missing)",
+            "pid file: /tmp/codex/app-server-daemon/app-server.pid (not a file)",
+            "update-loop pid file: /tmp/codex/app-server-daemon/app-server-updater.pid (permission denied)",
+            "control socket: /tmp/codex/app-server-control/app-server-control.sock",
+            "status: stale or unreachable",
+            "mode: ephemeral"
+        ])
+        XCTAssertEqual(check.remediation, "Run codex app-server daemon version for more details.")
+    }
+
+    func testBackgroundServerCheckWarnsWhenSocketPathCannotResolveLikeRustDoctor() {
+        let check = DoctorCommandRuntime.backgroundServerCheck(inputs: DoctorBackgroundServerCheckInputs(
+            codexHomePath: "/tmp/codex",
+            settingsFile: .missing,
+            pidFile: .missing,
+            updatePidFile: .missing,
+            controlSocket: .failed("failed to resolve CODEX_HOME")
+        ))
+
+        XCTAssertEqual(check.status, .warning)
+        XCTAssertEqual(check.summary, "background server socket path could not be resolved")
+        XCTAssertEqual(check.details, [
+            "daemon state dir: /tmp/codex/app-server-daemon",
+            "settings: /tmp/codex/app-server-daemon/settings.json (missing)",
+            "pid file: /tmp/codex/app-server-daemon/app-server.pid (missing)",
+            "update-loop pid file: /tmp/codex/app-server-daemon/app-server-updater.pid (missing)",
+            "failed to resolve CODEX_HOME"
+        ])
+        XCTAssertNil(check.remediation)
     }
 
     func testInstallationCheckIgnoresInheritedManagedEnvironmentForCargoBuiltBinaryLikeRustDoctor() {
