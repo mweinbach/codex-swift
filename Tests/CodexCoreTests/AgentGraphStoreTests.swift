@@ -2719,6 +2719,40 @@ final class AgentGraphStoreTests: XCTestCase {
         XCTAssertEqual(persisted.title, "actual user request")
     }
 
+    func testSQLiteStoreApplyRolloutItemsTreatsSQLiteFailuresAsBestEffortLikeRust() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let store = try SQLiteAgentGraphStore(databaseURL: databaseURL, defaultProvider: "test-provider")
+        try dropThreadsTable(databaseURL: databaseURL)
+        let builder = ThreadMetadataBuilder(
+            id: try threadID(126),
+            rolloutPath: URL(fileURLWithPath: "/tmp/apply-best-effort.jsonl"),
+            createdAt: date(milliseconds: 1_700_000_140_000),
+            source: .cli
+        )
+        let metaLine = SessionMetaLine(
+            meta: SessionMeta(
+                id: ConversationId(uuid: builder.id.uuid),
+                timestamp: ISO8601DateFormatter().string(from: builder.createdAt),
+                cwd: "/repo/from-rollout",
+                originator: "",
+                cliVersion: "1.2.3",
+                source: .cli,
+                memoryMode: "disabled"
+            ),
+            git: nil
+        )
+
+        try await store.applyRolloutItems(
+            builder: builder,
+            items: [
+                .sessionMeta(metaLine),
+                .eventMsg(.userMessage(UserMessageEvent(message: "best effort")))
+            ],
+            newThreadMemoryMode: "disabled"
+        )
+    }
+
     func testSQLiteStoreFindsNewestThreadByExactTitleWithRustFilters() async throws {
         let temp = try AgentGraphStoreTemporaryDirectory()
         let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
@@ -3010,6 +3044,12 @@ final class AgentGraphStoreTests: XCTestCase {
                 sqlite3_finalize(preparedStatement)
             }
             XCTAssertEqual(sqlite3_step(preparedStatement), SQLITE_DONE)
+        }
+    }
+
+    private func dropThreadsTable(databaseURL: URL) throws {
+        try withRawSQLiteDatabase(databaseURL: databaseURL) { database in
+            XCTAssertEqual(sqlite3_exec(database, "DROP TABLE threads", nil, nil, nil), SQLITE_OK)
         }
     }
 

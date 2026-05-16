@@ -12,6 +12,15 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `249d50aafc` (`Soften SQLite
+  metadata sync failures`) against
+  `codex-rs/thread-store/src/local/update_thread_metadata.rs`. Swift
+  rollout-derived thread metadata indexing now treats SQLite
+  `AgentGraphStoreError.internal` failures as best-effort during state-store
+  reads, metadata upserts, memory-mode indexing, and dynamic-tool persistence,
+  so broken optional state DB writes do not make JSONL transcript durability
+  look failed. Explicit `thread/metadata/update` git-only state updates remain
+  hard failures, matching Rust's partial-git-patch policy.
 - 2026-05-16: rechecked Rust commit `8543e39885` (`Preserve image detail in
   app-server inputs`) against `codex-rs/app-server-protocol/src/protocol/v2/turn.rs`.
   Swift's live app-server `turn/start` and `turn/steer` JSON-RPC parsers now

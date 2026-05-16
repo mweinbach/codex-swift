@@ -580,7 +580,16 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
             return
         }
 
-        let existingMetadata = try await getThread(threadID: builder.id)
+        let existingMetadata: ThreadMetadata?
+        do {
+            existingMetadata = try await getThread(threadID: builder.id)
+        } catch {
+            guard Self.isBestEffortRolloutMetadataSyncError(error) else {
+                throw error
+            }
+            Self.warnBestEffortRolloutMetadataSyncFailure(threadID: builder.id, error: error)
+            existingMetadata = nil
+        }
         var draft = existingMetadata
             .map(ThreadMetadataDraft.init(metadata:))
             ?? ThreadMetadataDraft(metadata: builder.build(defaultProvider: defaultProvider))
@@ -599,18 +608,50 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         }
 
         let metadata = draft.metadata
-        if existingMetadata == nil {
-            try await upsertThread(metadata, creationMemoryMode: newThreadMemoryMode)
-        } else {
-            try await upsertThread(metadata)
+        do {
+            if existingMetadata == nil {
+                try await upsertThread(metadata, creationMemoryMode: newThreadMemoryMode)
+            } else {
+                try await upsertThread(metadata)
+            }
+        } catch {
+            guard Self.isBestEffortRolloutMetadataSyncError(error) else {
+                throw error
+            }
+            Self.warnBestEffortRolloutMetadataSyncFailure(threadID: builder.id, error: error)
         }
 
         if let memoryMode = Self.extractMemoryMode(from: items) {
-            _ = try await setThreadMemoryMode(threadID: builder.id, memoryMode: memoryMode)
+            do {
+                _ = try await setThreadMemoryMode(threadID: builder.id, memoryMode: memoryMode)
+            } catch {
+                guard Self.isBestEffortRolloutMetadataSyncError(error) else {
+                    throw error
+                }
+                Self.warnBestEffortRolloutMetadataSyncFailure(threadID: builder.id, error: error)
+            }
         }
         if let dynamicTools = Self.extractDynamicTools(from: items) {
-            try await persistDynamicTools(threadID: builder.id, tools: dynamicTools)
+            do {
+                try await persistDynamicTools(threadID: builder.id, tools: dynamicTools)
+            } catch {
+                guard Self.isBestEffortRolloutMetadataSyncError(error) else {
+                    throw error
+                }
+                Self.warnBestEffortRolloutMetadataSyncFailure(threadID: builder.id, error: error)
+            }
         }
+    }
+
+    private static func isBestEffortRolloutMetadataSyncError(_ error: Error) -> Bool {
+        if case .internal = error as? AgentGraphStoreError {
+            return true
+        }
+        return false
+    }
+
+    private static func warnBestEffortRolloutMetadataSyncFailure(threadID: ThreadId, error: Error) {
+        fputs("state db applyRolloutItems failed for \(threadID): \(error)\n", stderr)
     }
 
     public func setThreadMemoryMode(threadID: ThreadId, memoryMode: String) async throws -> Bool {
