@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `85915a2a21` (`chore(config) rm
+  windows_wsl_setup_acknowledged`). Swift already has no
+  `windows_wsl_setup_acknowledged` config field, config edit, schema surface, or
+  test fixture surface, so there is no runtime cleanup needed for this removed
+  Rust compatibility knob.
 - 2026-05-16: rechecked Rust commit `9c691b74d6` (`chore(config) rm
   tools.view_image`). Swift now removes the legacy `tools_view_image` and
   `[tools].view_image` config/profile/app-server protocol knob while continuing
