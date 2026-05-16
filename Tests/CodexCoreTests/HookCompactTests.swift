@@ -89,6 +89,29 @@ final class HookCompactTests: XCTestCase {
         ])
     }
 
+    func testCompactHookContinueFalseUsesRustDefaultStopMessages() throws {
+        let pre = try HookPreCompact.parseCompleted(
+            handler: preHandler(),
+            runResult: runResult(exitCode: 0, stdout: #"{"continue":false,"systemMessage":"heads up"}"#),
+            turnID: "turn-1"
+        )
+        let post = try HookPostCompact.parseCompleted(
+            handler: postHandler(),
+            runResult: runResult(exitCode: 0, stdout: #"{"continue":false}"#),
+            turnID: "turn-1"
+        )
+
+        XCTAssertEqual(pre.data, HookCompactHandlerData(shouldStop: true, stopReason: nil))
+        XCTAssertEqual(pre.completed.run.status, .stopped)
+        XCTAssertEqual(pre.completed.run.entries, [
+            HookOutputEntry(kind: .warning, text: "heads up"),
+            HookOutputEntry(kind: .stop, text: "PreCompact hook stopped execution"),
+        ])
+        XCTAssertEqual(post.completed.run.entries, [
+            HookOutputEntry(kind: .stop, text: "PostCompact hook stopped execution"),
+        ])
+    }
+
     func testCompactHooksIgnorePlainStdout() throws {
         let pre = try HookPreCompact.parseCompleted(
             handler: preHandler(),
