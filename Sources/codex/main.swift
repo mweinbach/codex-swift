@@ -67,7 +67,8 @@ let exitCode = await cli.runAsync(
     pluginRunner: runPluginCommand,
     cloudRunner: runCloudCommand,
     responsesAPIProxyRunner: runResponsesAPIProxyCommand,
-    updateRunner: runUpdateCommand
+    updateRunner: runUpdateCommand,
+    doctorRunner: runDoctorCommand
 )
 exit(exitCode)
 
@@ -220,6 +221,46 @@ private func runLoginCommand(_ request: CodexCLI.LoginCommandRequest) async thro
                 stderrMessage: "Error logging in with device code: \(String(describing: error))"
             )
         }
+    }
+}
+
+private func runDoctorCommand(_ request: CodexCLI.DoctorCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
+    DoctorCommandRuntime.run(
+        request: request,
+        codexVersion: CodexCLI.version
+    ) {
+        do {
+            let (codexHome, settings) = try resolvedAuthSettings(overrides: request.configOverrides)
+            let configTomlPath = codexHome.appendingPathComponent("config.toml").path
+            return DoctorCommandRuntime.configLoadedCheck(
+                model: settings.model,
+                modelProviderID: settings.modelProvider,
+                logDir: settings.logDir,
+                sqliteHome: settings.sqliteHome,
+                mcpServerCount: settings.mcpServers.count,
+                configTomlPath: configTomlPath,
+                configTomlStatus: doctorConfigTomlStatus(path: configTomlPath),
+                startupWarnings: settings.startupWarnings
+            )
+        } catch {
+            return DoctorCommandRuntime.configLoadFailedCheck(error)
+        }
+    }
+}
+
+private func doctorConfigTomlStatus(path: String) -> String {
+    var isDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) else {
+        return "missing"
+    }
+    guard !isDirectory.boolValue else {
+        return "read: is a directory"
+    }
+    do {
+        _ = try String(contentsOfFile: path, encoding: .utf8)
+        return "parse: ok"
+    } catch {
+        return "read: \(error.localizedDescription)"
     }
 }
 

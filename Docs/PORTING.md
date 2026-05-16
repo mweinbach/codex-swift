@@ -131,8 +131,12 @@ Recent upstream audit checkpoint:
   `doctor` command, parses Rust's current `--json`, `--summary`, `--all`,
   `--no-color`, and `--ascii` flags into an injectable command request, and
   carries the same npm global-root probe command selection: `npm.cmd` on
-  Windows, `npm` elsewhere. Full diagnostic report generation remains a
-  broader `codex doctor` runtime gap.
+  Windows, `npm` elsewhere. The executable `codex doctor` path now also builds
+  the first Rust-shaped diagnostic report slice for config loading, emits the
+  redacted `--json` support-report map keyed by check id, renders compact
+  human summary output, and exits nonzero when config loading fails. Full
+  diagnostic report generation beyond the config check remains a broader
+  `codex doctor` runtime gap.
 - 2026-05-16: rechecked Rust commit `a5e5faf216` (`Reject legacy [profiles]
   when using profile-v2`). Swift config-layer loading now accepts an explicit
   profile-v2 user config file/profile selection, overlays the selected profile
