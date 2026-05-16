@@ -1,0 +1,150 @@
+import Foundation
+
+public enum McpToolApprovalMetaKey {
+    public static let approvalKind = "codex_approval_kind"
+    public static let approvalKindMcpToolCall = "mcp_tool_call"
+    public static let approvalKindToolSuggestion = "tool_suggestion"
+    public static let requestType = "codex_request_type"
+    public static let requestTypeApprovalRequest = "approval_request"
+    public static let approvalsReviewer = "approvals_reviewer"
+    public static let persist = "persist"
+    public static let persistSession = "session"
+    public static let persistAlways = "always"
+    public static let source = "source"
+    public static let sourceConnector = "connector"
+    public static let connectorID = "connector_id"
+    public static let connectorName = "connector_name"
+    public static let connectorDescription = "connector_description"
+    public static let toolName = "tool_name"
+    public static let toolTitle = "tool_title"
+    public static let toolDescription = "tool_description"
+    public static let toolParams = "tool_params"
+    public static let toolParamsDisplay = "tool_params_display"
+}
+
+public struct McpToolApprovalMetadata: Equatable, Sendable {
+    public let connectorID: String?
+    public let connectorName: String?
+    public let connectorDescription: String?
+    public let toolTitle: String?
+    public let toolDescription: String?
+
+    public init(
+        connectorID: String? = nil,
+        connectorName: String? = nil,
+        connectorDescription: String? = nil,
+        toolTitle: String? = nil,
+        toolDescription: String? = nil
+    ) {
+        self.connectorID = connectorID
+        self.connectorName = connectorName
+        self.connectorDescription = connectorDescription
+        self.toolTitle = toolTitle
+        self.toolDescription = toolDescription
+    }
+}
+
+public struct McpToolApprovalPromptOptions: Equatable, Sendable {
+    public let allowSessionRemember: Bool
+    public let allowPersistentApproval: Bool
+
+    public init(allowSessionRemember: Bool, allowPersistentApproval: Bool) {
+        self.allowSessionRemember = allowSessionRemember
+        self.allowPersistentApproval = allowPersistentApproval
+    }
+}
+
+public func buildMcpToolApprovalElicitationRequest(
+    threadID: String,
+    turnID: String?,
+    serverName: String,
+    metadata: McpToolApprovalMetadata?,
+    toolParams: JSONValue?,
+    toolParamsDisplay: [RenderedMcpToolApprovalParam]?,
+    message: String,
+    promptOptions: McpToolApprovalPromptOptions
+) -> AppServerProtocol.McpServerElicitationRequestParams {
+    AppServerProtocol.McpServerElicitationRequestParams(
+        threadID: threadID,
+        turnID: turnID,
+        serverName: serverName,
+        request: .form(
+            meta: buildMcpToolApprovalElicitationMeta(
+                serverName: serverName,
+                metadata: metadata,
+                toolParams: toolParams,
+                toolParamsDisplay: toolParamsDisplay,
+                promptOptions: promptOptions
+            ),
+            message: message,
+            requestedSchema: AppServerProtocol.McpElicitationSchema(properties: [:])
+        )
+    )
+}
+
+public func buildMcpToolApprovalElicitationMeta(
+    serverName: String,
+    metadata: McpToolApprovalMetadata?,
+    toolParams: JSONValue?,
+    toolParamsDisplay: [RenderedMcpToolApprovalParam]?,
+    promptOptions: McpToolApprovalPromptOptions
+) -> JSONValue {
+    var meta: [String: JSONValue] = [
+        McpToolApprovalMetaKey.approvalKind: .string(McpToolApprovalMetaKey.approvalKindMcpToolCall),
+    ]
+
+    switch (promptOptions.allowSessionRemember, promptOptions.allowPersistentApproval) {
+    case (true, true):
+        meta[McpToolApprovalMetaKey.persist] = .array([
+            .string(McpToolApprovalMetaKey.persistSession),
+            .string(McpToolApprovalMetaKey.persistAlways),
+        ])
+    case (true, false):
+        meta[McpToolApprovalMetaKey.persist] = .string(McpToolApprovalMetaKey.persistSession)
+    case (false, true):
+        meta[McpToolApprovalMetaKey.persist] = .string(McpToolApprovalMetaKey.persistAlways)
+    case (false, false):
+        break
+    }
+
+    if let metadata {
+        if let toolTitle = metadata.toolTitle {
+            meta[McpToolApprovalMetaKey.toolTitle] = .string(toolTitle)
+        }
+        if let toolDescription = metadata.toolDescription {
+            meta[McpToolApprovalMetaKey.toolDescription] = .string(toolDescription)
+        }
+        let hasConnectorMetadata = metadata.connectorID != nil
+            || metadata.connectorName != nil
+            || metadata.connectorDescription != nil
+        if serverName == codexAppsMCPServerName, hasConnectorMetadata {
+            meta[McpToolApprovalMetaKey.source] = .string(McpToolApprovalMetaKey.sourceConnector)
+            if let connectorID = metadata.connectorID {
+                meta[McpToolApprovalMetaKey.connectorID] = .string(connectorID)
+            }
+            if let connectorName = metadata.connectorName {
+                meta[McpToolApprovalMetaKey.connectorName] = .string(connectorName)
+            }
+            if let connectorDescription = metadata.connectorDescription {
+                meta[McpToolApprovalMetaKey.connectorDescription] = .string(connectorDescription)
+            }
+        }
+    }
+
+    if let toolParams {
+        meta[McpToolApprovalMetaKey.toolParams] = toolParams
+    }
+    if let toolParamsDisplay {
+        meta[McpToolApprovalMetaKey.toolParamsDisplay] = .array(
+            toolParamsDisplay.map { param in
+                .object([
+                    "name": .string(param.name),
+                    "value": param.value,
+                    "display_name": .string(param.displayName),
+                ])
+            }
+        )
+    }
+
+    return .object(meta)
+}

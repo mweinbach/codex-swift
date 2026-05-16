@@ -2731,6 +2731,8 @@ Recent upstream audit checkpoint:
   - pinned Swift `thread/start`, `thread/resume`, and `thread/fork` response decoding for Rust's missing optional lifecycle fields: absent `instructionSources` defaults to an empty list while absent `permissionProfile` and `activePermissionProfile` decode as `nil`; explicit `null` remains rejected for the Rust-defaulted `instructionSources` vector.
 - `codex-rs/core/src/mcp_tool_approval_templates.rs` MCP approval template rendering
   - added Swift parity for bundled consequential tool approval templates, exact connector/server/tool-title matching, connector-name substitution, literal templates without connector names, template parameter relabeling, duplicate display-label rejection, object-only tool params, and sorted fallback display parameters.
+- `codex-rs/protocol/src/mcp_approval_meta.rs` / `codex-rs/core/src/mcp_tool_call.rs` MCP approval elicitation metadata
+  - added Swift MCP approval metadata keys, prompt options, elicitation request construction, fallback tool-parameter display ordering, and Rust-shaped `_meta` payloads for MCP tool approvals including session/always persistence, connector-source metadata for `codex_apps`, tool params, and snake-case `tool_params_display`.
 
 ## Known Gaps
 

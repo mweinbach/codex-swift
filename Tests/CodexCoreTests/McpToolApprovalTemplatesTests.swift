@@ -177,4 +177,175 @@ final class McpToolApprovalTemplatesTests: XCTestCase {
             toolParams: .array([])
         ))
     }
+
+    func testFallbackDisplayParamsSortObjectKeysLikeRust() {
+        XCTAssertEqual(McpToolApprovalTemplates.buildDisplayParams(from: .object([
+            "title": .string("Roadmap review"),
+            "calendar_id": .string("primary"),
+        ])), [
+            RenderedMcpToolApprovalParam(
+                name: "calendar_id",
+                value: .string("primary"),
+                displayName: "calendar_id"
+            ),
+            RenderedMcpToolApprovalParam(
+                name: "title",
+                value: .string("Roadmap review"),
+                displayName: "title"
+            ),
+        ])
+        XCTAssertNil(McpToolApprovalTemplates.buildDisplayParams(from: .array([])))
+        XCTAssertNil(McpToolApprovalTemplates.buildDisplayParams(from: nil))
+    }
+
+    func testRenderedApprovalParamUsesRustSnakeCaseWireShape() throws {
+        try XCTAssertJSONObjectEqual(RenderedMcpToolApprovalParam(
+            name: "calendar_id",
+            value: .string("primary"),
+            displayName: "Calendar"
+        ), [
+            "name": "calendar_id",
+            "value": "primary",
+            "display_name": "Calendar",
+        ])
+    }
+
+    func testApprovalElicitationMetaMarksToolApprovalsLikeRust() {
+        XCTAssertEqual(buildMcpToolApprovalElicitationMeta(
+            serverName: "custom_server",
+            metadata: nil,
+            toolParams: nil,
+            toolParamsDisplay: nil,
+            promptOptions: McpToolApprovalPromptOptions(
+                allowSessionRemember: false,
+                allowPersistentApproval: false
+            )
+        ), .object([
+            "codex_approval_kind": .string("mcp_tool_call"),
+        ]))
+    }
+
+    func testApprovalElicitationMetaMergesSessionAndAlwaysPersistForCustomServersLikeRust() {
+        XCTAssertEqual(buildMcpToolApprovalElicitationMeta(
+            serverName: "custom_server",
+            metadata: McpToolApprovalMetadata(
+                toolTitle: "Run Action",
+                toolDescription: "Runs the selected action."
+            ),
+            toolParams: .object(["id": .integer(1)]),
+            toolParamsDisplay: nil,
+            promptOptions: McpToolApprovalPromptOptions(
+                allowSessionRemember: true,
+                allowPersistentApproval: true
+            )
+        ), .object([
+            "codex_approval_kind": .string("mcp_tool_call"),
+            "persist": .array([.string("session"), .string("always")]),
+            "tool_title": .string("Run Action"),
+            "tool_description": .string("Runs the selected action."),
+            "tool_params": .object(["id": .integer(1)]),
+        ]))
+    }
+
+    func testApprovalElicitationMetaIncludesConnectorSourceForCodexAppsLikeRust() {
+        XCTAssertEqual(buildMcpToolApprovalElicitationMeta(
+            serverName: codexAppsMCPServerName,
+            metadata: McpToolApprovalMetadata(
+                connectorID: "calendar",
+                connectorName: "Calendar",
+                connectorDescription: "Manage events and schedules.",
+                toolTitle: "Run Action",
+                toolDescription: "Runs the selected action."
+            ),
+            toolParams: .object(["calendar_id": .string("primary")]),
+            toolParamsDisplay: nil,
+            promptOptions: McpToolApprovalPromptOptions(
+                allowSessionRemember: false,
+                allowPersistentApproval: false
+            )
+        ), .object([
+            "codex_approval_kind": .string("mcp_tool_call"),
+            "source": .string("connector"),
+            "connector_id": .string("calendar"),
+            "connector_name": .string("Calendar"),
+            "connector_description": .string("Manage events and schedules."),
+            "tool_title": .string("Run Action"),
+            "tool_description": .string("Runs the selected action."),
+            "tool_params": .object(["calendar_id": .string("primary")]),
+        ]))
+    }
+
+    func testApprovalElicitationRequestUsesMessageOverrideAndPreservesToolParamsKeysLikeRust() throws {
+        let request = buildMcpToolApprovalElicitationRequest(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            serverName: codexAppsMCPServerName,
+            metadata: McpToolApprovalMetadata(
+                connectorID: "calendar",
+                connectorName: "Calendar",
+                connectorDescription: "Manage events and schedules.",
+                toolTitle: "Create Event",
+                toolDescription: "Create a calendar event."
+            ),
+            toolParams: .object([
+                "calendar_id": .string("primary"),
+                "title": .string("Roadmap review"),
+            ]),
+            toolParamsDisplay: [
+                RenderedMcpToolApprovalParam(
+                    name: "calendar_id",
+                    value: .string("primary"),
+                    displayName: "Calendar"
+                ),
+                RenderedMcpToolApprovalParam(
+                    name: "title",
+                    value: .string("Roadmap review"),
+                    displayName: "Title"
+                ),
+            ],
+            message: "Allow Calendar to create an event?",
+            promptOptions: McpToolApprovalPromptOptions(
+                allowSessionRemember: true,
+                allowPersistentApproval: true
+            )
+        )
+
+        try XCTAssertJSONObjectEqual(request, [
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "serverName": "codex_apps",
+            "mode": "form",
+            "_meta": [
+                "codex_approval_kind": "mcp_tool_call",
+                "persist": ["session", "always"],
+                "source": "connector",
+                "connector_id": "calendar",
+                "connector_name": "Calendar",
+                "connector_description": "Manage events and schedules.",
+                "tool_title": "Create Event",
+                "tool_description": "Create a calendar event.",
+                "tool_params": [
+                    "calendar_id": "primary",
+                    "title": "Roadmap review",
+                ],
+                "tool_params_display": [
+                    [
+                        "name": "calendar_id",
+                        "value": "primary",
+                        "display_name": "Calendar",
+                    ],
+                    [
+                        "name": "title",
+                        "value": "Roadmap review",
+                        "display_name": "Title",
+                    ],
+                ],
+            ],
+            "message": "Allow Calendar to create an event?",
+            "requestedSchema": [
+                "type": "object",
+                "properties": [:],
+            ],
+        ])
+    }
 }

@@ -19,7 +19,7 @@ public struct RenderedMcpToolApprovalTemplate: Equatable, Sendable {
     }
 }
 
-public struct RenderedMcpToolApprovalParam: Equatable, Sendable {
+public struct RenderedMcpToolApprovalParam: Equatable, Codable, Sendable {
     public let name: String
     public let value: JSONValue
     public let displayName: String
@@ -28,6 +28,12 @@ public struct RenderedMcpToolApprovalParam: Equatable, Sendable {
         self.name = name
         self.value = value
         self.displayName = displayName
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case value
+        case displayName = "display_name"
     }
 }
 
@@ -95,6 +101,20 @@ public enum McpToolApprovalTemplates {
             toolTitle: toolTitle,
             toolParams: toolParams
         )
+    }
+
+    public static func buildDisplayParams(
+        from toolParams: JSONValue?
+    ) -> [RenderedMcpToolApprovalParam]? {
+        guard case let .object(params)? = toolParams else {
+            return nil
+        }
+
+        return params
+            .map { name, value in
+                RenderedMcpToolApprovalParam(name: name, value: value, displayName: name)
+            }
+            .sorted { left, right in left.name < right.name }
     }
 
     public static func render(
