@@ -80,6 +80,11 @@ public struct ContextManager: Equatable, Sendable {
         }
     }
 
+    public mutating func recordModelWarning(_ message: String) {
+        items.append(.message(role: "user", content: [.inputText(text: "Warning: \(message)")]))
+        historyVersion = historyVersion.addingSaturating(1)
+    }
+
     public func forPrompt(inputModalities: [InputModality] = [.text, .image]) -> [ResponseItem] {
         var normalized = items
         ContextNormalization.normalizeHistory(&normalized)

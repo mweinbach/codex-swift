@@ -2,6 +2,20 @@ import CodexCore
 import XCTest
 
 final class ContextManagerTests: XCTestCase {
+    func testRecordModelWarningAppendsUserMessageLikeRust() {
+        var history = ContextManager(items: [
+            assistantMessage("ready")
+        ])
+
+        history.recordModelWarning("too many unified exec processes")
+
+        XCTAssertEqual(history.rawItems, [
+            assistantMessage("ready"),
+            userMessage("Warning: too many unified exec processes")
+        ])
+        XCTAssertEqual(history.historyVersion, 1)
+    }
+
     func testNonLastReasoningTokensReturnZeroWhenNoUserMessagesLikeRust() {
         let history = ContextManager(items: [
             reasoningWithEncryptedContent(length: 800)

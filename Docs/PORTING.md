@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust `record_model_warning_appends_user_message` in
+  `codex-rs/core/src/session/tests.rs`. Swift `ContextManager` now has a
+  focused warning-history helper that appends model runtime warnings as a user
+  message prefixed with `Warning:` while advancing the history version.
 - 2026-05-16: rechecked Rust app-server v2
   `core_turn_item_into_thread_item_converts_supported_variants` in
   `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now has a
