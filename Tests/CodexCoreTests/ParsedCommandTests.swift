@@ -760,6 +760,30 @@ final class ParsedCommandTests: XCTestCase {
         ])
     }
 
+    func testSearchAliasesMatchRustParser() {
+        for tool in ["ag", "ack", "pt", "rga"] {
+            XCTAssertEqual(parseCommand([tool, "TODO", "src"]), [
+                .search(cmd: "\(tool) TODO src", query: "TODO", path: "src")
+            ], tool)
+        }
+
+        for tool in ["ag", "ack", "pt"] {
+            XCTAssertEqual(parseCommand([tool, "-l", "TODO", "src"]), [
+                .search(cmd: "\(tool) -l TODO src", query: "TODO", path: "src")
+            ], tool)
+        }
+    }
+
+    func testCompactHeadAndTailFlagsMatchRustParser() {
+        XCTAssertEqual(parseCommand(["bash", "-lc", "head -n50 Cargo.toml"]), [
+            .read(cmd: "head -n50 Cargo.toml", name: "Cargo.toml", path: "Cargo.toml")
+        ])
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", "tail -n+10 README.md"]), [
+            .read(cmd: "tail -n+10 README.md", name: "README.md", path: "README.md")
+        ])
+    }
+
     func testNumericParserArgumentsRequireASCIIDigitsLikeRust() {
         XCTAssertEqual(parseCommand(["bash", "-lc", "head -n ٣ README.md"]), [
             .unknown(cmd: "head -n ٣ README.md")
