@@ -1492,8 +1492,6 @@ Recent upstream audit checkpoint:
 - `codex-rs/core/src/parse_command.rs`
   - first command parser parity slice for shell extraction, simple shell tokenization, small pipeline formatter dropping, relative-`cd` context including rebased read/search/list paths, `rg`, `grep`, `ls`, `cat`, `bat`/`batcat`, `less`, `more`, `head`, `tail`, `nl`, and `sed -n`
   - Rust-style unknown-collapse behavior for mixed parsed/unknown command sequences, newline-separated Bash command boundaries, `rg --files`/`fd`/`find` list-file classification, `git grep`/`git ls-files`, `eza`/`exa`/`tree`/`du`, `ag`/`ack`/`pt`/`rga`/`ripgrep-all`, `awk` file reads, Python file-walk summaries, richer `grep`/`sed -n` flag handling including explicit `-e`/`--regexp`/`-f`/`--file` patterns and `--` pattern boundaries, and mutating `xargs` pipeline preservation
-- `codex-rs/common/src/fuzzy_match.rs`
-  - Unicode-aware case-insensitive subsequence matching, original-character highlight indices, scoring, and empty-needle behavior
 - `codex-rs/apply-patch`
   - initial native `CodexApplyPatch` target and `apply_patch` executable
   - parser support for add/delete/update/move hunks, lenient heredoc patch arguments, missing context errors, multiple chunks, parent directory creation, Rust move-summary paths, and committed-delta reporting for partial failures including exact destination writes from failed moves and inexact write-failure deltas
@@ -2503,6 +2501,8 @@ Recent upstream audit checkpoint:
   - tightened Swift bash-script fallback detection so expansion and subshell constructs collapse to a whole-script unknown instead of being simplified as word-only command sequences, while preserving Rust's literal handling for escaped `$` and backtick characters inside double-quoted words.
 - `codex-rs/shell-command/src/bash.rs` word-only shell line continuations
   - matched Rust tree-sitter handling for backslash-newline continuations in word-only shell scripts so wrapped `bash`/`zsh`/`sh` read, search, and list summaries can span continued lines without collapsing to whole-script unknowns.
+- `codex-rs/utils/fuzzy-match/src/lib.rs`
+  - verified Swift `FuzzyMatcher` parity for Rust's Unicode-aware case-insensitive subsequence matching, original-character highlight indices, scoring, start-of-string bonus, deduped multi-scalar lowercase expansion, sharp-S non-match behavior, and empty-needle max-score behavior.
 - `codex-rs/shell-command/src/bash.rs` comment-token rejection
   - matched Rust tree-sitter parser behavior for shell comments by rejecting unquoted `#` at word boundaries in Swift's word-only bash fallback, preventing comment-bearing `bash -lc` scripts from being auto-classified as safe while preserving literal `#` inside words and escaped `\#` arguments.
 - `codex-rs/shell-command/src/bash.rs` quote/hash concatenation
