@@ -14,12 +14,36 @@ public enum ImageGenerationArtifactError: Error, Equatable, CustomStringConverti
 public enum StreamEventUtils {
     private static let generatedImageArtifactsDirectory = "generated_images"
 
+    public struct HandledNonToolResponseItem: Equatable, Sendable {
+        public let turnItem: TurnItem
+        public let supplementalHistoryItems: [ResponseItem]
+
+        public init(turnItem: TurnItem, supplementalHistoryItems: [ResponseItem] = []) {
+            self.turnItem = turnItem
+            self.supplementalHistoryItems = supplementalHistoryItems
+        }
+    }
+
     public static func handleNonToolResponseItem(
         _ item: ResponseItem,
         codexHome: URL? = nil,
         sessionID: String? = nil,
         planMode: Bool = false
     ) -> TurnItem? {
+        handleNonToolResponseItemWithSupplementalHistory(
+            item,
+            codexHome: codexHome,
+            sessionID: sessionID,
+            planMode: planMode
+        )?.turnItem
+    }
+
+    public static func handleNonToolResponseItemWithSupplementalHistory(
+        _ item: ResponseItem,
+        codexHome: URL? = nil,
+        sessionID: String? = nil,
+        planMode: Bool = false
+    ) -> HandledNonToolResponseItem? {
         switch item {
         case .message,
              .reasoning,
@@ -63,8 +87,12 @@ public enum StreamEventUtils {
                     result: imageItem.result,
                     savedPath: savedPath
                 ))
+                return HandledNonToolResponseItem(
+                    turnItem: turnItem,
+                    supplementalHistoryItems: [imageGenerationInstructionsItem(codexHome: codexHome, sessionID: sessionID)]
+                )
             }
-            return turnItem
+            return HandledNonToolResponseItem(turnItem: turnItem)
         case .functionCallOutput,
              .customToolCallOutput,
              .toolSearchCall,
@@ -79,6 +107,22 @@ public enum StreamEventUtils {
              .other:
             return nil
         }
+    }
+
+    public static func imageGenerationInstructionsItem(codexHome: URL, sessionID: String) -> ResponseItem {
+        let imageOutputPath = try? imageGenerationArtifactPath(
+            codexHome: codexHome,
+            sessionID: sessionID,
+            callID: "<image_id>"
+        )
+        let outputPath = imageOutputPath?.path ?? codexHome.standardizedFileURL.path
+        let imageOutputDirectory = URL(fileURLWithPath: outputPath, isDirectory: false)
+            .deletingLastPathComponent()
+            .path
+        return ImageGenerationInstructions(
+            imageOutputDirectory: imageOutputDirectory,
+            imageOutputPath: outputPath
+        ).asResponseItem()
     }
 
     public static func lastAssistantMessage(from item: ResponseItem) -> String? {

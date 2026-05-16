@@ -119,6 +119,53 @@ final class StreamEventUtilsTests: XCTestCase {
         XCTAssertTrue(expectedPath.path.hasSuffix("/generated_images/session-1/___ig___.png"))
     }
 
+    func testHandleNonToolResponseItemRecordsImageGenerationInstructionsLikeRust() throws {
+        let codexHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: codexHome) }
+
+        let handled = try XCTUnwrap(StreamEventUtils.handleNonToolResponseItemWithSupplementalHistory(
+            .imageGenerationCall(
+                id: "ig_history_records_message",
+                status: "completed",
+                revisedPrompt: "A tiny blue square",
+                result: "Zm9v"
+            ),
+            codexHome: codexHome,
+            sessionID: "session-1"
+        ))
+        let expectedSavedPath = try StreamEventUtils.imageGenerationArtifactPath(
+            codexHome: codexHome,
+            sessionID: "session-1",
+            callID: "ig_history_records_message"
+        )
+        let expectedInstructionPath = try StreamEventUtils.imageGenerationArtifactPath(
+            codexHome: codexHome,
+            sessionID: "session-1",
+            callID: "<image_id>"
+        )
+
+        XCTAssertEqual(handled.turnItem, .imageGeneration(ImageGenerationItem(
+            id: "ig_history_records_message",
+            status: "completed",
+            revisedPrompt: "A tiny blue square",
+            result: "Zm9v",
+            savedPath: expectedSavedPath
+        )))
+        XCTAssertEqual(handled.supplementalHistoryItems, [
+            ImageGenerationInstructions(
+                imageOutputDirectory: URL(fileURLWithPath: expectedInstructionPath.path)
+                    .deletingLastPathComponent()
+                    .path,
+                imageOutputPath: expectedInstructionPath.path
+            ).asResponseItem()
+        ])
+        XCTAssertEqual(
+            try Data(contentsOf: URL(fileURLWithPath: expectedSavedPath.path)),
+            Data("foo".utf8)
+        )
+    }
+
     func testSaveImageGenerationResultRejectsNonStandardBase64() throws {
         let codexHome = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

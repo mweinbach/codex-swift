@@ -12,6 +12,18 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust `function_call_deserializes_optional_namespace`
+  in `codex-rs/protocol/src/models.rs`. Swift response-item coverage now pins
+  the exact namespaced MCP-style `function_call` fixture so optional
+  `namespace` survives decode and re-encode alongside the existing omitted
+  namespace path.
+- 2026-05-16: rechecked Rust
+  `handle_output_item_done_records_image_save_history_message` in
+  `codex-rs/core/src/session/tests.rs` and
+  `codex-rs/core/src/context/image_generation_instructions.rs`. Swift
+  stream-event handling now exposes the Rust developer history item that tells
+  the model where generated images are saved, using the stable `<image_id>`
+  artifact path template after successful image result persistence.
 - 2026-05-16: rechecked Rust `record_model_warning_appends_user_message` in
   `codex-rs/core/src/session/tests.rs`. Swift `ContextManager` now has a
   focused warning-history helper that appends model runtime warnings as a user

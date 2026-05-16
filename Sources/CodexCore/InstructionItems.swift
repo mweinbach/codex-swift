@@ -124,3 +124,24 @@ public struct DeveloperInstructions: Equatable, Codable, Sendable {
         )
     }
 }
+
+public struct ImageGenerationInstructions: Equatable, Sendable {
+    public let imageOutputDirectory: String
+    public let imageOutputPath: String
+
+    public init(imageOutputDirectory: String, imageOutputPath: String) {
+        self.imageOutputDirectory = imageOutputDirectory
+        self.imageOutputPath = imageOutputPath
+    }
+
+    public func intoText() -> String {
+        "Generated images are saved to \(imageOutputDirectory) as \(imageOutputPath) by default.\nIf you need to use a generated image at another path, copy it and leave the original in place unless the user explicitly asks you to delete it."
+    }
+
+    public func asResponseItem() -> ResponseItem {
+        .message(
+            role: "developer",
+            content: [.inputText(text: intoText())]
+        )
+    }
+}

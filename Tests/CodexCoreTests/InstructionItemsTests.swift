@@ -104,6 +104,22 @@ final class InstructionItemsTests: XCTestCase {
         ))
     }
 
+    func testImageGenerationInstructionsMatchRustContextFragment() {
+        let instructions = ImageGenerationInstructions(
+            imageOutputDirectory: "/tmp/codex/generated_images/session-1",
+            imageOutputPath: "/tmp/codex/generated_images/session-1/<image_id>.png"
+        )
+
+        XCTAssertEqual(
+            instructions.intoText(),
+            "Generated images are saved to /tmp/codex/generated_images/session-1 as /tmp/codex/generated_images/session-1/<image_id>.png by default.\nIf you need to use a generated image at another path, copy it and leave the original in place unless the user explicitly asks you to delete it."
+        )
+        XCTAssertEqual(instructions.asResponseItem(), .message(
+            role: "developer",
+            content: [.inputText(text: instructions.intoText())]
+        ))
+    }
+
     func testInstructionCodableShapesUseRustFieldNames() throws {
         try XCTAssertJSONObjectEqual(
             UserInstructions(directory: "repo", text: "contents"),
