@@ -738,10 +738,11 @@ Recent upstream audit checkpoint:
   the default.
 - 2026-05-15: rechecked Rust app-server feedback upload handling in
   `codex-rs/app-server-protocol/src/protocol/v2/feedback.rs` and
-  `codex-rs/app-server/src/request_processors/feedback_processor.rs`. Swift
+  `codex-rs/app-server/src/request_processors/feedback_processor.rs`, including
+  commit `acac786d91`'s auth-derived `account_id` feedback tag. Swift
   `feedback/upload` now preserves Rust's required `classification` /
   `includeLogs` request decoding, disabled-feedback error, client tag merging,
-  and extra log-file attachment forwarding.
+  account-id tag forwarding, and extra log-file attachment forwarding.
 - 2026-05-15: rechecked Rust MCP OAuth fallback credentials in
   `codex-rs/rmcp-client/src/oauth.rs`. Swift `.credentials.json` fallback
   token decoding now preserves Serde's default boundary for `scopes`: omitted
