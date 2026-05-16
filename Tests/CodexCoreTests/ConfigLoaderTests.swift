@@ -3715,6 +3715,47 @@ final class ConfigLoaderTests: XCTestCase {
         }
     }
 
+    func testOtelMetricsExporterUsesAppServerDefaultAnalyticsFlagLikeRust() {
+        let otlpMetrics = OtelExporterKind.otlpHttp(
+            endpoint: "http://localhost:4318",
+            headers: [:],
+            httpProtocol: .json,
+            tls: nil
+        )
+        let config = OtelConfig(metricsExporter: otlpMetrics)
+
+        XCTAssertEqual(
+            config.effectiveMetricsExporter(analyticsEnabled: nil, defaultAnalyticsEnabled: false),
+            .none
+        )
+        XCTAssertFalse(config.metricsEnabled(analyticsEnabled: nil, defaultAnalyticsEnabled: false))
+
+        XCTAssertEqual(
+            config.effectiveMetricsExporter(analyticsEnabled: nil, defaultAnalyticsEnabled: true),
+            otlpMetrics
+        )
+        XCTAssertTrue(config.metricsEnabled(analyticsEnabled: nil, defaultAnalyticsEnabled: true))
+    }
+
+    func testOtelMetricsExporterConfigOverridesAppServerDefaultAnalyticsFlagLikeRust() {
+        let otlpMetrics = OtelExporterKind.otlpHttp(
+            endpoint: "http://localhost:4318",
+            headers: [:],
+            httpProtocol: .json,
+            tls: nil
+        )
+        let config = OtelConfig(metricsExporter: otlpMetrics)
+
+        XCTAssertEqual(
+            config.effectiveMetricsExporter(analyticsEnabled: false, defaultAnalyticsEnabled: true),
+            .none
+        )
+        XCTAssertEqual(
+            config.effectiveMetricsExporter(analyticsEnabled: true, defaultAnalyticsEnabled: false),
+            otlpMetrics
+        )
+    }
+
     func testOtelTracestateHeaderMergeMatchesRustPropagationOrder() {
         let config = OtelConfig(tracestate: [
             "alpha": [

@@ -462,6 +462,15 @@ private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) as
             codexHome: codexHome,
             overrides: request.configOverrides
         )
+        let logEnabled = settings.otel.exporter.isEnabled
+        let traceEnabled = settings.otel.traceExporter.isEnabled
+        let metricsEnabled = settings.otel.metricsEnabled(
+            analyticsEnabled: settings.analyticsEnabled,
+            defaultAnalyticsEnabled: request.analyticsDefaultEnabled
+        )
+        if logEnabled || traceEnabled || metricsEnabled {
+            try settings.otel.validateProviderStartup(traceEnabled: traceEnabled)
+        }
         let stateStore: SQLiteAgentGraphStore?
         do {
             stateStore = try CodexAppServer.defaultStateStore(codexHome: codexHome, runtimeConfig: settings)

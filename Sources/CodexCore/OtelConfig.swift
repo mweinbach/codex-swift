@@ -26,6 +26,15 @@ public enum OtelExporterKind: Equatable, Sendable {
     case statsig
     case otlpHttp(endpoint: String, headers: [String: String], httpProtocol: OtelHttpProtocol, tls: OtelTlsConfig?)
     case otlpGrpc(endpoint: String, headers: [String: String], tls: OtelTlsConfig?)
+
+    public var isEnabled: Bool {
+        switch self {
+        case .none:
+            return false
+        case .statsig, .otlpHttp, .otlpGrpc:
+            return true
+        }
+    }
 }
 
 public struct OtelConfig: Equatable, Sendable {
@@ -62,6 +71,23 @@ public struct OtelConfig: Equatable, Sendable {
             try Self.validateSpanAttributes(spanAttributes)
         }
         try Self.validateTracestateEntries(tracestate)
+    }
+
+    public func effectiveMetricsExporter(
+        analyticsEnabled: Bool?,
+        defaultAnalyticsEnabled: Bool
+    ) -> OtelExporterKind {
+        (analyticsEnabled ?? defaultAnalyticsEnabled) ? metricsExporter : .none
+    }
+
+    public func metricsEnabled(
+        analyticsEnabled: Bool?,
+        defaultAnalyticsEnabled: Bool
+    ) -> Bool {
+        effectiveMetricsExporter(
+            analyticsEnabled: analyticsEnabled,
+            defaultAnalyticsEnabled: defaultAnalyticsEnabled
+        ).isEnabled
     }
 
     public func mergedTracestateHeader(existing: String? = nil) -> String? {
