@@ -17,6 +17,11 @@ Recent upstream audit checkpoint:
   for unused Cargo dependencies and has no Swift runtime or SwiftPM manifest
   behavior to port; the Swift package manifest still resolves cleanly under
   SwiftPM.
+- 2026-05-16: rechecked Rust's
+  `mcp_server_status_list_keeps_tools_for_sanitized_name_collisions` app-server
+  fixture. Swift `mcpServerStatus/list` coverage now pins raw per-server tool
+  maps for configured MCP server names that would collide after sanitization,
+  such as `some-server` and `some_server`.
 - 2026-05-16: rechecked upstream Rust commit `c15613f2b6` (`Forward apps
   MCP product SKU from Codex config`). Swift config now loads the top-level
   `apps_mcp_product_sku`, blocks project-local config from setting it, carries

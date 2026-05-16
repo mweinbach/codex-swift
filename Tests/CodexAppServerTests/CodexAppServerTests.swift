@@ -24850,6 +24850,81 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(capture.requests.map(\.timeoutInterval), [3, 3, 3, 3])
     }
 
+    func testMcpServerStatusListKeepsToolsForSanitizedServerNameCollisionsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [mcp_servers.some-server]
+        url = "https://mcp-dash.example.test/mcp"
+
+        [mcp_servers.some_server]
+        url = "https://mcp-underscore.example.test/mcp"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let configuration = CodexAppServerConfiguration(
+            codexHome: temp.url,
+            requiresOpenAIAuth: false,
+            environment: [
+                CodexConfigLayerLoader.managedConfigEnvironmentVariable: temp.url
+                    .appendingPathComponent("missing-managed-config.toml", isDirectory: false)
+                    .path
+            ],
+            mcpHTTPTransport: { request in
+                let body = try XCTUnwrap(request.httpBody)
+                let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                let host = try XCTUnwrap(request.url?.host)
+                switch object["method"] as? String {
+                case "initialize":
+                    return URLSessionTransportResponse(
+                        statusCode: 200,
+                        headers: ["mcp-session-id": "\(host)-session"],
+                        body: Data(#"{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"docs","version":"1.0.0"}}}"#.utf8)
+                    )
+                case "tools/list":
+                    let toolName = host.contains("dash") ? "dash_lookup" : "underscore_lookup"
+                    return URLSessionTransportResponse(
+                        statusCode: 200,
+                        body: Data("""
+                        {"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"\(toolName)","description":"Look up test data.","inputSchema":{"type":"object","additionalProperties":false}}]}}
+                        """.utf8)
+                    )
+                case "resources/list":
+                    return URLSessionTransportResponse(
+                        statusCode: 200,
+                        body: Data(#"{"jsonrpc":"2.0","id":2,"result":{"resources":[]}}"#.utf8)
+                    )
+                case "resources/templates/list":
+                    return URLSessionTransportResponse(
+                        statusCode: 200,
+                        body: Data(#"{"jsonrpc":"2.0","id":3,"result":{"resourceTemplates":[]}}"#.utf8)
+                    )
+                default:
+                    return URLSessionTransportResponse(
+                        statusCode: 500,
+                        body: Data(#"{"jsonrpc":"2.0","id":99,"error":{"code":-32601,"message":"unexpected method"}}"#.utf8)
+                    )
+                }
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"mcpServerStatus/list","params":{}}"#,
+            configuration: configuration
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        XCTAssertNil(result["nextCursor"])
+        XCTAssertEqual(data.map { $0["name"] as? String }, ["some-server", "some_server"])
+
+        let toolsByServer = Dictionary(uniqueKeysWithValues: try data.map { status in
+            let name = try XCTUnwrap(status["name"] as? String)
+            let tools = try XCTUnwrap(status["tools"] as? [String: [String: Any]])
+            return (name, Set(tools.keys))
+        })
+        XCTAssertEqual(toolsByServer["some-server"], ["dash_lookup"])
+        XCTAssertEqual(toolsByServer["some_server"], ["underscore_lookup"])
+    }
+
     func testMcpServerStatusListFollowsResourcePaginationLikeRust() throws {
         let temp = try TemporaryDirectory()
         try """
