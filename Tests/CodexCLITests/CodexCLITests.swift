@@ -17,6 +17,7 @@ final class CodexCLITests: XCTestCase {
             "app",
             "completion",
             "update",
+            "doctor",
             "sandbox",
             "debug",
             "execpolicy",
@@ -69,6 +70,7 @@ final class CodexCLITests: XCTestCase {
         XCTAssertTrue(stdout[0].contains("_codex()"))
         XCTAssertTrue(stdout[0].contains("complete -F _codex codex"))
         XCTAssertTrue(stdout[0].contains("exec e computer-use cu review"))
+        XCTAssertTrue(stdout[0].contains("update doctor sandbox"))
         XCTAssertFalse(stdout[0].contains("--full-auto"))
         XCTAssertFalse(stdout[0].contains("execpolicy"))
     }

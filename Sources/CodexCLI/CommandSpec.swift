@@ -33,6 +33,7 @@ public enum CodexCommandRegistry {
         CommandSpec(name: "app", summary: "Launch the Codex desktop app (opens the app installer if missing)."),
         CommandSpec(name: "completion", summary: "Generate shell completion scripts."),
         CommandSpec(name: "update", summary: "Update Codex to the latest version."),
+        CommandSpec(name: "doctor", summary: "Diagnose local Codex installation, config, auth, and runtime health."),
         CommandSpec(name: "sandbox", summary: "Run commands within a Codex-provided sandbox."),
         CommandSpec(name: "debug", summary: "Debugging tools."),
         CommandSpec(name: "execpolicy", summary: "Execpolicy tooling.", isHidden: true),

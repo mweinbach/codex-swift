@@ -665,6 +665,31 @@ public struct CodexCLI: Sendable {
         public init() {}
     }
 
+    public struct DoctorCommandRequest: Equatable, Sendable {
+        public let json: Bool
+        public let summary: Bool
+        public let all: Bool
+        public let noColor: Bool
+        public let ascii: Bool
+        public let configOverrides: CliConfigOverrides
+
+        public init(
+            json: Bool = false,
+            summary: Bool = false,
+            all: Bool = false,
+            noColor: Bool = false,
+            ascii: Bool = false,
+            configOverrides: CliConfigOverrides = CliConfigOverrides()
+        ) {
+            self.json = json
+            self.summary = summary
+            self.all = all
+            self.noColor = noColor
+            self.ascii = ascii
+            self.configOverrides = configOverrides
+        }
+    }
+
     public struct CommandExecutionResult: Equatable, Sendable {
         public let exitCode: Int32
         public let stdoutMessage: String?
@@ -702,6 +727,7 @@ public struct CodexCLI: Sendable {
     public typealias CloudCommandRunner = (CloudCommandRequest) async throws -> CommandExecutionResult
     public typealias ResponsesAPIProxyCommandRunner = (ResponsesAPIProxyCommandRequest) async throws -> CommandExecutionResult
     public typealias UpdateCommandRunner = (UpdateCommandRequest) async throws -> CommandExecutionResult
+    public typealias DoctorCommandRunner = (DoctorCommandRequest) async throws -> CommandExecutionResult
 
     public func parseInvocation(arguments: [String]) -> Invocation {
         if arguments.contains("--version") || arguments.contains("-V") {
@@ -830,7 +856,8 @@ public struct CodexCLI: Sendable {
         pluginRunner: PluginCommandRunner? = nil,
         cloudRunner: CloudCommandRunner? = nil,
         responsesAPIProxyRunner: ResponsesAPIProxyCommandRunner? = nil,
-        updateRunner: UpdateCommandRunner? = nil
+        updateRunner: UpdateCommandRunner? = nil,
+        doctorRunner: DoctorCommandRunner? = nil
     ) async -> Int32 {
         let invocation = parseInvocation(arguments: arguments)
         if let message = rootDuplicateSharedOptionRejectionMessage(invocation: invocation, arguments: arguments) {
@@ -1333,6 +1360,33 @@ public struct CodexCLI: Sendable {
                 stderr(describe(error))
                 return 1
             }
+        case let .command(spec, _) where spec.name == "doctor":
+            guard let doctorRunner else {
+                stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
+                return 78
+            }
+            let rawArguments = rawCommandArguments(after: spec, in: arguments)
+            let configOverrides: CliConfigOverrides
+            do {
+                configOverrides = CliConfigOverrides(rawOverrides: try configOverrideTokens(arguments))
+            } catch {
+                stderr(describe(error))
+                return 1
+            }
+            switch parseDoctorCommand(rawArguments, configOverrides: configOverrides) {
+            case let .success(request):
+                do {
+                    let result = try await doctorRunner(request)
+                    emit(result, stdout: stdout, stderr: stderr)
+                    return result.exitCode
+                } catch {
+                    stderr(describe(error))
+                    return 1
+                }
+            case let .failure(message, exitCode):
+                stderr(message)
+                return exitCode
+            }
         case let .command(spec, commandArguments) where spec.name == "features":
             guard let featuresRunner else {
                 stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
@@ -1609,6 +1663,46 @@ public struct CodexCLI: Sendable {
             }
         }
         return nil
+    }
+
+    private func parseDoctorCommand(
+        _ arguments: [String],
+        configOverrides: CliConfigOverrides
+    ) -> ParseResult<DoctorCommandRequest> {
+        var json = false
+        var summary = false
+        var all = false
+        var noColor = false
+        var ascii = false
+
+        for argument in arguments {
+            switch argument {
+            case "--json":
+                json = true
+            case "--summary":
+                summary = true
+            case "--all":
+                all = true
+            case "--no-color":
+                noColor = true
+            case "--ascii":
+                ascii = true
+            default:
+                if argument.hasPrefix("-") {
+                    return .failure("codex-swift: unexpected option for command 'doctor': \(argument)", 64)
+                }
+                return .failure("codex-swift: unexpected argument for command 'doctor': \(argument)", 64)
+            }
+        }
+
+        return .success(DoctorCommandRequest(
+            json: json,
+            summary: summary,
+            all: all,
+            noColor: noColor,
+            ascii: ascii,
+            configOverrides: configOverrides
+        ))
     }
 
     private func parseFeaturesCommandAction(_ arguments: [String]) -> ParseResult<FeaturesCommandAction> {

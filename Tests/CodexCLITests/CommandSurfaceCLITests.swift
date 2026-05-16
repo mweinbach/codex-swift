@@ -1755,7 +1755,8 @@ final class CommandSurfaceCLITests: XCTestCase {
             "mcp-server",
             "app-server",
             "debug",
-            "resume"
+            "resume",
+            "doctor"
         ] {
             var stderr: [String] = []
             let exitCode = await CodexCLI().runAsync(
@@ -1807,6 +1808,57 @@ final class CommandSurfaceCLITests: XCTestCase {
 
         XCTAssertEqual(exitCode, 64)
         XCTAssertEqual(stderr, ["codex-swift: unexpected argument for command 'update': now"])
+    }
+
+    func testRunAsyncDoctorDelegatesRustFlagsAndOverrides() async {
+        var receivedRequest: CodexCLI.DoctorCommandRequest?
+        var stdout: [String] = []
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: [
+                "-c", "model=\"gpt-5.4\"",
+                "doctor",
+                "--json",
+                "--summary",
+                "--all",
+                "--no-color",
+                "--ascii"
+            ],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") },
+            doctorRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: "doctor")
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(stdout, ["doctor"])
+        XCTAssertEqual(receivedRequest, CodexCLI.DoctorCommandRequest(
+            json: true,
+            summary: true,
+            all: true,
+            noColor: true,
+            ascii: true,
+            configOverrides: CliConfigOverrides(rawOverrides: ["model=\"gpt-5.4\""])
+        ))
+    }
+
+    func testRunAsyncDoctorRejectsUnexpectedArguments() async {
+        var stderr: [String] = []
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["doctor", "repair"],
+            stdout: { _ in XCTFail("stdout should not be written") },
+            stderr: { stderr.append($0) },
+            doctorRunner: { _ in
+                XCTFail("runner should not be called")
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 64)
+        XCTAssertEqual(stderr, ["codex-swift: unexpected argument for command 'doctor': repair"])
     }
 
     private struct TestError: Error, Equatable, CustomStringConvertible, Sendable {

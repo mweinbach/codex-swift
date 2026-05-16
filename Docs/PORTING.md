@@ -81,6 +81,13 @@ Recent upstream audit checkpoint:
   off by default, and plugin hooks are stable/on by default. Built-in memories
   MCP selection now follows Rust's `memories` feature plus `[memories]`
   `use_memories`, without the old `builtin_mcp` double gate.
+- 2026-05-16: rechecked the CLI portion of Rust commit `de9c5c0226` (`Fix
+  Windows doctor npm root probe`). Swift now registers the Rust top-level
+  `doctor` command, parses Rust's current `--json`, `--summary`, `--all`,
+  `--no-color`, and `--ascii` flags into an injectable command request, and
+  carries the same npm global-root probe command selection: `npm.cmd` on
+  Windows, `npm` elsewhere. Full diagnostic report generation remains a
+  broader `codex doctor` runtime gap.
 - 2026-05-16: ported the reusable portion of Rust commit `bbb5c2811d`
   (`tui: pass active permission profiles through app commands`) from
   `codex-rs/utils/approval-presets/src/lib.rs`. Swift approval presets now pair
