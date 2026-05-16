@@ -137,10 +137,11 @@ Recent upstream audit checkpoint:
   network environment readability, terminal environment metadata/issues, and
   auth credential/provider checks, update status/cache/npm-target diagnostics,
   sandbox helper/config readability, local MCP configuration consistency,
-  state path/database/rollout stats, and passive background app-server daemon
-  state/socket diagnostics, emits the redacted `--json` support-report map
-  keyed by check id, renders compact grouped human summary output, and exits
-  nonzero when config loading fails.
+  state path/database/rollout stats, passive background app-server daemon
+  state/socket diagnostics, and provider HTTP reachability planning/base/route
+  probe reporting, emits the redacted `--json` support-report map keyed by
+  check id, renders compact grouped human summary output, and exits nonzero
+  when config loading fails.
   Full diagnostic report
   generation beyond those local checks remains a broader `codex doctor`
   runtime gap.

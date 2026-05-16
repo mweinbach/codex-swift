@@ -152,6 +152,25 @@ final class DoctorCommandRuntimeTests: XCTestCase {
                             path: "/tmp/codex/app-server-control/app-server-control.sock",
                             status: .notRunning
                         )
+                    )),
+                    DoctorCommandRuntime.providerReachabilityCheck(inputs: DoctorProviderReachabilityCheckInputs(
+                        plan: DoctorProviderReachabilityPlan(
+                            modeDescription: "API key auth",
+                            endpoints: [
+                                DoctorProviderReachabilityEndpoint(
+                                    label: "openai API",
+                                    url: "https://api.openai.com/v1",
+                                    required: true,
+                                    routeProbeURL: "https://api.openai.com/v1/models"
+                                )
+                            ]
+                        ),
+                        baseProbeResults: [
+                            "https://api.openai.com/v1": .reachable("HTTP 200")
+                        ],
+                        routeProbeResults: [
+                            "https://api.openai.com/v1/models": .ok("HTTP 401")
+                        ]
                     ))
                 ]
             }
@@ -294,6 +313,18 @@ final class DoctorCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(appServerDetails["control socket"] as? String, "/tmp/codex/app-server-control/app-server-control.sock")
         XCTAssertEqual(appServerDetails["status"] as? String, "not running")
         XCTAssertEqual(appServerDetails["mode"] as? String, "ephemeral")
+
+        let reachability = try XCTUnwrap(checks["network.provider_reachability"] as? [String: Any])
+        XCTAssertEqual(reachability["category"] as? String, "reachability")
+        XCTAssertEqual(reachability["status"] as? String, "ok")
+        XCTAssertEqual(reachability["summary"] as? String, "active provider endpoints are reachable over HTTP")
+        let reachabilityDetails = try XCTUnwrap(reachability["details"] as? [String: Any])
+        XCTAssertEqual(reachabilityDetails["reachability mode"] as? String, "API key auth")
+        XCTAssertEqual(reachabilityDetails["openai API base URL"] as? String, "https://api.openai.com/v1 reachable (HTTP 200)")
+        XCTAssertEqual(
+            reachabilityDetails["openai API route probe"] as? String,
+            "https://api.openai.com/v1/models route exists (HTTP 401)"
+        )
 
         let config = try XCTUnwrap(checks["config.load"] as? [String: Any])
         XCTAssertEqual(config["id"] as? String, "config.load")
@@ -792,6 +823,117 @@ final class DoctorCommandRuntimeTests: XCTestCase {
             "required_http: bearer token env var MCP_TOKEN is not set"
         ])
         XCTAssertEqual(check.remediation, "Set the missing MCP env vars or disable the affected server.")
+    }
+
+    func testProviderReachabilityPlanUsesAPIKeyAuthAndModelsRouteLikeRustDoctor() {
+        let settings = CodexRuntimeConfig(
+            modelProvider: "openai",
+            modelProviders: [
+                "openai": ModelProviderInfo.createOpenAIProvider(openAIBaseURL: "https://api.openai.com/v1")
+            ],
+            chatgptBaseURL: "https://chatgpt.com/backend-api/"
+        )
+
+        let plan = DoctorCommandRuntime.providerReachabilityPlan(
+            settings: settings,
+            environment: ["OPENAI_API_KEY": "sk-test"],
+            storedAuth: nil
+        )
+
+        XCTAssertEqual(plan, DoctorProviderReachabilityPlan(
+            modeDescription: "API key auth",
+            endpoints: [
+                DoctorProviderReachabilityEndpoint(
+                    label: "openai API",
+                    url: "https://api.openai.com/v1",
+                    required: true,
+                    routeProbeURL: "https://api.openai.com/v1/models"
+                )
+            ]
+        ))
+    }
+
+    func testProviderReachabilityPlanUsesChatGPTAuthWhenNoAPIKeyLikeRustDoctor() {
+        let settings = CodexRuntimeConfig(
+            modelProvider: "openai",
+            modelProviders: [
+                "openai": ModelProviderInfo.createOpenAIProvider(openAIBaseURL: "https://api.openai.com/v1")
+            ],
+            chatgptBaseURL: "https://chatgpt.com/backend-api/"
+        )
+
+        let plan = DoctorCommandRuntime.providerReachabilityPlan(
+            settings: settings,
+            environment: [:],
+            storedAuth: nil
+        )
+
+        XCTAssertEqual(plan, DoctorProviderReachabilityPlan(
+            modeDescription: "ChatGPT auth",
+            endpoints: [
+                DoctorProviderReachabilityEndpoint(
+                    label: "ChatGPT",
+                    url: "https://chatgpt.com/backend-api/",
+                    required: true
+                )
+            ]
+        ))
+    }
+
+    func testProviderReachabilityCheckReportsRoute404AsRustFailure() {
+        let check = DoctorCommandRuntime.providerReachabilityCheck(inputs: DoctorProviderReachabilityCheckInputs(
+            plan: DoctorProviderReachabilityPlan(
+                modeDescription: "API key auth",
+                endpoints: [
+                    DoctorProviderReachabilityEndpoint(
+                        label: "custom API",
+                        url: "https://api.example/v1",
+                        required: true,
+                        routeProbeURL: "https://api.example/v1/models"
+                    )
+                ]
+            ),
+            baseProbeResults: [
+                "https://api.example/v1": .reachable("HTTP 200")
+            ],
+            routeProbeResults: [
+                "https://api.example/v1/models": .fail("HTTP 404")
+            ]
+        ))
+
+        XCTAssertEqual(check.status, .fail)
+        XCTAssertEqual(check.summary, "one or more required provider endpoints are unreachable over HTTP")
+        XCTAssertEqual(check.details, [
+            "reachability mode: API key auth",
+            "custom API base URL: https://api.example/v1 reachable (HTTP 200)",
+            "custom API route probe: https://api.example/v1/models returned HTTP 404 (required)"
+        ])
+        XCTAssertEqual(check.issues, [
+            DoctorIssue(
+                severity: .fail,
+                cause: "provider base URL route returned 404 - verify the configured API prefix",
+                measured: "https://api.example/v1/models returned HTTP 404",
+                expected: "GET /models returns 2xx, 401, or 403",
+                remedy: "Set base_url to the provider API root, for example https://api.openai.com/v1",
+                fields: ["route probe"]
+            )
+        ])
+        XCTAssertEqual(check.remediation, "Check proxy, VPN, firewall, DNS, and custom CA configuration.")
+    }
+
+    func testProviderReachabilityCheckReportsProviderWithoutEndpointLikeRustDoctor() {
+        let check = DoctorCommandRuntime.providerReachabilityCheck(inputs: DoctorProviderReachabilityCheckInputs(
+            plan: DoctorProviderReachabilityPlan(modeDescription: "provider auth", endpoints: []),
+            baseProbeResults: [:]
+        ))
+
+        XCTAssertEqual(check.status, .ok)
+        XCTAssertEqual(check.summary, "active provider has no HTTP endpoint to probe")
+        XCTAssertEqual(check.details, [
+            "reachability mode: provider auth",
+            "active provider endpoint: none configured"
+        ])
+        XCTAssertNil(check.remediation)
     }
 
     func testStatePathsCheckReportsInspectablePathsLikeRustDoctor() {

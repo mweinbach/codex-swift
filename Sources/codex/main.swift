@@ -285,6 +285,10 @@ private func doctorConfigDependentChecks(_ request: CodexCLI.DoctorCommandReques
             ),
             DoctorCommandRuntime.backgroundServerCheck(
                 codexHome: codexHome
+            ),
+            DoctorCommandRuntime.providerReachabilityCheck(
+                codexHome: codexHome,
+                settings: settings
             )
         ]
     } catch {
