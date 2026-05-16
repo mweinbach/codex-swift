@@ -33,6 +33,22 @@ final class McpOAuthCallbackTests: XCTestCase {
         )
     }
 
+    func testParseCallbackAcceptsCallbackIDPathLikeRust() {
+        XCTAssertEqual(
+            McpOAuthCallbackParser.parse(
+                path: "/callback/abc123?code=abc&state=xyz",
+                callbackPath: "/callback/abc123"
+            ),
+            McpOAuthCallbackResult(code: "abc", state: "xyz")
+        )
+        XCTAssertNil(
+            McpOAuthCallbackParser.parse(
+                path: "/callback?code=abc&state=xyz",
+                callbackPath: "/callback/abc123"
+            )
+        )
+    }
+
     func testParseCallbackRejectsRustInvalidShapes() {
         XCTAssertNil(McpOAuthCallbackParser.parse(path: "/other?code=abc&state=xyz"))
         XCTAssertNil(McpOAuthCallbackParser.parse(path: "/callback"))
@@ -133,6 +149,24 @@ final class McpOAuthCallbackTests: XCTestCase {
         XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
         let callbackResult = try await callback
         XCTAssertEqual(callbackResult, McpOAuthCallbackResult(code: "auth-code", state: "csrf"))
+    }
+
+    func testLocalCallbackServerAppendsAndRequiresCallbackIDPath() async throws {
+        let server = try McpOAuthLocalCallbackServer.start(callbackID: "abc123")
+        defer { server.stop() }
+
+        XCTAssertTrue(server.redirectURI.hasSuffix("/callback/abc123"))
+        let baseURL = server.redirectURI.replacingOccurrences(of: "/callback/abc123", with: "")
+        let oldCallbackURL = try XCTUnwrap(URL(string: "\(baseURL)/callback?code=abc&state=xyz"))
+        let (_, oldCallbackResponse) = try await URLSession.shared.data(from: oldCallbackURL)
+        XCTAssertEqual((oldCallbackResponse as? HTTPURLResponse)?.statusCode, 400)
+
+        async let callback = server.waitForCallback(timeout: 2)
+        let validURL = try XCTUnwrap(URL(string: "\(baseURL)/callback/abc123?code=abc&state=xyz"))
+        let (_, validResponse) = try await URLSession.shared.data(from: validURL)
+        XCTAssertEqual((validResponse as? HTTPURLResponse)?.statusCode, 200)
+        let callbackResult = try await callback
+        XCTAssertEqual(callbackResult, McpOAuthCallbackResult(code: "abc", state: "xyz"))
     }
 
     func testLocalCallbackServerRejectsInvalidConfiguredPortAndURL() {

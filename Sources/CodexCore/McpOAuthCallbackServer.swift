@@ -43,11 +43,11 @@ public final class McpOAuthLocalCallbackServer: McpOAuthCallbackServing, @unchec
     private var pendingError: Error?
     private var completed = false
 
-    private init(listenFileDescriptor: Int32, port: UInt16, redirectURI: String?, callbackPath: String) {
+    private init(listenFileDescriptor: Int32, redirectURI: String, callbackPath: String) {
         self.listenFileDescriptor = listenFileDescriptor
-        self.redirectURI = redirectURI ?? "http://127.0.0.1:\(port)/callback"
+        self.redirectURI = redirectURI
         self.callbackPath = callbackPath
-        self.queue = DispatchQueue(label: "codex.mcp-oauth.callback.\(port)")
+        self.queue = DispatchQueue(label: "codex.mcp-oauth.callback.\(callbackPath)")
     }
 
     deinit {
@@ -56,7 +56,8 @@ public final class McpOAuthLocalCallbackServer: McpOAuthCallbackServing, @unchec
 
     public static func start(
         port requestedPort: UInt16? = nil,
-        redirectURI redirectURIOverride: String? = nil
+        redirectURI redirectURIOverride: String? = nil,
+        callbackID: String? = nil
     ) throws -> McpOAuthLocalCallbackServer {
         if let requestedPort, requestedPort == 0 {
             throw McpOAuthCallbackServerError.invalidCallbackPort(requestedPort)
@@ -72,7 +73,6 @@ public final class McpOAuthLocalCallbackServer: McpOAuthCallbackServing, @unchec
             parsedRedirectURI = nil
         }
         let bindHost = Self.callbackBindHost(parsedRedirectURI)
-        let callbackPath = Self.callbackPath(from: parsedRedirectURI)
 
         let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
         guard fd >= 0 else {
@@ -121,10 +121,18 @@ public final class McpOAuthLocalCallbackServer: McpOAuthCallbackServing, @unchec
                 throw McpOAuthCallbackServerError.listenFailed(posixMessage(operation: "getsockname"))
             }
 
+            let actualPort = UInt16(bigEndian: actualAddress.sin_port)
+            let baseRedirectURI = redirectURIOverride ?? "http://127.0.0.1:\(actualPort)/callback"
+            let redirectURI: String
+            if let callbackID {
+                redirectURI = try McpOAuthLogin.redirectURI(baseRedirectURI, appendingCallbackID: callbackID)
+            } else {
+                redirectURI = baseRedirectURI
+            }
+            let callbackPath = Self.callbackPath(from: URL(string: redirectURI))
             let server = McpOAuthLocalCallbackServer(
                 listenFileDescriptor: fd,
-                port: UInt16(bigEndian: actualAddress.sin_port),
-                redirectURI: redirectURIOverride,
+                redirectURI: redirectURI,
                 callbackPath: callbackPath
             )
             server.queue.async { [server] in

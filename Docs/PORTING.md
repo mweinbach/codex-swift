@@ -12,6 +12,13 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `0a2d751fc2` (`Add callback ids to
+  local MCP OAuth redirects`) against
+  `codex-rs/rmcp-client/src/perform_oauth_login.rs`. Swift MCP OAuth login now
+  derives the same fragment-insensitive, server-URL-bound 12-character callback
+  id, appends it as the final redirect URI path segment before authorization,
+  preserves redirect URI queries, and starts the local callback server with the
+  enriched path so callbacks to the old generic `/callback` path are rejected.
 - 2026-05-16: rechecked Rust commit `cccde930ce` (`Move memory prompt
   injection to app-server extension`) against
   `codex-rs/ext/memories/src/extension.rs`,

@@ -1,12 +1,14 @@
-import CodexCore
 import Foundation
+@testable import CodexCore
 import XCTest
 
 final class McpOAuthLoginTests: XCTestCase {
     func testPerformRunsBrowserCallbackTokenExchangeAndPersistsTokens() async throws {
         let temp = try OAuthLoginTemporaryDirectory()
+        let callbackID = try McpOAuthLogin.callbackID(fromServerURL: "https://mcp.example")
+        let redirectURI = "http://127.0.0.1:4321/callback/\(callbackID)"
         let callbackServer = StubOAuthCallbackServer(
-            redirectURI: "http://127.0.0.1:4321/callback",
+            redirectURI: redirectURI,
             callback: McpOAuthCallbackResult(code: "auth-code", state: "csrf")
         )
         let probe = OAuthLoginProbe()
@@ -25,7 +27,7 @@ final class McpOAuthLoginTests: XCTestCase {
                 oauthResource: "https://api.example.com",
                 timeoutSeconds: 9
             ),
-            callbackServerFactory: { _, _ in callbackServer },
+            callbackServerFactory: { _, _, _ in callbackServer },
             browserLauncher: { url in
                 await recorder.recordBrowserURL(url)
             },
@@ -48,7 +50,7 @@ final class McpOAuthLoginTests: XCTestCase {
         XCTAssertEqual(messages, [.authorizationURL(serverName: "github", authURL: authURL)])
         XCTAssertEqual(
             authURL,
-            "https://auth.example/authorize?response_type=code&client_id=client-id&state=csrf&code_challenge=challenge&code_challenge_method=S256&redirect_uri=http%3A%2F%2F127.0.0.1%3A4321%2Fcallback&scope=repo+user&resource=https%3A%2F%2Fapi.example.com"
+            "https://auth.example/authorize?response_type=code&client_id=client-id&state=csrf&code_challenge=challenge&code_challenge_method=S256&redirect_uri=http%3A%2F%2F127.0.0.1%3A4321%2Fcallback%2F\(callbackID)&scope=repo+user&resource=https%3A%2F%2Fapi.example.com"
         )
 
         let requests = await probe.requests()
@@ -75,8 +77,9 @@ final class McpOAuthLoginTests: XCTestCase {
 
     func testPerformUsesDiscoveredScopesWhenRequestScopesAreMissing() async throws {
         let temp = try OAuthLoginTemporaryDirectory()
+        let callbackID = try McpOAuthLogin.callbackID(fromServerURL: "https://mcp.example")
         let callbackServer = StubOAuthCallbackServer(
-            redirectURI: "http://127.0.0.1:4321/callback",
+            redirectURI: "http://127.0.0.1:4321/callback/\(callbackID)",
             callback: McpOAuthCallbackResult(code: "auth-code", state: "csrf")
         )
         let probe = OAuthLoginProbe()
@@ -89,7 +92,7 @@ final class McpOAuthLoginTests: XCTestCase {
                 codexHome: temp.url,
                 storeMode: .file
             ),
-            callbackServerFactory: { _, _ in callbackServer },
+            callbackServerFactory: { _, _, _ in callbackServer },
             browserLauncher: { url in
                 await recorder.recordBrowserURL(url)
             },
@@ -103,14 +106,15 @@ final class McpOAuthLoginTests: XCTestCase {
         let browserURL = await recorder.browserURLs().first
         XCTAssertEqual(
             browserURL,
-            "https://auth.example/authorize?response_type=code&client_id=client-id&state=csrf&code_challenge=challenge&code_challenge_method=S256&redirect_uri=http%3A%2F%2F127.0.0.1%3A4321%2Fcallback&scope=profile+email"
+            "https://auth.example/authorize?response_type=code&client_id=client-id&state=csrf&code_challenge=challenge&code_challenge_method=S256&redirect_uri=http%3A%2F%2F127.0.0.1%3A4321%2Fcallback%2F\(callbackID)&scope=profile+email"
         )
     }
 
     func testPerformContinuesWhenBrowserLaunchFails() async throws {
         let temp = try OAuthLoginTemporaryDirectory()
+        let callbackID = try McpOAuthLogin.callbackID(fromServerURL: "https://mcp.example")
         let callbackServer = StubOAuthCallbackServer(
-            redirectURI: "http://127.0.0.1:4321/callback",
+            redirectURI: "http://127.0.0.1:4321/callback/\(callbackID)",
             callback: McpOAuthCallbackResult(code: "auth-code", state: "csrf")
         )
         let probe = OAuthLoginProbe()
@@ -123,7 +127,7 @@ final class McpOAuthLoginTests: XCTestCase {
                 codexHome: temp.url,
                 storeMode: .file
             ),
-            callbackServerFactory: { _, _ in callbackServer },
+            callbackServerFactory: { _, _, _ in callbackServer },
             browserLauncher: { _ in throw McpOAuthBrowserError.openFailed(1) },
             messageSink: { message in await recorder.recordMessage(message) },
             transport: { request in try await probe.handle(request) },
@@ -144,8 +148,13 @@ final class McpOAuthLoginTests: XCTestCase {
 
     func testPerformPassesConfiguredCallbackPortAndURLToServerFactory() async throws {
         let temp = try OAuthLoginTemporaryDirectory()
+        let callbackID = try McpOAuthLogin.callbackID(fromServerURL: "https://mcp.example")
+        let redirectURI = try McpOAuthLogin.redirectURI(
+            "https://oauth.example/custom/callback",
+            appendingCallbackID: callbackID
+        )
         let callbackServer = StubOAuthCallbackServer(
-            redirectURI: "https://oauth.example/custom/callback",
+            redirectURI: redirectURI,
             callback: McpOAuthCallbackResult(code: "auth-code", state: "csrf")
         )
         let probe = OAuthLoginProbe()
@@ -160,8 +169,8 @@ final class McpOAuthLoginTests: XCTestCase {
                 callbackPort: 5678,
                 callbackURL: "https://oauth.example/custom/callback"
             ),
-            callbackServerFactory: { callbackPort, callbackURL in
-                capture.record(callbackPort: callbackPort, callbackURL: callbackURL)
+            callbackServerFactory: { callbackPort, callbackURL, callbackID in
+                capture.record(callbackPort: callbackPort, callbackURL: callbackURL, callbackID: callbackID)
                 return callbackServer
             },
             browserLauncher: { _ in },
@@ -172,6 +181,7 @@ final class McpOAuthLoginTests: XCTestCase {
 
         XCTAssertEqual(capture.callbackPort, 5678)
         XCTAssertEqual(capture.callbackURL, "https://oauth.example/custom/callback")
+        XCTAssertEqual(capture.callbackID, callbackID)
         let requests = await probe.requests()
         let registrationBody = try XCTUnwrap(requests[1].body)
         let registrationJSON = try XCTUnwrap(
@@ -179,7 +189,48 @@ final class McpOAuthLoginTests: XCTestCase {
         )
         XCTAssertEqual(
             registrationJSON["redirect_uris"] as? [String],
-            ["https://oauth.example/custom/callback"]
+            ["https://oauth.example/custom/callback/\(callbackID)"]
+        )
+    }
+
+    func testCallbackIDIsBoundToServerURLLikeRust() throws {
+        let callbackID = try McpOAuthLogin.callbackID(
+            fromServerURL: "https://mcp.example.com/mcp?tenant=one"
+        )
+        let sameWithoutFragment = try McpOAuthLogin.callbackID(
+            fromServerURL: "https://mcp.example.com/mcp?tenant=one#unused"
+        )
+        let differentPath = try McpOAuthLogin.callbackID(
+            fromServerURL: "https://mcp.example.com/sse?tenant=one"
+        )
+        let differentQuery = try McpOAuthLogin.callbackID(
+            fromServerURL: "https://mcp.example.com/mcp?tenant=two"
+        )
+        let differentOrigin = try McpOAuthLogin.callbackID(
+            fromServerURL: "https://mcp.example.com:8443/mcp"
+        )
+
+        XCTAssertEqual(callbackID, sameWithoutFragment)
+        XCTAssertNotEqual(callbackID, differentPath)
+        XCTAssertNotEqual(callbackID, differentQuery)
+        XCTAssertNotEqual(callbackID, differentOrigin)
+        XCTAssertEqual(callbackID.count, 12)
+        XCTAssertTrue(callbackID.allSatisfy { character in
+            character.isASCII && (character.isLetter || character.isNumber || character == "-" || character == "_")
+        })
+    }
+
+    func testCallbackIDIsAppendedToRedirectURIPathBeforeQueryLikeRust() throws {
+        XCTAssertEqual(
+            try McpOAuthLogin.redirectURI("http://127.0.0.1:1234/callback", appendingCallbackID: "abc123"),
+            "http://127.0.0.1:1234/callback/abc123"
+        )
+        XCTAssertEqual(
+            try McpOAuthLogin.redirectURI(
+                "https://callbacks.example.com/oauth/callback?provider=github",
+                appendingCallbackID: "abc123"
+            ),
+            "https://callbacks.example.com/oauth/callback/abc123?provider=github"
         )
     }
 }
@@ -188,6 +239,7 @@ private final class CallbackServerFactoryCapture: @unchecked Sendable {
     private let lock = NSLock()
     private var _callbackPort: UInt16?
     private var _callbackURL: String?
+    private var _callbackID: String?
 
     var callbackPort: UInt16? {
         lock.withLock { _callbackPort }
@@ -197,10 +249,15 @@ private final class CallbackServerFactoryCapture: @unchecked Sendable {
         lock.withLock { _callbackURL }
     }
 
-    func record(callbackPort: UInt16?, callbackURL: String?) {
+    var callbackID: String? {
+        lock.withLock { _callbackID }
+    }
+
+    func record(callbackPort: UInt16?, callbackURL: String?, callbackID: String) {
         lock.withLock {
             _callbackPort = callbackPort
             _callbackURL = callbackURL
+            _callbackID = callbackID
         }
     }
 }

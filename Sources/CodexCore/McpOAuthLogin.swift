@@ -1,8 +1,10 @@
+import CryptoKit
 import Foundation
 
 public typealias McpOAuthCallbackServerFactory = @Sendable (
     _ callbackPort: UInt16?,
-    _ callbackURL: String?
+    _ callbackURL: String?,
+    _ callbackID: String
 ) throws -> any McpOAuthCallbackServing
 public typealias McpOAuthBrowserLauncher = @Sendable (String) async throws -> Void
 public typealias McpOAuthLoginMessageSink = @Sendable (McpOAuthLoginMessage) async -> Void
@@ -63,11 +65,17 @@ public enum McpOAuthLoginMessage: Equatable, Sendable {
 
 public enum McpOAuthLoginError: Error, Equatable, CustomStringConvertible, Sendable {
     case metadataNotFound
+    case invalidServerURL(String)
+    case serverURLMissingHost(String)
 
     public var description: String {
         switch self {
         case .metadataNotFound:
             return "OAuth authorization metadata was not found"
+        case let .invalidServerURL(url):
+            return "invalid MCP server URL `\(url)`"
+        case let .serverURLMissingHost(url):
+            return "MCP server URL `\(url)` must include a host"
         }
     }
 }
@@ -77,8 +85,12 @@ public enum McpOAuthLogin {
 
     public static func perform(
         request: McpOAuthLoginRequest,
-        callbackServerFactory: McpOAuthCallbackServerFactory = { callbackPort, callbackURL in
-            try McpOAuthLocalCallbackServer.start(port: callbackPort, redirectURI: callbackURL)
+        callbackServerFactory: McpOAuthCallbackServerFactory = { callbackPort, callbackURL, callbackID in
+            try McpOAuthLocalCallbackServer.start(
+                port: callbackPort,
+                redirectURI: callbackURL,
+                callbackID: callbackID
+            )
         },
         browserLauncher: @escaping McpOAuthBrowserLauncher = McpOAuthBrowser.open,
         messageSink: @escaping McpOAuthLoginMessageSink = { _ in },
@@ -87,7 +99,8 @@ public enum McpOAuthLogin {
         pkceGenerator: @Sendable () throws -> PKCECodes = { try PKCE.generate() },
         csrfTokenGenerator: @Sendable () throws -> String = { try McpOAuthAuthorizationSession.generateCSRFToken() }
     ) async throws {
-        let callbackServer = try callbackServerFactory(request.callbackPort, request.callbackURL)
+        let callbackID = try callbackID(fromServerURL: request.serverURL)
+        let callbackServer = try callbackServerFactory(request.callbackPort, request.callbackURL, callbackID)
         defer {
             callbackServer.stop()
         }
@@ -160,6 +173,49 @@ public enum McpOAuthLogin {
             normalized.append(trimmed)
         }
         return normalized
+    }
+
+    static func callbackID(fromServerURL serverURL: String) throws -> String {
+        guard var components = URLComponents(string: serverURL), components.scheme != nil else {
+            throw McpOAuthLoginError.invalidServerURL(serverURL)
+        }
+        guard components.host != nil else {
+            throw McpOAuthLoginError.serverURLMissingHost(serverURL)
+        }
+        components.fragment = nil
+        if components.path.isEmpty {
+            components.path = "/"
+        }
+        guard let normalizedURL = components.string else {
+            throw McpOAuthLoginError.invalidServerURL(serverURL)
+        }
+
+        let digest = SHA256.hash(data: Data(normalizedURL.utf8))
+        return Data(digest.prefix(9))
+            .base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+
+    static func redirectURI(_ redirectURI: String, appendingCallbackID callbackID: String) throws -> String {
+        guard var components = URLComponents(string: redirectURI),
+              components.scheme != nil,
+              components.host != nil
+        else {
+            throw McpOAuthCallbackServerError.invalidCallbackURL(redirectURI)
+        }
+
+        let path = components.path.isEmpty ? "/" : components.path
+        if path.hasSuffix("/") {
+            components.path = "\(path)\(callbackID)"
+        } else {
+            components.path = "\(path)/\(callbackID)"
+        }
+        guard let updated = components.string else {
+            throw McpOAuthCallbackServerError.invalidCallbackURL(redirectURI)
+        }
+        return updated
     }
 }
 
