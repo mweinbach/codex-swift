@@ -44,6 +44,7 @@ public struct AppServerMcpOAuthLoginStartRequest: Sendable {
     public let envHttpHeaders: [String: String]?
     public let environment: [String: String]
     public let scopes: [String]?
+    public let oauthClientID: String?
     public let oauthResource: String?
     public let timeoutSeconds: Int?
     public let callbackPort: UInt16?
@@ -58,6 +59,7 @@ public struct AppServerMcpOAuthLoginStartRequest: Sendable {
         envHttpHeaders: [String: String]? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         scopes: [String]? = nil,
+        oauthClientID: String? = nil,
         oauthResource: String? = nil,
         timeoutSeconds: Int? = nil,
         callbackPort: UInt16? = nil,
@@ -71,6 +73,7 @@ public struct AppServerMcpOAuthLoginStartRequest: Sendable {
         self.envHttpHeaders = envHttpHeaders
         self.environment = environment
         self.scopes = scopes
+        self.oauthClientID = oauthClientID
         self.oauthResource = oauthResource
         self.timeoutSeconds = timeoutSeconds
         self.callbackPort = callbackPort
@@ -1002,6 +1005,7 @@ public enum CodexAppServer {
                         envHttpHeaders: request.envHttpHeaders,
                         environment: request.environment,
                         scopes: request.scopes,
+                        oauthClientID: request.oauthClientID,
                         oauthResource: request.oauthResource,
                         timeoutSeconds: request.timeoutSeconds,
                         launchBrowser: true,
@@ -13709,9 +13713,22 @@ public enum CodexAppServer {
                     field: "startup_timeout_sec",
                     server: name
                 ),
-                toolTimeoutSec: try optionalRefreshDouble(server["tool_timeout_sec"], field: "tool_timeout_sec", server: name)
+                toolTimeoutSec: try optionalRefreshDouble(server["tool_timeout_sec"], field: "tool_timeout_sec", server: name),
+                scopes: try optionalRefreshStringArray(server["scopes"], field: "scopes", server: name),
+                oauthClientID: try optionalRefreshOAuthClientID(server["oauth"], server: name),
+                oauthResource: try optionalRefreshString(server["oauth_resource"], field: "oauth_resource", server: name)
             ))
         })
+    }
+
+    private static func optionalRefreshOAuthClientID(_ value: JSONValue?, server: String) throws -> String? {
+        guard let value else {
+            return nil
+        }
+        guard case let .object(object) = value else {
+            throw AppServerError.internalError("MCP refresh config for \(server).oauth must be an object")
+        }
+        return try optionalRefreshString(object["client_id"], field: "oauth.client_id", server: server)
     }
 
     private static func optionalRefreshString(_ value: JSONValue?, field: String, server: String) throws -> String? {
@@ -13845,6 +13862,9 @@ public enum CodexAppServer {
         }
         if let scopes = server.scopes {
             object["scopes"] = .array(scopes.map(JSONValue.string))
+        }
+        if let oauthClientID = server.oauthClientID {
+            object["oauth"] = .object(["client_id": .string(oauthClientID)])
         }
         if let oauthResource = server.oauthResource {
             object["oauth_resource"] = .string(oauthResource)
@@ -14711,6 +14731,7 @@ public enum CodexAppServer {
                         envHttpHeaders: envHttpHeaders,
                         environment: configuration.environment,
                         scopes: resolvedScopes.scopes,
+                        oauthClientID: server.effectiveOAuthClientID,
                         oauthResource: server.oauthResource,
                         timeoutSeconds: timeoutSeconds,
                         callbackPort: runtimeConfig.mcpOAuthCallbackPort,

@@ -324,7 +324,7 @@ final class McpCLITests: XCTestCase {
                 bearerTokenEnvVar: nil,
                 httpHeaders: nil,
                 envHttpHeaders: nil
-            ))
+            ), oauthClientID: "eci-prd-pub-codex-123")
         ])
         let loginCapture = McpRuntimeOAuthLoginCapture()
         nonisolated(unsafe) var discoveredURLs: [String] = []
@@ -346,6 +346,7 @@ final class McpCLITests: XCTestCase {
         XCTAssertEqual(discoveredURLs, ["https://mcp.github.test/mcp"])
         let requests = await loginCapture.requests()
         XCTAssertEqual(requests.map(\.scopes), [["profile", "email"]])
+        XCTAssertEqual(requests.map(\.oauthClientID), ["eci-prd-pub-codex-123"])
     }
 
     func testMcpCommandRuntimeAddRetriesDiscoveredScopeProviderErrorWithoutScopes() async throws {

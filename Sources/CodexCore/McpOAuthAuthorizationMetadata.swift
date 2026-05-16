@@ -184,6 +184,7 @@ public struct McpOAuthAuthorizationSession: Equatable, Sendable {
     public static func start(
         metadata: McpOAuthAuthorizationMetadata,
         scopes: [String],
+        oauthClientID: String? = nil,
         oauthResource: String? = nil,
         redirectURI: String,
         clientName: String? = nil,
@@ -199,6 +200,7 @@ public struct McpOAuthAuthorizationSession: Equatable, Sendable {
             metadata: metadata,
             scopes: scopes,
             redirectURI: redirectURI,
+            oauthClientID: oauthClientID,
             clientName: clientName,
             clientMetadataURL: clientMetadataURL,
             httpHeaders: httpHeaders,
@@ -243,6 +245,7 @@ public struct McpOAuthAuthorizationSession: Equatable, Sendable {
         metadata: McpOAuthAuthorizationMetadata,
         scopes: [String],
         redirectURI: String,
+        oauthClientID: String?,
         clientName: String?,
         clientMetadataURL: String?,
         httpHeaders: [String: String]?,
@@ -250,6 +253,16 @@ public struct McpOAuthAuthorizationSession: Equatable, Sendable {
         environment: [String: String],
         transport: McpOAuthDiscoveryTransport?
     ) async throws -> McpOAuthClientConfig {
+        if let oauthClientID = oauthClientID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !oauthClientID.isEmpty {
+            return McpOAuthClientConfig(
+                clientID: oauthClientID,
+                clientSecret: nil,
+                scopes: scopes,
+                redirectURI: redirectURI
+            )
+        }
+
         if metadata.clientIDMetadataDocumentSupported == true, let clientMetadataURL {
             guard isHTTPSURLWithNonRootPath(clientMetadataURL) else {
                 throw McpOAuthAuthorizationError.registrationFailed(

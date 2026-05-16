@@ -74,6 +74,7 @@ public struct McpServerConfig: Equatable, Sendable {
     public var enabledTools: [String]?
     public var disabledTools: [String]?
     public var scopes: [String]?
+    public var oauthClientID: String?
     public var oauthResource: String?
     public var tools: [String: McpServerToolConfig]
 
@@ -89,6 +90,7 @@ public struct McpServerConfig: Equatable, Sendable {
         enabledTools: [String]? = nil,
         disabledTools: [String]? = nil,
         scopes: [String]? = nil,
+        oauthClientID: String? = nil,
         oauthResource: String? = nil,
         tools: [String: McpServerToolConfig] = [:]
     ) {
@@ -103,8 +105,17 @@ public struct McpServerConfig: Equatable, Sendable {
         self.enabledTools = enabledTools
         self.disabledTools = disabledTools
         self.scopes = scopes
+        self.oauthClientID = oauthClientID
         self.oauthResource = oauthResource
         self.tools = tools
+    }
+
+    public var effectiveOAuthClientID: String? {
+        guard let clientID = oauthClientID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !clientID.isEmpty else {
+            return nil
+        }
+        return clientID
     }
 }
 
@@ -218,7 +229,7 @@ public enum McpConfigStore {
             }
             var builder = McpServerBuilder()
             for (key, value) in rawServer {
-                if case let .table(nestedTable) = value, ["env", "http_headers", "env_http_headers"].contains(key) {
+                if case let .table(nestedTable) = value, ["env", "http_headers", "env_http_headers", "oauth"].contains(key) {
                     for (nestedKey, nestedValue) in nestedTable {
                         try builder.set(table: key, key: nestedKey, value: nestedValue)
                     }
@@ -296,7 +307,7 @@ public enum McpConfigStore {
                 if let cwd {
                     lines.append("cwd = \(tomlString(cwd))")
                 }
-                appendCommonServerFields(server, to: &lines)
+                appendCommonServerFields(server, serverKey: serverKey, to: &lines)
                 appendToolConfigFields(server, serverKey: serverKey, to: &lines)
                 if let env, !env.isEmpty {
                     lines.append("")
@@ -310,7 +321,7 @@ public enum McpConfigStore {
                 if let bearerTokenEnvVar {
                     lines.append("bearer_token_env_var = \(tomlString(bearerTokenEnvVar))")
                 }
-                appendCommonServerFields(server, to: &lines)
+                appendCommonServerFields(server, serverKey: serverKey, to: &lines)
                 appendToolConfigFields(server, serverKey: serverKey, to: &lines)
                 if let httpHeaders, !httpHeaders.isEmpty {
                     lines.append("")
@@ -333,7 +344,11 @@ public enum McpConfigStore {
         return blocks.joined(separator: "\n\n") + "\n"
     }
 
-    private static func appendCommonServerFields(_ server: McpServerConfig, to lines: inout [String]) {
+    private static func appendCommonServerFields(
+        _ server: McpServerConfig,
+        serverKey: String,
+        to lines: inout [String]
+    ) {
         if !server.enabled {
             lines.append("enabled = false")
         }
@@ -363,6 +378,11 @@ public enum McpConfigStore {
         }
         if let oauthResource = server.oauthResource {
             lines.append("oauth_resource = \(tomlString(oauthResource))")
+        }
+        if let oauthClientID = server.oauthClientID {
+            lines.append("")
+            lines.append("[mcp_servers.\(serverKey).oauth]")
+            lines.append("client_id = \(tomlString(oauthClientID))")
         }
     }
 
@@ -825,6 +845,7 @@ private struct McpServerBuilder {
     var enabledTools: [String]?
     var disabledTools: [String]?
     var scopes: [String]?
+    var oauthClientID: String?
     var oauthResource: String?
     var tools: [String: McpServerToolConfig] = [:]
 
@@ -864,6 +885,13 @@ private struct McpServerBuilder {
             disabledTools = try stringArrayValue(value, key: "mcp_servers.\(serverName).disabled_tools")
         case "scopes":
             scopes = try stringArrayValue(value, key: "mcp_servers.\(serverName).scopes")
+        case "oauth":
+            guard case let .table(table) = value else {
+                throw McpConfigError.invalidConfigLine(key)
+            }
+            for (nestedKey, nestedValue) in table {
+                try set(table: key, key: nestedKey, value: nestedValue)
+            }
         case "oauth_resource":
             oauthResource = try stringValue(value, key: "mcp_servers.\(serverName).oauth_resource")
         case "env", "http_headers", "env_http_headers":
@@ -902,6 +930,10 @@ private struct McpServerBuilder {
         case "env_http_headers":
             envHttpHeaders = (envHttpHeaders ?? [:])
             envHttpHeaders?[key] = rawValue
+        case "oauth":
+            if key == "client_id" {
+                oauthClientID = rawValue
+            }
         default:
             break
         }
@@ -955,6 +987,7 @@ private struct McpServerBuilder {
             enabledTools: enabledTools,
             disabledTools: disabledTools,
             scopes: scopes,
+            oauthClientID: oauthClientID,
             oauthResource: oauthResource,
             tools: tools
         )

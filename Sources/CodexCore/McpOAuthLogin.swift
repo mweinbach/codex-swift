@@ -16,6 +16,7 @@ public struct McpOAuthLoginRequest: Sendable {
     public let envHttpHeaders: [String: String]?
     public let environment: [String: String]
     public let scopes: [String]?
+    public let oauthClientID: String?
     public let oauthResource: String?
     public let timeoutSeconds: Int?
     public let launchBrowser: Bool
@@ -31,6 +32,7 @@ public struct McpOAuthLoginRequest: Sendable {
         envHttpHeaders: [String: String]? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         scopes: [String]? = nil,
+        oauthClientID: String? = nil,
         oauthResource: String? = nil,
         timeoutSeconds: Int? = nil,
         launchBrowser: Bool = true,
@@ -45,6 +47,7 @@ public struct McpOAuthLoginRequest: Sendable {
         self.envHttpHeaders = envHttpHeaders
         self.environment = environment
         self.scopes = scopes
+        self.oauthClientID = oauthClientID
         self.oauthResource = oauthResource
         self.timeoutSeconds = timeoutSeconds
         self.launchBrowser = launchBrowser
@@ -103,6 +106,7 @@ public enum McpOAuthLogin {
         let session = try await McpOAuthAuthorizationSession.start(
             metadata: metadata,
             scopes: scopes,
+            oauthClientID: request.oauthClientID,
             oauthResource: request.oauthResource,
             redirectURI: callbackServer.redirectURI,
             clientName: "Codex",

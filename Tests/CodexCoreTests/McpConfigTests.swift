@@ -194,6 +194,9 @@ final class McpConfigTests: XCTestCase {
         scopes = ["repo", "user"]
         oauth_resource = "https://api.example.com"
 
+        [mcp_servers.github.oauth]
+        client_id = "eci-prd-pub-codex-123"
+
         [mcp_servers.github.tools.search]
         approval_mode = "prompt"
         """)
@@ -211,9 +214,42 @@ final class McpConfigTests: XCTestCase {
                 supportsParallelToolCalls: true,
                 defaultToolsApprovalMode: .approve,
                 scopes: ["repo", "user"],
+                oauthClientID: "eci-prd-pub-codex-123",
                 oauthResource: "https://api.example.com",
                 tools: ["search": McpServerToolConfig(approvalMode: .prompt)]
             )
+        )
+    }
+
+    func testReplaceGlobalMcpServersSerializesOAuthClientIDLikeRust() throws {
+        let temp = try McpConfigTemporaryDirectory()
+        try McpConfigStore.replaceGlobalMcpServers(codexHome: temp.url, servers: [
+            "maas_outlook": McpServerConfig(
+                transport: .streamableHttp(
+                    url: "https://example.com/mcp",
+                    bearerTokenEnvVar: nil,
+                    httpHeaders: nil,
+                    envHttpHeaders: nil
+                ),
+                oauthClientID: "eci-prd-pub-codex-123"
+            )
+        ])
+
+        let serialized = try String(
+            contentsOf: temp.url.appendingPathComponent("config.toml"),
+            encoding: .utf8
+        )
+        XCTAssertEqual(serialized, """
+        [mcp_servers.maas_outlook]
+        url = "https://example.com/mcp"
+
+        [mcp_servers.maas_outlook.oauth]
+        client_id = "eci-prd-pub-codex-123"
+
+        """)
+        XCTAssertEqual(
+            try McpConfigStore.loadGlobalMcpServers(codexHome: temp.url)["maas_outlook"]?.oauthClientID,
+            "eci-prd-pub-codex-123"
         )
     }
 

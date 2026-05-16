@@ -170,6 +170,7 @@ public enum McpCommandRuntime {
                         httpHeaders: httpHeaders,
                         envHttpHeaders: envHttpHeaders,
                         resolvedScopes: resolvedScopes,
+                        oauthClientID: nil,
                         oauthResource: nil,
                         dependencies: dependencies
                     )
@@ -238,6 +239,7 @@ public enum McpCommandRuntime {
                 httpHeaders: httpHeaders,
                 envHttpHeaders: envHttpHeaders,
                 resolvedScopes: resolvedScopes,
+                oauthClientID: server.effectiveOAuthClientID,
                 oauthResource: server.oauthResource,
                 dependencies: dependencies
             )
@@ -315,6 +317,7 @@ public enum McpCommandRuntime {
         httpHeaders: [String: String]?,
         envHttpHeaders: [String: String]?,
         resolvedScopes: ResolvedMcpOAuthScopes,
+        oauthClientID: String?,
         oauthResource: String?,
         dependencies: Dependencies
     ) async throws {
@@ -327,6 +330,7 @@ public enum McpCommandRuntime {
                 httpHeaders: httpHeaders,
                 envHttpHeaders: envHttpHeaders,
                 scopes: resolvedScopes.scopes,
+                oauthClientID: oauthClientID,
                 oauthResource: oauthResource,
                 dependencies: dependencies
             )
@@ -343,6 +347,7 @@ public enum McpCommandRuntime {
                 httpHeaders: httpHeaders,
                 envHttpHeaders: envHttpHeaders,
                 scopes: [],
+                oauthClientID: oauthClientID,
                 oauthResource: oauthResource,
                 dependencies: dependencies
             )
@@ -357,6 +362,7 @@ public enum McpCommandRuntime {
         httpHeaders: [String: String]?,
         envHttpHeaders: [String: String]?,
         scopes: [String],
+        oauthClientID: String?,
         oauthResource: String?,
         dependencies: Dependencies
     ) async throws {
@@ -369,6 +375,7 @@ public enum McpCommandRuntime {
             envHttpHeaders: envHttpHeaders,
             environment: dependencies.environment(),
             scopes: scopes,
+            oauthClientID: oauthClientID,
             oauthResource: oauthResource,
             callbackPort: settings.mcpOAuthCallbackPort,
             callbackURL: settings.mcpOAuthCallbackURL

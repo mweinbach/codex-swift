@@ -300,6 +300,31 @@ final class McpOAuthAuthorizationMetadataTests: XCTestCase {
         XCTAssertTrue(session.authURL.contains("client_id=https%3A%2F%2Fclient.example%2Fmetadata.json"))
     }
 
+    func testAuthorizationSessionUsesConfiguredClientIDWithoutDynamicRegistrationLikeRust() async throws {
+        let probe = OAuthAuthorizationMetadataProbe(responses: [:])
+        let session = try await McpOAuthAuthorizationSession.start(
+            metadata: sampleAuthorizationMetadata(registrationEndpoint: "https://auth.example/register"),
+            scopes: ["profile"],
+            oauthClientID: "eci-prd-pub-codex-123",
+            redirectURI: "http://127.0.0.1/callback",
+            clientName: "Codex",
+            transport: { request in await probe.handle(request) },
+            pkceGenerator: {
+                PKCECodes(codeVerifier: "verifier", codeChallenge: "challenge")
+            },
+            csrfTokenGenerator: {
+                "csrf"
+            }
+        )
+
+        XCTAssertEqual(session.clientConfig.clientID, "eci-prd-pub-codex-123")
+        XCTAssertEqual(session.clientConfig.clientSecret, nil)
+        XCTAssertEqual(session.clientConfig.scopes, ["profile"])
+        XCTAssertTrue(session.authURL.contains("client_id=eci-prd-pub-codex-123"))
+        let requests = await probe.requests()
+        XCTAssertEqual(requests, [])
+    }
+
     func testAuthorizationSessionRejectsInvalidURLBasedClientID() async throws {
         do {
             _ = try await McpOAuthAuthorizationSession.start(
