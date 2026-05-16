@@ -405,16 +405,16 @@ public extension ResponseInputItem {
         switch input {
         case let .text(text, _):
             return [.inputText(text: text)]
-        case let .image(imageURL):
+        case let .image(imageURL, detail):
             imageIndex += 1
             return [
                 .inputText(text: imageOpenTagText),
-                .inputImage(imageURL: imageURL, detail: defaultImageDetail),
+                .inputImage(imageURL: imageURL, detail: detail ?? defaultImageDetail),
                 .inputText(text: imageCloseTagText)
             ]
-        case let .localImage(path):
+        case let .localImage(path, detail):
             imageIndex += 1
-            return localImageContentItems(path: path, labelNumber: imageIndex)
+            return localImageContentItems(path: path, detail: detail, labelNumber: imageIndex)
         case .skill, .mention:
             return []
         }
@@ -427,12 +427,15 @@ public extension ResponseInputItem {
         "<image name=[Image #\(labelNumber)]>"
     }
 
-    private static func localImageContentItems(path: String, labelNumber: Int) -> [ContentItem] {
+    private static func localImageContentItems(path: String, detail: ImageDetail?, labelNumber: Int) -> [ContentItem] {
         do {
-            let image = try LocalImageProcessor.loadAndResizeToFit(path: URL(fileURLWithPath: path))
+            let selectedDetail = detail ?? defaultImageDetail
+            let image = try selectedDetail == .original
+                ? LocalImageProcessor.loadOriginal(path: URL(fileURLWithPath: path))
+                : LocalImageProcessor.loadAndResizeToFit(path: URL(fileURLWithPath: path))
             return [
                 .inputText(text: localImageOpenTagText(labelNumber: labelNumber)),
-                .inputImage(imageURL: image.dataURL, detail: defaultImageDetail),
+                .inputImage(imageURL: image.dataURL, detail: selectedDetail),
                 .inputText(text: imageCloseTagText)
             ]
         } catch let error as ImageProcessingError {

@@ -11,7 +11,7 @@ final class EventMappingTests: XCTestCase {
             content: [
                 .inputText(text: "Hello world"),
                 .inputImage(imageURL: img1),
-                .inputImage(imageURL: img2)
+                .inputImage(imageURL: img2, detail: .original)
             ]
         )
 
@@ -23,7 +23,7 @@ final class EventMappingTests: XCTestCase {
         XCTAssertEqual(message.content, [
             .text("Hello world"),
             .image(imageURL: img1),
-            .image(imageURL: img2)
+            .image(imageURL: img2, detail: .original)
         ])
     }
 
@@ -45,7 +45,7 @@ final class EventMappingTests: XCTestCase {
             return XCTFail("expected user message")
         }
         XCTAssertEqual(message.content, [
-            .image(imageURL: imageURL),
+            .image(imageURL: imageURL, detail: defaultImageDetail),
             .text(userText)
         ])
     }
@@ -68,7 +68,7 @@ final class EventMappingTests: XCTestCase {
             return XCTFail("expected user message")
         }
         XCTAssertEqual(message.content, [
-            .image(imageURL: imageURL),
+            .image(imageURL: imageURL, detail: defaultImageDetail),
             .text(userText)
         ])
     }

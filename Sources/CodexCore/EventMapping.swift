@@ -79,8 +79,8 @@ public enum EventMapping {
                 }
                 content.append(.text(text))
 
-            case let .inputImage(imageURL, _):
-                content.append(.image(imageURL: imageURL))
+            case let .inputImage(imageURL, detail):
+                content.append(.image(imageURL: imageURL, detail: detail))
 
             case .outputText:
                 continue

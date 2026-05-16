@@ -287,8 +287,8 @@ extension AppServerTextElement: Codable {
 
 public enum AppServerUserInput: Equatable, Sendable {
     case text(String, textElements: [AppServerTextElement] = [])
-    case image(url: String)
-    case localImage(path: String)
+    case image(url: String, detail: ImageDetail? = nil)
+    case localImage(path: String, detail: ImageDetail? = nil)
     case skill(name: String, path: String)
     case mention(name: String, path: String)
 
@@ -298,6 +298,7 @@ public enum AppServerUserInput: Equatable, Sendable {
         case textElements
         case url
         case path
+        case detail
         case name
     }
 
@@ -313,10 +314,10 @@ public enum AppServerUserInput: Equatable, Sendable {
         switch core {
         case let .text(text, textElements):
             self = .text(text, textElements: textElements.map(AppServerTextElement.init))
-        case let .image(imageURL):
-            self = .image(url: imageURL)
-        case let .localImage(path):
-            self = .localImage(path: path)
+        case let .image(imageURL, detail):
+            self = .image(url: imageURL, detail: detail)
+        case let .localImage(path, detail):
+            self = .localImage(path: path, detail: detail)
         case let .skill(name, path):
             self = .skill(name: name, path: path)
         case let .mention(name, path):
@@ -328,10 +329,10 @@ public enum AppServerUserInput: Equatable, Sendable {
         switch self {
         case let .text(text, textElements):
             .text(text, textElements: textElements.map(\.coreValue))
-        case let .image(url):
-            .image(imageURL: url)
-        case let .localImage(path):
-            .localImage(path: path)
+        case let .image(url, detail):
+            .image(imageURL: url, detail: detail)
+        case let .localImage(path, detail):
+            .localImage(path: path, detail: detail)
         case let .skill(name, path):
             .skill(name: name, path: path)
         case let .mention(name, path):
@@ -363,9 +364,15 @@ extension AppServerUserInput: Codable {
                 )
             )
         case .image:
-            self = .image(url: try container.decode(String.self, forKey: .url))
+            self = .image(
+                url: try container.decode(String.self, forKey: .url),
+                detail: try container.decodeIfPresent(ImageDetail.self, forKey: .detail)
+            )
         case .localImage:
-            self = .localImage(path: try container.decode(String.self, forKey: .path))
+            self = .localImage(
+                path: try container.decode(String.self, forKey: .path),
+                detail: try container.decodeIfPresent(ImageDetail.self, forKey: .detail)
+            )
         case .skill:
             self = .skill(
                 name: try container.decode(String.self, forKey: .name),
@@ -386,12 +393,14 @@ extension AppServerUserInput: Codable {
             try container.encode(InputType.text, forKey: .type)
             try container.encode(text, forKey: .text)
             try container.encode(textElements, forKey: .textElements)
-        case let .image(url):
+        case let .image(url, detail):
             try container.encode(InputType.image, forKey: .type)
             try container.encode(url, forKey: .url)
-        case let .localImage(path):
+            try container.encodeIfPresent(detail, forKey: .detail)
+        case let .localImage(path, detail):
             try container.encode(InputType.localImage, forKey: .type)
             try container.encode(path, forKey: .path)
+            try container.encodeIfPresent(detail, forKey: .detail)
         case let .skill(name, path):
             try container.encode(InputType.skill, forKey: .type)
             try container.encode(name, forKey: .name)

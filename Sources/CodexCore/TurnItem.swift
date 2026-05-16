@@ -258,7 +258,7 @@ public struct UserMessageItem: Equatable, Codable, Sendable {
 
     public var imageURLs: [String] {
         content.compactMap { input in
-            if case let .image(imageURL) = input {
+            if case let .image(imageURL, _) = input {
                 return imageURL
             }
             return nil
@@ -267,7 +267,7 @@ public struct UserMessageItem: Equatable, Codable, Sendable {
 
     public var localImagePaths: [String] {
         content.compactMap { input in
-            if case let .localImage(path) = input {
+            if case let .localImage(path, _) = input {
                 return path
             }
             return nil

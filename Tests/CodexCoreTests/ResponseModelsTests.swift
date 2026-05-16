@@ -432,7 +432,7 @@ final class ResponseModelsTests: XCTestCase {
     func testUserInputsBecomeMessageAndSkipToolBodyInputs() throws {
         let item = ResponseInputItem(userInputs: [
             .text("hello"),
-            .image(imageURL: "data:image/png;base64,abc"),
+            .image(imageURL: "data:image/png;base64,abc", detail: .original),
             .skill(name: "sample", path: "/tmp/SKILL.md"),
             .mention(name: "drive", path: "app://google_drive")
         ])
@@ -444,7 +444,7 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertEqual(content, [
             .inputText(text: "hello"),
             .inputText(text: "<image>"),
-            .inputImage(imageURL: "data:image/png;base64,abc", detail: defaultImageDetail),
+            .inputImage(imageURL: "data:image/png;base64,abc", detail: .original),
             .inputText(text: "</image>")
         ])
     }
@@ -490,6 +490,26 @@ final class ResponseModelsTests: XCTestCase {
         XCTAssertEqual(content.first, .inputText(text: "<image name=[Image #1]>"))
         XCTAssertEqual(content.last, .inputText(text: "</image>"))
         XCTAssertEqual(detail, defaultImageDetail)
+        let prefix = "data:image/png;base64,"
+        XCTAssertTrue(imageURL.hasPrefix(prefix))
+        let encoded = String(imageURL.dropFirst(prefix.count))
+        XCTAssertEqual(Data(base64Encoded: encoded), original)
+    }
+
+    func testLocalImageOriginalDetailKeepsOriginalResolutionLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let path = temp.url.appendingPathComponent("large-original.png")
+        let original = try writePNG(width: 2_560, height: 1_280, to: path)
+
+        let item = ResponseInputItem(userInputs: [.localImage(path: path.path, detail: .original)])
+
+        guard case let .message(_, content, _) = item,
+              case let .inputImage(imageURL, detail) = content.dropFirst().first
+        else {
+            return XCTFail("expected local image to become an input image")
+        }
+
+        XCTAssertEqual(detail, .original)
         let prefix = "data:image/png;base64,"
         XCTAssertTrue(imageURL.hasPrefix(prefix))
         let encoded = String(imageURL.dropFirst(prefix.count))

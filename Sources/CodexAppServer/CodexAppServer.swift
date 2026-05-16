@@ -15622,16 +15622,24 @@ public enum CodexAppServer {
                 "text": text,
                 "textElements": textElements.map(textElementObject)
             ]
-        case let .image(imageURL):
-            return [
+        case let .image(imageURL, detail):
+            var object: [String: Any] = [
                 "type": "image",
                 "url": imageURL
             ]
-        case let .localImage(path):
-            return [
+            if let detail {
+                object["detail"] = detail.rawValue
+            }
+            return object
+        case let .localImage(path, detail):
+            var object: [String: Any] = [
                 "type": "localImage",
                 "path": path
             ]
+            if let detail {
+                object["detail"] = detail.rawValue
+            }
+            return object
         case let .skill(name, path):
             return [
                 "type": "skill",
@@ -20830,8 +20838,9 @@ public enum CodexAppServer {
                 }
             case "image":
                 if let url = stringParam(item["url"]), !url.isEmpty {
+                    let detail = stringParam(item["detail"]).flatMap(ImageDetail.init(rawValue:))
                     images.append(url)
-                    userInputItems.append(.image(imageURL: url))
+                    userInputItems.append(.image(imageURL: url, detail: detail))
                 }
             default:
                 continue

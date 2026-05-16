@@ -32,6 +32,16 @@ final class AppServerTurnProtocolTests: XCTestCase {
             "type": "localImage",
             "path": "/tmp/image.png"
         ])
+        try XCTAssertJSONObjectEqual(AppServerUserInput.image(url: "https://example.com/original.png", detail: .original), [
+            "type": "image",
+            "url": "https://example.com/original.png",
+            "detail": "original"
+        ])
+        try XCTAssertJSONObjectEqual(AppServerUserInput.localImage(path: "/tmp/original.png", detail: .original), [
+            "type": "localImage",
+            "path": "/tmp/original.png",
+            "detail": "original"
+        ])
         try XCTAssertJSONObjectEqual(AppServerUserInput.skill(name: "plan", path: "/skills/plan/SKILL.md"), [
             "type": "skill",
             "name": "plan",
@@ -73,6 +83,31 @@ final class AppServerTurnProtocolTests: XCTestCase {
         try XCTAssertJSONObjectEqual(AppServerUserInput(core: .localImage(path: "/tmp/a.png")), [
             "type": "localImage",
             "path": "/tmp/a.png"
+        ])
+
+        let remoteOriginal = AppServerUserInput(core: .image(
+            imageURL: "https://example.com/image.png",
+            detail: .original
+        ))
+        XCTAssertEqual(remoteOriginal.coreValue, .image(
+            imageURL: "https://example.com/image.png",
+            detail: .original
+        ))
+        try XCTAssertJSONObjectEqual(remoteOriginal, [
+            "type": "image",
+            "url": "https://example.com/image.png",
+            "detail": "original"
+        ])
+
+        let localOriginal = AppServerUserInput(core: .localImage(
+            path: "local/image.png",
+            detail: .original
+        ))
+        XCTAssertEqual(localOriginal.coreValue, .localImage(path: "local/image.png", detail: .original))
+        try XCTAssertJSONObjectEqual(localOriginal, [
+            "type": "localImage",
+            "path": "local/image.png",
+            "detail": "original"
         ])
     }
 

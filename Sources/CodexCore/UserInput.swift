@@ -40,8 +40,8 @@ public struct TextElement: Equatable, Codable, Sendable {
 
 public enum UserInput: Equatable, Codable, Sendable {
     case text(String, textElements: [TextElement] = [])
-    case image(imageURL: String)
-    case localImage(path: String)
+    case image(imageURL: String, detail: ImageDetail? = nil)
+    case localImage(path: String, detail: ImageDetail? = nil)
     case skill(name: String, path: String)
     case mention(name: String, path: String)
 
@@ -51,6 +51,7 @@ public enum UserInput: Equatable, Codable, Sendable {
         case textElements = "text_elements"
         case imageURL = "image_url"
         case path
+        case detail
         case name
     }
 
@@ -75,9 +76,15 @@ public enum UserInput: Equatable, Codable, Sendable {
                 )
             )
         case .image:
-            self = .image(imageURL: try container.decode(String.self, forKey: .imageURL))
+            self = .image(
+                imageURL: try container.decode(String.self, forKey: .imageURL),
+                detail: try container.decodeIfPresent(ImageDetail.self, forKey: .detail)
+            )
         case .localImage:
-            self = .localImage(path: try container.decode(String.self, forKey: .path))
+            self = .localImage(
+                path: try container.decode(String.self, forKey: .path),
+                detail: try container.decodeIfPresent(ImageDetail.self, forKey: .detail)
+            )
         case .skill:
             self = .skill(
                 name: try container.decode(String.self, forKey: .name),
@@ -98,12 +105,14 @@ public enum UserInput: Equatable, Codable, Sendable {
             try container.encode(InputType.text, forKey: .type)
             try container.encode(text, forKey: .text)
             try container.encode(textElements, forKey: .textElements)
-        case let .image(imageURL):
+        case let .image(imageURL, detail):
             try container.encode(InputType.image, forKey: .type)
             try container.encode(imageURL, forKey: .imageURL)
-        case let .localImage(path):
+            try container.encodeIfPresent(detail, forKey: .detail)
+        case let .localImage(path, detail):
             try container.encode(InputType.localImage, forKey: .type)
             try container.encode(path, forKey: .path)
+            try container.encodeIfPresent(detail, forKey: .detail)
         case let .skill(name, path):
             try container.encode(InputType.skill, forKey: .type)
             try container.encode(name, forKey: .name)

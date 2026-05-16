@@ -1021,16 +1021,16 @@ final class AppServerThreadProtocolTests: XCTestCase {
                 id: "user-1",
                 content: [
                     .text("hello"),
-                    .image(imageURL: "https://example.com/image.png"),
-                    .localImage(path: "local/image.png"),
+                    .image(imageURL: "https://example.com/image.png", detail: .original),
+                    .localImage(path: "local/image.png", detail: .original),
                     .skill(name: "skill-creator", path: "/repo/.codex/skills/skill-creator/SKILL.md"),
                     .mention(name: "Demo App", path: "app://demo-app")
                 ]
             ))),
             .userMessage(id: "user-1", content: [
                 .text("hello"),
-                .image(url: "https://example.com/image.png"),
-                .localImage(path: "local/image.png"),
+                .image(url: "https://example.com/image.png", detail: .original),
+                .localImage(path: "local/image.png", detail: .original),
                 .skill(name: "skill-creator", path: "/repo/.codex/skills/skill-creator/SKILL.md"),
                 .mention(name: "Demo App", path: "app://demo-app")
             ])

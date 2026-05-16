@@ -409,7 +409,7 @@ public enum DebugCommandRuntime {
             environmentContextNetwork: environmentContextNetwork(from: configLayerStack.requirements.network)
         )
 
-        var userInputs = imagePaths.map(UserInput.localImage(path:))
+        var userInputs = imagePaths.map { UserInput.localImage(path: $0) }
         if let prompt {
             userInputs.append(.text(prompt.replacingCRLFWithLF()))
         }

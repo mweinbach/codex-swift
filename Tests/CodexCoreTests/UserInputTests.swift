@@ -28,6 +28,26 @@ final class UserInputTests: XCTestCase {
         ])
     }
 
+    func testImageInputsPreserveOptionalDetailLikeRust() throws {
+        let remoteJSON = #"{"type":"image","image_url":"https://example.com/image.png","detail":"original"}"#
+        let decodedRemote = try JSONDecoder().decode(UserInput.self, from: Data(remoteJSON.utf8))
+        XCTAssertEqual(decodedRemote, .image(imageURL: "https://example.com/image.png", detail: .original))
+        try XCTAssertJSONObjectEqual(decodedRemote, [
+            "type": "image",
+            "image_url": "https://example.com/image.png",
+            "detail": "original"
+        ])
+
+        let localJSON = #"{"type":"local_image","path":"local/image.png","detail":"original"}"#
+        let decodedLocal = try JSONDecoder().decode(UserInput.self, from: Data(localJSON.utf8))
+        XCTAssertEqual(decodedLocal, .localImage(path: "local/image.png", detail: .original))
+        try XCTAssertJSONObjectEqual(decodedLocal, [
+            "type": "local_image",
+            "path": "local/image.png",
+            "detail": "original"
+        ])
+    }
+
     func testTextInputCarriesTextElementsWithRustDefaults() throws {
         let input = UserInput.text(
             "see [image]",

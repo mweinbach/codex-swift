@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked upstream Rust commit `8543e39885` (`Preserve
+  image detail in app-server inputs`). Swift core and app-server user-input
+  models now preserve optional `detail` on both remote and local images,
+  convert it through app-server thread items, reconstruct it from Responses
+  input images, and keep explicit `original` local-image inputs on the
+  original-resolution loading path instead of forcing the resized default.
 - 2026-05-16: rechecked Rust `ConfigProfile` in
   `codex-rs/config/src/profile_toml.rs`. Swift's Rust-shaped config profile
   model now accepts and serializes the same direct runtime fields
