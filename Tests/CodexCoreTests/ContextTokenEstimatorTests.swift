@@ -87,6 +87,25 @@ final class ContextTokenEstimatorTests: XCTestCase {
         XCTAssertLessThan(estimated, rawBytes)
     }
 
+    func testImageDataURLPayloadDoesNotDominateCustomToolOutputEstimateLikeRust() throws {
+        let payload = String(repeating: "D", count: 50_000)
+        let imageURL = "data:image/png;base64,\(payload)"
+        let item = ResponseItem.customToolCallOutput(
+            callID: "call-js-repl",
+            output: FunctionCallOutputPayload(content: "Screenshot captured", contentItems: [
+                .inputText(text: "Screenshot captured"),
+                .inputImage(imageURL: imageURL, detail: .high)
+            ])
+        )
+
+        let rawBytes = try encodedByteCount(item)
+        let estimated = ContextTokenEstimator.estimateResponseItemModelVisibleBytes(item)
+        let expected = rawBytes - payload.count + ContextTokenEstimator.resizedImageBytesEstimate
+
+        XCTAssertEqual(estimated, expected)
+        XCTAssertLessThan(estimated, rawBytes)
+    }
+
     func testNonBase64AndNonImageDataURLsAreUnchangedLikeRust() throws {
         let remoteImage = ResponseItem.message(role: "user", content: [
             .inputImage(imageURL: "https://example.com/foo.png", detail: .high)
@@ -127,6 +146,17 @@ final class ContextTokenEstimatorTests: XCTestCase {
             + (2 * ContextTokenEstimator.resizedImageBytesEstimate)
 
         XCTAssertEqual(estimated, expected)
+    }
+
+    func testTextOnlyItemsUseRawSerializedSizeLikeRust() throws {
+        let item = ResponseItem.message(role: "assistant", content: [
+            .outputText(text: "Hello world, this is a response.")
+        ])
+
+        XCTAssertEqual(
+            ContextTokenEstimator.estimateResponseItemModelVisibleBytes(item),
+            try encodedByteCount(item)
+        )
     }
 
     func testOriginalDetailImagesScaleWithDimensionsLikeRust() throws {

@@ -13,6 +13,13 @@ Source baseline inspected for this scaffold:
 Recent upstream audit checkpoint:
 
 - 2026-05-16: rechecked Rust
+  `image_data_url_payload_does_not_dominate_custom_tool_call_output_estimate`
+  and `text_only_items_unchanged` in
+  `codex-rs/core/src/context_manager/history_tests.rs`. Swift context token
+  estimator coverage now separately pins structured custom-tool output images
+  to the fixed resized-image replacement cost and keeps text-only items at
+  their raw serialized size.
+- 2026-05-16: rechecked Rust
   `original_detail_images_are_capped_at_max_patch_count` in
   `codex-rs/core/src/context_manager/history_tests.rs`. Swift context token
   estimator coverage now pins the 10,000-patch cap for `detail: "original"`
