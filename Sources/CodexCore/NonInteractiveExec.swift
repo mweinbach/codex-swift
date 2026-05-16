@@ -75,6 +75,7 @@ public enum NonInteractiveExec {
         cwd: URL,
         approvalPolicy: AskForApproval,
         sandboxPolicy: SandboxPolicy,
+        permissionProfile: PermissionProfile? = nil,
         shell: Shell,
         includeEnvironmentContext: Bool = true,
         includePermissionsInstructions: Bool = true,
@@ -94,12 +95,16 @@ public enum NonInteractiveExec {
             approvalPolicy: approvalPolicy,
             sandboxPolicy: sandboxPolicy
         )
+        let effectivePermissionProfile = permissionProfile ?? PermissionProfile.fromLegacySandboxPolicyForCwd(
+            sandboxPolicy,
+            cwd: cwd.path
+        )
         var input: [ResponseItem] = []
         var developerContent: [ContentItem] = []
         if includePermissionsInstructions {
             developerContent.append(
-                .inputText(text: PermissionsInstructions.fromPolicy(
-                    sandboxPolicy,
+                .inputText(text: PermissionsInstructions.fromPermissionProfile(
+                    effectivePermissionProfile,
                     config: PermissionsPromptConfig(approvalPolicy: approvalPolicy),
                     cwd: cwd.path
                 ).render())
@@ -161,6 +166,7 @@ public enum NonInteractiveExec {
         cwd: URL,
         approvalPolicy: AskForApproval,
         sandboxPolicy: SandboxPolicy,
+        permissionProfile: PermissionProfile? = nil,
         shell: Shell,
         includeEnvironmentContext: Bool = true,
         includePermissionsInstructions: Bool = true,
@@ -182,6 +188,7 @@ public enum NonInteractiveExec {
             cwd: cwd,
             approvalPolicy: approvalPolicy,
             sandboxPolicy: sandboxPolicy,
+            permissionProfile: permissionProfile,
             shell: shell,
             includeEnvironmentContext: includeEnvironmentContext,
             includePermissionsInstructions: includePermissionsInstructions,

@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `aeca1cba6f` (`context: remove legacy
+  permissions instructions helper`). Swift permission-instruction rendering now
+  consumes the effective `PermissionProfile` directly during non-interactive
+  prompt construction, removes the legacy `SandboxPolicy` adapter from
+  `PermissionsInstructions`, and keeps CLI sandbox overrides projected to a
+  permission profile before rendering model-visible permission text.
 - 2026-05-16: rechecked Rust commit `4c80435eba` (`telemetry: tag
   sandboxes from permission profiles`). Swift sandbox telemetry helpers now
   follow Rust's permission-profile-only production path, removing the legacy

@@ -361,6 +361,10 @@ public enum DebugCommandRuntime {
     ) -> [ResponseItem] {
         let approvalPolicy = config.approvalPolicy ?? .onRequest
         let sandboxPolicy = config.legacySandboxPolicy()
+        let permissionProfile = config.permissionProfile ?? PermissionProfile.fromLegacySandboxPolicyForCwd(
+            sandboxPolicy,
+            cwd: cwd.path
+        )
         let shell = ShellResolver.defaultUserShell()
         let projectInstructions = ProjectDoc.getUserInstructions(
             config: ProjectDocConfig(runtimeConfig: config, cwd: cwd)
@@ -391,6 +395,7 @@ public enum DebugCommandRuntime {
             cwd: cwd,
             approvalPolicy: approvalPolicy,
             sandboxPolicy: sandboxPolicy,
+            permissionProfile: permissionProfile,
             shell: shell,
             includeEnvironmentContext: config.includeEnvironmentContext,
             includePermissionsInstructions: config.includePermissionsInstructions,

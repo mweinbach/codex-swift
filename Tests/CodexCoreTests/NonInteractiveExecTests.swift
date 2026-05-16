@@ -82,6 +82,28 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(text, "ship it")
     }
 
+    func testMakePromptBuildsPermissionsFromEffectiveProfileLikeRust() {
+        let prompt = NonInteractiveExec.makePrompt(
+            prompt: "ship it",
+            imagePaths: [],
+            outputSchema: nil,
+            cwd: URL(fileURLWithPath: "/tmp/project", isDirectory: true),
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            permissionProfile: .readOnly(),
+            shell: Shell(shellType: .zsh, shellPath: "/bin/zsh")
+        )
+
+        guard case let .message(_, "developer", developerContent, _) = prompt.input.first,
+              case let .inputText(permissionsText) = developerContent.first
+        else {
+            return XCTFail("expected permissions developer message")
+        }
+
+        XCTAssertTrue(permissionsText.contains("`sandbox_mode` is `read-only`"))
+        XCTAssertFalse(permissionsText.contains("`sandbox_mode` is `danger-full-access`"))
+    }
+
     func testMakePromptExpandsConfiguredEnvironmentSnapshotDefaultFirstLikeRust() throws {
         let cwd = URL(fileURLWithPath: "/tmp/project", isDirectory: true)
         let snapshot = ConfiguredEnvironmentSnapshot(

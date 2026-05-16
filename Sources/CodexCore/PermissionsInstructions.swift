@@ -48,18 +48,6 @@ public struct PermissionsInstructions: Equatable, Sendable {
         )
     }
 
-    public static func fromPolicy(
-        _ sandboxPolicy: SandboxPolicy,
-        config: PermissionsPromptConfig,
-        cwd: String
-    ) -> PermissionsInstructions {
-        fromPermissionProfile(
-            .fromLegacySandboxPolicy(sandboxPolicy),
-            config: config,
-            cwd: cwd
-        )
-    }
-
     public static func fromPermissionsWithNetwork(
         sandboxMode: SandboxMode,
         networkAccess: NetworkAccess,

@@ -127,6 +127,28 @@ final class DebugCommandRuntimeTests: XCTestCase {
         XCTAssertTrue(text.contains("<environment_context>"))
     }
 
+    func testPromptInputRendersPermissionsFromEffectiveProfileLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        var config = CodexRuntimeConfig(modelProvider: "test-provider", projectDocMaxBytes: 0)
+        config.sandboxPolicy = .dangerFullAccess
+        config.permissionProfile = .readOnly()
+
+        let result = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .promptInput(prompt: nil, imagePaths: [])),
+            dependencies: testDependencies(codexHome: temp.url, config: config)
+        )
+
+        let output = try XCTUnwrap(result.stdoutMessage)
+        let decoded = try JSONDecoder().decode([ResponseItem].self, from: Data(output.utf8))
+        guard case let .message(_, "developer", developerContent, _) = decoded.first,
+              case let .inputText(permissionsText) = developerContent.first
+        else {
+            return XCTFail("expected permissions developer message")
+        }
+        XCTAssertTrue(permissionsText.contains("`sandbox_mode` is `read-only`"))
+        XCTAssertFalse(permissionsText.contains("`sandbox_mode` is `danger-full-access`"))
+    }
+
     func testPromptInputHonorsInitialContextInstructionGates() async throws {
         let temp = try TemporaryDirectory()
 

@@ -948,6 +948,12 @@ private func runNonInteractiveExec(
     )
     let approvalPolicy = resolveExecApprovalPolicy(settings: settings, arguments: arguments)
     let sandboxPolicy = resolveExecSandboxPolicy(settings: settings, arguments: arguments)
+    let permissionProfile = resolveExecPermissionProfile(
+        settings: settings,
+        arguments: arguments,
+        sandboxPolicy: sandboxPolicy,
+        cwd: cwd
+    )
     let shell = ShellSnapshot.attachSnapshotIfEnabled(
         codexHome: codexHome,
         sessionID: ThreadId(uuid: conversationID.uuid),
@@ -1006,6 +1012,7 @@ private func runNonInteractiveExec(
         cwd: cwd,
         approvalPolicy: approvalPolicy,
         sandboxPolicy: sandboxPolicy,
+        permissionProfile: permissionProfile,
         shell: shell,
         includeEnvironmentContext: settings.includeEnvironmentContext,
         includePermissionsInstructions: settings.includePermissionsInstructions,
@@ -1409,6 +1416,22 @@ private func resolveExecSandboxPolicy(
         .flatMap(SandboxModeCLIArgument.init(rawValue:))?
         .sandboxMode
     return mode.map(sandboxPolicy(from:)) ?? settings.legacySandboxPolicy()
+}
+
+private func resolveExecPermissionProfile(
+    settings: CodexRuntimeConfig,
+    arguments: [String],
+    sandboxPolicy: SandboxPolicy,
+    cwd: URL
+) -> PermissionProfile {
+    let hasLegacySandboxOverride = execHasFlag("--dangerously-bypass-approvals-and-sandbox", in: arguments)
+        || execHasFlag("--yolo", in: arguments)
+        || execHasFlag("--full-auto", in: arguments)
+        || execOptionValue(short: "-s", long: "--sandbox", in: arguments) != nil
+    if hasLegacySandboxOverride {
+        return PermissionProfile.fromLegacySandboxPolicyForCwd(sandboxPolicy, cwd: cwd.path)
+    }
+    return settings.permissionProfile ?? PermissionProfile.fromLegacySandboxPolicyForCwd(sandboxPolicy, cwd: cwd.path)
 }
 
 private func sandboxPolicy(from mode: SandboxMode) -> SandboxPolicy {
