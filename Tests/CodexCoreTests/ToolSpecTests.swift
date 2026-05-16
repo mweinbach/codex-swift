@@ -449,9 +449,27 @@ final class ToolSpecTests: XCTestCase {
         ))
         let multipleParameters = try XCTUnwrap(multiple["parameters"] as? [String: Any])
         let multipleProperties = try XCTUnwrap(multipleParameters["properties"] as? [String: Any])
-        XCTAssertNotNil(multipleProperties["detail"])
+        let detail = try XCTUnwrap(multipleProperties["detail"] as? [String: Any])
+        XCTAssertEqual(detail["type"] as? String, "string")
+        XCTAssertEqual(detail["enum"] as? [String], ["high", "original"])
         XCTAssertNotNil(multipleProperties["environment_id"])
         XCTAssertEqual(multipleParameters["required"] as? [String], ["path"])
+
+        guard case let .function(tool) = ToolSpecFactory.createViewImageTool(
+            canRequestOriginalImageDetail: true,
+            includeEnvironmentID: true
+        ) else {
+            return XCTFail("expected view_image function tool")
+        }
+        guard case let .object(outputSchema)? = tool.outputSchema,
+              case let .object(outputProperties)? = outputSchema["properties"],
+              case let .object(outputDetail)? = outputProperties["detail"]
+        else {
+            return XCTFail("expected view_image output schema with detail property")
+        }
+        XCTAssertEqual(outputDetail["type"], .string("string"))
+        XCTAssertEqual(outputDetail["enum"], .array([.string("high"), .string("original")]))
+        XCTAssertEqual(outputSchema["required"], .array([.string("image_url"), .string("detail")]))
     }
 
     func testBuildSpecsAddsViewImageEnvironmentIDOnlyForMultipleEnvironments() throws {

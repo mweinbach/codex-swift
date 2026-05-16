@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked the `view_image` tool schema portion of Rust commit
+  `8543e39885` (`Preserve image detail in app-server inputs`). Swift now
+  advertises Rust's narrowed `detail` input enum (`high`, `original`) and
+  non-null output schema enum instead of a generic nullable string.
 - 2026-05-16: rechecked Rust commit `6f1a01fbdd` (`Simplify tool executor
   and registry plumbing`) for unified-exec hook payload behavior in
   `codex-rs/core/src/tools/handlers/unified_exec{.rs,/write_stdin.rs}` and
