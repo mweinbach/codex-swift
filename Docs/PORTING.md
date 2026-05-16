@@ -88,6 +88,13 @@ Recent upstream audit checkpoint:
   carries the same npm global-root probe command selection: `npm.cmd` on
   Windows, `npm` elsewhere. Full diagnostic report generation remains a
   broader `codex doctor` runtime gap.
+- 2026-05-16: rechecked Rust commit `a5e5faf216` (`Reject legacy [profiles]
+  when using profile-v2`). Swift config-layer loading now accepts an explicit
+  profile-v2 user config file/profile selection, overlays the selected profile
+  file above the base user config for layer-stack callers, rejects a matching
+  legacy `[profiles.<name>]` table in the base config with Rust's hard
+  `--profile-v2` error message, and still allows unrelated legacy profile
+  tables.
 - 2026-05-16: ported the reusable portion of Rust commit `bbb5c2811d`
   (`tui: pass active permission profiles through app commands`) from
   `codex-rs/utils/approval-presets/src/lib.rs`. Swift approval presets now pair

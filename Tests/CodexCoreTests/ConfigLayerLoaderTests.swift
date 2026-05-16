@@ -242,6 +242,61 @@ final class ConfigLayerLoaderTests: XCTestCase {
         XCTAssertNil(effectiveConfig["model"])
     }
 
+    func testProfileV2RejectsMatchingLegacyProfileInBaseUserConfigLikeRust() throws {
+        let dir = try ConfigLayerTemporaryDirectory()
+        let selectedConfig = dir.url.appendingPathComponent("work.config.toml", isDirectory: false)
+        try """
+        model = "gpt-main"
+
+        [profiles.work]
+        model = "gpt-work"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        try #"model = "gpt-work-v2""#.write(to: selectedConfig, atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: dir.url,
+            overrides: ConfigLayerLoaderOverrides(
+                userConfigPath: selectedConfig,
+                userConfigProfile: "work",
+                ignoreManagedRequirements: true
+            ),
+            systemConfigFile: nil
+        )) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "--profile-v2 `work` cannot be used while \(dir.url.appendingPathComponent("config.toml").path) contains legacy `[profiles.work]` config; move those settings into \(selectedConfig.path) or remove `[profiles.work]`"
+            )
+        }
+    }
+
+    func testProfileV2AllowsUnrelatedLegacyProfilesInBaseUserConfigLikeRust() throws {
+        let dir = try ConfigLayerTemporaryDirectory()
+        let selectedConfig = dir.url.appendingPathComponent("work.config.toml", isDirectory: false)
+        try """
+        model = "gpt-main"
+
+        [profiles.dev]
+        model = "gpt-dev"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        try #"model = "gpt-work-v2""#.write(to: selectedConfig, atomically: true, encoding: .utf8)
+
+        let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: dir.url,
+            overrides: ConfigLayerLoaderOverrides(
+                userConfigPath: selectedConfig,
+                userConfigProfile: "work",
+                ignoreManagedRequirements: true
+            ),
+            systemConfigFile: nil
+        )
+
+        XCTAssertEqual(stack.getUserLayer()?.name, try .user(file: AbsolutePath(absolutePath: selectedConfig.path)))
+        guard case let .table(effective) = stack.effectiveConfig() else {
+            return XCTFail("expected table config")
+        }
+        XCTAssertEqual(effective["model"], .string("gpt-work-v2"))
+    }
+
     func testIgnoreRulesMarksConfigStackLikeRust() throws {
         let dir = try ConfigLayerTemporaryDirectory()
         let home = dir.url.appendingPathComponent("home", isDirectory: true)

@@ -4,6 +4,8 @@ public struct ConfigLayerLoaderOverrides: Equatable, Sendable {
     public var managedConfigPath: URL?
     public var managedPreferencesBase64: String?
     public var requirementsPath: URL?
+    public var userConfigPath: URL?
+    public var userConfigProfile: String?
     public var ignoreUserConfig: Bool
     public var ignoreUserAndProjectExecPolicyRules: Bool
     public var ignoreManagedRequirements: Bool
@@ -12,6 +14,8 @@ public struct ConfigLayerLoaderOverrides: Equatable, Sendable {
         managedConfigPath: URL? = nil,
         managedPreferencesBase64: String? = nil,
         requirementsPath: URL? = nil,
+        userConfigPath: URL? = nil,
+        userConfigProfile: String? = nil,
         ignoreUserConfig: Bool = false,
         ignoreUserAndProjectExecPolicyRules: Bool = false,
         ignoreManagedRequirements: Bool = false
@@ -19,6 +23,8 @@ public struct ConfigLayerLoaderOverrides: Equatable, Sendable {
         self.managedConfigPath = managedConfigPath
         self.managedPreferencesBase64 = managedPreferencesBase64
         self.requirementsPath = requirementsPath
+        self.userConfigPath = userConfigPath
+        self.userConfigProfile = userConfigProfile
         self.ignoreUserConfig = ignoreUserConfig
         self.ignoreUserAndProjectExecPolicyRules = ignoreUserAndProjectExecPolicyRules
         self.ignoreManagedRequirements = ignoreManagedRequirements
@@ -167,15 +173,29 @@ public enum CodexConfigLayerLoader {
             ))
         }
 
-        let userConfigFile = codexHome.appendingPathComponent("config.toml", isDirectory: false)
-        let userPath = try AbsolutePath(absolutePath: userConfigFile.standardizedFileURL.path)
+        let baseUserConfigFile = codexHome.appendingPathComponent("config.toml", isDirectory: false).standardizedFileURL
+        let activeUserConfigFile = (overrides.userConfigPath ?? baseUserConfigFile).standardizedFileURL
+        let activeUserPath = try AbsolutePath(absolutePath: activeUserConfigFile.path)
         if overrides.ignoreUserConfig {
-            layers.append(ConfigLayerEntry(name: .user(file: userPath), config: .table([:])))
+            layers.append(ConfigLayerEntry(name: .user(file: activeUserPath), config: .table([:])))
         } else {
-            layers.append(try loadRequiredConfigLayer(
-                configFile: userConfigFile,
-                source: .user(file: userPath),
-                fileManager: fileManager
+            let baseUserConfig = try readConfig(from: baseUserConfigFile, fileManager: fileManager) ?? .table([:])
+            if let profile = overrides.userConfigProfile,
+               hasLegacyProfile(named: profile, in: baseUserConfig)
+            {
+                throw ConfigLayerLoadError.invalidData(
+                    "--profile-v2 `\(profile)` cannot be used while \(baseUserConfigFile.path) contains legacy `[profiles.\(profile)]` config; move those settings into \(activeUserConfigFile.path) or remove `[profiles.\(profile)]`"
+                )
+            }
+
+            var userConfig = baseUserConfig
+            if activeUserConfigFile != baseUserConfigFile {
+                let activeUserConfig = try readConfig(from: activeUserConfigFile, fileManager: fileManager) ?? .table([:])
+                userConfig.merge(overlay: activeUserConfig)
+            }
+            layers.append(ConfigLayerEntry(
+                name: .user(file: activeUserPath),
+                config: userConfig
             ))
         }
 
@@ -386,6 +406,15 @@ public enum CodexConfigLayerLoader {
     ) throws -> ConfigLayerEntry {
         let config = try readConfig(from: configFile, fileManager: fileManager) ?? .table([:])
         return ConfigLayerEntry(name: source, config: config)
+    }
+
+    private static func hasLegacyProfile(named profile: String, in config: ConfigValue) -> Bool {
+        guard case let .table(table) = config,
+              case let .table(profiles)? = table["profiles"]
+        else {
+            return false
+        }
+        return profiles[profile] != nil
     }
 
     private static let configPathKeys: Set<String> = [
