@@ -200,17 +200,25 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         }
 
         public let status: Status
+        public let serverName: String
         public let installationID: String
         public let environmentID: String?
 
-        public init(status: Status, installationID: String, environmentID: String?) {
+        public init(
+            status: Status,
+            serverName: String = CodexCore.RemoteControlStatusSnapshot.defaultServerName,
+            installationID: String,
+            environmentID: String?
+        ) {
             self.status = status
+            self.serverName = serverName
             self.installationID = installationID
             self.environmentID = environmentID
         }
 
         public init(_ snapshot: CodexCore.RemoteControlStatusSnapshot) {
             self.status = Status(rawValue: snapshot.status.rawValue) ?? .errored
+            self.serverName = snapshot.serverName
             self.installationID = snapshot.installationID
             self.environmentID = snapshot.environmentID
         }
@@ -15000,6 +15008,7 @@ public enum CodexAppServer {
             "method": "remoteControl/status/changed",
             "params": [
                 "status": snapshot.status.rawValue,
+                "serverName": snapshot.serverName,
                 "installationId": snapshot.installationID,
                 "environmentId": snapshot.environmentID as Any? ?? NSNull()
             ]
@@ -25569,12 +25578,14 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         if effectivelyEnabled {
             nextSnapshot = CodexAppServerConfiguration.RemoteControlStatusSnapshot(
                 status: .connecting,
+                serverName: snapshot.serverName,
                 installationID: snapshot.installationID,
                 environmentID: lastRemoteControlEnvironmentID
             )
         } else {
             nextSnapshot = CodexAppServerConfiguration.RemoteControlStatusSnapshot(
                 status: .disabled,
+                serverName: snapshot.serverName,
                 installationID: snapshot.installationID,
                 environmentID: nil
             )
@@ -25585,6 +25596,48 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         currentRemoteControlStatusSnapshot = nextSnapshot
         publishRemoteControlStatus(nextSnapshot, excludingCurrentConnection: true)
         return CodexAppServer.remoteControlStatusChangedNotification(snapshot: nextSnapshot)
+    }
+
+    private func remoteControlStatusReadResult(rawParams: Any?) throws -> [String: Any] {
+        try CodexAppServer.requireRustUnitParams(rawParams)
+        refreshRemoteControlStatusSnapshotFromBroadcaster()
+        guard let snapshot = currentRemoteControlStatusSnapshot else {
+            throw AppServerError.internalError("remote control is unavailable for this app-server")
+        }
+        return [
+            "status": snapshot.status.rawValue,
+            "serverName": snapshot.serverName,
+            "installationId": snapshot.installationID,
+            "environmentId": snapshot.environmentID as Any? ?? NSNull()
+        ]
+    }
+
+    private func remoteControlSetEnabledResult(rawParams: Any?, enabled: Bool) throws -> [String: Any] {
+        try CodexAppServer.requireRustUnitParams(rawParams)
+        refreshRemoteControlStatusSnapshotFromBroadcaster()
+        guard let snapshot = currentRemoteControlStatusSnapshot else {
+            throw AppServerError.internalError("remote control is unavailable for this app-server")
+        }
+        if enabled && configuration.stateStore == nil {
+            throw AppServerError.invalidRequest(
+                "remote control cannot be enabled because sqlite state db is unavailable"
+            )
+        }
+        let status: CodexAppServerConfiguration.RemoteControlStatusSnapshot.Status = enabled ? .connecting : .disabled
+        let nextSnapshot = CodexAppServerConfiguration.RemoteControlStatusSnapshot(
+            status: enabled && snapshot.status == .connected ? .connected : status,
+            serverName: snapshot.serverName,
+            installationID: snapshot.installationID,
+            environmentID: enabled ? snapshot.environmentID : nil
+        )
+        currentRemoteControlStatusSnapshot = nextSnapshot
+        publishRemoteControlStatus(nextSnapshot, excludingCurrentConnection: true)
+        return [
+            "status": nextSnapshot.status.rawValue,
+            "serverName": nextSnapshot.serverName,
+            "installationId": nextSnapshot.installationID,
+            "environmentId": nextSnapshot.environmentID as Any? ?? NSNull()
+        ]
     }
 
     private func initializeConfigWarningNotifications() -> [[String: Any]] {
@@ -28866,6 +28919,33 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                        let notification = remoteControlStatusNotification(applyingFeatureEnablement: enablement) {
                         notifications.append(notification)
                     }
+                case "remoteControl/enable":
+                    try CodexAppServer.requireExperimentalAPI(
+                        method: "remoteControl/enable",
+                        experimentalAPIEnabled: experimentalAPIEnabled
+                    )
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try remoteControlSetEnabledResult(rawParams: object["params"], enabled: true)
+                    )
+                case "remoteControl/disable":
+                    try CodexAppServer.requireExperimentalAPI(
+                        method: "remoteControl/disable",
+                        experimentalAPIEnabled: experimentalAPIEnabled
+                    )
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try remoteControlSetEnabledResult(rawParams: object["params"], enabled: false)
+                    )
+                case "remoteControl/status/read":
+                    try CodexAppServer.requireExperimentalAPI(
+                        method: "remoteControl/status/read",
+                        experimentalAPIEnabled: experimentalAPIEnabled
+                    )
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try remoteControlStatusReadResult(rawParams: object["params"])
+                    )
                 case "collaborationMode/list":
                     let result = try CodexAppServer.collaborationModeListResult(rawParams: object["params"])
                     try CodexAppServer.requireExperimentalAPI(

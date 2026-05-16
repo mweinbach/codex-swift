@@ -48,11 +48,13 @@ final class AppServerNotificationProtocolTests: XCTestCase {
         try XCTAssertJSONObjectEqual(
             RemoteControlStatusChangedNotification(
                 status: .connected,
+                serverName: "server-1",
                 installationID: "install-1",
                 environmentID: "env-1"
             ),
             [
                 "status": "connected",
+                "serverName": "server-1",
                 "installationId": "install-1",
                 "environmentId": "env-1"
             ]
@@ -61,11 +63,13 @@ final class AppServerNotificationProtocolTests: XCTestCase {
         try XCTAssertJSONObjectEqual(
             RemoteControlStatusChangedNotification(
                 status: .disabled,
+                serverName: "server-2",
                 installationID: "install-2",
                 environmentID: nil
             ),
             [
                 "status": "disabled",
+                "serverName": "server-2",
                 "installationId": "install-2",
                 "environmentId": NSNull()
             ]
@@ -77,6 +81,7 @@ final class AppServerNotificationProtocolTests: XCTestCase {
                 #"""
                 {
                   "status": "errored",
+                  "serverName": "server-3",
                   "installationId": "install-3",
                   "environmentId": null
                 }
@@ -88,6 +93,7 @@ final class AppServerNotificationProtocolTests: XCTestCase {
             decoded,
             RemoteControlStatusChangedNotification(
                 status: .errored,
+                serverName: "server-3",
                 installationID: "install-3",
                 environmentID: nil
             )
@@ -485,11 +491,13 @@ final class AppServerNotificationProtocolTests: XCTestCase {
         try XCTAssertJSONObjectEqual(
             RemoteControlStatusChangedNotification(
                 status: .connected,
+                serverName: "server-1",
                 installationID: "install-1",
                 environmentID: nil
             ),
             [
                 "status": "connected",
+                "serverName": "server-1",
                 "installationId": "install-1",
                 "environmentId": NSNull()
             ]
@@ -499,12 +507,14 @@ final class AppServerNotificationProtocolTests: XCTestCase {
             RemoteControlStatusChangedNotification(
                 snapshot: RemoteControlStatusSnapshot(
                     status: .errored,
+                    serverName: "server-2",
                     installationID: "install-1",
                     environmentID: "env-1"
                 )
             ),
             [
                 "status": "errored",
+                "serverName": "server-2",
                 "installationId": "install-1",
                 "environmentId": "env-1"
             ]

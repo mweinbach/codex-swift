@@ -69,15 +69,23 @@ public enum RemoteControlConnectionStatus: String, Codable, Equatable, Sendable 
 
 public struct RemoteControlStatusSnapshot: Equatable, Sendable {
     public var status: RemoteControlConnectionStatus
+    public var serverName: String
     public var installationID: String
     public var environmentID: String?
 
+    public static var defaultServerName: String {
+        let hostName = ProcessInfo.processInfo.hostName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return hostName.isEmpty ? "unknown" : hostName
+    }
+
     public init(
         status: RemoteControlConnectionStatus,
+        serverName: String = RemoteControlStatusSnapshot.defaultServerName,
         installationID: String,
         environmentID: String?
     ) {
         self.status = status
+        self.serverName = serverName
         self.installationID = installationID
         self.environmentID = environmentID
     }
@@ -94,6 +102,7 @@ public struct RemoteControlStatusPublisherCore: Equatable, Sendable {
     public mutating func publishStatus(_ status: RemoteControlConnectionStatus) -> RemoteControlStatusSnapshot? {
         let nextSnapshot = RemoteControlStatusSnapshot(
             status: status,
+            serverName: snapshot.serverName,
             installationID: snapshot.installationID,
             environmentID: status == .disabled ? nil : snapshot.environmentID
         )
@@ -111,6 +120,7 @@ public struct RemoteControlStatusPublisherCore: Equatable, Sendable {
         }
         let nextSnapshot = RemoteControlStatusSnapshot(
             status: snapshot.status,
+            serverName: snapshot.serverName,
             installationID: snapshot.installationID,
             environmentID: environmentID
         )

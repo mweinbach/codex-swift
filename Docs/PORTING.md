@@ -12,6 +12,14 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `6a331a66eb` (`feat(app-server):
+  update remote control APIs for better UX`). Swift remote-control status
+  snapshots and `remoteControl/status/changed` payloads now include Rust's
+  `serverName` field, the shared protocol layer carries the Rust-shaped
+  enable/disable/status-read response payloads, and app-server v2 now supports
+  the experimental `remoteControl/enable`, `remoteControl/disable`, and
+  `remoteControl/status/read` unit-param routes against the current status
+  broadcaster snapshot.
 - 2026-05-16: rechecked Rust commit `249d50aafc` (`Soften SQLite
   metadata sync failures`). Swift now keeps configured SQLite state-store
   failures best-effort for transcript-derived thread-name and memory-mode

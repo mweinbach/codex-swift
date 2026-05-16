@@ -21273,6 +21273,7 @@ final class CodexAppServerTests: XCTestCase {
             codexHome: temp.url,
             remoteControlStatusSnapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot(
                 status: .connected,
+                serverName: "server-123",
                 installationID: "install-123",
                 environmentID: "env-456"
             )
@@ -21288,8 +21289,116 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(messages[1]["method"] as? String, "remoteControl/status/changed")
         let params = try XCTUnwrap(messages[1]["params"] as? [String: Any])
         XCTAssertEqual(params["status"] as? String, "connected")
+        XCTAssertEqual(params["serverName"] as? String, "server-123")
         XCTAssertEqual(params["installationId"] as? String, "install-123")
         XCTAssertEqual(params["environmentId"] as? String, "env-456")
+    }
+
+    func testRemoteControlStatusReadReturnsCurrentSnapshotLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                remoteControlStatusSnapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot(
+                    status: .disabled,
+                    serverName: "server-123",
+                    installationID: "install-123",
+                    environmentID: nil
+                )
+            ),
+            experimentalAPIEnabled: true
+        )
+
+        let response = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"remoteControl/status/read"}"#.utf8
+        )))
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["status"] as? String, "disabled")
+        XCTAssertEqual(result["serverName"] as? String, "server-123")
+        XCTAssertEqual(result["installationId"] as? String, "install-123")
+        XCTAssertTrue(result["environmentId"] is NSNull)
+    }
+
+    func testRemoteControlEnableAndDisableReturnRustStatusPayloads() throws {
+        let temp = try TemporaryDirectory()
+        let stateStore = try createAppServerStateStore(codexHome: temp.url)
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                stateStore: stateStore,
+                remoteControlStatusSnapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot(
+                    status: .disabled,
+                    serverName: "server-123",
+                    installationID: "install-123",
+                    environmentID: nil
+                )
+            ),
+            experimentalAPIEnabled: true
+        )
+
+        let enabled = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"remoteControl/enable"}"#.utf8
+        )))
+        let enabledResult = try XCTUnwrap(enabled["result"] as? [String: Any])
+        XCTAssertEqual(enabledResult["status"] as? String, "connecting")
+        XCTAssertEqual(enabledResult["serverName"] as? String, "server-123")
+        XCTAssertEqual(enabledResult["installationId"] as? String, "install-123")
+        XCTAssertTrue(enabledResult["environmentId"] is NSNull)
+
+        let disabled = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"remoteControl/disable"}"#.utf8
+        )))
+        let disabledResult = try XCTUnwrap(disabled["result"] as? [String: Any])
+        XCTAssertEqual(disabledResult["status"] as? String, "disabled")
+        XCTAssertEqual(disabledResult["serverName"] as? String, "server-123")
+        XCTAssertEqual(disabledResult["installationId"] as? String, "install-123")
+        XCTAssertTrue(disabledResult["environmentId"] is NSNull)
+    }
+
+    func testRemoteControlEnableRejectsMissingStateDbLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let response = try appServerResponse(
+            #"{"id":1,"method":"remoteControl/enable"}"#,
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                remoteControlStatusSnapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot(
+                    status: .disabled,
+                    serverName: "server-123",
+                    installationID: "install-123",
+                    environmentID: nil
+                )
+            ),
+            experimentalAPIEnabled: true
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(
+            error["message"] as? String,
+            "remote control cannot be enabled because sqlite state db is unavailable"
+        )
+    }
+
+    func testRemoteControlStatusReadRejectsObjectParamsLikeRustUnitOption() throws {
+        let temp = try TemporaryDirectory()
+        let response = try appServerResponse(
+            #"{"id":1,"method":"remoteControl/status/read","params":{}}"#,
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                remoteControlStatusSnapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot(
+                    status: .disabled,
+                    serverName: "server-123",
+                    installationID: "install-123",
+                    environmentID: nil
+                )
+            ),
+            experimentalAPIEnabled: true
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "Invalid request: invalid type: map, expected unit")
     }
 
     func testInitializeRemoteControlStatusUsesExplicitNullAndOptOutLikeRust() throws {
@@ -21298,6 +21407,7 @@ final class CodexAppServerTests: XCTestCase {
             codexHome: temp.url,
             remoteControlStatusSnapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot(
                 status: .disabled,
+                serverName: "server-123",
                 installationID: "install-123",
                 environmentID: nil
             )
@@ -21315,6 +21425,7 @@ final class CodexAppServerTests: XCTestCase {
             codexHome: temp.url,
             remoteControlStatusSnapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot(
                 status: .disabled,
+                serverName: "server-123",
                 installationID: "install-123",
                 environmentID: nil
             )
@@ -21324,6 +21435,7 @@ final class CodexAppServerTests: XCTestCase {
         )))
         let params = try XCTUnwrap(unfiltered.last?["params"] as? [String: Any])
         XCTAssertEqual(params["status"] as? String, "disabled")
+        XCTAssertEqual(params["serverName"] as? String, "server-123")
         XCTAssertEqual(params["installationId"] as? String, "install-123")
         XCTAssertTrue(params["environmentId"] is NSNull)
     }
@@ -21336,6 +21448,7 @@ final class CodexAppServerTests: XCTestCase {
             stateStore: stateStore,
             remoteControlStatusSnapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot(
                 status: .connected,
+                serverName: "server-123",
                 installationID: "install-123",
                 environmentID: "env-456"
             )
@@ -21353,6 +21466,7 @@ final class CodexAppServerTests: XCTestCase {
         let disabledParams = try XCTUnwrap(disabled[1]["params"] as? [String: Any])
         XCTAssertEqual(disabled[1]["method"] as? String, "remoteControl/status/changed")
         XCTAssertEqual(disabledParams["status"] as? String, "disabled")
+        XCTAssertEqual(disabledParams["serverName"] as? String, "server-123")
         XCTAssertEqual(disabledParams["installationId"] as? String, "install-123")
         XCTAssertTrue(disabledParams["environmentId"] is NSNull)
 
@@ -21365,6 +21479,7 @@ final class CodexAppServerTests: XCTestCase {
         let enabledParams = try XCTUnwrap(enabled[1]["params"] as? [String: Any])
         XCTAssertEqual(enabled[1]["method"] as? String, "remoteControl/status/changed")
         XCTAssertEqual(enabledParams["status"] as? String, "connecting")
+        XCTAssertEqual(enabledParams["serverName"] as? String, "server-123")
         XCTAssertEqual(enabledParams["installationId"] as? String, "install-123")
         XCTAssertEqual(enabledParams["environmentId"] as? String, "env-456")
     }

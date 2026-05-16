@@ -428,11 +428,18 @@ public struct ServerRequestResolvedNotification: Equatable, Codable, Sendable {
 
 public struct RemoteControlStatusChangedNotification: Equatable, Sendable {
     public let status: RemoteControlConnectionStatus
+    public let serverName: String
     public let installationID: String
     public let environmentID: String?
 
-    public init(status: RemoteControlConnectionStatus, installationID: String, environmentID: String?) {
+    public init(
+        status: RemoteControlConnectionStatus,
+        serverName: String = RemoteControlStatusSnapshot.defaultServerName,
+        installationID: String,
+        environmentID: String?
+    ) {
         self.status = status
+        self.serverName = serverName
         self.installationID = installationID
         self.environmentID = environmentID
     }
@@ -440,6 +447,7 @@ public struct RemoteControlStatusChangedNotification: Equatable, Sendable {
     public init(snapshot: RemoteControlStatusSnapshot) {
         self.init(
             status: snapshot.status,
+            serverName: snapshot.serverName,
             installationID: snapshot.installationID,
             environmentID: snapshot.environmentID
         )
@@ -449,6 +457,7 @@ public struct RemoteControlStatusChangedNotification: Equatable, Sendable {
 extension RemoteControlStatusChangedNotification: Codable {
     private enum CodingKeys: String, CodingKey {
         case status
+        case serverName
         case installationID = "installationId"
         case environmentID = "environmentId"
     }
@@ -456,6 +465,7 @@ extension RemoteControlStatusChangedNotification: Codable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(status, forKey: .status)
+        try container.encode(serverName, forKey: .serverName)
         try container.encode(installationID, forKey: .installationID)
         try container.encodeNilOrValue(environmentID, forKey: .environmentID)
     }
