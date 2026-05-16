@@ -135,9 +135,10 @@ Recent upstream audit checkpoint:
   the first Rust-shaped diagnostic report slice for installation/package-manager
   provenance, config loading, runtime provenance, search-command readiness,
   network environment readability, terminal environment metadata/issues, and
-  auth credential/provider checks, and sandbox helper/config readability, emits
-  the redacted `--json` support-report map keyed by check id, renders compact
-  grouped human summary output, and exits nonzero when config loading fails.
+  auth credential/provider checks, update status/cache/npm-target diagnostics,
+  and sandbox helper/config readability, emits the redacted `--json`
+  support-report map keyed by check id, renders compact grouped human summary
+  output, and exits nonzero when config loading fails.
   Full diagnostic report
   generation beyond those local checks remains a broader `codex doctor`
   runtime gap.

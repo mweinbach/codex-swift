@@ -86,6 +86,15 @@ final class DoctorCommandRuntimeTests: XCTestCase {
                             lastRefresh: nil
                         ))
                     )),
+                    DoctorCommandRuntime.updatesCheck(inputs: DoctorUpdatesCheckInputs(
+                        codexHomePath: "/tmp/codex",
+                        checkForUpdateOnStartup: true,
+                        installContext: .other,
+                        environment: [:],
+                        currentVersion: "0.0.0",
+                        versionCache: .missing,
+                        latestVersion: .success("0.0.0")
+                    )),
                     DoctorCommandRuntime.sandboxHelpersCheck(
                         approvalPolicy: .onRequest,
                         sandboxPolicy: .newWorkspaceWritePolicy(),
@@ -172,6 +181,17 @@ final class DoctorCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(authDetails["auth file"] as? String, "/tmp/codex/auth.json")
         XCTAssertEqual(authDetails["stored auth mode"] as? String, "api_key")
         XCTAssertEqual(authDetails["stored API key"] as? String, "true")
+
+        let updates = try XCTUnwrap(checks["updates.status"] as? [String: Any])
+        XCTAssertEqual(updates["category"] as? String, "updates")
+        XCTAssertEqual(updates["status"] as? String, "ok")
+        XCTAssertEqual(updates["summary"] as? String, "update configuration is locally consistent")
+        let updateDetails = try XCTUnwrap(updates["details"] as? [String: Any])
+        XCTAssertEqual(updateDetails["check for update on startup"] as? String, "true")
+        XCTAssertEqual(updateDetails["update action"] as? String, "manual or unknown")
+        XCTAssertEqual(updateDetails["version cache"] as? [String], ["/tmp/codex/version.json", "missing"])
+        XCTAssertEqual(updateDetails["latest version"] as? String, "0.0.0")
+        XCTAssertEqual(updateDetails["latest version status"] as? String, "current version is not older")
 
         let sandbox = try XCTUnwrap(checks["sandbox.helpers"] as? [String: Any])
         XCTAssertEqual(sandbox["category"] as? String, "sandbox")
@@ -421,6 +441,97 @@ final class DoctorCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(
             check.remediation,
             "Run codex login again or provide a supported auth env var."
+        )
+    }
+
+    func testUpdatesCheckReportsCachedVersionAndNewerLatestLikeRustDoctor() {
+        let check = DoctorCommandRuntime.updatesCheck(inputs: DoctorUpdatesCheckInputs(
+            codexHomePath: "/tmp/codex",
+            checkForUpdateOnStartup: false,
+            installContext: .brew,
+            environment: [:],
+            currentVersion: "1.2.3",
+            versionCache: .loaded("""
+            {
+              "latest_version": "1.3.0",
+              "last_checked_at": "2026-05-16T10:00:00Z",
+              "dismissed_version": "1.2.9"
+            }
+            """),
+            latestVersion: .success("1.3.0")
+        ))
+
+        XCTAssertEqual(check.id, "updates.status")
+        XCTAssertEqual(check.category, "updates")
+        XCTAssertEqual(check.status, .ok)
+        XCTAssertEqual(check.summary, "update configuration is locally consistent")
+        XCTAssertEqual(check.details, [
+            "check for update on startup: false",
+            "update action: brew upgrade --cask codex",
+            "version cache: /tmp/codex/version.json",
+            "cached latest version: 1.3.0",
+            "last checked at: 2026-05-16T10:00:00Z",
+            "dismissed version: 1.2.9",
+            "latest version: 1.3.0",
+            "latest version status: newer version is available"
+        ])
+    }
+
+    func testUpdatesCheckWarnsWhenLatestVersionProbeFailsLikeRustDoctor() {
+        let check = DoctorCommandRuntime.updatesCheck(inputs: DoctorUpdatesCheckInputs(
+            codexHomePath: "/tmp/codex",
+            checkForUpdateOnStartup: true,
+            installContext: .other,
+            environment: [:],
+            currentVersion: "1.2.3",
+            versionCache: .missing,
+            latestVersion: .failed("curl exited with status 28")
+        ))
+
+        XCTAssertEqual(check.status, .warning)
+        XCTAssertEqual(check.summary, "update configuration is locally consistent")
+        XCTAssertEqual(check.details, [
+            "check for update on startup: true",
+            "update action: manual or unknown",
+            "version cache: /tmp/codex/version.json",
+            "version cache: missing",
+            "latest version probe: curl exited with status 28"
+        ])
+    }
+
+    func testUpdatesCheckFailsForNpmTargetMismatchLikeRustDoctor() {
+        let check = DoctorCommandRuntime.updatesCheck(inputs: DoctorUpdatesCheckInputs(
+            codexHomePath: "/tmp/codex",
+            checkForUpdateOnStartup: true,
+            installContext: .npm,
+            environment: [
+                "CODEX_MANAGED_BY_NPM": "1",
+                "CODEX_MANAGED_PACKAGE_ROOT": "/opt/codex/lib/node_modules/@openai/codex"
+            ],
+            currentVersion: "1.2.3",
+            versionCache: .missing,
+            latestVersion: .success("1.2.3"),
+            npmRootCheck: .mismatch(
+                runningPackageRoot: "/opt/codex/lib/node_modules/@openai/codex",
+                npmPackageRoot: "/usr/local/lib/node_modules/@openai/codex"
+            )
+        ))
+
+        XCTAssertEqual(check.status, .fail)
+        XCTAssertEqual(check.summary, "update would target a different npm install")
+        XCTAssertEqual(check.details, [
+            "check for update on startup: true",
+            "update action: npm install -g @openai/codex",
+            "version cache: /tmp/codex/version.json",
+            "version cache: missing",
+            "running package root: /opt/codex/lib/node_modules/@openai/codex",
+            "npm package root: /usr/local/lib/node_modules/@openai/codex",
+            "latest version: 1.2.3",
+            "latest version status: current version is not older"
+        ])
+        XCTAssertEqual(
+            check.remediation,
+            "Fix PATH or npm prefix so the running package root (/opt/codex/lib/node_modules/@openai/codex) matches the npm global package root (/usr/local/lib/node_modules/@openai/codex)."
         )
     }
 
