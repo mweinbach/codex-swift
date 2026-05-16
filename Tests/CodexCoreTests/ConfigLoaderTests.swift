@@ -893,6 +893,38 @@ final class ConfigLoaderTests: XCTestCase {
         )
     }
 
+    func testRuntimeWorkspaceRootsOverrideRebindsPermissionProfileLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let cwd = try CoreTemporaryDirectory()
+        let runtimeRoot = try CoreTemporaryDirectory()
+        try """
+        default_permissions = "workspace"
+
+        [permissions.workspace.filesystem.":workspace_roots"]
+        "." = "write"
+        """.write(
+            to: dir.url.appendingPathComponent("config.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let runtimeWorkspaceRoot = try AbsolutePath(absolutePath: runtimeRoot.url.standardizedFileURL.path)
+        let config = try CodexConfigLoader.load(
+            codexHome: dir.url,
+            cwd: cwd.url,
+            runtimeWorkspaceRoots: [runtimeWorkspaceRoot],
+            systemConfigFile: nil
+        )
+
+        XCTAssertEqual(config.workspaceRoots, [runtimeWorkspaceRoot])
+        let policy = try XCTUnwrap(config.permissionProfile?.fileSystemSandboxPolicy)
+        XCTAssertTrue(policy.canWritePathWithCwd(runtimeRoot.url.path, cwd: cwd.url.path))
+        XCTAssertFalse(
+            policy.canWritePathWithCwd(cwd.url.path, cwd: cwd.url.path),
+            "explicit runtime workspace roots should materialize :workspace_roots away from cwd"
+        )
+    }
+
     func testPermissionProfileGlobScanDepthRejectsZeroLikeRust() throws {
         let dir = try CoreTemporaryDirectory()
         try """

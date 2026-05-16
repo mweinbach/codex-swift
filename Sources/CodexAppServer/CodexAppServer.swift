@@ -1332,10 +1332,12 @@ public enum CodexAppServer {
         let cwd = stringParam(params?["cwd"]).map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         let runtimeWorkspaceRoots = try runtimeWorkspaceRootPathsParam(params?["runtimeWorkspaceRoots"], cwd: cwd) ?? []
+        let runtimeWorkspaceRootPaths = try runtimeWorkspaceRoots.map { try AbsolutePath(absolutePath: $0) }
         let permissionSelection = try permissionProfileSelectionParam(params?["permissions"])
         let runtimeConfig = try loadRuntimeConfigForThreadStartup(
             configuration: configuration,
             cwd: cwd,
+            runtimeWorkspaceRoots: runtimeWorkspaceRootPaths.isEmpty ? nil : runtimeWorkspaceRootPaths,
             permissionSelection: permissionSelection
         )
         let model = stringParam(params?["model"])
@@ -1835,6 +1837,7 @@ public enum CodexAppServer {
     private static func loadRuntimeConfigForThreadStartup(
         configuration: CodexAppServerConfiguration,
         cwd: URL? = nil,
+        runtimeWorkspaceRoots: [AbsolutePath]? = nil,
         permissionSelection: PermissionProfileSelection? = nil
     ) throws -> CodexRuntimeConfig {
         var overrides = configuration.cliConfigOverrides
@@ -1846,6 +1849,7 @@ public enum CodexAppServer {
             runtimeConfig = try CodexConfigLoader.load(
                 codexHome: configuration.codexHome,
                 cwd: cwd,
+                runtimeWorkspaceRoots: runtimeWorkspaceRoots,
                 overrides: overrides,
                 threadConfigSources: configuration.threadConfigSources,
                 managedConfigOverrides: configuration.configLayerOverrides,
@@ -3513,6 +3517,7 @@ public enum CodexAppServer {
             let runtimeConfig = try loadRuntimeConfigForThreadStartup(
                 configuration: configuration,
                 cwd: URL(fileURLWithPath: contextCwd, isDirectory: true),
+                runtimeWorkspaceRoots: runtimeWorkspaceRoots,
                 permissionSelection: permissionSelection
             )
             let baseSandboxPolicy = sandboxPolicy ?? runtimeConfig.legacySandboxPolicy()

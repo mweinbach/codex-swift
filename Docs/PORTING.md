@@ -30,9 +30,12 @@ Recent upstream audit checkpoint:
   profile roots, keeps deny-read globs symbolic until materialization using
   Rust's `codex-project-roots://` prefix, expands those globs across cwd and
   profile roots, and forwards profile roots on live `turn/start` submissions
-  through Rust's `profile_workspace_roots` core-op field. The broader symbolic
-  permission-state representation and runtime `workspace_roots_explicit` flag
-  remain pending.
+  through Rust's `profile_workspace_roots` core-op field. Runtime workspace
+  roots supplied with a selected permission profile now also rebind the
+  materialized `permission_profile` submitted on live `turn/start`, matching
+  Rust's config reload path for explicit `runtime_workspace_roots`. The broader
+  symbolic permission-state representation and runtime `workspace_roots_explicit`
+  flag remain pending.
 - 2026-05-16: rechecked Rust commit `5d30764fe9` (`Run compact hooks for
   remote compaction v2`). Swift core remote-v2 compaction orchestration now
   runs trusted `PreCompact` hooks before collecting the v2 compaction stream,

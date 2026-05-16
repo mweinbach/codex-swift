@@ -1174,6 +1174,7 @@ public enum CodexConfigLoader {
     public static func load(
         codexHome: URL,
         cwd: URL? = nil,
+        runtimeWorkspaceRoots: [AbsolutePath]? = nil,
         overrides: CliConfigOverrides = CliConfigOverrides(),
         threadConfigSources: [ThreadConfigSource] = [],
         fileManager: FileManager = .default,
@@ -1305,7 +1306,8 @@ public enum CodexConfigLoader {
                 from: parsed,
                 profileName: defaultPermissions,
                 to: &config,
-                cwd: cwd ?? codexHome
+                cwd: cwd ?? codexHome,
+                runtimeWorkspaceRoots: runtimeWorkspaceRoots
             )
             let networkProxyConfig = try parsed.networkProxyConfig(named: defaultPermissions)
             if networkProxyConfig.network.enabled {
@@ -1333,18 +1335,25 @@ public enum CodexConfigLoader {
         from parsed: ParsedCodexConfigToml,
         profileName: String,
         to config: inout CodexRuntimeConfig,
-        cwd: URL
+        cwd: URL,
+        runtimeWorkspaceRoots: [AbsolutePath]? = nil
     ) throws {
         let profileWorkspaceRoots = try parsed.profileWorkspaceRoots(named: profileName, cwd: cwd)
         let cwdRoot = try AbsolutePath(absolutePath: cwd.standardizedFileURL.path)
-        let workspaceRoots = deduplicatedAbsolutePaths([cwdRoot] + profileWorkspaceRoots)
+        let workspaceRoots = runtimeWorkspaceRoots.map(deduplicatedAbsolutePaths)
+            ?? deduplicatedAbsolutePaths([cwdRoot] + profileWorkspaceRoots)
+        let materializationRoots = runtimeWorkspaceRoots.map { roots in
+            deduplicatedAbsolutePaths(roots + profileWorkspaceRoots)
+        } ?? workspaceRoots
         config.profileWorkspaceRoots = profileWorkspaceRoots
         config.workspaceRoots = workspaceRoots
 
         guard let profile = config.permissionProfile else {
             return
         }
-        let fileSystemPolicy = profile.fileSystemSandboxPolicy.materializeProjectRoots(withWorkspaceRoots: workspaceRoots)
+        let fileSystemPolicy = profile.fileSystemSandboxPolicy.materializeProjectRoots(
+            withWorkspaceRoots: materializationRoots
+        )
         let effectiveProfile = PermissionProfile.fromRuntimePermissionsWithEnforcement(
             profile.enforcement,
             fileSystem: fileSystemPolicy,
