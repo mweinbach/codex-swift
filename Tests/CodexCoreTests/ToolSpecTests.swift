@@ -669,9 +669,6 @@ final class ToolSpecTests: XCTestCase {
             "read_mcp_resource",
             "update_plan",
             "apply_patch",
-            "grep_files",
-            "read_file",
-            "list_dir",
             "test_sync_tool",
             "web_search",
             "view_image",
@@ -685,7 +682,10 @@ final class ToolSpecTests: XCTestCase {
 
         let parallelSpecs = Dictionary(uniqueKeysWithValues: specs.map { ($0.spec.name, $0.supportsParallelToolCalls) })
         XCTAssertEqual(parallelSpecs["exec_command"], false)
-        XCTAssertEqual(parallelSpecs["grep_files"], true)
+        XCTAssertNil(parallelSpecs["grep_files"])
+        XCTAssertNil(parallelSpecs["read_file"])
+        XCTAssertNil(parallelSpecs["list_dir"])
+        XCTAssertEqual(parallelSpecs["test_sync_tool"], true)
         XCTAssertEqual(parallelSpecs["view_image"], true)
         XCTAssertEqual(parallelSpecs["computer_key"], true)
     }

@@ -951,15 +951,6 @@ public enum ToolSpecFactory {
             break
         }
 
-        if config.experimentalSupportedTools.contains("grep_files") {
-            specs.append(ConfiguredToolSpec(spec: createGrepFilesTool(), supportsParallelToolCalls: true))
-        }
-        if config.experimentalSupportedTools.contains("read_file") {
-            specs.append(ConfiguredToolSpec(spec: createReadFileTool(), supportsParallelToolCalls: true))
-        }
-        if config.experimentalSupportedTools.contains("list_dir") {
-            specs.append(ConfiguredToolSpec(spec: createListDirTool(), supportsParallelToolCalls: true))
-        }
         if config.experimentalSupportedTools.contains("test_sync_tool") {
             specs.append(ConfiguredToolSpec(spec: createTestSyncTool(), supportsParallelToolCalls: true))
         }
@@ -1740,59 +1731,6 @@ public enum ToolSpecFactory {
                 "stop": .boolean(description: "Optional. When true, cancels the remaining job items after this result is recorded.")
             ],
             required: ["job_id", "item_id", "result"]
-        )
-    }
-
-    public static func createGrepFilesTool() -> ToolSpec {
-        functionTool(
-            name: "grep_files",
-            description: "Finds files whose contents match the pattern and lists them by modification time.",
-            properties: [
-                "pattern": .string(description: "Regular expression pattern to search for."),
-                "include": .string(description: "Optional glob that limits which files are searched (e.g. \"*.rs\" or \"*.{ts,tsx}\")."),
-                "path": .string(description: "Directory or file path to search. Defaults to the session's working directory."),
-                "limit": .number(description: "Maximum number of file paths to return (defaults to 100).")
-            ],
-            required: ["pattern"]
-        )
-    }
-
-    public static func createReadFileTool() -> ToolSpec {
-        functionTool(
-            name: "read_file",
-            description: "Reads a local file with 1-indexed line numbers, supporting slice and indentation-aware block modes.",
-            properties: [
-                "file_path": .string(description: "Absolute path to the file"),
-                "offset": .number(description: "The line number to start reading from. Must be 1 or greater."),
-                "limit": .number(description: "The maximum number of lines to return."),
-                "mode": .string(description: "Optional mode selector: \"slice\" for simple ranges (default) or \"indentation\" to expand around an anchor line."),
-                "indentation": .object(
-                    properties: [
-                        "anchor_line": .number(description: "Anchor line to center the indentation lookup on (defaults to offset)."),
-                        "max_levels": .number(description: "How many parent indentation levels (smaller indents) to include."),
-                        "include_siblings": .boolean(description: "When true, include additional blocks that share the anchor indentation."),
-                        "include_header": .boolean(description: "Include doc comments or attributes directly above the selected block."),
-                        "max_lines": .number(description: "Hard cap on the number of lines returned when using indentation mode.")
-                    ],
-                    required: nil,
-                    additionalProperties: .boolean(false)
-                )
-            ],
-            required: ["file_path"]
-        )
-    }
-
-    public static func createListDirTool() -> ToolSpec {
-        functionTool(
-            name: "list_dir",
-            description: "Lists entries in a local directory with 1-indexed entry numbers and simple type labels.",
-            properties: [
-                "dir_path": .string(description: "Absolute path to the directory to list."),
-                "offset": .number(description: "The entry number to start listing from. Must be 1 or greater."),
-                "limit": .number(description: "The maximum number of entries to return."),
-                "depth": .number(description: "The maximum directory depth to traverse. Must be 1 or greater.")
-            ],
-            required: ["dir_path"]
         )
     }
 

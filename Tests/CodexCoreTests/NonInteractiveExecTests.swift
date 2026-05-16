@@ -504,7 +504,7 @@ final class NonInteractiveExecTests: XCTestCase {
             slug: "test-model",
             family: "test",
             supportsParallelToolCalls: true,
-            experimentalSupportedTools: ["grep_files"],
+            experimentalSupportedTools: ["grep_files", "read_file", "list_dir", "test_sync_tool"],
             shellType: .shellCommand
         )
 
@@ -513,8 +513,11 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertTrue(names.contains("exec_command"))
         XCTAssertTrue(names.contains("write_stdin"))
         XCTAssertTrue(names.contains("apply_patch"))
-        XCTAssertTrue(names.contains("grep_files"))
+        XCTAssertTrue(names.contains("test_sync_tool"))
         XCTAssertTrue(names.contains("web_search"))
+        XCTAssertFalse(names.contains("grep_files"))
+        XCTAssertFalse(names.contains("read_file"))
+        XCTAssertFalse(names.contains("list_dir"))
         XCTAssertFalse(names.contains("shell_command"))
         XCTAssertFalse(names.contains("view_image"))
     }

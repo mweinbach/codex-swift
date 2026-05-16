@@ -23,9 +23,6 @@ final class ModelFamilyTests: XCTestCase {
         let testModel = ModelsManager.findFamilyForModel("test-gpt-5-codex")
         XCTAssertEqual(testModel.family, "test-gpt-5-codex")
         XCTAssertEqual(testModel.experimentalSupportedTools, [
-            "grep_files",
-            "list_dir",
-            "read_file",
             "test_sync_tool"
         ])
         XCTAssertTrue(testModel.supportsParallelToolCalls)

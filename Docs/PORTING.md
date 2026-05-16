@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `7c9731c9af` after `cargo shear`
+  removed the unreachable `grep_files`, `read_file`, and `list_dir`
+  experimental tool handlers. Swift model metadata and tool-spec construction
+  now only honor Rust's remaining `test_sync_tool` experimental tool while
+  ignoring the removed legacy experimental names if they appear in model
+  metadata.
 - 2026-05-16: rechecked Rust app-server v2
   `permissions_request_approval_response_uses_granted_permission_profile_without_macos`
   in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift

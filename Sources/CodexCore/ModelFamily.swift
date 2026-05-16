@@ -264,9 +264,6 @@ extension ModelsManager {
                 supportsParallelToolCalls: true,
                 baseInstructions: ModelFamilyPrompts.gpt5Codex,
                 experimentalSupportedTools: [
-                    "grep_files",
-                    "list_dir",
-                    "read_file",
                     "test_sync_tool"
                 ],
                 supportVerbosity: true,
