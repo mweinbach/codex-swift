@@ -17287,7 +17287,12 @@ public enum CodexAppServer {
         )
     }
 
-    fileprivate static func validateInitializeClientInfo(_ value: Any?) throws {
+    fileprivate struct AppServerInitializeClientInfo: Equatable {
+        let name: String
+        let version: String
+    }
+
+    fileprivate static func initializeClientInfo(_ value: Any?) throws -> AppServerInitializeClientInfo {
         guard let value else {
             throw AppServerError.invalidRequest("missing field `clientInfo`")
         }
@@ -17301,12 +17306,17 @@ public enum CodexAppServer {
         }
         let clientName = try rustRequiredStringParam(clientInfo["name"], field: "name")
         _ = try rustOptionalStringParam(clientInfo["title"])
-        _ = try rustRequiredStringParam(clientInfo["version"], field: "version")
+        let clientVersion = try rustRequiredStringParam(clientInfo["version"], field: "version")
         guard isValidHTTPHeaderValue(clientName) else {
             throw AppServerError.invalidRequest(
                 "Invalid clientInfo.name: '\(clientName)'. Must be a valid HTTP header value."
             )
         }
+        return AppServerInitializeClientInfo(name: clientName, version: clientVersion)
+    }
+
+    fileprivate static func validateInitializeClientInfo(_ value: Any?) throws {
+        _ = try initializeClientInfo(value)
     }
 
     fileprivate static func configRequirementsReadResult(
@@ -25276,6 +25286,8 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
     private var requestAttestation = false
     private var experimentalAPIEnabled = false
     private var userAgent: String
+    private var appServerClientName: String?
+    private var appServerClientVersion: String?
     private let configuration: CodexAppServerConfiguration
     private let notificationSink: AppServerNotificationSink?
     private let coreOpSubmitter: AppServerCoreOpSubmitter?
@@ -25304,6 +25316,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
     private var runtimeTurnErrorInfos: [String: [String: CodexErrorInfo]] = [:]
     private var runtimeTurnTokenUsage: [String: [String: TokenUsage]] = [:]
     private var runtimeTurnAnalyticsSeeds: [String: [String: RuntimeTurnAnalyticsSeed]] = [:]
+    private var runtimeTurnInputMessages: [String: [String: [String]]] = [:]
     private var runtimeTurnAnalyticsStartCounts: [String: Int] = [:]
     private var runtimePendingApprovalCounts: [String: Int] = [:]
     private var runtimePendingUserInputCounts: [String: Int] = [:]
@@ -25598,6 +25611,19 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         return [CodexAppServer.legacyNotifyDeprecationNoticeNotification()]
     }
 
+    private func legacyUserNotifier() -> UserNotifier? {
+        guard let runtimeConfig = try? CodexConfigLoader.load(
+            codexHome: configuration.codexHome,
+            cwd: configuration.cwd,
+            systemConfigFile: nil,
+            managedConfigOverrides: configuration.configLayerOverrides,
+            environment: configuration.environment
+        ), runtimeConfig.usesDeprecatedLegacyNotify else {
+            return nil
+        }
+        return UserNotifier(notifyCommand: runtimeConfig.notify)
+    }
+
     private func subscribeCurrentConnection(toThreadID threadID: String) {
         rememberLoadedThreadFeatureState(threadID: threadID)
         let manager = threadStateManager
@@ -25718,10 +25744,11 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
     }
 
     private func recordTurnStartForAnalytics(threadID: String, turnID: String, params: [String: Any]?) {
+        let input = CodexAppServer.v2UserInputs(params?["input"])
+        runtimeTurnInputMessages[threadID, default: [:]][turnID] = input.text.isEmpty ? [] : [input.text]
         guard let metadata = threadAnalyticsMetadata[threadID] else {
             return
         }
-        let input = CodexAppServer.v2UserInputs(params?["input"])
         let priorTurnCount = runtimeTurnAnalyticsStartCounts[threadID] ?? 0
         runtimeTurnAnalyticsStartCounts[threadID] = priorTurnCount + 1
         let serviceTier = CodexAppServer.stringParam(params?["serviceTier"]) ?? metadata.serviceTier
@@ -26201,8 +26228,10 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             let startedAt = runtimeTurnStartedAt[threadID]?[runtimeTurnID]
             let error = runtimeTurnErrors[threadID]?[runtimeTurnID]
             let errorInfo = runtimeTurnErrorInfos[threadID]?[runtimeTurnID]
+            let inputMessages = runtimeTurnInputMessages[threadID]?[runtimeTurnID] ?? []
             runtimeTurnStartedAt[threadID]?[runtimeTurnID] = nil
             runtimeTurnErrors[threadID]?[runtimeTurnID] = nil
+            runtimeTurnInputMessages[threadID]?[runtimeTurnID] = nil
             clearRuntimePendingActiveFlags(threadID: threadID)
             if activeTurnIDs[threadID] == runtimeTurnID {
                 activeTurnIDs[threadID] = nil
@@ -26222,6 +26251,14 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                 )
             ].compactMap(\.self)
             beforeNotifications = drainPendingInterruptResponseEnvelopes(threadID: threadID)
+            legacyUserNotifier()?.notify(.agentTurnComplete(
+                threadID: threadID,
+                turnID: runtimeTurnID,
+                cwd: threadAnalyticsMetadata[threadID]?.cwd.path ?? configuration.cwd.standardizedFileURL.path,
+                client: appServerClientName,
+                inputMessages: inputMessages,
+                lastAssistantMessage: event.lastAgentMessage
+            ))
             trackTurnCompletedForAnalytics(turnID: runtimeTurnID)
             trackTurnEventForAnalytics(
                 threadID: threadID,
@@ -26238,6 +26275,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             runtimeTurnStartedAt[threadID]?[runtimeTurnID] = nil
             runtimeTurnErrors[threadID]?[runtimeTurnID] = nil
             runtimeTurnErrorInfos[threadID]?[runtimeTurnID] = nil
+            runtimeTurnInputMessages[threadID]?[runtimeTurnID] = nil
             clearRuntimePendingActiveFlags(threadID: threadID)
             if activeTurnIDs[threadID] == runtimeTurnID {
                 activeTurnIDs[threadID] = nil
@@ -27813,8 +27851,9 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                 response = CodexAppServer.errorObject(id: id, code: -32600, message: "Already initialized")
             } else {
                 let capabilities: AppServerInitializeCapabilities
+                let clientInfo: CodexAppServer.AppServerInitializeClientInfo
                 do {
-                    try CodexAppServer.validateInitializeClientInfo(params?["clientInfo"])
+                    clientInfo = try CodexAppServer.initializeClientInfo(params?["clientInfo"])
                     capabilities = try CodexAppServer.initializeCapabilities(params?["capabilities"])
                 } catch let error as AppServerError {
                     response = CodexAppServer.errorObject(
@@ -27832,6 +27871,8 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                 requestAttestation = capabilities.requestAttestation
                 experimentalAPIEnabled = capabilities.experimentalAPI
                 optOutNotificationMethods = Set(capabilities.optOutNotificationMethods)
+                appServerClientName = clientInfo.name
+                appServerClientVersion = clientInfo.version
                 markCurrentConnectionInitialized(
                     requestAttestation: requestAttestation,
                     optOutNotificationMethods: optOutNotificationMethods

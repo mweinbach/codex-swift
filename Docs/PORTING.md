@@ -12,6 +12,13 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust app-server v2
+  `turn_start_notify_payload_includes_initialize_client_name` in
+  `codex-rs/app-server/tests/suite/v2/initialize.rs`. Swift now retains the
+  initialized `clientInfo.name` on the connection and includes it as `client`
+  in the deprecated `notify` `agent-turn-complete` payload emitted from runtime
+  task completion, matching Rust's app-server session metadata handoff into
+  turn context.
 - 2026-05-16: rechecked Rust app-server v2 `initialize` fixtures in
   `codex-rs/app-server/tests/suite/v2/initialize.rs`. Swift now builds the
   initialized `userAgent` with `clientInfo.name` as the originator, while

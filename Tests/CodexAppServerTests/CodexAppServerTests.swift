@@ -21576,6 +21576,69 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(userAgent.hasPrefix("codex_originator_via_env_var/"))
     }
 
+    func testTurnStartNotifyPayloadIncludesInitializeClientNameLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let notifyFile = temp.url.appendingPathComponent("notify.json", isDirectory: false)
+        let notifyCapture = try writeMCPServerScript(
+            directory: temp.url,
+            name: "notify-capture.sh",
+            contents: """
+            #!/bin/sh
+            printf '%s' "$2" > "$1"
+            """
+        )
+        try """
+        notify = [\(tomlTestString(notifyCapture.path)), \(tomlTestString(notifyFile.path))]
+        """.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let coreOpCapture = AppServerCoreOpCapture()
+        let processor = CodexAppServerMessageProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            coreOpSubmitter: coreOpCapture.submit
+        )
+        let initializeMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"xcode","title":"Xcode","version":"1.0.0"}}}"#.utf8
+        )))
+        XCTAssertEqual(initializeMessages.first?["id"] as? Int, 1)
+
+        let threadMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"thread/start","params":{"modelProvider":"mock_provider","cwd":"\#(cwd.url.path)"}}"#.utf8
+        )))
+        let threadResult = try XCTUnwrap(threadMessages.first?["result"] as? [String: Any])
+        let thread = try XCTUnwrap(threadResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let turnMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":3,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Hello","textElements":[]}]}}"#.utf8
+        )))
+        let turnResult = try XCTUnwrap(turnMessages.first?["result"] as? [String: Any])
+        let turn = try XCTUnwrap(turnResult["turn"] as? [String: Any])
+        let turnID = try XCTUnwrap(turn["id"] as? String)
+        let submissions = try await waitForSubmissions(coreOpCapture, count: 1)
+        XCTAssertEqual(submissions[0].threadID, threadID)
+
+        await processor.handleRuntimeEvent(
+            threadID: threadID,
+            turnID: turnID,
+            event: .taskComplete(TaskCompleteEvent(turnID: turnID, lastAgentMessage: "Done"))
+        )
+
+        let payloadRaw = try await waitForTextFile(at: notifyFile)
+        let payloadData = try XCTUnwrap(payloadRaw.data(using: .utf8))
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: payloadData) as? [String: Any])
+        XCTAssertEqual(payload["type"] as? String, "agent-turn-complete")
+        XCTAssertEqual(payload["thread-id"] as? String, threadID)
+        XCTAssertEqual(payload["turn-id"] as? String, turnID)
+        XCTAssertEqual(payload["cwd"] as? String, cwd.url.path)
+        XCTAssertEqual(payload["client"] as? String, "xcode")
+        XCTAssertEqual(payload["input-messages"] as? [String], ["Hello"])
+        XCTAssertEqual(payload["last-assistant-message"] as? String, "Done")
+    }
+
     func testGetAuthStatusReportsAPIKeyAndOptionalToken() throws {
         let temp = try TemporaryDirectory()
         try CodexAuthStorage.loginWithAPIKey(codexHome: temp.url, apiKey: "sk-test")
@@ -31357,6 +31420,20 @@ final class CodexAppServerTests: XCTestCase {
         while DispatchTime.now().uptimeNanoseconds - start < timeoutNanoseconds {
             if let payload = await capture.popPayload() {
                 return payload
+            }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        throw AppServerTestTimeout()
+    }
+
+    private func waitForTextFile(
+        at url: URL,
+        timeoutNanoseconds: UInt64 = 5_000_000_000
+    ) async throws -> String {
+        let start = DispatchTime.now().uptimeNanoseconds
+        while DispatchTime.now().uptimeNanoseconds - start < timeoutNanoseconds {
+            if let contents = try? String(contentsOf: url, encoding: .utf8), !contents.isEmpty {
+                return contents
             }
             try await Task.sleep(nanoseconds: 10_000_000)
         }
