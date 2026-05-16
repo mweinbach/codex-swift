@@ -102,6 +102,70 @@ final class ShellTests: XCTestCase {
         )
     }
 
+    func testElevatedWindowsSandboxAddsPowerShellNoProfileLikeRust() {
+        XCTAssertEqual(
+            ShellResolver.disablePowerShellProfileForElevatedWindowsSandbox(
+                ["powershell.exe", "-Command", "Write-Host hi"],
+                shellType: .powerShell,
+                sandboxType: .windowsRestrictedToken,
+                windowsSandboxLevel: .elevated
+            ),
+            ["powershell.exe", "-NoProfile", "-Command", "Write-Host hi"]
+        )
+        XCTAssertEqual(
+            ShellResolver.disablePowerShellProfileForElevatedWindowsSandbox(
+                ["pwsh.exe", "-EncodedCommand", "abc"],
+                shellType: .powerShell,
+                sandboxType: .windowsRestrictedToken,
+                windowsSandboxLevel: .elevated
+            ),
+            ["pwsh.exe", "-NoProfile", "-EncodedCommand", "abc"]
+        )
+    }
+
+    func testElevatedWindowsSandboxPreservesExistingPowerShellNoProfileLikeRust() {
+        XCTAssertEqual(
+            ShellResolver.disablePowerShellProfileForElevatedWindowsSandbox(
+                ["powershell.exe", "-noprofile", "-Command", "Write-Host hi"],
+                shellType: .powerShell,
+                sandboxType: .windowsRestrictedToken,
+                windowsSandboxLevel: .elevated
+            ),
+            ["powershell.exe", "-noprofile", "-Command", "Write-Host hi"]
+        )
+    }
+
+    func testElevatedWindowsSandboxLeavesOtherCommandsAloneLikeRust() {
+        let command = ["powershell.exe", "-Command", "Write-Host hi"]
+        XCTAssertEqual(
+            ShellResolver.disablePowerShellProfileForElevatedWindowsSandbox(
+                command,
+                shellType: .powerShell,
+                sandboxType: .windowsRestrictedToken,
+                windowsSandboxLevel: .restrictedToken
+            ),
+            command
+        )
+        XCTAssertEqual(
+            ShellResolver.disablePowerShellProfileForElevatedWindowsSandbox(
+                command,
+                shellType: .powerShell,
+                sandboxType: .none,
+                windowsSandboxLevel: .elevated
+            ),
+            command
+        )
+        XCTAssertEqual(
+            ShellResolver.disablePowerShellProfileForElevatedWindowsSandbox(
+                ["bash", "-lc", "echo hi"],
+                shellType: .bash,
+                sandboxType: .windowsRestrictedToken,
+                windowsSandboxLevel: .elevated
+            ),
+            ["bash", "-lc", "echo hi"]
+        )
+    }
+
     func testExtractPowerShellCommandMatchesRustHelper() {
         XCTAssertEqual(
             ShellResolver.extractPowerShellCommand(["powershell", "-Command", "Write-Host hi"])?.script,

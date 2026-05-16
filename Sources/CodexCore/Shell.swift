@@ -132,6 +132,29 @@ public enum ShellResolver {
         return command
     }
 
+    public static func disablePowerShellProfileForElevatedWindowsSandbox(
+        _ command: [String],
+        shellType: ShellType?,
+        sandboxType: SandboxType,
+        windowsSandboxLevel: WindowsSandboxLevel
+    ) -> [String] {
+        guard shellType == .powerShell,
+              sandboxType == .windowsRestrictedToken,
+              windowsSandboxLevel == .elevated,
+              !command.isEmpty
+        else {
+            return command
+        }
+
+        if command.dropFirst().contains(where: { $0.caseInsensitiveCompare("-NoProfile") == .orderedSame }) {
+            return command
+        }
+
+        var command = command
+        command.insert("-NoProfile", at: 1)
+        return command
+    }
+
     public static func extractPowerShellCommand(_ command: [String]) -> (shell: String, script: String)? {
         guard command.count >= 3,
               detectShellType(command[0]) == .powerShell

@@ -1300,7 +1300,8 @@ private func runNonInteractiveExec(
                 turnEnvironmentSelections: turnEnvironmentSelections,
                 configuredEnvironmentSnapshot: configuredEnvironmentSnapshot,
                 features: settings.features,
-                execPolicyManager: execPolicyManager
+                execPolicyManager: execPolicyManager,
+                windowsSandboxLevel: settings.windowsSandboxLevel
             )
         }
     )

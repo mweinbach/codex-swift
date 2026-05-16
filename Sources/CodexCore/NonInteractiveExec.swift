@@ -761,7 +761,8 @@ public enum NonInteractiveExec {
         configuredEnvironmentSnapshot: ConfiguredEnvironmentSnapshot? = nil,
         remoteEnvironmentFileSystems: [String: ExecServerRemoteFileSystem] = [:],
         features: FeatureStates = .withDefaults(),
-        execPolicyManager: ExecPolicyManager = ExecPolicyManager()
+        execPolicyManager: ExecPolicyManager = ExecPolicyManager(),
+        windowsSandboxLevel: WindowsSandboxLevel = .disabled
     ) async -> ResponseItem {
         await executeFunctionCallWithApproval(
             item,
@@ -783,6 +784,7 @@ public enum NonInteractiveExec {
             remoteEnvironmentFileSystems: remoteEnvironmentFileSystems,
             features: features,
             execPolicyManager: execPolicyManager,
+            windowsSandboxLevel: windowsSandboxLevel,
             approvalGranted: false
         )
     }
@@ -807,6 +809,7 @@ public enum NonInteractiveExec {
         remoteEnvironmentFileSystems: [String: ExecServerRemoteFileSystem] = [:],
         features: FeatureStates,
         execPolicyManager: ExecPolicyManager,
+        windowsSandboxLevel: WindowsSandboxLevel,
         approvalGranted: Bool
     ) async -> ResponseItem {
         switch item {
@@ -833,6 +836,7 @@ public enum NonInteractiveExec {
                 remoteEnvironmentFileSystems: remoteEnvironmentFileSystems,
                 features: features,
                 execPolicyManager: execPolicyManager,
+                windowsSandboxLevel: windowsSandboxLevel,
                 approvalGranted: approvalGranted
             )
 
@@ -928,7 +932,8 @@ public enum NonInteractiveExec {
         configuredEnvironmentSnapshot: ConfiguredEnvironmentSnapshot? = nil,
         remoteEnvironmentFileSystems: [String: ExecServerRemoteFileSystem] = [:],
         features: FeatureStates = .withDefaults(),
-        execPolicyManager: ExecPolicyManager = ExecPolicyManager()
+        execPolicyManager: ExecPolicyManager = ExecPolicyManager(),
+        windowsSandboxLevel: WindowsSandboxLevel = .disabled
     ) async -> FunctionCallExecutionResult {
         let hookPayload = toolHookPayload(for: item)
         if let hookPayload {
@@ -954,6 +959,7 @@ public enum NonInteractiveExec {
                 sandboxPolicy: sandboxPolicy,
                 shell: shell,
                 allowLoginShell: allowLoginShell,
+                windowsSandboxLevel: windowsSandboxLevel,
                 features: features,
                 execPolicyManager: execPolicyManager
             )
@@ -1003,6 +1009,7 @@ public enum NonInteractiveExec {
                 remoteEnvironmentFileSystems: remoteEnvironmentFileSystems,
                 features: features,
                 execPolicyManager: execPolicyManager,
+                windowsSandboxLevel: windowsSandboxLevel,
                 approvalGranted: approvalGranted
             )
             guard toolOutputSucceeded(output),
@@ -1047,6 +1054,7 @@ public enum NonInteractiveExec {
             remoteEnvironmentFileSystems: remoteEnvironmentFileSystems,
             features: features,
             execPolicyManager: execPolicyManager,
+            windowsSandboxLevel: windowsSandboxLevel,
             approvalGranted: false
         )
         return FunctionCallExecutionResult(output: output)
@@ -1295,6 +1303,7 @@ public enum NonInteractiveExec {
         sandboxPolicy: SandboxPolicy,
         shell: Shell,
         allowLoginShell: Bool,
+        windowsSandboxLevel: WindowsSandboxLevel,
         features: FeatureStates,
         execPolicyManager: ExecPolicyManager
     ) -> ShellApprovalHookContext? {
@@ -1316,8 +1325,11 @@ public enum NonInteractiveExec {
                     return nil
                 }
                 let requestedShell = params.shell.map(ShellResolver.getShellByModelProvidedPath) ?? shell
-                command = ShellResolver.prefixPowerShellScriptWithUTF8(
-                    requestedShell.deriveExecArgs(command: params.cmd, useLoginShell: useLoginShell)
+                command = prepareRuntimeCommand(
+                    requestedShell.deriveExecArgs(command: params.cmd, useLoginShell: useLoginShell),
+                    shellType: requestedShell.shellType,
+                    sandboxPolicy: sandboxPolicy,
+                    windowsSandboxLevel: windowsSandboxLevel
                 )
                 sandboxPermissions = params.sandboxPermissions
                 prefixRule = params.prefixRule
@@ -1328,8 +1340,11 @@ public enum NonInteractiveExec {
                 else {
                     return nil
                 }
-                command = ShellResolver.prefixPowerShellScriptWithUTF8(
-                    shell.deriveExecArgs(command: params.command, useLoginShell: useLoginShell)
+                command = prepareRuntimeCommand(
+                    shell.deriveExecArgs(command: params.command, useLoginShell: useLoginShell),
+                    shellType: shell.shellType,
+                    sandboxPolicy: sandboxPolicy,
+                    windowsSandboxLevel: windowsSandboxLevel
                 )
                 sandboxPermissions = params.sandboxPermissions ?? .useDefault
                 prefixRule = params.prefixRule
@@ -1394,6 +1409,7 @@ public enum NonInteractiveExec {
         remoteEnvironmentFileSystems: [String: ExecServerRemoteFileSystem],
         features: FeatureStates,
         execPolicyManager: ExecPolicyManager,
+        windowsSandboxLevel: WindowsSandboxLevel,
         approvalGranted: Bool
     ) async -> ResponseItem {
         let decoder = JSONDecoder()
@@ -1404,8 +1420,11 @@ public enum NonInteractiveExec {
                 let useLoginShell = try resolveUseLoginShell(params.requestedLogin, allowLoginShell: allowLoginShell)
                 let requestedShell = params.shell.map(ShellResolver.getShellByModelProvidedPath) ?? shell
                 let snapshotShell = params.shell == nil ? shell : nil
-                let command = ShellResolver.prefixPowerShellScriptWithUTF8(
-                    requestedShell.deriveExecArgs(command: params.cmd, useLoginShell: useLoginShell)
+                let command = prepareRuntimeCommand(
+                    requestedShell.deriveExecArgs(command: params.cmd, useLoginShell: useLoginShell),
+                    shellType: requestedShell.shellType,
+                    sandboxPolicy: sandboxPolicy,
+                    windowsSandboxLevel: windowsSandboxLevel
                 )
                 return await executeUnifiedExecCommand(
                     command: command,
@@ -1432,8 +1451,11 @@ public enum NonInteractiveExec {
             case "shell_command":
                 let params = try decoder.decode(ShellCommandToolCallParams.self, from: Data(arguments.utf8))
                 let useLoginShell = try resolveUseLoginShell(params.login, allowLoginShell: allowLoginShell)
-                let command = ShellResolver.prefixPowerShellScriptWithUTF8(
-                    shell.deriveExecArgs(command: params.command, useLoginShell: useLoginShell)
+                let command = prepareRuntimeCommand(
+                    shell.deriveExecArgs(command: params.command, useLoginShell: useLoginShell),
+                    shellType: shell.shellType,
+                    sandboxPolicy: sandboxPolicy,
+                    windowsSandboxLevel: windowsSandboxLevel
                 )
                 return await executeShellCommand(
                     toolName: name,
@@ -1569,6 +1591,40 @@ public enum NonInteractiveExec {
             )
         }
         return login ?? allowLoginShell
+    }
+
+    private static func prepareRuntimeCommand(
+        _ command: [String],
+        shellType: ShellType?,
+        sandboxPolicy: SandboxPolicy,
+        windowsSandboxLevel: WindowsSandboxLevel
+    ) -> [String] {
+        let utf8Command = ShellResolver.prefixPowerShellScriptWithUTF8(command)
+        return ShellResolver.disablePowerShellProfileForElevatedWindowsSandbox(
+            utf8Command,
+            shellType: shellType,
+            sandboxType: runtimeSandboxType(
+                sandboxPolicy: sandboxPolicy,
+                windowsSandboxLevel: windowsSandboxLevel
+            ),
+            windowsSandboxLevel: windowsSandboxLevel
+        )
+    }
+
+    private static func runtimeSandboxType(
+        sandboxPolicy: SandboxPolicy,
+        windowsSandboxLevel: WindowsSandboxLevel
+    ) -> SandboxType {
+        switch sandboxPolicy {
+        case .dangerFullAccess, .externalSandbox:
+            return .none
+        case .readOnly, .readOnlyWithNetworkAccess, .workspaceWrite:
+            #if os(Windows)
+            return windowsSandboxLevel == .disabled ? .none : .windowsRestrictedToken
+            #else
+            return PatchSafety.getPlatformSandbox() ?? .none
+            #endif
+        }
     }
 
     private struct ViewImageToolCallParams: Decodable {

@@ -2902,6 +2902,8 @@ Recent upstream audit checkpoint:
   - added Swift coverage for Rust's packaged Windows desktop runtime-bin discovery path, including `LOCALAPPDATA` precedence, `USERPROFILE/AppData/Local` fallback, and clean no-op when `OpenAI/Codex/bin` is absent. Native Windows ACL repair remains pending with the broader Windows sandbox runtime.
 - `codex-rs/shell-command/src/powershell.rs` UTF-8 output prefixing
   - added Swift PowerShell command prefixing with Rust's `[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;` prelude, including idempotence, accepted flag validation, and non-interactive shell/unified exec wiring.
+- `codex-rs/core/src/tools/runtimes/mod.rs` elevated Windows PowerShell profile suppression
+  - matched Rust commit `8ae0c837f0` by inserting `-NoProfile` into selected PowerShell runtime argv only for the elevated Windows restricted-token sandbox, preserving existing case-insensitive `-NoProfile` flags and leaving unelevated, unsandboxed, and non-PowerShell commands unchanged.
 - `codex-rs/shell-command/src/powershell.rs` wrapper command extraction
   - Swift PowerShell safe-command parsing now matches Rust's `-Command`/`-c` extraction by evaluating the script argument immediately after the command flag and ignoring later wrapper argv entries, while still rejecting unknown or unsafe flags before the script.
 - `codex-rs/core/src/exec_policy.rs` PowerShell command-origin lowering
