@@ -165,9 +165,14 @@ public struct FunctionCallOutputPayload: Equatable, Codable, CustomStringConvert
     }
 
     public init(callToolResult: McpCallToolResult) {
-        let isSuccess = callToolResult.isError != true
+        self.init(callToolResult: callToolResult, supportsImageInput: true)
+    }
 
-        if let structuredContent = callToolResult.structuredContent,
+    public init(callToolResult: McpCallToolResult, supportsImageInput: Bool) {
+        let modelResult = callToolResult.sanitizedForModel(supportsImageInput: supportsImageInput)
+        let isSuccess = modelResult.isError != true
+
+        if let structuredContent = modelResult.structuredContent,
            structuredContent != .null
         {
             do {
@@ -183,11 +188,11 @@ public struct FunctionCallOutputPayload: Equatable, Codable, CustomStringConvert
         }
 
         do {
-            let data = try JSONEncoder.codexCompact.encode(callToolResult.content)
+            let data = try JSONEncoder.codexCompact.encode(modelResult.content)
             let serializedContent = String(data: data, encoding: .utf8) ?? "[]"
             self.init(
                 content: serializedContent,
-                contentItems: Self.contentItems(from: callToolResult.content),
+                contentItems: Self.contentItems(from: modelResult.content),
                 success: isSuccess
             )
         } catch {

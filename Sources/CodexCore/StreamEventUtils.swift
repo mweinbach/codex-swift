@@ -154,7 +154,14 @@ public enum StreamEventUtils {
     }
 
     public static func responseInputToResponseItem(_ input: ResponseInputItem) -> ResponseItem {
-        input.responseItem()
+        responseInputToResponseItem(input, supportsImageInput: true)
+    }
+
+    public static func responseInputToResponseItem(
+        _ input: ResponseInputItem,
+        supportsImageInput: Bool
+    ) -> ResponseItem {
+        input.responseItem(supportsImageInput: supportsImageInput)
     }
 
     public static func imageGenerationArtifactPath(
@@ -312,6 +319,10 @@ public enum StreamEventUtils {
 
 public extension ResponseInputItem {
     func responseItem() -> ResponseItem {
+        responseItem(supportsImageInput: true)
+    }
+
+    func responseItem(supportsImageInput: Bool) -> ResponseItem {
         switch self {
         case let .message(role, content, phase):
             return .message(role: role, content: content, phase: phase)
@@ -322,7 +333,10 @@ public extension ResponseInputItem {
         case let .toolSearchOutput(callID, status, execution, tools):
             return .toolSearchOutput(callID: callID, status: status, execution: execution, tools: tools)
         case let .mcpToolCallOutput(callID, result):
-            let output = FunctionCallOutputPayload(callToolResult: result)
+            let output = FunctionCallOutputPayload(
+                callToolResult: result,
+                supportsImageInput: supportsImageInput
+            )
             return .functionCallOutput(callID: callID, output: output)
         }
     }

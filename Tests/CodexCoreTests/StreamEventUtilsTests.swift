@@ -294,6 +294,37 @@ final class StreamEventUtilsTests: XCTestCase {
         ])
     }
 
+    func testResponseInputToResponseItemSanitizesMcpImagesForTextOnlyModelsLikeRust() throws {
+        let input = ResponseInputItem.mcpToolCallOutput(
+            callID: "mcp1",
+            output: McpCallToolResult(
+                content: [
+                    .text(McpTextContent(text: "caption")),
+                    .image(McpImageContent(data: "data:image/jpeg;base64,ABC", mimeType: "image/jpeg"))
+                ]
+            )
+        )
+
+        guard case let .functionCallOutput(callID, output) = StreamEventUtils.responseInputToResponseItem(
+            input,
+            supportsImageInput: false
+        ) else {
+            return XCTFail("Expected function call output")
+        }
+
+        XCTAssertEqual(callID, "mcp1")
+        XCTAssertEqual(output.success, true)
+        XCTAssertNil(output.contentItems)
+        let decodedContent = try JSONDecoder().decode(
+            [McpContentBlock].self,
+            from: Data(output.content.utf8)
+        )
+        XCTAssertEqual(decodedContent, [
+            .text(McpTextContent(text: "caption")),
+            .text(McpTextContent(text: McpCallToolResult.imageContentOmittedForModelPlaceholder))
+        ])
+    }
+
     func testResponseInputToResponseItemUsesRawMcpErrorString() {
         let result = McpCallToolResult(
             content: [.text(McpTextContent(text: "failed"))],
