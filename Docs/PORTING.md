@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust MCP tool approval persistence in
+  `codex-rs/core/src/mcp_tool_call.rs`. Swift now persists remembered MCP tool
+  approvals as Rust-shaped `approval_mode = "approve"` overrides for
+  `codex_apps` connector tools and configured custom MCP servers, including
+  quoted tool-name TOML table paths. Plugin-backed and project-local MCP
+  approval persistence remain pending broader config-layer wiring.
 - 2026-05-16: rechecked Rust MCP tool approval prompt helpers in
   `codex-rs/core/src/mcp_tool_call.rs`. Swift now recognizes MCP approval
   question ids with Rust's prefix/underscore boundary, derives session and
