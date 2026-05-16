@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `9c691b74d6` (`chore(config) rm
+  tools.view_image`). Swift now removes the legacy `tools_view_image` and
+  `[tools].view_image` config/profile/app-server protocol knob while continuing
+  to expose the actual `view_image` tool unconditionally like Rust's current
+  tool spec construction.
 - 2026-05-16: rechecked Rust commits `e33cf9ae28`
   (`chore(config) rm experimental_use_freeform_apply_patch`) and `51b0e94105`
   (`chore(features) rm Feature::ApplyPatchFreeform`). Swift now removes
@@ -2420,7 +2425,7 @@ Recent upstream audit checkpoint:
 - legacy `setDefaultModel` config edits
   - `setDefaultModel` now preserves Rust's active-profile config editing when user config stores profiles as an inline TOML table: the Swift edit migrates the inline profile table into `[profiles.<name>]`, preserves sibling profile fields such as `sandbox_mode`, updates or clears `model`, and appends `model_reasoning_effort` in Rust's source-preserving order.
 - `codex-rs/app-server/src/request_processors/config_processor.rs` config tools projection
-  - `config/read` now projects top-level and profile-scoped `[tools]` through Rust's v2 `ToolsV2` shape, including nested `tools.web_search` `context_size`, `allowed_domains`, and `location` fields, `view_image`, typed `null` values for absent optional fields, and Rust's legacy behavior of ignoring boolean `tools.web_search = true`.
+  - `config/read` now projects top-level and profile-scoped `[tools]` through Rust's v2 `ToolsV2` shape, including nested `tools.web_search` `context_size`, `allowed_domains`, and `location` fields, typed `null` values for absent optional fields, and Rust's legacy behavior of ignoring boolean `tools.web_search = true`.
 - `codex-rs/app-server/src/request_processors/config_processor.rs` config apps projection
   - `config/read` now projects `[apps]` through Rust's v2 `AppsConfig` shape, including `_default`, app-level defaults, nullable optional app fields, nested app tool configs, and origin coverage for configured app fields.
 - `codex-rs/app-server/src/request_processors/config_processor.rs` config managed layer reads

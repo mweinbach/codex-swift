@@ -197,22 +197,18 @@ extension AppServerProtocol {
 
     public struct ToolsV2: Codable, Equatable, Sendable {
         public let webSearch: WebSearchToolConfig?
-        public let viewImage: Bool?
 
         private enum CodingKeys: String, CodingKey {
             case webSearch = "web_search"
-            case viewImage = "view_image"
         }
 
-        public init(webSearch: WebSearchToolConfig? = nil, viewImage: Bool? = nil) {
+        public init(webSearch: WebSearchToolConfig? = nil) {
             self.webSearch = webSearch
-            self.viewImage = viewImage
         }
 
         public func encode(to encoder: Encoder) throws {
             var container = encoder.container(keyedBy: CodingKeys.self)
             try container.encodeNilOrValue(webSearch, forKey: .webSearch)
-            try container.encodeNilOrValue(viewImage, forKey: .viewImage)
         }
     }
 

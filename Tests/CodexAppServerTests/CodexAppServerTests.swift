@@ -28059,9 +28059,6 @@ final class CodexAppServerTests: XCTestCase {
         [tools.web_search]
         context_size = "low"
         allowed_domains = ["example.com"]
-
-        [tools]
-        view_image = false
         """.write(
             to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
             atomically: true,
@@ -28085,7 +28082,6 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(webSearch["context_size"] as? String, "low")
         XCTAssertEqual(webSearch["allowed_domains"] as? [String], ["example.com"])
         XCTAssertTrue(webSearch["location"] is NSNull)
-        XCTAssertEqual(tools["view_image"] as? Bool, false)
 
         let origins = try XCTUnwrap(result["origins"] as? [String: Any])
         let modelOrigin = try XCTUnwrap(origins["model"] as? [String: Any])
@@ -28100,7 +28096,6 @@ final class CodexAppServerTests: XCTestCase {
         let webSearchOriginName = try XCTUnwrap(webSearchOrigin["name"] as? [String: Any])
         XCTAssertEqual(webSearchOriginName["type"] as? String, "user")
         XCTAssertNotNil(origins["tools.web_search.allowed_domains.0"] as? [String: Any])
-        XCTAssertNotNil(origins["tools.view_image"] as? [String: Any])
         XCTAssertTrue((modelOrigin["version"] as? String)?.hasPrefix("sha256:") == true)
 
         let layers = try XCTUnwrap(result["layers"] as? [[String: Any]])
@@ -28142,7 +28137,6 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(location["region"] is NSNull)
         XCTAssertEqual(location["city"] as? String, "New York")
         XCTAssertEqual(location["timezone"] as? String, "America/New_York")
-        XCTAssertTrue(tools["view_image"] is NSNull)
     }
 
     func testConfigReadIgnoresBoolWebSearchToolConfigLikeRust() throws {
@@ -28164,7 +28158,6 @@ final class CodexAppServerTests: XCTestCase {
         let config = try XCTUnwrap(result["config"] as? [String: Any])
         let tools = try XCTUnwrap(config["tools"] as? [String: Any])
         XCTAssertTrue(tools["web_search"] is NSNull)
-        XCTAssertTrue(tools["view_image"] is NSNull)
     }
 
     func testConfigReadProjectsProfileToolsLikeRustV2Config() throws {
@@ -28173,9 +28166,6 @@ final class CodexAppServerTests: XCTestCase {
         [profiles.research]
         model = "gpt-profile"
         web_search = "cached"
-
-        [profiles.research.tools]
-        view_image = true
 
         [profiles.research.tools.web_search]
         context_size = "medium"
@@ -28207,7 +28197,6 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(research["approval_policy"] is NSNull)
         XCTAssertEqual(research["web_search"] as? String, "cached")
         let researchTools = try XCTUnwrap(research["tools"] as? [String: Any])
-        XCTAssertEqual(researchTools["view_image"] as? Bool, true)
         let webSearch = try XCTUnwrap(researchTools["web_search"] as? [String: Any])
         XCTAssertEqual(webSearch["context_size"] as? String, "medium")
         XCTAssertEqual(webSearch["allowed_domains"] as? [String], ["openai.com"])
@@ -28222,11 +28211,9 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(legacy["web_search"] is NSNull)
         let legacyTools = try XCTUnwrap(legacy["tools"] as? [String: Any])
         XCTAssertTrue(legacyTools["web_search"] is NSNull)
-        XCTAssertTrue(legacyTools["view_image"] is NSNull)
 
         let origins = try XCTUnwrap(result["origins"] as? [String: Any])
         XCTAssertNotNil(origins["profiles.research.tools.web_search.context_size"] as? [String: Any])
-        XCTAssertNotNil(origins["profiles.research.tools.view_image"] as? [String: Any])
     }
 
     func testConfigReadIncludesAppsLikeRust() throws {
@@ -29505,7 +29492,6 @@ final class CodexAppServerTests: XCTestCase {
 
         [tools]
         web_search = false
-        view_image = true
 
         [profiles.test]
         model = "gpt-4o"
@@ -29545,7 +29531,6 @@ final class CodexAppServerTests: XCTestCase {
 
         let tools = try XCTUnwrap(config["tools"] as? [String: Any])
         XCTAssertEqual(tools["webSearch"] as? Bool, false)
-        XCTAssertEqual(tools["viewImage"] as? Bool, true)
 
         let profiles = try XCTUnwrap(config["profiles"] as? [String: Any])
         let profile = try XCTUnwrap(profiles["test"] as? [String: Any])

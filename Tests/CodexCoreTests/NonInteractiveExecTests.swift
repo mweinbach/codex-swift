@@ -517,10 +517,7 @@ final class NonInteractiveExecTests: XCTestCase {
         var features = FeatureStates.withDefaults()
         features.set(.unifiedExec, enabled: true)
         features.set(.webSearchRequest, enabled: true)
-        let config = CodexRuntimeConfig(
-            toolsViewImage: false,
-            features: features
-        )
+        let config = CodexRuntimeConfig(features: features)
         let modelFamily = ModelFamily(
             slug: "test-model",
             family: "test",
@@ -541,7 +538,7 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertFalse(names.contains("read_file"))
         XCTAssertFalse(names.contains("list_dir"))
         XCTAssertFalse(names.contains("shell_command"))
-        XCTAssertFalse(names.contains("view_image"))
+        XCTAssertTrue(names.contains("view_image"))
     }
 
     func testToolsConfigRequiresUnifiedExecFeatureForModelProvidedUnifiedExecLikeRust() {
@@ -628,10 +625,7 @@ final class NonInteractiveExecTests: XCTestCase {
     func testToolSpecsExposeAgentJobToolsForFanoutWorkersLikeRust() {
         var features = FeatureStates.withDefaults()
         features.set(.spawnCsv, enabled: true)
-        let config = CodexRuntimeConfig(
-            toolsViewImage: false,
-            features: features
-        )
+        let config = CodexRuntimeConfig(features: features)
         let modelFamily = ModelFamily(
             slug: "test-model",
             family: "test",
@@ -658,10 +652,7 @@ final class NonInteractiveExecTests: XCTestCase {
     func testToolSpecsForwardMultiAgentV2ConfigLikeRust() throws {
         var features = FeatureStates.withDefaults()
         features.set(.multiAgentV2, enabled: true)
-        var config = CodexRuntimeConfig(
-            toolsViewImage: false,
-            features: features
-        )
+        var config = CodexRuntimeConfig(features: features)
         config.multiAgentV2 = MultiAgentV2Config(
             maxConcurrentThreadsPerSession: 7,
             minWaitTimeoutMS: 60_000,

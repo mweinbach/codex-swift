@@ -42,14 +42,12 @@ final class ConfigProfileTests: XCTestCase {
                 experimentalUseUnifiedExecTool: false,
                 webSearchMode: .cached,
                 toolsWebSearch: true,
-                toolsViewImage: false,
                 tools: ConfigProfileTools(
                     webSearch: AppServerProtocol.WebSearchToolConfig(
                         contextSize: .low,
                         allowedDomains: ["openai.com"],
                         location: AppServerProtocol.WebSearchLocation(country: "US")
-                    ),
-                    viewImage: true
+                    )
                 ),
                 analytics: ConfigProfileAnalytics(enabled: false),
                 tui: ConfigProfileTui(sessionPickerView: .comfortable),
@@ -82,7 +80,6 @@ final class ConfigProfileTests: XCTestCase {
                 "experimental_use_unified_exec_tool": false,
                 "web_search": "cached",
                 "tools_web_search": true,
-                "tools_view_image": false,
                 "tools": [
                     "web_search": [
                         "context_size": "low",
@@ -93,8 +90,7 @@ final class ConfigProfileTests: XCTestCase {
                             "city": NSNull(),
                             "timezone": NSNull()
                         ]
-                    ],
-                    "view_image": true
+                    ]
                 ],
                 "analytics": ["enabled": false],
                 "tui": ["session_picker_view": "comfortable"],
@@ -134,7 +130,6 @@ final class ConfigProfileTests: XCTestCase {
                 "experimental_use_unified_exec_tool": NSNull(),
                 "web_search": NSNull(),
                 "tools_web_search": NSNull(),
-                "tools_view_image": NSNull(),
                 "tools": NSNull(),
                 "analytics": NSNull(),
                 "tui": NSNull(),
@@ -156,8 +151,7 @@ final class ConfigProfileTests: XCTestCase {
           "js_repl_node_module_dirs": ["/repo/node_modules"],
           "zsh_path": "/usr/local/bin/zsh",
           "tools": {
-            "web_search": true,
-            "view_image": false
+            "web_search": true
           },
           "analytics": {
             "enabled": true
@@ -184,7 +178,7 @@ final class ConfigProfileTests: XCTestCase {
         XCTAssertEqual(profile.jsReplNodePath, "/usr/local/bin/node")
         XCTAssertEqual(profile.jsReplNodeModuleDirs, ["/repo/node_modules"])
         XCTAssertEqual(profile.zshPath, "/usr/local/bin/zsh")
-        XCTAssertEqual(profile.tools, ConfigProfileTools(webSearch: nil, viewImage: false))
+        XCTAssertEqual(profile.tools, ConfigProfileTools(webSearch: nil))
         XCTAssertEqual(profile.analytics, ConfigProfileAnalytics(enabled: true))
         XCTAssertEqual(profile.tui, ConfigProfileTui(sessionPickerView: .dense))
         XCTAssertEqual(profile.windows, ConfigProfileWindows(sandbox: .elevated, sandboxPrivateDesktop: true))

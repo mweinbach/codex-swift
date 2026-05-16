@@ -22664,14 +22664,10 @@ public enum CodexAppServer {
 
     private static func configReadToolsObject(_ table: [String: ConfigValue]) -> [String: Any] {
         var object: [String: Any] = [
-            "web_search": NSNull(),
-            "view_image": NSNull()
+            "web_search": NSNull()
         ]
         if case let .table(webSearchTable)? = table["web_search"] {
             object["web_search"] = configReadWebSearchToolObject(webSearchTable)
-        }
-        if case let .bool(viewImage)? = table["view_image"] {
-            object["view_image"] = viewImage
         }
         return object
     }
@@ -23736,8 +23732,7 @@ public enum CodexAppServer {
             return NSNull()
         }
         return [
-            "webSearch": nullable(boolConfig(table, "web_search")),
-            "viewImage": nullable(boolConfig(table, "view_image"))
+            "webSearch": nullable(boolConfig(table, "web_search"))
         ]
     }
 

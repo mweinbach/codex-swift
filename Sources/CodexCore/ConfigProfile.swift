@@ -20,19 +20,15 @@ public struct FeaturesToml: Codable, Equatable, Sendable {
 
 public struct ConfigProfileTools: Codable, Equatable, Sendable {
     public var webSearch: AppServerProtocol.WebSearchToolConfig?
-    public var viewImage: Bool?
 
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case webSearch = "web_search"
-        case viewImage = "view_image"
     }
 
     public init(
-        webSearch: AppServerProtocol.WebSearchToolConfig? = nil,
-        viewImage: Bool? = nil
+        webSearch: AppServerProtocol.WebSearchToolConfig? = nil
     ) {
         self.webSearch = webSearch
-        self.viewImage = viewImage
     }
 
     public init(from decoder: Decoder) throws {
@@ -50,13 +46,11 @@ public struct ConfigProfileTools: Codable, Equatable, Sendable {
                 forKey: .webSearch
             )
         }
-        self.viewImage = try container.decodeIfPresent(Bool.self, forKey: .viewImage)
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try encodeOptional(webSearch, into: &container, forKey: .webSearch)
-        try encodeOptional(viewImage, into: &container, forKey: .viewImage)
     }
 }
 
@@ -204,7 +198,6 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
     public var experimentalUseUnifiedExecTool: Bool?
     public var webSearchMode: WebSearchMode?
     public var toolsWebSearch: Bool?
-    public var toolsViewImage: Bool?
     public var tools: ConfigProfileTools?
     public var analytics: ConfigProfileAnalytics?
     public var tui: ConfigProfileTui?
@@ -237,7 +230,6 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         case experimentalUseUnifiedExecTool = "experimental_use_unified_exec_tool"
         case webSearchMode = "web_search"
         case toolsWebSearch = "tools_web_search"
-        case toolsViewImage = "tools_view_image"
         case tools
         case analytics
         case tui
@@ -271,7 +263,6 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         experimentalUseUnifiedExecTool: Bool? = nil,
         webSearchMode: WebSearchMode? = nil,
         toolsWebSearch: Bool? = nil,
-        toolsViewImage: Bool? = nil,
         tools: ConfigProfileTools? = nil,
         analytics: ConfigProfileAnalytics? = nil,
         tui: ConfigProfileTui? = nil,
@@ -303,7 +294,6 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         self.experimentalUseUnifiedExecTool = experimentalUseUnifiedExecTool
         self.webSearchMode = webSearchMode
         self.toolsWebSearch = toolsWebSearch
-        self.toolsViewImage = toolsViewImage
         self.tools = tools
         self.analytics = analytics
         self.tui = tui
@@ -339,7 +329,6 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         self.experimentalUseUnifiedExecTool = try container.decodeIfPresent(Bool.self, forKey: .experimentalUseUnifiedExecTool)
         self.webSearchMode = try container.decodeIfPresent(WebSearchMode.self, forKey: .webSearchMode)
         self.toolsWebSearch = try container.decodeIfPresent(Bool.self, forKey: .toolsWebSearch)
-        self.toolsViewImage = try container.decodeIfPresent(Bool.self, forKey: .toolsViewImage)
         self.tools = try container.decodeIfPresent(ConfigProfileTools.self, forKey: .tools)
         self.analytics = try container.decodeIfPresent(ConfigProfileAnalytics.self, forKey: .analytics)
         self.tui = try container.decodeIfPresent(ConfigProfileTui.self, forKey: .tui)
@@ -381,7 +370,6 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         try encodeOptional(experimentalUseUnifiedExecTool, into: &container, forKey: .experimentalUseUnifiedExecTool)
         try encodeOptional(webSearchMode, into: &container, forKey: .webSearchMode)
         try encodeOptional(toolsWebSearch, into: &container, forKey: .toolsWebSearch)
-        try encodeOptional(toolsViewImage, into: &container, forKey: .toolsViewImage)
         try encodeOptional(tools, into: &container, forKey: .tools)
         try encodeOptional(analytics, into: &container, forKey: .analytics)
         try encodeOptional(tui, into: &container, forKey: .tui)

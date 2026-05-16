@@ -67,7 +67,6 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertNil(config.experimentalThreadConfigEndpoint)
         XCTAssertEqual(config.experimentalThreadStore, .local)
         XCTAssertNil(config.toolsWebSearch)
-        XCTAssertNil(config.toolsViewImage)
         XCTAssertTrue(config.features.isEnabled(.shellTool))
         XCTAssertFalse(config.features.isEnabled(.webSearchRequest))
         XCTAssertEqual(config.mcpServers, [:])
@@ -1023,7 +1022,6 @@ final class ConfigLoaderTests: XCTestCase {
         experimental_thread_config_endpoint = "http://127.0.0.1:8061"
         web_search = "cached"
         tools_web_search = true
-        tools_view_image = false
         mcp_oauth_credentials_store = "file"
         mcp_oauth_callback_port = 5678
         mcp_oauth_callback_url = "https://example.com/callback"
@@ -1145,7 +1143,6 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.experimentalThreadStore, .local)
         XCTAssertEqual(config.webSearchMode, .cached)
         XCTAssertEqual(config.toolsWebSearch, true)
-        XCTAssertEqual(config.toolsViewImage, false)
         XCTAssertEqual(config.mcpOAuthCredentialsStoreMode, .file)
         XCTAssertEqual(config.mcpOAuthCallbackPort, 5678)
         XCTAssertEqual(config.mcpOAuthCallbackURL, "https://example.com/callback")
@@ -2414,7 +2411,6 @@ final class ConfigLoaderTests: XCTestCase {
         experimental_compact_prompt_file = "top-compact.md"
         experimental_use_unified_exec_tool = false
         tools_web_search = false
-        tools_view_image = false
         oss_provider = "top-oss"
 
         [tui]
@@ -2435,7 +2431,6 @@ final class ConfigLoaderTests: XCTestCase {
         experimental_compact_prompt_file = "profile-compact.md"
         experimental_use_unified_exec_tool = true
         tools_web_search = true
-        tools_view_image = true
         oss_provider = "profile-oss"
 
         [profiles.work.tui]
@@ -2463,7 +2458,6 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.compactPrompt, "profile-compact.md")
         XCTAssertEqual(config.experimentalUseUnifiedExecTool, true)
         XCTAssertEqual(config.toolsWebSearch, true)
-        XCTAssertEqual(config.toolsViewImage, true)
         XCTAssertEqual(config.ossProvider, "profile-oss")
         XCTAssertEqual(config.tui.sessionPickerView, .comfortable)
     }

@@ -365,7 +365,6 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var webSearchMode: WebSearchMode?
     public var webSearchConfig: WebSearchConfig?
     public var toolsWebSearch: Bool?
-    public var toolsViewImage: Bool?
     public var features: FeatureStates
     public var memories: MemoriesConfig
     public var mcpServers: [String: McpServerConfig]
@@ -492,7 +491,6 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         webSearchMode: WebSearchMode? = nil,
         webSearchConfig: WebSearchConfig? = nil,
         toolsWebSearch: Bool? = nil,
-        toolsViewImage: Bool? = nil,
         features: FeatureStates = .withDefaults(),
         memories: MemoriesConfig,
         mcpServers: [String: McpServerConfig] = [:],
@@ -571,7 +569,6 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.webSearchMode = webSearchMode
         self.webSearchConfig = webSearchConfig
         self.toolsWebSearch = toolsWebSearch
-        self.toolsViewImage = toolsViewImage
         self.features = features
         self.memories = memories
         self.mcpServers = mcpServers
@@ -655,7 +652,6 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         webSearchMode: WebSearchMode? = nil,
         webSearchConfig: WebSearchConfig? = nil,
         toolsWebSearch: Bool? = nil,
-        toolsViewImage: Bool? = nil,
         features: FeatureStates = .withDefaults(),
         mcpServers: [String: McpServerConfig] = [:],
         mcpOAuthCredentialsStoreMode: OAuthCredentialsStoreMode = .auto,
@@ -716,7 +712,6 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
             webSearchMode: webSearchMode,
             webSearchConfig: webSearchConfig,
             toolsWebSearch: toolsWebSearch,
-            toolsViewImage: toolsViewImage,
             features: features,
             memories: MemoriesConfig(),
             mcpServers: mcpServers,
@@ -769,7 +764,6 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         webSearchMode: WebSearchMode? = nil,
         webSearchConfig: WebSearchConfig? = nil,
         toolsWebSearch: Bool? = nil,
-        toolsViewImage: Bool? = nil,
         features: FeatureStates = .withDefaults(),
         mcpServers: [String: McpServerConfig] = [:],
         mcpOAuthCredentialsStoreMode: OAuthCredentialsStoreMode = .auto,
@@ -822,7 +816,6 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
             webSearchMode: webSearchMode,
             webSearchConfig: webSearchConfig,
             toolsWebSearch: toolsWebSearch,
-            toolsViewImage: toolsViewImage,
             features: features,
             memories: MemoriesConfig(),
             mcpServers: mcpServers,
@@ -865,7 +858,6 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         webSearchMode: WebSearchMode?,
         webSearchConfig: WebSearchConfig?,
         toolsWebSearch: Bool?,
-        toolsViewImage: Bool?,
         features: FeatureStates,
         memories: MemoriesConfig = MemoriesConfig(),
         mcpServers: [String: McpServerConfig],
@@ -913,7 +905,6 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
             webSearchMode: webSearchMode,
             webSearchConfig: webSearchConfig,
             toolsWebSearch: toolsWebSearch,
-            toolsViewImage: toolsViewImage,
             features: features,
             memories: memories,
             mcpServers: mcpServers,
@@ -962,7 +953,6 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         webSearchMode: WebSearchMode?,
         webSearchConfig: WebSearchConfig?,
         toolsWebSearch: Bool?,
-        toolsViewImage: Bool?,
         features: FeatureStates,
         mcpServers: [String: McpServerConfig],
         mcpOAuthCredentialsStoreMode: OAuthCredentialsStoreMode,
@@ -1009,7 +999,6 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
             webSearchMode: webSearchMode,
             webSearchConfig: webSearchConfig,
             toolsWebSearch: toolsWebSearch,
-            toolsViewImage: toolsViewImage,
             features: features,
             mcpServers: mcpServers,
             mcpOAuthCredentialsStoreMode: mcpOAuthCredentialsStoreMode,
@@ -4448,9 +4437,6 @@ private struct ParsedCodexConfigToml {
         if let webSearch = values["tools_web_search"] {
             config.toolsWebSearch = try boolValue(webSearch, key: "\(keyPrefix)tools_web_search")
         }
-        if let viewImage = values["tools_view_image"] {
-            config.toolsViewImage = try boolValue(viewImage, key: "\(keyPrefix)tools_view_image")
-        }
         if let ossProvider = values["oss_provider"] {
             config.ossProvider = try stringValue(ossProvider, key: "\(keyPrefix)oss_provider")
         }
@@ -4534,7 +4520,6 @@ private struct ParsedCodexConfigToml {
             || key == "experimental_thread_store"
             || key == "web_search"
             || key == "tools_web_search"
-            || key == "tools_view_image"
             || key == "mcp_oauth_credentials_store"
             || key == "mcp_oauth_callback_port"
             || key == "mcp_oauth_callback_url"
@@ -4576,7 +4561,6 @@ private struct ParsedCodexConfigToml {
             || key == "experimental_use_unified_exec_tool"
             || key == "web_search"
             || key == "tools_web_search"
-            || key == "tools_view_image"
             || key == "oss_provider"
     }
 

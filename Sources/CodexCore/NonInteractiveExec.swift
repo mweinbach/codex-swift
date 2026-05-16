@@ -242,7 +242,6 @@ public enum NonInteractiveExec {
             applyPatchToolType: applyPatchToolType,
             webSearchMode: webSearchMode(for: config),
             webSearchConfig: config.webSearchConfig,
-            includeViewImageTool: config.toolsViewImage ?? true,
             canRequestOriginalImageDetail: modelFamily.supportsImageDetailOriginal,
             includeComputerUseTools: config.features.isEnabled(.computerUse),
             experimentalSupportedTools: modelFamily.experimentalSupportedTools,

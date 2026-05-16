@@ -232,7 +232,6 @@ final class ToolSpecTests: XCTestCase {
     func testBuildSpecsCanExposeAgentJobTools() {
         let specs = ToolSpecFactory.buildSpecs(config: ToolsConfig(
             shellType: .disabled,
-            includeViewImageTool: false,
             experimentalSupportedTools: ["spawn_agents_on_csv", "report_agent_job_result"]
         ))
 
@@ -247,7 +246,6 @@ final class ToolSpecTests: XCTestCase {
     func testBuildSpecsExposeAgentJobToolsFromRustFeatureFlags() {
         let mainAgentSpecs = ToolSpecFactory.buildSpecs(config: ToolsConfig(
             shellType: .disabled,
-            includeViewImageTool: false,
             agentJobTools: true
         ))
         XCTAssertTrue(mainAgentSpecs.contains {
@@ -259,7 +257,6 @@ final class ToolSpecTests: XCTestCase {
 
         let workerSpecs = ToolSpecFactory.buildSpecs(config: ToolsConfig(
             shellType: .disabled,
-            includeViewImageTool: false,
             agentJobTools: true,
             agentJobWorkerTools: true
         ))
@@ -274,7 +271,6 @@ final class ToolSpecTests: XCTestCase {
     func testBuildSpecsMultiAgentV2UsesTaskNamesAndHidesLegacyToolsLikeRust() throws {
         let specs = ToolSpecFactory.buildSpecs(config: ToolsConfig(
             shellType: .disabled,
-            includeViewImageTool: false,
             multiAgentV2Tools: true,
             spawnAgentUsageHint: true,
             spawnAgentUsageHintText: "Custom delegation guidance.",
@@ -287,6 +283,7 @@ final class ToolSpecTests: XCTestCase {
             "list_mcp_resource_templates",
             "read_mcp_resource",
             "update_plan",
+            "view_image",
             "spawn_agent",
             "send_message",
             "followup_task",
@@ -393,7 +390,6 @@ final class ToolSpecTests: XCTestCase {
     func testBuildSpecsMultiAgentV2HideMetadataMatchesRustSchema() throws {
         let specs = ToolSpecFactory.buildSpecs(config: ToolsConfig(
             shellType: .disabled,
-            includeViewImageTool: false,
             multiAgentV2Tools: true,
             spawnAgentUsageHint: false,
             spawnAgentUsageHintText: "Should not appear.",
@@ -457,7 +453,6 @@ final class ToolSpecTests: XCTestCase {
     func testBuildSpecsAddsViewImageEnvironmentIDOnlyForMultipleEnvironments() throws {
         let single = ToolSpecFactory.buildSpecs(config: ToolsConfig(
             shellType: .disabled,
-            includeViewImageTool: true,
             environmentMode: .single
         ))
         let singleTool = try XCTUnwrap(single.first { $0.spec.name == "view_image" }?.spec)
@@ -468,7 +463,6 @@ final class ToolSpecTests: XCTestCase {
 
         let multiple = ToolSpecFactory.buildSpecs(config: ToolsConfig(
             shellType: .disabled,
-            includeViewImageTool: true,
             environmentMode: .multiple
         ))
         let multipleTool = try XCTUnwrap(multiple.first { $0.spec.name == "view_image" }?.spec)
@@ -655,7 +649,6 @@ final class ToolSpecTests: XCTestCase {
                 shellType: .unifiedExec,
                 applyPatchToolType: .freeform,
                 webSearchRequest: true,
-                includeViewImageTool: true,
                 includeComputerUseTools: true,
                 experimentalSupportedTools: ["grep_files", "read_file", "list_dir", "test_sync_tool"]
             )
@@ -787,8 +780,7 @@ final class ToolSpecTests: XCTestCase {
         )
         let specs = ToolSpecFactory.buildSpecs(
             config: ToolsConfig(
-                shellType: .disabled,
-                includeViewImageTool: false
+                shellType: .disabled
             ),
             unavailableCalledTools: [unavailableTool]
         )
@@ -798,6 +790,7 @@ final class ToolSpecTests: XCTestCase {
             "list_mcp_resource_templates",
             "read_mcp_resource",
             "update_plan",
+            "view_image",
             "mcp__codex_apps__calendar_create_event"
         ])
         XCTAssertEqual(specs.last?.supportsParallelToolCalls, false)
@@ -820,7 +813,6 @@ final class ToolSpecTests: XCTestCase {
         let specs = ToolSpecFactory.buildSpecs(
             config: ToolsConfig(
                 shellType: .disabled,
-                includeViewImageTool: false,
                 toolSearch: false,
                 toolSuggest: true
             ),
@@ -840,9 +832,10 @@ final class ToolSpecTests: XCTestCase {
             "list_mcp_resource_templates",
             "read_mcp_resource",
             "update_plan",
-            "request_plugin_install"
+            "request_plugin_install",
+            "view_image"
         ])
-        XCTAssertEqual(specs.last?.supportsParallelToolCalls, true)
+        XCTAssertTrue(specs.first { $0.spec.name == requestPluginInstallToolName }?.supportsParallelToolCalls == true)
     }
 
     func testRequestPluginInstallDoesNotRegisterWithoutToolSuggest() {
@@ -990,7 +983,6 @@ final class ToolSpecTests: XCTestCase {
         let specs = ToolSpecFactory.buildSpecs(config: ToolsConfig(
             shellType: .disabled,
             webSearchMode: .cached,
-            includeViewImageTool: false,
             includeImageGenerationTool: true
         ))
 
@@ -1002,11 +994,13 @@ final class ToolSpecTests: XCTestCase {
                 "read_mcp_resource",
                 "update_plan",
                 "web_search",
-                "image_generation"
+                "image_generation",
+                "view_image"
             ]
         )
-        XCTAssertEqual(specs.last?.spec, .imageGeneration(outputFormat: "png"))
-        XCTAssertEqual(specs.last?.supportsParallelToolCalls, false)
+        let imageGeneration = specs.first { $0.spec.name == "image_generation" }
+        XCTAssertEqual(imageGeneration?.spec, .imageGeneration(outputFormat: "png"))
+        XCTAssertEqual(imageGeneration?.supportsParallelToolCalls, false)
     }
 
     func testProviderCapabilitiesDisableProviderBoundToolSurfacesLikeRust() throws {
@@ -1014,7 +1008,6 @@ final class ToolSpecTests: XCTestCase {
             shellType: .disabled,
             webSearchMode: .cached,
             webSearchRequest: true,
-            includeViewImageTool: false,
             includeImageGenerationTool: true,
             namespaceTools: true,
             toolSearch: true,
@@ -1066,8 +1059,7 @@ final class ToolSpecTests: XCTestCase {
         let specs = ToolSpecFactory.buildSpecs(
             config: ToolsConfig(
                 shellType: .disabled,
-                applyPatchToolType: nil,
-                includeViewImageTool: false
+                applyPatchToolType: nil
             ),
             mcpTools: [
                 "mcp__test_server__something": makeMcpTool(name: "something"),
@@ -1096,8 +1088,7 @@ final class ToolSpecTests: XCTestCase {
         let specs = ToolSpecFactory.buildSpecs(
             config: ToolsConfig(
                 shellType: .disabled,
-                applyPatchToolType: nil,
-                includeViewImageTool: false
+                applyPatchToolType: nil
             ),
             mcpToolInfos: [
                 McpToolInfo(serverName: "docs", tool: makeMcpTool(name: "search")),
@@ -1126,8 +1117,7 @@ final class ToolSpecTests: XCTestCase {
         let specs = ToolSpecFactory.buildSpecs(
             config: ToolsConfig(
                 shellType: .disabled,
-                applyPatchToolType: nil,
-                includeViewImageTool: false
+                applyPatchToolType: nil
             ),
             mcpToolInfos: [
                 McpToolInfo(
@@ -1149,8 +1139,7 @@ final class ToolSpecTests: XCTestCase {
         let specs = ToolSpecFactory.buildSpecs(
             config: ToolsConfig(
                 shellType: .disabled,
-                applyPatchToolType: nil,
-                includeViewImageTool: false
+                applyPatchToolType: nil
             ),
             mcpToolInfos: [
                 McpToolInfo(serverName: "server.one", tool: makeMcpTool(name: "tool.two-three"))
@@ -1169,8 +1158,7 @@ final class ToolSpecTests: XCTestCase {
         let specs = ToolSpecFactory.buildSpecs(
             config: ToolsConfig(
                 shellType: .disabled,
-                applyPatchToolType: nil,
-                includeViewImageTool: false
+                applyPatchToolType: nil
             ),
             dynamicTools: [
                 DynamicToolSpec(
@@ -1244,8 +1232,7 @@ final class ToolSpecTests: XCTestCase {
         let specs = ToolSpecFactory.buildSpecs(
             config: ToolsConfig(
                 shellType: .disabled,
-                applyPatchToolType: nil,
-                includeViewImageTool: false
+                applyPatchToolType: nil
             ),
             dynamicTools: dynamicTools
         )
@@ -1286,8 +1273,7 @@ final class ToolSpecTests: XCTestCase {
         let specs = ToolSpecFactory.buildSpecs(
             config: ToolsConfig(
                 shellType: .disabled,
-                applyPatchToolType: nil,
-                includeViewImageTool: false
+                applyPatchToolType: nil
             ),
             dynamicTools: dynamicTools
         )
@@ -1306,7 +1292,6 @@ final class ToolSpecTests: XCTestCase {
             config: ToolsConfig(
                 shellType: .disabled,
                 applyPatchToolType: nil,
-                includeViewImageTool: false,
                 namespaceTools: false
             ),
             dynamicTools: [
@@ -1333,7 +1318,6 @@ final class ToolSpecTests: XCTestCase {
             config: ToolsConfig(
                 shellType: .disabled,
                 applyPatchToolType: nil,
-                includeViewImageTool: false,
                 toolSearch: true
             ),
             dynamicTools: [
@@ -1691,7 +1675,6 @@ final class ToolSpecTests: XCTestCase {
             config: ToolsConfig(
                 shellType: .disabled,
                 applyPatchToolType: nil,
-                includeViewImageTool: false,
                 namespaceTools: false
             ),
             mcpTools: [

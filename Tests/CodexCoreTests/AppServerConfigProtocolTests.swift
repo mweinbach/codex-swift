@@ -120,8 +120,7 @@ final class AppServerConfigProtocolTests: XCTestCase {
                     contextSize: .low,
                     allowedDomains: ["openai.com"],
                     location: AppServerProtocol.WebSearchLocation(country: "US", city: "New York")
-                ),
-                viewImage: true
+                )
             ),
             profiles: [
                 "work": AppServerProtocol.ProfileV2(
@@ -180,8 +179,7 @@ final class AppServerConfigProtocolTests: XCTestCase {
                         "city": "New York",
                         "timezone": NSNull()
                     ]
-                ],
-                "view_image": true
+                ]
             ],
             profiles: [
                 "work": [

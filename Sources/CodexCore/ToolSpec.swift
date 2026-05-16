@@ -793,7 +793,6 @@ public struct ToolsConfig: Equatable, Sendable {
     public let webSearchMode: WebSearchMode?
     public let webSearchConfig: WebSearchConfig?
     public let webSearchRequest: Bool
-    public let includeViewImageTool: Bool
     public let canRequestOriginalImageDetail: Bool
     public let environmentMode: ToolEnvironmentMode
     public let includeComputerUseTools: Bool
@@ -818,7 +817,6 @@ public struct ToolsConfig: Equatable, Sendable {
         webSearchMode: WebSearchMode? = nil,
         webSearchConfig: WebSearchConfig? = nil,
         webSearchRequest: Bool = false,
-        includeViewImageTool: Bool = true,
         canRequestOriginalImageDetail: Bool = false,
         environmentMode: ToolEnvironmentMode = .single,
         includeComputerUseTools: Bool = false,
@@ -842,7 +840,6 @@ public struct ToolsConfig: Equatable, Sendable {
         self.webSearchMode = webSearchMode
         self.webSearchConfig = webSearchConfig
         self.webSearchRequest = webSearchRequest
-        self.includeViewImageTool = includeViewImageTool
         self.canRequestOriginalImageDetail = canRequestOriginalImageDetail
         self.environmentMode = environmentMode
         self.includeComputerUseTools = includeComputerUseTools
@@ -869,7 +866,6 @@ public struct ToolsConfig: Equatable, Sendable {
             webSearchMode: capabilities.webSearch ? webSearchMode : nil,
             webSearchConfig: webSearchConfig,
             webSearchRequest: capabilities.webSearch ? webSearchRequest : false,
-            includeViewImageTool: includeViewImageTool,
             canRequestOriginalImageDetail: canRequestOriginalImageDetail,
             environmentMode: environmentMode,
             includeComputerUseTools: includeComputerUseTools,
@@ -1025,15 +1021,13 @@ public enum ToolSpecFactory {
             ))
         }
 
-        if config.includeViewImageTool {
-            specs.append(ConfiguredToolSpec(
-                spec: createViewImageTool(
-                    canRequestOriginalImageDetail: config.canRequestOriginalImageDetail,
-                    includeEnvironmentID: config.environmentMode == .multiple
-                ),
-                supportsParallelToolCalls: true
-            ))
-        }
+        specs.append(ConfiguredToolSpec(
+            spec: createViewImageTool(
+                canRequestOriginalImageDetail: config.canRequestOriginalImageDetail,
+                includeEnvironmentID: config.environmentMode == .multiple
+            ),
+            supportsParallelToolCalls: true
+        ))
 
         if config.multiAgentV2Tools {
             specs.append(contentsOf: createMultiAgentV2ToolSpecs(
