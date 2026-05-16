@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `64d8f387f9` (`Remove connector_openai
+  prefix filtering`). Swift connector discovery no longer filters connector
+  ids only because they start with `connector_openai_`; explicit global and
+  first-party disallowed connector-id lists still apply for app listing and
+  tool-suggestion filtering.
 - 2026-05-16: rechecked Rust commit `f13e21ef43` (`Prefer the model list
   fetched from the backend for SIWC users`). Swift model catalog refresh and
   app-server `model/list` now treat a ChatGPT remote catalog containing at

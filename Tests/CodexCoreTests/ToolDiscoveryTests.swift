@@ -212,11 +212,11 @@ final class ToolDiscoveryTests: XCTestCase {
 
         XCTAssertEqual(
             filterDisallowedConnectors(connectors, originatorValue: "codex_cli").map(\.id),
-            ["alpha", "connector_0f9c9d4592e54d0a9a12b3f44a1e2010"]
+            ["alpha", "connector_openai_hidden", "connector_0f9c9d4592e54d0a9a12b3f44a1e2010"]
         )
         XCTAssertEqual(
             filterDisallowedConnectors(connectors, originatorValue: "codex_chatgpt_desktop").map(\.id),
-            ["alpha", "asdk_app_6938a94a61d881918ef32cb999ff937c"]
+            ["alpha", "connector_openai_hidden", "asdk_app_6938a94a61d881918ef32cb999ff937c"]
         )
     }
 
@@ -263,7 +263,7 @@ final class ToolDiscoveryTests: XCTestCase {
             originatorValue: "codex_cli"
         )
 
-        XCTAssertEqual(filtered.map(\.id), ["connector_alpha", "connector_gamma"])
+        XCTAssertEqual(filtered.map(\.id), ["connector_alpha", "connector_gamma", "connector_openai_hidden"])
     }
 
     func testToolSuggestConnectorIDsIncludeConfiguredDiscoverables() {

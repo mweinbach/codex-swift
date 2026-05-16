@@ -12154,7 +12154,11 @@ final class CodexAppServerTests: XCTestCase {
         let response = try appServerResponse(#"{"id":1,"method":"app/list","params":{}}"#, configuration: configuration)
         let result = try XCTUnwrap(response["result"] as? [String: Any])
         let data = try XCTUnwrap(result["data"] as? [[String: Any]])
-        XCTAssertEqual(data.map { $0["id"] as? String }, ["connector_accessible", "connector_alpha"])
+        XCTAssertEqual(data.map { $0["id"] as? String }, [
+            "connector_accessible",
+            "connector_alpha",
+            "connector_openai_hidden"
+        ])
     }
 
     func testPluginListReturnsRustEmptyResponseWhenPluginsUnavailable() throws {

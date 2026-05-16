@@ -23,7 +23,6 @@ public let toolSuggestDiscoverablePluginAllowlist: Set<String> = [
     "computer-use@openai-bundled"
 ]
 public let codexAppsMCPServerName = "codex_apps"
-public let disallowedConnectorIDPrefix = "connector_openai_"
 public let firstPartyChatOriginators: Set<String> = ["codex_atlas", "codex_chatgpt_desktop"]
 public let disallowedConnectorIDs: Set<String> = [
     "asdk_app_6938a94a61d881918ef32cb999ff937c",
@@ -449,9 +448,6 @@ public func filterDisallowedConnectors(
 }
 
 public func isConnectorIDAllowed(_ connectorID: String, originatorValue: String) -> Bool {
-    if connectorID.hasPrefix(disallowedConnectorIDPrefix) {
-        return false
-    }
     if firstPartyChatOriginators.contains(originatorValue) {
         return !firstPartyChatDisallowedConnectorIDs.contains(connectorID)
     }
