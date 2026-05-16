@@ -193,6 +193,82 @@ final class McpToolApprovalPersistenceTests: XCTestCase {
         }
     }
 
+    func testPersistCustomMcpToolApprovalWritesEnabledPluginOverrideLikeRust() throws {
+        let temp = try TemporaryCodexHome()
+        try """
+        model = "gpt-5"
+
+        [plugins."sample@test"]
+        enabled = true
+        """.write(to: temp.configFile, atomically: true, encoding: .utf8)
+
+        try McpToolApprovalPersistence.persistCustomMcpToolApproval(
+            codexHome: temp.url,
+            serverName: "weather",
+            toolName: "forecast/search",
+            enabledPluginMcpServerSources: [
+                PluginMcpToolApprovalSource(
+                    pluginConfigName: "sample@test",
+                    mcpServers: ["weather"]
+                ),
+            ]
+        )
+
+        let contents = try String(contentsOf: temp.configFile, encoding: .utf8)
+        XCTAssertTrue(contents.contains("model = \"gpt-5\""))
+        XCTAssertTrue(contents.contains("[plugins.\"sample@test\"]\nenabled = true"))
+        XCTAssertTrue(contents.contains("[plugins.\"sample@test\".mcp_servers.weather.tools.\"forecast/search\"]"))
+        XCTAssertTrue(contents.contains("approval_mode = \"approve\""))
+    }
+
+    func testPersistCustomMcpToolApprovalPrefersConfiguredServerOverPluginLikeRust() throws {
+        let temp = try TemporaryCodexHome()
+        try """
+        [mcp_servers.weather]
+        command = "local-weather"
+
+        [plugins."sample@test"]
+        enabled = true
+        """.write(to: temp.configFile, atomically: true, encoding: .utf8)
+
+        try McpToolApprovalPersistence.persistCustomMcpToolApproval(
+            codexHome: temp.url,
+            serverName: "weather",
+            toolName: "search",
+            enabledPluginMcpServerSources: [
+                PluginMcpToolApprovalSource(
+                    pluginConfigName: "sample@test",
+                    mcpServers: ["weather"]
+                ),
+            ]
+        )
+
+        let contents = try String(contentsOf: temp.configFile, encoding: .utf8)
+        XCTAssertTrue(contents.contains("[mcp_servers.weather.tools.search]"))
+        XCTAssertFalse(contents.contains("[plugins.\"sample@test\".mcp_servers.weather.tools.search]"))
+    }
+
+    func testPersistCustomMcpToolApprovalRejectsUnknownPluginBackedServerLikeRust() throws {
+        let temp = try TemporaryCodexHome()
+
+        XCTAssertThrowsError(try McpToolApprovalPersistence.persistCustomMcpToolApproval(
+            codexHome: temp.url,
+            serverName: "weather",
+            toolName: "search",
+            enabledPluginMcpServerSources: [
+                PluginMcpToolApprovalSource(
+                    pluginConfigName: "sample@test",
+                    mcpServers: ["docs"]
+                ),
+            ]
+        )) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "MCP server `weather` is not configured in config.toml or an enabled plugin"
+            )
+        }
+    }
+
     func testPersistMcpToolApprovalDispatchesCodexAppsAndRequiresConnectorID() throws {
         let temp = try TemporaryCodexHome()
 

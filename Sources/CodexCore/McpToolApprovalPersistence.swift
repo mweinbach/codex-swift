@@ -3,6 +3,7 @@ import Foundation
 public enum McpToolApprovalPersistenceError: Error, Equatable, CustomStringConvertible, Sendable {
     case missingConnectorID
     case mcpServerNotConfigured(String)
+    case mcpServerNotConfiguredOrEnabledPlugin(String)
 
     public var description: String {
         switch self {
@@ -10,7 +11,19 @@ public enum McpToolApprovalPersistenceError: Error, Equatable, CustomStringConve
             return "codex_apps MCP tool approval persistence requires a connector_id"
         case let .mcpServerNotConfigured(server):
             return "MCP server `\(server)` is not configured in config.toml"
+        case let .mcpServerNotConfiguredOrEnabledPlugin(server):
+            return "MCP server `\(server)` is not configured in config.toml or an enabled plugin"
         }
+    }
+}
+
+public struct PluginMcpToolApprovalSource: Equatable, Sendable {
+    public var pluginConfigName: String
+    public var mcpServers: Set<String>
+
+    public init(pluginConfigName: String, mcpServers: Set<String>) {
+        self.pluginConfigName = pluginConfigName
+        self.mcpServers = mcpServers
     }
 }
 
@@ -19,6 +32,7 @@ public enum McpToolApprovalPersistence {
         codexHome: URL,
         key: McpToolApprovalKey,
         configLayerStack: ConfigLayerStack? = nil,
+        enabledPluginMcpServerSources: [PluginMcpToolApprovalSource] = [],
         fileManager: FileManager = .default
     ) throws {
         if key.server == codexAppsMCPServerName {
@@ -39,6 +53,7 @@ public enum McpToolApprovalPersistence {
             serverName: key.server,
             toolName: key.toolName,
             configLayerStack: configLayerStack,
+            enabledPluginMcpServerSources: enabledPluginMcpServerSources,
             fileManager: fileManager
         )
     }
@@ -75,6 +90,7 @@ public enum McpToolApprovalPersistence {
         serverName: String,
         toolName: String,
         configLayerStack: ConfigLayerStack? = nil,
+        enabledPluginMcpServerSources: [PluginMcpToolApprovalSource] = [],
         fileManager: FileManager = .default
     ) throws {
         if let projectConfigFolder = projectMcpToolApprovalConfigFolder(
@@ -90,12 +106,67 @@ public enum McpToolApprovalPersistence {
             return
         }
 
-        try persistCustomMcpToolApprovalAt(
-            configFolder: codexHome,
-            serverName: serverName,
-            toolName: toolName,
+        let globalServers = try McpConfigStore.loadGlobalMcpServers(
+            codexHome: codexHome,
             fileManager: fileManager
         )
+        if globalServers[serverName] != nil {
+            try persistCustomMcpToolApprovalAt(
+                configFolder: codexHome,
+                servers: globalServers,
+                serverName: serverName,
+                toolName: toolName,
+                fileManager: fileManager
+            )
+            return
+        }
+
+        if let pluginConfigName = pluginConfigName(
+            forServerName: serverName,
+            in: enabledPluginMcpServerSources
+        ) {
+            try persistPluginMcpToolApproval(
+                codexHome: codexHome,
+                pluginConfigName: pluginConfigName,
+                serverName: serverName,
+                toolName: toolName,
+                fileManager: fileManager
+            )
+            return
+        }
+
+        if enabledPluginMcpServerSources.isEmpty {
+            throw McpToolApprovalPersistenceError.mcpServerNotConfigured(serverName)
+        }
+        throw McpToolApprovalPersistenceError.mcpServerNotConfiguredOrEnabledPlugin(serverName)
+    }
+
+    private static func persistPluginMcpToolApproval(
+        codexHome: URL,
+        pluginConfigName: String,
+        serverName: String,
+        toolName: String,
+        fileManager: FileManager
+    ) throws {
+        try fileManager.createDirectory(at: codexHome, withIntermediateDirectories: true)
+        let configFile = codexHome.appendingPathComponent("config.toml", isDirectory: false)
+        let existing = fileManager.fileExists(atPath: configFile.path)
+            ? try String(contentsOf: configFile, encoding: .utf8)
+            : ""
+        let next = setTomlAssignment(
+            in: existing,
+            tablePath: ["plugins", pluginConfigName, "mcp_servers", serverName, "tools", toolName],
+            key: "approval_mode",
+            literal: tomlString(AppToolApproval.approve.rawValue)
+        )
+        try next.write(to: configFile, atomically: true, encoding: .utf8)
+    }
+
+    private static func pluginConfigName(
+        forServerName serverName: String,
+        in sources: [PluginMcpToolApprovalSource]
+    ) -> String? {
+        sources.first { $0.mcpServers.contains(serverName) }?.pluginConfigName
     }
 
     private static func persistCustomMcpToolApprovalAt(
@@ -104,10 +175,26 @@ public enum McpToolApprovalPersistence {
         toolName: String,
         fileManager: FileManager
     ) throws {
-        var servers = try McpConfigStore.loadGlobalMcpServers(
-            codexHome: configFolder,
+        try persistCustomMcpToolApprovalAt(
+            configFolder: configFolder,
+            servers: try McpConfigStore.loadGlobalMcpServers(
+                codexHome: configFolder,
+                fileManager: fileManager
+            ),
+            serverName: serverName,
+            toolName: toolName,
             fileManager: fileManager
         )
+    }
+
+    private static func persistCustomMcpToolApprovalAt(
+        configFolder: URL,
+        servers loadedServers: [String: McpServerConfig],
+        serverName: String,
+        toolName: String,
+        fileManager: FileManager
+    ) throws {
+        var servers = loadedServers
         guard var server = servers[serverName] else {
             throw McpToolApprovalPersistenceError.mcpServerNotConfigured(serverName)
         }
