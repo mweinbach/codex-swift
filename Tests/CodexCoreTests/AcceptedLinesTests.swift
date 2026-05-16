@@ -192,6 +192,38 @@ final class AcceptedLinesTests: XCTestCase {
         XCTAssertTrue(reducer.completeTurn(turnID: "turn-2", completedAt: 457).isEmpty)
     }
 
+    func testReducerEmitsDeleteOnlyAcceptedLineEventLikeRust() {
+        var reducer = AcceptedLineFingerprintReducer(repoHashResolver: { _ in nil })
+        reducer.ingestResolvedTurn(
+            turnID: "turn-delete-only",
+            threadID: "thread-delete-only",
+            modelSlug: "gpt-5.4",
+            cwd: URL(fileURLWithPath: "/tmp/project", isDirectory: true)
+        )
+        reducer.ingestTurnDiff(
+            threadID: "thread-delete-only",
+            turnID: "turn-delete-only",
+            unifiedDiff: """
+            diff --git a/src/lib.rs b/src/lib.rs
+            index 1111111..2222222
+            --- a/src/lib.rs
+            +++ b/src/lib.rs
+            @@ -1 +0,0 @@
+            -let removed_value = 1;
+            """
+        )
+
+        let events = reducer.completeTurn(turnID: "turn-delete-only", completedAt: 999)
+
+        XCTAssertEqual(events.count, 1)
+        let params = events[0].eventParams
+        XCTAssertEqual(params.turnID, "turn-delete-only")
+        XCTAssertEqual(params.threadID, "thread-delete-only")
+        XCTAssertEqual(params.acceptedAddedLines, 0)
+        XCTAssertEqual(params.acceptedDeletedLines, 1)
+        XCTAssertEqual(params.lineFingerprints, [])
+    }
+
     func testAnalyticsClientUploadsAcceptedLineEventsOnCompletion() async {
         let uploader = RecordingAcceptedLineAnalyticsUploader()
         let client = AcceptedLineAnalyticsClient(

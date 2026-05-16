@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust accepted-line analytics in
+  `codex-rs/analytics/src/accepted_lines.rs`. Swift coverage now pins the
+  delete-only diff path where the reducer still emits a
+  `codex_accepted_line_fingerprints` request with deleted-line counts and an
+  empty `line_fingerprints` array.
 - 2026-05-16: rechecked Rust commit `7c9731c9af` after `cargo shear`
   removed the unreachable `grep_files`, `read_file`, and `list_dir`
   experimental tool handlers. Swift model metadata and tool-spec construction
