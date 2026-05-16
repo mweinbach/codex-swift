@@ -80,6 +80,98 @@ final class CodeModeTests: XCTestCase {
         XCTAssertFalse(CodeMode.isCodeModeNestedTool("wait"))
         XCTAssertTrue(CodeMode.isCodeModeNestedTool("mcp__server__tool"))
     }
+
+    func testResponseInputToCodeModeResultJoinsTextAndImagesLikeRustToolContext() {
+        let response = ResponseInputItem.message(
+            role: "user",
+            content: [
+                .inputText(text: "line 1"),
+                .inputImage(imageURL: "data:image/png;base64,AAA"),
+                .outputText(text: "line 2"),
+                .inputText(text: "   ")
+            ]
+        )
+
+        XCTAssertEqual(
+            CodeMode.responseInputToCodeModeResult(response),
+            .string("line 1\ndata:image/png;base64,AAA\nline 2")
+        )
+    }
+
+    func testResponseInputToCodeModeResultUsesFunctionAndCustomOutputBodiesLikeRustToolContext() {
+        let contentItems: [FunctionCallOutputContentItem] = [
+            .inputText(text: "line 1"),
+            .inputImage(imageURL: "data:image/png;base64,AAA"),
+            .inputText(text: "line 2")
+        ]
+
+        XCTAssertEqual(
+            CodeMode.responseInputToCodeModeResult(.functionCallOutput(
+                callID: "call-1",
+                output: FunctionCallOutputPayload(content: "ignored", contentItems: contentItems)
+            )),
+            .string("line 1\ndata:image/png;base64,AAA\nline 2")
+        )
+        XCTAssertEqual(
+            CodeMode.responseInputToCodeModeResult(.customToolCallOutput(
+                callID: "custom-1",
+                output: FunctionCallOutputPayload(content: "plain")
+            )),
+            .string("plain")
+        )
+    }
+
+    func testResponseInputToCodeModeResultKeepsToolSearchArrayLikeRustToolContext() {
+        let tools: [JSONValue] = [
+            .object([
+                "type": .string("function"),
+                "name": .string("create_event")
+            ])
+        ]
+
+        XCTAssertEqual(
+            CodeMode.responseInputToCodeModeResult(.toolSearchOutput(
+                callID: "search-1",
+                status: "completed",
+                execution: "client",
+                tools: tools
+            )),
+            .array(tools)
+        )
+    }
+
+    func testResponseInputToCodeModeResultSerializesRawMcpCallToolResultLikeRustToolContext() {
+        let result = McpCallToolResult(
+            content: [.text(McpTextContent(text: "ignored"))],
+            isError: false,
+            structuredContent: .object([
+                "threadId": .string("thread_123"),
+                "content": .string("done")
+            ]),
+            meta: .object(["source": .string("mcp")])
+        )
+
+        XCTAssertEqual(
+            CodeMode.responseInputToCodeModeResult(.mcpToolCallOutput(
+                callID: "mcp-1",
+                output: result
+            )),
+            .object([
+                "_meta": .object(["source": .string("mcp")]),
+                "content": .array([
+                    .object([
+                        "type": .string("text"),
+                        "text": .string("ignored")
+                    ])
+                ]),
+                "isError": .bool(false),
+                "structuredContent": .object([
+                    "content": .string("done"),
+                    "threadId": .string("thread_123")
+                ])
+            ])
+        )
+    }
 }
 
 private extension Result where Success == ParsedExecSource, Failure == CodeModeParseError {

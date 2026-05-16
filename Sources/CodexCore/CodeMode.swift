@@ -113,6 +113,24 @@ public enum CodeMode {
         return identifier.isEmpty ? "_" : identifier
     }
 
+    public static func responseInputToCodeModeResult(_ response: ResponseInputItem) -> JSONValue {
+        switch response {
+        case let .message(_, content, _):
+            return contentItemsToCodeModeResult(content.map(functionOutputContentItem))
+        case let .functionCallOutput(_, output),
+             let .customToolCallOutput(_, _, output):
+            if let contentItems = output.contentItems {
+                return contentItemsToCodeModeResult(contentItems)
+            }
+            return .string(output.content)
+        case let .toolSearchOutput(_, _, _, tools):
+            return .array(tools)
+        case let .mcpToolCallOutput(_, output):
+            return encodeToJSONValue(output)
+                ?? .string("failed to serialize mcp result")
+        }
+    }
+
     private static func safeInteger(_ value: Any) -> Int? {
         if value is NSNull {
             return nil
@@ -132,6 +150,35 @@ public enum CodeMode {
             return nil
         }
         return Int(doubleValue)
+    }
+
+    private static func functionOutputContentItem(_ item: ContentItem) -> FunctionCallOutputContentItem {
+        switch item {
+        case let .inputText(text),
+             let .outputText(text):
+            return .inputText(text: text)
+        case let .inputImage(imageURL, detail):
+            return .inputImage(imageURL: imageURL, detail: detail ?? defaultImageDetail)
+        }
+    }
+
+    private static func contentItemsToCodeModeResult(_ items: [FunctionCallOutputContentItem]) -> JSONValue {
+        let text = items.compactMap { item -> String? in
+            switch item {
+            case let .inputText(text):
+                return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : text
+            case let .inputImage(imageURL, _):
+                return imageURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : imageURL
+            }
+        }.joined(separator: "\n")
+        return .string(text)
+    }
+
+    private static func encodeToJSONValue<T: Encodable>(_ value: T) -> JSONValue? {
+        guard let data = try? JSONEncoder().encode(value) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(JSONValue.self, from: data)
     }
 }
 
