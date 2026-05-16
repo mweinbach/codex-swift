@@ -1917,7 +1917,7 @@ extension ThreadStartParams: Codable {
         try container.encodeNilOrValue(sessionStartSource, forKey: .sessionStartSource)
         try container.encodeNilOrValue(threadSource, forKey: .threadSource)
         try container.encodeNilOrValue(environments, forKey: .environments)
-        try container.encodeNilOrValue(dynamicTools, forKey: .dynamicTools)
+        try container.encodeNilOrValue(dynamicTools?.map(AppServerDynamicToolSpec.init), forKey: .dynamicTools)
         try container.encodeNilOrValue(mockExperimentalField, forKey: .mockExperimentalField)
         try container.encode(experimentalRawEvents, forKey: .experimentalRawEvents)
         try container.encode(persistExtendedHistory, forKey: .persistExtendedHistory)
@@ -1952,6 +1952,41 @@ extension ThreadStartParams: Codable {
         try container.encodeNilOrValue(sandbox, forKey: .sandbox)
         try container.encodeNilOrValue(permissions, forKey: .permissions)
         try container.encodeNilOrValue(config, forKey: .config)
+    }
+}
+
+private struct AppServerDynamicToolSpec: Encodable {
+    let namespace: String?
+    let name: String
+    let description: String
+    let inputSchema: JSONValue
+    let deferLoading: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case namespace
+        case name
+        case description
+        case inputSchema
+        case deferLoading
+    }
+
+    init(_ spec: DynamicToolSpec) {
+        namespace = spec.namespace
+        name = spec.name
+        description = spec.description
+        inputSchema = spec.inputSchema
+        deferLoading = spec.deferLoading
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeNilOrValue(namespace, forKey: .namespace)
+        try container.encode(name, forKey: .name)
+        try container.encode(description, forKey: .description)
+        try container.encode(inputSchema, forKey: .inputSchema)
+        if deferLoading {
+            try container.encode(true, forKey: .deferLoading)
+        }
     }
 }
 

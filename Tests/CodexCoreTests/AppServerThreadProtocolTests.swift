@@ -1657,6 +1657,57 @@ final class AppServerThreadProtocolTests: XCTestCase {
         XCTAssertNil(ThreadStartParams(model: "gpt-5").appServerExperimentalReason)
     }
 
+    func testThreadStartParamsDynamicToolsUseAppServerProtocolNullNamespaceLikeRust() throws {
+        try XCTAssertJSONObjectEqual(
+            ThreadStartParams(dynamicTools: [
+                DynamicToolSpec(
+                    name: "lookup_ticket",
+                    description: "Fetch a ticket",
+                    inputSchema: .object([
+                        "type": .string("object"),
+                        "properties": .object([
+                            "id": .object(["type": .string("string")])
+                        ])
+                    ]),
+                    deferLoading: true
+                )
+            ]),
+            [
+                "model": NSNull(),
+                "modelProvider": NSNull(),
+                "cwd": NSNull(),
+                "approvalPolicy": NSNull(),
+                "approvalsReviewer": NSNull(),
+                "sandbox": NSNull(),
+                "permissions": NSNull(),
+                "config": NSNull(),
+                "serviceName": NSNull(),
+                "baseInstructions": NSNull(),
+                "developerInstructions": NSNull(),
+                "personality": NSNull(),
+                "ephemeral": NSNull(),
+                "sessionStartSource": NSNull(),
+                "threadSource": NSNull(),
+                "environments": NSNull(),
+                "dynamicTools": [[
+                    "namespace": NSNull(),
+                    "name": "lookup_ticket",
+                    "description": "Fetch a ticket",
+                    "inputSchema": [
+                        "type": "object",
+                        "properties": [
+                            "id": ["type": "string"]
+                        ]
+                    ],
+                    "deferLoading": true
+                ]],
+                "mockExperimentalField": NSNull(),
+                "experimentalRawEvents": false,
+                "persistExtendedHistory": false
+            ]
+        )
+    }
+
     func testThreadListAndReadResponsesCarryRustThreadDataShape() throws {
         let turn = AppServerTurn(
             id: "turn-1",
