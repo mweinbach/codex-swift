@@ -617,21 +617,29 @@ final class ResponseModelsTests: XCTestCase {
         let json = #"""
         {
             "type": "function_call",
-            "name": "search",
-            "namespace": "browser",
-            "arguments": "{\"query\":\"swift\"}",
+            "name": "mcp__codex_apps__gmail_get_recent_emails",
+            "namespace": "mcp__codex_apps__gmail",
+            "arguments": "{\"top_k\":5}",
             "call_id": "call-1"
         }
         """#
 
         let item = try JSONDecoder().decode(ResponseItem.self, from: Data(json.utf8))
-        XCTAssertEqual(item, .functionCall(name: "search", namespace: "browser", arguments: #"{"query":"swift"}"#, callID: "call-1"))
+        XCTAssertEqual(
+            item,
+            .functionCall(
+                name: "mcp__codex_apps__gmail_get_recent_emails",
+                namespace: "mcp__codex_apps__gmail",
+                arguments: #"{"top_k":5}"#,
+                callID: "call-1"
+            )
+        )
 
         try XCTAssertJSONObjectEqual(item, [
             "type": "function_call",
-            "name": "search",
-            "namespace": "browser",
-            "arguments": #"{"query":"swift"}"#,
+            "name": "mcp__codex_apps__gmail_get_recent_emails",
+            "namespace": "mcp__codex_apps__gmail",
+            "arguments": #"{"top_k":5}"#,
             "call_id": "call-1"
         ])
 
