@@ -405,6 +405,14 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var tuiKeymap: TuiKeymapConfig
     public var terminalResizeReflow: TerminalResizeReflowConfig
 
+    public var effectiveWorkspaceRoots: [AbsolutePath] {
+        var roots: [AbsolutePath] = []
+        for root in workspaceRoots + profileWorkspaceRoots where !roots.contains(root) {
+            roots.append(root)
+        }
+        return roots
+    }
+
     public var usesDeprecatedLegacyNotify: Bool {
         guard let notify, let command = notify.first else {
             return false
@@ -1343,10 +1351,10 @@ public enum CodexConfigLoader {
         let profileWorkspaceRoots = try parsed.profileWorkspaceRoots(named: profileName, cwd: cwd)
         let cwdRoot = try AbsolutePath(absolutePath: cwd.standardizedFileURL.path)
         let workspaceRoots = runtimeWorkspaceRoots.map(deduplicatedAbsolutePaths)
-            ?? deduplicatedAbsolutePaths([cwdRoot] + profileWorkspaceRoots)
+            ?? [cwdRoot]
         let materializationRoots = runtimeWorkspaceRoots.map { roots in
             deduplicatedAbsolutePaths(roots + profileWorkspaceRoots)
-        } ?? workspaceRoots
+        } ?? deduplicatedAbsolutePaths(workspaceRoots + profileWorkspaceRoots)
         config.profileWorkspaceRoots = profileWorkspaceRoots
         config.workspaceRoots = workspaceRoots
         config.workspaceRootsExplicit = runtimeWorkspaceRoots != nil

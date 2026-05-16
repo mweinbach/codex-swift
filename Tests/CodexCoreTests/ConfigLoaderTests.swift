@@ -841,7 +841,12 @@ final class ConfigLoaderTests: XCTestCase {
 
         XCTAssertEqual(config.activePermissionProfile, ActivePermissionProfile(id: "workspace"))
         XCTAssertEqual(config.profileWorkspaceRoots.map(\.path), [profileRoot.url.standardizedFileURL.path])
-        XCTAssertEqual(config.workspaceRoots.map(\.path), [
+        XCTAssertEqual(
+            config.workspaceRoots.map(\.path),
+            [cwd.url.standardizedFileURL.path],
+            "profile workspace roots should stay separate from Rust runtime workspace_roots"
+        )
+        XCTAssertEqual(config.effectiveWorkspaceRoots.map(\.path), [
             cwd.url.standardizedFileURL.path,
             profileRoot.url.standardizedFileURL.path
         ])
@@ -921,6 +926,7 @@ final class ConfigLoaderTests: XCTestCase {
         )
 
         XCTAssertEqual(config.workspaceRoots, [runtimeWorkspaceRoot])
+        XCTAssertEqual(config.effectiveWorkspaceRoots, [runtimeWorkspaceRoot])
         XCTAssertTrue(
             config.workspaceRootsExplicit,
             "caller-supplied runtime workspace roots should be tracked as explicit like Rust"

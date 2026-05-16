@@ -36,8 +36,11 @@ Recent upstream audit checkpoint:
   Rust's config reload path for explicit `runtime_workspace_roots`. Swift
   runtime config now also tracks Rust's `workspace_roots_explicit` boundary so
   profile-defined workspace roots do not count as explicit runtime roots while
-  caller-supplied runtime roots do. The broader symbolic permission-state
-  representation and live session retargeting behavior remain pending.
+  caller-supplied runtime roots do. Swift also keeps runtime `workspaceRoots`
+  separate from profile-defined roots and exposes the Rust-style combined
+  `effectiveWorkspaceRoots` view for status/permission-summary callers. The
+  broader symbolic permission-state representation and live session retargeting
+  behavior remain pending.
 - 2026-05-16: rechecked Rust commit `5d30764fe9` (`Run compact hooks for
   remote compaction v2`). Swift core remote-v2 compaction orchestration now
   runs trusted `PreCompact` hooks before collecting the v2 compaction stream,
