@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `5b87bd2845` TUI status-surface
+  identifier changes in `codex-rs/tui/src/bottom_pane/status_line_setup.rs`,
+  `title_setup.rs`, and `chatwidget/status_surfaces.rs`. Swift now has shared
+  status-line and terminal-title item parsers that accept Rust's legacy
+  aliases, including `session-id`, while canonicalizing the current thread
+  identifier item back to `thread-id` for the eventual Swift TUI renderer.
 - 2026-05-16: rechecked Rust commit `7c0e54bf59` service-tier request
   filtering in `codex-rs/core/src/session/turn_context.rs` and
   `codex-rs/core/tests/suite/model_switching.rs`. Swift already filtered
