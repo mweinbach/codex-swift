@@ -12,6 +12,18 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commits `12bfb57139` (`Fix turn extension data
+  task plumbing`), `eeabaf74ea` (`[codex] Group removed feature flags`),
+  `c03cea4ca2` (`Remove zombie tools spec module`), and `6a225e4005`
+  (`Defer startup NUX impressions until startup succeeds`). These are
+  Rust-internal task-context, enum-layout, module-layout, and TUI startup
+  refactors with no new Swift wire shape to port: Swift app-server runtime
+  active-turn state already records turn ids for interrupt/steer/completion
+  flows without a separate `ExtensionData` handle, `FeatureRegistry.specs`
+  still matches Rust's public `FEATURES` ordering/stages/defaults, Swift
+  already keeps tool-spec planning in `ToolSpecFactory` without a zombie
+  `spec` module boundary, and the model-availability NUX impression path has
+  no Swift TUI startup equivalent beyond parsed config/model metadata.
 - 2026-05-16: rechecked Rust commit `3c6d727810` (`permissions: resolve
   profile identity with constraints`) and `01d93fd9fc` (`permissions:
   canonicalize workspace_roots and danger-full-access names`). Swift now treats
