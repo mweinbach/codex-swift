@@ -12901,9 +12901,10 @@ public enum CodexAppServer {
 
     fileprivate static func modelListResult(
         params: [String: Any]?,
-        configuration: CodexAppServerConfiguration
+        configuration: CodexAppServerConfiguration,
+        runtimeConfig: CodexRuntimeConfig? = nil
     ) throws -> [String: Any] {
-        let runtimeConfig = try CodexConfigLoader.load(
+        let runtimeConfig = try runtimeConfig ?? CodexConfigLoader.load(
             codexHome: configuration.codexHome,
             cwd: configuration.cwd,
             managedConfigOverrides: configuration.configLayerOverrides,
@@ -16884,28 +16885,37 @@ public enum CodexAppServer {
     fileprivate static func experimentalFeatureListResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration,
-        runtimeFeatureEnablement: [String: Bool] = [:]
+        runtimeFeatureEnablement: [String: Bool] = [:],
+        runtimeConfig loadedRuntimeConfig: CodexRuntimeConfig? = nil,
+        protectedFeatureKeys loadedProtectedFeatureKeys: Set<String>? = nil
     ) throws -> [String: Any] {
         var runtimeConfig: CodexRuntimeConfig
-        do {
-            runtimeConfig = try CodexConfigLoader.load(
+        let protectedFeatureKeys: Set<String>
+        if let loadedRuntimeConfig {
+            runtimeConfig = loadedRuntimeConfig
+            protectedFeatureKeys = loadedProtectedFeatureKeys ?? []
+        } else {
+            do {
+                runtimeConfig = try CodexConfigLoader.load(
+                    codexHome: configuration.codexHome,
+                    systemConfigFile: nil,
+                    environment: configuration.environment
+                )
+            } catch {
+                throw AppServerError.internalError("failed to reload config: \(error)")
+            }
+            let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
                 codexHome: configuration.codexHome,
-                systemConfigFile: nil,
+                cliOverrides: configuration.cliConfigOverrides,
+                overrides: configuration.configLayerOverrides,
                 environment: configuration.environment
             )
-        } catch {
-            throw AppServerError.internalError("failed to reload config: \(error)")
+            protectedFeatureKeys = Self.protectedFeatureKeys(in: stack.effectiveConfig())
         }
-        let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
-            codexHome: configuration.codexHome,
-            cliOverrides: configuration.cliConfigOverrides,
-            overrides: configuration.configLayerOverrides,
-            environment: configuration.environment
-        )
         applyRuntimeFeatureEnablement(
             runtimeFeatureEnablement,
             to: &runtimeConfig.features,
-            protectedFeatureKeys: protectedFeatureKeys(in: stack.effectiveConfig())
+            protectedFeatureKeys: protectedFeatureKeys
         )
 
         let data = FeatureRegistry.specs.map { spec in
@@ -25331,6 +25341,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
     private let activeChatGPTLogins = AppServerChatGPTLoginRegistry()
     private let activeDeviceCodeLogins = AppServerCancellableLoginRegistry()
     private var runtimeFeatureEnablement: [String: Bool] = [:]
+    private var startupDefaultRuntimeConfig: CodexRuntimeConfig?
     private var currentRemoteControlStatusSnapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot?
     private var lastRemoteControlEnvironmentID: String?
     private var loadedThreadAppsFeatureEnabled: [String: Bool] = [:]
@@ -25621,12 +25632,34 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                 warnings.append(CodexAppServer.configWarningFromExecPolicyWarning(execPolicyWarning))
             }
         } catch {
+            startupDefaultRuntimeConfig = try? defaultRuntimeConfigAfterInvalidStartupConfig()
             warnings.append(CodexAppServer.configWarningFromLoadError(
                 summary: "Invalid configuration; using defaults.",
                 error: error
             ))
         }
         return warnings.map(CodexAppServer.configWarningNotification)
+    }
+
+    private func defaultRuntimeConfigAfterInvalidStartupConfig() throws -> CodexRuntimeConfig {
+        try CodexConfigLoader.load(
+            codexHome: configuration.codexHome,
+            overrides: configuration.cliConfigOverrides,
+            systemConfigFile: nil,
+            managedConfigOverrides: ConfigLayerLoaderOverrides(
+                ignoreUserConfig: true,
+                ignoreUserAndProjectExecPolicyRules: true,
+                ignoreManagedRequirements: true
+            ),
+            environment: configuration.environment
+        )
+    }
+
+    private func runtimeConfigAfterInvalidStartupConfig() throws -> CodexRuntimeConfig? {
+        if let startupDefaultRuntimeConfig {
+            return startupDefaultRuntimeConfig
+        }
+        return nil
     }
 
     private func initializeDeprecationNoticeNotifications() -> [[String: Any]] {
@@ -28705,7 +28738,11 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                 case "model/list":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.modelListResult(params: params, configuration: configuration)
+                        result: try CodexAppServer.modelListResult(
+                            params: params,
+                            configuration: configuration,
+                            runtimeConfig: runtimeConfigAfterInvalidStartupConfig()
+                        )
                     )
                 case "modelProvider/capabilities/read":
                     response = CodexAppServer.responseObject(
@@ -28811,7 +28848,9 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                         result: try CodexAppServer.experimentalFeatureListResult(
                             params: params,
                             configuration: configuration,
-                            runtimeFeatureEnablement: runtimeFeatureEnablement
+                            runtimeFeatureEnablement: runtimeFeatureEnablement,
+                            runtimeConfig: runtimeConfigAfterInvalidStartupConfig(),
+                            protectedFeatureKeys: startupDefaultRuntimeConfig == nil ? nil : []
                         )
                     )
                 case "experimentalFeature/enablement/set":

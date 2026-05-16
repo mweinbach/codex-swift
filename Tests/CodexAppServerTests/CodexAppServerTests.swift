@@ -21431,6 +21431,38 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNil(params["range"])
     }
 
+    func testCatalogRoutesUseDefaultConfigAfterInvalidStartupConfigLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        try #"model = 42"#.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(
+            codexHome: temp.url
+        ))
+
+        let initializeMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"test","version":"0"}}}"#.utf8
+        )))
+        XCTAssertEqual(initializeMessages.count, 2)
+        XCTAssertEqual(initializeMessages[1]["method"] as? String, "configWarning")
+
+        let modelList = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"model/list","params":{"limit":100}}"#.utf8
+        )))
+        let modelResult = try XCTUnwrap(modelList["result"] as? [String: Any])
+        let models = try XCTUnwrap(modelResult["data"] as? [[String: Any]])
+        XCTAssertEqual(models.first?["id"] as? String, "gpt-5.5")
+
+        let featureList = try decode(processor.processLine(Data(
+            #"{"id":3,"method":"experimentalFeature/list","params":{"limit":100}}"#.utf8
+        )))
+        let featureResult = try XCTUnwrap(featureList["result"] as? [String: Any])
+        let features = try XCTUnwrap(featureResult["data"] as? [[String: Any]])
+        XCTAssertEqual(features.map { $0["name"] as? String }, FeatureRegistry.specs.map(\.key))
+    }
+
     func testInitializeEmitsExecPolicyParseWarningLikeRust() throws {
         let temp = try TemporaryDirectory()
         let rulesDir = temp.url.appendingPathComponent("rules", isDirectory: true)
