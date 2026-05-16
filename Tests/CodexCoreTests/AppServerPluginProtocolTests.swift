@@ -189,6 +189,15 @@ final class AppServerPluginProtocolTests: XCTestCase {
         )
         let defaultedSkills = try JSONDecoder().decode(SkillsListParams.self, from: Data(#"{}"#.utf8))
         XCTAssertEqual(defaultedSkills, SkillsListParams())
+        let legacyExtraRootsSkills = try JSONDecoder().decode(
+            SkillsListParams.self,
+            from: Data(#"{"cwds":["/repo"],"forceReload":true,"perCwdExtraUserRoots":[{"cwd":"/repo","extraUserRoots":["/tmp/skills"]}]}"#.utf8)
+        )
+        XCTAssertEqual(legacyExtraRootsSkills, SkillsListParams(cwds: ["/repo"], forceReload: true))
+        try XCTAssertJSONObjectEqual(legacyExtraRootsSkills, [
+            "cwds": ["/repo"],
+            "forceReload": true
+        ])
 
         try XCTAssertJSONObjectEqual(HooksListParams(), [:])
         try XCTAssertJSONObjectEqual(HooksListParams(cwds: ["/repo", "relative"]), [

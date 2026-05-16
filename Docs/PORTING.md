@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `314229fd72` (`Remove skills list
+  extra roots`) and app-server v2 `SkillsListParams` decoding in
+  `codex-rs/app-server-protocol/src/protocol/v2/plugin.rs`. Swift shared
+  protocol coverage now pins legacy `perCwdExtraUserRoots` as an ignored
+  old-client field while preserving current `cwds` and `forceReload`
+  request values.
 - 2026-05-16: rechecked Rust commit `5b87bd2845` TUI status-surface
   identifier changes in `codex-rs/tui/src/bottom_pane/status_line_setup.rs`,
   `title_setup.rs`, and `chatwidget/status_surfaces.rs`. Swift now has shared
