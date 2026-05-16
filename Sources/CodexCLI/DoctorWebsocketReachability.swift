@@ -1,5 +1,10 @@
 import CodexCore
 import Foundation
+#if canImport(Darwin)
+    import Darwin
+#elseif canImport(Glibc)
+    import Glibc
+#endif
 
 public struct DoctorWebsocketHandshakeResult: Equatable, Sendable {
     public let httpStatus: Int
@@ -18,6 +23,11 @@ public struct DoctorWebsocketHandshakeResult: Equatable, Sendable {
         self.modelsETagPresent = modelsETagPresent
         self.serverModelPresent = serverModelPresent
     }
+}
+
+public enum DoctorWebsocketAddressFamily: Equatable, Sendable {
+    case ipv4
+    case ipv6
 }
 
 public enum DoctorWebsocketProbeOutcome: Equatable, Sendable {
@@ -89,6 +99,7 @@ extension DoctorCommandRuntime {
         )
         let apiProvider = provider.toAPIProvider(authMode: authMode, environment: environment)
         let endpoint = websocketURLForResponsesPath(apiProvider: apiProvider)
+        let dnsDetails = endpoint.flatMap(websocketDNSDetailsForEndpoint)
         return websocketReachabilityCheck(inputs: DoctorWebsocketReachabilityInputs(
             providerID: settings.selectedModelProviderID,
             providerName: provider.name,
@@ -98,6 +109,7 @@ extension DoctorCommandRuntime {
             connectTimeoutMilliseconds: provider.websocketConnectTimeoutMS(),
             authModeDescription: websocketAuthModeDescription(authMode),
             endpoint: endpoint,
+            dnsDetails: dnsDetails,
             outcome: .notAttempted("handshake probe is not implemented in Swift doctor yet")
         ))
     }
@@ -253,6 +265,17 @@ extension DoctorCommandRuntime {
         return components.string
     }
 
+    public static func websocketDNSDetails(addressFamilies: [DoctorWebsocketAddressFamily]) -> String {
+        let ipv4Count = addressFamilies.filter { $0 == .ipv4 }.count
+        let ipv6Count = addressFamilies.filter { $0 == .ipv6 }.count
+        let firstFamily = addressFamilies.first.map(websocketAddressFamilyDescription) ?? "none"
+        return "DNS: \(ipv4Count) IPv4, \(ipv6Count) IPv6, first \(firstFamily)"
+    }
+
+    public static func websocketDNSLookupFailedDetails(_ message: String) -> String {
+        "DNS: lookup failed (\(message))"
+    }
+
     private static let websocketReachabilityRemediation =
         "Check proxy, VPN, firewall, DNS, custom CA, and WebSocket policy support."
 
@@ -329,6 +352,74 @@ extension DoctorCommandRuntime {
             "models etag present: \(rustBool(result.modelsETagPresent))",
             "server model present: \(rustBool(result.serverModelPresent))"
         ]
+    }
+
+    private static func websocketDNSDetailsForEndpoint(_ endpoint: String) -> String? {
+        guard let components = URLComponents(string: endpoint),
+              let host = components.host,
+              let port = components.port ?? websocketDefaultPort(for: components.scheme)
+        else {
+            return nil
+        }
+        return websocketDNSDetails(host: host, port: port)
+    }
+
+    private static func websocketDNSDetails(host: String, port: Int) -> String {
+        #if canImport(Darwin) || canImport(Glibc)
+            var hints = addrinfo(
+                ai_flags: 0,
+                ai_family: AF_UNSPEC,
+                ai_socktype: SOCK_STREAM,
+                ai_protocol: IPPROTO_TCP,
+                ai_addrlen: 0,
+                ai_canonname: nil,
+                ai_addr: nil,
+                ai_next: nil
+            )
+            var result: UnsafeMutablePointer<addrinfo>?
+            let status = getaddrinfo(host, String(port), &hints, &result)
+            guard status == 0 else {
+                return websocketDNSLookupFailedDetails(String(cString: gai_strerror(status)))
+            }
+            defer { freeaddrinfo(result) }
+
+            var families: [DoctorWebsocketAddressFamily] = []
+            var current = result
+            while let address = current {
+                switch address.pointee.ai_family {
+                case AF_INET:
+                    families.append(.ipv4)
+                case AF_INET6:
+                    families.append(.ipv6)
+                default:
+                    break
+                }
+                current = address.pointee.ai_next
+            }
+            return websocketDNSDetails(addressFamilies: families)
+        #else
+            return websocketDNSLookupFailedDetails("DNS lookup is not supported on this platform")
+        #endif
+    }
+
+    private static func websocketDefaultPort(for scheme: String?) -> Int? {
+        switch scheme {
+        case "ws", "http":
+            80
+        case "wss", "https":
+            443
+        default:
+            nil
+        }
+    }
+
+    private static func websocketAddressFamilyDescription(_ family: DoctorWebsocketAddressFamily) -> String {
+        switch family {
+        case .ipv4:
+            "IPv4"
+        case .ipv6:
+            "IPv6"
+        }
     }
 
     private static func authEnvironmentVariablePresent(_ name: String, in environment: [String: String]) -> Bool {

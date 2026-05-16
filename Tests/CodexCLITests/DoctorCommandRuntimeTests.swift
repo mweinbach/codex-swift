@@ -1172,6 +1172,25 @@ final class DoctorCommandRuntimeTests: XCTestCase {
         )
     }
 
+    func testWebsocketDNSDetailsMatchRustAddressFamilyRows() {
+        XCTAssertEqual(
+            DoctorCommandRuntime.websocketDNSDetails(addressFamilies: [.ipv4, .ipv6, .ipv4]),
+            "DNS: 2 IPv4, 1 IPv6, first IPv4"
+        )
+        XCTAssertEqual(
+            DoctorCommandRuntime.websocketDNSDetails(addressFamilies: [.ipv6]),
+            "DNS: 0 IPv4, 1 IPv6, first IPv6"
+        )
+        XCTAssertEqual(
+            DoctorCommandRuntime.websocketDNSDetails(addressFamilies: []),
+            "DNS: 0 IPv4, 0 IPv6, first none"
+        )
+        XCTAssertEqual(
+            DoctorCommandRuntime.websocketDNSLookupFailedDetails("nodename nor servname provided"),
+            "DNS: lookup failed (nodename nor servname provided)"
+        )
+    }
+
     func testStatePathsCheckReportsInspectablePathsLikeRustDoctor() {
         let check = DoctorCommandRuntime.statePathsCheck(inputs: DoctorStatePathsCheckInputs(
             codexHomePath: "/tmp/codex",
