@@ -36,6 +36,15 @@ Recent upstream audit checkpoint:
   session/always overrides, request-user-input answer fallback, synthetic
   decline priority, accepted-without-content defaulting to accept, and
   prompt-mode normalization of remember decisions.
+- 2026-05-16: rechecked Rust commit `346070a424` and
+  `codex-rs/core/src/session/mcp.rs` Guardian-routed MCP elicitations. Swift
+  now recognizes explicit `codex_request_type = "approval_request"` MCP
+  elicitation opt-ins, requires the `mcp_tool_call` approval kind, rejects
+  unsupported URL, non-empty-schema, missing-tool, and non-object-argument
+  shapes with Rust's decline reasons, builds the Rust-shaped Guardian MCP
+  tool-call review request, and maps Guardian approval, denial, timeout, and
+  abort decisions back to MCP elicitation responses with `auto_review`
+  metadata.
 - 2026-05-16: rechecked Rust app-server v2
   `turn_start_notify_payload_includes_initialize_client_name` in
   `codex-rs/app-server/tests/suite/v2/initialize.rs`. Swift now retains the

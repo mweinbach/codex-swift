@@ -117,6 +117,164 @@ final class McpToolApprovalElicitationTests: XCTestCase {
         )
     }
 
+    func testGuardianElicitationReviewBuildsMcpToolCallFromOptInMetaLikeRust() {
+        let review = guardianMcpElicitationReview(request: GuardianMcpElicitationReviewRequest(
+            serverName: "browser-use",
+            requestID: "7",
+            request: .form(
+                meta: .object(Self.guardianMeta(toolParams: .object([
+                    "origin": .string("https://example.com"),
+                ]))),
+                message: "Allow origin?",
+                requestedSchema: AppServerProtocol.McpElicitationSchema(properties: [:])
+            )
+        ))
+
+        XCTAssertEqual(review, .approvalRequest(GuardianMcpToolApprovalRequest(
+            id: "mcp_elicitation:browser-use:7",
+            server: "browser-use",
+            toolName: "access_browser_origin",
+            arguments: .object(["origin": .string("https://example.com")]),
+            connectorID: "browser-use",
+            connectorName: "Browser Use",
+            connectorDescription: nil,
+            toolTitle: "Access browser origin",
+            toolDescription: nil
+        )))
+    }
+
+    func testGuardianElicitationReviewDefaultsMissingToolParamsLikeRust() {
+        let review = guardianMcpElicitationReview(request: GuardianMcpElicitationReviewRequest(
+            serverName: "browser-use",
+            requestID: "7",
+            request: .form(
+                meta: .object(Self.guardianMeta(toolParams: nil)),
+                message: "Allow origin?",
+                requestedSchema: AppServerProtocol.McpElicitationSchema(properties: [:])
+            )
+        ))
+
+        guard case let .approvalRequest(request) = review else {
+            return XCTFail("expected Guardian MCP tool call request")
+        }
+        XCTAssertEqual(request.arguments, .object([:]))
+    }
+
+    func testGuardianElicitationReviewRequiresExplicitApprovalRequestOptInLikeRust() {
+        let review = guardianMcpElicitationReview(request: GuardianMcpElicitationReviewRequest(
+            serverName: "browser-use",
+            requestID: "7",
+            request: .form(
+                meta: .object([
+                    McpToolApprovalMetaKey.approvalKind: .string(McpToolApprovalMetaKey.approvalKindMcpToolCall),
+                    McpToolApprovalMetaKey.toolName: .string("access_browser_origin"),
+                ]),
+                message: "Allow origin?",
+                requestedSchema: AppServerProtocol.McpElicitationSchema(properties: [:])
+            )
+        ))
+
+        XCTAssertEqual(review, .notRequested)
+    }
+
+    func testGuardianElicitationReviewDeclinesUnsupportedOptInShapesLikeRust() {
+        XCTAssertEqual(
+            guardianMcpElicitationReview(request: GuardianMcpElicitationReviewRequest(
+                serverName: "browser-use",
+                requestID: "8",
+                request: .url(
+                    meta: .object(Self.guardianMeta(toolParams: .object([:]))),
+                    message: "Open URL",
+                    url: "https://example.com",
+                    elicitationID: "elicit-1"
+                )
+            )),
+            .decline("guardian MCP elicitation review only supports form elicitations")
+        )
+        XCTAssertEqual(
+            guardianMcpElicitationReview(request: GuardianMcpElicitationReviewRequest(
+                serverName: "browser-use",
+                requestID: "9",
+                request: .form(
+                    meta: .object(Self.guardianMeta(toolParams: .object([:]))),
+                    message: "Allow origin?",
+                    requestedSchema: AppServerProtocol.McpElicitationSchema(properties: [
+                        "confirmed": .string(AppServerProtocol.McpElicitationStringSchema())
+                    ])
+                )
+            )),
+            .decline("guardian MCP elicitation review only supports empty form schemas")
+        )
+        XCTAssertEqual(
+            guardianMcpElicitationReview(request: GuardianMcpElicitationReviewRequest(
+                serverName: "browser-use",
+                requestID: "10",
+                request: .form(
+                    meta: .object([
+                        McpToolApprovalMetaKey.approvalKind: .string(McpToolApprovalMetaKey.approvalKindMcpToolCall),
+                        McpToolApprovalMetaKey.requestType: .string(McpToolApprovalMetaKey.requestTypeApprovalRequest),
+                    ]),
+                    message: "Allow origin?",
+                    requestedSchema: AppServerProtocol.McpElicitationSchema(properties: [:])
+                )
+            )),
+            .decline("guardian MCP elicitation metadata must include a non-empty tool_name")
+        )
+        XCTAssertEqual(
+            guardianMcpElicitationReview(request: GuardianMcpElicitationReviewRequest(
+                serverName: "browser-use",
+                requestID: "11",
+                request: .form(
+                    meta: .object(Self.guardianMeta(toolParams: .array([]))),
+                    message: "Allow origin?",
+                    requestedSchema: AppServerProtocol.McpElicitationSchema(properties: [:])
+                )
+            )),
+            .decline("guardian MCP elicitation tool_params must be an object")
+        )
+    }
+
+    func testGuardianDecisionsMapToMcpElicitationResponsesLikeRust() throws {
+        try XCTAssertJSONObjectEqual(
+            mcpElicitationResponseFromGuardianDecision(.approved),
+            [
+                "action": "accept",
+                "content": [:],
+                "_meta": ["approvals_reviewer": "auto_review"],
+            ]
+        )
+        try XCTAssertJSONObjectEqual(
+            mcpElicitationResponseFromGuardianDecision(.denied(message: "Denied by Guardian")),
+            [
+                "action": "decline",
+                "content": NSNull(),
+                "_meta": [
+                    "approvals_reviewer": "auto_review",
+                    "message": "Denied by Guardian",
+                ],
+            ]
+        )
+        try XCTAssertJSONObjectEqual(
+            mcpElicitationResponseFromGuardianDecision(.timedOut(message: "Guardian review timed out.")),
+            [
+                "action": "decline",
+                "content": NSNull(),
+                "_meta": [
+                    "approvals_reviewer": "auto_review",
+                    "message": "Guardian review timed out.",
+                ],
+            ]
+        )
+        try XCTAssertJSONObjectEqual(
+            mcpElicitationResponseFromGuardianDecision(.abort),
+            [
+                "action": "cancel",
+                "content": NSNull(),
+                "_meta": ["approvals_reviewer": "auto_review"],
+            ]
+        )
+    }
+
     func testApprovalQuestionOptionsOmitAlwaysAllowWhenElicitationDisabledLikeRust() {
         let question = buildMcpToolApprovalQuestion(
             id: "q",
@@ -380,5 +538,20 @@ final class McpToolApprovalElicitationTests: XCTestCase {
             normalizeMcpToolApprovalDecision(.blockedBySafetyMonitor("risk"), for: .prompt),
             .blockedBySafetyMonitor("risk")
         )
+    }
+
+    private static func guardianMeta(toolParams: JSONValue?) -> [String: JSONValue] {
+        var meta: [String: JSONValue] = [
+            McpToolApprovalMetaKey.approvalKind: .string(McpToolApprovalMetaKey.approvalKindMcpToolCall),
+            McpToolApprovalMetaKey.requestType: .string(McpToolApprovalMetaKey.requestTypeApprovalRequest),
+            McpToolApprovalMetaKey.connectorID: .string("browser-use"),
+            McpToolApprovalMetaKey.connectorName: .string("Browser Use"),
+            McpToolApprovalMetaKey.toolName: .string("access_browser_origin"),
+            McpToolApprovalMetaKey.toolTitle: .string("Access browser origin"),
+        ]
+        if let toolParams {
+            meta[McpToolApprovalMetaKey.toolParams] = toolParams
+        }
+        return meta
     }
 }

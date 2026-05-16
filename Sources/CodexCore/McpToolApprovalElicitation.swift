@@ -40,6 +40,69 @@ public enum McpToolApprovalDecision: Equatable, Sendable {
     case blockedBySafetyMonitor(String)
 }
 
+public struct GuardianMcpElicitationReviewRequest: Equatable, Sendable {
+    public let serverName: String
+    public let requestID: String
+    public let request: AppServerProtocol.McpServerElicitationRequest
+
+    public init(
+        serverName: String,
+        requestID: String,
+        request: AppServerProtocol.McpServerElicitationRequest
+    ) {
+        self.serverName = serverName
+        self.requestID = requestID
+        self.request = request
+    }
+}
+
+public struct GuardianMcpToolApprovalRequest: Equatable, Sendable {
+    public let id: String
+    public let server: String
+    public let toolName: String
+    public let arguments: JSONValue?
+    public let connectorID: String?
+    public let connectorName: String?
+    public let connectorDescription: String?
+    public let toolTitle: String?
+    public let toolDescription: String?
+
+    public init(
+        id: String,
+        server: String,
+        toolName: String,
+        arguments: JSONValue?,
+        connectorID: String?,
+        connectorName: String?,
+        connectorDescription: String?,
+        toolTitle: String?,
+        toolDescription: String?
+    ) {
+        self.id = id
+        self.server = server
+        self.toolName = toolName
+        self.arguments = arguments
+        self.connectorID = connectorID
+        self.connectorName = connectorName
+        self.connectorDescription = connectorDescription
+        self.toolTitle = toolTitle
+        self.toolDescription = toolDescription
+    }
+}
+
+public enum GuardianMcpElicitationReview: Equatable, Sendable {
+    case notRequested
+    case decline(String)
+    case approvalRequest(GuardianMcpToolApprovalRequest)
+}
+
+public enum GuardianMcpElicitationDecision: Equatable, Sendable {
+    case approved
+    case denied(message: String?)
+    case timedOut(message: String)
+    case abort
+}
+
 public struct McpToolApprovalKey: Equatable, Codable, Sendable {
     public let server: String
     public let connectorID: String?
@@ -108,6 +171,88 @@ public func mcpToolApprovalPromptOptions(
         allowSessionRemember: sessionApprovalKey != nil,
         allowPersistentApproval: toolCallMcpElicitationEnabled && persistentApprovalKey != nil
     )
+}
+
+public func guardianMcpElicitationReview(
+    request: GuardianMcpElicitationReviewRequest
+) -> GuardianMcpElicitationReview {
+    let meta: JSONValue?
+    let requestedSchema: AppServerProtocol.McpElicitationSchema?
+    switch request.request {
+    case let .form(formMeta, _, schema):
+        meta = formMeta
+        requestedSchema = schema
+    case let .url(urlMeta, _, _, _):
+        if metaRequestsGuardianApproval(urlMeta) {
+            return .decline("guardian MCP elicitation review only supports form elicitations")
+        }
+        return .notRequested
+    }
+
+    guard case let .object(metaObject)? = meta else {
+        return .notRequested
+    }
+    guard metadataString(metaObject, McpToolApprovalMetaKey.requestType)
+        == McpToolApprovalMetaKey.requestTypeApprovalRequest
+    else {
+        return .notRequested
+    }
+    guard metadataString(metaObject, McpToolApprovalMetaKey.approvalKind)
+        == McpToolApprovalMetaKey.approvalKindMcpToolCall
+    else {
+        return .decline("guardian MCP elicitation metadata must declare mcp_tool_call approval kind")
+    }
+    if !requestedSchemaPropertiesAreEmpty(requestedSchema) {
+        return .decline("guardian MCP elicitation review only supports empty form schemas")
+    }
+    guard let toolName = metadataOwnedString(metaObject, McpToolApprovalMetaKey.toolName) else {
+        return .decline("guardian MCP elicitation metadata must include a non-empty tool_name")
+    }
+
+    let arguments: JSONValue?
+    switch metaObject[McpToolApprovalMetaKey.toolParams] {
+    case let .object(params)?:
+        arguments = .object(params)
+    case nil:
+        arguments = .object([:])
+    default:
+        return .decline("guardian MCP elicitation tool_params must be an object")
+    }
+
+    return .approvalRequest(GuardianMcpToolApprovalRequest(
+        id: "mcp_elicitation:\(request.serverName):\(request.requestID)",
+        server: request.serverName,
+        toolName: toolName,
+        arguments: arguments,
+        connectorID: metadataOwnedString(metaObject, McpToolApprovalMetaKey.connectorID),
+        connectorName: metadataOwnedString(metaObject, McpToolApprovalMetaKey.connectorName),
+        connectorDescription: metadataOwnedString(metaObject, McpToolApprovalMetaKey.connectorDescription),
+        toolTitle: metadataOwnedString(metaObject, McpToolApprovalMetaKey.toolTitle),
+        toolDescription: metadataOwnedString(metaObject, McpToolApprovalMetaKey.toolDescription)
+    ))
+}
+
+public func mcpElicitationResponseFromGuardianDecision(
+    _ decision: GuardianMcpElicitationDecision
+) -> AppServerProtocol.McpServerElicitationRequestResponse {
+    switch decision {
+    case .approved:
+        return AppServerProtocol.McpServerElicitationRequestResponse(
+            action: .accept,
+            content: .object([:]),
+            meta: guardianMcpElicitationAutoMeta()
+        )
+    case let .denied(message):
+        return guardianMcpElicitationDecline(message: message ?? "Guardian denied this request.")
+    case let .timedOut(message):
+        return guardianMcpElicitationDecline(message: message)
+    case .abort:
+        return AppServerProtocol.McpServerElicitationRequestResponse(
+            action: .cancel,
+            content: nil,
+            meta: guardianMcpElicitationAutoMeta()
+        )
+    }
 }
 
 public func sessionMcpToolApprovalKey(
@@ -406,6 +551,53 @@ public func requestUserInputResponseFromMcpElicitationContent(
     return RequestUserInputResponse(answers: answers)
 }
 
+private func metaRequestsGuardianApproval(_ meta: JSONValue?) -> Bool {
+    guard case let .object(metaObject)? = meta else {
+        return false
+    }
+    return metadataString(metaObject, McpToolApprovalMetaKey.requestType)
+        == McpToolApprovalMetaKey.requestTypeApprovalRequest
+}
+
+private func metadataString(_ meta: [String: JSONValue], _ key: String) -> String? {
+    guard case let .string(value)? = meta[key] else {
+        return nil
+    }
+    return value
+}
+
+private func metadataOwnedString(_ meta: [String: JSONValue], _ key: String) -> String? {
+    metadataString(meta, key)?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .nilIfEmpty
+}
+
+private func requestedSchemaPropertiesAreEmpty(_ schema: AppServerProtocol.McpElicitationSchema?) -> Bool {
+    guard let schema else {
+        return true
+    }
+    return schema.properties.isEmpty
+}
+
+private func guardianMcpElicitationAutoMeta() -> JSONValue {
+    .object([
+        McpToolApprovalMetaKey.approvalsReviewer: .string("auto_review"),
+    ])
+}
+
+private func guardianMcpElicitationDecline(
+    message: String
+) -> AppServerProtocol.McpServerElicitationRequestResponse {
+    AppServerProtocol.McpServerElicitationRequestResponse(
+        action: .decline,
+        content: nil,
+        meta: .object([
+            McpToolApprovalMetaKey.approvalsReviewer: .string("auto_review"),
+            "message": .string(message),
+        ])
+    )
+}
+
 public func normalizeMcpToolApprovalDecision(
     _ decision: McpToolApprovalDecision,
     for approvalMode: AppToolApproval
@@ -422,6 +614,10 @@ public func normalizeMcpToolApprovalDecision(
 }
 
 private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
+    }
+
     func trimmingTrailingQuestionMarks() -> String {
         var result = self
         while result.last == "?" {
