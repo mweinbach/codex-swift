@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2
+  `command_execution_request_approval_rejects_relative_additional_permission_paths`
+  in `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now pins
+  the server-request decode boundary rejecting relative `additionalPermissions`
+  filesystem paths through the same absolute-path contract as Rust.
 - 2026-05-15: rechecked Rust app-server v2 MCP elicitation form-schema
   rejection fixtures in
   `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now directly

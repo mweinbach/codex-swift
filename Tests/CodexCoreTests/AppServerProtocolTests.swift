@@ -506,6 +506,46 @@ final class AppServerProtocolTests: XCTestCase {
         )
     }
 
+    func testCommandExecutionRequestApprovalRejectsRelativeAdditionalPermissionPathsLikeRust() throws {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AppServerProtocol.ServerRequest.self,
+                from: Data(#"""
+                {
+                  "method": "item/commandExecution/requestApproval",
+                  "id": 4,
+                  "params": {
+                    "threadId": "thr_123",
+                    "turnId": "turn_123",
+                    "itemId": "call_123",
+                    "startedAtMs": 1,
+                    "command": "cat file",
+                    "cwd": "/tmp",
+                    "commandActions": null,
+                    "reason": null,
+                    "networkApprovalContext": null,
+                    "additionalPermissions": {
+                      "network": null,
+                      "fileSystem": {
+                        "read": ["relative/path"],
+                        "write": null
+                      }
+                    },
+                    "proposedExecpolicyAmendment": null,
+                    "proposedNetworkPolicyAmendments": null,
+                    "availableDecisions": null
+                  }
+                }
+                """#.utf8)
+            )
+        ) { error in
+            XCTAssertTrue(
+                String(describing: error).contains("AbsolutePathBuf deserialized without a base path"),
+                "expected Rust-shaped relative additional permission path error, got \(error)"
+            )
+        }
+    }
+
     func testCommandExecutionRequestApprovalSkipsNilOptionalsLikeRust() throws {
         let request = AppServerProtocol.ServerRequest.commandExecutionRequestApproval(
             requestID: .integer(4),
