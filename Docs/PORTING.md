@@ -274,6 +274,12 @@ Recent upstream audit checkpoint:
   disable configured hooks for their internal git invocations. Swift memory
   workspace baseline/diff git helpers now also disable configured hooks for
   their internal git invocations, matching Rust's baseline helper path.
+- 2026-05-16: rechecked upstream Rust commit `68ccfdc905` (`guardian: use
+  permission profile for review sandbox`). Swift `Op.user_turn` wire coverage
+  now pins the Guardian child-turn contract where the legacy read-only
+  `sandbox_policy` and the typed read-only `permission_profile` are emitted
+  together. A full Swift Guardian review-session runner remains pending with
+  the broader live Guardian runtime port.
 - 2026-05-16: rechecked upstream Rust commit `8543e39885` (`Preserve
   image detail in app-server inputs`). Swift core and app-server user-input
   models now preserve optional `detail` on both remote and local images,

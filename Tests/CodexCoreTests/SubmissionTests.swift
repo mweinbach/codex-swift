@@ -169,6 +169,63 @@ final class SubmissionTests: XCTestCase {
         ])
     }
 
+    func testGuardianReviewUserTurnCarriesReadOnlyPermissionProfileLikeRust() throws {
+        let op = Op.userTurn(
+            items: [.text("review this change")],
+            cwd: "/repo",
+            approvalPolicy: .never,
+            approvalsReviewer: .null,
+            sandboxPolicy: .readOnly,
+            permissionProfile: .readOnly(),
+            model: "gpt-5.4",
+            effort: .medium,
+            summary: .auto,
+            finalOutputJSONSchema: nil
+        )
+
+        try XCTAssertJSONObjectEqual(op, [
+            "type": "user_turn",
+            "items": [
+                [
+                    "type": "text",
+                    "text": "review this change",
+                    "text_elements": []
+                ]
+            ],
+            "cwd": "/repo",
+            "approval_policy": "never",
+            "approvals_reviewer": NSNull(),
+            "sandbox_policy": [
+                "type": "read-only"
+            ],
+            "permission_profile": [
+                "type": "managed",
+                "file_system": [
+                    "type": "restricted",
+                    "entries": [
+                        [
+                            "path": [
+                                "type": "special",
+                                "value": [
+                                    "kind": "root"
+                                ]
+                            ],
+                            "access": "read"
+                        ]
+                    ]
+                ],
+                "network": "restricted"
+            ],
+            "model": "gpt-5.4",
+            "effort": "medium",
+            "summary": "auto",
+            "final_output_json_schema": NSNull()
+        ])
+
+        let data = try JSONEncoder().encode(op)
+        XCTAssertEqual(try JSONDecoder().decode(Op.self, from: data), op)
+    }
+
     func testUserTurnWireShapeWithReasoningAndSchema() throws {
         let op = Op.userTurn(
             items: [.localImage(path: "/tmp/a.png")],
