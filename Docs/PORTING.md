@@ -13,6 +13,13 @@ Source baseline inspected for this scaffold:
 Recent upstream audit checkpoint:
 
 - 2026-05-15: rechecked Rust app-server v2
+  `additional_file_system_permissions_rejects_zero_glob_scan_depth`,
+  `permission_profile_file_system_permissions_preserves_glob_scan_depth`, and
+  read-directory payload round trips in
+  `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now pins the
+  direct permission glob-depth validation fixtures and `fs/readDirectory`
+  decode/re-encode fixtures alongside the broader filesystem protocol coverage.
+- 2026-05-15: rechecked Rust app-server v2
   `permissions_request_approval_response_accepts_strict_auto_review` in
   `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift permissions
   protocol coverage now decodes `strictAutoReview: true` while preserving the

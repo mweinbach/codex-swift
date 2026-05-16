@@ -185,6 +185,40 @@ final class AppServerFileSystemProtocolTests: XCTestCase {
         )
     }
 
+    func testReadDirectoryPayloadsRoundTripLikeRustProtocol() throws {
+        let params = try JSONDecoder().decode(
+            FsReadDirectoryParams.self,
+            from: Data(#"{"path":"/tmp/codex-fs"}"#.utf8)
+        )
+        XCTAssertEqual(params, FsReadDirectoryParams(path: try AbsolutePath(absolutePath: "/tmp/codex-fs")))
+        try XCTAssertJSONObjectEqual(params, ["path": "/tmp/codex-fs"])
+
+        let response = try JSONDecoder().decode(
+            FsReadDirectoryResponse.self,
+            from: Data(
+                #"{"entries":[{"fileName":"file.txt","isDirectory":false,"isFile":true},{"fileName":"nested","isDirectory":true,"isFile":false}]}"#.utf8
+            )
+        )
+        XCTAssertEqual(response, FsReadDirectoryResponse(entries: [
+            FsReadDirectoryEntry(fileName: "file.txt", isDirectory: false, isFile: true),
+            FsReadDirectoryEntry(fileName: "nested", isDirectory: true, isFile: false)
+        ]))
+        try XCTAssertJSONObjectEqual(response, [
+            "entries": [
+                [
+                    "fileName": "file.txt",
+                    "isDirectory": false,
+                    "isFile": true
+                ],
+                [
+                    "fileName": "nested",
+                    "isDirectory": true,
+                    "isFile": false
+                ]
+            ]
+        ])
+    }
+
     func testFsChangedNotificationRoundTripsMultiplePathsLikeRustProtocol() throws {
         let notification = try JSONDecoder().decode(
             FsChangedNotification.self,

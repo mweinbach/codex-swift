@@ -125,6 +125,58 @@ final class AppServerPermissionsProtocolTests: XCTestCase {
         ])
     }
 
+    func testAdditionalFileSystemPermissionsRejectZeroGlobScanDepthLikeRustProtocol() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AppServerAdditionalFileSystemPermissions.self,
+                from: Data(#"{"read":null,"write":null,"globScanMaxDepth":0,"entries":[]}"#.utf8)
+            )
+        )
+    }
+
+    func testPermissionProfileFileSystemPermissionsPreservesGlobScanDepthLikeRustProtocol() throws {
+        let permissions = AppServerPermissionProfileFileSystemPermissions.restricted(
+            entries: [
+                FileSystemSandboxEntry(
+                    path: .globPattern("**/*.env"),
+                    access: .none
+                )
+            ],
+            globScanMaxDepth: 2
+        )
+
+        try XCTAssertJSONObjectEqual(permissions, [
+            "type": "restricted",
+            "entries": [
+                [
+                    "path": [
+                        "type": "glob_pattern",
+                        "pattern": "**/*.env"
+                    ],
+                    "access": "none"
+                ]
+            ],
+            "globScanMaxDepth": 2
+        ])
+
+        let decoded = try JSONDecoder().decode(
+            AppServerPermissionProfileFileSystemPermissions.self,
+            from: Data(
+                #"{"type":"restricted","entries":[{"path":{"type":"glob_pattern","pattern":"**/*.env"},"access":"none"}],"globScanMaxDepth":2}"#.utf8
+            )
+        )
+        XCTAssertEqual(decoded, permissions)
+    }
+
+    func testPermissionProfileFileSystemPermissionsRejectZeroGlobScanDepthLikeRustProtocol() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AppServerPermissionProfileFileSystemPermissions.self,
+                from: Data(#"{"type":"restricted","entries":[],"globScanMaxDepth":0}"#.utf8)
+            )
+        )
+    }
+
     func testDecodedReadWriteOnlyAdditionalFileSystemPermissionsPreserveLegacyCoreShape() throws {
         let decoded = try JSONDecoder().decode(
             AppServerAdditionalFileSystemPermissions.self,
