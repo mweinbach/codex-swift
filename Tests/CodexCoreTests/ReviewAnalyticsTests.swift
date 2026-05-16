@@ -2373,6 +2373,66 @@ final class ReviewAnalyticsTests: XCTestCase {
         ])
     }
 
+    func testToolItemBaseThreadSourceUsesRustThreadSourceWireValues() throws {
+        let base = CodexToolItemEventBase(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            itemID: "item-1",
+            appServerClient: Self.analyticsContext.appServerClient,
+            runtime: Self.analyticsContext.runtime,
+            threadSource: .subagent,
+            subagentSource: "worker",
+            parentThreadID: "thread-parent",
+            toolName: "shell",
+            startedAtMilliseconds: 123_000,
+            completedAtMilliseconds: 125_000,
+            durationMilliseconds: 2_000,
+            executionDurationMilliseconds: 1_900,
+            reviewCount: 1,
+            guardianReviewCount: 1,
+            userReviewCount: 0,
+            finalApprovalOutcome: .guardianApproved,
+            terminalStatus: .completed,
+            requestedAdditionalPermissions: true,
+            requestedNetworkAccess: false
+        )
+
+        try XCTAssertJSONObjectEqual(base, [
+            "thread_id": "thread-1",
+            "turn_id": "turn-1",
+            "item_id": "item-1",
+            "app_server_client": [
+                "product_client_id": "codex_tui",
+                "client_name": "codex-tui",
+                "client_version": "1.2.3",
+                "rpc_transport": "websocket",
+                "experimental_api_enabled": true
+            ],
+            "runtime": [
+                "codex_rs_version": "0.99.0",
+                "runtime_os": "macos",
+                "runtime_os_version": "15.3.1",
+                "runtime_arch": "aarch64"
+            ],
+            "thread_source": "subagent",
+            "subagent_source": "worker",
+            "parent_thread_id": "thread-parent",
+            "tool_name": "shell",
+            "started_at_ms": 123_000,
+            "completed_at_ms": 125_000,
+            "duration_ms": 2_000,
+            "execution_duration_ms": 1_900,
+            "review_count": 1,
+            "guardian_review_count": 1,
+            "user_review_count": 0,
+            "final_approval_outcome": "guardian_approved",
+            "terminal_status": "completed",
+            "failure_kind": NSNull(),
+            "requested_additional_permissions": true,
+            "requested_network_access": false
+        ])
+    }
+
     func testCodexReviewAnalyticsReducerAddsRuntimeContextLikeRust() throws {
         let reducer = CodexReviewAnalyticsReducer()
 
