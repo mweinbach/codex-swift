@@ -4,7 +4,6 @@ import XCTest
 final class RequestSerializationTests: XCTestCase {
     func testConfigFamilyReadMethodsUseSharedReadScopeLikeRust() {
         XCTAssertEqual(CodexAppServer.requestSerializationScope(forMethod: "config/read"), .globalSharedRead("config"))
-        XCTAssertEqual(CodexAppServer.requestSerializationScope(forMethod: "plugin/list"), .globalSharedRead("config"))
         XCTAssertEqual(CodexAppServer.requestSerializationScope(forMethod: "skills/list"), .globalSharedRead("config"))
 
         XCTAssertEqual(CodexAppServer.requestSerializationScope(forMethod: "config/value/write"), .global("config"))
@@ -128,7 +127,6 @@ final class RequestSerializationTests: XCTestCase {
 
     func testRustRequestScopeTableCoversGlobalFamilies() {
         for method in [
-            "plugin/read",
             "plugin/skill/read",
             "plugin/share/save",
             "plugin/share/updateTargets",
@@ -196,6 +194,8 @@ final class RequestSerializationTests: XCTestCase {
             "modelProvider/capabilities/read",
             "collaborationMode/list",
             "mock/experimentalMethod",
+            "plugin/list",
+            "plugin/read",
             "thread/realtime/listVoices",
             "account/rateLimits/read"
         ] {

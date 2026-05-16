@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `8c7a176b55` (`Unqueue plugin list and
+  read requests`). Swift app-server request serialization now leaves
+  `plugin/list` and `plugin/read` unscoped so those read-only plugin requests
+  start immediately instead of waiting behind the global config queue, while
+  mutating plugin/marketplace/config routes keep their existing serialization.
 - 2026-05-16: rechecked Rust commit `85915a2a21` (`chore(config) rm
   windows_wsl_setup_acknowledged`). Swift already has no
   `windows_wsl_setup_acknowledged` config field, config edit, schema surface, or

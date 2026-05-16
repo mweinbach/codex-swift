@@ -159,7 +159,7 @@ extension CodexAppServer {
              "review/start",
              "mcpServer/tool/call":
             return stringScopeParam(params?["threadId"]).map { .thread(threadID: $0) }
-        case "config/read", "plugin/list", "skills/list":
+        case "config/read", "skills/list":
             return .globalSharedRead("config")
         case "config/value/write",
              "config/batchWrite",
@@ -170,7 +170,6 @@ extension CodexAppServer {
              "experimentalFeature/enablement/set",
              "hooks/list",
              "skills/config/write",
-             "plugin/read",
              "plugin/skill/read",
              "plugin/share/save",
              "plugin/share/updateTargets",
