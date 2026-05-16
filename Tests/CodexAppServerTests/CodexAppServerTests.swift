@@ -9478,26 +9478,49 @@ final class CodexAppServerTests: XCTestCase {
         )
         let processor = try initializedProcessor(
             configuration: testConfiguration(codexHome: temp.url),
-            coreOpSubmitter: { _, _, _ in throw AppServerCoreOpCaptureError(message: "channel closed") }
+            coreOpSubmitter: { _, _, _ in throw AppServerCoreOpCaptureError(message: "channel closed") },
+            experimentalAPIEnabled: true
         )
 
-        let response = try decode(processor.processLine(Data(
-            #"{"id":1,"method":"thread/shellCommand","params":{"threadId":"\#(threadID)","command":"pwd"}}"#.utf8
+        let compact = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"thread/compact/start","params":{"threadId":"\#(threadID)"}}"#.utf8
         )))
+        let compactError = try XCTUnwrap(compact["error"] as? [String: Any])
+        XCTAssertEqual(compactError["code"] as? Int, -32603)
+        XCTAssertEqual(compactError["message"] as? String, "failed to start compaction: channel closed")
 
+        let response = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"thread/shellCommand","params":{"threadId":"\#(threadID)","command":"pwd"}}"#.utf8
+        )))
         let error = try XCTUnwrap(response["error"] as? [String: Any])
         XCTAssertEqual(error["code"] as? Int, -32603)
         XCTAssertEqual(error["message"] as? String, "failed to start shell command: channel closed")
 
+        let guardian = try decode(processor.processLine(Data(
+            """
+            {"id":3,"method":"thread/approveGuardianDeniedAction","params":{"threadId":"\(threadID)","event":{"id":"guardian-1","turn_id":"turn-1","started_at_ms":1234,"status":"denied","risk_level":"high","action":{"type":"command","source":"shell","command":"rm -rf build","cwd":"/repo"}}}}
+            """.utf8
+        )))
+        let guardianError = try XCTUnwrap(guardian["error"] as? [String: Any])
+        XCTAssertEqual(guardianError["code"] as? Int, -32603)
+        XCTAssertEqual(guardianError["message"] as? String, "failed to approve Guardian denial: channel closed")
+
+        let clean = try decode(processor.processLine(Data(
+            #"{"id":4,"method":"thread/backgroundTerminals/clean","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        let cleanError = try XCTUnwrap(clean["error"] as? [String: Any])
+        XCTAssertEqual(cleanError["code"] as? Int, -32603)
+        XCTAssertEqual(cleanError["message"] as? String, "failed to clean background terminals: channel closed")
+
         let rollback = try decode(processor.processLine(Data(
-            #"{"id":2,"method":"thread/rollback","params":{"threadId":"\#(threadID)","numTurns":1}}"#.utf8
+            #"{"id":5,"method":"thread/rollback","params":{"threadId":"\#(threadID)","numTurns":1}}"#.utf8
         )))
         let rollbackError = try XCTUnwrap(rollback["error"] as? [String: Any])
         XCTAssertEqual(rollbackError["code"] as? Int, -32603)
         XCTAssertEqual(rollbackError["message"] as? String, "failed to start rollback: channel closed")
 
         let retryRollback = try decode(processor.processLine(Data(
-            #"{"id":3,"method":"thread/rollback","params":{"threadId":"\#(threadID)","numTurns":1}}"#.utf8
+            #"{"id":6,"method":"thread/rollback","params":{"threadId":"\#(threadID)","numTurns":1}}"#.utf8
         )))
         let retryRollbackError = try XCTUnwrap(retryRollback["error"] as? [String: Any])
         XCTAssertEqual(retryRollbackError["code"] as? Int, -32603)
