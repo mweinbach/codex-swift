@@ -2428,6 +2428,9 @@ Recent upstream audit checkpoint:
   - pinned Rust's remaining PowerShell git global-option rejection cases for split and inline `--git-dir`, `--work-tree`, `--exec-path`, `--namespace`, and `--super-prefix` values.
 - `codex-rs/core/src/command_canonicalization.rs` approval-cache command keys
   - added Swift command canonicalization for approval-cache matching, including Rust's plain `bash`/`zsh` inner-command normalization, stable shell-script keys for heredoc/complex scripts, stable PowerShell script keys, and unchanged non-shell argv behavior.
+- `codex-rs/core/src/tools/sandboxing.rs` session approval cache
+  - added Swift `ApprovalStore`/`ApprovalCache` behavior for Rust's serialized session approval keys: empty key lists always fetch, fully cached `approved_for_session` keys skip fetching, `approved_for_session` stores each key individually so future subsets are reused, and one-shot `approved` decisions are not cached.
+  - added Rust-shaped shell and unified-exec approval keys that canonicalize command argv before serialization while preserving cwd, sandbox permissions, additional permissions, and unified-exec tty scope.
 - `codex-rs/cloud-tasks-client/src/http.rs` cloud task git apply
   - wired Swift's `CloudHTTPClient` default apply path to resolve the git root, write a temporary unified diff, run `git apply --check` for preflight or `git apply --3way` for apply, honor `CODEX_APPLY_GIT_CFG`, parse git output into applied/skipped/conflict paths, and keep the existing injected apply hook for deterministic tests.
 - `codex-rs/agent-graph-store` local SQLite store
