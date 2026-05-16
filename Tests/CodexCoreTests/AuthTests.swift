@@ -468,10 +468,32 @@ final class AuthTests: XCTestCase {
         )) { error in
             XCTAssertEqual(
                 (error as? CodexAuthRestrictionError)?.description,
-                "Login is restricted to workspace org_mine, but current credentials belong to org_other. Logging out."
+                "Login is restricted to workspace(s) org_mine, but current credentials belong to org_other. Logging out."
             )
         }
         XCTAssertNil(try CodexAuthStorage.loadAuthDotJSON(codexHome: dir.url, mode: .file))
+    }
+
+    func testEnforceLoginRestrictionsAllowsAnyMatchingWorkspaceInList() async throws {
+        let dir = try AuthTemporaryDirectory()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        try Self.writeAuth(
+            to: dir.url,
+            accessToken: "access-token",
+            refreshToken: "refresh-token",
+            lastRefresh: Self.isoString(now),
+            jwtAccountID: "org_two"
+        )
+        var config = CodexRuntimeConfig()
+        config.forcedChatGPTWorkspaceIDs = ["org_one", "org_two"]
+
+        try await CodexAuthStorage.enforceLoginRestrictions(
+            codexHome: dir.url,
+            config: config,
+            environment: [:]
+        )
+
+        XCTAssertEqual(try CodexAuthStorage.authStatus(codexHome: dir.url), .chatGPT)
     }
 
     func testEnforceLoginRestrictionsAllowsMatchingWorkspace() async throws {

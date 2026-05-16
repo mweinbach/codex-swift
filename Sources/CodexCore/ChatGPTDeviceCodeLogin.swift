@@ -8,7 +8,8 @@ public struct ChatGPTDeviceCodeLoginOptions: Sendable {
     public let codexHome: URL
     public let issuer: String
     public let clientID: String
-    public let forcedChatGPTWorkspaceID: String?
+    public let forcedChatGPTWorkspaceIDs: [String]?
+    public var forcedChatGPTWorkspaceID: String? { forcedChatGPTWorkspaceIDs?.first }
     public let authCredentialsStoreMode: AuthCredentialsStoreMode
     public let cliVersion: String
 
@@ -17,13 +18,14 @@ public struct ChatGPTDeviceCodeLoginOptions: Sendable {
         issuer: String = ChatGPTDeviceCodeLogin.defaultIssuer,
         clientID: String = CodexAuthStorage.refreshClientID,
         forcedChatGPTWorkspaceID: String? = nil,
+        forcedChatGPTWorkspaceIDs: [String]? = nil,
         authCredentialsStoreMode: AuthCredentialsStoreMode = .file,
         cliVersion: String = "0.0.0"
     ) {
         self.codexHome = codexHome
         self.issuer = issuer
         self.clientID = clientID
-        self.forcedChatGPTWorkspaceID = forcedChatGPTWorkspaceID
+        self.forcedChatGPTWorkspaceIDs = forcedChatGPTWorkspaceIDs ?? forcedChatGPTWorkspaceID.map { [$0] }
         self.authCredentialsStoreMode = authCredentialsStoreMode
         self.cliVersion = cliVersion
     }
@@ -176,7 +178,7 @@ public enum ChatGPTDeviceCodeLogin {
         )
 
         try ensureWorkspaceAllowed(
-            expected: options.forcedChatGPTWorkspaceID,
+            expected: options.forcedChatGPTWorkspaceIDs,
             idToken: tokens.idToken
         )
 
@@ -306,7 +308,7 @@ public enum ChatGPTDeviceCodeLogin {
         }
     }
 
-    static func ensureWorkspaceAllowed(expected: String?, idToken: String) throws {
+    static func ensureWorkspaceAllowed(expected: [String]?, idToken: String) throws {
         guard let expected else {
             return
         }
@@ -323,9 +325,9 @@ public enum ChatGPTDeviceCodeLogin {
                 "Login is restricted to a specific workspace, but the token did not include an chatgpt_account_id claim."
             )
         }
-        guard actual == expected else {
+        guard expected.contains(actual) else {
             throw ChatGPTDeviceCodeLoginError.workspaceRestricted(
-                "Login is restricted to workspace id \(expected)."
+                "Login is restricted to workspace id(s) \(expected.joined(separator: ", "))."
             )
         }
     }

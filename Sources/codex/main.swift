@@ -177,7 +177,7 @@ private func runLoginCommand(_ request: CodexCLI.LoginCommandRequest) async thro
             try await ChatGPTLogin.run(
                 options: ChatGPTLoginOptions(
                     codexHome: codexHome,
-                    forcedChatGPTWorkspaceID: settings.forcedChatGPTWorkspaceID,
+                    forcedChatGPTWorkspaceIDs: settings.forcedChatGPTWorkspaceIDs,
                     authCredentialsStoreMode: settings.cliAuthCredentialsStoreMode
                 ),
                 messageSink: { message in
@@ -206,7 +206,7 @@ private func runLoginCommand(_ request: CodexCLI.LoginCommandRequest) async thro
                     codexHome: codexHome,
                     issuer: issuerBaseURL ?? ChatGPTDeviceCodeLogin.defaultIssuer,
                     clientID: clientID ?? CodexAuthStorage.refreshClientID,
-                    forcedChatGPTWorkspaceID: settings.forcedChatGPTWorkspaceID,
+                    forcedChatGPTWorkspaceIDs: settings.forcedChatGPTWorkspaceIDs,
                     authCredentialsStoreMode: settings.cliAuthCredentialsStoreMode,
                     cliVersion: CodexCLI.version
                 ),

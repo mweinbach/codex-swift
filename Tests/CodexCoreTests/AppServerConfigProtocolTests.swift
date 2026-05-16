@@ -318,6 +318,28 @@ final class AppServerConfigProtocolTests: XCTestCase {
         ))
     }
 
+    func testConfigForcedChatGPTWorkspaceIDAcceptsStringOrListLikeRust() throws {
+        let single = try JSONDecoder().decode(
+            AppServerProtocol.Config.self,
+            from: Data(#"{"forced_chatgpt_workspace_id":"org_one"}"#.utf8)
+        )
+        XCTAssertEqual(single.forcedChatGPTWorkspaceID?.values, ["org_one"])
+        try XCTAssertJSONObjectEqual(
+            single,
+            expectedConfigObject(forcedChatGPTWorkspaceID: "org_one")
+        )
+
+        let multiple = try JSONDecoder().decode(
+            AppServerProtocol.Config.self,
+            from: Data(#"{"forced_chatgpt_workspace_id":["org_one","org_two"]}"#.utf8)
+        )
+        XCTAssertEqual(multiple.forcedChatGPTWorkspaceID?.values, ["org_one", "org_two"])
+        try XCTAssertJSONObjectEqual(
+            multiple,
+            expectedConfigObject(forcedChatGPTWorkspaceID: ["org_one", "org_two"])
+        )
+    }
+
     func testConfigRequirementsReadResponseMatchesRustOptionShape() throws {
         try XCTAssertJSONObjectEqual(
             AppServerProtocol.ConfigRequirementsReadResponse(requirements: nil),

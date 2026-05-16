@@ -114,7 +114,7 @@ final class ChatGPTDeviceCodeLoginTests: XCTestCase {
         )) { error in
             XCTAssertEqual(
                 String(describing: error),
-                "Login is restricted to workspace id acct_required."
+                "Login is restricted to workspace id(s) acct_required."
             )
         }
 

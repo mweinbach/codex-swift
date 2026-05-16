@@ -890,7 +890,7 @@ public enum CodexAuthStorage {
             }
         }
 
-        guard let expectedAccountID = config.forcedChatGPTWorkspaceID,
+        guard let expectedAccountIDs = config.forcedChatGPTWorkspaceIDs,
               authMode == .chatGPT
         else {
             return
@@ -920,12 +920,13 @@ public enum CodexAuthStorage {
         }
 
         let actualAccountID = tokenData.idToken.chatGPTAccountID
-        guard actualAccountID == expectedAccountID else {
+        guard actualAccountID.map({ expectedAccountIDs.contains($0) }) == true else {
+            let expectedWorkspaces = expectedAccountIDs.joined(separator: ", ")
             let message: String
             if let actualAccountID {
-                message = "Login is restricted to workspace \(expectedAccountID), but current credentials belong to \(actualAccountID). Logging out."
+                message = "Login is restricted to workspace(s) \(expectedWorkspaces), but current credentials belong to \(actualAccountID). Logging out."
             } else {
-                message = "Login is restricted to workspace \(expectedAccountID), but current credentials lack a workspace identifier. Logging out."
+                message = "Login is restricted to workspace(s) \(expectedWorkspaces), but current credentials lack a workspace identifier. Logging out."
             }
             throw restrictionErrorAfterLogout(
                 message: message,

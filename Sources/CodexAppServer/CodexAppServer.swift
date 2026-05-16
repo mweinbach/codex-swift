@@ -18504,10 +18504,10 @@ public enum CodexAppServer {
             let chatGPTAccountID = try rustRequiredStringParam(params?["chatgptAccountId"], field: "chatgptAccountId")
             let chatGPTPlanType = try rustOptionalStringParam(params?["chatgptPlanType"])
             cancelActiveLogin()
-            if let forcedWorkspace = try forcedChatGPTWorkspaceID(configuration: configuration),
-               chatGPTAccountID != forcedWorkspace {
+            if let forcedWorkspaces = try forcedChatGPTWorkspaceIDs(configuration: configuration),
+               !forcedWorkspaces.contains(chatGPTAccountID) {
                 throw AppServerError.invalidRequest(
-                    "External auth must use workspace \(forcedWorkspace), but received \"\(chatGPTAccountID)\"."
+                    "External auth must use one of workspace(s) \(debugStringArray(forcedWorkspaces)), but received \"\(chatGPTAccountID)\"."
                 )
             }
             do {
@@ -18819,7 +18819,7 @@ public enum CodexAppServer {
         return stringConfig(table, "forced_login_method")
     }
 
-    fileprivate static func forcedChatGPTWorkspaceID(configuration: CodexAppServerConfiguration) throws -> String? {
+    fileprivate static func forcedChatGPTWorkspaceIDs(configuration: CodexAppServerConfiguration) throws -> [String]? {
         let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
             codexHome: configuration.codexHome,
             cliOverrides: configuration.cliConfigOverrides,
@@ -18829,7 +18829,7 @@ public enum CodexAppServer {
         guard let table = configTable(stack.effectiveConfig()) else {
             return nil
         }
-        return stringConfig(table, "forced_chatgpt_workspace_id")
+        return forcedChatGPTWorkspaceIDsConfig(table, "forced_chatgpt_workspace_id")
     }
 
     fileprivate static func buildUserAgent(
@@ -23762,7 +23762,7 @@ public enum CodexAppServer {
             "approvalPolicy": nullable(stringConfig(table, "approval_policy")),
             "sandboxMode": nullable(stringConfig(table, "sandbox_mode")),
             "sandboxSettings": sandboxSettingsObject(table["sandbox_workspace_write"]) as Any,
-            "forcedChatgptWorkspaceId": nullable(stringConfig(table, "forced_chatgpt_workspace_id")),
+            "forcedChatgptWorkspaceId": nullable(forcedChatGPTWorkspaceIDObject(table, "forced_chatgpt_workspace_id")),
             "forcedLoginMethod": nullable(stringConfig(table, "forced_login_method")),
             "model": nullable(stringConfig(table, "model")),
             "modelReasoningEffort": nullable(stringConfig(table, "model_reasoning_effort")),
@@ -23831,6 +23831,38 @@ public enum CodexAppServer {
             return nil
         }
         return value
+    }
+
+    private static func forcedChatGPTWorkspaceIDsConfig(_ table: [String: ConfigValue], _ key: String) -> [String]? {
+        switch table[key] {
+        case let .string(value)?:
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : [trimmed]
+        case let .array(values)?:
+            let strings = values.compactMap { value -> String? in
+                guard case let .string(string) = value else { return nil }
+                let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.isEmpty ? nil : trimmed
+            }
+            return strings.isEmpty ? nil : strings
+        default:
+            return nil
+        }
+    }
+
+    private static func forcedChatGPTWorkspaceIDObject(_ table: [String: ConfigValue], _ key: String) -> Any? {
+        switch forcedChatGPTWorkspaceIDsConfig(table, key) {
+        case nil:
+            return nil
+        case let values? where values.count == 1:
+            return values[0]
+        case let values?:
+            return values
+        }
+    }
+
+    fileprivate static func debugStringArray(_ values: [String]) -> String {
+        "[" + values.map { "\"\($0)\"" }.joined(separator: ", ") + "]"
     }
 
     private static func boolConfig(_ table: [String: ConfigValue], _ key: String) -> Bool? {
@@ -27444,10 +27476,10 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             throw AppServerError.internalError("auth refresh request returned malformed response")
         }
 
-        if let forcedWorkspace = try CodexAppServer.forcedChatGPTWorkspaceID(configuration: configuration),
-           response.chatGPTAccountID != forcedWorkspace {
+        if let forcedWorkspaces = try CodexAppServer.forcedChatGPTWorkspaceIDs(configuration: configuration),
+           !forcedWorkspaces.contains(response.chatGPTAccountID) {
             throw AppServerError.invalidRequest(
-                "External auth must use workspace \(forcedWorkspace), but received \"\(response.chatGPTAccountID)\"."
+                "External auth must use one of workspace(s) \(CodexAppServer.debugStringArray(forcedWorkspaces)), but received \"\(response.chatGPTAccountID)\"."
             )
         }
 
@@ -27537,7 +27569,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             server = try ChatGPTLoginServer.start(options: ChatGPTLoginOptions(
                 codexHome: configuration.codexHome,
                 openBrowser: false,
-                forcedChatGPTWorkspaceID: runtimeConfig.forcedChatGPTWorkspaceID,
+                forcedChatGPTWorkspaceIDs: runtimeConfig.forcedChatGPTWorkspaceIDs,
                 authCredentialsStoreMode: configuration.authCredentialsStoreMode,
                 originator: configuration.originator,
                 codexStreamlinedLogin: codexStreamlinedLogin
@@ -27629,7 +27661,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         return ChatGPTDeviceCodeLoginOptions(
             codexHome: configuration.codexHome,
             issuer: issuerOverride.flatMap { $0.isEmpty ? nil : $0 } ?? ChatGPTDeviceCodeLogin.defaultIssuer,
-            forcedChatGPTWorkspaceID: try CodexAppServer.forcedChatGPTWorkspaceID(configuration: configuration),
+            forcedChatGPTWorkspaceIDs: try CodexAppServer.forcedChatGPTWorkspaceIDs(configuration: configuration),
             authCredentialsStoreMode: configuration.authCredentialsStoreMode,
             cliVersion: configuration.version
         )

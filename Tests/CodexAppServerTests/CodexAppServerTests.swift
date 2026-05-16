@@ -22927,7 +22927,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(wrongWorkspaceError["code"] as? Int, -32600)
         XCTAssertEqual(
             wrongWorkspaceError["message"] as? String,
-            "External auth must use workspace org-allowed, but received \"org-denied\"."
+            "External auth must use one of workspace(s) [\"org-allowed\"], but received \"org-denied\"."
         )
     }
 

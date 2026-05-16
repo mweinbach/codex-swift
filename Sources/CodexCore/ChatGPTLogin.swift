@@ -13,7 +13,8 @@ public struct ChatGPTLoginOptions: Sendable {
     public let port: UInt16
     public let openBrowser: Bool
     public let forceState: String?
-    public let forcedChatGPTWorkspaceID: String?
+    public let forcedChatGPTWorkspaceIDs: [String]?
+    public var forcedChatGPTWorkspaceID: String? { forcedChatGPTWorkspaceIDs?.first }
     public let authCredentialsStoreMode: AuthCredentialsStoreMode
     public let originator: String
     public let codexStreamlinedLogin: Bool
@@ -26,6 +27,7 @@ public struct ChatGPTLoginOptions: Sendable {
         openBrowser: Bool = true,
         forceState: String? = nil,
         forcedChatGPTWorkspaceID: String? = nil,
+        forcedChatGPTWorkspaceIDs: [String]? = nil,
         authCredentialsStoreMode: AuthCredentialsStoreMode = .file,
         originator: String = ChatGPTLogin.defaultOriginator(),
         codexStreamlinedLogin: Bool = false
@@ -36,7 +38,7 @@ public struct ChatGPTLoginOptions: Sendable {
         self.port = port
         self.openBrowser = openBrowser
         self.forceState = forceState
-        self.forcedChatGPTWorkspaceID = forcedChatGPTWorkspaceID
+        self.forcedChatGPTWorkspaceIDs = forcedChatGPTWorkspaceIDs ?? forcedChatGPTWorkspaceID.map { [$0] }
         self.authCredentialsStoreMode = authCredentialsStoreMode
         self.originator = originator
         self.codexStreamlinedLogin = codexStreamlinedLogin
@@ -102,7 +104,7 @@ public final class ChatGPTLoginServer: @unchecked Sendable {
     private let redirectURI: String
     private let pkce: PKCECodes
     private let state: String
-    private let forcedChatGPTWorkspaceID: String?
+    private let forcedChatGPTWorkspaceIDs: [String]?
     private let authCredentialsStoreMode: AuthCredentialsStoreMode
     private let codexStreamlinedLogin: Bool
     private let transport: ChatGPTLoginTransport
@@ -130,7 +132,7 @@ public final class ChatGPTLoginServer: @unchecked Sendable {
         self.redirectURI = redirectURI
         self.pkce = pkce
         self.state = state
-        self.forcedChatGPTWorkspaceID = options.forcedChatGPTWorkspaceID
+        self.forcedChatGPTWorkspaceIDs = options.forcedChatGPTWorkspaceIDs
         self.authCredentialsStoreMode = options.authCredentialsStoreMode
         self.codexStreamlinedLogin = options.codexStreamlinedLogin
         self.transport = transport
@@ -161,7 +163,7 @@ public final class ChatGPTLoginServer: @unchecked Sendable {
             redirectURI: redirectURI,
             pkce: pkce,
             state: state,
-            forcedChatGPTWorkspaceID: options.forcedChatGPTWorkspaceID,
+            forcedChatGPTWorkspaceIDs: options.forcedChatGPTWorkspaceIDs,
             originator: options.originator
         )
         let server = ChatGPTLoginServer(
@@ -293,7 +295,7 @@ public final class ChatGPTLoginServer: @unchecked Sendable {
                     transport: transport
                 )
                 do {
-                    try ChatGPTLogin.ensureWorkspaceAllowed(expected: forcedChatGPTWorkspaceID, idToken: tokens.idToken)
+                    try ChatGPTLogin.ensureWorkspaceAllowed(expected: forcedChatGPTWorkspaceIDs, idToken: tokens.idToken)
                 } catch {
                     let message = String(describing: error)
                     return .text(
@@ -641,7 +643,8 @@ public enum ChatGPTLogin {
         redirectURI: String,
         pkce: PKCECodes,
         state: String,
-        forcedChatGPTWorkspaceID: String?,
+        forcedChatGPTWorkspaceID: String? = nil,
+        forcedChatGPTWorkspaceIDs: [String]? = nil,
         originator: String
     ) -> String {
         var query = [
@@ -656,8 +659,9 @@ public enum ChatGPTLogin {
             ("state", state),
             ("originator", originator)
         ]
-        if let forcedChatGPTWorkspaceID {
-            query.append(("allowed_workspace_id", forcedChatGPTWorkspaceID))
+        let workspaceIDs = forcedChatGPTWorkspaceIDs ?? forcedChatGPTWorkspaceID.map { [$0] }
+        if let workspaceIDs, !workspaceIDs.isEmpty {
+            query.append(("allowed_workspace_id", workspaceIDs.joined(separator: ",")))
         }
         return "\(issuer)/oauth/authorize?\(formBody(query))"
     }
@@ -730,7 +734,7 @@ public enum ChatGPTLogin {
         }
     }
 
-    static func ensureWorkspaceAllowed(expected: String?, idToken: String) throws {
+    static func ensureWorkspaceAllowed(expected: [String]?, idToken: String) throws {
         guard let expected else {
             return
         }
@@ -740,8 +744,10 @@ public enum ChatGPTLogin {
                 "Login is restricted to a specific workspace, but the token did not include an chatgpt_account_id claim."
             )
         }
-        guard actual == expected else {
-            throw ChatGPTLoginError.workspaceRestricted("Login is restricted to workspace id \(expected).")
+        guard expected.contains(actual) else {
+            throw ChatGPTLoginError.workspaceRestricted(
+                "Login is restricted to workspace id(s) \(expected.joined(separator: ", "))."
+            )
         }
     }
 

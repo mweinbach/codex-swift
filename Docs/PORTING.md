@@ -12,6 +12,15 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `02a7205250` (`Support multiple forced
+  ChatGPT workspaces`) across config loading, login helpers, auth enforcement,
+  and app-server config protocol. Swift `forced_chatgpt_workspace_id` now keeps
+  the backward-compatible single-string shape while also accepting a TOML/JSON
+  string list, rejects comma-separated TOML strings with Rust's guidance,
+  normalizes the runtime restriction to an allowed workspace list, accepts any
+  matching ChatGPT workspace during auth enforcement, sends browser login
+  allowlists as one comma-joined `allowed_workspace_id` query parameter, and
+  preserves the string-or-list app-server config wire shape.
 - 2026-05-16: rechecked Rust commits `3a23e87e20` (`tui: recover local state
   db startup failures`) and `53a36fc1c2` (`Block appserver startup if state db
   can't be opened`) against `codex-rs/tui/src/startup_error.rs`,

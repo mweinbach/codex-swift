@@ -1124,6 +1124,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.cliAuthCredentialsStoreMode, .file)
         XCTAssertEqual(config.forcedLoginMethod, .api)
         XCTAssertEqual(config.forcedChatGPTWorkspaceID, "org_workspace")
+        XCTAssertEqual(config.forcedChatGPTWorkspaceIDs, ["org_workspace"])
         XCTAssertEqual(config.developerInstructions, "Use developer override.")
         XCTAssertEqual(config.compactPrompt, "Summarize differently.")
         XCTAssertEqual(config.modelInstructionsFile, instructions.path)
@@ -1187,6 +1188,30 @@ final class ConfigLoaderTests: XCTestCase {
             )
         ))
         XCTAssertEqual(config.terminalResizeReflow.maxRows, .limit(9000))
+    }
+
+    func testForcedChatGPTWorkspaceIDAcceptsRustStringList() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        forced_chatgpt_workspace_id = ["org_one", "org_two"]
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.forcedChatGPTWorkspaceIDs, ["org_one", "org_two"])
+        XCTAssertEqual(config.forcedChatGPTWorkspaceID, "org_one")
+    }
+
+    func testForcedChatGPTWorkspaceIDRejectsCommaSeparatedStringLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        forced_chatgpt_workspace_id = "org_one,org_two"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+            XCTAssertTrue(String(describing: error).contains("comma-separated strings are not supported"))
+            XCTAssertTrue(String(describing: error).contains("TOML list of strings"))
+        }
     }
 
     func testAgentRuntimeConfigAcceptsInlineAndDottedOverridesLikeRust() throws {

@@ -351,7 +351,11 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var realtimeAudio: RealtimeAudioConfig
     public var cliAuthCredentialsStoreMode: AuthCredentialsStoreMode
     public var forcedLoginMethod: ForcedLoginMethod?
-    public var forcedChatGPTWorkspaceID: String?
+    public var forcedChatGPTWorkspaceIDs: [String]?
+    public var forcedChatGPTWorkspaceID: String? {
+        get { forcedChatGPTWorkspaceIDs?.first }
+        set { forcedChatGPTWorkspaceIDs = newValue.map { [$0] } }
+    }
     public var modelInstructionsFile: String?
     public var experimentalCompactPromptFile: String?
     public var baseInstructions: String?
@@ -555,7 +559,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.realtimeAudio = realtimeAudio
         self.cliAuthCredentialsStoreMode = cliAuthCredentialsStoreMode
         self.forcedLoginMethod = forcedLoginMethod
-        self.forcedChatGPTWorkspaceID = forcedChatGPTWorkspaceID
+        self.forcedChatGPTWorkspaceIDs = forcedChatGPTWorkspaceID.map { [$0] }
         self.modelInstructionsFile = modelInstructionsFile
         self.experimentalCompactPromptFile = experimentalCompactPromptFile
         self.baseInstructions = baseInstructions
@@ -3500,7 +3504,10 @@ private struct ParsedCodexConfigToml {
         }
 
         if let workspaceID = topLevel["forced_chatgpt_workspace_id"] {
-            config.forcedChatGPTWorkspaceID = try Self.stringValue(workspaceID, key: "forced_chatgpt_workspace_id")
+            config.forcedChatGPTWorkspaceIDs = try Self.forcedChatGPTWorkspaceIDsValue(
+                workspaceID,
+                key: "forced_chatgpt_workspace_id"
+            )
         }
 
         if let projectRootMarkers = topLevel["project_root_markers"] {
@@ -5867,6 +5874,33 @@ private struct ParsedCodexConfigToml {
             strings.append(string)
         }
         return strings
+    }
+
+    private static func forcedChatGPTWorkspaceIDsValue(_ value: ConfigValue, key: String) throws -> [String]? {
+        let values: [String]
+        switch value {
+        case let .string(string):
+            if string.contains(",") {
+                throw CodexConfigLoadError.invalidConfig(
+                    "forced_chatgpt_workspace_id must be a single workspace ID string or a TOML list of strings; comma-separated strings are not supported. Use `forced_chatgpt_workspace_id = [\"123e4567-e89b-42d3-a456-426614174000\", \"123e4567-e89b-42d3-a456-426614174001\"]` instead."
+                )
+            }
+            values = [string]
+        case let .array(items):
+            values = try items.map { item in
+                guard case let .string(string) = item else {
+                    throw CodexConfigLoadError.invalidStringValue(key)
+                }
+                return string
+            }
+        default:
+            throw CodexConfigLoadError.invalidStringValue(key)
+        }
+
+        let normalized = values
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return normalized.isEmpty ? nil : normalized
     }
 
     private static func stringMapValue(_ value: ConfigValue, key: String) throws -> [String: String] {

@@ -547,6 +547,39 @@ extension AppServerProtocol {
     }
 
     public struct Config: Codable, Equatable, Sendable {
+        public enum ForcedChatGPTWorkspaceIDs: Codable, Equatable, Sendable {
+            case single(String)
+            case multiple([String])
+
+            public var values: [String] {
+                switch self {
+                case let .single(value):
+                    return [value]
+                case let .multiple(values):
+                    return values
+                }
+            }
+
+            public init(from decoder: Decoder) throws {
+                let container = try decoder.singleValueContainer()
+                if let value = try? container.decode(String.self) {
+                    self = .single(value)
+                    return
+                }
+                self = .multiple(try container.decode([String].self))
+            }
+
+            public func encode(to encoder: Encoder) throws {
+                var container = encoder.singleValueContainer()
+                switch self {
+                case let .single(value):
+                    try container.encode(value)
+                case let .multiple(values):
+                    try container.encode(values)
+                }
+            }
+        }
+
         public let model: String?
         public let reviewModel: String?
         public let modelContextWindow: Int64?
@@ -556,7 +589,7 @@ extension AppServerProtocol {
         public let approvalsReviewer: ApprovalsReviewer?
         public let sandboxMode: SandboxMode?
         public let sandboxWorkspaceWrite: SandboxWorkspaceWrite?
-        public let forcedChatGPTWorkspaceID: String?
+        public let forcedChatGPTWorkspaceID: ForcedChatGPTWorkspaceIDs?
         public let forcedLoginMethod: ForcedLoginMethod?
         public let webSearch: WebSearchMode?
         public let tools: ToolsV2?
@@ -612,7 +645,7 @@ extension AppServerProtocol {
             approvalsReviewer: ApprovalsReviewer? = nil,
             sandboxMode: SandboxMode? = nil,
             sandboxWorkspaceWrite: SandboxWorkspaceWrite? = nil,
-            forcedChatGPTWorkspaceID: String? = nil,
+            forcedChatGPTWorkspaceID: ForcedChatGPTWorkspaceIDs? = nil,
             forcedLoginMethod: ForcedLoginMethod? = nil,
             webSearch: WebSearchMode? = nil,
             tools: ToolsV2? = nil,
@@ -694,7 +727,7 @@ extension AppServerProtocol {
                 forKey: AppServerConfigCodingKey(stringValue: "sandbox_workspace_write")
             )
             forcedChatGPTWorkspaceID = try container.decodeIfPresent(
-                String.self,
+                ForcedChatGPTWorkspaceIDs.self,
                 forKey: AppServerConfigCodingKey(stringValue: "forced_chatgpt_workspace_id")
             )
             forcedLoginMethod = try container.decodeIfPresent(

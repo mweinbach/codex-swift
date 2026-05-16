@@ -20,6 +20,24 @@ final class ChatGPTLoginTests: XCTestCase {
         )
     }
 
+    func testBuildAuthorizeURLJoinsForcedWorkspaceAllowlistLikeRust() throws {
+        let authURL = ChatGPTLogin.buildAuthorizeURL(
+            issuer: "https://auth.example",
+            clientID: "client-id",
+            redirectURI: "http://localhost:1455/auth/callback",
+            pkce: PKCECodes(codeVerifier: "verifier", codeChallenge: "challenge"),
+            state: "state/123",
+            forcedChatGPTWorkspaceIDs: ["workspace-123", "workspace-456"],
+            originator: "codex_cli_rs"
+        )
+
+        let components = try XCTUnwrap(URLComponents(string: authURL))
+        let allowedWorkspaceIDs = components.queryItems?
+            .filter { $0.name == "allowed_workspace_id" }
+            .map(\.value)
+        XCTAssertEqual(allowedWorkspaceIDs, ["workspace-123,workspace-456"])
+    }
+
     func testComposeSuccessURLIncludesStreamlinedFlagWhenRequested() throws {
         let idToken = Self.fakeJWT(authClaims: [
             "organization_id": "org-123",
@@ -134,10 +152,10 @@ final class ChatGPTLoginTests: XCTestCase {
         let (body, response) = try await URLSession.shared.data(from: callbackURL)
         let http = try XCTUnwrap(response as? HTTPURLResponse)
         XCTAssertEqual(http.statusCode, 200)
-        XCTAssertEqual(String(data: body, encoding: .utf8), "Login is restricted to workspace id acct-required.")
+        XCTAssertEqual(String(data: body, encoding: .utf8), "Login is restricted to workspace id(s) acct-required.")
 
         await XCTAssertThrowsErrorAsync(try await server.waitUntilDone()) { error in
-            XCTAssertEqual(String(describing: error), "Login is restricted to workspace id acct-required.")
+            XCTAssertEqual(String(describing: error), "Login is restricted to workspace id(s) acct-required.")
         }
         XCTAssertNil(try CodexAuthStorage.loadAuthDotJSON(codexHome: temp.url, mode: .file))
     }
