@@ -134,49 +134,6 @@ final class AppServerPermissionsProtocolTests: XCTestCase {
         )
     }
 
-    func testPermissionProfileFileSystemPermissionsPreservesGlobScanDepthLikeRustProtocol() throws {
-        let permissions = AppServerPermissionProfileFileSystemPermissions.restricted(
-            entries: [
-                FileSystemSandboxEntry(
-                    path: .globPattern("**/*.env"),
-                    access: .none
-                )
-            ],
-            globScanMaxDepth: 2
-        )
-
-        try XCTAssertJSONObjectEqual(permissions, [
-            "type": "restricted",
-            "entries": [
-                [
-                    "path": [
-                        "type": "glob_pattern",
-                        "pattern": "**/*.env"
-                    ],
-                    "access": "none"
-                ]
-            ],
-            "globScanMaxDepth": 2
-        ])
-
-        let decoded = try JSONDecoder().decode(
-            AppServerPermissionProfileFileSystemPermissions.self,
-            from: Data(
-                #"{"type":"restricted","entries":[{"path":{"type":"glob_pattern","pattern":"**/*.env"},"access":"none"}],"globScanMaxDepth":2}"#.utf8
-            )
-        )
-        XCTAssertEqual(decoded, permissions)
-    }
-
-    func testPermissionProfileFileSystemPermissionsRejectZeroGlobScanDepthLikeRustProtocol() {
-        XCTAssertThrowsError(
-            try JSONDecoder().decode(
-                AppServerPermissionProfileFileSystemPermissions.self,
-                from: Data(#"{"type":"restricted","entries":[],"globScanMaxDepth":0}"#.utf8)
-            )
-        )
-    }
-
     func testDecodedReadWriteOnlyAdditionalFileSystemPermissionsPreserveLegacyCoreShape() throws {
         let decoded = try JSONDecoder().decode(
             AppServerAdditionalFileSystemPermissions.self,
@@ -258,79 +215,12 @@ final class AppServerPermissionsProtocolTests: XCTestCase {
         )
     }
 
-    func testManagedPermissionProfileUsesAppServerCamelCaseFilesystemFields() throws {
-        let profile = AppServerPermissionProfile.managed(
-            network: AppServerPermissionProfileNetworkPermissions(enabled: false),
-            fileSystem: .restricted(
-                entries: [FileSystemSandboxEntry(path: .path("/repo"), access: .read)],
-                globScanMaxDepth: 4
-            )
-        )
-
-        try XCTAssertJSONObjectEqual(profile, [
-            "type": "managed",
-            "network": [
-                "enabled": false
-            ],
-            "fileSystem": [
-                "type": "restricted",
-                "entries": [
-                    [
-                        "path": [
-                            "type": "path",
-                            "path": "/repo"
-                        ],
-                        "access": "read"
-                    ]
-                ],
-                "globScanMaxDepth": 4
-            ]
-        ])
-    }
-
-    func testSpecialFilesystemPathEncodesNullSubpathLikeRustTaggedEnum() throws {
-        let profile = AppServerPermissionProfile.managed(
-            network: AppServerPermissionProfileNetworkPermissions(enabled: false),
-            fileSystem: .restricted(
-                entries: [
-                    FileSystemSandboxEntry(
-                        path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue),
-                        access: .write
-                    )
-                ]
-            )
-        )
-
-        try XCTAssertJSONObjectEqual(profile, [
-            "type": "managed",
-            "network": [
-                "enabled": false
-            ],
-            "fileSystem": [
-                "type": "restricted",
-                "entries": [
-                    [
-                        "path": [
-                            "type": "special",
-                            "value": [
-                                "kind": "project_roots",
-                                "subpath": NSNull()
-                            ]
-                        ],
-                        "access": "write"
-                    ]
-                ]
-            ]
-        ])
-    }
-
     func testSpecialFilesystemPathCanonicalizesLegacyCurrentWorkingDirectoryAliasLikeRust() throws {
         let decoded = try JSONDecoder().decode(
-            AppServerPermissionProfileFileSystemPermissions.self,
+            AppServerAdditionalFileSystemPermissions.self,
             from: Data(
                 #"""
                 {
-                  "type": "restricted",
                   "entries": [{
                     "path": {
                       "type": "special",
@@ -347,7 +237,7 @@ final class AppServerPermissionsProtocolTests: XCTestCase {
 
         XCTAssertEqual(
             decoded,
-            .restricted(entries: [
+            AppServerAdditionalFileSystemPermissions(entries: [
                 FileSystemSandboxEntry(
                     path: .special(FileSystemSpecialPath.projectRoots(subpath: nil).jsonValue),
                     access: .write
@@ -355,7 +245,8 @@ final class AppServerPermissionsProtocolTests: XCTestCase {
             ])
         )
         try XCTAssertJSONObjectEqual(decoded, [
-            "type": "restricted",
+            "read": NSNull(),
+            "write": NSNull(),
             "entries": [
                 [
                     "path": [
@@ -371,35 +262,23 @@ final class AppServerPermissionsProtocolTests: XCTestCase {
         ])
     }
 
-    func testActivePermissionProfileUsesAppServerCamelCaseModificationTags() throws {
+    func testActivePermissionProfileUsesCurrentRustAppServerShape() throws {
         let profile = AppServerActivePermissionProfile(
-            ActivePermissionProfile(
-                id: ":workspace",
-                modifications: [.additionalWritableRoot(path: "/repo/tmp")]
-            )
+            ActivePermissionProfile(id: ":workspace")
         )
 
         try XCTAssertJSONObjectEqual(profile, [
             "id": ":workspace",
-            "extends": NSNull(),
-            "modifications": [
-                [
-                    "type": "additionalWritableRoot",
-                    "path": "/repo/tmp"
-                ]
-            ]
+            "extends": NSNull()
         ])
 
         XCTAssertEqual(
             profile.activePermissionProfile,
-            ActivePermissionProfile(
-                id: ":workspace",
-                modifications: [.additionalWritableRoot(path: "/repo/tmp")]
-            )
+            ActivePermissionProfile(id: ":workspace")
         )
     }
 
-    func testActivePermissionProfileDecodesRustDefaultedModifications() throws {
+    func testActivePermissionProfileDecodesRustDefaultedExtends() throws {
         let missingModifications = try JSONDecoder().decode(
             AppServerActivePermissionProfile.self,
             from: Data(#"{"id":":workspace"}"#.utf8)
@@ -417,49 +296,28 @@ final class AppServerPermissionsProtocolTests: XCTestCase {
             explicitNullExtends,
             AppServerActivePermissionProfile(id: ":workspace")
         )
-
-        let explicitEmptyModifications = try JSONDecoder().decode(
-            AppServerActivePermissionProfile.self,
-            from: Data(#"{"id":":workspace","modifications":[]}"#.utf8)
-        )
-        XCTAssertEqual(
-            explicitEmptyModifications,
-            AppServerActivePermissionProfile(id: ":workspace")
-        )
-
-        XCTAssertThrowsError(
-            try JSONDecoder().decode(
-                AppServerActivePermissionProfile.self,
-                from: Data(#"{"id":":workspace","modifications":null}"#.utf8)
-            )
-        )
     }
 
-    func testPermissionProfileSelectionParamsEncodesNullableModifications() throws {
-        try XCTAssertJSONObjectEqual(
-            AppServerPermissionProfileSelectionParams.profile(id: "limited"),
-            [
-                "type": "profile",
-                "id": "limited",
-                "modifications": NSNull()
-            ]
+    func testPermissionProfileSelectionParamsEncodesCurrentRustStringShapeAndDecodesLegacyObject() throws {
+        let encoded = try JSONEncoder().encode(AppServerPermissionProfileSelectionParams.profile(id: "limited"))
+        XCTAssertEqual(String(data: encoded, encoding: .utf8), #""limited""#)
+
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                AppServerPermissionProfileSelectionParams.self,
+                from: Data(#""limited""#.utf8)
+            ),
+            .profile(id: "limited")
         )
 
-        try XCTAssertJSONObjectEqual(
-            AppServerPermissionProfileSelectionParams.profile(
-                id: "limited",
-                modifications: [.additionalWritableRoot(path: "/repo/tmp")]
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                AppServerPermissionProfileSelectionParams.self,
+                from: Data(
+                    #"{"type":"profile","id":"limited","modifications":[{"type":"additionalWritableRoot","path":"/repo/tmp"}]}"#.utf8
+                )
             ),
-            [
-                "type": "profile",
-                "id": "limited",
-                "modifications": [
-                    [
-                        "type": "additionalWritableRoot",
-                        "path": "/repo/tmp"
-                    ]
-                ]
-            ]
+            .profile(id: "limited", modifications: [.additionalWritableRoot(path: "/repo/tmp")])
         )
     }
 
@@ -554,12 +412,4 @@ final class AppServerPermissionsProtocolTests: XCTestCase {
         }
     }
 
-    func testManagedPermissionProfileRejectsZeroGlobScanDepthLikeRust() {
-        XCTAssertThrowsError(try JSONDecoder().decode(
-            AppServerPermissionProfile.self,
-            from: Data(
-                #"{"type":"managed","network":{"enabled":true},"fileSystem":{"type":"restricted","entries":[],"globScanMaxDepth":0}}"#.utf8
-            )
-        ))
-    }
 }

@@ -25,14 +25,6 @@ public struct AppServerAdditionalNetworkPermissions: Codable, Equatable, Sendabl
     }
 }
 
-public struct AppServerPermissionProfileNetworkPermissions: Codable, Equatable, Sendable {
-    public let enabled: Bool
-
-    public init(enabled: Bool) {
-        self.enabled = enabled
-    }
-}
-
 public struct AppServerAdditionalFileSystemPermissions: Codable, Equatable, Sendable {
     public let read: [String]?
     public let write: [String]?
@@ -136,134 +128,27 @@ public struct AppServerAdditionalFileSystemPermissions: Codable, Equatable, Send
     }
 }
 
-public enum AppServerPermissionProfileFileSystemPermissions: Codable, Equatable, Sendable {
-    case restricted(entries: [FileSystemSandboxEntry], globScanMaxDepth: Int? = nil)
-    case unrestricted
-
-    private enum CodingKeys: String, CodingKey {
-        case type
-        case entries
-        case globScanMaxDepth
-    }
-
-    private enum ProfileType: String, Codable {
-        case restricted
-        case unrestricted
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        switch try container.decode(ProfileType.self, forKey: .type) {
-        case .restricted:
-            let globScanMaxDepth = try container.decodeIfPresent(Int.self, forKey: .globScanMaxDepth)
-            if let globScanMaxDepth, globScanMaxDepth <= 0 {
-                throw DecodingError.dataCorruptedError(
-                    forKey: .globScanMaxDepth,
-                    in: container,
-                    debugDescription: "globScanMaxDepth must be nonzero"
-                )
-            }
-            self = .restricted(
-                entries: try container.decode([FileSystemSandboxEntry].self, forKey: .entries),
-                globScanMaxDepth: globScanMaxDepth
-            )
-        case .unrestricted:
-            self = .unrestricted
-        }
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        switch self {
-        case let .restricted(entries, globScanMaxDepth):
-            try container.encode(ProfileType.restricted, forKey: .type)
-            try container.encode(entries, forKey: .entries)
-            try container.encodeIfPresent(globScanMaxDepth, forKey: .globScanMaxDepth)
-        case .unrestricted:
-            try container.encode(ProfileType.unrestricted, forKey: .type)
-        }
-    }
-}
-
-public enum AppServerPermissionProfile: Codable, Equatable, Sendable {
-    case managed(
-        network: AppServerPermissionProfileNetworkPermissions,
-        fileSystem: AppServerPermissionProfileFileSystemPermissions
-    )
-    case disabled
-    case external(network: AppServerPermissionProfileNetworkPermissions)
-
-    private enum CodingKeys: String, CodingKey {
-        case type
-        case network
-        case fileSystem
-    }
-
-    private enum ProfileType: String, Codable {
-        case managed
-        case disabled
-        case external
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        switch try container.decode(ProfileType.self, forKey: .type) {
-        case .managed:
-            self = .managed(
-                network: try container.decode(AppServerPermissionProfileNetworkPermissions.self, forKey: .network),
-                fileSystem: try container.decode(AppServerPermissionProfileFileSystemPermissions.self, forKey: .fileSystem)
-            )
-        case .disabled:
-            self = .disabled
-        case .external:
-            self = .external(
-                network: try container.decode(AppServerPermissionProfileNetworkPermissions.self, forKey: .network)
-            )
-        }
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        switch self {
-        case let .managed(network, fileSystem):
-            try container.encode(ProfileType.managed, forKey: .type)
-            try container.encode(network, forKey: .network)
-            try container.encode(fileSystem, forKey: .fileSystem)
-        case .disabled:
-            try container.encode(ProfileType.disabled, forKey: .type)
-        case let .external(network):
-            try container.encode(ProfileType.external, forKey: .type)
-            try container.encode(network, forKey: .network)
-        }
-    }
-}
-
 public struct AppServerActivePermissionProfile: Codable, Equatable, Sendable {
     public let id: String
     public let extends: String?
-    public let modifications: [AppServerActivePermissionProfileModification]
 
     private enum CodingKeys: String, CodingKey {
         case id
         case extends
-        case modifications
     }
 
     public init(
         id: String,
-        extends: String? = nil,
-        modifications: [AppServerActivePermissionProfileModification] = []
+        extends: String? = nil
     ) {
         self.id = id
         self.extends = extends
-        self.modifications = modifications
     }
 
     public init(_ profile: ActivePermissionProfile) {
         self.init(
             id: profile.id,
-            extends: profile.extends,
-            modifications: profile.modifications.map(AppServerActivePermissionProfileModification.init)
+            extends: profile.extends
         )
     }
 
@@ -271,18 +156,12 @@ public struct AppServerActivePermissionProfile: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         extends = try container.decodeIfPresent(String.self, forKey: .extends)
-        modifications = try container.decodeRustDefaulted(
-            [AppServerActivePermissionProfileModification].self,
-            forKey: .modifications,
-            defaultValue: []
-        )
     }
 
     public var activePermissionProfile: ActivePermissionProfile {
         ActivePermissionProfile(
             id: id,
-            extends: extends,
-            modifications: modifications.map(\.activePermissionProfileModification)
+            extends: extends
         )
     }
 
@@ -290,7 +169,6 @@ public struct AppServerActivePermissionProfile: Codable, Equatable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
         try container.encodeNilOrValue(extends, forKey: .extends)
-        try container.encode(modifications, forKey: .modifications)
     }
 }
 
@@ -352,26 +230,26 @@ public enum AppServerPermissionProfileSelectionParams: Codable, Equatable, Senda
     }
 
     public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        switch try container.decode(SelectionType.self, forKey: .type) {
-        case .profile:
-            self = .profile(
-                id: try container.decode(String.self, forKey: .id),
-                modifications: try container.decodeIfPresent(
-                    [AppServerPermissionProfileModificationParams].self,
-                    forKey: .modifications
-                )
-            )
+        if let id = try? decoder.singleValueContainer().decode(String.self) {
+            self = .profile(id: id)
+            return
         }
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        _ = try container.decode(SelectionType.self, forKey: .type)
+        self = .profile(
+            id: try container.decode(String.self, forKey: .id),
+            modifications: try container.decodeIfPresent(
+                [AppServerPermissionProfileModificationParams].self,
+                forKey: .modifications
+            )
+        )
     }
 
     public func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
+        var container = encoder.singleValueContainer()
         switch self {
-        case let .profile(id, modifications):
-            try container.encode(SelectionType.profile, forKey: .type)
-            try container.encode(id, forKey: .id)
-            try container.encodeNilOrValue(modifications, forKey: .modifications)
+        case let .profile(id, _):
+            try container.encode(id)
         }
     }
 }

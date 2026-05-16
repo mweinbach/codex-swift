@@ -12,6 +12,16 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `9025550709` (`app-server-protocol:
+  remove PermissionProfile from API`). Swift app-server v2 now omits the full
+  `permissionProfile` object from `thread/start`, `thread/resume`, and
+  `thread/fork` responses, keeps `activePermissionProfile` as Rust's current
+  `id`/`extends` shape without `modifications`, encodes permission-profile
+  selection params as the Rust string id, and decodes the prior object shape for
+  legacy callers. `command/exec.permissionProfile` now selects an active profile
+  by id/extends and reloads config for the command cwd before sandbox
+  selection, preserving configured deny-read restrictions while retaining the
+  Rust conflict with per-request `sandboxPolicy`.
 - 2026-05-16: refreshed Rust `main` to `de9c5c0226` (`Fix Windows doctor npm
   root probe`) and rechecked `codex-rs/features/src/lib.rs`,
   `features/src/legacy.rs`, and feature tests. Swift's feature registry now

@@ -39,7 +39,7 @@ final class AppServerCommandExecProtocolTests: XCTestCase {
                 excludeTmpdirEnvVar: true,
                 excludeSlashTmp: true
             ),
-            permissionProfile: .disabled
+            permissionProfile: AppServerActivePermissionProfile(id: ":read-only")
         )
 
         try XCTAssertJSONObjectEqual(params, [
@@ -69,7 +69,8 @@ final class AppServerCommandExecProtocolTests: XCTestCase {
                 "excludeSlashTmp": true
             ],
             "permissionProfile": [
-                "type": "disabled"
+                "id": ":read-only",
+                "extends": NSNull()
             ]
         ])
     }

@@ -875,10 +875,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(result["approvalPolicy"] as? String, "never")
         XCTAssertEqual(result["approvalsReviewer"] as? String, "guardian_subagent")
         XCTAssertEqual((result["sandbox"] as? [String: Any])?["type"] as? String, "workspaceWrite")
-        let permissionProfile = try XCTUnwrap(result["permissionProfile"] as? [String: Any])
-        XCTAssertEqual(permissionProfile["type"] as? String, "managed")
-        XCTAssertEqual((permissionProfile["file_system"] as? [String: Any])?["type"] as? String, "restricted")
-        XCTAssertEqual(permissionProfile["network"] as? String, "restricted")
+        XCTAssertNil(result["permissionProfile"])
         XCTAssertEqual(result["activePermissionProfile"] as? NSNull, NSNull())
         let thread = try XCTUnwrap(result["thread"] as? [String: Any])
         let threadID = try XCTUnwrap(thread["id"] as? String)
@@ -1293,18 +1290,11 @@ final class CodexAppServerTests: XCTestCase {
         )))
 
         let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
-        let permissionProfile = try XCTUnwrap(result["permissionProfile"] as? [String: Any])
-        XCTAssertEqual(permissionProfile["type"] as? String, "managed")
-        XCTAssertEqual(permissionProfile["network"] as? String, "enabled")
-        let fileSystem = try XCTUnwrap(permissionProfile["file_system"] as? [String: Any])
-        XCTAssertEqual(fileSystem["type"] as? String, "restricted")
-        let entries = try XCTUnwrap(fileSystem["entries"] as? [[String: Any]])
-        XCTAssertEqual((entries.first?["path"] as? [String: Any])?["path"] as? String, docs.path)
-        XCTAssertEqual(entries.first?["access"] as? String, "read")
+        XCTAssertNil(result["permissionProfile"])
         let activePermissionProfile = try XCTUnwrap(result["activePermissionProfile"] as? [String: Any])
         XCTAssertEqual(activePermissionProfile["id"] as? String, "limited-read-test")
         XCTAssertEqual(activePermissionProfile["extends"] as? NSNull, NSNull())
-        XCTAssertEqual((activePermissionProfile["modifications"] as? [[String: Any]])?.count, 0)
+        XCTAssertNil(activePermissionProfile["modifications"])
     }
 
     func testThreadLifecycleResponsesIncludeLoadedInstructionSourcesLikeRust() throws {
@@ -8000,10 +7990,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(result["approvalPolicy"] as? String, "untrusted")
         XCTAssertEqual(result["approvalsReviewer"] as? String, "user")
         XCTAssertEqual((result["sandbox"] as? [String: Any])?["type"] as? String, "readOnly")
-        let permissionProfile = try XCTUnwrap(result["permissionProfile"] as? [String: Any])
-        XCTAssertEqual(permissionProfile["type"] as? String, "managed")
-        XCTAssertEqual((permissionProfile["file_system"] as? [String: Any])?["type"] as? String, "restricted")
-        XCTAssertEqual(permissionProfile["network"] as? String, "restricted")
+        XCTAssertNil(result["permissionProfile"])
         XCTAssertEqual(result["activePermissionProfile"] as? NSNull, NSNull())
         XCTAssertEqual(result["reasoningEffort"] as? NSNull, NSNull())
         let thread = try XCTUnwrap(result["thread"] as? [String: Any])
@@ -8077,10 +8064,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(granular["request_permissions"] as? Bool, true)
         XCTAssertEqual(granular["mcp_elicitations"] as? Bool, true)
         XCTAssertEqual((result["sandbox"] as? [String: Any])?["type"] as? String, "workspaceWrite")
-        let permissionProfile = try XCTUnwrap(result["permissionProfile"] as? [String: Any])
-        XCTAssertEqual(permissionProfile["type"] as? String, "managed")
-        XCTAssertEqual((permissionProfile["file_system"] as? [String: Any])?["type"] as? String, "restricted")
-        XCTAssertEqual(permissionProfile["network"] as? String, "restricted")
+        XCTAssertNil(result["permissionProfile"])
     }
 
     func testThreadResumeAndForkUsePersistedModelMetadataLikeRust() throws {
@@ -8415,10 +8399,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(granular["request_permissions"] as? Bool, true)
         XCTAssertEqual(granular["mcp_elicitations"] as? Bool, true)
         XCTAssertEqual((result["sandbox"] as? [String: Any])?["type"] as? String, "workspaceWrite")
-        let permissionProfile = try XCTUnwrap(result["permissionProfile"] as? [String: Any])
-        XCTAssertEqual(permissionProfile["type"] as? String, "managed")
-        XCTAssertEqual((permissionProfile["file_system"] as? [String: Any])?["type"] as? String, "restricted")
-        XCTAssertEqual(permissionProfile["network"] as? String, "restricted")
+        XCTAssertNil(result["permissionProfile"])
     }
 
     func testThreadResumeAndForkRejectMalformedThreadIDParamsLikeRust() throws {
@@ -29621,7 +29602,7 @@ final class CodexAppServerTests: XCTestCase {
         let cwd = try TemporaryDirectory()
 
         let response = try appServerResponse(
-            #"{"id":1,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","permissionProfile":{"type":"disabled"}}}"#,
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","permissionProfile":{"id":":read-only"}}}"#,
             codexHome: codexHome.url
         )
         let error = try XCTUnwrap(response["error"] as? [String: Any])
@@ -29637,7 +29618,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(nullPermissionProfileResult["stdout"] as? String, "hi\n")
     }
 
-    func testCommandExecPermissionProfileDisabledOverridesConfiguredSandboxLikeRust() throws {
+    func testCommandExecPermissionProfileSelectsActiveWorkspaceProfileLikeRust() throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
         let allowedFile = cwd.url.appendingPathComponent("permission-profile.txt", isDirectory: false)
@@ -29647,30 +29628,28 @@ final class CodexAppServerTests: XCTestCase {
         )
 
         let response = try decode(processor.processLine(Data(
-            #"{"id":1,"method":"command/exec","params":{"command":["/bin/sh","-c","printf profile > permission-profile.txt"],"cwd":"\#(cwd.url.path)","permissionProfile":{"type":"disabled"}}}"#.utf8
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/sh","-c","printf profile > permission-profile.txt"],"cwd":"\#(cwd.url.path)","permissionProfile":{"id":":workspace"}}}"#.utf8
         )))
         let result = try XCTUnwrap(response["result"] as? [String: Any])
         XCTAssertEqual(result["exitCode"] as? Int, 0)
         XCTAssertEqual(try String(contentsOf: allowedFile, encoding: .utf8), "profile")
     }
 
-    func testCommandExecPermissionProfileRejectsUnbridgeableWritesUntilDirectRuntimeLikeRust() throws {
+    func testCommandExecPermissionProfileRejectsUnknownActiveProfileLikeRust() throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
-        let outside = try TemporaryDirectory()
         let processor = try initializedProcessor(
             configuration: testConfiguration(codexHome: codexHome.url),
             experimentalAPIEnabled: true
         )
 
         let response = try decode(processor.processLine(Data(
-            #"{"id":1,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","permissionProfile":{"type":"managed","network":{"enabled":false},"fileSystem":{"type":"restricted","entries":[{"path":{"type":"path","path":"\#(outside.url.path)"},"access":"write"}]}}}}"#.utf8
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","permissionProfile":{"id":"missing-profile"}}}"#.utf8
         )))
         let error = try XCTUnwrap(response["error"] as? [String: Any])
-        XCTAssertEqual(error["code"] as? Int, -32600)
         XCTAssertEqual(
             error["message"] as? String,
-            "invalid permission profile: permissions profile requests filesystem writes outside the workspace root, which is not supported until the runtime enforces FileSystemSandboxPolicy directly"
+            "failed to load configuration: Invalid config line: default_permissions requires a `[permissions]` table"
         )
     }
 
@@ -29708,7 +29687,7 @@ final class CodexAppServerTests: XCTestCase {
         )
 
         let response = try decode(processor.processLine(Data(
-            #"{"id":1,"method":"command/exec","params":{"command":["/bin/cat","\#(secret.path)"],"cwd":"\#(cwd.path)","permissionProfile":{"type":"managed","network":{"enabled":false},"fileSystem":{"type":"restricted","entries":[{"path":{"type":"special","value":{"kind":"root"}},"access":"read"}]}}}}"#.utf8
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/cat","\#(secret.path)"],"cwd":"\#(cwd.path)","permissionProfile":{"id":":read-only"}}}"#.utf8
         )))
         let result = try XCTUnwrap(response["result"] as? [String: Any])
         XCTAssertNotEqual(result["exitCode"] as? Int, 0)
@@ -31673,25 +31652,14 @@ final class CodexAppServerTests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        guard let permissionProfile = result["permissionProfile"] as? [String: Any],
-              permissionProfile["type"] as? String == "managed",
-              let fileSystem = permissionProfile["file_system"] as? [String: Any],
-              let entries = fileSystem["entries"] as? [[String: Any]],
-              let activePermissionProfile = result["activePermissionProfile"] as? [String: Any]
+        guard let activePermissionProfile = result["activePermissionProfile"] as? [String: Any]
         else {
             XCTFail("missing permission profile selection", file: file, line: line)
             return
         }
-        XCTAssertEqual(permissionProfile["network"] as? String, "restricted", file: file, line: line)
-        XCTAssertTrue(entries.contains { entry in
-            (entry["path"] as? [String: Any])?["path"] as? String == extraPath
-                && entry["access"] as? String == "write"
-        }, file: file, line: line)
+        XCTAssertNil(result["permissionProfile"], file: file, line: line)
         XCTAssertEqual(activePermissionProfile["id"] as? String, activeID, file: file, line: line)
-        let modifications = activePermissionProfile["modifications"] as? [[String: Any]]
-        XCTAssertEqual(modifications?.count, 1, file: file, line: line)
-        XCTAssertEqual(modifications?.first?["type"] as? String, "additionalWritableRoot", file: file, line: line)
-        XCTAssertEqual(modifications?.first?["path"] as? String, extraPath, file: file, line: line)
+        XCTAssertNil(activePermissionProfile["modifications"], file: file, line: line)
     }
 
     private func nextNotificationPayload(

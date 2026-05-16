@@ -531,7 +531,7 @@ private struct AppServerCommandExecParams {
     let size: AppServerTerminalSize?
     let environmentOverrides: [String: String?]
     let sandboxPolicy: SandboxPolicy?
-    let permissionProfile: PermissionProfile?
+    let activePermissionProfile: ActivePermissionProfile?
 }
 
 private struct AppServerInitializeCapabilities {
@@ -1270,7 +1270,6 @@ public enum CodexAppServer {
     ) {
         try validateTurnEnvironmentSelections(params?["environments"], configuration: configuration)
         let started = try startRolloutConversation(params: params, configuration: configuration)
-        let permissionProfile = started.permissionProfile
         let thread: [String: Any]
         if started.ephemeral {
             thread = threadObject(for: started)
@@ -1294,7 +1293,6 @@ public enum CodexAppServer {
             "approvalPolicy": try appServerApprovalPolicyObject(started.approvalPolicy),
             "approvalsReviewer": started.approvalsReviewer.appServerRawValue,
             "sandbox": try jsonObject(AppServerSandboxPolicy(core: started.sandbox)),
-            "permissionProfile": try jsonObject(permissionProfile),
             "activePermissionProfile": activePermissionProfileObject(started.activePermissionProfile),
             "reasoningEffort": started.reasoningEffort ?? NSNull()
         ].nullStripped(keepNulls: true)
@@ -2244,7 +2242,6 @@ public enum CodexAppServer {
             "approvalPolicy": try appServerApprovalPolicyObject(approvalPolicy),
             "approvalsReviewer": approvalsReviewer.appServerRawValue,
             "sandbox": try jsonObject(AppServerSandboxPolicy(core: sandbox)),
-            "permissionProfile": try jsonObject(permissionProfile),
             "activePermissionProfile": activePermissionProfileObject(runtimeConfig.activePermissionProfile),
             "reasoningEffort": reasoningEffort?.rawValue ?? NSNull()
         ].nullStripped(keepNulls: true)
@@ -2420,7 +2417,6 @@ public enum CodexAppServer {
             "approvalPolicy": try appServerApprovalPolicyObject(approvalPolicy),
             "approvalsReviewer": approvalsReviewer.appServerRawValue,
             "sandbox": try jsonObject(AppServerSandboxPolicy(core: sandbox)),
-            "permissionProfile": try jsonObject(permissionProfile),
             "activePermissionProfile": activePermissionProfileObject(runtimeConfig.activePermissionProfile),
             "reasoningEffort": reasoningEffort?.rawValue ?? NSNull()
         ].nullStripped(keepNulls: true)
@@ -17627,7 +17623,7 @@ public enum CodexAppServer {
         {
             throw AppServerError.invalidRequest("`permissionProfile` cannot be combined with `sandboxPolicy`")
         }
-        let permissionProfile = try commandExecPermissionProfile(params?["permissionProfile"])
+        let activePermissionProfile = try commandExecActivePermissionProfile(params?["permissionProfile"])
         if processID == nil && (tty || streamStdin || streamStdoutStderr) {
             throw AppServerError.invalidRequest("command/exec tty or streaming requires a client-supplied processId")
         }
@@ -17656,7 +17652,7 @@ public enum CodexAppServer {
             size: size,
             environmentOverrides: try processEnvironmentOverrides(params?["env"]),
             sandboxPolicy: sandboxPolicy,
-            permissionProfile: permissionProfile
+            activePermissionProfile: activePermissionProfile
         )
     }
 
@@ -17678,7 +17674,7 @@ public enum CodexAppServer {
             size: nil,
             environmentOverrides: [:],
             sandboxPolicy: try commandExecSandboxPolicy(params?["sandboxPolicy"]),
-            permissionProfile: nil
+            activePermissionProfile: nil
         )
     }
 
@@ -17688,11 +17684,16 @@ public enum CodexAppServer {
         commandCwd: URL,
         configuration: CodexAppServerConfiguration
     ) throws -> AppServerCommandExecSandboxConfiguration {
-        if let permissionProfile = parsed.permissionProfile {
-            let permissionProfile = permissionProfilePreservingConfiguredDenyReads(
-                permissionProfile,
+        if let activePermissionProfile = parsed.activePermissionProfile {
+            let selectedRuntimeConfig = try loadRuntimeConfigForCommandExecPermissionProfile(
+                activePermissionProfile,
                 runtimeConfig: runtimeConfig,
+                commandCwd: commandCwd,
                 configuration: configuration
+            )
+            let permissionProfile = selectedRuntimeConfig.permissionProfile ?? PermissionProfile.fromLegacySandboxPolicyForCwd(
+                selectedRuntimeConfig.legacySandboxPolicy(),
+                cwd: commandCwd.standardizedFileURL.path
             )
             if permissionProfile.fileSystemSandboxPolicy.hasDeniedReadRestrictions {
                 return .direct(permissionProfile: permissionProfile, cwd: commandCwd)
@@ -17705,23 +17706,46 @@ public enum CodexAppServer {
         return .legacy(policy: parsed.sandboxPolicy ?? runtimeConfig.legacySandboxPolicy(), cwd: configuration.cwd)
     }
 
-    private static func permissionProfilePreservingConfiguredDenyReads(
-        _ permissionProfile: PermissionProfile,
+    private static func loadRuntimeConfigForCommandExecPermissionProfile(
+        _ activePermissionProfile: ActivePermissionProfile,
         runtimeConfig: CodexRuntimeConfig,
+        commandCwd: URL,
         configuration: CodexAppServerConfiguration
-    ) -> PermissionProfile {
+    ) throws -> CodexRuntimeConfig {
+        var overrides = configuration.cliConfigOverrides
+        overrides.rawOverrides.append("default_permissions=\(tomlQuotedString(activePermissionProfile.id))")
+        let loaded: CodexRuntimeConfig
+        do {
+            loaded = try CodexConfigLoader.load(
+                codexHome: configuration.codexHome,
+                cwd: commandCwd,
+                overrides: overrides,
+                threadConfigSources: configuration.threadConfigSources,
+                managedConfigOverrides: configuration.configLayerOverrides,
+                environment: configuration.environment
+            )
+        } catch {
+            throw configLoadError(error)
+        }
+
         let configuredFileSystemPolicy = runtimeConfig.permissionProfile?.fileSystemSandboxPolicy
             ?? FileSystemSandboxPolicy.fromLegacySandboxPolicyForCwd(
                 runtimeConfig.legacySandboxPolicy(),
                 cwd: configuration.cwd.standardizedFileURL.path
             )
-        var fileSystemPolicy = permissionProfile.fileSystemSandboxPolicy
-        fileSystemPolicy.preserveDenyReadRestrictions(from: configuredFileSystemPolicy)
-        return PermissionProfile.fromRuntimePermissionsWithEnforcement(
-            permissionProfile.enforcement,
-            fileSystem: fileSystemPolicy,
-            network: permissionProfile.networkSandboxPolicy
+        var selected = loaded
+        let selectedProfile = selected.permissionProfile ?? PermissionProfile.fromLegacySandboxPolicyForCwd(
+            selected.legacySandboxPolicy(),
+            cwd: commandCwd.standardizedFileURL.path
         )
+        var fileSystemPolicy = selectedProfile.fileSystemSandboxPolicy
+        fileSystemPolicy.preserveDenyReadRestrictions(from: configuredFileSystemPolicy)
+        selected.permissionProfile = PermissionProfile.fromRuntimePermissionsWithEnforcement(
+            selectedProfile.enforcement,
+            fileSystem: fileSystemPolicy,
+            network: selectedProfile.networkSandboxPolicy
+        )
+        return selected
     }
 
     private static func legacySandboxPolicy(
@@ -17973,73 +17997,19 @@ public enum CodexAppServer {
         }
     }
 
-    private static func commandExecPermissionProfile(_ value: Any?) throws -> PermissionProfile? {
+    private static func commandExecActivePermissionProfile(_ value: Any?) throws -> ActivePermissionProfile? {
         guard let value, !(value is NSNull) else {
             return nil
         }
+        if let id = value as? String {
+            return ActivePermissionProfile(id: id)
+        }
         guard let object = value as? [String: Any],
-              let type = stringParam(object["type"])
+              let id = try rustOptionalStringParam(object["id"])
         else {
             throw AppServerError.invalidRequest("invalid permission profile")
         }
-
-        switch type {
-        case "disabled":
-            return .disabled
-        case "external":
-            return .external(network: try permissionProfileNetworkPolicy(object["network"]))
-        case "managed":
-            guard let fileSystemObject = object["fileSystem"] as? [String: Any] else {
-                throw AppServerError.invalidRequest("invalid permission profile")
-            }
-            return .managed(
-                fileSystem: try permissionProfileFileSystemPermissions(fileSystemObject),
-                network: try permissionProfileNetworkPolicy(object["network"])
-            )
-        default:
-            throw AppServerError.invalidRequest("invalid permission profile")
-        }
-    }
-
-    private static func permissionProfileNetworkPolicy(_ value: Any?) throws -> NetworkSandboxPolicy {
-        guard let object = value as? [String: Any],
-              let enabled = object["enabled"] as? Bool
-        else {
-            throw AppServerError.invalidRequest("invalid permission profile")
-        }
-        return enabled ? .enabled : .restricted
-    }
-
-    private static func permissionProfileFileSystemPermissions(
-        _ object: [String: Any]
-    ) throws -> ManagedFileSystemPermissions {
-        guard let type = stringParam(object["type"]) else {
-            throw AppServerError.invalidRequest("invalid permission profile")
-        }
-
-        switch type {
-        case "unrestricted":
-            return .unrestricted
-        case "restricted":
-            let entries = object["entries"] as? [[String: Any]] ?? []
-            var coreObject: [String: Any] = [
-                "type": "restricted",
-                "entries": entries
-            ]
-            if let globScanMaxDepth = object["globScanMaxDepth"] ?? object["glob_scan_max_depth"],
-               !(globScanMaxDepth is NSNull)
-            {
-                coreObject["glob_scan_max_depth"] = globScanMaxDepth
-            }
-            do {
-                let data = try JSONSerialization.data(withJSONObject: coreObject)
-                return try JSONDecoder().decode(ManagedFileSystemPermissions.self, from: data)
-            } catch {
-                throw AppServerError.invalidRequest("invalid permission profile")
-            }
-        default:
-            throw AppServerError.invalidRequest("invalid permission profile")
-        }
+        return ActivePermissionProfile(id: id, extends: try rustOptionalStringParam(object["extends"]))
     }
 
     private static func networkAccessParam(_ value: Any?) throws -> NetworkAccess? {
@@ -19655,16 +19625,7 @@ public enum CodexAppServer {
         }
         return [
             "id": profile.id,
-            "extends": profile.extends as Any? ?? NSNull(),
-            "modifications": profile.modifications.map { modification -> [String: Any] in
-                switch modification {
-                case let .additionalWritableRoot(path):
-                    return [
-                        "type": "additionalWritableRoot",
-                        "path": path
-                    ]
-                }
-            }
+            "extends": profile.extends as Any? ?? NSNull()
         ]
     }
 

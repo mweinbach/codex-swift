@@ -2304,7 +2304,6 @@ public struct ThreadStartResponse: Equatable, Codable, Sendable {
     public let approvalPolicy: AskForApproval
     public let approvalsReviewer: ApprovalsReviewer
     public let sandbox: SandboxPolicy
-    public let permissionProfile: AppServerPermissionProfile?
     public let activePermissionProfile: AppServerActivePermissionProfile?
     public let reasoningEffort: ReasoningEffort?
 
@@ -2318,7 +2317,6 @@ public struct ThreadStartResponse: Equatable, Codable, Sendable {
         case approvalPolicy
         case approvalsReviewer
         case sandbox
-        case permissionProfile
         case activePermissionProfile
         case reasoningEffort
     }
@@ -2333,7 +2331,6 @@ public struct ThreadStartResponse: Equatable, Codable, Sendable {
         approvalPolicy: AskForApproval,
         approvalsReviewer: ApprovalsReviewer,
         sandbox: SandboxPolicy,
-        permissionProfile: AppServerPermissionProfile?,
         activePermissionProfile: AppServerActivePermissionProfile?,
         reasoningEffort: ReasoningEffort?
     ) {
@@ -2346,7 +2343,6 @@ public struct ThreadStartResponse: Equatable, Codable, Sendable {
         self.approvalPolicy = approvalPolicy
         self.approvalsReviewer = approvalsReviewer
         self.sandbox = sandbox
-        self.permissionProfile = permissionProfile
         self.activePermissionProfile = activePermissionProfile
         self.reasoningEffort = reasoningEffort
     }
@@ -2366,7 +2362,6 @@ public struct ThreadStartResponse: Equatable, Codable, Sendable {
         approvalPolicy = try container.decode(AskForApproval.self, forKey: .approvalPolicy)
         approvalsReviewer = try container.decode(ApprovalsReviewer.self, forKey: .approvalsReviewer)
         sandbox = try container.decode(AppServerSandboxPolicy.self, forKey: .sandbox).coreValue
-        permissionProfile = try container.decodeIfPresent(AppServerPermissionProfile.self, forKey: .permissionProfile)
         activePermissionProfile = try container.decodeIfPresent(
             AppServerActivePermissionProfile.self,
             forKey: .activePermissionProfile
@@ -2385,7 +2380,6 @@ public struct ThreadStartResponse: Equatable, Codable, Sendable {
         try container.encode(approvalPolicy, forKey: .approvalPolicy)
         try container.encode(approvalsReviewer, forKey: .approvalsReviewer)
         try container.encode(AppServerSandboxPolicy(core: sandbox), forKey: .sandbox)
-        try container.encodeNilOrValue(permissionProfile, forKey: .permissionProfile)
         try container.encodeNilOrValue(activePermissionProfile, forKey: .activePermissionProfile)
         try container.encodeNilOrValue(reasoningEffort, forKey: .reasoningEffort)
     }
@@ -2401,7 +2395,6 @@ public struct ThreadResumeResponse: Equatable, Codable, Sendable {
     public let approvalPolicy: AskForApproval
     public let approvalsReviewer: ApprovalsReviewer
     public let sandbox: SandboxPolicy
-    public let permissionProfile: AppServerPermissionProfile?
     public let activePermissionProfile: AppServerActivePermissionProfile?
     public let reasoningEffort: ReasoningEffort?
 
@@ -2415,7 +2408,6 @@ public struct ThreadResumeResponse: Equatable, Codable, Sendable {
         case approvalPolicy
         case approvalsReviewer
         case sandbox
-        case permissionProfile
         case activePermissionProfile
         case reasoningEffort
     }
@@ -2430,7 +2422,6 @@ public struct ThreadResumeResponse: Equatable, Codable, Sendable {
         approvalPolicy: AskForApproval,
         approvalsReviewer: ApprovalsReviewer,
         sandbox: SandboxPolicy,
-        permissionProfile: AppServerPermissionProfile?,
         activePermissionProfile: AppServerActivePermissionProfile?,
         reasoningEffort: ReasoningEffort?
     ) {
@@ -2443,7 +2434,6 @@ public struct ThreadResumeResponse: Equatable, Codable, Sendable {
         self.approvalPolicy = approvalPolicy
         self.approvalsReviewer = approvalsReviewer
         self.sandbox = sandbox
-        self.permissionProfile = permissionProfile
         self.activePermissionProfile = activePermissionProfile
         self.reasoningEffort = reasoningEffort
     }
@@ -2463,7 +2453,6 @@ public struct ThreadResumeResponse: Equatable, Codable, Sendable {
         approvalPolicy = try container.decode(AskForApproval.self, forKey: .approvalPolicy)
         approvalsReviewer = try container.decode(ApprovalsReviewer.self, forKey: .approvalsReviewer)
         sandbox = try container.decode(AppServerSandboxPolicy.self, forKey: .sandbox).coreValue
-        permissionProfile = try container.decodeIfPresent(AppServerPermissionProfile.self, forKey: .permissionProfile)
         activePermissionProfile = try container.decodeIfPresent(
             AppServerActivePermissionProfile.self,
             forKey: .activePermissionProfile
@@ -2482,7 +2471,6 @@ public struct ThreadResumeResponse: Equatable, Codable, Sendable {
         try container.encode(approvalPolicy, forKey: .approvalPolicy)
         try container.encode(approvalsReviewer, forKey: .approvalsReviewer)
         try container.encode(AppServerSandboxPolicy(core: sandbox), forKey: .sandbox)
-        try container.encodeNilOrValue(permissionProfile, forKey: .permissionProfile)
         try container.encodeNilOrValue(activePermissionProfile, forKey: .activePermissionProfile)
         try container.encodeNilOrValue(reasoningEffort, forKey: .reasoningEffort)
     }
@@ -2498,7 +2486,6 @@ public struct ThreadForkResponse: Equatable, Codable, Sendable {
     public let approvalPolicy: AskForApproval
     public let approvalsReviewer: ApprovalsReviewer
     public let sandbox: SandboxPolicy
-    public let permissionProfile: AppServerPermissionProfile?
     public let activePermissionProfile: AppServerActivePermissionProfile?
     public let reasoningEffort: ReasoningEffort?
 
@@ -2512,7 +2499,6 @@ public struct ThreadForkResponse: Equatable, Codable, Sendable {
         case approvalPolicy
         case approvalsReviewer
         case sandbox
-        case permissionProfile
         case activePermissionProfile
         case reasoningEffort
     }
@@ -2527,7 +2513,6 @@ public struct ThreadForkResponse: Equatable, Codable, Sendable {
         approvalPolicy: AskForApproval,
         approvalsReviewer: ApprovalsReviewer,
         sandbox: SandboxPolicy,
-        permissionProfile: AppServerPermissionProfile?,
         activePermissionProfile: AppServerActivePermissionProfile?,
         reasoningEffort: ReasoningEffort?
     ) {
@@ -2540,7 +2525,6 @@ public struct ThreadForkResponse: Equatable, Codable, Sendable {
         self.approvalPolicy = approvalPolicy
         self.approvalsReviewer = approvalsReviewer
         self.sandbox = sandbox
-        self.permissionProfile = permissionProfile
         self.activePermissionProfile = activePermissionProfile
         self.reasoningEffort = reasoningEffort
     }
@@ -2560,7 +2544,6 @@ public struct ThreadForkResponse: Equatable, Codable, Sendable {
         approvalPolicy = try container.decode(AskForApproval.self, forKey: .approvalPolicy)
         approvalsReviewer = try container.decode(ApprovalsReviewer.self, forKey: .approvalsReviewer)
         sandbox = try container.decode(AppServerSandboxPolicy.self, forKey: .sandbox).coreValue
-        permissionProfile = try container.decodeIfPresent(AppServerPermissionProfile.self, forKey: .permissionProfile)
         activePermissionProfile = try container.decodeIfPresent(
             AppServerActivePermissionProfile.self,
             forKey: .activePermissionProfile
@@ -2579,7 +2562,6 @@ public struct ThreadForkResponse: Equatable, Codable, Sendable {
         try container.encode(approvalPolicy, forKey: .approvalPolicy)
         try container.encode(approvalsReviewer, forKey: .approvalsReviewer)
         try container.encode(AppServerSandboxPolicy(core: sandbox), forKey: .sandbox)
-        try container.encodeNilOrValue(permissionProfile, forKey: .permissionProfile)
         try container.encodeNilOrValue(activePermissionProfile, forKey: .activePermissionProfile)
         try container.encodeNilOrValue(reasoningEffort, forKey: .reasoningEffort)
     }

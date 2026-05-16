@@ -1940,10 +1940,6 @@ final class AppServerThreadProtocolTests: XCTestCase {
             turns: []
         )
 
-        let permissionProfile = AppServerPermissionProfile.managed(
-            network: AppServerPermissionProfileNetworkPermissions(enabled: true),
-            fileSystem: .unrestricted
-        )
         let activePermissionProfile = AppServerActivePermissionProfile(id: ":workspace")
         let expectedThread = expectedRuntimeThreadJSON()
 
@@ -1957,7 +1953,6 @@ final class AppServerThreadProtocolTests: XCTestCase {
                 approvalPolicy: .never,
                 approvalsReviewer: .autoReview,
                 sandbox: .newWorkspaceWritePolicy(),
-                permissionProfile: nil,
                 activePermissionProfile: nil,
                 reasoningEffort: nil
             ),
@@ -1977,7 +1972,6 @@ final class AppServerThreadProtocolTests: XCTestCase {
                     "excludeTmpdirEnvVar": false,
                     "excludeSlashTmp": false
                 ],
-                "permissionProfile": NSNull(),
                 "activePermissionProfile": NSNull(),
                 "reasoningEffort": NSNull()
             ]
@@ -1996,19 +1990,9 @@ final class AppServerThreadProtocolTests: XCTestCase {
                 "type": "readOnly",
                 "networkAccess": false
             ],
-            "permissionProfile": [
-                "type": "managed",
-                "network": [
-                    "enabled": true
-                ],
-                "fileSystem": [
-                    "type": "unrestricted"
-                ]
-            ],
             "activePermissionProfile": [
                 "id": ":workspace",
-                "extends": NSNull(),
-                "modifications": []
+                "extends": NSNull()
             ],
             "reasoningEffort": "high"
         ]
@@ -2024,7 +2008,6 @@ final class AppServerThreadProtocolTests: XCTestCase {
                 approvalPolicy: .onRequest,
                 approvalsReviewer: .user,
                 sandbox: .readOnly,
-                permissionProfile: permissionProfile,
                 activePermissionProfile: activePermissionProfile,
                 reasoningEffort: .high
             ),
@@ -2042,7 +2025,6 @@ final class AppServerThreadProtocolTests: XCTestCase {
                 approvalPolicy: .onRequest,
                 approvalsReviewer: .user,
                 sandbox: .readOnly,
-                permissionProfile: permissionProfile,
                 activePermissionProfile: activePermissionProfile,
                 reasoningEffort: .high
             ),
@@ -2068,19 +2050,16 @@ final class AppServerThreadProtocolTests: XCTestCase {
 
         let start = try JSONDecoder().decode(ThreadStartResponse.self, from: data)
         XCTAssertEqual(start.instructionSources, [])
-        XCTAssertNil(start.permissionProfile)
         XCTAssertNil(start.activePermissionProfile)
         XCTAssertNil(start.reasoningEffort)
 
         let resume = try JSONDecoder().decode(ThreadResumeResponse.self, from: data)
         XCTAssertEqual(resume.instructionSources, [])
-        XCTAssertNil(resume.permissionProfile)
         XCTAssertNil(resume.activePermissionProfile)
         XCTAssertNil(resume.reasoningEffort)
 
         let fork = try JSONDecoder().decode(ThreadForkResponse.self, from: data)
         XCTAssertEqual(fork.instructionSources, [])
-        XCTAssertNil(fork.permissionProfile)
         XCTAssertNil(fork.activePermissionProfile)
         XCTAssertNil(fork.reasoningEffort)
     }
@@ -2102,7 +2081,6 @@ final class AppServerThreadProtocolTests: XCTestCase {
                 "excludeTmpdirEnvVar": false,
                 "excludeSlashTmp": false
             ],
-            "permissionProfile": NSNull(),
             "activePermissionProfile": NSNull(),
             "reasoningEffort": NSNull()
         ]
@@ -2128,7 +2106,6 @@ final class AppServerThreadProtocolTests: XCTestCase {
             "sandbox": [
                 "type": "readOnly"
             ],
-            "permissionProfile": NSNull(),
             "activePermissionProfile": NSNull(),
             "reasoningEffort": NSNull()
         ]

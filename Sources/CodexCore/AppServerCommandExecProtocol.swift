@@ -203,7 +203,7 @@ public struct CommandExecParams: Equatable, Sendable {
     public let env: [String: String?]?
     public let size: CommandExecTerminalSize?
     public let sandboxPolicy: AppServerCommandExecSandboxPolicy?
-    public let permissionProfile: AppServerPermissionProfile?
+    public let permissionProfile: AppServerActivePermissionProfile?
 
     public init(
         command: [String],
@@ -219,7 +219,7 @@ public struct CommandExecParams: Equatable, Sendable {
         env: [String: String?]? = nil,
         size: CommandExecTerminalSize? = nil,
         sandboxPolicy: AppServerCommandExecSandboxPolicy? = nil,
-        permissionProfile: AppServerPermissionProfile? = nil
+        permissionProfile: AppServerActivePermissionProfile? = nil
     ) {
         self.command = command
         self.processID = processID
@@ -284,7 +284,10 @@ extension CommandExecParams: Codable {
             env: try container.decodeIfPresent([String: String?].self, forKey: .env),
             size: try container.decodeIfPresent(CommandExecTerminalSize.self, forKey: .size),
             sandboxPolicy: try container.decodeIfPresent(AppServerCommandExecSandboxPolicy.self, forKey: .sandboxPolicy),
-            permissionProfile: try container.decodeIfPresent(AppServerPermissionProfile.self, forKey: .permissionProfile)
+            permissionProfile: try container.decodeIfPresent(
+                AppServerActivePermissionProfile.self,
+                forKey: .permissionProfile
+            )
         )
     }
 
