@@ -21,8 +21,10 @@ Recent upstream audit checkpoint:
   server before falling back to `$CODEX_HOME/config.toml`; when the caller
   supplies enabled plugin MCP sources, Swift also writes Rust-shaped plugin
   overrides under `[plugins."<id>".mcp_servers.<server>.tools.<tool>]`.
-  Discovering those plugin MCP sources from the live plugin manager remains
-  pending broader runtime wiring.
+  Swift now also discovers those plugin MCP sources from configured enabled
+  local or remote installed plugin cache entries when a config layer stack is
+  available, including manifest-directed and default `.mcp.json` plugin MCP
+  definitions.
 - 2026-05-16: rechecked Rust MCP tool approval prompt helpers in
   `codex-rs/core/src/mcp_tool_call.rs`. Swift now recognizes MCP approval
   question ids with Rust's prefix/underscore boundary, derives session and

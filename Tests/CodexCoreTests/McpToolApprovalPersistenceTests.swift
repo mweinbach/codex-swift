@@ -221,6 +221,149 @@ final class McpToolApprovalPersistenceTests: XCTestCase {
         XCTAssertTrue(contents.contains("approval_mode = \"approve\""))
     }
 
+    func testConfiguredPluginMcpToolApprovalSourcesDiscoverInstalledPluginServersLikeRust() throws {
+        let temp = try TemporaryCodexHome()
+        try """
+        [features]
+        plugins = true
+        remote_plugin = true
+
+        [plugins."sample@test"]
+        enabled = true
+
+        [plugins."disabled@test"]
+        enabled = false
+        """.write(to: temp.configFile, atomically: true, encoding: .utf8)
+        try writePluginMcpConfig(
+            codexHome: temp.url,
+            pluginID: "sample@test",
+            version: "1.0.0",
+            contents: """
+            {
+              "mcpServers": {
+                "weather": {
+                  "command": "weather-mcp"
+                }
+              }
+            }
+            """
+        )
+        try writePluginMcpConfig(
+            codexHome: temp.url,
+            pluginID: "disabled@test",
+            version: "1.0.0",
+            contents: """
+            {
+              "mcpServers": {
+                "ignored": {
+                  "command": "ignored-mcp"
+                }
+              }
+            }
+            """
+        )
+        let remotePluginRoot = try pluginCacheRoot(codexHome: temp.url, pluginID: "remote@market", version: "2.0.0")
+        let manifestDirectory = remotePluginRoot.appendingPathComponent(".codex-plugin", isDirectory: true)
+        let mcpDirectory = remotePluginRoot.appendingPathComponent("config", isDirectory: true)
+        try FileManager.default.createDirectory(at: manifestDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: mcpDirectory, withIntermediateDirectories: true)
+        try #"{"name":"remote","mcpServers":"./config/mcp.json"}"#.write(
+            to: manifestDirectory.appendingPathComponent("plugin.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        {
+          "radar": {
+            "command": "radar-mcp"
+          }
+        }
+        """.write(
+            to: mcpDirectory.appendingPathComponent("mcp.json", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let stack = try userConfigLayerStack(codexHome: temp.url, config: .table([
+            "features": .table([
+                "plugins": .bool(true),
+                "remote_plugin": .bool(true),
+            ]),
+            "plugins": .table([
+                "sample@test": .table(["enabled": .bool(true)]),
+                "disabled@test": .table(["enabled": .bool(false)]),
+            ]),
+        ]))
+
+        XCTAssertEqual(
+            McpToolApprovalPersistence.configuredPluginMcpToolApprovalSources(
+                codexHome: temp.url,
+                configLayerStack: stack,
+                remoteInstalledPlugins: [
+                    RemoteInstalledPluginReference(
+                        marketplaceName: "market",
+                        pluginName: "remote",
+                        enabled: true
+                    ),
+                ]
+            ),
+            [
+                PluginMcpToolApprovalSource(
+                    pluginConfigName: "remote@market",
+                    mcpServers: ["radar"]
+                ),
+                PluginMcpToolApprovalSource(
+                    pluginConfigName: "sample@test",
+                    mcpServers: ["weather"]
+                ),
+            ]
+        )
+    }
+
+    func testPersistCustomMcpToolApprovalDiscoversConfiguredPluginServerLikeRust() throws {
+        let temp = try TemporaryCodexHome()
+        try """
+        model = "gpt-5"
+
+        [features]
+        plugins = true
+
+        [plugins."sample@test"]
+        enabled = true
+        """.write(to: temp.configFile, atomically: true, encoding: .utf8)
+        try writePluginMcpConfig(
+            codexHome: temp.url,
+            pluginID: "sample@test",
+            version: "1.0.0",
+            contents: """
+            {
+              "mcpServers": {
+                "weather": {
+                  "command": "weather-mcp"
+                }
+              }
+            }
+            """
+        )
+        let stack = try userConfigLayerStack(codexHome: temp.url, config: .table([
+            "features": .table(["plugins": .bool(true)]),
+            "plugins": .table([
+                "sample@test": .table(["enabled": .bool(true)]),
+            ]),
+        ]))
+
+        try McpToolApprovalPersistence.persistCustomMcpToolApproval(
+            codexHome: temp.url,
+            serverName: "weather",
+            toolName: "forecast/search",
+            configLayerStack: stack
+        )
+
+        let contents = try String(contentsOf: temp.configFile, encoding: .utf8)
+        XCTAssertTrue(contents.contains("model = \"gpt-5\""))
+        XCTAssertTrue(contents.contains("[plugins.\"sample@test\".mcp_servers.weather.tools.\"forecast/search\"]"))
+        XCTAssertTrue(contents.contains("approval_mode = \"approve\""))
+    }
+
     func testPersistCustomMcpToolApprovalPrefersConfiguredServerOverPluginLikeRust() throws {
         let temp = try TemporaryCodexHome()
         try """
@@ -326,4 +469,42 @@ private final class TemporaryCodexHome {
     deinit {
         try? FileManager.default.removeItem(at: url)
     }
+}
+
+private func userConfigLayerStack(codexHome: URL, config: ConfigValue) throws -> ConfigLayerStack {
+    try ConfigLayerStack(layers: [
+        ConfigLayerEntry(
+            name: .user(file: try AbsolutePath(
+                absolutePath: codexHome.appendingPathComponent("config.toml", isDirectory: false).path
+            )),
+            config: config
+        ),
+    ])
+}
+
+private func writePluginMcpConfig(
+    codexHome: URL,
+    pluginID: String,
+    version: String,
+    contents: String
+) throws {
+    let pluginRoot = try pluginCacheRoot(codexHome: codexHome, pluginID: pluginID, version: version)
+    try FileManager.default.createDirectory(at: pluginRoot, withIntermediateDirectories: true)
+    try contents.write(
+        to: pluginRoot.appendingPathComponent(".mcp.json", isDirectory: false),
+        atomically: true,
+        encoding: .utf8
+    )
+}
+
+private func pluginCacheRoot(codexHome: URL, pluginID: String, version: String) throws -> URL {
+    let parts = pluginID.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+    guard parts.count == 2 else {
+        throw NSError(domain: "McpToolApprovalPersistenceTests", code: 1)
+    }
+    return codexHome
+        .appendingPathComponent("plugins/cache", isDirectory: true)
+        .appendingPathComponent(parts[1], isDirectory: true)
+        .appendingPathComponent(parts[0], isDirectory: true)
+        .appendingPathComponent(version, isDirectory: true)
 }
