@@ -1039,7 +1039,7 @@ final class DoctorCommandRuntimeTests: XCTestCase {
             "provider name: gpt-oss",
             "wire API: responses",
             "supports websockets: false",
-            "proxy env vars: HTTPS_PROXY"
+            "proxy env vars present: HTTPS_PROXY"
         ])
         XCTAssertNil(check.remediation)
     }
@@ -1085,6 +1085,57 @@ final class DoctorCommandRuntimeTests: XCTestCase {
             "immediate close code: 1008",
             "immediate close reason: policy violation"
         ])
+        XCTAssertEqual(
+            check.remediation,
+            "Check proxy, VPN, firewall, DNS, custom CA, and WebSocket policy support."
+        )
+    }
+
+    func testWebsocketReachabilityCheckUsesRustFailureDetailLabels() {
+        let failed = DoctorCommandRuntime.websocketReachabilityCheck(inputs: DoctorWebsocketReachabilityInputs(
+            providerID: "openai",
+            providerName: "OpenAI",
+            wireAPI: .responses,
+            supportsWebsockets: true,
+            connectTimeoutMilliseconds: 15_000,
+            authModeDescription: "api_key",
+            endpoint: "wss://api.openai.com/v1/responses",
+            outcome: .transportError("connection reset")
+        ))
+
+        XCTAssertEqual(failed.status, .warning)
+        XCTAssertEqual(failed.summary, "Responses WebSocket failed; HTTPS fallback may still work")
+        XCTAssertEqual(failed.details.last, "handshake transport error: connection reset")
+
+        let timedOut = DoctorCommandRuntime.websocketReachabilityCheck(inputs: DoctorWebsocketReachabilityInputs(
+            providerID: "openai",
+            providerName: "OpenAI",
+            wireAPI: .responses,
+            supportsWebsockets: true,
+            connectTimeoutMilliseconds: 15_000,
+            authModeDescription: "api_key",
+            endpoint: "wss://api.openai.com/v1/responses",
+            outcome: .timedOut
+        ))
+
+        XCTAssertEqual(timedOut.summary, "Responses WebSocket timed out; HTTPS fallback may still work")
+        XCTAssertEqual(timedOut.details.last, "handshake timed out")
+    }
+
+    func testWebsocketReachabilityCheckReportsEndpointBuildFailureLikeRustDoctor() {
+        let check = DoctorCommandRuntime.websocketReachabilityCheck(inputs: DoctorWebsocketReachabilityInputs(
+            providerID: "custom",
+            providerName: "Custom",
+            wireAPI: .responses,
+            supportsWebsockets: true,
+            connectTimeoutMilliseconds: 15_000,
+            authModeDescription: "none",
+            endpoint: nil
+        ))
+
+        XCTAssertEqual(check.status, .warning)
+        XCTAssertEqual(check.summary, "Responses WebSocket endpoint could not be built")
+        XCTAssertEqual(check.details.last, "endpoint build failed: invalid URL")
         XCTAssertEqual(
             check.remediation,
             "Check proxy, VPN, firewall, DNS, custom CA, and WebSocket policy support."

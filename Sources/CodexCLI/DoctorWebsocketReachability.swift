@@ -24,6 +24,9 @@ public enum DoctorWebsocketProbeOutcome: Equatable, Sendable {
     case notAttempted(String)
     case handshakeSucceeded(DoctorWebsocketHandshakeResult)
     case closedImmediately(DoctorWebsocketHandshakeResult, code: UInt16, reason: String)
+    case transportError(String)
+    case apiError(status: Int, message: String)
+    case streamError(String)
     case failed(String)
     case timedOut
 }
@@ -125,6 +128,7 @@ extension DoctorCommandRuntime {
             details.append("auth mode: \(authModeDescription)")
         }
         guard let endpoint = inputs.endpoint else {
+            details.append("endpoint build failed: invalid URL")
             return DoctorCheck(
                 id: "network.websocket_reachability",
                 category: "websocket",
@@ -171,8 +175,38 @@ extension DoctorCommandRuntime {
                 details: details,
                 remediation: websocketReachabilityRemediation
             )
+        case let .transportError(message):
+            details.append("handshake transport error: \(message)")
+            return DoctorCheck(
+                id: "network.websocket_reachability",
+                category: "websocket",
+                status: .warning,
+                summary: "Responses WebSocket failed; HTTPS fallback may still work",
+                details: details,
+                remediation: websocketReachabilityRemediation
+            )
+        case let .apiError(status, message):
+            details.append("handshake API error: \(status) \(message)")
+            return DoctorCheck(
+                id: "network.websocket_reachability",
+                category: "websocket",
+                status: .warning,
+                summary: "Responses WebSocket failed; HTTPS fallback may still work",
+                details: details,
+                remediation: websocketReachabilityRemediation
+            )
+        case let .streamError(message):
+            details.append("handshake stream error: \(message)")
+            return DoctorCheck(
+                id: "network.websocket_reachability",
+                category: "websocket",
+                status: .warning,
+                summary: "Responses WebSocket failed; HTTPS fallback may still work",
+                details: details,
+                remediation: websocketReachabilityRemediation
+            )
         case .timedOut:
-            details.append("handshake error: request timed out")
+            details.append("handshake timed out")
             return DoctorCheck(
                 id: "network.websocket_reachability",
                 category: "websocket",
@@ -182,7 +216,7 @@ extension DoctorCommandRuntime {
                 remediation: websocketReachabilityRemediation
             )
         case let .notAttempted(reason):
-            details.append("handshake probe: \(reason)")
+            details.append("handshake stream error: \(reason)")
             return DoctorCheck(
                 id: "network.websocket_reachability",
                 category: "websocket",
@@ -192,7 +226,7 @@ extension DoctorCommandRuntime {
                 remediation: websocketReachabilityRemediation
             )
         case .none:
-            details.append("handshake probe: not attempted")
+            details.append("handshake stream error: not attempted")
             return DoctorCheck(
                 id: "network.websocket_reachability",
                 category: "websocket",
@@ -282,7 +316,10 @@ extension DoctorCommandRuntime {
             }
             return name
         }
-        return ["proxy env vars: \(websocketDisplayList(present))"]
+        if present.isEmpty {
+            return ["proxy env vars: none"]
+        }
+        return ["proxy env vars present: \(present.joined(separator: ", "))"]
     }
 
     private static func websocketHandshakeDetails(_ result: DoctorWebsocketHandshakeResult) -> [String] {
@@ -302,7 +339,4 @@ extension DoctorCommandRuntime {
         value ? "true" : "false"
     }
 
-    private static func websocketDisplayList(_ items: [String]) -> String {
-        items.isEmpty ? "none" : items.joined(separator: ", ")
-    }
 }
