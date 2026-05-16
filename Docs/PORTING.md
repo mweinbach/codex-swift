@@ -135,9 +135,10 @@ Recent upstream audit checkpoint:
   the first Rust-shaped diagnostic report slice for installation/package-manager
   provenance, config loading, runtime provenance, search-command readiness,
   network environment readability, terminal environment metadata/issues, and
-  sandbox helper/config readability, emits the redacted `--json`
-  support-report map keyed by check id, renders compact grouped human summary
-  output, and exits nonzero when config loading fails. Full diagnostic report
+  auth credential/provider checks, and sandbox helper/config readability, emits
+  the redacted `--json` support-report map keyed by check id, renders compact
+  grouped human summary output, and exits nonzero when config loading fails.
+  Full diagnostic report
   generation beyond those local checks remains a broader `codex doctor`
   runtime gap.
 - 2026-05-16: rechecked Rust commit `a5e5faf216` (`Reject legacy [profiles]

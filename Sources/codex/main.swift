@@ -258,9 +258,13 @@ private func runDoctorCommand(_ request: CodexCLI.DoctorCommandRequest) async th
 
 private func doctorConfigDependentChecks(_ request: CodexCLI.DoctorCommandRequest) -> [DoctorCheck] {
     do {
-        let (_, settings) = try resolvedAuthSettings(overrides: request.configOverrides)
+        let (codexHome, settings) = try resolvedAuthSettings(overrides: request.configOverrides)
         let cwd = FileManager.default.currentDirectoryPath
         return [
+            DoctorCommandRuntime.authCredentialsCheck(
+                codexHome: codexHome,
+                settings: settings
+            ),
             DoctorCommandRuntime.sandboxHelpersCheck(
                 approvalPolicy: settings.approvalPolicy,
                 sandboxPolicy: settings.legacySandboxPolicy(),

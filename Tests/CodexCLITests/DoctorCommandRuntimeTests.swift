@@ -72,6 +72,20 @@ final class DoctorCommandRuntimeTests: XCTestCase {
                             terminalSize: .available(DoctorTerminalSize(columns: 120, rows: 40))
                         )
                     ),
+                    DoctorCommandRuntime.authCredentialsCheck(inputs: DoctorAuthCheckInputs(
+                        codexHomePath: "/tmp/codex",
+                        authStorageMode: .file,
+                        environment: [:],
+                        providerRequiresOpenAIAuth: true,
+                        providerEnvKey: nil,
+                        providerEnvKeyInstructions: nil,
+                        storedAuth: .loaded(AuthDotJSON(
+                            authMode: .apiKey,
+                            openAIAPIKey: "sk-test",
+                            tokens: nil,
+                            lastRefresh: nil
+                        ))
+                    )),
                     DoctorCommandRuntime.sandboxHelpersCheck(
                         approvalPolicy: .onRequest,
                         sandboxPolicy: .newWorkspaceWritePolicy(),
@@ -148,6 +162,16 @@ final class DoctorCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(terminalDetails["terminal version"] as? String, "3.5")
         XCTAssertEqual(terminalDetails["terminal size"] as? String, "120x40")
         XCTAssertEqual(terminalDetails["color output"] as? String, "enabled")
+
+        let auth = try XCTUnwrap(checks["auth.credentials"] as? [String: Any])
+        XCTAssertEqual(auth["category"] as? String, "auth")
+        XCTAssertEqual(auth["status"] as? String, "ok")
+        XCTAssertEqual(auth["summary"] as? String, "auth is configured")
+        let authDetails = try XCTUnwrap(auth["details"] as? [String: Any])
+        XCTAssertEqual(authDetails["auth storage mode"] as? String, "File")
+        XCTAssertEqual(authDetails["auth file"] as? String, "/tmp/codex/auth.json")
+        XCTAssertEqual(authDetails["stored auth mode"] as? String, "api_key")
+        XCTAssertEqual(authDetails["stored API key"] as? String, "true")
 
         let sandbox = try XCTUnwrap(checks["sandbox.helpers"] as? [String: Any])
         XCTAssertEqual(sandbox["category"] as? String, "sandbox")
@@ -257,6 +281,146 @@ final class DoctorCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(
             check.remediation,
             "Fix PATH or npm prefix so the running package root (/opt/codex/lib/node_modules/@openai/codex) matches the npm global package root (/usr/local/lib/node_modules/@openai/codex)."
+        )
+    }
+
+    func testAuthCredentialsCheckFailsWhenOpenAIAuthIsMissingLikeRustDoctor() {
+        let check = DoctorCommandRuntime.authCredentialsCheck(inputs: DoctorAuthCheckInputs(
+            codexHomePath: "/tmp/codex",
+            authStorageMode: .file,
+            environment: [:],
+            providerRequiresOpenAIAuth: true,
+            providerEnvKey: nil,
+            providerEnvKeyInstructions: nil,
+            storedAuth: .loaded(nil)
+        ))
+
+        XCTAssertEqual(check.id, "auth.credentials")
+        XCTAssertEqual(check.category, "auth")
+        XCTAssertEqual(check.status, .fail)
+        XCTAssertEqual(check.summary, "no Codex credentials were found")
+        XCTAssertEqual(check.details, [
+            "auth storage mode: File",
+            "auth file: /tmp/codex/auth.json"
+        ])
+        XCTAssertEqual(
+            check.remediation,
+            "Run codex login or provide an API key through a supported auth env var."
+        )
+    }
+
+    func testAuthCredentialsCheckAllowsProviderEnvAuthLikeRustDoctor() {
+        let check = DoctorCommandRuntime.authCredentialsCheck(inputs: DoctorAuthCheckInputs(
+            codexHomePath: "/tmp/codex",
+            authStorageMode: .auto,
+            environment: ["PROVIDER_API_KEY": "present"],
+            providerRequiresOpenAIAuth: false,
+            providerEnvKey: "PROVIDER_API_KEY",
+            providerEnvKeyInstructions: nil,
+            storedAuth: .loaded(nil)
+        ))
+
+        XCTAssertEqual(check.status, .ok)
+        XCTAssertEqual(check.summary, "auth is provided by the active model provider")
+        XCTAssertEqual(check.details, [
+            "auth storage mode: Auto",
+            "auth file: /tmp/codex/auth.json",
+            "model provider requires OpenAI auth: false",
+            "provider auth env var: PROVIDER_API_KEY (present)"
+        ])
+    }
+
+    func testAuthCredentialsCheckFailsMissingProviderEnvAuthLikeRustDoctor() {
+        let check = DoctorCommandRuntime.authCredentialsCheck(inputs: DoctorAuthCheckInputs(
+            codexHomePath: "/tmp/codex",
+            authStorageMode: .auto,
+            environment: [:],
+            providerRequiresOpenAIAuth: false,
+            providerEnvKey: "PROVIDER_API_KEY",
+            providerEnvKeyInstructions: "Set PROVIDER_API_KEY before running Codex.",
+            storedAuth: .loaded(AuthDotJSON(
+                authMode: .apiKey,
+                openAIAPIKey: "sk-test",
+                tokens: nil,
+                lastRefresh: nil
+            ))
+        ))
+
+        XCTAssertEqual(check.status, .fail)
+        XCTAssertEqual(check.summary, "active model provider auth env var is missing")
+        XCTAssertEqual(check.details, [
+            "auth storage mode: Auto",
+            "auth file: /tmp/codex/auth.json",
+            "model provider requires OpenAI auth: false",
+            "provider auth env var: PROVIDER_API_KEY (missing)"
+        ])
+        XCTAssertEqual(check.remediation, "Set PROVIDER_API_KEY before running Codex.")
+    }
+
+    func testAuthCredentialsCheckWarnsForIncompleteStoredAuthWhenEnvironmentPresentLikeRustDoctor() {
+        let check = DoctorCommandRuntime.authCredentialsCheck(inputs: DoctorAuthCheckInputs(
+            codexHomePath: "/tmp/codex",
+            authStorageMode: .file,
+            environment: [CodexAuthStorage.codexAccessTokenEnvironmentVariable: "access"],
+            providerRequiresOpenAIAuth: true,
+            providerEnvKey: nil,
+            providerEnvKeyInstructions: nil,
+            storedAuth: .loaded(AuthDotJSON(
+                authMode: .chatGPT,
+                openAIAPIKey: nil,
+                tokens: nil,
+                lastRefresh: nil
+            ))
+        ))
+
+        XCTAssertEqual(check.status, .warning)
+        XCTAssertEqual(
+            check.summary,
+            "auth is provided by environment, but stored credentials are incomplete"
+        )
+        XCTAssertEqual(check.details, [
+            "auth storage mode: File",
+            "auth file: /tmp/codex/auth.json",
+            "auth env vars present: CODEX_ACCESS_TOKEN",
+            "stored auth mode: chatgpt",
+            "stored API key: false",
+            "stored ChatGPT tokens: false",
+            "stored agent identity: false",
+            "stored auth issue: ChatGPT auth is missing token data",
+            "stored auth issue: ChatGPT auth is missing refresh metadata"
+        ])
+    }
+
+    func testAuthCredentialsCheckFailsForIncompleteStoredAPIKeyLikeRustDoctor() {
+        let check = DoctorCommandRuntime.authCredentialsCheck(inputs: DoctorAuthCheckInputs(
+            codexHomePath: "/tmp/codex",
+            authStorageMode: .file,
+            environment: [:],
+            providerRequiresOpenAIAuth: true,
+            providerEnvKey: nil,
+            providerEnvKeyInstructions: nil,
+            storedAuth: .loaded(AuthDotJSON(
+                authMode: .apiKey,
+                openAIAPIKey: "   ",
+                tokens: nil,
+                lastRefresh: nil
+            ))
+        ))
+
+        XCTAssertEqual(check.status, .fail)
+        XCTAssertEqual(check.summary, "stored credentials are incomplete")
+        XCTAssertEqual(check.details, [
+            "auth storage mode: File",
+            "auth file: /tmp/codex/auth.json",
+            "stored auth mode: api_key",
+            "stored API key: true",
+            "stored ChatGPT tokens: false",
+            "stored agent identity: false",
+            "stored auth issue: API key auth is missing an API key"
+        ])
+        XCTAssertEqual(
+            check.remediation,
+            "Run codex login again or provide a supported auth env var."
         )
     }
 
