@@ -16,8 +16,10 @@ Recent upstream audit checkpoint:
   `codex-rs/core/src/mcp_tool_call.rs`. Swift now persists remembered MCP tool
   approvals as Rust-shaped `approval_mode = "approve"` overrides for
   `codex_apps` connector tools and configured custom MCP servers, including
-  quoted tool-name TOML table paths. Plugin-backed and project-local MCP
-  approval persistence remain pending broader config-layer wiring.
+  quoted tool-name TOML table paths. Custom-server persistence now also prefers
+  the highest-precedence project `.codex/config.toml` layer that defines the
+  server before falling back to `$CODEX_HOME/config.toml`; plugin-backed MCP
+  approval persistence remains pending broader plugin-manager wiring.
 - 2026-05-16: rechecked Rust MCP tool approval prompt helpers in
   `codex-rs/core/src/mcp_tool_call.rs`. Swift now recognizes MCP approval
   question ids with Rust's prefix/underscore boundary, derives session and

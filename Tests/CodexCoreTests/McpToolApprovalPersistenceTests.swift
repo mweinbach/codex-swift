@@ -65,6 +65,119 @@ final class McpToolApprovalPersistenceTests: XCTestCase {
         XCTAssertEqual(loaded["docs"]?.tools["search"]?.approvalMode, .approve)
     }
 
+    func testPersistCustomMcpToolApprovalPrefersProjectLayerLikeRust() throws {
+        let temp = try TemporaryCodexHome()
+        let project = temp.url.appendingPathComponent("project/.codex", isDirectory: true)
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        try """
+        model = "gpt-5"
+
+        [mcp_servers.docs]
+        command = "project-docs"
+        """.write(to: project.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        try """
+        [mcp_servers.docs]
+        command = "global-docs"
+        """.write(to: temp.configFile, atomically: true, encoding: .utf8)
+
+        let stack = try ConfigLayerStack(layers: [
+            ConfigLayerEntry(
+                name: .user(file: try AbsolutePath(absolutePath: temp.configFile.path)),
+                config: .table([
+                    "mcp_servers": .table([
+                        "docs": .table([
+                            "command": .string("global-docs"),
+                        ]),
+                    ]),
+                ])
+            ),
+            ConfigLayerEntry(
+                name: .project(dotCodexFolder: try AbsolutePath(absolutePath: project.path)),
+                config: .table([
+                    "mcp_servers": .table([
+                        "docs": .table([
+                            "command": .string("project-docs"),
+                        ]),
+                    ]),
+                ])
+            ),
+        ])
+
+        try McpToolApprovalPersistence.persistCustomMcpToolApproval(
+            codexHome: temp.url,
+            serverName: "docs",
+            toolName: "search",
+            configLayerStack: stack
+        )
+
+        let projectContents = try String(
+            contentsOf: project.appendingPathComponent("config.toml"),
+            encoding: .utf8
+        )
+        let globalContents = try String(contentsOf: temp.configFile, encoding: .utf8)
+        XCTAssertTrue(projectContents.contains("model = \"gpt-5\""))
+        XCTAssertTrue(projectContents.contains("[mcp_servers.docs.tools.search]"))
+        XCTAssertTrue(projectContents.contains("approval_mode = \"approve\""))
+        XCTAssertFalse(globalContents.contains("approval_mode = \"approve\""))
+    }
+
+    func testPersistCustomMcpToolApprovalUsesHighestPrecedenceProjectLayerLikeRust() throws {
+        let temp = try TemporaryCodexHome()
+        let rootProject = temp.url.appendingPathComponent("repo/.codex", isDirectory: true)
+        let childProject = temp.url.appendingPathComponent("repo/child/.codex", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootProject, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: childProject, withIntermediateDirectories: true)
+        try """
+        [mcp_servers.docs]
+        command = "root-docs"
+        """.write(to: rootProject.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        try """
+        [mcp_servers.docs]
+        command = "child-docs"
+        """.write(to: childProject.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let stack = try ConfigLayerStack(layers: [
+            ConfigLayerEntry(
+                name: .project(dotCodexFolder: try AbsolutePath(absolutePath: rootProject.path)),
+                config: .table([
+                    "mcp_servers": .table([
+                        "docs": .table([
+                            "command": .string("root-docs"),
+                        ]),
+                    ]),
+                ])
+            ),
+            ConfigLayerEntry(
+                name: .project(dotCodexFolder: try AbsolutePath(absolutePath: childProject.path)),
+                config: .table([
+                    "mcp_servers": .table([
+                        "docs": .table([
+                            "command": .string("child-docs"),
+                        ]),
+                    ]),
+                ])
+            ),
+        ])
+
+        try McpToolApprovalPersistence.persistCustomMcpToolApproval(
+            codexHome: temp.url,
+            serverName: "docs",
+            toolName: "search",
+            configLayerStack: stack
+        )
+
+        let childContents = try String(
+            contentsOf: childProject.appendingPathComponent("config.toml"),
+            encoding: .utf8
+        )
+        let rootContents = try String(
+            contentsOf: rootProject.appendingPathComponent("config.toml"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(childContents.contains("[mcp_servers.docs.tools.search]"))
+        XCTAssertFalse(rootContents.contains("approval_mode = \"approve\""))
+    }
+
     func testPersistCustomMcpToolApprovalRejectsUnknownServerLikeRust() throws {
         let temp = try TemporaryCodexHome()
 

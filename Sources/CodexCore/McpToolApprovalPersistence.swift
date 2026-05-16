@@ -18,6 +18,7 @@ public enum McpToolApprovalPersistence {
     public static func persistMcpToolApproval(
         codexHome: URL,
         key: McpToolApprovalKey,
+        configLayerStack: ConfigLayerStack? = nil,
         fileManager: FileManager = .default
     ) throws {
         if key.server == codexAppsMCPServerName {
@@ -37,6 +38,7 @@ public enum McpToolApprovalPersistence {
             codexHome: codexHome,
             serverName: key.server,
             toolName: key.toolName,
+            configLayerStack: configLayerStack,
             fileManager: fileManager
         )
     }
@@ -72,10 +74,38 @@ public enum McpToolApprovalPersistence {
         codexHome: URL,
         serverName: String,
         toolName: String,
+        configLayerStack: ConfigLayerStack? = nil,
         fileManager: FileManager = .default
     ) throws {
+        if let projectConfigFolder = projectMcpToolApprovalConfigFolder(
+            serverName: serverName,
+            configLayerStack: configLayerStack
+        ) {
+            try persistCustomMcpToolApprovalAt(
+                configFolder: projectConfigFolder,
+                serverName: serverName,
+                toolName: toolName,
+                fileManager: fileManager
+            )
+            return
+        }
+
+        try persistCustomMcpToolApprovalAt(
+            configFolder: codexHome,
+            serverName: serverName,
+            toolName: toolName,
+            fileManager: fileManager
+        )
+    }
+
+    private static func persistCustomMcpToolApprovalAt(
+        configFolder: URL,
+        serverName: String,
+        toolName: String,
+        fileManager: FileManager
+    ) throws {
         var servers = try McpConfigStore.loadGlobalMcpServers(
-            codexHome: codexHome,
+            codexHome: configFolder,
             fileManager: fileManager
         )
         guard var server = servers[serverName] else {
@@ -85,10 +115,32 @@ public enum McpToolApprovalPersistence {
         server.tools[toolName] = McpServerToolConfig(approvalMode: .approve)
         servers[serverName] = server
         try McpConfigStore.replaceGlobalMcpServers(
-            codexHome: codexHome,
+            codexHome: configFolder,
             servers: servers,
             fileManager: fileManager
         )
+    }
+
+    private static func projectMcpToolApprovalConfigFolder(
+        serverName: String,
+        configLayerStack: ConfigLayerStack?
+    ) -> URL? {
+        guard let configLayerStack else {
+            return nil
+        }
+
+        for layer in configLayerStack.layersHighToLow() {
+            guard case .project = layer.name,
+                  let configFolder = layer.configFolder(),
+                  case let .table(table) = layer.config,
+                  let mcpServersValue = table["mcp_servers"],
+                  let servers = try? McpConfigStore.parseMcpServers(from: mcpServersValue),
+                  servers[serverName] != nil else {
+                continue
+            }
+            return URL(fileURLWithPath: configFolder.path, isDirectory: true)
+        }
+        return nil
     }
 
     private static func setTomlAssignment(
