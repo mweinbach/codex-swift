@@ -4,9 +4,10 @@ import XCTest
 final class SandboxTagsTests: XCTestCase {
     func testDangerFullAccessIsUntaggedLikeRust() {
         XCTAssertEqual(
-            SandboxTags.sandboxTag(
-                sandboxPolicy: .dangerFullAccess,
-                windowsSandboxLevel: .disabled
+            SandboxTags.permissionProfileSandboxTag(
+                profile: .disabled,
+                windowsSandboxLevel: .disabled,
+                enforceManagedNetwork: false
             ),
             "none"
         )
@@ -14,9 +15,10 @@ final class SandboxTagsTests: XCTestCase {
 
     func testExternalSandboxKeepsExternalTagLikeRust() {
         XCTAssertEqual(
-            SandboxTags.sandboxTag(
-                sandboxPolicy: .externalSandbox(networkAccess: .enabled),
-                windowsSandboxLevel: .disabled
+            SandboxTags.permissionProfileSandboxTag(
+                profile: .external(network: .enabled),
+                windowsSandboxLevel: .disabled,
+                enforceManagedNetwork: false
             ),
             "external"
         )
@@ -24,9 +26,10 @@ final class SandboxTagsTests: XCTestCase {
 
     func testDefaultReadOnlyUsesPlatformSandboxTagLikeRust() {
         XCTAssertEqual(
-            SandboxTags.sandboxTag(
-                sandboxPolicy: .newReadOnlyPolicy(),
-                windowsSandboxLevel: .disabled
+            SandboxTags.permissionProfileSandboxTag(
+                profile: .readOnly(),
+                windowsSandboxLevel: .disabled,
+                enforceManagedNetwork: false
             ),
             PatchSafety.getPlatformSandbox()?.metricTag ?? "none"
         )

@@ -1,17 +1,6 @@
 import Foundation
 
 public enum SandboxTags {
-    public static func sandboxTag(
-        sandboxPolicy: SandboxPolicy,
-        windowsSandboxLevel: WindowsSandboxLevel
-    ) -> String {
-        permissionProfileSandboxTag(
-            profile: .fromLegacySandboxPolicy(sandboxPolicy),
-            windowsSandboxLevel: windowsSandboxLevel,
-            enforceManagedNetwork: false
-        )
-    }
-
     public static func permissionProfileSandboxTag(
         profile: PermissionProfile,
         windowsSandboxLevel: WindowsSandboxLevel,

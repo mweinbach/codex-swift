@@ -163,10 +163,14 @@ final class TurnMetadataTests: XCTestCase {
         let header = try XCTUnwrap(state.currentHeaderValue())
         let json = try jsonObject(header)
 
-        XCTAssertEqual(json["sandbox"] as? String, SandboxTags.sandboxTag(
-            sandboxPolicy: .newReadOnlyPolicy(),
-            windowsSandboxLevel: .disabled
-        ))
+        XCTAssertEqual(
+            json["sandbox"] as? String,
+            SandboxTags.permissionProfileSandboxTag(
+                profile: .readOnly(),
+                windowsSandboxLevel: .disabled,
+                enforceManagedNetwork: false
+            )
+        )
         XCTAssertEqual(json["session_id"] as? String, "session-a")
         XCTAssertEqual(json["thread_id"] as? String, "thread-a")
         XCTAssertEqual(json["thread_source"] as? String, "user")
