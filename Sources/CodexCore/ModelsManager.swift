@@ -168,7 +168,9 @@ public enum ModelsManager {
         let remotePresets = remoteModels
             .sorted { $0.priority < $1.priority }
             .map(\.preset)
-        var mergedPresets = mergePresets(remotePresets: remotePresets, existingPresets: localModels)
+        var mergedPresets = shouldUseRemoteModelsOnly(remoteModels: remoteModels, chatGPTMode: chatGPTMode)
+            ? remotePresets
+            : mergePresets(remotePresets: remotePresets, existingPresets: localModels)
         mergedPresets = filterByAuth(mergedPresets, chatGPTMode: chatGPTMode)
         markDefaultByPickerVisibility(&mergedPresets)
         return mergedPresets
@@ -298,7 +300,11 @@ public enum ModelsManager {
            cached.clientVersion == clientVersion,
            cached.isFresh(ttl: cacheTTL, now: now) {
             return ModelsResponse(
-                models: mergedRawModels(remoteModels: cached.models, existingModels: fallbackModels),
+                models: authoritativeOrMergedRawModels(
+                    remoteModels: cached.models,
+                    existingModels: fallbackModels,
+                    authMode: auth?.authMode
+                ),
                 etag: cached.etag ?? ""
             )
         }
@@ -322,7 +328,11 @@ public enum ModelsManager {
             )
             try cache.save(to: cacheURL)
             return ModelsResponse(
-                models: mergedRawModels(remoteModels: response.models, existingModels: fallbackModels),
+                models: authoritativeOrMergedRawModels(
+                    remoteModels: response.models,
+                    existingModels: fallbackModels,
+                    authMode: auth?.authMode
+                ),
                 etag: response.etag
             )
         case .failure:
@@ -425,6 +435,27 @@ public enum ModelsManager {
             }
         }
         return models
+    }
+
+    private static func authoritativeOrMergedRawModels(
+        remoteModels: [ModelInfo],
+        existingModels: [ModelInfo],
+        authMode: AuthMode?
+    ) -> [ModelInfo] {
+        shouldUseRemoteModelsOnly(remoteModels: remoteModels, authMode: authMode)
+            ? remoteModels
+            : mergedRawModels(remoteModels: remoteModels, existingModels: existingModels)
+    }
+
+    private static func shouldUseRemoteModelsOnly(remoteModels: [ModelInfo], chatGPTMode: Bool) -> Bool {
+        chatGPTMode && remoteModels.contains { $0.visibility == .list }
+    }
+
+    private static func shouldUseRemoteModelsOnly(remoteModels: [ModelInfo], authMode: AuthMode?) -> Bool {
+        guard authMode == .chatGPT || authMode == .chatGPTAuthTokens else {
+            return false
+        }
+        return remoteModels.contains { $0.visibility == .list }
     }
 
     private static func amazonBedrockGPT54Model(priority: Int32) -> ModelInfo {

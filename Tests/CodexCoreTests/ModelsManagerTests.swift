@@ -324,7 +324,7 @@ final class ModelsManagerTests: XCTestCase {
         )
 
         XCTAssertEqual(response.etag, "header-etag")
-        XCTAssertTrue(response.models.contains { $0.slug == "remote-model" })
+        XCTAssertEqual(response.models, [remoteModel])
         let capturedRequest = await capture.firstRequest()
         let request = try XCTUnwrap(capturedRequest)
         XCTAssertEqual(request.url, "https://chatgpt.com/backend-api/codex/models?client_version=1.2.3")
@@ -335,6 +335,33 @@ final class ModelsManagerTests: XCTestCase {
         XCTAssertEqual(cache.etag, "header-etag")
         XCTAssertEqual(cache.clientVersion, "1.2.3")
         XCTAssertEqual(cache.models.map(\.slug), ["remote-model"])
+    }
+
+    func testRawModelCatalogOnlineIfUncachedMergesHiddenOnlyChatGPTRemoteLikeRust() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let hiddenRemote = minimalModelInfo(slug: "hidden-chatgpt-remote", visibility: .hide, priority: 0)
+        let responseBody = try JSONEncoder().encode(ModelsResponse(models: [hiddenRemote], etag: "body-etag"))
+        let transport = RecordingAPITransport { _ in
+            URLSessionTransportResponse(statusCode: 200, body: responseBody)
+        }
+
+        let response = try await ModelsManager.rawModelCatalogOnlineIfUncached(
+            codexHome: root,
+            config: CodexRuntimeConfig(modelProvider: "openai"),
+            auth: AuthDotJSON(
+                authMode: .chatGPT,
+                openAIAPIKey: nil,
+                tokens: chatGPTTokenData(accessToken: "chatgpt-token", accountID: "acct-123"),
+                lastRefresh: nil
+            ),
+            transport: transport,
+            clientVersion: "1.2.3",
+            now: try parseDate("2026-05-08T12:00:00Z")
+        )
+
+        XCTAssertTrue(response.models.contains { $0.slug == "hidden-chatgpt-remote" })
+        XCTAssertTrue(response.models.contains { $0.slug == "gpt-5.5" })
     }
 
     func testRawModelCatalogOnlineIfUncachedSkipsNetworkForAPIKeyAuthLikeRust() async throws {
@@ -602,6 +629,66 @@ final class ModelsManagerTests: XCTestCase {
         XCTAssertEqual(available.map(\.model), ["first", "local-default"])
         XCTAssertTrue(available[0].isDefault)
         XCTAssertFalse(available[1].isDefault)
+    }
+
+    func testBuildAvailableModelsUsesVisibleChatGPTRemoteAsSourceOfTruthLikeRust() {
+        let hiddenRemote = minimalModelInfo(
+            slug: "chatgpt-hidden",
+            visibility: .hide,
+            supportedInAPI: true,
+            priority: 0
+        )
+        let visibleRemote = minimalModelInfo(
+            slug: "chatgpt-visible-source-of-truth",
+            visibility: .list,
+            supportedInAPI: true,
+            priority: 1
+        )
+        let local = preset(model: "local-bundled", isDefault: true, showInPicker: true, supportedInAPI: true)
+
+        let models = ModelsManager.buildAvailableModels(
+            remoteModels: [visibleRemote, hiddenRemote],
+            localModels: [local],
+            chatGPTMode: true
+        )
+
+        XCTAssertEqual(models.map(\.model), ["chatgpt-hidden", "chatgpt-visible-source-of-truth"])
+        XCTAssertFalse(models[0].isDefault)
+        XCTAssertTrue(models[1].isDefault)
+    }
+
+    func testBuildAvailableModelsMergesHiddenOnlyAndAPIRemoteCatalogsLikeRust() {
+        let hiddenRemote = minimalModelInfo(
+            slug: "hidden-only-remote",
+            visibility: .hide,
+            supportedInAPI: true,
+            priority: 0
+        )
+        let visibleRemote = minimalModelInfo(
+            slug: "api-visible-remote",
+            visibility: .list,
+            supportedInAPI: true,
+            priority: 0
+        )
+        let local = preset(model: "local-bundled", isDefault: true, showInPicker: true, supportedInAPI: true)
+
+        let chatGPTHiddenOnly = ModelsManager.buildAvailableModels(
+            remoteModels: [hiddenRemote],
+            localModels: [local],
+            chatGPTMode: true
+        )
+        XCTAssertEqual(chatGPTHiddenOnly.map(\.model), ["hidden-only-remote", "local-bundled"])
+        XCTAssertFalse(chatGPTHiddenOnly[0].isDefault)
+        XCTAssertTrue(chatGPTHiddenOnly[1].isDefault)
+
+        let apiModels = ModelsManager.buildAvailableModels(
+            remoteModels: [visibleRemote],
+            localModels: [local],
+            chatGPTMode: false
+        )
+        XCTAssertEqual(apiModels.map(\.model), ["api-visible-remote", "local-bundled"])
+        XCTAssertTrue(apiModels[0].isDefault)
+        XCTAssertFalse(apiModels[1].isDefault)
     }
 
     func testDefaultModelSelectionMatchesRustFallbacks() {

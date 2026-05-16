@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `f13e21ef43` (`Prefer the model list
+  fetched from the backend for SIWC users`). Swift model catalog refresh and
+  app-server `model/list` now treat a ChatGPT remote catalog containing at
+  least one visible/listed model as the source of truth instead of merging in
+  bundled models, while still merging bundled models for API-key/custom
+  providers, empty remote catalogs, and hidden-only ChatGPT remote catalogs.
 - 2026-05-16: rechecked Rust commit `6ec8c4a6ec` (`Ignore fsmonitor
   config in Git metadata reads`). Swift `GitInfoCollector` already disables
   repository `core.fsmonitor` for internal Git subprocesses alongside the

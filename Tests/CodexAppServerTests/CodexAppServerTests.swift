@@ -24364,6 +24364,40 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNil(result["nextCursor"] as? String)
     }
 
+    func testModelListUsesChatGPTRemoteCatalogAsSourceOfTruthLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let remoteModel = minimalModelInfo(slug: "chatgpt-remote-only", priority: 0)
+        try ModelsCache(
+            fetchedAt: appServerDate("2026-05-08T12:00:00Z"),
+            etag: "remote-etag",
+            clientVersion: "1.2.3",
+            models: [remoteModel]
+        ).save(to: ModelsManager.cachePath(codexHome: temp.url))
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"model/list","params":{"limit":100}}"#,
+            codexHome: temp.url
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        XCTAssertEqual(data.map { $0["id"] as? String }, ["chatgpt-remote-only"])
+        XCTAssertEqual(data.first?["isDefault"] as? Bool, true)
+        XCTAssertNil(result["nextCursor"] as? String)
+    }
+
     func testModelListRejectsInvalidCursorWithRustErrorCode() throws {
         let temp = try TemporaryDirectory()
 
