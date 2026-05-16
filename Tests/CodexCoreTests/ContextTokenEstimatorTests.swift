@@ -147,6 +147,27 @@ final class ContextTokenEstimatorTests: XCTestCase {
 
         XCTAssertEqual(estimated, expected)
     }
+
+    func testOriginalDetailImageEstimateIsCappedLikeRust() throws {
+        let imageData = try makePNG(width: 3_201, height: 3_201)
+        let payload = imageData.base64EncodedString()
+        let imageURL = "data:image/png;base64,\(payload)"
+        let item = ResponseItem.functionCallOutput(
+            callID: "call-original-capped",
+            output: FunctionCallOutputPayload(content: "image", contentItems: [
+                .inputImage(imageURL: imageURL, detail: .original)
+            ])
+        )
+
+        let rawBytes = try encodedByteCount(item)
+        let estimated = ContextTokenEstimator.estimateResponseItemModelVisibleBytes(item)
+        let expectedCappedImageBytes = Truncation.approxBytesForTokens(
+            ContextTokenEstimator.originalImageMaxPatches
+        )
+        let expected = rawBytes - payload.count + expectedCappedImageBytes
+
+        XCTAssertEqual(estimated, expected)
+    }
 }
 
 private func encodedByteCount<T: Encodable>(_ value: T) throws -> Int {

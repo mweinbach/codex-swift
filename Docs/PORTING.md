@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust
+  `original_detail_images_are_capped_at_max_patch_count` in
+  `codex-rs/core/src/context_manager/history_tests.rs`. Swift context token
+  estimator coverage now pins the 10,000-patch cap for `detail: "original"`
+  inline image estimates.
 - 2026-05-16: rechecked Rust `ThreadStartParams.environments` in
   `codex-rs/app-server-protocol/src/protocol/v2/thread.rs`, matching the
   adjacent `turn_start_params_*_environments` fixtures in
