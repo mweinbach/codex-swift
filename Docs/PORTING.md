@@ -12,6 +12,14 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `7c57a59f51` (`Make multi_agent_v2
+  wait_agent timeouts configurable`). Swift `[features.multi_agent_v2]`
+  config now accepts `max_wait_timeout_ms` and `default_wait_timeout_ms`
+  alongside the existing minimum, validates Rust's `0...3600000` bounds and
+  `min <= default <= max` relationship, preserves profile override precedence,
+  projects the new values through app-server config reads, and forwards
+  min/default/max into the model-visible `wait_agent` timeout description for
+  non-interactive tool specs.
 - 2026-05-16: rechecked Rust commit `23bb524973` (`Spill oversized PreToolUse
   additionalContext`). Swift `PreToolUse` hook contexts now pass through the
   same hook-output spiller used by session, prompt-submit, and post-tool

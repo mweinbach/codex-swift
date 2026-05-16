@@ -1640,6 +1640,8 @@ public enum CodexAppServer {
                         Int64(runtimeConfig.multiAgentV2.maxConcurrentThreadsPerSession)
                     ),
                     "min_wait_timeout_ms": .integer(runtimeConfig.multiAgentV2.minWaitTimeoutMS),
+                    "max_wait_timeout_ms": .integer(runtimeConfig.multiAgentV2.maxWaitTimeoutMS),
+                    "default_wait_timeout_ms": .integer(runtimeConfig.multiAgentV2.defaultWaitTimeoutMS),
                     "usage_hint_enabled": .bool(runtimeConfig.multiAgentV2.usageHintEnabled),
                     "hide_spawn_agent_metadata": .bool(runtimeConfig.multiAgentV2.hideSpawnAgentMetadata)
                 ]

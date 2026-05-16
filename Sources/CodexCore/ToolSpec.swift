@@ -808,6 +808,8 @@ public struct ToolsConfig: Equatable, Sendable {
     public let hideSpawnAgentMetadata: Bool
     public let maxConcurrentThreadsPerSession: Int?
     public let waitAgentMinTimeoutMS: Int64?
+    public let waitAgentMaxTimeoutMS: Int64?
+    public let waitAgentDefaultTimeoutMS: Int64?
     public let agentJobTools: Bool
     public let agentJobWorkerTools: Bool
 
@@ -832,6 +834,8 @@ public struct ToolsConfig: Equatable, Sendable {
         hideSpawnAgentMetadata: Bool = false,
         maxConcurrentThreadsPerSession: Int? = nil,
         waitAgentMinTimeoutMS: Int64? = nil,
+        waitAgentMaxTimeoutMS: Int64? = nil,
+        waitAgentDefaultTimeoutMS: Int64? = nil,
         agentJobTools: Bool = false,
         agentJobWorkerTools: Bool = false
     ) {
@@ -855,6 +859,8 @@ public struct ToolsConfig: Equatable, Sendable {
         self.hideSpawnAgentMetadata = hideSpawnAgentMetadata
         self.maxConcurrentThreadsPerSession = maxConcurrentThreadsPerSession
         self.waitAgentMinTimeoutMS = waitAgentMinTimeoutMS
+        self.waitAgentMaxTimeoutMS = waitAgentMaxTimeoutMS
+        self.waitAgentDefaultTimeoutMS = waitAgentDefaultTimeoutMS
         self.agentJobTools = agentJobTools
         self.agentJobWorkerTools = agentJobWorkerTools
     }
@@ -881,6 +887,8 @@ public struct ToolsConfig: Equatable, Sendable {
             hideSpawnAgentMetadata: hideSpawnAgentMetadata,
             maxConcurrentThreadsPerSession: maxConcurrentThreadsPerSession,
             waitAgentMinTimeoutMS: waitAgentMinTimeoutMS,
+            waitAgentMaxTimeoutMS: waitAgentMaxTimeoutMS,
+            waitAgentDefaultTimeoutMS: waitAgentDefaultTimeoutMS,
             agentJobTools: agentJobTools,
             agentJobWorkerTools: agentJobWorkerTools
         )
@@ -891,7 +899,6 @@ public enum ToolSpecFactory {
     private static let spawnAgentInheritedModelGuidance = "Spawned agents inherit your current model by default. Omit `model` to use that preferred default; set `model` only when an explicit override is needed."
     private static let spawnAgentModelOverrideDescription = "Optional model override for the new agent. Leave unset to inherit the same model as the parent, which is the preferred default. Only set this when the user explicitly asks for a different model or the task clearly requires one."
     private static let defaultAgentTypeDescription = "Optional type name for the new agent. If omitted, `default` is used."
-    private static let defaultWaitAgentTimeoutMS: Int64 = 30_000
 
     public static func buildSpecs(
         config: ToolsConfig,
@@ -1035,7 +1042,9 @@ public enum ToolSpecFactory {
                 usageHintText: config.spawnAgentUsageHintText,
                 hideAgentMetadata: config.hideSpawnAgentMetadata,
                 maxConcurrentThreadsPerSession: config.maxConcurrentThreadsPerSession,
-                waitAgentMinTimeoutMS: config.waitAgentMinTimeoutMS
+                waitAgentMinTimeoutMS: config.waitAgentMinTimeoutMS,
+                waitAgentMaxTimeoutMS: config.waitAgentMaxTimeoutMS,
+                waitAgentDefaultTimeoutMS: config.waitAgentDefaultTimeoutMS
             ).map {
                 ConfiguredToolSpec(spec: $0, supportsParallelToolCalls: false)
             })
@@ -1646,7 +1655,9 @@ public enum ToolSpecFactory {
         usageHintText: String? = nil,
         hideAgentMetadata: Bool = false,
         maxConcurrentThreadsPerSession: Int? = nil,
-        waitAgentMinTimeoutMS: Int64? = nil
+        waitAgentMinTimeoutMS: Int64? = nil,
+        waitAgentMaxTimeoutMS: Int64? = nil,
+        waitAgentDefaultTimeoutMS: Int64? = nil
     ) -> [ToolSpec] {
         [
             createSpawnAgentV2Tool(
@@ -1657,7 +1668,11 @@ public enum ToolSpecFactory {
             ),
             createSendMessageTool(),
             createFollowupTaskTool(),
-            createWaitAgentV2Tool(minTimeoutMS: waitAgentMinTimeoutMS),
+            createWaitAgentV2Tool(
+                minTimeoutMS: waitAgentMinTimeoutMS,
+                maxTimeoutMS: waitAgentMaxTimeoutMS,
+                defaultTimeoutMS: waitAgentDefaultTimeoutMS
+            ),
             createCloseAgentV2Tool(),
             createListAgentsTool()
         ]
@@ -1721,8 +1736,16 @@ public enum ToolSpecFactory {
         )
     }
 
-    public static func createWaitAgentV2Tool(minTimeoutMS: Int64? = nil) -> ToolSpec {
-        let timeoutDescription = waitAgentTimeoutDescription(minTimeoutMS: minTimeoutMS)
+    public static func createWaitAgentV2Tool(
+        minTimeoutMS: Int64? = nil,
+        maxTimeoutMS: Int64? = nil,
+        defaultTimeoutMS: Int64? = nil
+    ) -> ToolSpec {
+        let timeoutDescription = waitAgentTimeoutDescription(
+            minTimeoutMS: minTimeoutMS,
+            maxTimeoutMS: maxTimeoutMS,
+            defaultTimeoutMS: defaultTimeoutMS
+        )
         return functionTool(
             name: "wait_agent",
             description: "Wait for a mailbox update from any live agent, including queued messages and final-status notifications. Does not return the content; returns either a summary of which agents have updates (if any), or a timeout summary if no mailbox update arrives before the deadline.",
@@ -1875,16 +1898,14 @@ public enum ToolSpecFactory {
         return description
     }
 
-    private static func waitAgentTimeoutDescription(minTimeoutMS: Int64?) -> String {
-        let maxTimeoutMS = MultiAgentV2Config.maxWaitTimeoutMS
-        let minTimeoutMS = Swift.min(
-            Swift.max(minTimeoutMS ?? MultiAgentV2Config.defaultMinWaitTimeoutMS, 1),
-            maxTimeoutMS
-        )
-        let defaultTimeoutMS = Swift.min(
-            Swift.max(defaultWaitAgentTimeoutMS, minTimeoutMS),
-            maxTimeoutMS
-        )
+    private static func waitAgentTimeoutDescription(
+        minTimeoutMS: Int64?,
+        maxTimeoutMS: Int64?,
+        defaultTimeoutMS: Int64?
+    ) -> String {
+        let minTimeoutMS = minTimeoutMS ?? MultiAgentV2Config.defaultMinWaitTimeoutMS
+        let maxTimeoutMS = maxTimeoutMS ?? MultiAgentV2Config.defaultMaxWaitTimeoutMS
+        let defaultTimeoutMS = defaultTimeoutMS ?? MultiAgentV2Config.defaultWaitTimeoutMS
         return "Optional timeout in milliseconds. Defaults to \(defaultTimeoutMS), min \(minTimeoutMS), max \(maxTimeoutMS)."
     }
 

@@ -656,6 +656,8 @@ final class NonInteractiveExecTests: XCTestCase {
         config.multiAgentV2 = MultiAgentV2Config(
             maxConcurrentThreadsPerSession: 7,
             minWaitTimeoutMS: 60_000,
+            maxWaitTimeoutMS: 120_000,
+            defaultWaitTimeoutMS: 90_000,
             usageHintEnabled: true,
             usageHintText: "Runtime delegation hint.",
             hideSpawnAgentMetadata: true
@@ -697,7 +699,7 @@ final class NonInteractiveExecTests: XCTestCase {
         }
         XCTAssertEqual(
             waitProperties["timeout_ms"],
-            .number(description: "Optional timeout in milliseconds. Defaults to 60000, min 60000, max 3600000.")
+            .number(description: "Optional timeout in milliseconds. Defaults to 90000, min 60000, max 120000.")
         )
     }
 

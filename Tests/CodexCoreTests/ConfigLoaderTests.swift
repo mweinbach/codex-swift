@@ -1248,6 +1248,8 @@ final class ConfigLoaderTests: XCTestCase {
         enabled = true
         max_concurrent_threads_per_session = 5
         min_wait_timeout_ms = 2500
+        max_wait_timeout_ms = 120000
+        default_wait_timeout_ms = 45000
         usage_hint_enabled = false
         usage_hint_text = "Custom delegation guidance."
         root_agent_usage_hint_text = "Root guidance."
@@ -1261,6 +1263,8 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.multiAgentV2, MultiAgentV2Config(
             maxConcurrentThreadsPerSession: 5,
             minWaitTimeoutMS: 2500,
+            maxWaitTimeoutMS: 120_000,
+            defaultWaitTimeoutMS: 45_000,
             usageHintEnabled: false,
             usageHintText: "Custom delegation guidance.",
             rootAgentUsageHintText: "Root guidance.",
@@ -1278,6 +1282,8 @@ final class ConfigLoaderTests: XCTestCase {
         [features.multi_agent_v2]
         max_concurrent_threads_per_session = 4
         min_wait_timeout_ms = 3000
+        max_wait_timeout_ms = 90000
+        default_wait_timeout_ms = 30000
         usage_hint_enabled = true
         usage_hint_text = "base hint"
         root_agent_usage_hint_text = "base root hint"
@@ -1287,6 +1293,8 @@ final class ConfigLoaderTests: XCTestCase {
         [profiles.no_hint.features.multi_agent_v2]
         max_concurrent_threads_per_session = 6
         min_wait_timeout_ms = 1500
+        max_wait_timeout_ms = 60000
+        default_wait_timeout_ms = 15000
         usage_hint_enabled = false
         usage_hint_text = "profile hint"
         root_agent_usage_hint_text = "profile root hint"
@@ -1299,6 +1307,8 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.multiAgentV2, MultiAgentV2Config(
             maxConcurrentThreadsPerSession: 6,
             minWaitTimeoutMS: 1500,
+            maxWaitTimeoutMS: 60_000,
+            defaultWaitTimeoutMS: 15_000,
             usageHintEnabled: false,
             usageHintText: "profile hint",
             rootAgentUsageHintText: "profile root hint",
@@ -1343,27 +1353,68 @@ final class ConfigLoaderTests: XCTestCase {
         try """
         [features.multi_agent_v2]
         enabled = true
-        min_wait_timeout_ms = 0
+        min_wait_timeout_ms = -1
         """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
 
         XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
             XCTAssertEqual(
                 String(describing: error),
-                "features.multi_agent_v2.min_wait_timeout_ms must be at least 1"
+                "features.multi_agent_v2.min_wait_timeout_ms must be at least 0"
             )
         }
 
-        try """
-        [features.multi_agent_v2]
-        enabled = true
-        min_wait_timeout_ms = 3600001
-        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        for (field, message) in [
+            ("min_wait_timeout_ms", "features.multi_agent_v2.min_wait_timeout_ms must be at most 3600000"),
+            ("max_wait_timeout_ms", "features.multi_agent_v2.max_wait_timeout_ms must be at most 3600000"),
+            ("default_wait_timeout_ms", "features.multi_agent_v2.default_wait_timeout_ms must be at most 3600000")
+        ] {
+            try """
+            [features.multi_agent_v2]
+            enabled = true
+            \(field) = 3600001
+            """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
 
-        XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
-            XCTAssertEqual(
-                String(describing: error),
-                "features.multi_agent_v2.min_wait_timeout_ms must be at most 3600000"
+            XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+                XCTAssertEqual(String(describing: error), message)
+            }
+        }
+
+        let invalidRelationships = [
+            (
+                """
+                min_wait_timeout_ms = 20
+                max_wait_timeout_ms = 10
+                default_wait_timeout_ms = 20
+                """,
+                "features.multi_agent_v2.min_wait_timeout_ms must be at most features.multi_agent_v2.max_wait_timeout_ms"
+            ),
+            (
+                """
+                min_wait_timeout_ms = 20
+                max_wait_timeout_ms = 30
+                default_wait_timeout_ms = 10
+                """,
+                "features.multi_agent_v2.default_wait_timeout_ms must be at least features.multi_agent_v2.min_wait_timeout_ms"
+            ),
+            (
+                """
+                min_wait_timeout_ms = 10
+                max_wait_timeout_ms = 20
+                default_wait_timeout_ms = 30
+                """,
+                "features.multi_agent_v2.default_wait_timeout_ms must be at most features.multi_agent_v2.max_wait_timeout_ms"
             )
+        ]
+        for (body, message) in invalidRelationships {
+            try """
+            [features.multi_agent_v2]
+            enabled = true
+            \(body)
+            """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+            XCTAssertThrowsError(try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)) { error in
+                XCTAssertEqual(String(describing: error), message)
+            }
         }
     }
 

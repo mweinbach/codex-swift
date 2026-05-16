@@ -1044,6 +1044,8 @@ final class CodexAppServerTests: XCTestCase {
         enabled = true
         max_concurrent_threads_per_session = 5
         min_wait_timeout_ms = 1234
+        max_wait_timeout_ms = 120000
+        default_wait_timeout_ms = 45000
         usage_hint_enabled = false
         usage_hint_text = "custom usage"
         root_agent_usage_hint_text = "root usage"
@@ -1097,6 +1099,8 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(multiAgentV2["enabled"], .bool(true))
         XCTAssertEqual(multiAgentV2["max_concurrent_threads_per_session"], .integer(5))
         XCTAssertEqual(multiAgentV2["min_wait_timeout_ms"], .integer(1234))
+        XCTAssertEqual(multiAgentV2["max_wait_timeout_ms"], .integer(120_000))
+        XCTAssertEqual(multiAgentV2["default_wait_timeout_ms"], .integer(45_000))
         XCTAssertEqual(multiAgentV2["usage_hint_enabled"], .bool(false))
         XCTAssertEqual(multiAgentV2["usage_hint_text"], .string("custom usage"))
         XCTAssertEqual(multiAgentV2["root_agent_usage_hint_text"], .string("root usage"))

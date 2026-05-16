@@ -221,10 +221,15 @@ public struct AgentRuntimeConfig: Equatable, Sendable {
 public struct MultiAgentV2Config: Equatable, Sendable {
     public static let defaultMaxConcurrentThreadsPerSession = 4
     public static let defaultMinWaitTimeoutMS: Int64 = 10_000
-    public static let maxWaitTimeoutMS: Int64 = 3_600_000
+    public static let defaultMaxWaitTimeoutMS: Int64 = 3_600_000
+    public static let defaultWaitTimeoutMS: Int64 = 30_000
+    public static let hardMinWaitTimeoutMS: Int64 = 0
+    public static let hardMaxWaitTimeoutMS: Int64 = defaultMaxWaitTimeoutMS
 
     public var maxConcurrentThreadsPerSession: Int
     public var minWaitTimeoutMS: Int64
+    public var maxWaitTimeoutMS: Int64
+    public var defaultWaitTimeoutMS: Int64
     public var usageHintEnabled: Bool
     public var usageHintText: String?
     public var rootAgentUsageHintText: String?
@@ -234,6 +239,8 @@ public struct MultiAgentV2Config: Equatable, Sendable {
     public init(
         maxConcurrentThreadsPerSession: Int = Self.defaultMaxConcurrentThreadsPerSession,
         minWaitTimeoutMS: Int64 = Self.defaultMinWaitTimeoutMS,
+        maxWaitTimeoutMS: Int64 = Self.defaultMaxWaitTimeoutMS,
+        defaultWaitTimeoutMS: Int64 = Self.defaultWaitTimeoutMS,
         usageHintEnabled: Bool = true,
         usageHintText: String? = nil,
         rootAgentUsageHintText: String? = nil,
@@ -242,6 +249,8 @@ public struct MultiAgentV2Config: Equatable, Sendable {
     ) {
         self.maxConcurrentThreadsPerSession = maxConcurrentThreadsPerSession
         self.minWaitTimeoutMS = minWaitTimeoutMS
+        self.maxWaitTimeoutMS = maxWaitTimeoutMS
+        self.defaultWaitTimeoutMS = defaultWaitTimeoutMS
         self.usageHintEnabled = usageHintEnabled
         self.usageHintText = usageHintText
         self.rootAgentUsageHintText = rootAgentUsageHintText
@@ -3910,6 +3919,8 @@ private struct ParsedCodexConfigToml {
             }
         case "max_concurrent_threads_per_session",
              "min_wait_timeout_ms",
+             "max_wait_timeout_ms",
+             "default_wait_timeout_ms",
              "usage_hint_enabled",
              "usage_hint_text",
              "root_agent_usage_hint_text",
@@ -5238,23 +5249,44 @@ private struct ParsedCodexConfigToml {
             base: base,
             profile: profile
         ).map {
-            let timeout = try int64Value($0, key: "\(key).min_wait_timeout_ms")
-            guard timeout >= 1 else {
-                throw CodexConfigLoadError.invalidConfig(
-                    "features.multi_agent_v2.min_wait_timeout_ms must be at least 1"
-                )
-            }
-            guard timeout <= MultiAgentV2Config.maxWaitTimeoutMS else {
-                throw CodexConfigLoadError.invalidConfig(
-                    "features.multi_agent_v2.min_wait_timeout_ms must be at most \(MultiAgentV2Config.maxWaitTimeoutMS)"
-                )
-            }
-            return timeout
+            try multiAgentV2WaitTimeoutValue($0, field: "min_wait_timeout_ms", key: key)
         } ?? defaults.minWaitTimeoutMS
+        let maxWaitTimeoutMS = try layeredConfigValue(
+            field: "max_wait_timeout_ms",
+            base: base,
+            profile: profile
+        ).map {
+            try multiAgentV2WaitTimeoutValue($0, field: "max_wait_timeout_ms", key: key)
+        } ?? defaults.maxWaitTimeoutMS
+        let defaultWaitTimeoutMS = try layeredConfigValue(
+            field: "default_wait_timeout_ms",
+            base: base,
+            profile: profile
+        ).map {
+            try multiAgentV2WaitTimeoutValue($0, field: "default_wait_timeout_ms", key: key)
+        } ?? defaults.defaultWaitTimeoutMS
+
+        guard minWaitTimeoutMS <= maxWaitTimeoutMS else {
+            throw CodexConfigLoadError.invalidConfig(
+                "features.multi_agent_v2.min_wait_timeout_ms must be at most features.multi_agent_v2.max_wait_timeout_ms"
+            )
+        }
+        guard defaultWaitTimeoutMS >= minWaitTimeoutMS else {
+            throw CodexConfigLoadError.invalidConfig(
+                "features.multi_agent_v2.default_wait_timeout_ms must be at least features.multi_agent_v2.min_wait_timeout_ms"
+            )
+        }
+        guard defaultWaitTimeoutMS <= maxWaitTimeoutMS else {
+            throw CodexConfigLoadError.invalidConfig(
+                "features.multi_agent_v2.default_wait_timeout_ms must be at most features.multi_agent_v2.max_wait_timeout_ms"
+            )
+        }
 
         return MultiAgentV2Config(
             maxConcurrentThreadsPerSession: maxConcurrentThreads,
             minWaitTimeoutMS: minWaitTimeoutMS,
+            maxWaitTimeoutMS: maxWaitTimeoutMS,
+            defaultWaitTimeoutMS: defaultWaitTimeoutMS,
             usageHintEnabled: try layeredConfigValue(
                 field: "usage_hint_enabled",
                 base: base,
@@ -5284,6 +5316,25 @@ private struct ParsedCodexConfigToml {
             ).map { try boolValue($0, key: "\(key).hide_spawn_agent_metadata") }
                 ?? defaults.hideSpawnAgentMetadata
         )
+    }
+
+    private static func multiAgentV2WaitTimeoutValue(
+        _ value: ConfigValue,
+        field: String,
+        key: String
+    ) throws -> Int64 {
+        let timeout = try int64Value(value, key: "\(key).\(field)")
+        guard timeout >= MultiAgentV2Config.hardMinWaitTimeoutMS else {
+            throw CodexConfigLoadError.invalidConfig(
+                "features.multi_agent_v2.\(field) must be at least \(MultiAgentV2Config.hardMinWaitTimeoutMS)"
+            )
+        }
+        guard timeout <= MultiAgentV2Config.hardMaxWaitTimeoutMS else {
+            throw CodexConfigLoadError.invalidConfig(
+                "features.multi_agent_v2.\(field) must be at most \(MultiAgentV2Config.hardMaxWaitTimeoutMS)"
+            )
+        }
+        return timeout
     }
 
     private static func layeredConfigValue(

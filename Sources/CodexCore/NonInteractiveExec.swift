@@ -258,6 +258,12 @@ public enum NonInteractiveExec {
             waitAgentMinTimeoutMS: multiAgentV2Enabled
                 ? config.multiAgentV2.minWaitTimeoutMS
                 : nil,
+            waitAgentMaxTimeoutMS: multiAgentV2Enabled
+                ? config.multiAgentV2.maxWaitTimeoutMS
+                : nil,
+            waitAgentDefaultTimeoutMS: multiAgentV2Enabled
+                ? config.multiAgentV2.defaultWaitTimeoutMS
+                : nil,
             agentJobTools: config.features.isEnabled(.spawnCsv),
             agentJobWorkerTools: config.features.isEnabled(.spawnCsv)
                 && AgentJobRuntime.isAgentJobWorkerSessionSource(sessionSource)

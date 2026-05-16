@@ -275,7 +275,9 @@ final class ToolSpecTests: XCTestCase {
             spawnAgentUsageHint: true,
             spawnAgentUsageHintText: "Custom delegation guidance.",
             maxConcurrentThreadsPerSession: 5,
-            waitAgentMinTimeoutMS: 2_500
+            waitAgentMinTimeoutMS: 2_500,
+            waitAgentMaxTimeoutMS: 120_000,
+            waitAgentDefaultTimeoutMS: 45_000
         ))
 
         XCTAssertEqual(specs.map(\.spec.name), [
@@ -352,7 +354,7 @@ final class ToolSpecTests: XCTestCase {
             waitAgent.parameters,
             .object(
                 properties: [
-                    "timeout_ms": .number(description: "Optional timeout in milliseconds. Defaults to 30000, min 2500, max 3600000.")
+                    "timeout_ms": .number(description: "Optional timeout in milliseconds. Defaults to 45000, min 2500, max 120000.")
                 ],
                 required: nil,
                 additionalProperties: .boolean(false)
@@ -394,7 +396,9 @@ final class ToolSpecTests: XCTestCase {
             spawnAgentUsageHint: false,
             spawnAgentUsageHintText: "Should not appear.",
             hideSpawnAgentMetadata: true,
-            waitAgentMinTimeoutMS: 50_000
+            waitAgentMinTimeoutMS: 5_000,
+            waitAgentMaxTimeoutMS: 50_000,
+            waitAgentDefaultTimeoutMS: 10_000
         ))
 
         let spawn = try functionTool(named: "spawn_agent", in: specs)
@@ -413,7 +417,7 @@ final class ToolSpecTests: XCTestCase {
         }
         XCTAssertEqual(
             waitProperties["timeout_ms"],
-            .number(description: "Optional timeout in milliseconds. Defaults to 50000, min 50000, max 3600000.")
+            .number(description: "Optional timeout in milliseconds. Defaults to 10000, min 5000, max 50000.")
         )
     }
 
