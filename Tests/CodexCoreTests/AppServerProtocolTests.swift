@@ -1251,6 +1251,45 @@ final class AppServerProtocolTests: XCTestCase {
         ))
     }
 
+    func testMcpServerElicitationFormRejectsNullOrInvalidRequestedSchemaLikeRustProtocol() {
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            AppServerProtocol.McpServerElicitationRequestParams.self,
+            from: Data(#"""
+            {
+              "threadId": "thr_123",
+              "turnId": "turn_123",
+              "serverName": "linear",
+              "mode": "form",
+              "_meta": {"persist": "session"},
+              "message": "Allow this request?",
+              "requestedSchema": null
+            }
+            """#.utf8)
+        ))
+
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            AppServerProtocol.McpServerElicitationRequestParams.self,
+            from: Data(#"""
+            {
+              "threadId": "thr_123",
+              "turnId": "turn_123",
+              "serverName": "linear",
+              "mode": "form",
+              "_meta": null,
+              "message": "Allow this request?",
+              "requestedSchema": {
+                "type": "object",
+                "properties": {
+                  "confirmed": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+            """#.utf8)
+        ))
+    }
+
     func testMcpServerElicitationServerResponseMatchesRustWireShape() throws {
         let response = AppServerProtocol.ServerResponse.mcpServerElicitationRequest(
             requestID: .integer(10),

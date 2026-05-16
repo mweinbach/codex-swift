@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-15: rechecked Rust app-server v2 MCP elicitation form-schema
+  rejection fixtures in
+  `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift now directly
+  pins `mcpServer/elicitation/request` form params rejecting a null
+  `requestedSchema` and unsupported object-valued primitive properties, matching Rust's
+  core-form conversion failures.
 - 2026-05-15: rechecked Rust app-server v2
   `sandbox_policy_round_trips_workspace_write_access` in
   `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`. Swift command-exec
