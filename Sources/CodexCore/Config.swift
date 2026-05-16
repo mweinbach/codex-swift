@@ -4479,6 +4479,7 @@ private struct ParsedCodexConfigToml {
             || key == "oss_provider"
             || key == "check_for_update_on_startup"
             || key == "disable_paste_burst"
+            || key == "desktop"
             || key == "file_opener"
     }
 

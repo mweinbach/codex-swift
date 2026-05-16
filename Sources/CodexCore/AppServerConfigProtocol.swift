@@ -575,6 +575,7 @@ extension AppServerProtocol {
         public let serviceTier: String?
         public let analytics: AnalyticsConfig?
         public let apps: AppsConfig?
+        public let desktop: [String: JSONValue]?
         public let additional: [String: JSONValue]
 
         private static let knownKeys: Set<String> = [
@@ -601,7 +602,8 @@ extension AppServerProtocol {
             "model_verbosity",
             "service_tier",
             "analytics",
-            "apps"
+            "apps",
+            "desktop"
         ]
 
         public init(
@@ -629,6 +631,7 @@ extension AppServerProtocol {
             serviceTier: String? = nil,
             analytics: AnalyticsConfig? = nil,
             apps: AppsConfig? = nil,
+            desktop: [String: JSONValue]? = nil,
             additional: [String: JSONValue] = [:]
         ) {
             self.model = model
@@ -655,6 +658,7 @@ extension AppServerProtocol {
             self.serviceTier = serviceTier
             self.analytics = analytics
             self.apps = apps
+            self.desktop = desktop
             self.additional = additional
         }
 
@@ -746,6 +750,10 @@ extension AppServerProtocol {
                 forKey: AppServerConfigCodingKey(stringValue: "analytics")
             )
             apps = try container.decodeIfPresent(AppsConfig.self, forKey: AppServerConfigCodingKey(stringValue: "apps"))
+            desktop = try container.decodeIfPresent(
+                [String: JSONValue].self,
+                forKey: AppServerConfigCodingKey(stringValue: "desktop")
+            )
             additional = try container.decodeAdditionalFields(excluding: Self.knownKeys)
         }
 
@@ -811,6 +819,7 @@ extension AppServerProtocol {
             try container.encodeNilOrValue(serviceTier, forKey: AppServerConfigCodingKey(stringValue: "service_tier"))
             try container.encodeNilOrValue(analytics, forKey: AppServerConfigCodingKey(stringValue: "analytics"))
             try container.encodeNilOrValue(apps, forKey: AppServerConfigCodingKey(stringValue: "apps"))
+            try container.encodeNilOrValue(desktop, forKey: AppServerConfigCodingKey(stringValue: "desktop"))
             try container.encodeAdditionalFields(additional)
         }
     }

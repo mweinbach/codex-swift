@@ -145,6 +145,13 @@ final class AppServerConfigProtocolTests: XCTestCase {
                     )
                 ]
             ),
+            desktop: [
+                "appearanceTheme": .string("dark"),
+                "workspace": .object([
+                    "collapsed": .bool(true),
+                    "width": .integer(320)
+                ])
+            ],
             additional: ["custom_flag": .bool(true)]
         )
 
@@ -214,6 +221,13 @@ final class AppServerConfigProtocolTests: XCTestCase {
                             "approval_mode": "approve"
                         ]
                     ]
+                ]
+            ],
+            desktop: [
+                "appearanceTheme": "dark",
+                "workspace": [
+                    "collapsed": true,
+                    "width": 320
                 ]
             ],
             additional: ["custom_flag": true]
@@ -711,6 +725,7 @@ private func expectedConfigObject(
     serviceTier: Any = NSNull(),
     analytics: Any = NSNull(),
     apps: Any = NSNull(),
+    desktop: Any = NSNull(),
     additional: [String: Any] = [:]
 ) -> [String: Any] {
     var object: [String: Any] = [
@@ -737,7 +752,8 @@ private func expectedConfigObject(
         "model_verbosity": modelVerbosity,
         "service_tier": serviceTier,
         "analytics": analytics,
-        "apps": apps
+        "apps": apps,
+        "desktop": desktop
     ]
     for (key, value) in additional {
         object[key] = value

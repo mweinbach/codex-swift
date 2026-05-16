@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `4f2918dd7f` (`Add opaque
+  desktop config namespace`). Swift app-server config reads now expose
+  Rust's first-class `desktop` config namespace as an opaque JSON-shaped bag,
+  default it to `null` when absent, and preserve `desktop.*` writes through
+  the existing `config/value/write` path without adding desktop-specific
+  runtime semantics.
 - 2026-05-16: rechecked Rust commit `10cf1f79dd` (`Add
   user_input_requested_during_turn to MCP turn metadata`). Swift turn metadata
   state now tracks when user input was requested during the current turn and

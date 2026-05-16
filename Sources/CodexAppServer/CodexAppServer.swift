@@ -22532,7 +22532,8 @@ public enum CodexAppServer {
             "model_verbosity": NSNull(),
             "service_tier": NSNull(),
             "analytics": NSNull(),
-            "apps": NSNull()
+            "apps": NSNull(),
+            "desktop": NSNull()
         ]
     }
 
@@ -23218,7 +23219,7 @@ public enum CodexAppServer {
                 lines.append("")
             }
             lines.append("[\(header)]")
-            let bodyStart = lines.index(before: lines.endIndex)
+            let bodyStart = lines.endIndex
             range = bodyStart..<bodyStart
         }
 

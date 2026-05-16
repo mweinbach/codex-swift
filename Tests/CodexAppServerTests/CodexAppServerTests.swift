@@ -27993,6 +27993,36 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(layers.first?["name"].flatMap { ($0 as? [String: Any])?["type"] as? String }, "user")
     }
 
+    func testConfigReadIncludesDesktopSettingsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [desktop]
+        appearanceTheme = "dark"
+        selected-avatar-id = "codex"
+
+        [desktop.workspace]
+        collapsed = true
+        width = 320
+        """.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/read","params":{}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let config = try XCTUnwrap(result["config"] as? [String: Any])
+        let desktop = try XCTUnwrap(config["desktop"] as? [String: Any])
+        XCTAssertEqual(desktop["appearanceTheme"] as? String, "dark")
+        XCTAssertEqual(desktop["selected-avatar-id"] as? String, "codex")
+        let workspace = try XCTUnwrap(desktop["workspace"] as? [String: Any])
+        XCTAssertEqual(workspace["collapsed"] as? Bool, true)
+        XCTAssertEqual(workspace["width"] as? Int, 320)
+    }
+
     func testConfigReadAppDefaultsAndToolConfigUseRustShape() throws {
         let temp = try TemporaryDirectory()
         try """
@@ -28639,6 +28669,36 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(app1["enabled"] as? Bool, false)
         XCTAssertEqual(app1["default_tools_approval_mode"] as? String, "prompt")
         XCTAssertTrue(app1["tools"] is NSNull)
+    }
+
+    func testConfigValueWriteSupportsDesktopSettingsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        try "".write(to: configFile, atomically: true, encoding: .utf8)
+
+        let writeTheme = try appServerResponse(
+            #"{"id":1,"method":"config/value/write","params":{"filePath":"\#(configFile.path)","keyPath":"desktop.appearanceTheme","value":"dark","mergeStrategy":"replace"}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertEqual((writeTheme["result"] as? [String: Any])?["status"] as? String, "ok")
+
+        let writeWorkspace = try appServerResponse(
+            #"{"id":2,"method":"config/value/write","params":{"filePath":"\#(configFile.path)","keyPath":"desktop.workspace","value":{"collapsed":true,"width":320},"mergeStrategy":"replace"}}"#,
+            codexHome: temp.url
+        )
+        XCTAssertEqual((writeWorkspace["result"] as? [String: Any])?["status"] as? String, "ok")
+
+        let read = try appServerResponse(
+            #"{"id":3,"method":"config/read","params":{}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(read["result"] as? [String: Any])
+        let config = try XCTUnwrap(result["config"] as? [String: Any])
+        let desktop = try XCTUnwrap(config["desktop"] as? [String: Any])
+        XCTAssertEqual(desktop["appearanceTheme"] as? String, "dark")
+        let workspace = try XCTUnwrap(desktop["workspace"] as? [String: Any])
+        XCTAssertEqual(workspace["collapsed"] as? Bool, true)
+        XCTAssertEqual(workspace["width"] as? Int, 320)
     }
 
     func testConfigValueWriteSupportsCustomMCPServerApprovalModeLikeRust() throws {
