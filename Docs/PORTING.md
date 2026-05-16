@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust `build_ws_client_metadata` in
+  `codex-rs/core/src/client.rs` and its window-lineage regression test in
+  `codex-rs/core/src/client_tests.rs`. Swift now has a shared request-header
+  helper for Responses websocket client metadata that includes installation ID,
+  thread window generation, subagent lineage, parent thread ID, and valid turn
+  metadata while dropping invalid header values like Rust `HeaderValue` parsing.
 - 2026-05-16: rechecked Rust unavailable MCP dummy-tool routing in
   `codex-rs/core/src/session/turn.rs`, `unavailable_tool.rs`, and
   `tools/router.rs`. Swift now refreshes non-interactive request tools after a

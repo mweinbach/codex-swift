@@ -161,7 +161,7 @@ public struct ChatRequestBuilder: Equatable, Sendable {
 
         var headers = CodexRequestHeaders.conversationHeaders(conversationID: conversationID)
         if let subagent = CodexRequestHeaders.subagentHeader(for: sessionSource) {
-            headers["x-openai-subagent"] = subagent
+            headers[CodexRequestHeaders.subagentHeaderName] = subagent
         }
 
         return ChatRequest(

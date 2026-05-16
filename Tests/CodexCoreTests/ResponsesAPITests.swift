@@ -187,6 +187,46 @@ final class ResponsesAPITests: XCTestCase {
         XCTAssertNil(object["client_metadata"])
     }
 
+    func testWebSocketClientMetadataIncludesWindowLineageAndTurnMetadataLikeRust() throws {
+        let threadID = ThreadId(uuid: UUID(uuidString: "018f7a2d-4c5b-7abc-8def-0123456789ab")!)
+        let parentThreadID = ThreadId(uuid: UUID(uuidString: "01902222-3333-7444-8555-666666666666")!)
+        let turnMetadata = #"{"turn_id":"turn-123"}"#
+
+        let metadata = CodexRequestHeaders.webSocketClientMetadata(
+            installationID: "11111111-1111-4111-8111-111111111111",
+            threadID: threadID,
+            windowGeneration: 1,
+            sessionSource: .subagent(.threadSpawn(parentThreadID: parentThreadID, depth: 2)),
+            turnMetadataHeader: turnMetadata
+        )
+
+        XCTAssertEqual(metadata, [
+            CodexRequestHeaders.installationIDHeaderName: "11111111-1111-4111-8111-111111111111",
+            CodexRequestHeaders.windowIDHeaderName: "\(threadID):1",
+            CodexRequestHeaders.subagentHeaderName: "collab_spawn",
+            CodexRequestHeaders.parentThreadIDHeaderName: parentThreadID.description,
+            CodexRequestHeaders.turnMetadataHeaderName: turnMetadata
+        ])
+    }
+
+    func testWebSocketClientMetadataSkipsInvalidTurnMetadataLikeRustHeaderParsing() throws {
+        let threadID = ThreadId(uuid: UUID(uuidString: "018f7a2d-4c5b-7abc-8def-0123456789ab")!)
+
+        let metadata = CodexRequestHeaders.webSocketClientMetadata(
+            installationID: "install-1",
+            threadID: threadID,
+            windowGeneration: 0,
+            sessionSource: .internal(.memoryConsolidation),
+            turnMetadataHeader: "東京"
+        )
+
+        XCTAssertEqual(metadata[CodexRequestHeaders.installationIDHeaderName], "install-1")
+        XCTAssertEqual(metadata[CodexRequestHeaders.windowIDHeaderName], "\(threadID):0")
+        XCTAssertEqual(metadata[CodexRequestHeaders.subagentHeaderName], "memory_consolidation")
+        XCTAssertNil(metadata[CodexRequestHeaders.parentThreadIDHeaderName])
+        XCTAssertNil(metadata[CodexRequestHeaders.turnMetadataHeaderName])
+    }
+
     func testResponseCreateWebSocketRequestCopiesResponsesAPIRequest() throws {
         let httpRequest = ResponsesAPIRequest(
             model: "gpt-test",

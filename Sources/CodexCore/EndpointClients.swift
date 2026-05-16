@@ -807,7 +807,7 @@ private enum AttestationRequestHeaders {
                 ?? headers["session_id"]
                 ?? headers["session-id"],
               let headerValue = await provider.header(for: Attestation.Context(threadID: threadID)),
-              validHeaderValue(headerValue)
+              CodexRequestHeaders.isValidHeaderValue(headerValue)
         else {
             return headers
         }
@@ -815,12 +815,6 @@ private enum AttestationRequestHeaders {
         var copy = headers
         copy[Attestation.headerName] = headerValue
         return copy
-    }
-
-    private static func validHeaderValue(_ value: String) -> Bool {
-        value.unicodeScalars.allSatisfy { scalar in
-            scalar.value == 0x09 || (0x20...0x7E).contains(scalar.value)
-        }
     }
 }
 
@@ -953,18 +947,18 @@ public struct ResponsesClient<Transport: APITransport, Auth: APIAuthProvider> {
         var headers: [String: String] = [:]
         if let betaFeaturesHeader,
            !betaFeaturesHeader.isEmpty,
-           Self.validHeaderValue(betaFeaturesHeader) {
+           CodexRequestHeaders.isValidHeaderValue(betaFeaturesHeader) {
             headers["x-codex-beta-features"] = betaFeaturesHeader
         }
         if let turnStateHeader,
-           Self.validHeaderValue(turnStateHeader) {
+           CodexRequestHeaders.isValidHeaderValue(turnStateHeader) {
             headers["x-codex-turn-state"] = turnStateHeader
         }
         if let turnMetadataHeader,
-           Self.validHeaderValue(turnMetadataHeader) {
+           CodexRequestHeaders.isValidHeaderValue(turnMetadataHeader) {
             headers[CodexRequestHeaders.turnMetadataHeaderName] = turnMetadataHeader
         }
-        if Self.validHeaderValue(threadID) {
+        if CodexRequestHeaders.isValidHeaderValue(threadID) {
             headers["x-client-request-id"] = threadID
         }
         for (name, value) in CodexRequestHeaders.sessionHeaders(sessionID: sessionID, threadID: threadID) {
@@ -991,12 +985,6 @@ public struct ResponsesClient<Transport: APITransport, Auth: APIAuthProvider> {
     private static func toolsJSONValues(_ tools: [Any]) throws -> [JSONValue] {
         let data = try JSONSerialization.data(withJSONObject: tools)
         return try JSONDecoder().decode([JSONValue].self, from: data)
-    }
-
-    private static func validHeaderValue(_ value: String) -> Bool {
-        value.unicodeScalars.allSatisfy { scalar in
-            scalar.value == 0x09 || (0x20...0x7E).contains(scalar.value)
-        }
     }
 
     private func headersWithAttestation(_ headers: [String: String]) async -> [String: String] {

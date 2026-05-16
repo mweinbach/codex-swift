@@ -713,7 +713,7 @@ public struct ResponsesRequestBuilder: Equatable, Sendable {
             headers[name] = value
         }
         if let subagent = CodexRequestHeaders.subagentHeader(for: sessionSource) {
-            headers["x-openai-subagent"] = subagent
+            headers[CodexRequestHeaders.subagentHeaderName] = subagent
         }
         if let sanitizedTurnMetadataHeader {
             headers[CodexRequestHeaders.turnMetadataHeaderName] = sanitizedTurnMetadataHeader
@@ -736,9 +736,7 @@ public struct ResponsesRequestBuilder: Equatable, Sendable {
 
     private static func validHeaderValue(_ value: String?) -> String? {
         guard let value,
-              value.unicodeScalars.allSatisfy({ scalar in
-                scalar.value == 0x09 || (0x20...0x7E).contains(scalar.value)
-              })
+              CodexRequestHeaders.isValidHeaderValue(value)
         else {
             return nil
         }

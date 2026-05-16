@@ -182,6 +182,10 @@ final class SessionSourceTests: XCTestCase {
     func testSubagentHeaderMatchesRustHelper() {
         XCTAssertNil(CodexRequestHeaders.subagentHeader(for: nil))
         XCTAssertNil(CodexRequestHeaders.subagentHeader(for: .cli))
+        XCTAssertEqual(
+            CodexRequestHeaders.subagentHeader(for: .internal(.memoryConsolidation)),
+            "memory_consolidation"
+        )
         XCTAssertEqual(CodexRequestHeaders.subagentHeader(for: .subagent(.review)), "review")
         XCTAssertEqual(CodexRequestHeaders.subagentHeader(for: .subagent(.compact)), "compact")
         XCTAssertEqual(CodexRequestHeaders.subagentHeader(for: .subagent(.memoryConsolidation)), "memory_consolidation")

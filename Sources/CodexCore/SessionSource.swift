@@ -431,6 +431,10 @@ extension SubAgentSource: Codable {
 }
 
 public enum CodexRequestHeaders {
+    public static let installationIDHeaderName = "x-codex-installation-id"
+    public static let windowIDHeaderName = "x-codex-window-id"
+    public static let parentThreadIDHeaderName = "x-codex-parent-thread-id"
+    public static let subagentHeaderName = "x-openai-subagent"
     public static let turnMetadataHeaderName = "x-codex-turn-metadata"
 
     public static func sessionHeaders(sessionID: String?, threadID: String?) -> [String: String] {
@@ -455,14 +459,55 @@ public enum CodexRequestHeaders {
     }
 
     public static func subagentHeader(for source: SessionSource?) -> String? {
-        guard case let .subagent(subagent)? = source else {
+        switch source {
+        case let .subagent(subagent):
+            switch subagent {
+            case .review, .compact, .memoryConsolidation, .other:
+                return subagent.description
+            case .threadSpawn:
+                return "collab_spawn"
+            }
+        case .internal(.memoryConsolidation):
+            return "memory_consolidation"
+        case .cli, .vscode, .exec, .mcp, .custom, .unknown, nil:
             return nil
         }
-        switch subagent {
-        case .review, .compact, .memoryConsolidation, .other:
-            return subagent.description
-        case .threadSpawn:
-            return "collab_spawn"
+    }
+
+    public static func parentThreadIDHeader(for source: SessionSource?) -> String? {
+        guard case let .subagent(.threadSpawn(parentThreadID, _, _, _, _)) = source else {
+            return nil
         }
+        return parentThreadID.description
+    }
+
+    public static func isValidHeaderValue(_ value: String) -> Bool {
+        value.unicodeScalars.allSatisfy { scalar in
+            scalar.value == 0x09 || (0x20...0x7E).contains(scalar.value)
+        }
+    }
+
+    public static func webSocketClientMetadata(
+        installationID: String,
+        threadID: ThreadId,
+        windowGeneration: Int,
+        sessionSource: SessionSource,
+        turnMetadataHeader: String? = nil
+    ) -> [String: String] {
+        var metadata = [
+            installationIDHeaderName: installationID,
+            windowIDHeaderName: "\(threadID):\(windowGeneration)"
+        ]
+        if let subagent = subagentHeader(for: sessionSource) {
+            metadata[subagentHeaderName] = subagent
+        }
+        if let parentThreadID = parentThreadIDHeader(for: sessionSource) {
+            metadata[parentThreadIDHeaderName] = parentThreadID
+        }
+        if let turnMetadataHeader,
+           isValidHeaderValue(turnMetadataHeader) {
+            metadata[turnMetadataHeaderName] = turnMetadataHeader
+        }
+        return metadata
     }
 }
