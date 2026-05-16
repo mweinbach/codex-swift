@@ -202,6 +202,10 @@ Recent upstream audit checkpoint:
   and expose the Rust helper that maps built-in active profile selections back
   to read-only, workspace-write, or disabled permission profiles while rejecting
   extended/custom selections.
+- 2026-05-16: rechecked Rust commit `4bff020a96` (`Remove SSE fixture
+  loaders`). Swift no longer carries the stale `CODEX_RS_SSE_FIXTURE`
+  environment helper or tests; Responses SSE parser coverage uses inline
+  structured event fixtures like current Rust test support.
 - 2026-05-16: rechecked Rust branch commit `40fd064ce2` (`Simplify remote
   installed scope gating`) and `codex-rs/features/src/lib.rs`. Swift now
   includes Rust's stable `plugin_sharing` feature flag, omits the explicit
@@ -1993,8 +1997,6 @@ Recent upstream audit checkpoint:
   - `exec` pragma parsing, public/nested tool filtering, JavaScript identifier normalization, image detail wire values, and function-call image-output detail serialization
 - `codex-rs/cli/src/main.rs` computer-use dispatch
   - top-level `codex computer-use ...` now reuses the non-interactive exec parser/runtime with `features.computer_use` overrides and the bundled computer-use prompt as a harness/base-instructions override
-- `codex-rs/core/src/flags.rs`
-  - `CODEX_RS_SSE_FIXTURE` environment flag helper and Responses SSE fixture stream reader for offline SSE fixture wiring
 - `codex-rs/core/src/git_info.rs`
   - lightweight `.git` root detection, git metadata collection, recent commit picker entries, branch/default-branch helpers, remote-base diff collection with untracked-file diffs, and trust-root resolution for regular repos and worktrees
 - `codex-rs/analytics/src/accepted_lines.rs` plus `codex-rs/git-utils/src/info.rs` remote URL helpers
