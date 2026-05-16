@@ -23,6 +23,7 @@ public struct ApprovalStore: Sendable {
 
     private static func serializedKey<Key: Encodable>(_ key: Key) -> String? {
         let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
         guard let data = try? encoder.encode(key) else {
             return nil
         }
