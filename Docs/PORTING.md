@@ -12,6 +12,13 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust `ConfigProfile` in
+  `codex-rs/config/src/profile_toml.rs`. Swift's Rust-shaped config profile
+  model now accepts and serializes the same direct runtime fields
+  (`model_catalog_json`, `personality`, `model_instructions_file`, deprecated
+  JS REPL path fields, and `zsh_path`) plus the profile-scoped `tools`,
+  `analytics`, `tui.session_picker_view`, and `windows` tables while keeping
+  Rust-style unknown-field rejection.
 - 2026-05-16: rechecked current Rust `SessionMeta` in
   `codex-rs/protocol/src/protocol.rs`. Swift session metadata now ignores
   legacy `instructions` fields when decoding old rollout records and no longer

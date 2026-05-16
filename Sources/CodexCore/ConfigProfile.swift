@@ -18,6 +18,142 @@ public struct FeaturesToml: Codable, Equatable, Sendable {
     }
 }
 
+public struct ConfigProfileTools: Codable, Equatable, Sendable {
+    public var webSearch: AppServerProtocol.WebSearchToolConfig?
+    public var viewImage: Bool?
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case webSearch = "web_search"
+        case viewImage = "view_image"
+    }
+
+    public init(
+        webSearch: AppServerProtocol.WebSearchToolConfig? = nil,
+        viewImage: Bool? = nil
+    ) {
+        self.webSearch = webSearch
+        self.viewImage = viewImage
+    }
+
+    public init(from decoder: Decoder) throws {
+        try rejectUnknownConfigProfileKeys(
+            in: decoder,
+            allowedKeys: Set(CodingKeys.allCases.map(\.stringValue))
+        )
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if container.contains(.webSearch),
+           (try? container.decode(Bool.self, forKey: .webSearch)) != nil {
+            self.webSearch = nil
+        } else {
+            self.webSearch = try container.decodeIfPresent(
+                AppServerProtocol.WebSearchToolConfig.self,
+                forKey: .webSearch
+            )
+        }
+        self.viewImage = try container.decodeIfPresent(Bool.self, forKey: .viewImage)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try encodeOptional(webSearch, into: &container, forKey: .webSearch)
+        try encodeOptional(viewImage, into: &container, forKey: .viewImage)
+    }
+}
+
+public struct ConfigProfileAnalytics: Codable, Equatable, Sendable {
+    public var enabled: Bool?
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case enabled
+    }
+
+    public init(enabled: Bool? = nil) {
+        self.enabled = enabled
+    }
+
+    public init(from decoder: Decoder) throws {
+        try rejectUnknownConfigProfileKeys(
+            in: decoder,
+            allowedKeys: Set(CodingKeys.allCases.map(\.stringValue))
+        )
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try encodeOptional(enabled, into: &container, forKey: .enabled)
+    }
+}
+
+public struct ConfigProfileTui: Codable, Equatable, Sendable {
+    public var sessionPickerView: TuiSessionPickerViewMode?
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case sessionPickerView = "session_picker_view"
+    }
+
+    public init(sessionPickerView: TuiSessionPickerViewMode? = nil) {
+        self.sessionPickerView = sessionPickerView
+    }
+
+    public init(from decoder: Decoder) throws {
+        try rejectUnknownConfigProfileKeys(
+            in: decoder,
+            allowedKeys: Set(CodingKeys.allCases.map(\.stringValue))
+        )
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.sessionPickerView = try container.decodeIfPresent(
+            TuiSessionPickerViewMode.self,
+            forKey: .sessionPickerView
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try encodeOptional(sessionPickerView, into: &container, forKey: .sessionPickerView)
+    }
+}
+
+public enum ConfigProfileWindowsSandboxMode: String, Codable, Equatable, Sendable {
+    case elevated
+    case unelevated
+}
+
+public struct ConfigProfileWindows: Codable, Equatable, Sendable {
+    public var sandbox: ConfigProfileWindowsSandboxMode?
+    public var sandboxPrivateDesktop: Bool?
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case sandbox
+        case sandboxPrivateDesktop = "sandbox_private_desktop"
+    }
+
+    public init(
+        sandbox: ConfigProfileWindowsSandboxMode? = nil,
+        sandboxPrivateDesktop: Bool? = nil
+    ) {
+        self.sandbox = sandbox
+        self.sandboxPrivateDesktop = sandboxPrivateDesktop
+    }
+
+    public init(from decoder: Decoder) throws {
+        try rejectUnknownConfigProfileKeys(
+            in: decoder,
+            allowedKeys: Set(CodingKeys.allCases.map(\.stringValue))
+        )
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.sandbox = try container.decodeIfPresent(ConfigProfileWindowsSandboxMode.self, forKey: .sandbox)
+        self.sandboxPrivateDesktop = try container.decodeIfPresent(Bool.self, forKey: .sandboxPrivateDesktop)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try encodeOptional(sandbox, into: &container, forKey: .sandbox)
+        try encodeOptional(sandboxPrivateDesktop, into: &container, forKey: .sandboxPrivateDesktop)
+    }
+}
+
 private struct ConfigProfileAnyCodingKey: CodingKey {
     let stringValue: String
     let intValue: Int? = nil
@@ -28,6 +164,18 @@ private struct ConfigProfileAnyCodingKey: CodingKey {
 
     init?(intValue: Int) {
         nil
+    }
+}
+
+private func rejectUnknownConfigProfileKeys(in decoder: Decoder, allowedKeys: Set<String>) throws {
+    let container = try decoder.container(keyedBy: ConfigProfileAnyCodingKey.self)
+    if let unknown = container.allKeys.first(where: { !allowedKeys.contains($0.stringValue) }) {
+        throw DecodingError.dataCorrupted(
+            DecodingError.Context(
+                codingPath: decoder.codingPath + [unknown],
+                debugDescription: "Unknown field '\(unknown.stringValue)'"
+            )
+        )
     }
 }
 
@@ -42,7 +190,13 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
     public var modelReasoningSummary: ReasoningSummary?
     public var modelVerbosity: Verbosity?
     public var serviceTier: String?
+    public var modelCatalogJSON: String?
+    public var personality: Personality?
     public var chatgptBaseURL: String?
+    public var modelInstructionsFile: String?
+    public var jsReplNodePath: String?
+    public var jsReplNodeModuleDirs: [String]?
+    public var zshPath: String?
     public var experimentalInstructionsFile: String?
     public var experimentalCompactPromptFile: String?
     public var includePermissionsInstructions: Bool?
@@ -54,6 +208,10 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
     public var webSearchMode: WebSearchMode?
     public var toolsWebSearch: Bool?
     public var toolsViewImage: Bool?
+    public var tools: ConfigProfileTools?
+    public var analytics: ConfigProfileAnalytics?
+    public var tui: ConfigProfileTui?
+    public var windows: ConfigProfileWindows?
     public var features: FeaturesToml?
     public var ossProvider: String?
 
@@ -68,7 +226,13 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         case modelReasoningSummary = "model_reasoning_summary"
         case modelVerbosity = "model_verbosity"
         case serviceTier = "service_tier"
+        case modelCatalogJSON = "model_catalog_json"
+        case personality
         case chatgptBaseURL = "chatgpt_base_url"
+        case modelInstructionsFile = "model_instructions_file"
+        case jsReplNodePath = "js_repl_node_path"
+        case jsReplNodeModuleDirs = "js_repl_node_module_dirs"
+        case zshPath = "zsh_path"
         case experimentalInstructionsFile = "experimental_instructions_file"
         case experimentalCompactPromptFile = "experimental_compact_prompt_file"
         case includePermissionsInstructions = "include_permissions_instructions"
@@ -80,6 +244,10 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         case webSearchMode = "web_search"
         case toolsWebSearch = "tools_web_search"
         case toolsViewImage = "tools_view_image"
+        case tools
+        case analytics
+        case tui
+        case windows
         case features
         case ossProvider = "oss_provider"
     }
@@ -95,7 +263,13 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         modelReasoningSummary: ReasoningSummary? = nil,
         modelVerbosity: Verbosity? = nil,
         serviceTier: String? = nil,
+        modelCatalogJSON: String? = nil,
+        personality: Personality? = nil,
         chatgptBaseURL: String? = nil,
+        modelInstructionsFile: String? = nil,
+        jsReplNodePath: String? = nil,
+        jsReplNodeModuleDirs: [String]? = nil,
+        zshPath: String? = nil,
         experimentalInstructionsFile: String? = nil,
         experimentalCompactPromptFile: String? = nil,
         includePermissionsInstructions: Bool? = nil,
@@ -107,6 +281,10 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         webSearchMode: WebSearchMode? = nil,
         toolsWebSearch: Bool? = nil,
         toolsViewImage: Bool? = nil,
+        tools: ConfigProfileTools? = nil,
+        analytics: ConfigProfileAnalytics? = nil,
+        tui: ConfigProfileTui? = nil,
+        windows: ConfigProfileWindows? = nil,
         features: FeaturesToml? = nil,
         ossProvider: String? = nil
     ) {
@@ -120,7 +298,13 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         self.modelReasoningSummary = modelReasoningSummary
         self.modelVerbosity = modelVerbosity
         self.serviceTier = serviceTier
+        self.modelCatalogJSON = modelCatalogJSON
+        self.personality = personality
         self.chatgptBaseURL = chatgptBaseURL
+        self.modelInstructionsFile = modelInstructionsFile
+        self.jsReplNodePath = jsReplNodePath
+        self.jsReplNodeModuleDirs = jsReplNodeModuleDirs
+        self.zshPath = zshPath
         self.experimentalInstructionsFile = experimentalInstructionsFile
         self.experimentalCompactPromptFile = experimentalCompactPromptFile
         self.includePermissionsInstructions = includePermissionsInstructions
@@ -132,6 +316,10 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         self.webSearchMode = webSearchMode
         self.toolsWebSearch = toolsWebSearch
         self.toolsViewImage = toolsViewImage
+        self.tools = tools
+        self.analytics = analytics
+        self.tui = tui
+        self.windows = windows
         self.features = features
         self.ossProvider = ossProvider
     }
@@ -149,7 +337,13 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         self.modelReasoningSummary = try container.decodeIfPresent(ReasoningSummary.self, forKey: .modelReasoningSummary)
         self.modelVerbosity = try container.decodeIfPresent(Verbosity.self, forKey: .modelVerbosity)
         self.serviceTier = try container.decodeIfPresent(String.self, forKey: .serviceTier)
+        self.modelCatalogJSON = try container.decodeIfPresent(String.self, forKey: .modelCatalogJSON)
+        self.personality = try container.decodeIfPresent(Personality.self, forKey: .personality)
         self.chatgptBaseURL = try container.decodeIfPresent(String.self, forKey: .chatgptBaseURL)
+        self.modelInstructionsFile = try container.decodeIfPresent(String.self, forKey: .modelInstructionsFile)
+        self.jsReplNodePath = try container.decodeIfPresent(String.self, forKey: .jsReplNodePath)
+        self.jsReplNodeModuleDirs = try container.decodeIfPresent([String].self, forKey: .jsReplNodeModuleDirs)
+        self.zshPath = try container.decodeIfPresent(String.self, forKey: .zshPath)
         self.experimentalInstructionsFile = try container.decodeIfPresent(String.self, forKey: .experimentalInstructionsFile)
         self.experimentalCompactPromptFile = try container.decodeIfPresent(String.self, forKey: .experimentalCompactPromptFile)
         self.includePermissionsInstructions = try container.decodeIfPresent(Bool.self, forKey: .includePermissionsInstructions)
@@ -161,21 +355,19 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         self.webSearchMode = try container.decodeIfPresent(WebSearchMode.self, forKey: .webSearchMode)
         self.toolsWebSearch = try container.decodeIfPresent(Bool.self, forKey: .toolsWebSearch)
         self.toolsViewImage = try container.decodeIfPresent(Bool.self, forKey: .toolsViewImage)
+        self.tools = try container.decodeIfPresent(ConfigProfileTools.self, forKey: .tools)
+        self.analytics = try container.decodeIfPresent(ConfigProfileAnalytics.self, forKey: .analytics)
+        self.tui = try container.decodeIfPresent(ConfigProfileTui.self, forKey: .tui)
+        self.windows = try container.decodeIfPresent(ConfigProfileWindows.self, forKey: .windows)
         self.features = try container.decodeIfPresent(FeaturesToml.self, forKey: .features)
         self.ossProvider = try container.decodeIfPresent(String.self, forKey: .ossProvider)
     }
 
     private static func rejectUnknownKeys(in decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: ConfigProfileAnyCodingKey.self)
-        let allowedKeys = Set(CodingKeys.allCases.map(\.stringValue))
-        if let unknown = container.allKeys.first(where: { !allowedKeys.contains($0.stringValue) }) {
-            throw DecodingError.dataCorrupted(
-                DecodingError.Context(
-                    codingPath: decoder.codingPath + [unknown],
-                    debugDescription: "Unknown field '\(unknown.stringValue)'"
-                )
-            )
-        }
+        try rejectUnknownConfigProfileKeys(
+            in: decoder,
+            allowedKeys: Set(CodingKeys.allCases.map(\.stringValue))
+        )
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -190,7 +382,13 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         try encodeOptional(modelReasoningSummary, into: &container, forKey: .modelReasoningSummary)
         try encodeOptional(modelVerbosity, into: &container, forKey: .modelVerbosity)
         try encodeOptional(serviceTier, into: &container, forKey: .serviceTier)
+        try encodeOptional(modelCatalogJSON, into: &container, forKey: .modelCatalogJSON)
+        try encodeOptional(personality, into: &container, forKey: .personality)
         try encodeOptional(chatgptBaseURL, into: &container, forKey: .chatgptBaseURL)
+        try encodeOptional(modelInstructionsFile, into: &container, forKey: .modelInstructionsFile)
+        try encodeOptional(jsReplNodePath, into: &container, forKey: .jsReplNodePath)
+        try encodeOptional(jsReplNodeModuleDirs, into: &container, forKey: .jsReplNodeModuleDirs)
+        try encodeOptional(zshPath, into: &container, forKey: .zshPath)
         try encodeOptional(experimentalInstructionsFile, into: &container, forKey: .experimentalInstructionsFile)
         try encodeOptional(experimentalCompactPromptFile, into: &container, forKey: .experimentalCompactPromptFile)
         try encodeOptional(includePermissionsInstructions, into: &container, forKey: .includePermissionsInstructions)
@@ -202,6 +400,10 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         try encodeOptional(webSearchMode, into: &container, forKey: .webSearchMode)
         try encodeOptional(toolsWebSearch, into: &container, forKey: .toolsWebSearch)
         try encodeOptional(toolsViewImage, into: &container, forKey: .toolsViewImage)
+        try encodeOptional(tools, into: &container, forKey: .tools)
+        try encodeOptional(analytics, into: &container, forKey: .analytics)
+        try encodeOptional(tui, into: &container, forKey: .tui)
+        try encodeOptional(windows, into: &container, forKey: .windows)
         try encodeOptional(features, into: &container, forKey: .features)
         try encodeOptional(ossProvider, into: &container, forKey: .ossProvider)
     }

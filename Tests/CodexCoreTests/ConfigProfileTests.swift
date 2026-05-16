@@ -28,7 +28,13 @@ final class ConfigProfileTests: XCTestCase {
                 modelReasoningSummary: .detailed,
                 modelVerbosity: .medium,
                 serviceTier: "priority",
+                modelCatalogJSON: "/repo/models.json",
+                personality: .friendly,
                 chatgptBaseURL: "https://chatgpt.example/backend-api/",
+                modelInstructionsFile: "/repo/model.md",
+                jsReplNodePath: "/usr/local/bin/node",
+                jsReplNodeModuleDirs: ["/repo/node_modules"],
+                zshPath: "/usr/local/bin/zsh",
                 experimentalInstructionsFile: "/repo/instructions.md",
                 experimentalCompactPromptFile: "/repo/compact.md",
                 includePermissionsInstructions: true,
@@ -40,6 +46,17 @@ final class ConfigProfileTests: XCTestCase {
                 webSearchMode: .cached,
                 toolsWebSearch: true,
                 toolsViewImage: false,
+                tools: ConfigProfileTools(
+                    webSearch: AppServerProtocol.WebSearchToolConfig(
+                        contextSize: .low,
+                        allowedDomains: ["openai.com"],
+                        location: AppServerProtocol.WebSearchLocation(country: "US")
+                    ),
+                    viewImage: true
+                ),
+                analytics: ConfigProfileAnalytics(enabled: false),
+                tui: ConfigProfileTui(sessionPickerView: .comfortable),
+                windows: ConfigProfileWindows(sandbox: .unelevated, sandboxPrivateDesktop: false),
                 features: FeaturesToml(entries: ["skills": true]),
                 ossProvider: "ollama"
             ),
@@ -54,7 +71,13 @@ final class ConfigProfileTests: XCTestCase {
                 "model_reasoning_summary": "detailed",
                 "model_verbosity": "medium",
                 "service_tier": "priority",
+                "model_catalog_json": "/repo/models.json",
+                "personality": "friendly",
                 "chatgpt_base_url": "https://chatgpt.example/backend-api/",
+                "model_instructions_file": "/repo/model.md",
+                "js_repl_node_path": "/usr/local/bin/node",
+                "js_repl_node_module_dirs": ["/repo/node_modules"],
+                "zsh_path": "/usr/local/bin/zsh",
                 "experimental_instructions_file": "/repo/instructions.md",
                 "experimental_compact_prompt_file": "/repo/compact.md",
                 "include_permissions_instructions": true,
@@ -66,6 +89,25 @@ final class ConfigProfileTests: XCTestCase {
                 "web_search": "cached",
                 "tools_web_search": true,
                 "tools_view_image": false,
+                "tools": [
+                    "web_search": [
+                        "context_size": "low",
+                        "allowed_domains": ["openai.com"],
+                        "location": [
+                            "country": "US",
+                            "region": NSNull(),
+                            "city": NSNull(),
+                            "timezone": NSNull()
+                        ]
+                    ],
+                    "view_image": true
+                ],
+                "analytics": ["enabled": false],
+                "tui": ["session_picker_view": "comfortable"],
+                "windows": [
+                    "sandbox": "unelevated",
+                    "sandbox_private_desktop": false
+                ],
                 "features": ["skills": true],
                 "oss_provider": "ollama"
             ]
@@ -84,7 +126,13 @@ final class ConfigProfileTests: XCTestCase {
                 "model_reasoning_summary": NSNull(),
                 "model_verbosity": NSNull(),
                 "service_tier": NSNull(),
+                "model_catalog_json": NSNull(),
+                "personality": NSNull(),
                 "chatgpt_base_url": NSNull(),
+                "model_instructions_file": NSNull(),
+                "js_repl_node_path": NSNull(),
+                "js_repl_node_module_dirs": NSNull(),
+                "zsh_path": NSNull(),
                 "experimental_instructions_file": NSNull(),
                 "experimental_compact_prompt_file": NSNull(),
                 "include_permissions_instructions": NSNull(),
@@ -96,6 +144,10 @@ final class ConfigProfileTests: XCTestCase {
                 "web_search": NSNull(),
                 "tools_web_search": NSNull(),
                 "tools_view_image": NSNull(),
+                "tools": NSNull(),
+                "analytics": NSNull(),
+                "tui": NSNull(),
+                "windows": NSNull(),
                 "features": NSNull(),
                 "oss_provider": NSNull()
             ]
@@ -106,6 +158,26 @@ final class ConfigProfileTests: XCTestCase {
         let profile = try JSONDecoder().decode(ConfigProfile.self, from: Data("""
         {
           "model": "gpt-5.4",
+          "model_catalog_json": "/repo/models.json",
+          "personality": "pragmatic",
+          "model_instructions_file": "/repo/model.md",
+          "js_repl_node_path": "/usr/local/bin/node",
+          "js_repl_node_module_dirs": ["/repo/node_modules"],
+          "zsh_path": "/usr/local/bin/zsh",
+          "tools": {
+            "web_search": true,
+            "view_image": false
+          },
+          "analytics": {
+            "enabled": true
+          },
+          "tui": {
+            "session_picker_view": "dense"
+          },
+          "windows": {
+            "sandbox": "elevated",
+            "sandbox_private_desktop": true
+          },
           "features": {
             "skills": true,
             "web_search_request": false
@@ -115,6 +187,16 @@ final class ConfigProfileTests: XCTestCase {
 
         XCTAssertEqual(profile.model, "gpt-5.4")
         XCTAssertEqual(profile.modelProvider, nil)
+        XCTAssertEqual(profile.modelCatalogJSON, "/repo/models.json")
+        XCTAssertEqual(profile.personality, .pragmatic)
+        XCTAssertEqual(profile.modelInstructionsFile, "/repo/model.md")
+        XCTAssertEqual(profile.jsReplNodePath, "/usr/local/bin/node")
+        XCTAssertEqual(profile.jsReplNodeModuleDirs, ["/repo/node_modules"])
+        XCTAssertEqual(profile.zshPath, "/usr/local/bin/zsh")
+        XCTAssertEqual(profile.tools, ConfigProfileTools(webSearch: nil, viewImage: false))
+        XCTAssertEqual(profile.analytics, ConfigProfileAnalytics(enabled: true))
+        XCTAssertEqual(profile.tui, ConfigProfileTui(sessionPickerView: .dense))
+        XCTAssertEqual(profile.windows, ConfigProfileWindows(sandbox: .elevated, sandboxPrivateDesktop: true))
         XCTAssertEqual(profile.features, FeaturesToml(entries: [
             "skills": true,
             "web_search_request": false
@@ -138,6 +220,26 @@ final class ConfigProfileTests: XCTestCase {
         }
     }
 
+    func testConfigProfileRejectsUnknownNestedTableFieldsLikeRustDenyUnknownFields() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(ConfigProfile.self, from: Data("""
+            {
+              "model": "gpt-5.4",
+              "tui": {
+                "session_picker_view": "dense",
+                "theme": "unsupported-here"
+              }
+            }
+            """.utf8))
+        ) { error in
+            let decodingError = error as? DecodingError
+            guard case let .dataCorrupted(context)? = decodingError else {
+                return XCTFail("expected dataCorrupted error, got \(error)")
+            }
+            XCTAssertEqual(context.debugDescription, "Unknown field 'theme'")
+        }
+    }
+
     func testAppServerProfileConversionKeepsOnlyRustForwardedFields() throws {
         let profile = ConfigProfile(
             model: "gpt-5.4",
@@ -151,8 +253,11 @@ final class ConfigProfileTests: XCTestCase {
             modelVerbosity: .high,
             serviceTier: "flex",
             chatgptBaseURL: "https://chatgpt.example/backend-api/",
+            modelInstructionsFile: "/repo/model.md",
+            zshPath: "/usr/local/bin/zsh",
             includeApplyPatchTool: true,
             toolsWebSearch: true,
+            analytics: ConfigProfileAnalytics(enabled: true),
             features: FeaturesToml(entries: ["skills": false]),
             ossProvider: "ollama"
         )
