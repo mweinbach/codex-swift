@@ -12,6 +12,17 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commits `3a23e87e20` (`tui: recover local state
+  db startup failures`) and `53a36fc1c2` (`Block appserver startup if state db
+  can't be opened`) against `codex-rs/tui/src/startup_error.rs`,
+  `codex-rs/cli/src/state_db_recovery.rs`, and the app-server entrypoint.
+  Swift now has a typed local state DB startup error plus recovery helpers that
+  detect locked/busy SQLite failures, emit Rust's damaged-database and
+  locked-database guidance, replace a blocking sqlite-home file with a
+  directory, and back up `state_5.sqlite`/`logs_2.sqlite` plus `-wal`/`-shm`
+  sidecars before rebuilding local data. The Swift app-server executable now
+  fails closed with that typed startup error instead of silently continuing
+  without a state store when SQLite initialization fails.
 - 2026-05-16: rechecked Rust commit `249d50aafc` (`Soften SQLite
   metadata sync failures`) against
   `codex-rs/thread-store/src/local/update_thread_metadata.rs`. Swift
