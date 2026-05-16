@@ -693,6 +693,24 @@ final class ParsedCommandTests: XCTestCase {
         ])
     }
 
+    func testRustSimplifierDropsLeadingEchoAndFlagOnlyNlHelpers() {
+        XCTAssertEqual(parseCommand(["bash", "-lc", "echo starting && cat README.md"]), [
+            .read(cmd: "cat README.md", name: "README.md", path: "README.md")
+        ])
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", "echo one && echo two && rg TODO Sources"]), [
+            .search(cmd: "rg TODO Sources", query: "TODO", path: "Sources")
+        ])
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", "nl -ba && cat README.md"]), [
+            .read(cmd: "cat README.md", name: "README.md", path: "README.md")
+        ])
+
+        XCTAssertEqual(parseCommand(["bash", "-lc", "cat README.md && nl -ba"]), [
+            .read(cmd: "cat README.md", name: "README.md", path: "README.md")
+        ])
+    }
+
     func testSplitsSemicolonAndOrConnectorsLikeRust() {
         XCTAssertEqual(parseCommand(["bash", "-lc", "rg foo ; echo done"]), [
             .unknown(cmd: "rg foo ; echo done")
