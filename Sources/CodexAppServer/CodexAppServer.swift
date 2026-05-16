@@ -106,12 +106,20 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
     public let threadID: String
     public let turnID: String
     public let op: Op
+    public let mcpElicitationsAutoDeny: Bool
 
-    public init(requestID: RequestID, threadID: String, turnID: String, op: Op) {
+    public init(
+        requestID: RequestID,
+        threadID: String,
+        turnID: String,
+        op: Op,
+        mcpElicitationsAutoDeny: Bool = false
+    ) {
         self.requestID = requestID
         self.threadID = threadID
         self.turnID = turnID
         self.op = op
+        self.mcpElicitationsAutoDeny = mcpElicitationsAutoDeny
     }
 }
 
@@ -949,6 +957,11 @@ public enum CodexAppServer {
     fileprivate static let fuzzyFileSearchLimitPerRoot = 50
     private static let interactiveSessionSources: [SessionSource] = [.cli, .vscode]
     fileprivate static let platformFamily = "unix"
+    // Xcode 26.4 predates client-visible app-server MCP elicitation requests.
+    fileprivate static func xcode264McpElicitationsAutoDeny(clientName: String?, clientVersion: String?) -> Bool {
+        clientName == "Xcode" && (clientVersion?.hasPrefix("26.4") ?? false)
+    }
+
     fileprivate static var platformOS: String {
         #if os(macOS)
             return "macos"
@@ -27863,7 +27876,11 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                 requestID: requestID,
                 threadID: threadID,
                 turnID: turnID,
-                op: op
+                op: op,
+                mcpElicitationsAutoDeny: CodexAppServer.xcode264McpElicitationsAutoDeny(
+                    clientName: appServerClientName,
+                    clientVersion: appServerClientVersion
+                )
             ))
         } catch {
             throw AppServerError.internalError("\(failureMessage): \(error)")

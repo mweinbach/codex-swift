@@ -4237,6 +4237,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(turnID, "turn-2")
         XCTAssertEqual(coreOpCapture.submissions.map(\.requestID), [.integer(2)])
         XCTAssertEqual(liveRuntime.submissions.map(\.turnID), [turnID])
+        XCTAssertEqual(liveRuntime.submissions.map(\.mcpElicitationsAutoDeny), [false])
 
         let active = try decodeMessages(try await nextNotificationPayload(notificationCapture))
         XCTAssertEqual(active[0]["method"] as? String, "thread/status/changed")
@@ -4285,6 +4286,46 @@ final class CodexAppServerTests: XCTestCase {
         let steerError = try XCTUnwrap(steerAfterCompletion["error"] as? [String: Any])
         XCTAssertEqual(steerError["code"] as? Int, -32600)
         XCTAssertEqual(steerError["message"] as? String, "no active turn to steer")
+    }
+
+    func testTurnStartLiveRuntimeAutoDeniesMcpElicitationsForXcode264LikeRust() throws {
+        struct Case {
+            let clientName: String
+            let clientVersion: String
+            let expectedAutoDeny: Bool
+        }
+        let cases = [
+            Case(clientName: "Xcode", clientVersion: "26.4", expectedAutoDeny: true),
+            Case(clientName: "Xcode", clientVersion: "26.4.1", expectedAutoDeny: true),
+            Case(clientName: "Xcode", clientVersion: "26.5", expectedAutoDeny: false),
+            Case(clientName: "xcode", clientVersion: "26.4", expectedAutoDeny: false),
+            Case(clientName: "Codex", clientVersion: "26.4", expectedAutoDeny: false)
+        ]
+
+        for testCase in cases {
+            let temp = try TemporaryDirectory()
+            let coreOpCapture = AppServerCoreOpCapture()
+            let liveRuntime = AppServerLiveRuntimeCapture { _ in [] }
+            let processor = try initializedProcessor(
+                configuration: testConfiguration(codexHome: temp.url),
+                coreOpSubmitter: coreOpCapture.submit,
+                liveRuntimeSubmitter: liveRuntime.submit,
+                experimentalAPIEnabled: true,
+                clientName: testCase.clientName,
+                clientVersion: testCase.clientVersion
+            )
+            let threadID = try startLoadedThread(processor: processor)
+
+            _ = try decodeMessages(processor.processLine(Data(
+                #"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Live"}]}}"#.utf8
+            )))
+
+            XCTAssertEqual(
+                liveRuntime.submissions.map(\.mcpElicitationsAutoDeny),
+                [testCase.expectedAutoDeny],
+                "\(testCase.clientName) \(testCase.clientVersion)"
+            )
+        }
     }
 
     func testTurnStartStartsMemoryStartupTaskAfterRuntimeSubmitWithInputLikeRust() throws {
@@ -31503,7 +31544,9 @@ final class CodexAppServerTests: XCTestCase {
         liveRuntimeSubmitter: AppServerLiveRuntimeSubmitter? = nil,
         threadStateManager: AppServerThreadStateManager = AppServerThreadStateManager(),
         experimentalAPIEnabled: Bool = false,
-        optOutNotificationMethods: [String] = []
+        optOutNotificationMethods: [String] = [],
+        clientName: String = "test",
+        clientVersion: String = "0"
     ) throws -> CodexAppServerMessageProcessor {
         let processor = CodexAppServerMessageProcessor(
             configuration: configuration,
@@ -31522,8 +31565,8 @@ final class CodexAppServerTests: XCTestCase {
         }
         var params: [String: Any] = [
             "clientInfo": [
-                "name": "test",
-                "version": "0"
+                "name": clientName,
+                "version": clientVersion
             ]
         ]
         if !capabilities.isEmpty {
