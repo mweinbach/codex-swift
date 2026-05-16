@@ -14381,18 +14381,27 @@ public enum CodexAppServer {
 
     fileprivate static func mcpServerToolCallResult(
         params: [String: Any]?,
-        configuration: CodexAppServerConfiguration
+        configuration: CodexAppServerConfiguration,
+        isThreadLoaded: (String) -> Bool = { _ in true }
     ) throws -> [String: Any] {
-        let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
-        try validateMaterializedThreadID(threadID, configuration: configuration)
-        let cwdFallback = try mcpThreadCwdFallback(
-            threadID: threadID,
-            configuration: configuration
-        )
+        let rawThreadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
+        let threadID: String
+        do {
+            threadID = try ConversationId(string: rawThreadID).description
+        } catch {
+            throw AppServerError.invalidRequest("invalid thread id: \(error)")
+        }
         let server = try rustRequiredStringParam(params?["server"], field: "server")
         let tool = try rustRequiredStringParam(params?["tool"], field: "tool")
         let arguments = params?["arguments"]
         let meta = mcpToolCallMeta(params?["_meta"], threadID: threadID)
+        guard isThreadLoaded(threadID) else {
+            throw AppServerError.invalidRequest("thread not found: \(threadID)")
+        }
+        let cwdFallback = try mcpThreadCwdFallback(
+            threadID: threadID,
+            configuration: configuration
+        )
         let runtimeConfig: CodexRuntimeConfig
         do {
             runtimeConfig = try CodexConfigLoader.load(
@@ -28560,7 +28569,11 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                 case "mcpServer/tool/call":
                     response = CodexAppServer.responseObject(
                         id: id,
-                        result: try CodexAppServer.mcpServerToolCallResult(params: params, configuration: configuration)
+                        result: try CodexAppServer.mcpServerToolCallResult(
+                            params: params,
+                            configuration: configuration,
+                            isThreadLoaded: { self.isThreadLoaded($0) }
+                        )
                     )
                 case "externalAgentConfig/detect":
                     response = CodexAppServer.responseObject(

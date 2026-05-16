@@ -18152,22 +18152,30 @@ final class CodexAppServerTests: XCTestCase {
         let toolMissingThreadRecordError = try XCTUnwrap(toolMissingThreadRecord["error"] as? [String: Any])
         XCTAssertEqual(toolMissingThreadRecordError["code"] as? Int, -32600)
         XCTAssertEqual(toolMissingThreadRecordError["message"] as? String, "thread not found: \(threadID)")
+
+        let toolMaterializedButUnloadedThread = try appServerResponse(
+            #"{"id":12,"method":"mcpServer/tool/call","params":{"threadId":"\#(materializedThreadID)","server":"filesystem","tool":"read_file","arguments":{}}}"#,
+            codexHome: temp.url
+        )
+        let toolMaterializedButUnloadedThreadError = try XCTUnwrap(
+            toolMaterializedButUnloadedThread["error"] as? [String: Any]
+        )
+        XCTAssertEqual(toolMaterializedButUnloadedThreadError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            toolMaterializedButUnloadedThreadError["message"] as? String,
+            "thread not found: \(materializedThreadID)"
+        )
     }
 
     func testMcpResourceAndToolCallsReportUnknownOrDisabledServersLikeRustManager() throws {
         let temp = try TemporaryDirectory()
-        let threadID = try writeRollout(
-            codexHome: temp.url,
-            filenameTimestamp: "2025-01-02T03-04-07",
-            timestamp: "2025-01-02T03:04:07Z",
-            preview: "mcp unknown server",
-            provider: nil
-        )
         try """
         [mcp_servers.disabled]
         command = "/bin/echo"
         enabled = false
         """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        let threadID = try startLoadedThread(processor: processor)
 
         let missingResource = try appServerResponse(
             #"{"id":1,"method":"mcpServer/resource/read","params":{"server":"missing","uri":"test://codex/resource"}}"#,
@@ -18185,18 +18193,16 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(disabledResourceError["code"] as? Int, -32603)
         XCTAssertEqual(disabledResourceError["message"] as? String, "unknown MCP server 'disabled'")
 
-        let missingTool = try appServerResponse(
-            #"{"id":3,"method":"mcpServer/tool/call","params":{"threadId":"\#(threadID)","server":"missing","tool":"echo_tool","arguments":{}}}"#,
-            codexHome: temp.url
-        )
+        let missingTool = try decode(processor.processLine(Data(
+            #"{"id":3,"method":"mcpServer/tool/call","params":{"threadId":"\#(threadID)","server":"missing","tool":"echo_tool","arguments":{}}}"#.utf8
+        )))
         let missingToolError = try XCTUnwrap(missingTool["error"] as? [String: Any])
         XCTAssertEqual(missingToolError["code"] as? Int, -32603)
         XCTAssertEqual(missingToolError["message"] as? String, "unknown MCP server 'missing'")
 
-        let disabledTool = try appServerResponse(
-            #"{"id":4,"method":"mcpServer/tool/call","params":{"threadId":"\#(threadID)","server":"disabled","tool":"echo_tool","arguments":{}}}"#,
-            codexHome: temp.url
-        )
+        let disabledTool = try decode(processor.processLine(Data(
+            #"{"id":4,"method":"mcpServer/tool/call","params":{"threadId":"\#(threadID)","server":"disabled","tool":"echo_tool","arguments":{}}}"#.utf8
+        )))
         let disabledToolError = try XCTUnwrap(disabledTool["error"] as? [String: Any])
         XCTAssertEqual(disabledToolError["code"] as? Int, -32603)
         XCTAssertEqual(disabledToolError["message"] as? String, "unknown MCP server 'disabled'")
@@ -18471,22 +18477,6 @@ final class CodexAppServerTests: XCTestCase {
 
     func testMcpServerToolCallCallsConfiguredStreamableHTTPServer() throws {
         let temp = try TemporaryDirectory()
-        let threadID = try writeRollout(
-            codexHome: temp.url,
-            filenameTimestamp: "2025-01-02T03-04-05",
-            timestamp: "2025-01-02T03:04:05Z",
-            preview: "call mcp",
-            provider: nil
-        )
-        try """
-        [mcp_servers.tools]
-        url = "https://mcp.example.test/mcp"
-        bearer_token_env_var = "MCP_TOKEN"
-
-        [mcp_servers.tools.http_headers]
-        XStatic = "static-value"
-        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
-
         let capture = MCPHTTPTransportCapture()
         let configuration = CodexAppServerConfiguration(
             codexHome: temp.url,
@@ -18522,6 +18512,15 @@ final class CodexAppServerTests: XCTestCase {
             }
         )
         let processor = try initializedProcessor(configuration: configuration)
+        let threadID = try startLoadedThread(processor: processor)
+        try """
+        [mcp_servers.tools]
+        url = "https://mcp.example.test/mcp"
+        bearer_token_env_var = "MCP_TOKEN"
+
+        [mcp_servers.tools.http_headers]
+        XStatic = "static-value"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
         let response = try decode(processor.processLine(Data(
             #"{"id":1,"method":"mcpServer/tool/call","params":{"threadId":"\#(threadID)","server":"tools","tool":"echo_tool","arguments":{"message":"hello from app"},"_meta":{"source":"mcp-app"}}}"#.utf8
         )))
@@ -18550,27 +18549,6 @@ final class CodexAppServerTests: XCTestCase {
 
     func testMcpServerToolCallUsesHostOwnedCodexAppsServerForMaterializedThread() throws {
         let temp = try TemporaryDirectory()
-        let threadID = try writeRollout(
-            codexHome: temp.url,
-            filenameTimestamp: "2025-01-02T03-04-08",
-            timestamp: "2025-01-02T03:04:08Z",
-            preview: "call codex apps mcp",
-            provider: nil
-        )
-        try """
-        [features.apps_mcp_path_override]
-        path = "/custom/mcp"
-
-        [mcp_servers.codex_apps]
-        url = "https://user.example.test/ignored"
-        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
-        try CodexAuthStorage.saveChatGPTAuthTokens(
-            codexHome: temp.url,
-            accessToken: try fakeJWT(email: "apps-tool@example.com", plan: "pro"),
-            chatGPTAccountID: "acct-tool",
-            chatGPTPlanType: "pro"
-        )
-
         let capture = MCPHTTPTransportCapture()
         let configuration = testConfiguration(
             codexHome: temp.url,
@@ -18601,6 +18579,20 @@ final class CodexAppServerTests: XCTestCase {
             }
         )
         let processor = try initializedProcessor(configuration: configuration)
+        let threadID = try startLoadedThread(processor: processor)
+        try """
+        [features.apps_mcp_path_override]
+        path = "/custom/mcp"
+
+        [mcp_servers.codex_apps]
+        url = "https://user.example.test/ignored"
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        try CodexAuthStorage.saveChatGPTAuthTokens(
+            codexHome: temp.url,
+            accessToken: try fakeJWT(email: "apps-tool@example.com", plan: "pro"),
+            chatGPTAccountID: "acct-tool",
+            chatGPTPlanType: "pro"
+        )
         let response = try decode(processor.processLine(Data(
             #"{"id":1,"method":"mcpServer/tool/call","params":{"threadId":"\#(threadID)","server":"codex_apps","tool":"calendar_list_events","arguments":{"limit":1},"_meta":{"source":"mcp-app"}}}"#.utf8
         )))
@@ -18628,13 +18620,10 @@ final class CodexAppServerTests: XCTestCase {
 
     func testMcpServerToolCallUsesBuiltinMemoriesServerForMaterializedThread() throws {
         let temp = try TemporaryDirectory()
-        let threadID = try writeRollout(
-            codexHome: temp.url,
-            filenameTimestamp: "2025-01-02T03-04-09",
-            timestamp: "2025-01-02T03:04:09Z",
-            preview: "call memories mcp",
-            provider: nil
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url, requiresOpenAIAuth: false)
         )
+        let threadID = try startLoadedThread(processor: processor)
         let memoriesRoot = temp.url.appendingPathComponent("memories/notes", isDirectory: true)
         try FileManager.default.createDirectory(at: memoriesRoot, withIntermediateDirectories: true)
         try "alpha\nbeta memory\n".write(
@@ -18654,10 +18643,9 @@ final class CodexAppServerTests: XCTestCase {
         url = "https://user.example.test/ignored"
         """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
 
-        let response = try appServerResponse(
-            #"{"id":1,"method":"mcpServer/tool/call","params":{"threadId":"\#(threadID)","server":"memories","tool":"read","arguments":{"path":"notes/one.md","line_offset":2,"max_lines":1}}}"#,
-            configuration: testConfiguration(codexHome: temp.url, requiresOpenAIAuth: false)
-        )
+        let response = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"mcpServer/tool/call","params":{"threadId":"\#(threadID)","server":"memories","tool":"read","arguments":{"path":"notes/one.md","line_offset":2,"max_lines":1}}}"#.utf8
+        )))
 
         let result = try XCTUnwrap(response["result"] as? [String: Any])
         let content = try XCTUnwrap(result["content"] as? [[String: Any]])
@@ -18671,13 +18659,18 @@ final class CodexAppServerTests: XCTestCase {
 
     func testMcpServerToolCallCallsConfiguredStdioServer() throws {
         let temp = try TemporaryDirectory()
-        let threadID = try writeRollout(
+        let configuration = CodexAppServerConfiguration(
             codexHome: temp.url,
-            filenameTimestamp: "2025-01-02T03-04-06",
-            timestamp: "2025-01-02T03:04:06Z",
-            preview: "call stdio mcp",
-            provider: nil
+            requiresOpenAIAuth: false,
+            environment: [
+                "MCP_ENV": "passed-value",
+                CodexConfigLayerLoader.managedConfigEnvironmentVariable: temp.url
+                    .appendingPathComponent("missing-managed-config.toml", isDirectory: false)
+                    .path
+            ]
         )
+        let processor = try initializedProcessor(configuration: configuration)
+        let threadID = try startLoadedThread(processor: processor)
         let script = temp.url.appendingPathComponent("stdio-tool-mcp.sh", isDirectory: false)
         try """
         #!/bin/sh
@@ -18705,18 +18698,6 @@ final class CodexAppServerTests: XCTestCase {
         [mcp_servers.stdio_tool.env]
         INLINE = "inline-value"
         """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
-
-        let configuration = CodexAppServerConfiguration(
-            codexHome: temp.url,
-            requiresOpenAIAuth: false,
-            environment: [
-                "MCP_ENV": "passed-value",
-                CodexConfigLayerLoader.managedConfigEnvironmentVariable: temp.url
-                    .appendingPathComponent("missing-managed-config.toml", isDirectory: false)
-                    .path
-            ]
-        )
-        let processor = try initializedProcessor(configuration: configuration)
         let response = try decode(processor.processLine(Data(
             #"{"id":1,"method":"mcpServer/tool/call","params":{"threadId":"\#(threadID)","server":"stdio_tool","tool":"echo_tool","arguments":{"message":"hello"}}}"#.utf8
         )))
@@ -18736,14 +18717,18 @@ final class CodexAppServerTests: XCTestCase {
         let serverCwd = temp.url.appendingPathComponent("server-tool-cwd", isDirectory: true)
         try FileManager.default.createDirectory(at: threadCwd, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: serverCwd, withIntermediateDirectories: true)
-        let threadID = try writeRollout(
+        let configuration = CodexAppServerConfiguration(
             codexHome: temp.url,
-            filenameTimestamp: "2025-01-02T03-04-10",
-            timestamp: "2025-01-02T03:04:10Z",
-            preview: "call stdio mcp with thread cwd",
-            provider: nil,
-            cwd: threadCwd.path
+            cwd: serverCwd,
+            requiresOpenAIAuth: false,
+            environment: [
+                CodexConfigLayerLoader.managedConfigEnvironmentVariable: temp.url
+                    .appendingPathComponent("missing-managed-config.toml", isDirectory: false)
+                    .path
+            ]
         )
+        let processor = try initializedProcessor(configuration: configuration)
+        let threadID = try startLoadedThread(processor: processor, cwd: threadCwd.path)
         let script = temp.url.appendingPathComponent("stdio-tool-cwd-mcp.sh", isDirectory: false)
         try """
         #!/bin/sh
@@ -18768,18 +18753,6 @@ final class CodexAppServerTests: XCTestCase {
         command = "\(script.path)"
         tool_timeout_sec = 10
         """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
-
-        let configuration = CodexAppServerConfiguration(
-            codexHome: temp.url,
-            cwd: serverCwd,
-            requiresOpenAIAuth: false,
-            environment: [
-                CodexConfigLayerLoader.managedConfigEnvironmentVariable: temp.url
-                    .appendingPathComponent("missing-managed-config.toml", isDirectory: false)
-                    .path
-            ]
-        )
-        let processor = try initializedProcessor(configuration: configuration)
         let response = try decode(processor.processLine(Data(
             #"{"id":1,"method":"mcpServer/tool/call","params":{"threadId":"\#(threadID)","server":"stdio_tool_cwd","tool":"pwd","arguments":{}}}"#.utf8
         )))
@@ -30938,6 +30911,25 @@ final class CodexAppServerTests: XCTestCase {
         let messages = try decodeMessages(processor.processLine(try JSONSerialization.data(withJSONObject: request)))
         XCTAssertEqual(messages.first?["id"] as? String, "init")
         return processor
+    }
+
+    private func startLoadedThread(
+        processor: CodexAppServerMessageProcessor,
+        cwd: String? = nil
+    ) throws -> String {
+        var params: [String: Any] = ["modelProvider": "mock_provider"]
+        if let cwd {
+            params["cwd"] = cwd
+        }
+        let request: [String: Any] = [
+            "id": 99,
+            "method": "thread/start",
+            "params": params
+        ]
+        let messages = try decodeMessages(processor.processLine(try JSONSerialization.data(withJSONObject: request)))
+        let result = try XCTUnwrap(messages.first?["result"] as? [String: Any])
+        let thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        return try XCTUnwrap(thread["id"] as? String)
     }
 
     private func assertPermissionSelection(
