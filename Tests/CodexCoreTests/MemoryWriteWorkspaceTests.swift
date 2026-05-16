@@ -115,6 +115,44 @@ final class MemoryWriteWorkspaceTests: XCTestCase {
         XCTAssertEqual(diff.changes, [])
     }
 
+    func testMemoryWorkspaceDiffIgnoresConfiguredHooksPathLikeRust() throws {
+        #if os(Windows)
+        throw XCTSkip("POSIX hook scripts are not used on Windows")
+        #else
+        let root = try temporaryDirectory().appendingPathComponent("memories", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try "memory".write(
+            to: root.appendingPathComponent("MEMORY.md", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try resetMemoryWorkspaceBaseline(root: root)
+
+        let marker = root.appendingPathComponent("post-index-change-ran", isDirectory: false)
+        let hooksDirectory = root.appendingPathComponent(".git/hooks-path-test", isDirectory: true)
+        try FileManager.default.createDirectory(at: hooksDirectory, withIntermediateDirectories: true)
+        let hook = hooksDirectory.appendingPathComponent("post-index-change", isDirectory: false)
+        let markerPath = marker.path.replacingOccurrences(of: "'", with: "'\\''")
+        try """
+        #!/bin/sh
+        printf hook > '\(markerPath)'
+        """.write(to: hook, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hook.path)
+        _ = try gitStdout(root: root, args: ["config", "core.hooksPath", hooksDirectory.path])
+
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date()],
+            ofItemAtPath: root.appendingPathComponent("MEMORY.md", isDirectory: false).path
+        )
+
+        XCTAssertEqual(try memoryWorkspaceDiff(root: root).changes, [])
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: marker.path),
+            "memory workspace git helpers should disable configured hooks for internal git status calls"
+        )
+        #endif
+    }
+
     func testWriteMemoryWorkspaceDiffWritesRenderedArtifact() throws {
         let root = try temporaryDirectory().appendingPathComponent("memories", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

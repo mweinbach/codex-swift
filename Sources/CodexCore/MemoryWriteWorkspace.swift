@@ -207,10 +207,18 @@ private struct MemoryGitOutput {
     let stderr: String
 }
 
+private var memoryGitDisabledHooksPath: String {
+    #if os(Windows)
+    "NUL"
+    #else
+    "/dev/null"
+    #endif
+}
+
 private func runMemoryGit(root: URL, args: [String]) throws -> MemoryGitOutput {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-    process.arguments = ["git"] + args
+    process.arguments = ["git", "-c", "core.hooksPath=\(memoryGitDisabledHooksPath)"] + args
     process.currentDirectoryURL = root
 
     let stdout = Pipe()
