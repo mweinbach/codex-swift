@@ -12,6 +12,17 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust live turn metadata construction in
+  `codex-rs/core/src/session/turn_context.rs`,
+  `codex-rs/core/src/session/handlers.rs`,
+  `codex-rs/core/src/session/turn.rs`, and
+  `codex-rs/core/src/turn_metadata.rs`. Swift live app-server runtime
+  submissions now carry a Rust-shaped turn metadata header at the
+  `AppServerLiveRuntimeSubmitter` boundary, including session/thread/turn
+  identity, thread source, resolved sandbox tag, and
+  `responsesapiClientMetadata` so a real ThreadManager/Responses dispatcher can
+  forward the same header. Full executable ThreadManager wiring remains
+  pending.
 - 2026-05-16: rechecked Rust commits `12bfb57139` (`Fix turn extension data
   task plumbing`), `eeabaf74ea` (`[codex] Group removed feature flags`),
   `c03cea4ca2` (`Remove zombie tools spec module`), and `6a225e4005`
@@ -2181,6 +2192,7 @@ Recent upstream audit checkpoint:
   - model provider wire shape/defaults including Rust's explicit-null rejection for defaulted provider fields, Rust's `chat` wire API removal error for configured providers, API-key environment lookup, header/environment-header construction, retry and stream-timeout caps, built-in OpenAI/Ollama/LM Studio providers, OSS provider environment overrides, Azure Responses endpoint detection, and OpenAI/Azure remote-compaction support detection
 - `codex-rs/model-provider-info/src/lib.rs` and `codex-rs/protocol/src/config_types.rs` provider auth/WebSocket fields
   - command-backed provider `auth` config wire fields and defaults, zero refresh interval handling, command-backed bearer token execution/cache/failure behavior for model catalog and non-interactive Responses requests, model-manager refresh eligibility based on `auth` presence even before a bearer token resolves, 401-triggered command refresh/retry, WebSocket support/connection-timeout fields, provider name validation, and Rust-shaped `auth`/`aws` conflict rejection during model-provider config loading
+  - matched Rust `codex-rs/login/src/auth/external_bearer.rs` cache-miss behavior by coalescing concurrent command-backed provider auth resolves for the same config into one token command, while preserving explicit refresh reruns and zero-refresh-interval cache reuse.
 - `codex-rs/models-manager/src/manager.rs` model metadata lookup
   - remote model metadata now applies using Rust's longest-prefix match and the narrow single-segment provider-namespace suffix retry, including hyphenated provider ids, while multi-segment namespace slugs still fall back to local metadata
   - remote catalog refresh eligibility now matches Rust's Codex-backend or command-auth gate: ChatGPT tokens refresh and persist `/models` metadata, but plain OpenAI API-key auth skips the network and keeps bundled/cache metadata

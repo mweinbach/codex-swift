@@ -106,6 +106,7 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
     public let threadID: String
     public let turnID: String
     public let op: Op
+    public let turnMetadataHeader: String?
     public let mcpElicitationsAutoDeny: Bool
 
     public init(
@@ -113,12 +114,14 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
         threadID: String,
         turnID: String,
         op: Op,
+        turnMetadataHeader: String? = nil,
         mcpElicitationsAutoDeny: Bool = false
     ) {
         self.requestID = requestID
         self.threadID = threadID
         self.turnID = turnID
         self.op = op
+        self.turnMetadataHeader = turnMetadataHeader
         self.mcpElicitationsAutoDeny = mcpElicitationsAutoDeny
     }
 }
@@ -1274,7 +1277,8 @@ public enum CodexAppServer {
     ) throws -> (
         result: [String: Any],
         sessionStartSource: HookSessionStartSource,
-        runtimeConfig: CodexRuntimeConfig
+        runtimeConfig: CodexRuntimeConfig,
+        turnMetadataSandboxTag: String
     ) {
         try validateTurnEnvironmentSelections(params?["environments"], configuration: configuration)
         let started = try startRolloutConversation(params: params, configuration: configuration)
@@ -1308,7 +1312,11 @@ public enum CodexAppServer {
         return (
             result: result,
             sessionStartSource: started.sessionStartSource,
-            runtimeConfig: started.runtimeConfig
+            runtimeConfig: started.runtimeConfig,
+            turnMetadataSandboxTag: turnMetadataSandboxTag(
+                permissionProfile: started.permissionProfile,
+                runtimeConfig: started.runtimeConfig
+            )
         )
     }
 
@@ -2037,6 +2045,17 @@ public enum CodexAppServer {
         )) ?? fallback
     }
 
+    private static func turnMetadataSandboxTag(
+        permissionProfile: PermissionProfile,
+        runtimeConfig: CodexRuntimeConfig
+    ) -> String {
+        SandboxTags.permissionProfileSandboxTag(
+            profile: permissionProfile,
+            windowsSandboxLevel: runtimeConfig.windowsSandboxLevel,
+            enforceManagedNetwork: runtimeConfig.networkProxy != nil
+        )
+    }
+
     private static func tomlQuotedString(_ value: String) -> String {
         let escaped = value
             .replacingOccurrences(of: "\\", with: "\\\\")
@@ -2162,7 +2181,11 @@ public enum CodexAppServer {
     fileprivate static func threadResumeResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
-    ) throws -> (result: [String: Any], runtimeConfig: CodexRuntimeConfig) {
+    ) throws -> (
+        result: [String: Any],
+        runtimeConfig: CodexRuntimeConfig,
+        turnMetadataSandboxTag: String
+    ) {
         let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
 
         let rolloutPath: String
@@ -2289,13 +2312,24 @@ public enum CodexAppServer {
             "activePermissionProfile": activePermissionProfileObject(runtimeConfig.activePermissionProfile),
             "reasoningEffort": reasoningEffort?.rawValue ?? NSNull()
         ].nullStripped(keepNulls: true)
-        return (result: result, runtimeConfig: runtimeConfig)
+        return (
+            result: result,
+            runtimeConfig: runtimeConfig,
+            turnMetadataSandboxTag: turnMetadataSandboxTag(
+                permissionProfile: permissionProfile,
+                runtimeConfig: runtimeConfig
+            )
+        )
     }
 
     fileprivate static func threadForkResult(
         params: [String: Any]?,
         configuration: CodexAppServerConfiguration
-    ) throws -> (result: [String: Any], runtimeConfig: CodexRuntimeConfig) {
+    ) throws -> (
+        result: [String: Any],
+        runtimeConfig: CodexRuntimeConfig,
+        turnMetadataSandboxTag: String
+    ) {
         let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
 
         let sourceRolloutPath: String
@@ -2466,7 +2500,14 @@ public enum CodexAppServer {
             "activePermissionProfile": activePermissionProfileObject(runtimeConfig.activePermissionProfile),
             "reasoningEffort": reasoningEffort?.rawValue ?? NSNull()
         ].nullStripped(keepNulls: true)
-        return (result: result, runtimeConfig: runtimeConfig)
+        return (
+            result: result,
+            runtimeConfig: runtimeConfig,
+            turnMetadataSandboxTag: turnMetadataSandboxTag(
+                permissionProfile: permissionProfile,
+                runtimeConfig: runtimeConfig
+            )
+        )
     }
 
     fileprivate static func threadReadResult(
@@ -25518,6 +25559,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         let serviceTier: String
         let sandboxPolicy: String?
         let sandboxNetworkAccess: Bool
+        let turnMetadataSandboxTag: String
         let reasoningEffort: String?
         let reasoningSummary: String?
         let collaborationMode: String?
@@ -26011,7 +26053,8 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
     private func rememberThreadAnalyticsMetadata(
         threadID: String,
         result: [String: Any],
-        initializationMode: ThreadInitializationMode
+        initializationMode: ThreadInitializationMode,
+        turnMetadataSandboxTag: String
     ) {
         guard let modelSlug = CodexAppServer.stringParam(result["model"]),
               let cwd = CodexAppServer.stringParam(result["cwd"])
@@ -26029,6 +26072,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             serviceTier: CodexAppServer.stringParam(result["serviceTier"]) ?? "default",
             sandboxPolicy: sandbox.policy,
             sandboxNetworkAccess: sandbox.networkAccess,
+            turnMetadataSandboxTag: turnMetadataSandboxTag,
             reasoningEffort: CodexAppServer.stringParam(result["reasoningEffort"]),
             reasoningSummary: nil,
             collaborationMode: "default",
@@ -28129,6 +28173,11 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                 threadID: threadID,
                 turnID: turnID,
                 op: op,
+                turnMetadataHeader: liveRuntimeTurnMetadataHeader(
+                    threadID: threadID,
+                    turnID: turnID,
+                    op: op
+                ),
                 mcpElicitationsAutoDeny: CodexAppServer.xcode264McpElicitationsAutoDeny(
                     clientName: appServerClientName,
                     clientVersion: appServerClientVersion
@@ -28136,6 +28185,37 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             ))
         } catch {
             throw AppServerError.internalError("\(failureMessage): \(error)")
+        }
+    }
+
+    private func liveRuntimeTurnMetadataHeader(
+        threadID: String,
+        turnID: String,
+        op: Op
+    ) -> String? {
+        let metadata = threadAnalyticsMetadata[threadID]
+        let state = TurnMetadataState(
+            sessionID: threadID,
+            threadID: threadID,
+            threadSource: metadata?.threadSource,
+            turnID: turnID,
+            cwd: metadata?.cwd,
+            sandbox: metadata?.turnMetadataSandboxTag
+        )
+        if let clientMetadata = Self.responsesAPIClientMetadata(from: op) {
+            state.setResponsesAPIClientMetadata(clientMetadata)
+        }
+        return state.currentHeaderValue()
+    }
+
+    private static func responsesAPIClientMetadata(from op: Op) -> [String: String]? {
+        switch op {
+        case let .userInput(_, _, _, metadata):
+            return metadata
+        case let .userInputWithTurnContext(params):
+            return params.responsesAPIClientMetadata
+        default:
+            return nil
         }
     }
 
@@ -28267,7 +28347,8 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                             rememberThreadAnalyticsMetadata(
                                 threadID: threadID,
                                 result: result,
-                                initializationMode: .new
+                                initializationMode: .new,
+                                turnMetadataSandboxTag: outcome.turnMetadataSandboxTag
                             )
                             subscribeCurrentConnection(toThreadID: threadID)
                         }
@@ -28375,7 +28456,8 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                         rememberThreadAnalyticsMetadata(
                             threadID: threadID,
                             result: result,
-                            initializationMode: .resumed
+                            initializationMode: .resumed,
+                            turnMetadataSandboxTag: resumeOutcome.turnMetadataSandboxTag
                         )
                         subscribeCurrentConnection(toThreadID: threadID)
                         if let notification = try CodexAppServer.restoredTokenUsageNotification(thread: thread) {
@@ -28413,7 +28495,8 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                             rememberThreadAnalyticsMetadata(
                                 threadID: threadID,
                                 result: result,
-                                initializationMode: .forked
+                                initializationMode: .forked,
+                                turnMetadataSandboxTag: forkOutcome.turnMetadataSandboxTag
                             )
                             subscribeCurrentConnection(toThreadID: threadID)
                         }

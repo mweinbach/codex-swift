@@ -4158,6 +4158,52 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(metadata, ["fiber_run_id": "fiber-live-123"])
     }
 
+    func testTurnStartLiveRuntimeSubmissionCarriesTurnMetadataHeaderLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let coreCapture = AppServerCoreOpCapture()
+        let liveRuntime = AppServerLiveRuntimeCapture { _ in [] }
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            coreOpSubmitter: coreCapture.submit,
+            liveRuntimeSubmitter: liveRuntime.submit,
+            experimentalAPIEnabled: true
+        )
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider","threadSource":"user"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+        let request: [String: Any] = [
+            "id": 2,
+            "method": "turn/start",
+            "params": [
+                "threadId": threadID,
+                "input": [["type": "text", "text": "Live"]],
+                "responsesapiClientMetadata": ["fiber_run_id": "fiber-live-123"]
+            ]
+        ]
+
+        _ = try decodeMessages(processor.processLine(try JSONSerialization.data(withJSONObject: request)))
+
+        XCTAssertEqual(coreCapture.submissions.map(\.requestID), [.integer(2)])
+        let submission = try XCTUnwrap(liveRuntime.submissions.first)
+        XCTAssertEqual(submission.requestID, .integer(2))
+        XCTAssertEqual(submission.threadID, threadID)
+        XCTAssertEqual(submission.turnID, "turn-2")
+        let header = try XCTUnwrap(submission.turnMetadataHeader)
+        let headerObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(header.utf8)) as? [String: Any]
+        )
+        XCTAssertEqual(headerObject["session_id"] as? String, threadID)
+        XCTAssertEqual(headerObject["thread_id"] as? String, threadID)
+        XCTAssertEqual(headerObject["thread_source"] as? String, "user")
+        XCTAssertEqual(headerObject["turn_id"] as? String, "turn-2")
+        XCTAssertEqual(headerObject["fiber_run_id"] as? String, "fiber-live-123")
+        XCTAssertNotNil(headerObject["sandbox"] as? String)
+        XCTAssertNil(headerObject["turn_started_at_unix_ms"])
+    }
+
     func testTurnStartRejectsUnsupportedImageDetailLikeRust() throws {
         let temp = try TemporaryDirectory()
         let capture = AppServerCoreOpCapture()
