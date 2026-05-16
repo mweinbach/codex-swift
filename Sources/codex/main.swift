@@ -239,13 +239,17 @@ private func runDoctorCommand(_ request: CodexCLI.DoctorCommandRequest) async th
     ) {
         do {
             let (codexHome, settings) = try resolvedAuthSettings(overrides: request.configOverrides)
+            let cwd = FileManager.default.currentDirectoryPath
             let configTomlPath = codexHome.appendingPathComponent("config.toml").path
             return DoctorCommandRuntime.configLoadedCheck(
+                codexHome: codexHome.path,
+                cwd: cwd,
                 model: settings.model,
                 modelProviderID: settings.modelProvider,
                 logDir: settings.logDir,
                 sqliteHome: settings.sqliteHome,
                 mcpServerCount: settings.mcpServers.count,
+                features: settings.features,
                 configTomlPath: configTomlPath,
                 configTomlStatus: doctorConfigTomlStatus(path: configTomlPath),
                 startupWarnings: settings.startupWarnings

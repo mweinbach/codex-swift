@@ -141,8 +141,19 @@ public struct FeatureSpec: Equatable, Sendable {
     }
 }
 
+public struct FeatureLegacyUsage: Equatable, Sendable {
+    public let alias: String
+    public let feature: FeatureKey
+
+    public init(alias: String, feature: FeatureKey) {
+        self.alias = alias
+        self.feature = feature
+    }
+}
+
 public struct FeatureStates: Equatable, Sendable {
     private var enabled: Set<FeatureKey>
+    private var legacyUsages: [FeatureLegacyUsage]
     private static let removedNoOpConfigKeys: Set<String> = [
         "tui_app_server",
         "undo",
@@ -153,12 +164,22 @@ public struct FeatureStates: Equatable, Sendable {
         "image_detail_original"
     ]
 
-    public init(enabled: Set<FeatureKey> = []) {
+    public init(enabled: Set<FeatureKey> = [], legacyUsages: [FeatureLegacyUsage] = []) {
         self.enabled = enabled
+        self.legacyUsages = legacyUsages.sorted { lhs, rhs in
+            if lhs.alias != rhs.alias {
+                return lhs.alias < rhs.alias
+            }
+            return lhs.feature.rawValue < rhs.feature.rawValue
+        }
     }
 
     public static func withDefaults() -> FeatureStates {
         FeatureStates(enabled: Set(FeatureRegistry.specs.filter(\.defaultEnabled).map(\.id)))
+    }
+
+    public var legacyFeatureUsages: [FeatureLegacyUsage] {
+        legacyUsages
     }
 
     public func isEnabled(_ feature: FeatureKey) -> Bool {
@@ -179,9 +200,28 @@ public struct FeatureStates: Equatable, Sendable {
                 continue
             }
             guard let feature = FeatureRegistry.feature(forKey: key) else { continue }
+            if key == FeatureKey.useLegacyLandlock.rawValue {
+                recordLegacyUsage(alias: "features.\(key)", feature: feature, force: true)
+            } else {
+                recordLegacyUsage(alias: key, feature: feature)
+            }
             set(feature, enabled: isEnabled)
         }
         normalizeDependencies()
+    }
+
+    private mutating func recordLegacyUsage(alias: String, feature: FeatureKey, force: Bool = false) {
+        guard force || alias != feature.rawValue else { return }
+        let usage = FeatureLegacyUsage(alias: alias, feature: feature)
+        if !legacyUsages.contains(usage) {
+            legacyUsages.append(usage)
+            legacyUsages.sort { lhs, rhs in
+                if lhs.alias != rhs.alias {
+                    return lhs.alias < rhs.alias
+                }
+                return lhs.feature.rawValue < rhs.feature.rawValue
+            }
+        }
     }
 
     public mutating func normalizeDependencies() {

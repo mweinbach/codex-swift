@@ -1,3 +1,4 @@
+import CodexCore
 import Foundation
 
 public enum DoctorCheckStatus: String, Codable, Equatable, Sendable {
@@ -295,24 +296,37 @@ public enum DoctorCommandRuntime {
     }
 
     public static func configLoadedCheck(
+        codexHome: String? = nil,
+        cwd: String? = nil,
         model: String?,
         modelProviderID: String?,
         logDir: String?,
         sqliteHome: String?,
         mcpServerCount: Int,
+        features: FeatureStates = .withDefaults(),
         configTomlPath: String,
         configTomlStatus: String,
         startupWarnings: [String] = []
     ) -> DoctorCheck {
-        var details = [
+        var details: [String] = []
+        if let codexHome {
+            details.append("CODEX_HOME: \(codexHome)")
+        }
+        if let cwd {
+            details.append("cwd: \(cwd)")
+        }
+        details.append(contentsOf: [
             "model: \(model ?? "<default>")",
             "model provider: \(modelProviderID ?? "<default>")",
             "log dir: \(logDir ?? "<unset>")",
             "sqlite home: \(sqliteHome ?? "<unset>")",
-            "mcp servers: \(mcpServerCount)",
+            "mcp servers: \(mcpServerCount)"
+        ])
+        details.append(contentsOf: featureFlagDetails(features: features))
+        details.append(contentsOf: [
             "config.toml: \(configTomlPath)",
             "config.toml \(configTomlStatus)"
-        ]
+        ])
         details.append(contentsOf: startupWarnings.map { "startup warning: \($0)" })
         return DoctorCheck(
             id: "config.load",
@@ -321,6 +335,26 @@ public enum DoctorCommandRuntime {
             summary: "config loaded",
             details: details
         )
+    }
+
+    public static func featureFlagDetails(
+        features: FeatureStates
+    ) -> [String] {
+        let enabledFeatures = FeatureRegistry.specs
+            .filter { features.isEnabled($0.id) }
+            .map(\.key)
+        let overrides = FeatureRegistry.specs
+            .filter { features.isEnabled($0.id) != $0.defaultEnabled }
+            .map { "\($0.key)=\(features.isEnabled($0.id))" }
+        var details = [
+            "feature flags enabled: \(enabledFeatures.count)",
+            "enabled feature flags: \(displayList(enabledFeatures))",
+            "feature flag overrides: \(displayList(overrides))"
+        ]
+        details.append(contentsOf: features.legacyFeatureUsages.map { usage in
+            "legacy feature flag: \(usage.alias) -> \(usage.feature.rawValue)"
+        })
+        return details
     }
 
     public static func configLoadFailedCheck(_ error: Error) -> DoctorCheck {
@@ -476,6 +510,13 @@ public enum DoctorCommandRuntime {
         "CODEX_CA_CERTIFICATE",
         "SSL_CERT_FILE"
     ]
+
+    private static func displayList(_ items: [String]) -> String {
+        if items.isEmpty {
+            return "none"
+        }
+        return items.joined(separator: ", ")
+    }
 
     private static func runCommand(_ command: String, _ arguments: [String]) -> DoctorCommandOutput {
         let process = Process()

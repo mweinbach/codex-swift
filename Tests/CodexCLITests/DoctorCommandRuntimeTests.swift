@@ -15,6 +15,11 @@ final class DoctorCommandRuntimeTests: XCTestCase {
     }
 
     func testRunJsonEmitsRustShapedConfigReport() throws {
+        var features = FeatureStates.withDefaults()
+        features.set(.networkProxy, enabled: true)
+        features.set(.toolSearch, enabled: false)
+        features.apply(featureValues: ["telepathy": true])
+
         let result = DoctorCommandRuntime.run(
             request: CodexCLI.DoctorCommandRequest(json: true),
             codexVersion: "0.0.0",
@@ -176,11 +181,14 @@ final class DoctorCommandRuntimeTests: XCTestCase {
             }
         ) {
             DoctorCommandRuntime.configLoadedCheck(
+                codexHome: "/tmp/codex",
+                cwd: "/tmp/work",
                 model: "gpt-test",
                 modelProviderID: "openai",
                 logDir: "/tmp/logs",
                 sqliteHome: "/tmp/state",
                 mcpServerCount: 2,
+                features: features,
                 configTomlPath: "/tmp/codex/config.toml",
                 configTomlStatus: "parse: ok"
             )
@@ -332,11 +340,56 @@ final class DoctorCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(config["status"] as? String, "ok")
         XCTAssertEqual(config["summary"] as? String, "config loaded")
         let details = try XCTUnwrap(config["details"] as? [String: Any])
+        XCTAssertEqual(details["CODEX_HOME"] as? String, "/tmp/codex")
+        XCTAssertEqual(details["cwd"] as? String, "/tmp/work")
         XCTAssertEqual(details["model"] as? String, "gpt-test")
         XCTAssertEqual(details["model provider"] as? String, "openai")
         XCTAssertEqual(details["mcp servers"] as? String, "2")
+        XCTAssertTrue((details["enabled feature flags"] as? String)?.contains("network_proxy") == true)
+        XCTAssertTrue((details["feature flag overrides"] as? String)?.contains("network_proxy=true") == true)
+        XCTAssertTrue((details["feature flag overrides"] as? String)?.contains("tool_search=false") == true)
+        XCTAssertEqual(details["legacy feature flag"] as? String, "telepathy -> chronicle")
         XCTAssertEqual(details["config.toml"] as? String, "/tmp/codex/config.toml")
         XCTAssertEqual(details["config.toml parse"] as? String, "ok")
+    }
+
+    func testConfigLoadedCheckIncludesRustFeatureFlagDetails() {
+        var features = FeatureStates.withDefaults()
+        features.set(.networkProxy, enabled: true)
+        features.set(.toolSearch, enabled: false)
+        features.apply(featureValues: ["telepathy": true])
+
+        let check = DoctorCommandRuntime.configLoadedCheck(
+            codexHome: "/tmp/codex",
+            cwd: "/tmp/work",
+            model: nil,
+            modelProviderID: "openai",
+            logDir: "/tmp/logs",
+            sqliteHome: "/tmp/state",
+            mcpServerCount: 0,
+            features: features,
+            configTomlPath: "/tmp/codex/config.toml",
+            configTomlStatus: "missing"
+        )
+
+        XCTAssertEqual(check.status, .ok)
+        XCTAssertEqual(Array(check.details.prefix(8)), [
+            "CODEX_HOME: /tmp/codex",
+            "cwd: /tmp/work",
+            "model: <default>",
+            "model provider: openai",
+            "log dir: /tmp/logs",
+            "sqlite home: /tmp/state",
+            "mcp servers: 0",
+            "feature flags enabled: \(FeatureRegistry.specs.filter { features.isEnabled($0.id) }.count)"
+        ])
+        XCTAssertTrue(check.details.contains(where: { $0.hasPrefix("enabled feature flags: ") && $0.contains("network_proxy") }))
+        XCTAssertTrue(check.details.contains(where: { $0.hasPrefix("feature flag overrides: ") && $0.contains("network_proxy=true") && $0.contains("tool_search=false") }))
+        XCTAssertTrue(check.details.contains("legacy feature flag: telepathy -> chronicle"))
+        XCTAssertEqual(Array(check.details.suffix(2)), [
+            "config.toml: /tmp/codex/config.toml",
+            "config.toml missing"
+        ])
     }
 
     func testSearchCheckWarnsWithRustRemediationWhenRgCannotRun() {

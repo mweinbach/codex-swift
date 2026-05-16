@@ -67,6 +67,20 @@ final class FeatureTogglesTests: XCTestCase {
         ])
     }
 
+    func testFeatureStatesRecordLegacyUsageLikeRust() {
+        var states = FeatureStates.withDefaults()
+        states.apply(featureValues: [
+            "telepathy": true,
+            "use_legacy_landlock": true,
+            "network_proxy": true
+        ])
+
+        XCTAssertEqual(states.legacyFeatureUsages, [
+            FeatureLegacyUsage(alias: "features.use_legacy_landlock", feature: .useLegacyLandlock),
+            FeatureLegacyUsage(alias: "telepathy", feature: .chronicle)
+        ])
+    }
+
     func testFeatureDependenciesNormalizeLikeRust() {
         var states = FeatureStates()
         states.apply(featureValues: ["enable_fanout": true, "code_mode_only": true])
