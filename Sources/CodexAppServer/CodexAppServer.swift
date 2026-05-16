@@ -234,6 +234,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let configLayerOverrides: ConfigLayerLoaderOverrides
     public let stateStore: SQLiteAgentGraphStore?
     public let configWarnings: [ConfigWarning]
+    let notificationBroadcaster: AppServerNotificationBroadcaster
     public let remoteControlStatusSnapshot: RemoteControlStatusSnapshot?
     public let remoteControlStatusBroadcaster: AppServerRemoteControlStatusBroadcaster?
     public let pluginStartupTasksEnabled: Bool
@@ -319,6 +320,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         self.configLayerOverrides = configLayerOverrides
         self.stateStore = stateStore
         self.configWarnings = configWarnings
+        self.notificationBroadcaster = AppServerNotificationBroadcaster()
         self.remoteControlStatusSnapshot = remoteControlStatusSnapshot
         self.remoteControlStatusBroadcaster = remoteControlStatusBroadcaster
             ?? remoteControlStatusSnapshot.map(AppServerRemoteControlStatusBroadcaster.init(snapshot:))
@@ -346,6 +348,46 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
             lhs.remoteControlStatusSnapshot == rhs.remoteControlStatusSnapshot &&
             lhs.pluginStartupTasksEnabled == rhs.pluginStartupTasksEnabled &&
             lhs.curatedPluginStartupSyncEnabled == rhs.curatedPluginStartupSyncEnabled
+    }
+}
+
+actor AppServerNotificationBroadcaster {
+    private struct Subscriber: Sendable {
+        let optOutNotificationMethods: Set<String>
+        let notificationSink: AppServerNotificationSink
+    }
+
+    private var subscribers: [AppServerConnectionID: Subscriber] = [:]
+
+    func register(
+        connectionID: AppServerConnectionID,
+        optOutNotificationMethods: Set<String>,
+        notificationSink: @escaping AppServerNotificationSink
+    ) {
+        subscribers[connectionID] = Subscriber(
+            optOutNotificationMethods: optOutNotificationMethods,
+            notificationSink: notificationSink
+        )
+    }
+
+    func unregister(connectionID: AppServerConnectionID) {
+        subscribers.removeValue(forKey: connectionID)
+    }
+
+    func publish(
+        data: Data,
+        method: String?,
+        excluding excludedConnectionID: AppServerConnectionID? = nil
+    ) async {
+        for (connectionID, subscriber) in subscribers {
+            guard connectionID != excludedConnectionID else {
+                continue
+            }
+            if let method, subscriber.optOutNotificationMethods.contains(method) {
+                continue
+            }
+            await subscriber.notificationSink(data)
+        }
     }
 }
 
@@ -25321,6 +25363,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         _ = try? CodexAppServer.runAsyncBlocking {
             await manager.removeConnection(connectionID)
         }
+        unregisterNotificationSubscriber()
         unregisterRemoteControlStatusSubscriber()
         activeCommandExecs.terminateAll()
         activeProcesses.terminateAll()
@@ -25343,6 +25386,8 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         let manager = threadStateManager
         let connectionID = connectionID
         let outgoing = outgoingRequestBroker
+        let notificationBroadcaster = configuration.notificationBroadcaster
+        let notificationSink = notificationSink
         _ = try? CodexAppServer.runAsyncBlocking {
             await outgoing.updateOptOutNotificationMethods(optOutNotificationMethods)
             await manager.connectionInitialized(
@@ -25352,6 +25397,13 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                     optOutNotificationMethods: optOutNotificationMethods
                 )
             )
+            if let notificationSink {
+                await notificationBroadcaster.register(
+                    connectionID: connectionID,
+                    optOutNotificationMethods: optOutNotificationMethods,
+                    notificationSink: notificationSink
+                )
+            }
         }
     }
 
@@ -25425,6 +25477,26 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         let connectionID = connectionID
         _ = try? CodexAppServer.runAsyncBlocking {
             await broadcaster.unregister(connectionID: connectionID)
+        }
+    }
+
+    private func unregisterNotificationSubscriber() {
+        let broadcaster = configuration.notificationBroadcaster
+        let connectionID = connectionID
+        _ = try? CodexAppServer.runAsyncBlocking {
+            await broadcaster.unregister(connectionID: connectionID)
+        }
+    }
+
+    private func publishNotificationToOtherConnections(_ notification: [String: Any]) {
+        let method = notification["method"] as? String
+        guard let data = CodexAppServer.encodeMessages([notification]) else {
+            return
+        }
+        let broadcaster = configuration.notificationBroadcaster
+        let connectionID = connectionID
+        _ = try? CodexAppServer.runAsyncBlocking {
+            await broadcaster.publish(data: data, method: method, excluding: connectionID)
         }
     }
 
@@ -28202,10 +28274,12 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                 case "thread/name/set":
                     let result = try CodexAppServer.threadSetNameResult(params: params, configuration: configuration)
                     response = CodexAppServer.responseObject(id: id, result: result.result)
-                    notifications.append(CodexAppServer.threadNameUpdatedNotification(
+                    let notification = CodexAppServer.threadNameUpdatedNotification(
                         threadID: result.threadID,
                         threadName: result.threadName
-                    ))
+                    )
+                    notifications.append(notification)
+                    publishNotificationToOtherConnections(notification)
                 case "thread/metadata/update":
                     try rejectMetadataUpdateForLoadedEphemeralThread(params: params)
                     response = CodexAppServer.responseObject(

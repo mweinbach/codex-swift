@@ -8817,6 +8817,92 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(thread["name"] as? String, "Sharper thread name")
     }
 
+    func testThreadNameUpdatedBroadcastsForLoadedThreadsLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "Saved user message",
+            provider: "mock_provider"
+        )
+        let configuration = testConfiguration(codexHome: temp.url)
+        let remoteCapture = AppServerNotificationCapture()
+        let requester = try initializedProcessor(
+            configuration: configuration,
+            connectionID: 1
+        )
+        _ = try initializedProcessor(
+            configuration: configuration,
+            connectionID: 2,
+            notificationSink: { data in await remoteCapture.append(data) }
+        )
+
+        let resume = try decode(requester.processLine(Data(
+            #"{"id":1,"method":"thread/resume","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        let resumedThread = try XCTUnwrap((resume["result"] as? [String: Any])?["thread"] as? [String: Any])
+        XCTAssertEqual(resumedThread["id"] as? String, threadID)
+
+        let messages = try decodeMessages(requester.processLine(Data(
+            #"{"id":2,"method":"thread/name/set","params":{"threadId":"\#(threadID)","name":"Loaded rename"}}"#.utf8
+        )))
+        XCTAssertEqual(messages.count, 2)
+        XCTAssertEqual(messages[1]["method"] as? String, "thread/name/updated")
+        let localParams = try XCTUnwrap(messages[1]["params"] as? [String: Any])
+        XCTAssertEqual(localParams["threadId"] as? String, threadID)
+        XCTAssertEqual(localParams["threadName"] as? String, "Loaded rename")
+
+        let remoteMessages = try decodeMessages(try await nextNotificationPayload(remoteCapture))
+        XCTAssertEqual(remoteMessages.count, 1)
+        XCTAssertEqual(remoteMessages[0]["method"] as? String, "thread/name/updated")
+        let remoteParams = try XCTUnwrap(remoteMessages[0]["params"] as? [String: Any])
+        XCTAssertEqual(remoteParams["threadId"] as? String, threadID)
+        XCTAssertEqual(remoteParams["threadName"] as? String, "Loaded rename")
+        let remainingPayloads = await remoteCapture.payloadsData()
+        XCTAssertTrue(remainingPayloads.isEmpty)
+    }
+
+    func testThreadNameUpdatedBroadcastsForNotLoadedThreadsLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-05-00",
+            timestamp: "2025-01-05T12:05:00Z",
+            preview: "Saved user message",
+            provider: "mock_provider"
+        )
+        let configuration = testConfiguration(codexHome: temp.url)
+        let remoteCapture = AppServerNotificationCapture()
+        let requester = try initializedProcessor(
+            configuration: configuration,
+            connectionID: 1
+        )
+        _ = try initializedProcessor(
+            configuration: configuration,
+            connectionID: 2,
+            notificationSink: { data in await remoteCapture.append(data) }
+        )
+
+        let messages = try decodeMessages(requester.processLine(Data(
+            #"{"id":1,"method":"thread/name/set","params":{"threadId":"\#(threadID)","name":"Stored rename"}}"#.utf8
+        )))
+        XCTAssertEqual(messages.count, 2)
+        XCTAssertEqual(messages[1]["method"] as? String, "thread/name/updated")
+        let localParams = try XCTUnwrap(messages[1]["params"] as? [String: Any])
+        XCTAssertEqual(localParams["threadId"] as? String, threadID)
+        XCTAssertEqual(localParams["threadName"] as? String, "Stored rename")
+
+        let remoteMessages = try decodeMessages(try await nextNotificationPayload(remoteCapture))
+        XCTAssertEqual(remoteMessages.count, 1)
+        XCTAssertEqual(remoteMessages[0]["method"] as? String, "thread/name/updated")
+        let remoteParams = try XCTUnwrap(remoteMessages[0]["params"] as? [String: Any])
+        XCTAssertEqual(remoteParams["threadId"] as? String, threadID)
+        XCTAssertEqual(remoteParams["threadName"] as? String, "Stored rename")
+        let remainingPayloads = await remoteCapture.payloadsData()
+        XCTAssertTrue(remainingPayloads.isEmpty)
+    }
+
     func testThreadNameSetUpdatesStateDbTitleAndStateOnlyListingLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(
