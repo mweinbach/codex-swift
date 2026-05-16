@@ -4965,7 +4965,7 @@ final class ExecPolicyTests: XCTestCase {
         )
     }
 
-    func testBlockingAppendAllowPrefixRuleDedupesExistingRuleLikeRust() throws {
+    func testBlockingAppendAllowPrefixRuleAppendsDuplicateRulesLikeRust() throws {
         let tempDir = try CoreTemporaryDirectory()
         let policyPath = ExecPolicyManager.defaultPolicyPath(codexHome: tempDir.url)
         let prefix = tokens("python3")
@@ -4976,7 +4976,8 @@ final class ExecPolicyTests: XCTestCase {
         let contents = try String(contentsOf: policyPath, encoding: .utf8)
         XCTAssertEqual(
             contents,
-            #"prefix_rule(pattern=["python3"], decision="allow")"# + "\n"
+            #"prefix_rule(pattern=["python3"], decision="allow")"# + "\n" +
+                #"prefix_rule(pattern=["python3"], decision="allow")"# + "\n"
         )
     }
 
@@ -5010,6 +5011,7 @@ final class ExecPolicyTests: XCTestCase {
         XCTAssertEqual(
             contents,
             "network_rule(host=\"api.github.com\", protocol=\"https\", decision=\"allow\", justification=\"Allow https_connect access to api.github.com\")\n" +
+                "network_rule(host=\"api.github.com\", protocol=\"https\", decision=\"allow\", justification=\"Allow https_connect access to api.github.com\")\n" +
                 "network_rule(host=\"blocked.example.com\", protocol=\"http\", decision=\"deny\")\n"
         )
     }
