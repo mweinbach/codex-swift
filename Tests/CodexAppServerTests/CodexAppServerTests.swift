@@ -1767,6 +1767,61 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
+    func testThreadStartInitializesOptionalLiveMCPServersWithoutRequiringThemLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let workingServer = try writeMCPServerScript(
+            directory: temp.url,
+            name: "working-optional-mcp.sh",
+            contents: """
+            #!/bin/sh
+            count=0
+            while IFS= read -r _line; do
+                count=$((count + 1))
+                if [ "$count" -ge 2 ]; then
+                    printf '%s\\n' '{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"lookup","description":"Look up docs.","inputSchema":{"type":"object"}}]}}'
+                    exit 0
+                fi
+            done
+            exit 1
+            """
+        )
+        let failingServer = try writeMCPServerScript(
+            directory: temp.url,
+            name: "failing-optional-mcp.sh",
+            contents: """
+            #!/bin/sh
+            while IFS= read -r _line; do
+                exit 1
+            done
+            exit 1
+            """
+        )
+        try """
+        [mcp_servers.optional_docs]
+        command = \(tomlTestString(workingServer.path))
+        startup_timeout_sec = 1
+
+        [mcp_servers.optional_broken]
+        command = \(tomlTestString(failingServer.path))
+        startup_timeout_sec = 1
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+
+        let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+        XCTAssertNil(processor.liveMcpStartupFailureMessage(threadID: threadID))
+        let toolsByServer = try XCTUnwrap(processor.liveMcpToolsByServer(threadID: threadID))
+        XCTAssertEqual(Set(toolsByServer.keys), ["optional_docs"])
+        let docsTools = try XCTUnwrap(toolsByServer["optional_docs"])
+        let lookup = try XCTUnwrap(docsTools["lookup"] as? [String: Any])
+        XCTAssertEqual(lookup["description"] as? String, "Look up docs.")
+    }
+
     func testThreadResumeFailsWhenRequiredMCPServerCommandCannotInitializeLikeRust() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(
