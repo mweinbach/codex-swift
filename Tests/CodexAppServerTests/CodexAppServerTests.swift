@@ -16602,6 +16602,57 @@ final class CodexAppServerTests: XCTestCase {
         ))
     }
 
+    func testPluginCommandHelpersReadActiveUserLayerMarketplaceConfig() throws {
+        let temp = try TemporaryDirectory()
+        let baseParent = temp.url.appendingPathComponent("base", isDirectory: true)
+        let activeParent = temp.url.appendingPathComponent("active", isDirectory: true)
+        let baseRoot = try makeLocalMarketplaceRootWithPlugin(named: "debug", pluginName: "old-weather", in: baseParent)
+        let activeRoot = try makeLocalMarketplaceRootWithPlugin(named: "debug", pluginName: "weather", in: activeParent)
+        let activeConfig = temp.url
+            .appendingPathComponent("profiles", isDirectory: true)
+            .appendingPathComponent("work.toml", isDirectory: false)
+        try FileManager.default.createDirectory(
+            at: activeConfig.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+
+        try """
+        [marketplaces.debug]
+        source_type = "local"
+        source = "\(baseRoot.resolvingSymlinksInPath().standardizedFileURL.path)"
+        """.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let activePath = activeRoot.resolvingSymlinksInPath().standardizedFileURL.path
+        try """
+        [marketplaces.debug]
+        source_type = "local"
+        source = "\(activePath)"
+        """.write(to: activeConfig, atomically: true, encoding: .utf8)
+        let configuration = CodexAppServerConfiguration(
+            codexHome: temp.url,
+            requiresOpenAIAuth: false,
+            configLayerOverrides: ConfigLayerLoaderOverrides(userConfigPath: activeConfig)
+        )
+
+        let marketplaces = try CodexAppServer.marketplaceListCommandResult(configuration: configuration)
+        let marketplaceRows = try XCTUnwrap(marketplaces["marketplaces"] as? [[String: String]])
+        XCTAssertEqual(marketplaceRows, [[
+            "marketplaceName": "debug",
+            "root": activePath
+        ]])
+
+        let pluginList = try CodexAppServer.pluginListCommandResult(
+            marketplaceName: "debug",
+            configuration: configuration
+        )
+        let pluginMarketplaces = try XCTUnwrap(pluginList["marketplaces"] as? [[String: Any]])
+        let plugins = try XCTUnwrap(pluginMarketplaces.first?["plugins"] as? [[String: Any]])
+        XCTAssertEqual(plugins.map { $0["id"] as? String }, ["weather@debug"])
+    }
+
     func testPluginInstallAndUninstallQueueMcpRefreshForLoadedThreads() throws {
         let temp = try TemporaryDirectory()
         let workspace = try TemporaryDirectory()

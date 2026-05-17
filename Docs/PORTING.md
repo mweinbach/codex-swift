@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `4a1f1df8ce` (`[codex] fix plugin CLI
+  active user layer compile`). Swift plugin CLI helper surfaces now have
+  explicit coverage that `codex plugin marketplace list` and
+  `codex plugin list --marketplace ...` read configured marketplace entries
+  from the active user config layer, including profile-v2 style active config
+  paths that override the base `config.toml`.
 - 2026-05-17: rechecked Rust commit `9797296564` (`Relax remote plugin sync
   gate`). Swift now mirrors Rust's relaxed remote-installed plugin cache gate:
   already-cached remote installed plugin references contribute plugin skill

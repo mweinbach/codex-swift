@@ -5351,8 +5351,13 @@ public enum CodexAppServer {
         cwds: [String],
         configuration: CodexAppServerConfiguration
     ) throws -> [String: Any] {
-        let configFile = configuration.codexHome.appendingPathComponent("config.toml", isDirectory: false)
-        let config = try CodexConfigLayerLoader.readConfig(from: configFile) ?? .table([:])
+        let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: configuration.codexHome,
+            cliOverrides: configuration.cliConfigOverrides,
+            overrides: configuration.configLayerOverrides,
+            environment: configuration.environment
+        )
+        let config = stack.effectiveConfig()
         let roots = localMarketplaceDiscoveryRoots(
             cwds: cwds.map { URL(fileURLWithPath: $0, isDirectory: true) },
             codexHome: configuration.codexHome,
