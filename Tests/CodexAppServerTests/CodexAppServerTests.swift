@@ -22786,6 +22786,34 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(userAgent.hasPrefix("codex_vscode/"))
     }
 
+    func testInitializeDaemonProbeDoesNotOverrideOriginatorLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let configuration = testConfiguration(codexHome: temp.url)
+        let processor = CodexAppServerMessageProcessor(configuration: configuration)
+
+        let initialize = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"codex_app_server_daemon","title":"Codex App Server Daemon","version":"0.1.0"}}}"#.utf8
+        )))
+        let result = try XCTUnwrap(initialize["result"] as? [String: Any])
+        let userAgent = try XCTUnwrap(result["userAgent"] as? String)
+        XCTAssertTrue(userAgent.hasPrefix("\(configuration.originator)/"))
+        XCTAssertFalse(userAgent.contains("codex_app_server_daemon"))
+    }
+
+    func testInitializeCodexBackendDoesNotOverrideOriginatorLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let configuration = testConfiguration(codexHome: temp.url)
+        let processor = CodexAppServerMessageProcessor(configuration: configuration)
+
+        let initialize = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"codex-backend","title":"Codex Backend","version":"0.1.0"}}}"#.utf8
+        )))
+        let result = try XCTUnwrap(initialize["result"] as? [String: Any])
+        let userAgent = try XCTUnwrap(result["userAgent"] as? String)
+        XCTAssertTrue(userAgent.hasPrefix("\(configuration.originator)/"))
+        XCTAssertFalse(userAgent.contains("codex-backend"))
+    }
+
     func testInitializeUserAgentRespectsOriginatorOverrideLikeRust() throws {
         let temp = try TemporaryDirectory()
         let processor = CodexAppServerMessageProcessor(configuration: testConfiguration(

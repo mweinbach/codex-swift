@@ -19,6 +19,11 @@ Recent upstream audit checkpoint:
   returns the original approximate token count, and appends media items after
   the truncated text. The signed byte-count-to-token conversion now also clamps
   non-positive values like Rust's `approx_tokens_from_byte_count_i64`.
+- 2026-05-17: rechecked Rust commit `fb7cfc813a` (`fix: prevent
+  codex-backend from stealing originator`). Swift app-server initialize now
+  treats `codex-backend` as a non-originating probe client alongside
+  `codex_app_server_daemon`, so the initialized user-agent keeps the configured
+  originator while real clients still use `clientInfo.name`.
 - 2026-05-17: rechecked Rust commit `4454e1411b` (`Deprecate TurnContext cwd
   and resolve_path`). Swift `TurnContext` now keeps the legacy `cwd` accessor
   behavior-preserving but deprecated, exposes `selectedEnvironmentCwd` as the

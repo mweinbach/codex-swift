@@ -19543,12 +19543,19 @@ public enum CodexAppServer {
         let clientVersion = (clientInfo?["version"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let originator = environment[ChatGPTLogin.originatorOverrideEnvironmentVariable].flatMap { override in
             ChatGPTLogin.defaultOriginator(environment: [ChatGPTLogin.originatorOverrideEnvironmentVariable: override])
-        } ?? (clientName.isEmpty ? configuration.originator : clientName)
-        let suffix = clientName.isEmpty && clientVersion.isEmpty ? "" : " (\(clientName); \(clientVersion))"
+        } ?? (clientName.isEmpty || nonOriginatingInitializeClientNames.contains(clientName) ? configuration.originator : clientName)
+        let suffix = clientName.isEmpty || nonOriginatingInitializeClientNames.contains(clientName)
+            ? ""
+            : " (\(clientName); \(clientVersion))"
         return sanitizeHeaderValue(
             "\(originator)/\(configuration.version) \(Terminal.userAgent(environment: environment))\(suffix)"
         )
     }
+
+    private static let nonOriginatingInitializeClientNames: Set<String> = [
+        "codex_app_server_daemon",
+        "codex-backend"
+    ]
 
     private enum AppServerAuthRefreshResult: Equatable {
         case notAttemptedOrSucceeded
