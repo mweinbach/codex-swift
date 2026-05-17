@@ -3281,6 +3281,45 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(payload.content, "spawn_agents_on_csv requires exactly one local environment")
     }
 
+    func testSpawnAgentsOnCSVRejectsSingleRemoteEnvironmentLikeRust() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let inputURL = temp.url.appendingPathComponent("input.csv")
+        try "id,value\nalpha,one\n".write(to: inputURL, atomically: true, encoding: .utf8)
+        let store = try SQLiteAgentJobStore(databaseURL: temp.url.appendingPathComponent("state.sqlite3"))
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            .functionCall(
+                name: "spawn_agents_on_csv",
+                arguments: #"{"csv_path":"input.csv","instruction":"check {id}"}"#,
+                callID: "call-spawn-remote-env"
+            ),
+            cwd: temp.url,
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: [:],
+            agentJobContext: NonInteractiveExec.AgentJobToolContext(
+                store: store,
+                reportingThreadID: "parent-thread",
+                environments: [
+                    TurnEnvironmentSelection(environmentID: "remote-dev", cwd: "/workspace")
+                ],
+                remoteEnvironmentIDs: ["remote-dev"],
+                statusForThread: { _ in .running },
+                spawnWorker: { _ in .agentLimitReached },
+                shutdownThread: { _ in }
+            )
+        )
+
+        guard case let .functionCallOutput(callID, payload) = output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-spawn-remote-env")
+        XCTAssertEqual(payload.success, false)
+        XCTAssertEqual(payload.content, "spawn_agents_on_csv is not supported for remote environments")
+    }
+
     func testUnsupportedCustomToolCallUsesRustRegistryMessage() async throws {
         let item = ResponseItem.customToolCall(callID: "custom-unknown", name: "missing_tool", input: "")
 

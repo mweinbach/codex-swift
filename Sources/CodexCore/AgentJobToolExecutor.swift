@@ -8,6 +8,7 @@ public struct AgentJobToolContext: Sendable {
     public var maxDepth: Int32?
     public var spawnConfigSource: AgentJobSpawnConfigSource?
     public var environments: [TurnEnvironmentSelection]?
+    public var remoteEnvironmentIDs: Set<String>
     public var configuredMaxRuntimeSeconds: UInt64?
     public var statusForThread: (@Sendable (ThreadId) async -> AgentStatus)?
     public var spawnWorker: (@Sendable (AgentJobWorkerSpawnRequest) async -> AgentJobWorkerSpawnResult)?
@@ -22,6 +23,7 @@ public struct AgentJobToolContext: Sendable {
         maxDepth: Int32? = nil,
         spawnConfigSource: AgentJobSpawnConfigSource? = nil,
         environments: [TurnEnvironmentSelection]? = nil,
+        remoteEnvironmentIDs: Set<String> = [],
         configuredMaxRuntimeSeconds: UInt64? = nil,
         statusForThread: (@Sendable (ThreadId) async -> AgentStatus)? = nil,
         spawnWorker: (@Sendable (AgentJobWorkerSpawnRequest) async -> AgentJobWorkerSpawnResult)? = nil,
@@ -35,6 +37,7 @@ public struct AgentJobToolContext: Sendable {
         self.maxDepth = maxDepth
         self.spawnConfigSource = spawnConfigSource
         self.environments = environments
+        self.remoteEnvironmentIDs = remoteEnvironmentIDs
         self.configuredMaxRuntimeSeconds = configuredMaxRuntimeSeconds
         self.statusForThread = statusForThread
         self.spawnWorker = spawnWorker
@@ -63,6 +66,7 @@ public enum AgentJobToolExecutor {
             do {
                 let executionCwd = try spawnAgentsOnCSVExecutionCwd(
                     selections: context.environments,
+                    remoteEnvironmentIDs: context.remoteEnvironmentIDs,
                     defaultCwd: cwd
                 )
                 let inputCSVPath = resolvePath(
@@ -173,6 +177,7 @@ public enum AgentJobToolExecutor {
 
     private static func spawnAgentsOnCSVExecutionCwd(
         selections: [TurnEnvironmentSelection]?,
+        remoteEnvironmentIDs: Set<String>,
         defaultCwd: URL
     ) throws -> URL {
         guard let selections else {
@@ -180,6 +185,9 @@ public enum AgentJobToolExecutor {
         }
         guard selections.count == 1, let selection = selections.first else {
             throw FunctionCallError.respondToModel("spawn_agents_on_csv requires exactly one local environment")
+        }
+        if remoteEnvironmentIDs.contains(selection.environmentID) {
+            throw FunctionCallError.respondToModel("spawn_agents_on_csv is not supported for remote environments")
         }
         return URL(fileURLWithPath: selection.cwd, isDirectory: true).standardizedFileURL
     }
