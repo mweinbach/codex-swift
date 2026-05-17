@@ -89,6 +89,8 @@ struct DebugTraceReducer {
             try endInference(event: event, payload: payload, type: type)
         case "tool_call_started":
             try startToolCall(event: event, payload: payload)
+        case "mcp_tool_call_correlation_assigned":
+            try assignMCPToolCallCorrelation(payload: payload)
         case "tool_call_runtime_started":
             try startToolCallRuntime(event: event, payload: payload)
         case "tool_call_runtime_ended":
@@ -408,6 +410,7 @@ struct DebugTraceReducer {
         let requester = try toolCallRequester(from: payload, threadID: threadID)
         var toolCall: [String: Any] = [
             "tool_call_id": toolCallID,
+            "mcp_call_id": NSNull(),
             "model_visible_call_id": Self.nullableString(payload["model_visible_call_id"]),
             "code_mode_runtime_tool_id": Self.nullableString(payload["code_mode_runtime_tool_id"]),
             "thread_id": threadID,
@@ -442,6 +445,21 @@ struct DebugTraceReducer {
             try linkWaitToolCallFromRequestPayload(threadID: threadID, toolCallID: toolCallID, payload["invocation_payload"])
         }
         try syncTerminalModelObservation(toolCallID: toolCallID)
+    }
+
+    private mutating func assignMCPToolCallCorrelation(payload: [String: Any]) throws {
+        let toolCallID = try Self.requiredString(payload, key: "tool_call_id")
+        let mcpCallID = try Self.requiredString(payload, key: "mcp_call_id")
+        var toolCalls = try Self.dictionaryMap(rollout["tool_calls"], key: "tool_calls")
+        guard var toolCall = toolCalls[toolCallID] as? [String: Any] else {
+            throw DebugTraceReducerError.unknownMCPToolCallCorrelation(toolCallID)
+        }
+        if !(toolCall["mcp_call_id"] is NSNull) {
+            throw DebugTraceReducerError.duplicateMCPToolCallCorrelation(toolCallID)
+        }
+        toolCall["mcp_call_id"] = mcpCallID
+        toolCalls[toolCallID] = toolCall
+        rollout["tool_calls"] = toolCalls
     }
 
     private mutating func startToolCallRuntime(event: [String: Any], payload: [String: Any]) throws {
@@ -3076,6 +3094,8 @@ private enum DebugTraceReducerError: Error, CustomStringConvertible {
         turnThreadID: String
     )
     case duplicateToolCall(String)
+    case unknownMCPToolCallCorrelation(String)
+    case duplicateMCPToolCallCorrelation(String)
     case unknownToolCallEnd(String)
     case unknownToolCallRuntimeStart(String)
     case unknownToolCallRuntimeEnd(String)
@@ -3179,6 +3199,10 @@ private enum DebugTraceReducerError: Error, CustomStringConvertible {
             return "inference start \(inferenceID) used thread \(eventThreadID), but codex turn \(turnID) belongs to \(turnThreadID)"
         case let .duplicateToolCall(toolCallID):
             return "duplicate tool call start for \(toolCallID)"
+        case let .unknownMCPToolCallCorrelation(toolCallID):
+            return "MCP correlation referenced unknown tool call \(toolCallID)"
+        case let .duplicateMCPToolCallCorrelation(toolCallID):
+            return "duplicate MCP correlation for tool call \(toolCallID)"
         case let .unknownToolCallEnd(toolCallID):
             return "tool call end referenced unknown call \(toolCallID)"
         case let .unknownToolCallRuntimeStart(toolCallID):

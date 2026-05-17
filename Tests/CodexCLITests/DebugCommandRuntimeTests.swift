@@ -1599,6 +1599,7 @@ final class DebugCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(toolCall["model_visible_call_item_ids"] as? [String], [])
         XCTAssertEqual(toolCall["model_visible_output_item_ids"] as? [String], [])
         XCTAssertNil(toolCall["terminal_operation_id"] as? String)
+        XCTAssertTrue(toolCall["mcp_call_id"] is NSNull)
 
         let requester = try XCTUnwrap(toolCall["requester"] as? [String: Any])
         XCTAssertEqual(requester["type"] as? String, "model")
@@ -1619,6 +1620,59 @@ final class DebugCommandRuntimeTests: XCTestCase {
         XCTAssertNotNil(rawPayloads["payload-tool-runtime-start"])
         XCTAssertNotNil(rawPayloads["payload-tool-runtime-end"])
         XCTAssertNotNil(rawPayloads["payload-tool-result"])
+    }
+
+    func testTraceReduceRecordsMCPToolCallCorrelationLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let bundle = temp.url.appendingPathComponent("trace-bundle", isDirectory: true)
+
+        try writeTraceBundle(at: bundle, events: [
+            traceEvent(seq: 1, wallTime: 101, payload: [
+                "type": "thread_started",
+                "thread_id": "thread-root",
+                "agent_path": "/root"
+            ]),
+            traceEvent(seq: 2, wallTime: 102, threadID: "thread-root", payload: [
+                "type": "codex_turn_started",
+                "codex_turn_id": "turn-1",
+                "thread_id": "thread-root"
+            ]),
+            traceEvent(seq: 3, wallTime: 103, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "tool_call_started",
+                "tool_call_id": "mcp-call",
+                "model_visible_call_id": "call-1",
+                "code_mode_runtime_tool_id": NSNull(),
+                "requester": ["type": "model"],
+                "kind": [
+                    "type": "mcp",
+                    "server": "docs",
+                    "tool": "search"
+                ],
+                "summary": [
+                    "type": "generic",
+                    "label": "search",
+                    "input_preview": "{\"query\":\"trace\"}",
+                    "output_preview": NSNull()
+                ],
+                "invocation_payload": NSNull()
+            ]),
+            traceEvent(seq: 4, wallTime: 104, threadID: "thread-root", codexTurnID: "turn-1", payload: [
+                "type": "mcp_tool_call_correlation_assigned",
+                "tool_call_id": "mcp-call",
+                "mcp_call_id": "mcp-call-id"
+            ])
+        ])
+
+        let result = try await DebugCommandRuntime.run(
+            CodexCLI.DebugCommandRequest(action: .traceReduce(traceBundle: bundle.path, output: nil)),
+            dependencies: testDependencies(codexHome: temp.url)
+        )
+
+        XCTAssertEqual(result.exitCode, 0)
+        let state = try loadJSONObject(at: bundle.appendingPathComponent("state.json", isDirectory: false))
+        let toolCalls = try XCTUnwrap(state["tool_calls"] as? [String: Any])
+        let toolCall = try XCTUnwrap(toolCalls["mcp-call"] as? [String: Any])
+        XCTAssertEqual(toolCall["mcp_call_id"] as? String, "mcp-call-id")
     }
 
     func testTraceReduceRecordsAgentInteractionEdges() async throws {

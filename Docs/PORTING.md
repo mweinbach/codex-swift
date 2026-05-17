@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: tightened Rust commit `702e6a3c64` (`[rollout-trace] Add a
+  trace ID to MCP calls`). Swift debug trace reduction now accepts
+  `mcp_tool_call_correlation_assigned`, stores the Rust `mcp_call_id` field on
+  reduced tool calls, initializes non-MCP tool calls with explicit null, and
+  preserves Rust's unknown/duplicate correlation errors.
 - 2026-05-17: rechecked Rust commit `6941f5c2c5` (`[codex] preserve
   MCP result meta in McpToolCallItemResult`). Swift non-interactive JSONL
   output now emits `mcp_tool_call` `item.started` / `item.completed`
@@ -129,8 +134,9 @@ Recent upstream audit checkpoint:
   injectable MCP call trace ID provider and preserve Rust's bridge-private
   `codex_bridge_mcp_call_id` request metadata key on outgoing configured MCP
   `tools/call` requests, while keeping caller `_meta` values and injected
-  `threadId` intact. Full rollout-trace bundle reduction remains pending with
-  the broader live runtime trace port.
+  `threadId` intact. Swift debug trace reduction also records the matching
+  `mcp_call_id` on reduced tool-call artifacts so replayed bundles preserve
+  the backend-call correlation.
 - 2026-05-17: rechecked Rust commit `92930a8d40` (`Refactor chatwidget
   state into modules`). Swift now carries the reusable TUI rate-limit warning
   helper from `chatwidget/rate_limits.rs`, including Rust's threshold
