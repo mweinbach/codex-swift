@@ -33,6 +33,15 @@ public struct RemoteControlStatusReadResponse: Equatable, Sendable {
             environmentID: snapshot.environmentID
         )
     }
+
+    public init(notification: RemoteControlStatusChangedNotification) {
+        self.init(
+            status: notification.status,
+            serverName: notification.serverName,
+            installationID: notification.installationID,
+            environmentID: notification.environmentID
+        )
+    }
 }
 
 extension RemoteControlStatusReadResponse: Codable {

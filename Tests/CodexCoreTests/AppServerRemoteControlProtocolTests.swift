@@ -59,4 +59,32 @@ final class AppServerRemoteControlProtocolTests: XCTestCase {
             )
         )
     }
+
+    func testRemoteControlEnableAndDisableResponsesConvertFromNotificationLikeRust() {
+        let notification = RemoteControlStatusChangedNotification(
+            status: .connected,
+            serverName: "server-4",
+            installationID: "install-4",
+            environmentID: "env-4"
+        )
+
+        XCTAssertEqual(
+            RemoteControlEnableResponse(notification: notification),
+            RemoteControlEnableResponse(
+                status: .connected,
+                serverName: "server-4",
+                installationID: "install-4",
+                environmentID: "env-4"
+            )
+        )
+        XCTAssertEqual(
+            RemoteControlDisableResponse(notification: notification),
+            RemoteControlDisableResponse(
+                status: .connected,
+                serverName: "server-4",
+                installationID: "install-4",
+                environmentID: "env-4"
+            )
+        )
+    }
 }

@@ -35,7 +35,9 @@ Recent upstream audit checkpoint:
   preserves Rust's unit-option request boundary by accepting omitted or
   explicit `null` params while rejecting object params, and returns the
   Rust-shaped status payload with `serverName`, `installationId`, and explicit
-  `environmentId: null`.
+  `environmentId: null`. Swift response models now also mirror Rust's
+  conversion from `RemoteControlStatusChangedNotification` into the
+  enable/disable response payload shape.
 - 2026-05-17: rechecked Rust commit `79c65f816c` (`[codex] Filter legacy
   warning messages during compaction`). Swift contextual user-fragment
   detection now recognizes the removed unified-exec process-limit warning,
