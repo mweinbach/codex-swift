@@ -10,6 +10,7 @@ public enum HookConfig {
     public static func configuredHandlers(
         from stack: ConfigLayerStack,
         codexHome: URL? = nil,
+        bypassHookTrust: Bool = false,
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> [ConfiguredHookHandler] {
         let effectiveConfig = stack.effectiveConfig()
@@ -29,6 +30,7 @@ public enum HookConfig {
                 source: managedHooks.source,
                 hookStates: hookStates,
                 isManaged: true,
+                bypassHookTrust: bypassHookTrust,
                 displayOrder: &displayOrder,
                 handlers: &handlers
             )
@@ -45,6 +47,7 @@ public enum HookConfig {
                 source: metadata.source,
                 hookStates: hookStates,
                 isManaged: metadata.isManaged,
+                bypassHookTrust: bypassHookTrust,
                 displayOrder: &displayOrder,
                 handlers: &handlers
             )
@@ -62,6 +65,7 @@ public enum HookConfig {
                     root: root,
                     pluginID: pluginID,
                     hookStates: hookStates,
+                    bypassHookTrust: bypassHookTrust,
                     displayOrder: &displayOrder,
                     handlers: &handlers
                 )
@@ -108,6 +112,7 @@ public enum HookConfig {
         source: HookSource,
         hookStates: [String: HookState],
         isManaged: Bool = false,
+        bypassHookTrust: Bool = false,
         displayOrder: inout Int64,
         handlers: inout [ConfiguredHookHandler]
     ) {
@@ -160,7 +165,12 @@ public enum HookConfig {
                         statusMessage: statusMessage
                     )
                     guard hookEnabled(isManaged: isManaged, state: hookStates[key]),
-                          hookTrusted(isManaged: isManaged, currentHash: currentHash, state: hookStates[key])
+                          hookTrusted(
+                              isManaged: isManaged,
+                              bypassHookTrust: bypassHookTrust,
+                              currentHash: currentHash,
+                              state: hookStates[key]
+                          )
                     else {
                         continue
                     }
@@ -221,6 +231,7 @@ public enum HookConfig {
         root: URL,
         pluginID: String,
         hookStates: [String: HookState],
+        bypassHookTrust: Bool,
         displayOrder: inout Int64,
         handlers: inout [ConfiguredHookHandler]
     ) {
@@ -260,7 +271,12 @@ public enum HookConfig {
                             statusMessage: statusMessage
                         )
                         guard hookEnabled(isManaged: false, state: hookStates[key]),
-                              hookTrusted(isManaged: false, currentHash: currentHash, state: hookStates[key]),
+                              hookTrusted(
+                                  isManaged: false,
+                                  bypassHookTrust: bypassHookTrust,
+                                  currentHash: currentHash,
+                                  state: hookStates[key]
+                              ),
                               let sourcePath = try? AbsolutePath(
                                   absolutePath: root.appendingPathComponent(
                                       config.sourcePath,
@@ -333,8 +349,13 @@ public enum HookConfig {
         isManaged || state?.enabled != false
     }
 
-    private static func hookTrusted(isManaged: Bool, currentHash: String, state: HookState?) -> Bool {
-        isManaged || state?.trustedHash == currentHash
+    private static func hookTrusted(
+        isManaged: Bool,
+        bypassHookTrust: Bool,
+        currentHash: String,
+        state: HookState?
+    ) -> Bool {
+        isManaged || bypassHookTrust || state?.trustedHash == currentHash
     }
 
     private static func configFeatureEnabled(_ key: String, in config: ConfigValue, defaultValue: Bool) -> Bool {

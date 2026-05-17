@@ -10,6 +10,26 @@ final class HookConfigTests: XCTestCase {
         XCTAssertEqual(HookConfig.configuredHandlers(from: stack), [])
     }
 
+    func testConfiguredHandlersCanBypassHookTrustForInvocation() throws {
+        let stack = try ConfigLayerStack(layers: [
+            ConfigLayerEntry(name: .user(file: try path("/tmp/config.toml")), config: hookConfig(command: "echo yes"))
+        ])
+
+        let handlers = HookConfig.configuredHandlers(from: stack, bypassHookTrust: true)
+
+        XCTAssertEqual(handlers, [
+            ConfiguredHookHandler(
+                eventName: .userPromptSubmit,
+                matcher: nil,
+                command: "echo yes",
+                timeoutSec: 600,
+                sourcePath: try path("/tmp/config.toml"),
+                source: .user,
+                displayOrder: 0
+            )
+        ])
+    }
+
     func testConfiguredHandlersIncludeTrustedUserHooks() throws {
         let command = "echo ${NAME}"
         let key = HookConfig.hookKey(

@@ -1078,7 +1078,12 @@ private func runNonInteractiveExec(
         strictConfig: options.strictConfig
     )
     let execPolicyManager = try ExecPolicyManager.load(features: settings.features, configStack: configStack)
-    let hookHandlers = HookConfig.configuredHandlers(from: configStack, codexHome: codexHome, environment: environment)
+    let hookHandlers = HookConfig.configuredHandlers(
+        from: configStack,
+        codexHome: codexHome,
+        bypassHookTrust: options.bypassHookTrust,
+        environment: environment
+    )
     try await CodexAuthStorage.enforceLoginRestrictions(
         codexHome: codexHome,
         config: settings,
@@ -1409,6 +1414,11 @@ private func runNonInteractiveExec(
     var stderrMessages = [String]()
     if let promptStderr = promptResolution.stderrMessage {
         stderrMessages.append(promptStderr)
+    }
+    if options.bypassHookTrust {
+        stderrMessages.append(
+            "`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation."
+        )
     }
     if !options.json {
         stderrMessages.append(configSummary)

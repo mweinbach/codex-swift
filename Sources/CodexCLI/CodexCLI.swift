@@ -193,6 +193,7 @@ public struct CodexCLI: Sendable {
         public let configProfileV2: String?
         public let removedFullAuto: Bool
         public let strictConfig: Bool
+        public let bypassHookTrust: Bool
 
         public init(
             json: Bool = false,
@@ -205,7 +206,8 @@ public struct CodexCLI: Sendable {
             ignoreRules: Bool = false,
             configProfileV2: String? = nil,
             removedFullAuto: Bool = false,
-            strictConfig: Bool = false
+            strictConfig: Bool = false,
+            bypassHookTrust: Bool = false
         ) {
             self.json = json
             self.imagePaths = imagePaths
@@ -218,6 +220,7 @@ public struct CodexCLI: Sendable {
             self.configProfileV2 = configProfileV2
             self.removedFullAuto = removedFullAuto
             self.strictConfig = strictConfig
+            self.bypassHookTrust = bypassHookTrust
         }
 
         public var removedFullAutoWarning: String? {
@@ -324,6 +327,7 @@ public struct CodexCLI: Sendable {
         public let approvalPolicy: String?
         public let searchEnabled: Bool
         public let noAltScreen: Bool
+        public let bypassHookTrust: Bool
 
         public init(
             imagePaths: [String] = [],
@@ -338,7 +342,8 @@ public struct CodexCLI: Sendable {
             additionalWritableRoots: [String] = [],
             approvalPolicy: String? = nil,
             searchEnabled: Bool = false,
-            noAltScreen: Bool = false
+            noAltScreen: Bool = false,
+            bypassHookTrust: Bool = false
         ) {
             self.imagePaths = imagePaths
             self.model = model
@@ -353,6 +358,7 @@ public struct CodexCLI: Sendable {
             self.approvalPolicy = approvalPolicy
             self.searchEnabled = searchEnabled
             self.noAltScreen = noAltScreen
+            self.bypassHookTrust = bypassHookTrust
         }
     }
 
@@ -841,6 +847,7 @@ public struct CodexCLI: Sendable {
           -a, --ask-for-approval <POLICY>   Configure command approval policy.
           --dangerously-bypass-approvals-and-sandbox
                                             Skip confirmations and sandboxing.
+          --dangerously-bypass-hook-trust   Run enabled hooks without persisted trust.
           -C, --cd <DIR>                    Working root for the session.
           --search                          Enable web search.
           --add-dir <DIR>                   Additional writable directory.
@@ -1943,6 +1950,7 @@ public struct CodexCLI: Sendable {
         var noAltScreen = false
         var dangerouslyBypassOption: String?
         var strictConfig = false
+        var bypassHookTrust = false
     }
 
     private func parseRootInteractiveOptions(
@@ -2140,6 +2148,9 @@ public struct CodexCLI: Sendable {
                 return .failure(message, exitCode)
             }
             return .success(index + 1)
+        case "--dangerously-bypass-hook-trust":
+            parsed.bypassHookTrust = true
+            return .success(index + 1)
         case "--search":
             parsed.searchEnabled = true
             return .success(index + 1)
@@ -2279,7 +2290,8 @@ public struct CodexCLI: Sendable {
             additionalWritableRoots: root.additionalWritableRoots + subcommand.additionalWritableRoots,
             approvalPolicy: subcommand.approvalPolicy ?? root.approvalPolicy,
             searchEnabled: root.searchEnabled || subcommand.searchEnabled,
-            noAltScreen: root.noAltScreen || subcommand.noAltScreen
+            noAltScreen: root.noAltScreen || subcommand.noAltScreen,
+            bypassHookTrust: root.bypassHookTrust || subcommand.bypassHookTrust
         )
     }
 
@@ -2363,6 +2375,7 @@ public struct CodexCLI: Sendable {
         var removedFullAuto = false
         var strictConfig = strictConfigEnabled(in: rootArguments)
         var dangerouslyBypassApprovalsAndSandbox = rootDangerouslyBypassBeforeExec(in: rootArguments)
+        var bypassHookTrust = rootBypassHookTrustBeforeExec(in: rootArguments)
         var actionTokens: [String] = []
         var index = 0
 
@@ -2425,6 +2438,10 @@ public struct CodexCLI: Sendable {
                 continue
             case "--dangerously-bypass-approvals-and-sandbox", "--yolo":
                 dangerouslyBypassApprovalsAndSandbox = true
+                index += 1
+                continue
+            case "--dangerously-bypass-hook-trust":
+                bypassHookTrust = true
                 index += 1
                 continue
             case "--output-schema":
@@ -2535,6 +2552,7 @@ public struct CodexCLI: Sendable {
                 removedFullAuto = removedFullAuto || parsed.removedFullAuto
                 dangerouslyBypassApprovalsAndSandbox =
                     dangerouslyBypassApprovalsAndSandbox || parsed.dangerouslyBypassApprovalsAndSandbox
+                bypassHookTrust = bypassHookTrust || parsed.bypassHookTrust
                 action = .resume(parsed.command)
             case let .failure(message, exitCode):
                 return .failure(message, exitCode)
@@ -2552,6 +2570,7 @@ public struct CodexCLI: Sendable {
                 removedFullAuto = removedFullAuto || parsed.removedFullAuto
                 dangerouslyBypassApprovalsAndSandbox =
                     dangerouslyBypassApprovalsAndSandbox || parsed.dangerouslyBypassApprovalsAndSandbox
+                bypassHookTrust = bypassHookTrust || parsed.bypassHookTrust
                 action = .resume(parsed.command)
             case let .failure(message, exitCode):
                 return .failure(message, exitCode)
@@ -2588,7 +2607,8 @@ public struct CodexCLI: Sendable {
                     ignoreRules: ignoreRules,
                     configProfileV2: configProfileV2 ?? rootProfileV2(beforeCommands: ["exec", "e"], in: rootArguments),
                     removedFullAuto: removedFullAuto,
-                    strictConfig: strictConfig
+                    strictConfig: strictConfig,
+                    bypassHookTrust: bypassHookTrust
                 ),
                 configOverrides: configOverrides
             ))
@@ -2618,6 +2638,7 @@ public struct CodexCLI: Sendable {
         let ignoreRules: Bool
         let removedFullAuto: Bool
         let dangerouslyBypassApprovalsAndSandbox: Bool
+        let bypassHookTrust: Bool
     }
 
     private func parseExecResumeCommand(
@@ -2635,6 +2656,7 @@ public struct CodexCLI: Sendable {
         var ignoreRules = false
         var removedFullAuto = false
         var dangerouslyBypassApprovalsAndSandbox = false
+        var bypassHookTrust = false
         var positionals: [String] = []
         var index = 0
 
@@ -2689,6 +2711,11 @@ public struct CodexCLI: Sendable {
             }
             if argument == "--dangerously-bypass-approvals-and-sandbox" || argument == "--yolo" {
                 dangerouslyBypassApprovalsAndSandbox = true
+                index += 1
+                continue
+            }
+            if argument == "--dangerously-bypass-hook-trust" {
+                bypassHookTrust = true
                 index += 1
                 continue
             }
@@ -2778,7 +2805,8 @@ public struct CodexCLI: Sendable {
             ignoreUserConfig: ignoreUserConfig,
             ignoreRules: ignoreRules,
             removedFullAuto: removedFullAuto,
-            dangerouslyBypassApprovalsAndSandbox: dangerouslyBypassApprovalsAndSandbox
+            dangerouslyBypassApprovalsAndSandbox: dangerouslyBypassApprovalsAndSandbox,
+            bypassHookTrust: bypassHookTrust
         ))
     }
 
@@ -2818,6 +2846,7 @@ public struct CodexCLI: Sendable {
             "--full-auto",
             "--dangerously-bypass-approvals-and-sandbox",
             "--yolo",
+            "--dangerously-bypass-hook-trust",
             "--ephemeral",
             "--ignore-user-config",
             "--ignore-rules",
@@ -3886,6 +3915,14 @@ public struct CodexCLI: Sendable {
             beforeCommands: execCommands,
             in: arguments
         ) || rootFlagPresent(named: "--yolo", beforeCommands: execCommands, in: arguments)
+    }
+
+    private func rootBypassHookTrustBeforeExec(in arguments: [String]) -> Bool {
+        rootFlagPresent(
+            named: "--dangerously-bypass-hook-trust",
+            beforeCommands: ["exec", "e"],
+            in: arguments
+        )
     }
 
     private func rootRemoteModeRejectionMessage(

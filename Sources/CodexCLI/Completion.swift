@@ -174,6 +174,7 @@ public enum CompletionGenerator {
         RootOption(longName: "sandbox", shortName: "s", summary: "Sandbox policy for model-generated shell commands.", takesValue: true),
         RootOption(longName: "ask-for-approval", shortName: "a", summary: "Configure command approval policy.", takesValue: true),
         RootOption(longName: "dangerously-bypass-approvals-and-sandbox", shortName: nil, summary: "Skip confirmations and sandboxing.", takesValue: false),
+        RootOption(longName: "dangerously-bypass-hook-trust", shortName: nil, summary: "Run enabled hooks without persisted trust.", takesValue: false),
         RootOption(longName: "cd", shortName: "C", summary: "Working root for the session.", takesValue: true),
         RootOption(longName: "search", shortName: nil, summary: "Enable web search.", takesValue: false),
         RootOption(longName: "add-dir", shortName: nil, summary: "Additional writable directory.", takesValue: true),

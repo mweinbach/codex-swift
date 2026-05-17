@@ -273,6 +273,13 @@ Recent upstream audit checkpoint:
   `plugin_hooks`; runtime hook discovery, `hooks/list`, and `plugin/read` now
   consult that default-enabled behavior while preserving explicit
   `[features] plugin_hooks = false` as the opt-out.
+- 2026-05-17: rechecked Rust commit `392e94e9ea` (`add
+  --dangerously-bypass-hook-trust CLI flag`). Swift CLI parsing now accepts the
+  invocation-only `--dangerously-bypass-hook-trust` flag for interactive,
+  resume/fork, `exec`, and `exec resume` flows, threads it into
+  non-interactive hook discovery, emits the Rust startup warning, and lets
+  enabled unmanaged hooks run without a persisted trusted hash only for that
+  invocation.
 - 2026-05-17: rechecked Rust commit `1ae9867296` (`Remove tool search bucket
   limit override`). Swift `tool_search` now uses the single Rust default
   result limit for omitted `limit` values, removes the old per-server

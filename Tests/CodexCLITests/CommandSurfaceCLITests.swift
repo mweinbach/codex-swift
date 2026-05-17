@@ -43,6 +43,7 @@ final class CommandSurfaceCLITests: XCTestCase {
                 "--ephemeral",
                 "--ignore-user-config",
                 "--ignore-rules",
+                "--dangerously-bypass-hook-trust",
                 "ship it"
             ],
             stderr: { _ in XCTFail("stderr should not be written") },
@@ -61,7 +62,8 @@ final class CommandSurfaceCLITests: XCTestCase {
             skipGitRepoCheck: true,
             ephemeral: true,
             ignoreUserConfig: true,
-            ignoreRules: true
+            ignoreRules: true,
+            bypassHookTrust: true
         ))
     }
 
@@ -730,6 +732,25 @@ final class CommandSurfaceCLITests: XCTestCase {
                 approvalPolicy: "on-request"
             )
         ))
+    }
+
+    func testRunAsyncResumeMergesBypassHookTrustFlagLikeRust() async {
+        var receivedRequest: CodexCLI.ResumeCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: [
+                "resume",
+                "--dangerously-bypass-hook-trust"
+            ],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            resumeRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(receivedRequest?.interactiveOptions.bypassHookTrust, true)
     }
 
     func testRunAsyncResumeRejectsSubcommandInteractivePermissionConflictLikeRust() async {
