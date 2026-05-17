@@ -12,6 +12,14 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: continued the live app-server extension runtime bridge by
+  carrying extension prompt fragments and configured extension tool specs into
+  `AppServerLiveRuntimeSubmission` for `turn/start`. The submitted Swift live
+  runtime payload now observes the same stable thread extension store seeded by
+  `thread/start`, matching Rust's `build_initial_context` prompt-contributor
+  pass and extension tool collection at turn setup. Registered extension tool
+  executor dispatch and approval-review contributor use in the live runtime loop
+  remain pending.
 - 2026-05-17: wired the Swift app-server processor into the first-class
   extension runtime state for loaded threads. `CodexAppServerConfiguration`
   now accepts an `ExtensionRegistry`, and live `thread/start`,

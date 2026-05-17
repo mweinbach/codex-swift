@@ -11,6 +11,8 @@ final class CodexAppServerTests: XCTestCase {
         ExtensionThreadLifecycleContributor,
         ExtensionTurnLifecycleContributor,
         ExtensionTokenUsageContributor,
+        ExtensionContextContributor,
+        ExtensionToolContributor,
         @unchecked Sendable
     {
         private let lock = NSLock()
@@ -55,6 +57,33 @@ final class CodexAppServerTests: XCTestCase {
             tokenUsage: TokenUsageInfo
         ) {
             append("tokens:\(turnID):\(tokenUsage.totalTokenUsage.totalTokens):\(turnStore.get(String.self) ?? "missing")")
+        }
+
+        func contribute(
+            sessionStore: ExtensionData,
+            threadStore: ExtensionData
+        ) async -> [ExtensionPromptFragment] {
+            [
+                .developerPolicy("live-prompt:\(threadStore.get(String.self) ?? "missing")")
+            ]
+        }
+
+        func tools(sessionStore: ExtensionData, threadStore: ExtensionData) -> [ExtensionTool] {
+            [
+                ExtensionTool(
+                    spec: .function(ResponsesAPITool(
+                        name: "extension/live_tool",
+                        description: "Live tool sees \(threadStore.get(String.self) ?? "missing")",
+                        parameters: .object(
+                            properties: [:],
+                            required: [],
+                            additionalProperties: .boolean(false)
+                        )
+                    )),
+                    supportsParallelToolCalls: true,
+                    executor: { _ in JSONToolOutput(.string("ok")) }
+                )
+            ]
         }
 
         private func append(_ value: String) {
@@ -4350,6 +4379,8 @@ final class CodexAppServerTests: XCTestCase {
         builder.threadLifecycleContributor(recorder)
         builder.turnLifecycleContributor(recorder)
         builder.tokenUsageContributor(recorder)
+        builder.promptContributor(recorder)
+        builder.toolContributor(recorder)
         let liveRuntime = AppServerLiveRuntimeCapture { submission in
             guard submission.turnID == "turn-3" else {
                 return []
@@ -4416,6 +4447,17 @@ final class CodexAppServerTests: XCTestCase {
             "turn-abort:turn-4:interrupted",
             "thread-stop:\(threadID):thread-started"
         ])
+        let firstSubmission = try XCTUnwrap(liveRuntime.submissions.first)
+        XCTAssertEqual(firstSubmission.extensionPromptFragments, [
+            .developerPolicy("live-prompt:thread-started")
+        ])
+        let extensionTool = try XCTUnwrap(firstSubmission.extensionToolSpecs.first)
+        XCTAssertTrue(extensionTool.supportsParallelToolCalls)
+        guard case let .function(tool) = extensionTool.spec else {
+            return XCTFail("expected extension function tool")
+        }
+        XCTAssertEqual(tool.name, "extension/live_tool")
+        XCTAssertEqual(tool.description, "Live tool sees thread-started")
     }
 
     func testTurnStartRejectsUnsupportedImageDetailLikeRust() throws {

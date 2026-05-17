@@ -109,6 +109,8 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
     public let op: Op
     public let turnMetadataHeader: String?
     public let mcpElicitationsAutoDeny: Bool
+    public let extensionPromptFragments: [ExtensionPromptFragment]
+    public let extensionToolSpecs: [ConfiguredToolSpec]
 
     public init(
         requestID: RequestID,
@@ -116,7 +118,9 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
         turnID: String,
         op: Op,
         turnMetadataHeader: String? = nil,
-        mcpElicitationsAutoDeny: Bool = false
+        mcpElicitationsAutoDeny: Bool = false,
+        extensionPromptFragments: [ExtensionPromptFragment] = [],
+        extensionToolSpecs: [ConfiguredToolSpec] = []
     ) {
         self.requestID = requestID
         self.threadID = threadID
@@ -124,6 +128,8 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
         self.op = op
         self.turnMetadataHeader = turnMetadataHeader
         self.mcpElicitationsAutoDeny = mcpElicitationsAutoDeny
+        self.extensionPromptFragments = extensionPromptFragments
+        self.extensionToolSpecs = extensionToolSpecs
     }
 }
 
@@ -26901,6 +26907,31 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         extensionRuntimeState.emitTokenUsage(threadID: parsedThreadID, turnID: turnID, tokenUsage: tokenUsage)
     }
 
+    private func extensionPromptFragments(threadID: String) throws -> [ExtensionPromptFragment] {
+        guard let parsedThreadID = try? ThreadId(string: threadID) else {
+            return []
+        }
+        return try CodexAppServer.runAsyncBlocking {
+            var fragments: [ExtensionPromptFragment] = []
+            let sessionStore = self.extensionRuntimeState.sessionStore
+            let threadStore = self.extensionRuntimeState.threadStore(for: parsedThreadID)
+            for contributor in self.extensionRuntimeState.registry.contextContributors {
+                fragments.append(contentsOf: await contributor.contribute(
+                    sessionStore: sessionStore,
+                    threadStore: threadStore
+                ))
+            }
+            return fragments
+        }
+    }
+
+    private func extensionToolSpecs(threadID: String) -> [ConfiguredToolSpec] {
+        guard let parsedThreadID = try? ThreadId(string: threadID) else {
+            return []
+        }
+        return extensionRuntimeState.configuredToolSpecs(threadID: parsedThreadID)
+    }
+
     private func unsubscribeCurrentConnection(fromThreadID threadID: String) -> Bool {
         let manager = threadStateManager
         let connectionID = connectionID
@@ -29093,7 +29124,9 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                 mcpElicitationsAutoDeny: CodexAppServer.xcode264McpElicitationsAutoDeny(
                     clientName: appServerClientName,
                     clientVersion: appServerClientVersion
-                )
+                ),
+                extensionPromptFragments: try extensionPromptFragments(threadID: threadID),
+                extensionToolSpecs: extensionToolSpecs(threadID: threadID)
             ))
         } catch {
             throw AppServerError.internalError("\(failureMessage): \(error)")
