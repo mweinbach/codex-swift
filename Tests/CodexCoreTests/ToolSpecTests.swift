@@ -1274,10 +1274,11 @@ final class ToolSpecTests: XCTestCase {
             return XCTFail("expected namespace")
         }
         XCTAssertEqual(namespace.description, "Tools in the codex_app namespace.")
-        XCTAssertEqual(namespace.tools.map(namespaceToolName), ["automation_update", "automation_list"])
+        XCTAssertEqual(namespace.tools.map(namespaceToolName), ["automation_list", "automation_update"])
 
-        guard case let .function(updateTool) = namespace.tools[0] else {
-            return XCTFail("expected function")
+        let updateNamespaceTool = try XCTUnwrap(namespace.tools.first { namespaceToolName($0) == "automation_update" })
+        guard case let .function(updateTool) = updateNamespaceTool else {
+            return XCTFail("expected automation_update function")
         }
         XCTAssertEqual(updateTool.description, "Create or update automations.")
         XCTAssertEqual(updateTool.deferLoading, true)
@@ -1330,6 +1331,35 @@ final class ToolSpecTests: XCTestCase {
             return XCTFail("expected visible namespace")
         }
         XCTAssertEqual(namespace.tools.map(namespaceToolName), ["visible_dynamic_tool"])
+    }
+
+    func testDynamicNamespaceToolsSortLikeRustSpecPlan() throws {
+        let specs = ToolSpecFactory.buildSpecs(
+            config: ToolsConfig(
+                shellType: .disabled,
+                applyPatchToolType: nil
+            ),
+            dynamicTools: [
+                DynamicToolSpec(
+                    namespace: "codex_app",
+                    name: "zeta",
+                    description: "Last alphabetically.",
+                    inputSchema: .object(["type": .string("object"), "properties": .object([:])])
+                ),
+                DynamicToolSpec(
+                    namespace: "codex_app",
+                    name: "alpha",
+                    description: "First alphabetically.",
+                    inputSchema: .object(["type": .string("object"), "properties": .object([:])])
+                )
+            ]
+        )
+
+        let registeredNamespace = try XCTUnwrap(specs.first { $0.spec.name == "codex_app" }?.spec)
+        guard case let .namespace(namespace) = registeredNamespace else {
+            return XCTFail("expected registered namespace")
+        }
+        XCTAssertEqual(namespace.tools.map(namespaceToolName), ["alpha", "zeta"])
     }
 
     func testModelVisibleSpecsDropEmptyNamespaceAndPlainDeferredDynamicToolLikeRustRouter() {

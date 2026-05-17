@@ -17,7 +17,9 @@ Recent upstream audit checkpoint:
   Responses tool-spec surface now has explicit parity coverage that namespace
   specs preserve Rust's slash-terminated extension namespace shape
   (`extension/` + `echo`) and expose the same flattened tool name
-  (`extension/echo`) for registered-tool accounting. Dynamic tool validation
+  (`extension/echo`) for registered-tool accounting. Swift dynamic namespace
+  tool specs now also follow Rust's `spec_plan.rs` namespace merge behavior by
+  sorting functions within a namespace by tool name. Dynamic tool validation
   remains intentionally restricted to Responses identifier namespaces.
 - 2026-05-17: rechecked Rust commit `4a1f1df8ce` (`[codex] fix plugin CLI
   active user layer compile`). Swift plugin CLI helper surfaces now have

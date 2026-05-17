@@ -1226,7 +1226,7 @@ public enum ToolSpecFactory {
                 specs[index] = .namespace(ResponsesAPINamespace(
                     name: existingNamespace.name,
                     description: existingNamespace.description,
-                    tools: tools
+                    tools: sortNamespaceTools(tools)
                 ))
             } else {
                 specs.append(.namespace(ResponsesAPINamespace(
@@ -1237,6 +1237,19 @@ public enum ToolSpecFactory {
             }
         }
         return specs
+    }
+
+    private static func sortNamespaceTools(_ tools: [ResponsesAPINamespaceTool]) -> [ResponsesAPINamespaceTool] {
+        tools.sorted { left, right in
+            namespaceToolName(left) < namespaceToolName(right)
+        }
+    }
+
+    private static func namespaceToolName(_ tool: ResponsesAPINamespaceTool) -> String {
+        switch tool {
+        case let .function(function):
+            return function.name
+        }
     }
 
     private static func isNamespace(_ spec: ToolSpec) -> Bool {
