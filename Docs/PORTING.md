@@ -26,8 +26,12 @@ Recent upstream audit checkpoint:
   writes Rust-shaped daemon settings, starts pid-backed app-server and updater
   processes with the Rust arguments, probes the control socket for
   `appServerVersion`, and emits untagged Rust-shaped `bootstrapped` or
-  `started` output. The broader `app-server daemon ...` command family remains
-  pending.
+  `started` output. Swift now also exposes the Rust
+  `codex app-server daemon start|restart|bootstrap|enable-remote-control|disable-remote-control|stop|version`
+  command family, including daemon-specific parser errors, root remote-flag
+  rejection wording, persisted remote-control settings, restart-on-toggle
+  behavior, and Rust-shaped lifecycle/version JSON. The hidden
+  `pid-update-loop` updater runtime remains pending.
 - 2026-05-17: rechecked Rust commit `e6939e3969` (`feat: namespace in ext`).
   Swift does not yet have the Rust extension executor registry, but the shared
   Responses tool-spec surface now has explicit parity coverage that namespace

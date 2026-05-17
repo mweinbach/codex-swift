@@ -672,6 +672,72 @@ private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) as
             exitCode: 0,
             stdoutMessage: try AppServerDaemonLifecycle.encodeOutput(output) + "\n"
         )
+    case .daemonStart:
+        let output = try await AppServerDaemonLifecycle.start(
+            codexHome: try CodexHome.find(),
+            cliVersion: CodexCLI.version
+        )
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 0,
+            stdoutMessage: try AppServerDaemonLifecycle.encodeOutput(output) + "\n"
+        )
+    case .daemonRestart:
+        let output = try await AppServerDaemonLifecycle.restart(
+            codexHome: try CodexHome.find(),
+            cliVersion: CodexCLI.version
+        )
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 0,
+            stdoutMessage: try AppServerDaemonLifecycle.encodeOutput(output) + "\n"
+        )
+    case let .daemonBootstrap(remoteControlEnabled):
+        let output = try await AppServerDaemonLifecycle.bootstrap(
+            codexHome: try CodexHome.find(),
+            cliVersion: CodexCLI.version,
+            remoteControlEnabled: remoteControlEnabled
+        )
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 0,
+            stdoutMessage: try AppServerDaemonLifecycle.encodeBootstrapOutput(output) + "\n"
+        )
+    case .daemonEnableRemoteControl:
+        let output = try await AppServerDaemonLifecycle.setRemoteControl(
+            codexHome: try CodexHome.find(),
+            cliVersion: CodexCLI.version,
+            enabled: true
+        )
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 0,
+            stdoutMessage: try AppServerDaemonLifecycle.encodeRemoteControlOutput(output) + "\n"
+        )
+    case .daemonDisableRemoteControl:
+        let output = try await AppServerDaemonLifecycle.setRemoteControl(
+            codexHome: try CodexHome.find(),
+            cliVersion: CodexCLI.version,
+            enabled: false
+        )
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 0,
+            stdoutMessage: try AppServerDaemonLifecycle.encodeRemoteControlOutput(output) + "\n"
+        )
+    case .daemonStop:
+        let output = try await AppServerDaemonLifecycle.stop(
+            codexHome: try CodexHome.find(),
+            cliVersion: CodexCLI.version
+        )
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 0,
+            stdoutMessage: try AppServerDaemonLifecycle.encodeOutput(output) + "\n"
+        )
+    case .daemonVersion:
+        let output = try await AppServerDaemonLifecycle.version(
+            codexHome: try CodexHome.find(),
+            cliVersion: CodexCLI.version
+        )
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 0,
+            stdoutMessage: try AppServerDaemonLifecycle.encodeOutput(output) + "\n"
+        )
     case let .proxy(socketPath):
         let resolvedSocketPath: String
         if let socketPath {

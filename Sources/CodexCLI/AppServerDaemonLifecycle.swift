@@ -7,6 +7,8 @@ public enum AppServerDaemonBackendKind: String, Codable, Sendable {
 
 public enum AppServerDaemonLifecycleStatus: String, Codable, Sendable {
     case alreadyRunning
+    case restarted
+    case running
     case started
     case stopped
     case notRunning
@@ -84,6 +86,38 @@ public struct AppServerDaemonBootstrapOutput: Equatable, Codable, Sendable {
 public enum AppServerDaemonRemoteControlStartOutput: Equatable, Sendable {
     case bootstrap(AppServerDaemonBootstrapOutput)
     case start(AppServerDaemonLifecycleOutput)
+}
+
+public enum AppServerDaemonRemoteControlStatus: String, Codable, Sendable {
+    case enabled
+    case disabled
+    case alreadyEnabled
+    case alreadyDisabled
+}
+
+public struct AppServerDaemonRemoteControlOutput: Equatable, Codable, Sendable {
+    public let status: AppServerDaemonRemoteControlStatus
+    public let backend: AppServerDaemonBackendKind?
+    public let remoteControlEnabled: Bool
+    public let socketPath: String
+    public let cliVersion: String
+    public let appServerVersion: String?
+
+    public init(
+        status: AppServerDaemonRemoteControlStatus,
+        backend: AppServerDaemonBackendKind?,
+        remoteControlEnabled: Bool,
+        socketPath: String,
+        cliVersion: String,
+        appServerVersion: String?
+    ) {
+        self.status = status
+        self.backend = backend
+        self.remoteControlEnabled = remoteControlEnabled
+        self.socketPath = socketPath
+        self.cliVersion = cliVersion
+        self.appServerVersion = appServerVersion
+    }
 }
 
 public enum AppServerDaemonSignal: Equatable, Sendable {
@@ -171,6 +205,189 @@ public struct AppServerDaemonStopOptions: Sendable {
 }
 
 public enum AppServerDaemonLifecycle {
+    public static func start(
+        codexHome: URL,
+        cliVersion: String,
+        processClient: AppServerDaemonProcessClient = .live,
+        options: AppServerDaemonStopOptions = AppServerDaemonStopOptions()
+    ) async throws -> AppServerDaemonLifecycleOutput {
+        let paths = AppServerDaemonPaths(codexHome: codexHome)
+        try FileManager.default.createDirectory(at: paths.stateDirectory, withIntermediateDirectories: true)
+        let lock = try await AppServerDaemonOperationLock.acquire(
+            path: paths.operationLockFile,
+            timeout: options.operationLockTimeout,
+            pollInterval: options.pollInterval,
+            sleep: processClient.sleep
+        )
+        defer { lock.close() }
+        return try await startWithLockHeld(
+            paths: paths,
+            cliVersion: cliVersion,
+            processClient: processClient,
+            options: options,
+            remoteControlEnabled: false
+        )
+    }
+
+    public static func restart(
+        codexHome: URL,
+        cliVersion: String,
+        processClient: AppServerDaemonProcessClient = .live,
+        options: AppServerDaemonStopOptions = AppServerDaemonStopOptions()
+    ) async throws -> AppServerDaemonLifecycleOutput {
+        let paths = AppServerDaemonPaths(codexHome: codexHome)
+        try FileManager.default.createDirectory(at: paths.stateDirectory, withIntermediateDirectories: true)
+        let lock = try await AppServerDaemonOperationLock.acquire(
+            path: paths.operationLockFile,
+            timeout: options.operationLockTimeout,
+            pollInterval: options.pollInterval,
+            sleep: processClient.sleep
+        )
+        defer { lock.close() }
+        let settings = try loadSettings(path: paths.settingsFile)
+        if (try? await processClient.probeAppServerVersion(paths.socketPath)) != nil,
+           try await runningBackend(pidFile: paths.pidFile, processClient: processClient, options: options) == nil {
+            throw AppServerDaemonLifecycleError("app server is running but is not managed by codex app-server daemon")
+        }
+        try ensureManagedCodexBin(paths.managedCodexBin)
+        if try await isPidBackendStartingOrRunning(pidFile: paths.pidFile, processClient: processClient, options: options) {
+            try await stopPidBackend(pidFile: paths.pidFile, processClient: processClient, options: options)
+        }
+        let pid = try await startPidBackend(
+            pidFile: paths.pidFile,
+            codexBin: paths.managedCodexBin,
+            kind: .appServer(remoteControlEnabled: settings.remoteControlEnabled),
+            processClient: processClient,
+            options: options
+        )
+        let appServerVersion = try await waitUntilReady(
+            socketPath: paths.socketPath,
+            processClient: processClient,
+            options: options
+        )
+        return AppServerDaemonLifecycleOutput(
+            status: .restarted,
+            backend: .pid,
+            pid: pid,
+            socketPath: paths.socketPath,
+            cliVersion: cliVersion,
+            appServerVersion: appServerVersion
+        )
+    }
+
+    public static func bootstrap(
+        codexHome: URL,
+        cliVersion: String,
+        remoteControlEnabled: Bool,
+        processClient: AppServerDaemonProcessClient = .live,
+        options: AppServerDaemonStopOptions = AppServerDaemonStopOptions()
+    ) async throws -> AppServerDaemonBootstrapOutput {
+        let paths = AppServerDaemonPaths(codexHome: codexHome)
+        try FileManager.default.createDirectory(at: paths.stateDirectory, withIntermediateDirectories: true)
+        let lock = try await AppServerDaemonOperationLock.acquire(
+            path: paths.operationLockFile,
+            timeout: options.operationLockTimeout,
+            pollInterval: options.pollInterval,
+            sleep: processClient.sleep
+        )
+        defer { lock.close() }
+        return try await bootstrapWithLockHeld(
+            paths: paths,
+            cliVersion: cliVersion,
+            processClient: processClient,
+            options: options,
+            remoteControlEnabled: remoteControlEnabled
+        )
+    }
+
+    public static func version(
+        codexHome: URL,
+        cliVersion: String,
+        processClient: AppServerDaemonProcessClient = .live,
+        options: AppServerDaemonStopOptions = AppServerDaemonStopOptions()
+    ) async throws -> AppServerDaemonLifecycleOutput {
+        let paths = AppServerDaemonPaths(codexHome: codexHome)
+        _ = try loadSettings(path: paths.settingsFile)
+        let appServerVersion = try await processClient.probeAppServerVersion(paths.socketPath)
+        return output(
+            status: .running,
+            backend: try await runningBackend(pidFile: paths.pidFile, processClient: processClient, options: options),
+            socketPath: paths.socketPath,
+            cliVersion: cliVersion,
+            appServerVersion: appServerVersion
+        )
+    }
+
+    public static func setRemoteControl(
+        codexHome: URL,
+        cliVersion: String,
+        enabled: Bool,
+        processClient: AppServerDaemonProcessClient = .live,
+        options: AppServerDaemonStopOptions = AppServerDaemonStopOptions()
+    ) async throws -> AppServerDaemonRemoteControlOutput {
+        let paths = AppServerDaemonPaths(codexHome: codexHome)
+        try FileManager.default.createDirectory(at: paths.stateDirectory, withIntermediateDirectories: true)
+        let lock = try await AppServerDaemonOperationLock.acquire(
+            path: paths.operationLockFile,
+            timeout: options.operationLockTimeout,
+            pollInterval: options.pollInterval,
+            sleep: processClient.sleep
+        )
+        defer { lock.close() }
+
+        let previousSettings = try loadSettings(path: paths.settingsFile)
+        let backend = try await runningBackend(pidFile: paths.pidFile, processClient: processClient, options: options)
+        if backend == nil, (try? await processClient.probeAppServerVersion(paths.socketPath)) != nil {
+            throw AppServerDaemonLifecycleError("app server is running but is not managed by codex app-server daemon")
+        }
+
+        if previousSettings.remoteControlEnabled == enabled {
+            let version = backend == nil ? nil : try await waitUntilReady(
+                socketPath: paths.socketPath,
+                processClient: processClient,
+                options: options
+            )
+            return remoteControlOutput(
+                status: enabled ? .alreadyEnabled : .alreadyDisabled,
+                backend: backend,
+                remoteControlEnabled: enabled,
+                socketPath: paths.socketPath,
+                cliVersion: cliVersion,
+                appServerVersion: version
+            )
+        }
+
+        try saveSettings(AppServerDaemonSettings(remoteControlEnabled: enabled), path: paths.settingsFile)
+        let version: String?
+        if backend != nil {
+            try ensureManagedCodexBin(paths.managedCodexBin)
+            try await stopPidBackend(pidFile: paths.pidFile, processClient: processClient, options: options)
+            _ = try await startPidBackend(
+                pidFile: paths.pidFile,
+                codexBin: paths.managedCodexBin,
+                kind: .appServer(remoteControlEnabled: enabled),
+                processClient: processClient,
+                options: options
+            )
+            version = try await waitUntilReady(
+                socketPath: paths.socketPath,
+                processClient: processClient,
+                options: options
+            )
+        } else {
+            version = nil
+        }
+
+        return remoteControlOutput(
+            status: enabled ? .enabled : .disabled,
+            backend: version == nil ? nil : .pid,
+            remoteControlEnabled: enabled,
+            socketPath: paths.socketPath,
+            cliVersion: cliVersion,
+            appServerVersion: version
+        )
+    }
+
     public static func ensureRemoteControlStarted(
         codexHome: URL,
         cliVersion: String,
@@ -452,6 +669,22 @@ public enum AppServerDaemonLifecycle {
         return "{\(fields.joined(separator: ","))}"
     }
 
+    public static func encodeRemoteControlOutput(_ output: AppServerDaemonRemoteControlOutput) throws -> String {
+        var fields = [
+            "\"status\":\(try jsonString(output.status.rawValue))"
+        ]
+        if let backend = output.backend {
+            fields.append("\"backend\":\(try jsonString(backend.rawValue))")
+        }
+        fields.append("\"remoteControlEnabled\":\(output.remoteControlEnabled)")
+        fields.append("\"socketPath\":\(try jsonString(output.socketPath))")
+        fields.append("\"cliVersion\":\(try jsonString(output.cliVersion))")
+        if let appServerVersion = output.appServerVersion {
+            fields.append("\"appServerVersion\":\(try jsonString(appServerVersion))")
+        }
+        return "{\(fields.joined(separator: ","))}"
+    }
+
     private static func jsonString(_ value: String) throws -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.withoutEscapingSlashes]
@@ -471,6 +704,24 @@ public enum AppServerDaemonLifecycle {
             status: status,
             backend: backend,
             pid: nil,
+            socketPath: socketPath,
+            cliVersion: cliVersion,
+            appServerVersion: appServerVersion
+        )
+    }
+
+    private static func remoteControlOutput(
+        status: AppServerDaemonRemoteControlStatus,
+        backend: AppServerDaemonBackendKind?,
+        remoteControlEnabled: Bool,
+        socketPath: String,
+        cliVersion: String,
+        appServerVersion: String?
+    ) -> AppServerDaemonRemoteControlOutput {
+        AppServerDaemonRemoteControlOutput(
+            status: status,
+            backend: backend,
+            remoteControlEnabled: remoteControlEnabled,
             socketPath: socketPath,
             cliVersion: cliVersion,
             appServerVersion: appServerVersion

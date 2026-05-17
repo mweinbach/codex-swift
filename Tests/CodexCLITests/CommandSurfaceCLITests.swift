@@ -1103,6 +1103,39 @@ final class CommandSurfaceCLITests: XCTestCase {
         XCTAssertEqual(action, .generateTS(outDir: "/tmp/ts", prettier: nil, experimental: true))
     }
 
+    func testRunAsyncAppServerParsesDaemonCommandsLikeRust() async {
+        let cases: [([String], CodexCLI.AppServerCommandAction)] = [
+            (["app-server", "daemon", "start"], .daemonStart),
+            (["app-server", "daemon", "restart"], .daemonRestart),
+            (["app-server", "daemon", "stop"], .daemonStop),
+            (["app-server", "daemon", "version"], .daemonVersion),
+            (["app-server", "daemon", "bootstrap"], .daemonBootstrap(remoteControlEnabled: false)),
+            (
+                ["app-server", "daemon", "bootstrap", "--remote-control"],
+                .daemonBootstrap(remoteControlEnabled: true)
+            ),
+            (["app-server", "daemon", "enable-remote-control"], .daemonEnableRemoteControl),
+            (["app-server", "daemon", "disable-remote-control"], .daemonDisableRemoteControl)
+        ]
+
+        for (arguments, expectedAction) in cases {
+            var request: CodexCLI.AppServerCommandRequest?
+            let exitCode = await CodexCLI().runAsync(
+                arguments: ["-c", "model=\"gpt-5\""] + arguments,
+                stderr: { _ in XCTFail("stderr should not be written for \(arguments)") },
+                appServerRunner: {
+                    request = $0
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                }
+            )
+
+            XCTAssertEqual(exitCode, 0, "\(arguments)")
+            XCTAssertEqual(request?.action, expectedAction, "\(arguments)")
+            XCTAssertEqual(request?.listenTransport, .stdio, "\(arguments)")
+            XCTAssertEqual(request?.configOverrides.rawOverrides, ["model=\"gpt-5\""], "\(arguments)")
+        }
+    }
+
     func testRunAsyncAppServerParsesRustTopLevelOptions() async {
         var request: CodexCLI.AppServerCommandRequest?
 
@@ -1349,6 +1382,14 @@ final class CommandSurfaceCLITests: XCTestCase {
                 "`--remote-auth-token-env` is only supported for interactive TUI commands, not `codex app-server generate-internal-json-schema`"
             ),
             (
+                ["--remote", "ws://root.example.test", "app-server", "daemon", "start"],
+                "`--remote ws://root.example.test` is only supported for interactive TUI commands, not `codex app-server daemon start`"
+            ),
+            (
+                ["--remote-auth-token-env", "CODEX_REMOTE_TOKEN", "app-server", "daemon", "bootstrap"],
+                "`--remote-auth-token-env` is only supported for interactive TUI commands, not `codex app-server daemon bootstrap`"
+            ),
+            (
                 ["--remote", "ws://root.example.test", "sandbox", "macos", "echo", "hi"],
                 "`--remote ws://root.example.test` is only supported for interactive TUI commands, not `codex sandbox macos`"
             ),
@@ -1523,6 +1564,30 @@ final class CommandSurfaceCLITests: XCTestCase {
             (
                 ["app-server", "generate-internal-json-schema"],
                 "codex-swift: missing required option for command 'app-server generate-internal-json-schema': --out <DIR>"
+            ),
+            (
+                ["app-server", "daemon"],
+                "codex-swift: missing app-server daemon subcommand"
+            ),
+            (
+                ["app-server", "daemon", "bogus"],
+                "codex-swift: unsupported app-server daemon subcommand: bogus"
+            ),
+            (
+                ["app-server", "daemon", "start", "extra"],
+                "codex-swift: unexpected argument for command 'app-server daemon start': extra"
+            ),
+            (
+                ["app-server", "daemon", "start", "--remote-control"],
+                "codex-swift: unsupported option for command 'app-server daemon start': --remote-control"
+            ),
+            (
+                ["app-server", "daemon", "bootstrap", "extra"],
+                "codex-swift: unexpected argument for command 'app-server daemon bootstrap': extra"
+            ),
+            (
+                ["app-server", "daemon", "bootstrap", "--bad"],
+                "codex-swift: unsupported option for command 'app-server daemon bootstrap': --bad"
             ),
             (
                 ["app-server", "bogus"],

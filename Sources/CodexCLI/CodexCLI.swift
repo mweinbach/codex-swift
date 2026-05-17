@@ -456,6 +456,13 @@ public struct CodexCLI: Sendable {
         case run
         case remoteControl
         case remoteControlStop
+        case daemonStart
+        case daemonRestart
+        case daemonBootstrap(remoteControlEnabled: Bool)
+        case daemonEnableRemoteControl
+        case daemonDisableRemoteControl
+        case daemonStop
+        case daemonVersion
         case proxy(socketPath: String?)
         case generateTS(outDir: String, prettier: String?, experimental: Bool)
         case generateJSONSchema(outDir: String, experimental: Bool)
@@ -3323,6 +3330,13 @@ public struct CodexCLI: Sendable {
         }
 
         switch subcommand {
+        case "daemon":
+            switch parseAppServerDaemon(Array(commandArguments.dropFirst())) {
+            case let .success(parsed):
+                action = parsed
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
         case "proxy":
             switch parseAppServerProxy(Array(commandArguments.dropFirst())) {
             case let .success(socketPath):
@@ -3363,6 +3377,67 @@ public struct CodexCLI: Sendable {
         }
 
         return appServerRequest(action: action, options: parsedOptions, rootArguments: rootArguments)
+    }
+
+    private func parseAppServerDaemon(_ arguments: [String]) -> ParseResult<AppServerCommandAction> {
+        guard let subcommand = arguments.first else {
+            return .failure("codex-swift: missing app-server daemon subcommand", 64)
+        }
+        let remainder = Array(arguments.dropFirst())
+        switch subcommand {
+        case "start":
+            return parseNoArguments(remainder, commandName: "app-server daemon start", action: .daemonStart)
+        case "restart":
+            return parseNoArguments(remainder, commandName: "app-server daemon restart", action: .daemonRestart)
+        case "stop":
+            return parseNoArguments(remainder, commandName: "app-server daemon stop", action: .daemonStop)
+        case "version":
+            return parseNoArguments(remainder, commandName: "app-server daemon version", action: .daemonVersion)
+        case "enable-remote-control":
+            return parseNoArguments(remainder, commandName: "app-server daemon enable-remote-control", action: .daemonEnableRemoteControl)
+        case "disable-remote-control":
+            return parseNoArguments(remainder, commandName: "app-server daemon disable-remote-control", action: .daemonDisableRemoteControl)
+        case "bootstrap":
+            return parseAppServerDaemonBootstrap(remainder)
+        default:
+            if subcommand.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'app-server daemon': \(subcommand)", 64)
+            }
+            return .failure("codex-swift: unsupported app-server daemon subcommand: \(subcommand)", 64)
+        }
+    }
+
+    private func parseNoArguments(
+        _ arguments: [String],
+        commandName: String,
+        action: AppServerCommandAction
+    ) -> ParseResult<AppServerCommandAction> {
+        guard arguments.isEmpty else {
+            let argument = arguments[0]
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command '\(commandName)': \(argument)", 64)
+            }
+            return .failure("codex-swift: unexpected argument for command '\(commandName)': \(argument)", 64)
+        }
+        return .success(action)
+    }
+
+    private func parseAppServerDaemonBootstrap(_ arguments: [String]) -> ParseResult<AppServerCommandAction> {
+        var remoteControlEnabled = false
+        var index = 0
+        while index < arguments.count {
+            let argument = arguments[index]
+            if argument == "--remote-control" {
+                remoteControlEnabled = true
+                index += 1
+                continue
+            }
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'app-server daemon bootstrap': \(argument)", 64)
+            }
+            return .failure("codex-swift: unexpected argument for command 'app-server daemon bootstrap': \(argument)", 64)
+        }
+        return .success(.daemonBootstrap(remoteControlEnabled: remoteControlEnabled))
     }
 
     private func parseRemoteControlCommand(
@@ -3772,6 +3847,28 @@ public struct CodexCLI: Sendable {
             return "app-server"
         }
         switch subcommand {
+        case "daemon":
+            guard arguments.count > 1 else {
+                return "app-server daemon"
+            }
+            switch arguments[1] {
+            case "bootstrap":
+                return "app-server daemon bootstrap"
+            case "start":
+                return "app-server daemon start"
+            case "restart":
+                return "app-server daemon restart"
+            case "enable-remote-control":
+                return "app-server daemon enable-remote-control"
+            case "disable-remote-control":
+                return "app-server daemon disable-remote-control"
+            case "stop":
+                return "app-server daemon stop"
+            case "version":
+                return "app-server daemon version"
+            default:
+                return "app-server daemon"
+            }
         case "proxy":
             return "app-server proxy"
         case "generate-ts":

@@ -91,6 +91,173 @@ final class AppServerDaemonLifecycleTests: XCTestCase {
         )
     }
 
+    func testDaemonStartUsesPersistedRemoteControlSettingLikeRust() async throws {
+        let temp = try AppServerDaemonTemporaryDirectory()
+        try temp.createManagedCodexBin()
+        try temp.writeSettings(remoteControlEnabled: true)
+        let fakeProcess = AppServerDaemonFakeProcess(
+            startTimes: [:],
+            spawnedStartTimes: [2001: "app-start"],
+            probeResults: [.failure(AppServerDaemonLifecycleError("not ready")), .success("1.2.4")]
+        )
+
+        let output = try await AppServerDaemonLifecycle.start(
+            codexHome: temp.url,
+            cliVersion: "1.2.3",
+            processClient: fakeProcess.client(),
+            options: .test
+        )
+
+        XCTAssertEqual(output.status, .started)
+        XCTAssertEqual(output.backend, .pid)
+        XCTAssertEqual(output.pid, 2001)
+        XCTAssertEqual(output.appServerVersion, "1.2.4")
+        let spawns = await fakeProcess.spawnsSnapshot()
+        XCTAssertEqual(spawns.map(\.arguments), [
+            ["app-server", "--remote-control", "--listen", "unix://"]
+        ])
+        XCTAssertEqual(
+            try AppServerDaemonLifecycle.encodeOutput(output),
+            #"{"status":"started","backend":"pid","pid":2001,"socketPath":"\#(temp.socketPath.path)","cliVersion":"1.2.3","appServerVersion":"1.2.4"}"#
+        )
+    }
+
+    func testDaemonBootstrapWithoutRemoteControlStartsAppAndUpdaterLikeRust() async throws {
+        let temp = try AppServerDaemonTemporaryDirectory()
+        try temp.createManagedCodexBin()
+        let fakeProcess = AppServerDaemonFakeProcess(
+            startTimes: [:],
+            spawnedStartTimes: [2001: "app-start", 2002: "updater-start"],
+            probeResults: [.failure(AppServerDaemonLifecycleError("not ready")), .success("1.2.4")]
+        )
+
+        let output = try await AppServerDaemonLifecycle.bootstrap(
+            codexHome: temp.url,
+            cliVersion: "1.2.3",
+            remoteControlEnabled: false,
+            processClient: fakeProcess.client(),
+            options: .test
+        )
+
+        XCTAssertEqual(output, AppServerDaemonBootstrapOutput(
+            status: .bootstrapped,
+            backend: .pid,
+            autoUpdateEnabled: true,
+            remoteControlEnabled: false,
+            managedCodexPath: temp.managedCodexBin.path,
+            socketPath: temp.socketPath.path,
+            cliVersion: "1.2.3",
+            appServerVersion: "1.2.4"
+        ))
+        XCTAssertEqual(try temp.settingsJSON(), #"{"remoteControlEnabled":false}"#)
+        let spawns = await fakeProcess.spawnsSnapshot()
+        XCTAssertEqual(spawns.map(\.arguments), [
+            ["app-server", "--listen", "unix://"],
+            ["app-server", "daemon", "pid-update-loop"]
+        ])
+        XCTAssertEqual(
+            try AppServerDaemonLifecycle.encodeBootstrapOutput(output),
+            #"{"status":"bootstrapped","backend":"pid","autoUpdateEnabled":true,"remoteControlEnabled":false,"managedCodexPath":"\#(temp.managedCodexBin.path)","socketPath":"\#(temp.socketPath.path)","cliVersion":"1.2.3","appServerVersion":"1.2.4"}"#
+        )
+    }
+
+    func testDaemonVersionReportsRunningOutputLikeRust() async throws {
+        let temp = try AppServerDaemonTemporaryDirectory()
+        try temp.writeSettings(remoteControlEnabled: false)
+        try temp.writePidRecord(pid: 1234, processStartTime: "start")
+        let fakeProcess = AppServerDaemonFakeProcess(
+            startTimes: [1234: "start"],
+            probeResults: [.success("1.2.4")]
+        )
+
+        let output = try await AppServerDaemonLifecycle.version(
+            codexHome: temp.url,
+            cliVersion: "1.2.3",
+            processClient: fakeProcess.client(),
+            options: .test
+        )
+
+        XCTAssertEqual(output, AppServerDaemonLifecycleOutput(
+            status: .running,
+            backend: .pid,
+            pid: nil,
+            socketPath: temp.socketPath.path,
+            cliVersion: "1.2.3",
+            appServerVersion: "1.2.4"
+        ))
+        XCTAssertEqual(
+            try AppServerDaemonLifecycle.encodeOutput(output),
+            #"{"status":"running","backend":"pid","socketPath":"\#(temp.socketPath.path)","cliVersion":"1.2.3","appServerVersion":"1.2.4"}"#
+        )
+    }
+
+    func testSetRemoteControlEnablesPersistedSettingsWhenStoppedLikeRust() async throws {
+        let temp = try AppServerDaemonTemporaryDirectory()
+        try temp.writeSettings(remoteControlEnabled: false)
+
+        let output = try await AppServerDaemonLifecycle.setRemoteControl(
+            codexHome: temp.url,
+            cliVersion: "1.2.3",
+            enabled: true,
+            processClient: .testClient(),
+            options: .test
+        )
+
+        XCTAssertEqual(output, AppServerDaemonRemoteControlOutput(
+            status: .enabled,
+            backend: nil,
+            remoteControlEnabled: true,
+            socketPath: temp.socketPath.path,
+            cliVersion: "1.2.3",
+            appServerVersion: nil
+        ))
+        XCTAssertEqual(try temp.settingsJSON(), #"{"remoteControlEnabled":true}"#)
+        XCTAssertEqual(
+            try AppServerDaemonLifecycle.encodeRemoteControlOutput(output),
+            #"{"status":"enabled","remoteControlEnabled":true,"socketPath":"\#(temp.socketPath.path)","cliVersion":"1.2.3"}"#
+        )
+    }
+
+    func testSetRemoteControlRestartsRunningBackendLikeRust() async throws {
+        let temp = try AppServerDaemonTemporaryDirectory()
+        try temp.createManagedCodexBin()
+        try temp.writeSettings(remoteControlEnabled: false)
+        try temp.writePidRecord(pid: 1234, processStartTime: "old-start")
+        let fakeProcess = AppServerDaemonFakeProcess(
+            startTimes: [1234: "old-start"],
+            spawnedStartTimes: [2001: "new-start"],
+            probeResults: [.success("1.2.4")]
+        )
+
+        let output = try await AppServerDaemonLifecycle.setRemoteControl(
+            codexHome: temp.url,
+            cliVersion: "1.2.3",
+            enabled: true,
+            processClient: fakeProcess.client(),
+            options: .test
+        )
+
+        XCTAssertEqual(output, AppServerDaemonRemoteControlOutput(
+            status: .enabled,
+            backend: .pid,
+            remoteControlEnabled: true,
+            socketPath: temp.socketPath.path,
+            cliVersion: "1.2.3",
+            appServerVersion: "1.2.4"
+        ))
+        XCTAssertEqual(try temp.settingsJSON(), #"{"remoteControlEnabled":true}"#)
+        let signals = await fakeProcess.signalsSnapshot()
+        XCTAssertEqual(signals, [.terminate])
+        let spawns = await fakeProcess.spawnsSnapshot()
+        XCTAssertEqual(spawns.map(\.arguments), [
+            ["app-server", "--remote-control", "--listen", "unix://"]
+        ])
+        XCTAssertEqual(
+            try AppServerDaemonLifecycle.encodeRemoteControlOutput(output),
+            #"{"status":"enabled","backend":"pid","remoteControlEnabled":true,"socketPath":"\#(temp.socketPath.path)","cliVersion":"1.2.3","appServerVersion":"1.2.4"}"#
+        )
+    }
+
     func testStopReturnsRustNotRunningOutputWhenPidFileIsMissing() async throws {
         let temp = try AppServerDaemonTemporaryDirectory()
 
@@ -260,6 +427,12 @@ private final class AppServerDaemonTemporaryDirectory {
     func createManagedCodexBin() throws {
         try FileManager.default.createDirectory(at: managedCodexBin.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data().write(to: managedCodexBin)
+    }
+
+    func writeSettings(remoteControlEnabled: Bool) throws {
+        try FileManager.default.createDirectory(at: settingsFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let data = #"{"remoteControlEnabled":\#(remoteControlEnabled)}"#.data(using: .utf8)!
+        try data.write(to: settingsFile)
     }
 
     func settingsJSON() throws -> String {
