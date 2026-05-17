@@ -12,6 +12,14 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust exec-server process notification rebinding from
+  `codex-rs/exec-server/src/server/session_registry.rs` and
+  `codex-rs/exec-server/src/local_process.rs`. Swift detached sessions now
+  clear process notification sinks on disconnect, rebind them on
+  `initialize.resumeSessionId`, and clear pipe readability handlers as soon as
+  stdout/stderr/PTY EOF is observed so EOF cannot spin before the termination
+  callback. This preserves retained output plus resumed
+  `process/output`/`process/exited`/`process/closed` delivery.
 - 2026-05-17: wired live app-server runtime notifications through the shared
   initialized-connection broadcaster using Rust's per-thread subscribed
   connection ids from `ThreadStateManager`. Runtime notifications emitted by a

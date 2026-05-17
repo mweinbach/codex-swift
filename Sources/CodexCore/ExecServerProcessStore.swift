@@ -177,10 +177,14 @@ public actor ExecServerProcessStore {
             if stream == .pty {
                 state.stdoutClosed = true
                 state.stderrClosed = true
+                state.stdout.readabilityHandler = nil
+                state.stderr.readabilityHandler = nil
             } else if stream == .stdout {
                 state.stdoutClosed = true
+                state.stdout.readabilityHandler = nil
             } else {
                 state.stderrClosed = true
+                state.stderr.readabilityHandler = nil
             }
             await maybeClose(processId: processId, state: state)
             return
