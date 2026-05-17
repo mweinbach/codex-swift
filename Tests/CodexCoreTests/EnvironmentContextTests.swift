@@ -281,6 +281,16 @@ final class EnvironmentContextTests: XCTestCase {
         XCTAssertEqual(diff.writableRoots, [try AbsolutePath(absolutePath: "/repo")])
     }
 
+    func testTurnContextSelectedEnvironmentCwdPreservesLegacyCwdValueLikeRust() {
+        let turnContext = TurnContext(
+            cwd: "/repo",
+            approvalPolicy: .never,
+            sandboxPolicy: .readOnly
+        )
+
+        XCTAssertEqual(turnContext.selectedEnvironmentCwd, "/repo")
+    }
+
     func testFromTurnContextAndResponseItem() {
         let turnContext = TurnContext(
             cwd: "/repo",

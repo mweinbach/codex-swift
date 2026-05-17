@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `4454e1411b` (`Deprecate TurnContext cwd
+  and resolve_path`). Swift `TurnContext` now keeps the legacy `cwd` accessor
+  behavior-preserving but deprecated, exposes `selectedEnvironmentCwd` as the
+  selected-turn-environment replacement, and updates internal prompt/runtime
+  helpers to use that selected environment cwd directly.
 - 2026-05-17: rechecked Rust commit `5a02962519` (`fix(tui): render network
   approval history by target`). Swift does not have the Rust TUI history-cell
   layer, but the shared approval protocol now carries the same reusable target

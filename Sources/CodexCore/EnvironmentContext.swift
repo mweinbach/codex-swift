@@ -1,14 +1,23 @@
 import Foundation
 
 public struct TurnContext: Equatable, Sendable {
-    public let cwd: String
+    private let environmentCwd: String
     public let approvalPolicy: AskForApproval
     public let sandboxPolicy: SandboxPolicy
 
     public init(cwd: String, approvalPolicy: AskForApproval, sandboxPolicy: SandboxPolicy) {
-        self.cwd = cwd
+        self.environmentCwd = cwd
         self.approvalPolicy = approvalPolicy
         self.sandboxPolicy = sandboxPolicy
+    }
+
+    public var selectedEnvironmentCwd: String {
+        environmentCwd
+    }
+
+    @available(*, deprecated, message: "use selectedEnvironmentCwd instead")
+    public var cwd: String {
+        environmentCwd
     }
 }
 
@@ -115,7 +124,7 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
 
     public static func diff(before: TurnContext, after: TurnContext, shell: Shell) -> EnvironmentContext {
         EnvironmentContext(
-            cwd: before.cwd == after.cwd ? nil : after.cwd,
+            cwd: before.selectedEnvironmentCwd == after.selectedEnvironmentCwd ? nil : after.selectedEnvironmentCwd,
             approvalPolicy: before.approvalPolicy == after.approvalPolicy ? nil : after.approvalPolicy,
             sandboxPolicy: before.sandboxPolicy == after.sandboxPolicy ? nil : after.sandboxPolicy,
             shell: shell
@@ -124,7 +133,7 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
 
     public static func fromTurnContext(_ turnContext: TurnContext, shell: Shell) -> EnvironmentContext {
         EnvironmentContext(
-            cwd: turnContext.cwd,
+            cwd: turnContext.selectedEnvironmentCwd,
             approvalPolicy: turnContext.approvalPolicy,
             sandboxPolicy: turnContext.sandboxPolicy,
             shell: shell

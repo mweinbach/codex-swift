@@ -81,7 +81,7 @@ public enum AgentJobRuntime {
             modelReasoningSummary: source.reasoningSummary,
             developerInstructions: source.developerInstructions,
             compactPrompt: source.compactPrompt,
-            cwd: source.turnContext.cwd,
+            cwd: source.turnContext.selectedEnvironmentCwd,
             approvalPolicy: source.turnContext.approvalPolicy,
             sandboxPolicy: source.turnContext.sandboxPolicy,
             shellEnvironmentPolicy: source.shellEnvironmentPolicy ?? source.parentConfig.shellEnvironmentPolicy

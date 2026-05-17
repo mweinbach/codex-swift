@@ -138,7 +138,7 @@ public enum NonInteractiveExec {
         if includeEnvironmentContext {
             contextualUserContent.append(
                 .inputText(text: EnvironmentContext(
-                    cwd: context.cwd,
+                    cwd: context.selectedEnvironmentCwd,
                     approvalPolicy: context.approvalPolicy,
                     sandboxPolicy: context.sandboxPolicy,
                     shell: shell,
