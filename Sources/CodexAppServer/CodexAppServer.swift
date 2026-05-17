@@ -24107,7 +24107,55 @@ public enum CodexAppServer {
                 data: ["config_write_error_code": "configValidationError"]
             )
         }
-        return keyPath.components(separatedBy: ".")
+
+        var segments: [String] = []
+        var segment = ""
+        var quoted = false
+        var index = keyPath.startIndex
+
+        while index < keyPath.endIndex {
+            let character = keyPath[index]
+            switch character {
+            case "\"" where segment.isEmpty && !quoted:
+                quoted = true
+            case "\"" where quoted:
+                quoted = false
+            case "\\" where quoted:
+                let nextIndex = keyPath.index(after: index)
+                guard nextIndex < keyPath.endIndex else {
+                    throw configWriteKeyPathError("unterminated escape in keyPath")
+                }
+                segment.append(keyPath[nextIndex])
+                index = nextIndex
+            case "." where !quoted:
+                guard !segment.isEmpty else {
+                    throw configWriteKeyPathError("keyPath segments must not be empty")
+                }
+                segments.append(segment)
+                segment = ""
+            case "\"":
+                throw configWriteKeyPathError("invalid quoted keyPath segment")
+            default:
+                segment.append(character)
+            }
+            index = keyPath.index(after: index)
+        }
+
+        guard !quoted else {
+            throw configWriteKeyPathError("unterminated quoted keyPath segment")
+        }
+        guard !segment.isEmpty else {
+            throw configWriteKeyPathError("keyPath segments must not be empty")
+        }
+        segments.append(segment)
+        return segments
+    }
+
+    private static func configWriteKeyPathError(_ message: String) -> AppServerError {
+        AppServerError.invalidRequestWithData(
+            message,
+            data: ["config_write_error_code": "configValidationError"]
+        )
     }
 
     private static func setConfigValue(

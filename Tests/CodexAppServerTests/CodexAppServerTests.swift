@@ -30106,6 +30106,41 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(sandbox["network_access"] as? Bool, false)
     }
 
+    func testConfigBatchWritePreservesDottedProfileNamesLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        try """
+        profile = "team.prod"
+
+        [profiles."team.prod"]
+        model = "gpt-5.3-spark"
+
+        """.write(to: configFile, atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/batchWrite","params":{"filePath":"\#(configFile.path)","edits":[{"keyPath":"profiles.\"team.prod\".model","value":"gpt-5.5","mergeStrategy":"replace"},{"keyPath":"mcp_servers.sample@catalog.command","value":"echo","mergeStrategy":"replace"}]}}"#,
+            codexHome: temp.url
+        )
+        guard let result = response["result"] as? [String: Any] else {
+            return XCTFail("expected result, got \(response)")
+        }
+        XCTAssertEqual(result["status"] as? String, "ok")
+
+        let verify = try appServerResponse(
+            #"{"id":2,"method":"config/read","params":{}}"#,
+            codexHome: temp.url
+        )
+        let verifyResult = try XCTUnwrap(verify["result"] as? [String: Any])
+        let config = try XCTUnwrap(verifyResult["config"] as? [String: Any])
+        let profiles = try XCTUnwrap(config["profiles"] as? [String: Any])
+        let dottedProfile = try XCTUnwrap(profiles["team.prod"] as? [String: Any])
+        let mcpServers = try XCTUnwrap(config["mcp_servers"] as? [String: Any])
+        let catalogServer = try XCTUnwrap(mcpServers["sample@catalog"] as? [String: Any])
+        XCTAssertEqual(dottedProfile["model"] as? String, "gpt-5.5")
+        XCTAssertNil(profiles["team"])
+        XCTAssertEqual(catalogServer["command"] as? String, "echo")
+    }
+
     func testGetUserSavedConfigReturnsLegacyRustShape() throws {
         let temp = try TemporaryDirectory()
         let writableRoot = temp.url.appendingPathComponent("workspace", isDirectory: true).path

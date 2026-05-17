@@ -12,6 +12,13 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `0445b290fe` (`[1 of 4] tui:
+  route primary settings writes through app server`). Swift app-server
+  `config/value/write` and `config/batchWrite` now parse config `keyPath`
+  values with Rust's quoted-segment rules, so paths like
+  `profiles."team.prod".model` update a dotted profile name without
+  accidentally writing `profiles.team.prod.model`, while bare segments such as
+  `sample@catalog` remain valid.
 - 2026-05-17: rechecked Rust commit `92930a8d40` (`Refactor chatwidget
   state into modules`). Swift now carries the reusable TUI rate-limit warning
   helper from `chatwidget/rate_limits.rs`, including Rust's threshold
