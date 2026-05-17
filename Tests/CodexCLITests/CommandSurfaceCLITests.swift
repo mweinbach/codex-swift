@@ -976,6 +976,17 @@ final class CommandSurfaceCLITests: XCTestCase {
                 "--executor-id",
                 "exec-123",
                 "--use-agent-identity-auth"
+            ],
+            [
+                "-c",
+                "chatgpt_base_url=\"https://example.test\"",
+                "--profile-v2",
+                "remoteauth",
+                "exec-server",
+                "--remote",
+                "https://registry.example.test",
+                "--executor-id",
+                "exec-123"
             ]
         ] {
             let exitCode = await CodexCLI().runAsync(
@@ -1010,7 +1021,17 @@ final class CommandSurfaceCLITests: XCTestCase {
                 executorID: "exec-123",
                 name: nil,
                 useAgentIdentityAuth: true
-            ))
+            )),
+            CodexCLI.ExecServerCommandRequest(
+                action: .remote(
+                    baseURL: "https://registry.example.test",
+                    executorID: "exec-123",
+                    name: nil,
+                    useAgentIdentityAuth: false
+                ),
+                configProfileV2: "remoteauth",
+                configOverrides: CliConfigOverrides(rawOverrides: ["chatgpt_base_url=\"https://example.test\""])
+            )
         ])
     }
 

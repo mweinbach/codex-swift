@@ -459,9 +459,17 @@ public struct CodexCLI: Sendable {
 
     public struct ExecServerCommandRequest: Equatable, Sendable {
         public let action: ExecServerCommandAction
+        public let configProfileV2: String?
+        public let configOverrides: CliConfigOverrides
 
-        public init(action: ExecServerCommandAction) {
+        public init(
+            action: ExecServerCommandAction,
+            configProfileV2: String? = nil,
+            configOverrides: CliConfigOverrides = CliConfigOverrides()
+        ) {
             self.action = action
+            self.configProfileV2 = configProfileV2
+            self.configOverrides = configOverrides
         }
     }
 
@@ -3399,12 +3407,23 @@ public struct CodexCLI: Sendable {
             guard let executorID else {
                 return .failure("codex-swift: --executor-id is required when --remote is set", 64)
             }
-            return .success(ExecServerCommandRequest(action: .remote(
-                baseURL: remote,
-                executorID: executorID,
-                name: name,
-                useAgentIdentityAuth: useAgentIdentityAuth
-            )))
+            let configOverrides: CliConfigOverrides
+            switch parseConfigOverrides(from: rootArguments) {
+            case let .success(overrides):
+                configOverrides = overrides
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
+            return .success(ExecServerCommandRequest(
+                action: .remote(
+                    baseURL: remote,
+                    executorID: executorID,
+                    name: name,
+                    useAgentIdentityAuth: useAgentIdentityAuth
+                ),
+                configProfileV2: rootProfileV2(beforeCommand: "exec-server", in: rootArguments),
+                configOverrides: configOverrides
+            ))
         }
 
         if useAgentIdentityAuth {
@@ -3414,9 +3433,7 @@ public struct CodexCLI: Sendable {
             )
         }
 
-        return .success(ExecServerCommandRequest(action: .listen(
-            url: listen ?? defaultExecServerListenURL
-        )))
+        return .success(ExecServerCommandRequest(action: .listen(url: listen ?? defaultExecServerListenURL)))
     }
 
     private func parseMcpServerCommand(
@@ -3751,12 +3768,12 @@ public struct CodexCLI: Sendable {
             return nil
         case let .command(spec, commandArguments):
             switch spec.name {
-            case "exec", "review", "resume", "fork":
+            case "exec", "review", "resume", "fork", "exec-server":
                 return nil
             case "debug" where commandArguments.first == "prompt-input":
                 return nil
             default:
-                return "--profile-v2 only applies to runtime commands: `codex`, `codex exec`, `codex review`, `codex resume`, `codex fork`, and `codex debug prompt-input`."
+                return "--profile-v2 only applies to runtime commands: `codex`, `codex exec`, `codex review`, `codex resume`, `codex fork`, `codex exec-server`, and `codex debug prompt-input`."
             }
         case .version, .help, .unknown:
             return nil

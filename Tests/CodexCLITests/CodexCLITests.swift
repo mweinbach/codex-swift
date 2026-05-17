@@ -695,7 +695,7 @@ final class CodexCLITests: XCTestCase {
 
         XCTAssertEqual(exitCode, 64)
         XCTAssertEqual(stderr, [
-            "--profile-v2 only applies to runtime commands: `codex`, `codex exec`, `codex review`, `codex resume`, `codex fork`, and `codex debug prompt-input`."
+            "--profile-v2 only applies to runtime commands: `codex`, `codex exec`, `codex review`, `codex resume`, `codex fork`, `codex exec-server`, and `codex debug prompt-input`."
         ])
     }
 

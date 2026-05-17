@@ -263,7 +263,9 @@ Recent upstream audit checkpoint:
   the configured auth-provider headers, sends no JSON body/content type,
   decodes the Rust response payload containing only `executor_id` and `url`,
   and logs the Rust-shaped remote registration message before connecting to
-  the rendezvous websocket.
+  the rendezvous websocket. Swift also forwards root `-c` overrides and
+  `--profile-v2` into the remote auth config load so auth-backed registration
+  uses the same config/profile layers as Rust.
 - 2026-05-17: rechecked Rust's `update_plan` handler and exec JSONL todo
   projection in `codex-rs/core/src/tools/handlers/plan.rs`,
   `codex-rs/exec/src/event_processor_with_jsonl_output.rs`, and

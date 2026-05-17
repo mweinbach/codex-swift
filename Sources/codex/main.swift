@@ -103,6 +103,15 @@ private func execLoaderOverrides(options: CodexCLI.ExecCommandOptions, codexHome
     return overrides
 }
 
+private func profileV2LoaderOverrides(profile: String?, codexHome: URL) -> ConfigLayerLoaderOverrides {
+    var overrides = ConfigLayerLoaderOverrides()
+    if let profile {
+        overrides.userConfigPath = profileV2ConfigPath(codexHome: codexHome, profile: profile)
+        overrides.userConfigProfile = profile
+    }
+    return overrides
+}
+
 private func runLoginCommand(_ request: CodexCLI.LoginCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
     switch request.action {
     case .status:
@@ -1861,7 +1870,9 @@ private func runExecServerCommand(_ request: CodexCLI.ExecServerCommandRequest) 
         }
     case let .remote(baseURL, executorID, name, useAgentIdentityAuth):
         let authProvider = try await execServerRemoteAuthProvider(
-            useAgentIdentityAuth: useAgentIdentityAuth
+            useAgentIdentityAuth: useAgentIdentityAuth,
+            configProfileV2: request.configProfileV2,
+            configOverrides: request.configOverrides
         )
         let config = try ExecServerRemoteExecutorConfiguration(
             baseURL: baseURL,
@@ -1877,10 +1888,17 @@ private func runExecServerCommand(_ request: CodexCLI.ExecServerCommandRequest) 
 
 private func execServerRemoteAuthProvider(
     useAgentIdentityAuth: Bool,
+    configProfileV2: String?,
+    configOverrides: CliConfigOverrides,
     environment: [String: String] = ProcessInfo.processInfo.environment
 ) async throws -> StaticAPIAuthProvider {
     let codexHome = try CodexHome.find()
-    let settings = try CodexConfigLoader.load(codexHome: codexHome, systemConfigFile: nil)
+    let settings = try CodexConfigLoader.load(
+        codexHome: codexHome,
+        overrides: configOverrides,
+        systemConfigFile: nil,
+        managedConfigOverrides: profileV2LoaderOverrides(profile: configProfileV2, codexHome: codexHome)
+    )
 
     if useAgentIdentityAuth {
         guard let accessToken = CodexAuthStorage.readCodexAccessTokenFromEnvironment(environment) else {
