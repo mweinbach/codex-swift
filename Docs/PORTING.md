@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `92930a8d40` (`Refactor chatwidget
+  state into modules`). Swift now carries the reusable TUI rate-limit warning
+  helper from `chatwidget/rate_limits.rs`, including Rust's threshold
+  progression, 100% cap suppression, fallback labels, duration rounding bias,
+  monthly windows, and annual labels for windows beyond the supported monthly
+  range.
 - 2026-05-17: rechecked Rust commit `e590f74515` (`goal: pause
   continuations on usage limits and blockers`). Swift now carries Rust's
   expanded thread-goal stopped statuses across the shared protocol, app-server
