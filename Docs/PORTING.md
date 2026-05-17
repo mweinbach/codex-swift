@@ -12,6 +12,13 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked upstream Rust commit `061a614d85`
+  (`multiagent: trim model-visible description, cap to 5 models`). Swift
+  `spawn_agent` tool specs now expose Rust's `service_tier` override field and
+  render picker-visible model override guidance with Rust's compact model slug
+  labels, inline default reasoning effort marker, service-tier id list, hidden
+  model filtering, and top-five cap. Non-interactive tool construction now
+  forwards the resolved configured or bundled model presets into that spec path.
 - 2026-05-17: rechecked Rust commit `610b86fefb` (`Pass Codex product SKU to
   ChatGPT backend`). Swift direct ChatGPT backend GET requests now send Rust's
   `OAI-Product-Sku: codex` header alongside bearer auth, ChatGPT account id,

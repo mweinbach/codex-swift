@@ -230,6 +230,12 @@ public enum NonInteractiveExec {
 
         let applyPatchToolType = modelFamily.applyPatchToolType
         let multiAgentV2Enabled = config.features.isEnabled(.multiAgentV2)
+        let configuredModelCatalog = config.modelCatalog?.models
+        let availableModels = ModelsManager.buildAvailableModels(
+            remoteModels: configuredModelCatalog ?? [],
+            localModels: configuredModelCatalog == nil ? ModelsManager.builtinModelPresets() : [],
+            chatGPTMode: false
+        )
 
         return ToolsConfig(
             shellType: shellType,
@@ -243,6 +249,7 @@ public enum NonInteractiveExec {
             toolSuggest: config.features.isEnabled(.toolSuggest),
             allowLoginShell: config.allowLoginShell,
             multiAgentV2Tools: multiAgentV2Enabled,
+            availableModels: availableModels,
             spawnAgentUsageHint: config.multiAgentV2.usageHintEnabled,
             spawnAgentUsageHintText: config.multiAgentV2.usageHintText,
             hideSpawnAgentMetadata: config.multiAgentV2.hideSpawnAgentMetadata,

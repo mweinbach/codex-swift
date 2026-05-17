@@ -313,6 +313,7 @@ final class ToolSpecTests: XCTestCase {
                     "fork_turns": .string(description: "Optional number of turns to fork. Defaults to `all`. Use `none`, `all`, or a positive integer string such as `3` to fork only the most recent turns."),
                     "model": .string(description: "Optional model override for the new agent. Leave unset to inherit the same model as the parent, which is the preferred default. Only set this when the user explicitly asks for a different model or the task clearly requires one."),
                     "reasoning_effort": .string(description: "Optional reasoning effort override for the new agent. Replaces the inherited reasoning effort."),
+                    "service_tier": .string(description: "Optional service tier override for the new agent. Leave unset unless the user explicitly asks for one."),
                     "task_name": .string(description: "Task name for the new agent. Use lowercase letters, digits, and underscores.")
                 ],
                 required: ["task_name", "message"],
@@ -419,6 +420,42 @@ final class ToolSpecTests: XCTestCase {
             waitProperties["timeout_ms"],
             .number(description: "Optional timeout in milliseconds. Defaults to 10000, min 5000, max 50000.")
         )
+    }
+
+    func testBuildSpecsMultiAgentV2RendersCompactTopFiveModelOverridesLikeRust() throws {
+        let visibleModels = (1...6).map { index in
+            makeModelPreset(
+                model: "model-\(index)",
+                description: "Model \(index) description.",
+                defaultReasoningEffort: .medium,
+                supportedReasoningEfforts: [.low, .medium, .high],
+                serviceTiers: index == 1
+                    ? [ModelServiceTier(id: "priority", name: "fast", description: "Fast")]
+                    : []
+            )
+        }
+        let hiddenModel = makeModelPreset(model: "hidden-model", showInPicker: false)
+        let specs = ToolSpecFactory.buildSpecs(config: ToolsConfig(
+            shellType: .disabled,
+            multiAgentV2Tools: true,
+            availableModels: [hiddenModel] + visibleModels,
+            spawnAgentUsageHint: false
+        ))
+
+        let spawn = try functionTool(named: "spawn_agent", in: specs)
+        XCTAssertTrue(spawn.description.contains(
+            "Available model overrides (optional; inherited parent model is preferred):"
+        ))
+        XCTAssertTrue(spawn.description.contains(
+            "- `model-1`: Model 1 description. Reasoning efforts: low, medium (default), high. Service tiers: priority."
+        ))
+        XCTAssertTrue(spawn.description.contains(
+            "- `model-5`: Model 5 description. Reasoning efforts: low, medium (default), high."
+        ))
+        XCTAssertFalse(spawn.description.contains("model-6"))
+        XCTAssertFalse(spawn.description.contains("hidden-model"))
+        XCTAssertFalse(spawn.description.contains("Default reasoning effort"))
+        XCTAssertFalse(spawn.description.contains("Supported service tiers"))
     }
 
     func testResponsesToolJSONShapeMatchesRustSerde() throws {
@@ -2043,6 +2080,30 @@ final class ToolSpecTests: XCTestCase {
                 description: "Deferred \(name)",
                 parameters: .object(properties: [:], required: nil, additionalProperties: .boolean(false))
             ))
+        )
+    }
+
+    private func makeModelPreset(
+        model: String,
+        description: String = "Description.",
+        defaultReasoningEffort: ReasoningEffort = .medium,
+        supportedReasoningEfforts: [ReasoningEffort] = [],
+        serviceTiers: [ModelServiceTier] = [],
+        showInPicker: Bool = true
+    ) -> ModelPreset {
+        ModelPreset(
+            id: model,
+            model: model,
+            displayName: model,
+            description: description,
+            defaultReasoningEffort: defaultReasoningEffort,
+            supportedReasoningEfforts: supportedReasoningEfforts.map {
+                ReasoningEffortPreset(effort: $0, description: "\($0.rawValue) effort")
+            },
+            serviceTiers: serviceTiers,
+            isDefault: false,
+            showInPicker: showInPicker,
+            supportedInAPI: true
         )
     }
 

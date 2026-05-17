@@ -803,6 +803,7 @@ public struct ToolsConfig: Equatable, Sendable {
     public let toolSuggest: Bool
     public let allowLoginShell: Bool
     public let multiAgentV2Tools: Bool
+    public let availableModels: [ModelPreset]
     public let spawnAgentUsageHint: Bool
     public let spawnAgentUsageHintText: String?
     public let hideSpawnAgentMetadata: Bool
@@ -829,6 +830,7 @@ public struct ToolsConfig: Equatable, Sendable {
         toolSuggest: Bool = true,
         allowLoginShell: Bool = true,
         multiAgentV2Tools: Bool = false,
+        availableModels: [ModelPreset] = [],
         spawnAgentUsageHint: Bool = true,
         spawnAgentUsageHintText: String? = nil,
         hideSpawnAgentMetadata: Bool = false,
@@ -854,6 +856,7 @@ public struct ToolsConfig: Equatable, Sendable {
         self.toolSuggest = toolSuggest
         self.allowLoginShell = allowLoginShell
         self.multiAgentV2Tools = multiAgentV2Tools
+        self.availableModels = availableModels
         self.spawnAgentUsageHint = spawnAgentUsageHint
         self.spawnAgentUsageHintText = spawnAgentUsageHintText
         self.hideSpawnAgentMetadata = hideSpawnAgentMetadata
@@ -882,6 +885,7 @@ public struct ToolsConfig: Equatable, Sendable {
             toolSuggest: toolSuggest,
             allowLoginShell: allowLoginShell,
             multiAgentV2Tools: multiAgentV2Tools,
+            availableModels: availableModels,
             spawnAgentUsageHint: spawnAgentUsageHint,
             spawnAgentUsageHintText: spawnAgentUsageHintText,
             hideSpawnAgentMetadata: hideSpawnAgentMetadata,
@@ -898,7 +902,9 @@ public struct ToolsConfig: Equatable, Sendable {
 public enum ToolSpecFactory {
     private static let spawnAgentInheritedModelGuidance = "Spawned agents inherit your current model by default. Omit `model` to use that preferred default; set `model` only when an explicit override is needed."
     private static let spawnAgentModelOverrideDescription = "Optional model override for the new agent. Leave unset to inherit the same model as the parent, which is the preferred default. Only set this when the user explicitly asks for a different model or the task clearly requires one."
+    private static let spawnAgentServiceTierOverrideDescription = "Optional service tier override for the new agent. Leave unset unless the user explicitly asks for one."
     private static let defaultAgentTypeDescription = "Optional type name for the new agent. If omitted, `default` is used."
+    private static let maxModelOverridesInSpawnAgentDescription = 5
 
     public static func buildSpecs(
         config: ToolsConfig,
@@ -1041,6 +1047,7 @@ public enum ToolSpecFactory {
                 includeUsageHint: config.spawnAgentUsageHint,
                 usageHintText: config.spawnAgentUsageHintText,
                 hideAgentMetadata: config.hideSpawnAgentMetadata,
+                availableModels: config.availableModels,
                 maxConcurrentThreadsPerSession: config.maxConcurrentThreadsPerSession,
                 waitAgentMinTimeoutMS: config.waitAgentMinTimeoutMS,
                 waitAgentMaxTimeoutMS: config.waitAgentMaxTimeoutMS,
@@ -1671,6 +1678,7 @@ public enum ToolSpecFactory {
         includeUsageHint: Bool = true,
         usageHintText: String? = nil,
         hideAgentMetadata: Bool = false,
+        availableModels: [ModelPreset] = [],
         maxConcurrentThreadsPerSession: Int? = nil,
         waitAgentMinTimeoutMS: Int64? = nil,
         waitAgentMaxTimeoutMS: Int64? = nil,
@@ -1681,6 +1689,7 @@ public enum ToolSpecFactory {
                 includeUsageHint: includeUsageHint,
                 usageHintText: usageHintText,
                 hideAgentMetadata: hideAgentMetadata,
+                availableModels: availableModels,
                 maxConcurrentThreadsPerSession: maxConcurrentThreadsPerSession
             ),
             createSendMessageTool(),
@@ -1699,6 +1708,7 @@ public enum ToolSpecFactory {
         includeUsageHint: Bool = true,
         usageHintText: String? = nil,
         hideAgentMetadata: Bool = false,
+        availableModels: [ModelPreset] = [],
         maxConcurrentThreadsPerSession: Int? = nil
     ) -> ToolSpec {
         var properties: [String: JSONSchema] = [
@@ -1707,12 +1717,14 @@ public enum ToolSpecFactory {
             "fork_turns": .string(description: "Optional number of turns to fork. Defaults to `all`. Use `none`, `all`, or a positive integer string such as `3` to fork only the most recent turns."),
             "model": .string(description: spawnAgentModelOverrideDescription),
             "reasoning_effort": .string(description: "Optional reasoning effort override for the new agent. Replaces the inherited reasoning effort."),
+            "service_tier": .string(description: spawnAgentServiceTierOverrideDescription),
             "task_name": .string(description: "Task name for the new agent. Use lowercase letters, digits, and underscores.")
         ]
         if hideAgentMetadata {
             properties.removeValue(forKey: "agent_type")
             properties.removeValue(forKey: "model")
             properties.removeValue(forKey: "reasoning_effort")
+            properties.removeValue(forKey: "service_tier")
         }
 
         return functionTool(
@@ -1721,6 +1733,7 @@ public enum ToolSpecFactory {
                 includeUsageHint: includeUsageHint,
                 usageHintText: usageHintText,
                 hideAgentMetadata: hideAgentMetadata,
+                availableModels: availableModels,
                 maxConcurrentThreadsPerSession: maxConcurrentThreadsPerSession
             ),
             properties: properties,
@@ -1892,11 +1905,10 @@ public enum ToolSpecFactory {
         includeUsageHint: Bool,
         usageHintText: String?,
         hideAgentMetadata: Bool,
+        availableModels: [ModelPreset],
         maxConcurrentThreadsPerSession: Int?
     ) -> String {
-        let modelGuidance = hideAgentMetadata
-            ? ""
-            : "No picker-visible model overrides are currently loaded.\n"
+        let modelGuidance = hideAgentMetadata ? "" : "\(spawnAgentModelsDescription(availableModels))\n"
         let concurrencyGuidance = maxConcurrentThreadsPerSession.map {
             "This session is configured with `max_concurrent_threads_per_session = \($0)` for concurrently open agent threads."
         } ?? ""
@@ -1913,6 +1925,30 @@ public enum ToolSpecFactory {
             description += "\n\(usageHintText)"
         }
         return description
+    }
+
+    private static func spawnAgentModelsDescription(_ models: [ModelPreset]) -> String {
+        let visibleModels = models
+            .filter(\.showInPicker)
+            .prefix(maxModelOverridesInSpawnAgentDescription)
+        guard !visibleModels.isEmpty else {
+            return "No picker-visible model overrides are currently loaded."
+        }
+
+        let descriptions = visibleModels.map { model in
+            let reasoningEfforts = model.supportedReasoningEfforts
+                .map { preset in
+                    let effort = preset.effort.rawValue
+                    return preset.effort == model.defaultReasoningEffort ? "\(effort) (default)" : effort
+                }
+                .joined(separator: ", ")
+            let reasoningSuffix = reasoningEfforts.isEmpty ? "" : " Reasoning efforts: \(reasoningEfforts)."
+            let serviceTiers = model.serviceTiers.map(\.id).joined(separator: ", ")
+            let serviceTiersSuffix = serviceTiers.isEmpty ? "" : " Service tiers: \(serviceTiers)."
+            return "- `\(model.model)`: \(model.description)\(reasoningSuffix)\(serviceTiersSuffix)"
+        }.joined(separator: "\n")
+
+        return "Available model overrides (optional; inherited parent model is preferred):\n\(descriptions)"
     }
 
     private static func waitAgentTimeoutDescription(

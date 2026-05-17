@@ -688,6 +688,7 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertNil(spawnProperties["agent_type"])
         XCTAssertNil(spawnProperties["model"])
         XCTAssertNil(spawnProperties["reasoning_effort"])
+        XCTAssertNil(spawnProperties["service_tier"])
 
         let waitAgent = try functionTool(named: "wait_agent", in: specs)
         guard case let .object(waitProperties, _, _) = waitAgent.parameters else {
@@ -697,6 +698,31 @@ final class NonInteractiveExecTests: XCTestCase {
             waitProperties["timeout_ms"],
             .number(description: "Optional timeout in milliseconds. Defaults to 90000, min 60000, max 120000.")
         )
+    }
+
+    func testToolSpecsForwardAvailableModelsToMultiAgentV2DescriptionLikeRust() throws {
+        var features = FeatureStates.withDefaults()
+        features.set(.multiAgentV2, enabled: true)
+        var config = CodexRuntimeConfig(features: features)
+        config.multiAgentV2 = MultiAgentV2Config(usageHintEnabled: false)
+        let modelFamily = ModelFamily(
+            slug: "test-model",
+            family: "test",
+            shellType: .disabled
+        )
+
+        let specs = NonInteractiveExec.toolSpecs(
+            modelFamily: modelFamily,
+            config: config,
+            sessionSource: .cli
+        )
+
+        let spawn = try functionTool(named: "spawn_agent", in: specs)
+        XCTAssertTrue(spawn.description.contains(
+            "Available model overrides (optional; inherited parent model is preferred):"
+        ))
+        XCTAssertTrue(spawn.description.contains("Reasoning efforts:"))
+        XCTAssertFalse(spawn.description.contains("No picker-visible model overrides"))
     }
 
     func testResponsesOptionsCarriesServiceTier() {
