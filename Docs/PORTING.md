@@ -18,9 +18,11 @@ Recent upstream audit checkpoint:
   the same remote-control runtime path and root remote-flag rejection wording.
   Swift now also accepts `codex remote-control stop` at the command surface,
   preserves Rust's subcommand-specific argument and root remote-flag rejection
-  wording, and routes it to a distinct daemon-stop action. The executable
-  daemon stop implementation and managed standalone install diagnostic still
-  depend on the broader app-server daemon lifecycle port and remain pending.
+  wording, routes it to a distinct daemon-stop action, and implements the
+  executable pid-file daemon stop path with Rust-shaped `stopped`/`notRunning`
+  JSON output, stale pid cleanup, `SIGTERM` then `SIGKILL` escalation, and the
+  shared operation lock. Managed standalone install diagnostics and the
+  start/bootstrap daemon lifecycle remain pending.
 - 2026-05-17: rechecked Rust commit `e6939e3969` (`feat: namespace in ext`).
   Swift does not yet have the Rust extension executor registry, but the shared
   Responses tool-spec surface now has explicit parity coverage that namespace

@@ -655,9 +655,13 @@ private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) as
         }
         return CodexCLI.CommandExecutionResult(exitCode: 0)
     case .remoteControlStop:
+        let output = try await AppServerDaemonLifecycle.stop(
+            codexHome: try CodexHome.find(),
+            cliVersion: CodexCLI.version
+        )
         return CodexCLI.CommandExecutionResult(
-            exitCode: 78,
-            stderrMessage: "codex-swift: app-server daemon lifecycle is not ported yet."
+            exitCode: 0,
+            stdoutMessage: try AppServerDaemonLifecycle.encodeOutput(output) + "\n"
         )
     case let .proxy(socketPath):
         let resolvedSocketPath: String
