@@ -264,6 +264,13 @@ Recent upstream audit checkpoint:
   after successful v2 output collection, and aborts on a stopping post-hook
   while preserving collected hook events and the feature-gated
   `response.processed` follow-up request.
+- 2026-05-17: rechecked recent Rust commits with no Swift runtime surface:
+  `98129fb9c5` (`Disable DMG staging for signed macOS promotion`) only changes
+  the upstream Rust release workflow for externally signed macOS handoffs,
+  `6afe00efda` (`Workflow updates`) only changes upstream issue automation
+  workflows, and `7fa0007ea8` (`tui: split remaining composer draft and footer
+  state`) is an internal Rust TUI refactor with no intended behavior change and
+  no Swift TUI counterpart in this package.
 - 2026-05-16: rechecked the reusable core portion of Rust commit `8543e39885`
   (`Preserve image detail in app-server inputs`). Swift now matches Rust's
   current `ImageDetail` domain (`high` / `original`), accepts explicit
