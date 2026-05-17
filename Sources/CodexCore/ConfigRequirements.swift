@@ -1455,6 +1455,7 @@ extension ManagedHooksRequirementsToml {
                 return [
                     "type": "command",
                     "command": command,
+                    "commandWindows": stringValue(handler["commandWindows"] ?? handler["command_windows"]) as Any? ?? NSNull(),
                     "timeoutSec": intValue(handler["timeout_sec"] ?? handler["timeout"]) as Any? ?? NSNull(),
                     "async": boolValue(handler["async"]) ?? false,
                     "statusMessage": stringValue(handler["status_message"] ?? handler["statusMessage"]) as Any? ?? NSNull()

@@ -121,6 +121,56 @@ final class HookConfigTests: XCTestCase {
         ])
     }
 
+    func testConfiguredHandlersResolveWindowsCommandOverrideLikeRust() throws {
+        let stack = try ConfigLayerStack(
+            layers: [],
+            requirements: ConfigRequirements(managedHooks: ManagedHooksRequirement(
+                value: ManagedHooksRequirementsToml(
+                    managedDir: "/tmp/managed-hooks",
+                    hooks: hookGroups(command: "echo unix", commandWindows: "echo windows")
+                ),
+                source: .system,
+                sourceDescription: "/etc/codex/requirements.toml"
+            ))
+        )
+
+        let handlers = HookConfig.configuredHandlers(from: stack)
+
+        #if os(Windows)
+        let expectedCommand = "echo windows"
+        #else
+        let expectedCommand = "echo unix"
+        #endif
+        XCTAssertEqual(handlers.map(\.command), [expectedCommand])
+    }
+
+    func testConfiguredHandlersAcceptCamelCaseWindowsCommandOverrideLikeRust() throws {
+        let stack = try ConfigLayerStack(
+            layers: [],
+            requirements: ConfigRequirements(managedHooks: ManagedHooksRequirement(
+                value: ManagedHooksRequirementsToml(
+                    managedDir: "/tmp/managed-hooks",
+                    hooks: hookGroups(
+                        command: "echo unix",
+                        commandWindows: "echo windows",
+                        windowsKey: "commandWindows"
+                    )
+                ),
+                source: .system,
+                sourceDescription: "/etc/codex/requirements.toml"
+            ))
+        )
+
+        let handlers = HookConfig.configuredHandlers(from: stack)
+
+        #if os(Windows)
+        let expectedCommand = "echo windows"
+        #else
+        let expectedCommand = "echo unix"
+        #endif
+        XCTAssertEqual(handlers.map(\.command), [expectedCommand])
+    }
+
     func testConfiguredHandlersIgnoreLegacyAfterToolUseHooksLikeRust() throws {
         let stack = try ConfigLayerStack(
             layers: [],
@@ -533,11 +583,20 @@ final class HookConfigTests: XCTestCase {
         return .table(["hooks": hooks])
     }
 
-    private func hookGroups(command: String, timeoutSec: UInt64 = 600, statusMessage: String? = nil) -> ConfigValue {
+    private func hookGroups(
+        command: String,
+        commandWindows: String? = nil,
+        windowsKey: String = "command_windows",
+        timeoutSec: UInt64 = 600,
+        statusMessage: String? = nil
+    ) -> ConfigValue {
         var handler: [String: ConfigValue] = [
             "type": .string("command"),
             "command": .string(command)
         ]
+        if let commandWindows {
+            handler[windowsKey] = .string(commandWindows)
+        }
         if timeoutSec != 600 {
             handler["timeout"] = .integer(Int64(timeoutSec))
         }

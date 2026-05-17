@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `9ab7f4e6ac` (`Add Windows hook command
+  overrides`). Swift hook config discovery now accepts both `command_windows`
+  and `commandWindows`, selects the Windows override only on Windows, keeps the
+  portable `command` on other platforms, and carries `commandWindows` through
+  app-server config-requirements protocol shapes with explicit nulls.
 - 2026-05-17: rechecked Rust commit `3d517fbd00` (`feat(tui): standardize
   picker navigation keys`). Swift keymap config parsing now accepts Rust's
   expanded `tui.keymap.list` actions for horizontal movement, page movement,

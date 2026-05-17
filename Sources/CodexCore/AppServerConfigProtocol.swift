@@ -1047,13 +1047,14 @@ extension AppServerProtocol {
     }
 
     public enum ConfiguredHookHandler: Codable, Equatable, Sendable {
-        case command(command: String, timeoutSec: UInt64?, async: Bool, statusMessage: String?)
+        case command(command: String, commandWindows: String?, timeoutSec: UInt64?, async: Bool, statusMessage: String?)
         case prompt
         case agent
 
         private enum CodingKeys: String, CodingKey {
             case type
             case command
+            case commandWindows
             case timeoutSec
             case `async`
             case statusMessage
@@ -1065,6 +1066,7 @@ extension AppServerProtocol {
             case "command":
                 self = .command(
                     command: try container.decode(String.self, forKey: .command),
+                    commandWindows: try container.decodeIfPresent(String.self, forKey: .commandWindows),
                     timeoutSec: try container.decodeIfPresent(UInt64.self, forKey: .timeoutSec),
                     async: try container.decode(Bool.self, forKey: .async),
                     statusMessage: try container.decodeIfPresent(String.self, forKey: .statusMessage)
@@ -1085,9 +1087,10 @@ extension AppServerProtocol {
         public func encode(to encoder: Encoder) throws {
             var container = encoder.container(keyedBy: CodingKeys.self)
             switch self {
-            case let .command(command, timeoutSec, async, statusMessage):
+            case let .command(command, commandWindows, timeoutSec, async, statusMessage):
                 try container.encode("command", forKey: .type)
                 try container.encode(command, forKey: .command)
+                try container.encodeNilOrValue(commandWindows, forKey: .commandWindows)
                 try container.encodeNilOrValue(timeoutSec, forKey: .timeoutSec)
                 try container.encode(async, forKey: .async)
                 try container.encodeNilOrValue(statusMessage, forKey: .statusMessage)

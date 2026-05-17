@@ -7537,7 +7537,7 @@ public enum CodexAppServer {
                     let handlers = group["hooks"] as? [[String: Any]] ?? []
                     for (handlerIndex, handler) in handlers.enumerated() {
                         guard (handler["type"] as? String) == "command",
-                              let command = handler["command"] as? String
+                              let command = effectivePluginHookCommand(handler)
                         else {
                             continue
                         }
@@ -22537,7 +22537,7 @@ public enum CodexAppServer {
                 for (handlerIndex, handlerValue) in handlerValues.enumerated() {
                     guard let handler = configTable(handlerValue),
                           stringConfig(handler, "type") == "command",
-                          let command = stringConfig(handler, "command")
+                          let command = effectiveHookCommand(handler)
                     else {
                         continue
                     }
@@ -22597,6 +22597,28 @@ public enum CodexAppServer {
         case .bool?, .array?, .table?, .range?, .integer?, .double?, .none?, nil:
             return nil
         }
+    }
+
+    private static func effectiveHookCommand(_ handler: [String: ConfigValue]) -> String? {
+        guard let command = stringConfig(handler, "command") else {
+            return nil
+        }
+        #if os(Windows)
+        return stringConfig(handler, "commandWindows") ?? stringConfig(handler, "command_windows") ?? command
+        #else
+        return command
+        #endif
+    }
+
+    private static func effectivePluginHookCommand(_ handler: [String: Any]) -> String? {
+        guard let command = handler["command"] as? String else {
+            return nil
+        }
+        #if os(Windows)
+        return handler["commandWindows"] as? String ?? handler["command_windows"] as? String ?? command
+        #else
+        return command
+        #endif
     }
 
     private static func appServerHookEventName(_ eventName: HookEventName) -> String {

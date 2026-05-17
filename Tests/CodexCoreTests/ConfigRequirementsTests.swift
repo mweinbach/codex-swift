@@ -417,10 +417,49 @@ final class ConfigRequirementsTests: XCTestCase {
         let handlers = try XCTUnwrap(preToolUse[0]["hooks"] as? [[String: Any]])
         XCTAssertEqual(handlers[0]["type"] as? String, "command")
         XCTAssertEqual(handlers[0]["command"] as? String, "python3 /enterprise/hooks/pre.py")
+        XCTAssertTrue(handlers[0]["commandWindows"] is NSNull)
         XCTAssertEqual(handlers[0]["timeoutSec"] as? Int, 10)
         XCTAssertEqual(handlers[0]["async"] as? Bool, false)
         XCTAssertEqual(handlers[0]["statusMessage"] as? String, "checking")
         XCTAssertEqual((hooksObject["PermissionRequest"] as? [[String: Any]])?.count, 0)
+    }
+
+    func testManagedHookRequirementsExposeWindowsCommandOverrideLikeRust() throws {
+        let config = try ConfigRequirementsToml.parse("""
+        [hooks]
+        managed_dir = "/enterprise/hooks"
+
+        [[hooks.PreToolUse]]
+        matcher = "^Bash$"
+
+        [[hooks.PreToolUse.hooks]]
+        type = "command"
+        command = "python3 /enterprise/hooks/pre.py"
+        command_windows = "powershell -File C:/enterprise/hooks/pre.ps1"
+
+        [[hooks.PostToolUse]]
+
+        [[hooks.PostToolUse.hooks]]
+        type = "command"
+        command = "python3 /enterprise/hooks/post.py"
+        commandWindows = "powershell -File C:/enterprise/hooks/post.ps1"
+        """)
+
+        let object = config.appServerRequirementsObject()
+        let hooksObject = try XCTUnwrap(object["hooks"] as? [String: Any])
+        let preToolUse = try XCTUnwrap(hooksObject["PreToolUse"] as? [[String: Any]])
+        let preHandlers = try XCTUnwrap(preToolUse[0]["hooks"] as? [[String: Any]])
+        XCTAssertEqual(
+            preHandlers[0]["commandWindows"] as? String,
+            "powershell -File C:/enterprise/hooks/pre.ps1"
+        )
+
+        let postToolUse = try XCTUnwrap(hooksObject["PostToolUse"] as? [[String: Any]])
+        let postHandlers = try XCTUnwrap(postToolUse[0]["hooks"] as? [[String: Any]])
+        XCTAssertEqual(
+            postHandlers[0]["commandWindows"] as? String,
+            "powershell -File C:/enterprise/hooks/post.ps1"
+        )
     }
 
     func testDeserializeMcpServerRequirements() throws {

@@ -486,6 +486,7 @@ final class AppServerConfigProtocolTests: XCTestCase {
                         hooks: [
                             .command(
                                 command: "validate.sh",
+                                commandWindows: "powershell -File validate.ps1",
                                 timeoutSec: 30,
                                 async: false,
                                 statusMessage: "Validating"
@@ -514,6 +515,7 @@ final class AppServerConfigProtocolTests: XCTestCase {
                         [
                             "type": "command",
                             "command": "validate.sh",
+                            "commandWindows": "powershell -File validate.ps1",
                             "timeoutSec": 30,
                             "async": false,
                             "statusMessage": "Validating"
@@ -543,6 +545,35 @@ final class AppServerConfigProtocolTests: XCTestCase {
             from: try JSONEncoder().encode(requirements)
         )
         XCTAssertEqual(decoded, requirements)
+    }
+
+    func testConfiguredHookCommandHandlerDecodesWindowsOverrideLikeRust() throws {
+        let decoded = try JSONDecoder().decode(
+            AppServerProtocol.ConfiguredHookHandler.self,
+            from: Data(
+                #"""
+                {
+                  "type": "command",
+                  "command": "validate.sh",
+                  "commandWindows": "powershell -File validate.ps1",
+                  "timeoutSec": 30,
+                  "async": false,
+                  "statusMessage": "Validating"
+                }
+                """#.utf8
+            )
+        )
+
+        XCTAssertEqual(
+            decoded,
+            .command(
+                command: "validate.sh",
+                commandWindows: "powershell -File validate.ps1",
+                timeoutSec: 30,
+                async: false,
+                statusMessage: "Validating"
+            )
+        )
     }
 
     func testConfigWarningNotificationMatchesRustWireShape() throws {
