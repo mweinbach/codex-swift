@@ -69,7 +69,10 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             }
             return UUID().uuidString.lowercased()
 
-        case .requestPermissionsResponse:
+        case let .requestPermissionsResponse(id, response):
+            AppServerLiveRuntimeBlocking.run {
+                await self.state.resolvePermissions(id: id, response: response)
+            }
             return UUID().uuidString.lowercased()
 
         case .shutdown:
@@ -522,6 +525,14 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                             threadID: submission.threadID,
                             turnID: submission.turnID
                         )
+                    },
+                    requestPermissionsHandler: { request in
+                        await Self.resolveRequestPermissionsRequest(
+                            request,
+                            state: state,
+                            threadID: submission.threadID,
+                            turnID: submission.turnID
+                        )
                     }
                 )
                 for event in result.runtimeEvents {
@@ -685,6 +696,61 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         }
     }
 
+    private static func resolveRequestPermissionsRequest(
+        _ request: NonInteractiveExec.RequestPermissionsToolRequest,
+        state: AppServerLiveRuntimeState,
+        threadID: String,
+        turnID: String
+    ) async -> RequestPermissionsResponse? {
+        let event = EventMessage.requestPermissions(RequestPermissionsEvent(
+            callID: request.callID,
+            turnID: turnID,
+            startedAtMilliseconds: AppServerLiveRuntimeClock.millisecondsSinceEpoch(),
+            reason: request.reason,
+            permissions: request.permissions,
+            cwd: try? AbsolutePath(absolutePath: request.cwd.standardizedFileURL.path)
+        ))
+        let response = await withTaskCancellationHandler {
+            await state.pendingPermissions(id: request.callID) {
+                await state.emit(threadID: threadID, turnID: turnID, event: event)
+            }
+        } onCancel: {
+            Task {
+                await state.resolvePermissions(
+                    id: request.callID,
+                    response: RequestPermissionsResponse(permissions: RequestPermissionProfile())
+                )
+            }
+        }
+        return normalizeRequestPermissionsResponse(
+            response,
+            requested: request.permissions,
+            cwd: request.cwd.standardizedFileURL.path
+        )
+    }
+
+    private static func normalizeRequestPermissionsResponse(
+        _ response: RequestPermissionsResponse,
+        requested: RequestPermissionProfile,
+        cwd: String
+    ) -> RequestPermissionsResponse {
+        if response.strictAutoReview && response.scope == .session {
+            return RequestPermissionsResponse(permissions: RequestPermissionProfile())
+        }
+        if response.permissions.isEmpty {
+            return response
+        }
+        return RequestPermissionsResponse(
+            permissions: RequestPermissionProfile.intersectAdditionalPermissionProfiles(
+                requested: requested,
+                granted: response.permissions,
+                cwd: cwd
+            ),
+            scope: response.scope,
+            strictAutoReview: response.strictAutoReview
+        )
+    }
+
     private static func lastAssistantMessage(from items: [ResponseItem]) -> String? {
         items.reversed().compactMap { item -> String? in
             guard case let .message(_, role, content, _) = item, role == "assistant" else {
@@ -805,6 +871,16 @@ private actor AppServerLiveRuntimeState {
 
     func resolveApproval(id: String, decision: ReviewDecision) {
         approvalContinuations.removeValue(forKey: id)?.resume(returning: decision)
+    }
+
+    func pendingPermissions(
+        id: String,
+        notify: @escaping @Sendable () async -> Void
+    ) async -> RequestPermissionsResponse {
+        await notify()
+        return await withCheckedContinuation { continuation in
+            permissionContinuations[id] = continuation
+        }
     }
 
     func resolvePermissions(id: String, response: RequestPermissionsResponse) {

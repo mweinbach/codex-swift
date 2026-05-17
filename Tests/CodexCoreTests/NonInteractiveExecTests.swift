@@ -168,6 +168,93 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(content, [.inputText(text: "ship it")])
     }
 
+    func testRequestPermissionsToolResolvesRelativePathsAndReturnsGrantedSubsetLikeRust() async throws {
+        let cwd = try NonInteractiveExecTemporaryDirectory()
+        let item = ResponseItem.functionCall(
+            name: "request_permissions",
+            arguments: #"{"reason":"Select a workspace root","permissions":{"file_system":{"write":[".","../shared"]}}}"#,
+            callID: "call-permissions"
+        )
+        let expectedCwdPath = cwd.url.standardizedFileURL.path
+        let expectedSharedPath = cwd.url
+            .appendingPathComponent("../shared", isDirectory: true)
+            .standardizedFileURL
+            .path
+        let requestCapture = RequestPermissionsToolRequestCapture()
+
+        let result = await NonInteractiveExec.executeFunctionCallWithHooks(
+            item,
+            handlers: [],
+            conversationID: ConversationId(),
+            turnID: "turn-1",
+            cwd: cwd.url,
+            model: "gpt-test",
+            approvalPolicy: .onRequest,
+            sandboxPolicy: .newWorkspaceWritePolicy(),
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            requestPermissionsHandler: { request in
+                requestCapture.set(request)
+                return RequestPermissionsResponse(
+                    permissions: RequestPermissionProfile(
+                        fileSystem: FileSystemPermissions(write: [expectedCwdPath])
+                    ),
+                    scope: .turn
+                )
+            }
+        )
+
+        let request = try XCTUnwrap(requestCapture.get())
+        XCTAssertEqual(request.callID, "call-permissions")
+        XCTAssertEqual(request.turnID, "turn-1")
+        XCTAssertEqual(request.reason, "Select a workspace root")
+        XCTAssertEqual(request.permissions.fileSystem?.legacyReadWriteRoots?.write, [
+            expectedCwdPath,
+            expectedSharedPath
+        ])
+
+        guard case let .functionCallOutput(callID, payload) = result.output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-permissions")
+        XCTAssertEqual(payload.success, true)
+        let response = try JSONDecoder().decode(RequestPermissionsResponse.self, from: Data(payload.content.utf8))
+        XCTAssertEqual(response.scope, PermissionGrantScope.turn)
+        XCTAssertEqual(response.permissions.fileSystem?.legacyReadWriteRoots?.write, [expectedCwdPath])
+    }
+
+    func testRequestPermissionsToolRejectsEmptyPermissionsLikeRust() async throws {
+        let item = ResponseItem.functionCall(
+            name: "request_permissions",
+            arguments: #"{"permissions":{}}"#,
+            callID: "call-permissions"
+        )
+
+        let result = await NonInteractiveExec.executeFunctionCallWithHooks(
+            item,
+            handlers: [],
+            conversationID: ConversationId(),
+            turnID: "turn-1",
+            cwd: FileManager.default.temporaryDirectory,
+            model: "gpt-test",
+            approvalPolicy: .onRequest,
+            sandboxPolicy: .newWorkspaceWritePolicy(),
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            requestPermissionsHandler: { _ in
+                XCTFail("empty request should not invoke handler")
+                return nil
+            }
+        )
+
+        guard case let .functionCallOutput(callID, payload) = result.output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-permissions")
+        XCTAssertEqual(payload.success, false)
+        XCTAssertEqual(payload.content, "request_permissions requires at least one permission")
+    }
+
     func testMakePromptIncludesDeveloperAndUserInstructionsInInitialContext() {
         let prompt = NonInteractiveExec.makePrompt(
             prompt: "ship it",
@@ -4685,6 +4772,23 @@ final class NonInteractiveExecTests: XCTestCase {
             throw XCTSkip("expected object")
         }
         return object
+    }
+}
+
+private final class RequestPermissionsToolRequestCapture: @unchecked Sendable {
+    private let lock = NSLock()
+    private var request: NonInteractiveExec.RequestPermissionsToolRequest?
+
+    func set(_ request: NonInteractiveExec.RequestPermissionsToolRequest) {
+        lock.withLock {
+            self.request = request
+        }
+    }
+
+    func get() -> NonInteractiveExec.RequestPermissionsToolRequest? {
+        lock.withLock {
+            request
+        }
     }
 }
 

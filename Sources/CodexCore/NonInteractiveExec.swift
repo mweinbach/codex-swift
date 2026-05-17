@@ -279,7 +279,8 @@ public enum NonInteractiveExec {
                 : nil,
             agentJobTools: config.features.isEnabled(.spawnCsv),
             agentJobWorkerTools: config.features.isEnabled(.spawnCsv)
-                && AgentJobRuntime.isAgentJobWorkerSessionSource(sessionSource)
+                && AgentJobRuntime.isAgentJobWorkerSessionSource(sessionSource),
+            requestPermissionsTool: config.features.isEnabled(.requestPermissionsTool)
         ).applyingProviderCapabilities(
             config.selectedModelProvider?.capabilities() ?? ModelProviderCapabilities()
         )
@@ -380,6 +381,30 @@ public enum NonInteractiveExec {
     }
 
     public typealias FunctionCallApprovalHandler = @Sendable (FunctionCallApprovalRequest) async -> ReviewDecision
+
+    public struct RequestPermissionsToolRequest: Equatable, Sendable {
+        public let callID: String
+        public let turnID: String
+        public let reason: String?
+        public let permissions: RequestPermissionProfile
+        public let cwd: URL
+
+        public init(
+            callID: String,
+            turnID: String,
+            reason: String?,
+            permissions: RequestPermissionProfile,
+            cwd: URL
+        ) {
+            self.callID = callID
+            self.turnID = turnID
+            self.reason = reason
+            self.permissions = permissions
+            self.cwd = cwd
+        }
+    }
+
+    public typealias RequestPermissionsHandler = @Sendable (RequestPermissionsToolRequest) async -> RequestPermissionsResponse?
 
     public struct StopHookContext: Equatable, Sendable {
         public var handlers: [ConfiguredHookHandler]
@@ -779,7 +804,8 @@ public enum NonInteractiveExec {
         execPolicyManager: ExecPolicyManager = ExecPolicyManager(),
         windowsSandboxLevel: WindowsSandboxLevel = .disabled,
         registeredToolExecutor: RegisteredToolExecutor? = nil,
-        approvalHandler: FunctionCallApprovalHandler? = nil
+        approvalHandler: FunctionCallApprovalHandler? = nil,
+        requestPermissionsHandler: RequestPermissionsHandler? = nil
     ) async -> ResponseItem {
         await executeFunctionCallWithApproval(
             item,
@@ -804,6 +830,7 @@ public enum NonInteractiveExec {
             windowsSandboxLevel: windowsSandboxLevel,
             registeredToolExecutor: registeredToolExecutor,
             approvalHandler: approvalHandler,
+            requestPermissionsHandler: requestPermissionsHandler,
             approvalGranted: false
         ).output
     }
@@ -860,6 +887,7 @@ public enum NonInteractiveExec {
         windowsSandboxLevel: WindowsSandboxLevel,
         registeredToolExecutor: RegisteredToolExecutor?,
         approvalHandler: FunctionCallApprovalHandler?,
+        requestPermissionsHandler: RequestPermissionsHandler?,
         turnID: String = "turn-1",
         approvalGranted: Bool
     ) async -> ExecutedFunctionCall {
@@ -891,6 +919,7 @@ public enum NonInteractiveExec {
                 registeredToolExecutor: registeredToolExecutor,
                 turnID: turnID,
                 approvalHandler: approvalHandler,
+                requestPermissionsHandler: requestPermissionsHandler,
                 approvalGranted: approvalGranted
             )
 
@@ -1001,7 +1030,8 @@ public enum NonInteractiveExec {
         execPolicyManager: ExecPolicyManager = ExecPolicyManager(),
         windowsSandboxLevel: WindowsSandboxLevel = .disabled,
         registeredToolExecutor: RegisteredToolExecutor? = nil,
-        approvalHandler: FunctionCallApprovalHandler? = nil
+        approvalHandler: FunctionCallApprovalHandler? = nil,
+        requestPermissionsHandler: RequestPermissionsHandler? = nil
     ) async -> FunctionCallExecutionResult {
         let hookPayload = toolHookPayload(for: item)
         var effectiveItem = item
@@ -1095,6 +1125,7 @@ public enum NonInteractiveExec {
             windowsSandboxLevel: windowsSandboxLevel,
             registeredToolExecutor: registeredToolExecutor,
             approvalHandler: approvalHandler,
+            requestPermissionsHandler: requestPermissionsHandler,
             turnID: turnID,
             approvalGranted: approvalGranted
         )
@@ -1678,6 +1709,7 @@ public enum NonInteractiveExec {
         registeredToolExecutor: RegisteredToolExecutor?,
         turnID: String,
         approvalHandler: FunctionCallApprovalHandler?,
+        requestPermissionsHandler: RequestPermissionsHandler?,
         approvalGranted: Bool
     ) async -> ExecutedFunctionCall {
         let decoder = JSONDecoder()
@@ -1815,6 +1847,40 @@ public enum NonInteractiveExec {
                     remoteEnvironmentFileSystems: remoteEnvironmentFileSystems
                 ))
 
+            case "request_permissions":
+                guard let requestPermissionsHandler else {
+                    return executed(functionOutput(
+                        callID: callID,
+                        content: "unsupported call: \(toolNameDisplay(namespace: namespace, name: name))",
+                        success: false
+                    ))
+                }
+                let params = try parseRequestPermissionsToolArguments(arguments, cwd: cwd)
+                guard !params.permissions.isEmpty else {
+                    return executed(functionOutput(
+                        callID: callID,
+                        content: "request_permissions requires at least one permission",
+                        success: false
+                    ))
+                }
+                let response = await requestPermissionsHandler(RequestPermissionsToolRequest(
+                    callID: callID,
+                    turnID: turnID,
+                    reason: params.reason,
+                    permissions: params.permissions,
+                    cwd: cwd
+                ))
+                guard let response else {
+                    return executed(functionOutput(
+                        callID: callID,
+                        content: "request_permissions was cancelled before receiving a response",
+                        success: false
+                    ))
+                }
+                let data = try JSONEncoder().encode(response)
+                let content = String(decoding: data, as: UTF8.self)
+                return executed(functionOutput(callID: callID, content: content, success: true))
+
             case "update_plan":
                 let params: UpdatePlanArguments
                 do {
@@ -1936,6 +2002,81 @@ public enum NonInteractiveExec {
             case environmentID = "environment_id"
             case detail
         }
+    }
+
+    private struct RequestPermissionsToolCallParams {
+        let reason: String?
+        let permissions: RequestPermissionProfile
+    }
+
+    private static func parseRequestPermissionsToolArguments(
+        _ arguments: String,
+        cwd: URL
+    ) throws -> RequestPermissionsToolCallParams {
+        let value = try JSONDecoder().decode(JSONValue.self, from: Data(arguments.utf8))
+        guard case var .object(object) = value else {
+            throw FunctionCallError.respondToModel("request_permissions arguments must be an object")
+        }
+        let reason: String? = {
+            guard case let .string(value)? = object["reason"] else {
+                return nil
+            }
+            return value
+        }()
+        guard let permissionsValue = object["permissions"] else {
+            throw FunctionCallError.respondToModel("missing field `permissions`")
+        }
+        object["permissions"] = materializeRequestPermissionPaths(permissionsValue, cwd: cwd)
+        let normalized = JSONValue.object(object)
+        let data = try JSONEncoder().encode(normalized)
+        let params = try JSONDecoder().decode(RequestPermissionsToolArguments.self, from: data)
+        return RequestPermissionsToolCallParams(reason: reason, permissions: params.permissions)
+    }
+
+    private struct RequestPermissionsToolArguments: Decodable {
+        let permissions: RequestPermissionProfile
+    }
+
+    private static func materializeRequestPermissionPaths(_ value: JSONValue, cwd: URL) -> JSONValue {
+        guard case var .object(profile) = value else {
+            return value
+        }
+        if case var .object(fileSystem)? = profile["file_system"] {
+            for key in ["read", "write"] {
+                if case let .array(paths)? = fileSystem[key] {
+                    fileSystem[key] = .array(paths.map { pathValue in
+                        guard case let .string(path) = pathValue else {
+                            return pathValue
+                        }
+                        return .string(resolveRequestPermissionPath(path, cwd: cwd))
+                    })
+                }
+            }
+            if case let .array(entries)? = fileSystem["entries"] {
+                fileSystem["entries"] = .array(entries.map { entryValue in
+                    guard case var .object(entry) = entryValue,
+                          case var .object(pathObject)? = entry["path"],
+                          case let .string(type)? = pathObject["type"],
+                          type == "path",
+                          case let .string(path)? = pathObject["path"]
+                    else {
+                        return entryValue
+                    }
+                    pathObject["path"] = .string(resolveRequestPermissionPath(path, cwd: cwd))
+                    entry["path"] = .object(pathObject)
+                    return .object(entry)
+                })
+            }
+            profile["file_system"] = .object(fileSystem)
+        }
+        return .object(profile)
+    }
+
+    private static func resolveRequestPermissionPath(_ path: String, cwd: URL) -> String {
+        if path.isRustAbsolutePath {
+            return URL(fileURLWithPath: path).standardizedFileURL.path
+        }
+        return cwd.appendingPathComponent(path).standardizedFileURL.path
     }
 
     private static func executeViewImageTool(

@@ -821,6 +821,7 @@ public struct ToolsConfig: Equatable, Sendable {
     public let waitAgentDefaultTimeoutMS: Int64?
     public let agentJobTools: Bool
     public let agentJobWorkerTools: Bool
+    public let requestPermissionsTool: Bool
 
     public init(
         shellType: ConfigShellToolType,
@@ -850,7 +851,8 @@ public struct ToolsConfig: Equatable, Sendable {
         waitAgentMaxTimeoutMS: Int64? = nil,
         waitAgentDefaultTimeoutMS: Int64? = nil,
         agentJobTools: Bool = false,
-        agentJobWorkerTools: Bool = false
+        agentJobWorkerTools: Bool = false,
+        requestPermissionsTool: Bool = false
     ) {
         self.shellType = shellType
         self.applyPatchToolType = applyPatchToolType
@@ -880,6 +882,7 @@ public struct ToolsConfig: Equatable, Sendable {
         self.waitAgentDefaultTimeoutMS = waitAgentDefaultTimeoutMS
         self.agentJobTools = agentJobTools
         self.agentJobWorkerTools = agentJobWorkerTools
+        self.requestPermissionsTool = requestPermissionsTool
     }
 
     public func applyingProviderCapabilities(_ capabilities: ModelProviderCapabilities) -> ToolsConfig {
@@ -911,7 +914,8 @@ public struct ToolsConfig: Equatable, Sendable {
             waitAgentMaxTimeoutMS: waitAgentMaxTimeoutMS,
             waitAgentDefaultTimeoutMS: waitAgentDefaultTimeoutMS,
             agentJobTools: agentJobTools,
-            agentJobWorkerTools: agentJobWorkerTools
+            agentJobWorkerTools: agentJobWorkerTools,
+            requestPermissionsTool: requestPermissionsTool
         )
     }
 }
@@ -1156,6 +1160,9 @@ type CallToolResult<TStructured = { [key: string]: unknown }> = {
         }
         if config.agentJobWorkerTools || config.experimentalSupportedTools.contains("report_agent_job_result") {
             specs.append(ConfiguredToolSpec(spec: createReportAgentJobResultTool(), supportsParallelToolCalls: false))
+        }
+        if config.requestPermissionsTool {
+            specs.append(ConfiguredToolSpec(spec: createRequestPermissionsTool(), supportsParallelToolCalls: false))
         }
 
         let webSearchMode = config.webSearchMode ?? (config.webSearchRequest ? .live : nil)
@@ -2042,6 +2049,18 @@ type CallToolResult<TStructured = { [key: string]: unknown }> = {
         )
     }
 
+    public static func createRequestPermissionsTool() -> ToolSpec {
+        functionTool(
+            name: "request_permissions",
+            description: "Request additional filesystem or network permissions from the user and wait for the client to grant a subset of the requested permission profile. Granted permissions apply automatically to later shell-like commands in the current turn, or for the rest of the session if the client approves them at session scope.",
+            properties: [
+                "reason": .string(description: "Optional short explanation for why additional permissions are needed."),
+                "permissions": requestPermissionProfileSchema()
+            ],
+            required: ["permissions"]
+        )
+    }
+
     public static func createPlanTool() -> ToolSpec {
         functionTool(
             name: "update_plan",
@@ -2066,6 +2085,67 @@ type CallToolResult<TStructured = { [key: string]: unknown }> = {
                 )
             ],
             required: ["plan"]
+        )
+    }
+
+    private static func requestPermissionProfileSchema() -> JSONSchema {
+        .object(
+            properties: [
+                "network": .object(
+                    properties: [
+                        "enabled": .boolean(description: "Whether network access is requested.")
+                    ],
+                    required: nil,
+                    additionalProperties: .boolean(false)
+                ),
+                "file_system": .object(
+                    properties: [
+                        "read": .array(
+                            items: .string(description: "Absolute or cwd-relative path to allow reading."),
+                            description: "Additional filesystem paths to allow reading."
+                        ),
+                        "write": .array(
+                            items: .string(description: "Absolute or cwd-relative path to allow writing."),
+                            description: "Additional filesystem paths to allow writing."
+                        ),
+                        "entries": .array(
+                            items: .object(
+                                properties: [
+                                    "path": .object(
+                                        properties: [
+                                            "type": .stringEnum(
+                                                values: [
+                                                    .string("path"),
+                                                    .string("glob_pattern"),
+                                                    .string("special")
+                                                ],
+                                                description: nil
+                                            ),
+                                            "path": .string(description: "Absolute or cwd-relative filesystem path."),
+                                            "pattern": .string(description: "Glob pattern."),
+                                            "value": .object(properties: [:], required: nil, additionalProperties: nil)
+                                        ],
+                                        required: ["type"],
+                                        additionalProperties: .boolean(false)
+                                    ),
+                                    "access": .stringEnum(
+                                        values: [.string("read"), .string("write"), .string("none")],
+                                        description: "Access mode for this entry."
+                                    )
+                                ],
+                                required: ["path", "access"],
+                                additionalProperties: .boolean(false)
+                            ),
+                            description: "Structured filesystem sandbox entries."
+                        ),
+                        "glob_scan_max_depth": .integer(description: "Maximum directory depth for deny glob scanning.")
+                    ],
+                    required: nil,
+                    additionalProperties: .boolean(false)
+                )
+            ],
+            required: nil,
+            additionalProperties: .boolean(false)
         )
     }
 

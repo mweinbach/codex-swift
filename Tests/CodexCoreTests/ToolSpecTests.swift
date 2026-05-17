@@ -229,6 +229,40 @@ final class ToolSpecTests: XCTestCase {
         )
     }
 
+    func testRequestPermissionsToolSpecMatchesRustShape() throws {
+        let specs = ToolSpecFactory.buildSpecs(config: ToolsConfig(
+            shellType: .disabled,
+            toolSearch: false,
+            toolSuggest: false,
+            requestPermissionsTool: true
+        ))
+
+        let tool = try XCTUnwrap(specs.first { configured in
+            guard case let .function(tool) = configured.spec else {
+                return false
+            }
+            return tool.name == "request_permissions"
+        })
+        XCTAssertFalse(tool.supportsParallelToolCalls)
+        guard case let .function(function) = tool.spec else {
+            return XCTFail("expected function tool")
+        }
+        XCTAssertEqual(function.name, "request_permissions")
+        XCTAssertTrue(function.description.contains("Request additional filesystem or network permissions"))
+        guard case let .object(properties, required, additionalProperties) = function.parameters else {
+            return XCTFail("expected object parameters")
+        }
+        XCTAssertEqual(required, ["permissions"])
+        XCTAssertEqual(additionalProperties, .boolean(false))
+        XCTAssertNotNil(properties["reason"])
+        guard case let .object(permissionProperties, _, permissionAdditionalProperties)? = properties["permissions"] else {
+            return XCTFail("expected permissions object")
+        }
+        XCTAssertEqual(permissionAdditionalProperties, .boolean(false))
+        XCTAssertNotNil(permissionProperties["file_system"])
+        XCTAssertNotNil(permissionProperties["network"])
+    }
+
     func testBuildSpecsCanExposeAgentJobTools() {
         let specs = ToolSpecFactory.buildSpecs(config: ToolsConfig(
             shellType: .disabled,

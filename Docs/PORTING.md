@@ -12,6 +12,16 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: wired the Rust `request_permissions` tool into the Swift
+  Responses/tool loop and live app-server runtime. Swift now advertises the
+  Rust-shaped function tool behind `features.request_permissions_tool`, parses
+  cwd-relative requested filesystem paths the way Rust's base-path parser does,
+  emits live `item/permissions/requestApproval` events, and resumes the model
+  with a normalized `RequestPermissionsResponse` after
+  `Op.requestPermissionsResponse`. Applying granted turn/session permissions
+  to subsequent shell-like commands remains a follow-on ThreadManager parity
+  gap alongside MCP tool injection/refresh, in-flight runtime config mutation,
+  and cross-connection runtime event fanout.
 - 2026-05-17: attached a first Swift app-server live runtime manager to the
   normal stdio, websocket, and remote-control executable paths. The manager now
   backs the existing core/live submitter seams with running-turn tasks,
