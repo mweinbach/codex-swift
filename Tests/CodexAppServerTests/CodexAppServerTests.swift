@@ -7012,6 +7012,67 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(reasoningItem["content"] as? [String], ["raw"])
     }
 
+    func testRuntimeReviewModeEventsEmitRustItemNotifications() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+        let threadID = "123e4567-e89b-12d3-a456-426614174000"
+        let turnID = "review-turn"
+
+        await processor.handleRuntimeEvent(
+            threadID: threadID,
+            turnID: turnID,
+            event: .enteredReviewMode(ReviewRequest(
+                target: .commit(sha: "1234567deadbeef", title: "Tidy UI colors")
+            ))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: threadID,
+            turnID: turnID,
+            event: .exitedReviewMode(ExitedReviewModeEvent(reviewOutput: ReviewOutputEvent(
+                findings: [
+                    ReviewFinding(
+                        title: "Prefer Stylize helpers",
+                        body: "Use .dim()/.bold() chaining instead of manual Style.",
+                        confidenceScore: 0.9,
+                        priority: 1,
+                        codeLocation: ReviewCodeLocation(
+                            absoluteFilePath: "/tmp/file.rs",
+                            lineRange: ReviewLineRange(start: 10, end: 20)
+                        )
+                    )
+                ],
+                overallCorrectness: "good",
+                overallExplanation: "Looks solid overall with minor polish suggested.",
+                overallConfidenceScore: 0.75
+            )))
+        )
+
+        let startedMessages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(startedMessages[0]["method"] as? String, "item/started")
+        let startedParams = try XCTUnwrap(startedMessages[0]["params"] as? [String: Any])
+        XCTAssertEqual(startedParams["threadId"] as? String, threadID)
+        XCTAssertEqual(startedParams["turnId"] as? String, turnID)
+        let enteredItem = try XCTUnwrap(startedParams["item"] as? [String: Any])
+        XCTAssertEqual(enteredItem["type"] as? String, "enteredReviewMode")
+        XCTAssertEqual(enteredItem["id"] as? String, turnID)
+        XCTAssertEqual(enteredItem["review"] as? String, "commit 1234567: Tidy UI colors")
+
+        let completedMessages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(completedMessages[0]["method"] as? String, "item/completed")
+        let completedParams = try XCTUnwrap(completedMessages[0]["params"] as? [String: Any])
+        XCTAssertEqual(completedParams["threadId"] as? String, threadID)
+        XCTAssertEqual(completedParams["turnId"] as? String, turnID)
+        let exitedItem = try XCTUnwrap(completedParams["item"] as? [String: Any])
+        XCTAssertEqual(exitedItem["type"] as? String, "exitedReviewMode")
+        XCTAssertEqual(exitedItem["id"] as? String, turnID)
+        XCTAssertTrue((exitedItem["review"] as? String)?.contains("Prefer Stylize helpers") == true)
+        XCTAssertTrue((exitedItem["review"] as? String)?.contains("/tmp/file.rs:10-20") == true)
+    }
+
     func testRuntimeDynamicToolCallRequestsMirrorRustClientBridge() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()

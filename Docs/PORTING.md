@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: pinned live app-server review-mode runtime item projection
+  against Rust's review task event stream. Swift now maps live
+  `entered_review_mode` events to `item/started` review-mode items and
+  `exited_review_mode` events to `item/completed` review-output items with the
+  review turn id, matching Rust's app-server item notification shape while full
+  review task execution remains tracked with the broader live runtime work.
 - 2026-05-17: rechecked Rust exec-server process notification rebinding from
   `codex-rs/exec-server/src/server/session_registry.rs` and
   `codex-rs/exec-server/src/local_process.rs`. Swift detached sessions now

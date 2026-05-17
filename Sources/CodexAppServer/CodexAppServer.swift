@@ -17316,6 +17316,35 @@ public enum CodexAppServer {
             return itemStartedNotification(threadID: threadID, turnID: turnID, event: event)
         case let .itemCompleted(event):
             return itemCompletedNotification(threadID: threadID, turnID: turnID, event: event)
+        case let .enteredReviewMode(request):
+            return itemStartedNotification(
+                threadID: threadID,
+                turnID: turnID,
+                event: ItemStartedEvent(
+                    threadID: (try? ConversationId(string: threadID)) ?? ConversationId(),
+                    turnID: turnID,
+                    item: .enteredReviewMode(ReviewModeItem(
+                        id: turnID,
+                        review: request.userFacingHint ?? ReviewPrompts.userFacingHint(target: request.target)
+                    )),
+                    startedAtMilliseconds: currentUnixTimestampMilliseconds()
+                )
+            )
+        case let .exitedReviewMode(event):
+            return itemCompletedNotification(
+                threadID: threadID,
+                turnID: turnID,
+                event: ItemCompletedEvent(
+                    threadID: (try? ConversationId(string: threadID)) ?? ConversationId(),
+                    turnID: turnID,
+                    item: .exitedReviewMode(ReviewModeItem(
+                        id: turnID,
+                        review: event.reviewOutput.map(ReviewFormat.renderReviewOutputText)
+                            ?? ReviewFormat.fallbackMessage
+                    )),
+                    completedAtMilliseconds: currentUnixTimestampMilliseconds()
+                )
+            )
         case let .dynamicToolCallResponse(event):
             return dynamicToolCallCompletedNotification(threadID: threadID, event: event)
         default:
