@@ -5,13 +5,22 @@ Objective: port `/Users/mweinbach/Projects/codex` from Rust to native Swift with
 Source baseline inspected for this scaffold:
 
 - Repository: `/Users/mweinbach/Projects/codex`
-- HEAD: `de9c5c0226f8f31b9ce7dfef8b9ad401126ca3b5`
+- HEAD: `4c897723142406baf3c5f6f8730f2844ef1aa436`
 - Rust workspace: `codex-rs`
-- Rust workspace member count: 115 Cargo manifests
-- Rust source size: 1,827 tracked `.rs` files
+- Rust workspace member count: 119 Cargo manifests
+- Rust source size: 1,972 tracked `.rs` files
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: refreshed upstream Rust `main` to `4c89772314`
+  (`sdk/python: add first-class login support`). The newest upstream changes
+  above the last Swift checkpoint are Python SDK-only (`4c89772314` and
+  `a280248021`) or Rust test-only permission-profile construction cleanup
+  (`d91bc15618`), so there is no new Swift package surface to port from those
+  commits. Swift already has the app-server account/login lifecycle, live
+  runtime smoke coverage for thread/start and turn/start, and direct
+  permission-profile tests that cover the behavior those Python examples and
+  Rust tests exercise through other language layers.
 - 2026-05-17: rechecked Rust commit `b200dd1b6f` (`exec-server:
   support auth-backed remote executor registration`). Swift remote
   `exec-server` registration now matches Rust's current registry wire shape:
