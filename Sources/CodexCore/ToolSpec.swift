@@ -974,6 +974,24 @@ type Annotations = {
   priority?: number;
   lastModified?: string;
 };
+type Icon = {
+  src: string;
+  mimeType?: string;
+  sizes?: string[];
+  theme?: "light" | "dark";
+};
+type TextResourceContents = {
+  uri: string;
+  mimeType?: string;
+  _meta?: MetaObject;
+  text: string;
+};
+type BlobResourceContents = {
+  uri: string;
+  mimeType?: string;
+  _meta?: MetaObject;
+  blob: string;
+};
 type TextContent = {
   type: "text";
   text: string;
@@ -987,7 +1005,37 @@ type ImageContent = {
   annotations?: Annotations;
   _meta?: MetaObject;
 };
-type ContentBlock = TextContent | ImageContent | { [key: string]: unknown };
+type AudioContent = {
+  type: "audio";
+  data: string;
+  mimeType: string;
+  annotations?: Annotations;
+  _meta?: MetaObject;
+};
+type ResourceLink = {
+  icons?: Icon[];
+  name: string;
+  title?: string;
+  uri: string;
+  description?: string;
+  mimeType?: string;
+  annotations?: Annotations;
+  size?: number;
+  _meta?: MetaObject;
+  type: "resource_link";
+};
+type EmbeddedResource = {
+  type: "resource";
+  resource: TextResourceContents | BlobResourceContents;
+  annotations?: Annotations;
+  _meta?: MetaObject;
+};
+type ContentBlock =
+  | TextContent
+  | ImageContent
+  | AudioContent
+  | ResourceLink
+  | EmbeddedResource;
 type CallToolResult<TStructured = { [key: string]: unknown }> = {
   _meta?: MetaObject;
   content: ContentBlock[];
@@ -1475,9 +1523,45 @@ type CallToolResult<TStructured = { [key: string]: unknown }> = {
         }
         let fields = properties.keys.sorted().map { key in
             let optional = required.contains(key) ? "" : "?"
-            return "\(key)\(optional): \(renderJSONSchemaToTypescript(properties[key] ?? .string(description: nil)));"
+            return "\(typescriptPropertyName(key))\(optional): \(renderJSONSchemaToTypescript(properties[key] ?? .string(description: nil)));"
         }
         return "{ \(fields.joined(separator: " ")) }"
+    }
+
+    private static func typescriptPropertyName(_ value: String) -> String {
+        guard isTypescriptIdentifier(value) else {
+            return typescriptStringLiteral(value)
+        }
+        return value
+    }
+
+    private static func isTypescriptIdentifier(_ value: String) -> Bool {
+        guard let first = value.unicodeScalars.first,
+              isTypescriptIdentifierStart(first)
+        else {
+            return false
+        }
+        return value.unicodeScalars.dropFirst().allSatisfy(isTypescriptIdentifierContinue)
+    }
+
+    private static func isTypescriptIdentifierStart(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.value {
+        case 65...90, 97...122:
+            return true
+        case 36, 95:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func isTypescriptIdentifierContinue(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.value {
+        case 48...57:
+            return true
+        default:
+            return isTypescriptIdentifierStart(scalar)
+        }
     }
 
     private static func renderTypescriptUnion(_ values: [String]) -> String {
@@ -1496,10 +1580,32 @@ type CallToolResult<TStructured = { [key: string]: unknown }> = {
         case let .double(value):
             return "\(value)"
         case let .string(value):
-            return "\"\(value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\""))\""
+            return typescriptStringLiteral(value)
         case .array, .object:
             return nil
         }
+    }
+
+    private static func typescriptStringLiteral(_ value: String) -> String {
+        var escaped = ""
+        escaped.reserveCapacity(value.count)
+        for scalar in value.unicodeScalars {
+            switch scalar {
+            case "\\":
+                escaped += "\\\\"
+            case "\"":
+                escaped += "\\\""
+            case "\n":
+                escaped += "\\n"
+            case "\r":
+                escaped += "\\r"
+            case "\t":
+                escaped += "\\t"
+            default:
+                escaped.unicodeScalars.append(scalar)
+            }
+        }
+        return "\"\(escaped)\""
     }
 
     public static func modelVisibleSpecs(

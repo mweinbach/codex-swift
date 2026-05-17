@@ -1409,12 +1409,19 @@ final class ToolSpecTests: XCTestCase {
                     inputSchema: McpToolInputSchema(rawValue: .object([
                         "type": .string("object"),
                         "properties": .object([
-                            "message": .object(["type": .string("string")])
+                            "message": .object(["type": .string("string")]),
+                            "response-length": .object(["type": .string("integer")])
                         ]),
                         "required": .array([.string("message")]),
                         "additionalProperties": .bool(false)
                     ])),
-                    description: "Echo text"
+                    description: "Echo text",
+                    outputSchema: McpToolOutputSchema(
+                        properties: .object([
+                            "echo-value": .object(["type": .string("string")])
+                        ]),
+                        required: ["echo-value"]
+                    )
                 )
             ]
         )
@@ -1427,7 +1434,50 @@ final class ToolSpecTests: XCTestCase {
 
         XCTAssertEqual(echoTool.name, "echo")
         XCTAssertTrue(echoTool.description.contains("Echo text"))
-        XCTAssertTrue(echoTool.description.contains("declare const tools: { mcp__sample__echo(args: { message: string; }): Promise<CallToolResult"))
+        XCTAssertTrue(echoTool.description.contains(#"declare const tools: { mcp__sample__echo(args: { message: string; "response-length"?: number; }): Promise<CallToolResult<{ "echo-value": string; }>>;"#))
+    }
+
+    func testCodeModeOnlyExecDescriptionIncludesFullMCPPreambleLikeRust() throws {
+        let specs = ToolSpecFactory.buildSpecs(
+            config: ToolsConfig(
+                shellType: .disabled,
+                namespaceTools: true,
+                codeModeEnabled: true,
+                codeModeOnlyEnabled: true
+            ),
+            mcpTools: [
+                "mcp__sample__echo": McpTool(
+                    name: "echo",
+                    inputSchema: McpToolInputSchema(rawValue: .object([
+                        "type": .string("object"),
+                        "properties": .object([
+                            "message": .object(["type": .string("string")])
+                        ]),
+                        "required": .array([.string("message")]),
+                        "additionalProperties": .bool(false)
+                    ])),
+                    description: "Echo text",
+                    outputSchema: McpToolOutputSchema(
+                        properties: .object([
+                            "echo": .object(["type": .string("string")])
+                        ]),
+                        required: ["echo"]
+                    )
+                )
+            ]
+        )
+
+        let execSpec = try XCTUnwrap(specs.first { $0.spec.name == "exec" }?.spec)
+        guard case let .freeform(execTool) = execSpec else {
+            return XCTFail("expected code-mode exec to be a freeform tool")
+        }
+
+        XCTAssertTrue(execTool.description.contains("Shared MCP Types:"))
+        XCTAssertTrue(execTool.description.contains("type Icon = {"))
+        XCTAssertTrue(execTool.description.contains("type AudioContent = {"))
+        XCTAssertTrue(execTool.description.contains("type ResourceLink = {"))
+        XCTAssertTrue(execTool.description.contains("type EmbeddedResource = {"))
+        XCTAssertTrue(execTool.description.contains("declare const tools: { mcp__sample__echo(args: { message: string; }): Promise<CallToolResult<{ echo: string; }>>; };"))
     }
 
     func testExtensionToolSpecsMayUseExecAndWaitWhenCodeModeIsDisabledLikeRust() throws {

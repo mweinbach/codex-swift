@@ -51,7 +51,9 @@ Recent upstream audit checkpoint:
   declarations, code-mode-only `exec` descriptions embed the hidden nested
   tool reference, direct-model-only multi-agent tools stay declaration-free,
   and JSON-schema required arrays survive JSONValue-backed MCP schema
-  sanitization.
+  sanitization. Swift now also matches Rust's fuller MCP TypeScript preamble
+  for nested `CallToolResult` declarations and quotes non-identifier JSON
+  schema property names in generated TypeScript object types.
 - 2026-05-17: rechecked Rust commit `9798eb377a` (`feat(cli): add codex
   doctor diagnostics`) for the app-server feedback path. Swift feedback uploads
   can now carry in-memory attachments, and `feedback/upload` includes the
