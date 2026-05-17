@@ -400,12 +400,15 @@ Recent upstream audit checkpoint:
   Rust's extension registration collision rule by skipping extension specs whose
   flat name is already registered, including code-mode public `exec`/`wait`
   reservations, preserving builtin/dynamic tools and extension parallel-call
-  metadata. Swift's non-interactive execution helper now accepts a registered
-  tool executor and routes non-builtin custom tools plus unknown namespaced
-  function calls through that handler before falling back to Rust's unsupported
-  call messages, while preserving builtin dispatch precedence for tools such as
-  `apply_patch` and the agent-job helpers. The broader live app-server
-  extension executor handle registry remains pending.
+  metadata. Swift extension namespace planning now also merges repeated
+  namespace specs by full callable child names like Rust's `merge_into_namespaces`,
+  preserving the memory extension's `memories/` namespace with `list`, `read`,
+  and `search` children. Swift's non-interactive execution helper now accepts a
+  registered tool executor and routes non-builtin custom tools plus unknown
+  namespaced function calls through that handler before falling back to Rust's
+  unsupported call messages, while preserving builtin dispatch precedence for
+  tools such as `apply_patch` and the agent-job helpers. The broader live
+  app-server extension executor handle registry remains pending.
 - 2026-05-17: rechecked Rust app-server dynamic-tool unsubscribe coverage
   (`thread_unsubscribe_during_turn_keeps_turn_running`). Swift now pins the
   live app-server bridge contract that `thread/unsubscribe` only removes the

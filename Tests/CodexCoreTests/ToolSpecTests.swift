@@ -1282,6 +1282,42 @@ final class ToolSpecTests: XCTestCase {
         XCTAssertTrue(configuredTool.supportsParallelToolCalls)
     }
 
+    func testExtensionNamespaceSpecsMergeMemoryToolsLikeRust() throws {
+        func memoryTool(_ name: String) -> ConfiguredToolSpec {
+            ConfiguredToolSpec(
+                spec: .namespace(ResponsesAPINamespace(
+                    name: "memories/",
+                    description: "Tools in the memories/ namespace.",
+                    tools: [
+                        .function(ResponsesAPITool(
+                            name: name,
+                            description: "Memory \(name) tool.",
+                            parameters: .object(properties: [:], required: nil, additionalProperties: .boolean(false))
+                        ))
+                    ]
+                )),
+                supportsParallelToolCalls: false
+            )
+        }
+
+        let specs = ToolSpecFactory.buildSpecs(
+            config: ToolsConfig(shellType: .disabled),
+            extensionToolSpecs: [
+                memoryTool("search"),
+                memoryTool("list"),
+                memoryTool("read")
+            ]
+        )
+
+        let memorySpecs = specs.filter { $0.spec.name == "memories/" }
+        XCTAssertEqual(memorySpecs.count, 1)
+        guard case let .namespace(namespace)? = memorySpecs.first?.spec else {
+            return XCTFail("expected memories namespace")
+        }
+        XCTAssertEqual(namespace.description, "Tools in the memories/ namespace.")
+        XCTAssertEqual(namespace.tools.map(namespaceToolName), ["list", "read", "search"])
+    }
+
     func testExtensionToolSpecsDoNotReplaceBuiltinToolsLikeRust() throws {
         let extensionUpdatePlan = ConfiguredToolSpec(
             spec: .function(ResponsesAPITool(

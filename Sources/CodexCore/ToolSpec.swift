@@ -1271,14 +1271,93 @@ type CallToolResult<TStructured = { [key: string]: unknown }> = {
         codeModeEnabled: Bool,
         to specs: inout [ConfiguredToolSpec]
     ) {
-        var registeredNames = Set(specs.map(\.spec.name))
+        var registeredNames = Set(specs.flatMap { registeredToolNames(for: $0.spec) })
         if codeModeEnabled {
             registeredNames.insert("exec")
             registeredNames.insert("wait")
         }
-        for extensionToolSpec in extensionToolSpecs
-            where registeredNames.insert(extensionToolSpec.spec.name).inserted {
-            specs.append(extensionToolSpec)
+        for extensionToolSpec in extensionToolSpecs {
+            switch extensionToolSpec.spec {
+            case let .namespace(namespace):
+                let unregisteredTools = namespace.tools.filter { tool in
+                    guard let name = registeredToolName(namespace: namespace.name, tool: tool) else {
+                        return false
+                    }
+                    return registeredNames.insert(name).inserted
+                }
+                guard !unregisteredTools.isEmpty else {
+                    continue
+                }
+                appendExtensionNamespace(
+                    ResponsesAPINamespace(
+                        name: namespace.name,
+                        description: namespace.description,
+                        tools: sortNamespaceTools(unregisteredTools)
+                    ),
+                    supportsParallelToolCalls: extensionToolSpec.supportsParallelToolCalls,
+                    to: &specs
+                )
+            default:
+                let names = registeredToolNames(for: extensionToolSpec.spec)
+                guard !names.isEmpty,
+                      names.allSatisfy({ !registeredNames.contains($0) })
+                else {
+                    continue
+                }
+                registeredNames.formUnion(names)
+                specs.append(extensionToolSpec)
+            }
+        }
+    }
+
+    private static func appendExtensionNamespace(
+        _ namespace: ResponsesAPINamespace,
+        supportsParallelToolCalls: Bool,
+        to specs: inout [ConfiguredToolSpec]
+    ) {
+        guard let index = specs.firstIndex(where: { configured in
+            guard case let .namespace(existingNamespace) = configured.spec else {
+                return false
+            }
+            return existingNamespace.name == namespace.name
+        }) else {
+            specs.append(ConfiguredToolSpec(
+                spec: .namespace(namespace),
+                supportsParallelToolCalls: supportsParallelToolCalls
+            ))
+            return
+        }
+
+        guard case let .namespace(existingNamespace) = specs[index].spec else {
+            return
+        }
+        let description = existingNamespace.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !namespace.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? namespace.description
+            : existingNamespace.description
+        specs[index] = ConfiguredToolSpec(
+            spec: .namespace(ResponsesAPINamespace(
+                name: existingNamespace.name,
+                description: description,
+                tools: sortNamespaceTools(existingNamespace.tools + namespace.tools)
+            )),
+            supportsParallelToolCalls: specs[index].supportsParallelToolCalls || supportsParallelToolCalls
+        )
+    }
+
+    private static func registeredToolNames(for spec: ToolSpec) -> [String] {
+        switch spec {
+        case let .namespace(namespace):
+            return namespace.tools.compactMap { registeredToolName(namespace: namespace.name, tool: $0) }
+        default:
+            return [spec.name]
+        }
+    }
+
+    private static func registeredToolName(namespace: String, tool: ResponsesAPINamespaceTool) -> String? {
+        switch tool {
+        case let .function(function):
+            return namespace + function.name
         }
     }
 
