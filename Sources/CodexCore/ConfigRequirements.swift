@@ -52,6 +52,7 @@ public struct ConfigRequirements: Equatable, Sendable {
     public var approvalsReviewer: Constrained<ApprovalsReviewer>
     public var sandboxPolicy: Constrained<SandboxPolicy>
     public var managedHooks: ManagedHooksRequirement?
+    public var allowManagedHooksOnly: Bool?
     public var mcpServers: [String: McpServerRequirement]?
     public var mcpServersSourceDescription: String?
     public var plugins: [String: PluginRequirementsToml]?
@@ -64,6 +65,7 @@ public struct ConfigRequirements: Equatable, Sendable {
         approvalsReviewer: Constrained<ApprovalsReviewer> = .allowAnyFromDefault(),
         sandboxPolicy: Constrained<SandboxPolicy> = .allowAny(.readOnly),
         managedHooks: ManagedHooksRequirement? = nil,
+        allowManagedHooksOnly: Bool? = nil,
         mcpServers: [String: McpServerRequirement]? = nil,
         mcpServersSourceDescription: String? = nil,
         plugins: [String: PluginRequirementsToml]? = nil,
@@ -75,6 +77,7 @@ public struct ConfigRequirements: Equatable, Sendable {
         self.approvalsReviewer = approvalsReviewer
         self.sandboxPolicy = sandboxPolicy
         self.managedHooks = managedHooks
+        self.allowManagedHooksOnly = allowManagedHooksOnly
         self.mcpServers = mcpServers
         self.mcpServersSourceDescription = mcpServersSourceDescription
         self.plugins = plugins
@@ -99,6 +102,34 @@ public struct ManagedHooksRequirement: Equatable, Sendable {
         self.value = value
         self.source = source
         self.sourceDescription = sourceDescription
+    }
+
+    public var hookIdentitySourcePath: URL {
+        if let managedDir = value.managedDirForCurrentPlatform,
+           managedDir.hasPrefix("/") {
+            return URL(fileURLWithPath: managedDir, isDirectory: true).standardizedFileURL
+        }
+        if sourceDescription.hasPrefix("/") {
+            return URL(fileURLWithPath: sourceDescription, isDirectory: false).standardizedFileURL
+        }
+        switch source {
+        case .system:
+            return syntheticManagedHookPath("<managed-requirements>/requirements.toml")
+        case .mdm:
+            return syntheticManagedHookPath("<mdm-managed-requirements>/requirements.toml")
+        case .cloudRequirements:
+            return syntheticManagedHookPath("<cloud-requirements>/requirements.toml")
+        case .legacyManagedConfigFile:
+            return syntheticManagedHookPath("<legacy-managed-config.toml-file>/managed_config.toml")
+        case .legacyManagedConfigMdm:
+            return syntheticManagedHookPath("<legacy-managed-config.toml-mdm>/managed_config.toml")
+        case .user, .project, .sessionFlags, .plugin, .unknown:
+            return syntheticManagedHookPath("<managed-requirements>/requirements.toml")
+        }
+    }
+
+    private func syntheticManagedHookPath(_ path: String) -> URL {
+        URL(fileURLWithPath: "/").appendingPathComponent(path, isDirectory: false)
     }
 }
 
@@ -482,6 +513,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
     public var allowedSandboxModes: [SandboxModeRequirement]?
     public var remoteSandboxConfig: [RemoteSandboxConfigToml]?
     public var allowedWebSearchModes: [WebSearchModeRequirement]?
+    public var allowManagedHooksOnly: Bool?
     public var featureRequirements: [String: Bool]?
     public var hooks: ManagedHooksRequirementsToml?
     public var hooksSource: HookSource
@@ -502,6 +534,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         allowedSandboxModes: [SandboxModeRequirement]? = nil,
         remoteSandboxConfig: [RemoteSandboxConfigToml]? = nil,
         allowedWebSearchModes: [WebSearchModeRequirement]? = nil,
+        allowManagedHooksOnly: Bool? = nil,
         featureRequirements: [String: Bool]? = nil,
         hooks: ManagedHooksRequirementsToml? = nil,
         hooksSource: HookSource = .unknown,
@@ -521,6 +554,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         self.allowedSandboxModes = allowedSandboxModes
         self.remoteSandboxConfig = remoteSandboxConfig
         self.allowedWebSearchModes = allowedWebSearchModes
+        self.allowManagedHooksOnly = allowManagedHooksOnly
         self.featureRequirements = featureRequirements
         self.hooks = hooks
         self.hooksSource = hooksSource
@@ -542,6 +576,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
             allowedSandboxModes == nil &&
             remoteSandboxConfig == nil &&
             allowedWebSearchModes == nil &&
+            allowManagedHooksOnly == nil &&
             featureRequirements == nil &&
             hooks == nil &&
             mcpServers == nil &&
@@ -569,6 +604,9 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         }
         if allowedWebSearchModes == nil, let value = other.allowedWebSearchModes {
             allowedWebSearchModes = value
+        }
+        if allowManagedHooksOnly == nil, let value = other.allowManagedHooksOnly {
+            allowManagedHooksOnly = value
         }
         if featureRequirements == nil, let value = other.featureRequirements {
             featureRequirements = value
@@ -687,6 +725,7 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
             approvalsReviewer: approvalsReviewer,
             sandboxPolicy: sandboxPolicy,
             managedHooks: managedHooks,
+            allowManagedHooksOnly: allowManagedHooksOnly,
             mcpServers: mcpServers,
             mcpServersSourceDescription: mcpServers.map { _ in mcpServersSourceDescription },
             plugins: plugins,
@@ -716,6 +755,12 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         }
         if let webSearchValue = table["allowed_web_search_modes"] {
             result.allowedWebSearchModes = try parseWebSearchModes(webSearchValue)
+        }
+        if let allowManagedHooksOnlyValue = table["allow_managed_hooks_only"] {
+            result.allowManagedHooksOnly = try requiredBool(
+                allowManagedHooksOnlyValue,
+                key: "allow_managed_hooks_only"
+            )
         }
         if let featureValue = table["features"] ?? table["feature_requirements"] {
             result.featureRequirements = try parseFeatureRequirements(featureValue)
@@ -1139,6 +1184,13 @@ public struct ConfigRequirementsToml: Equatable, Sendable {
         return boolValue
     }
 
+    private static func requiredBool(_ value: ConfigValue, key: String) throws -> Bool {
+        guard case let .bool(boolValue) = value else {
+            throw ConfigRequirementsParseError.invalidLine(key)
+        }
+        return boolValue
+    }
+
     private static func optionalPort(_ value: ConfigValue?, key: String) throws -> UInt16? {
         guard let value else {
             return nil
@@ -1275,6 +1327,7 @@ extension ConfigRequirementsToml {
                 }
                 return normalized
             } as Any? ?? NSNull(),
+            "allowManagedHooksOnly": allowManagedHooksOnly as Any? ?? NSNull(),
             "featureRequirements": featureRequirements as Any? ?? NSNull(),
             "hooks": hooks.map { $0.appServerObject() } as Any? ?? NSNull(),
             "enforceResidency": enforceResidency?.rawValue as Any? ?? NSNull(),

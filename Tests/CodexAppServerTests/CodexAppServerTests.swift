@@ -28395,6 +28395,66 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(data[0]["warnings"] as? [String], [])
     }
 
+    func testHooksListAllowsOnlyManagedRequirementHooksWhenRequirementEnabled() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let requirementsPath = codexHome.url.appendingPathComponent("requirements.toml", isDirectory: false)
+        try """
+        allow_managed_hooks_only = true
+
+        [hooks]
+
+        [[hooks.UserPromptSubmit]]
+
+        [[hooks.UserPromptSubmit.hooks]]
+        type = "command"
+        command = "echo managed"
+        """.write(to: requirementsPath, atomically: true, encoding: .utf8)
+        try """
+        [features]
+        plugins = true
+        plugin_hooks = true
+        hooks = true
+
+        [plugins."demo@test"]
+        enabled = true
+
+        [[hooks.UserPromptSubmit]]
+
+        [[hooks.UserPromptSubmit.hooks]]
+        type = "command"
+        command = "echo user"
+        """.write(
+            to: codexHome.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let pluginRoot = codexHome.url.appendingPathComponent("plugins/cache/test/demo/local", isDirectory: true)
+        let hooksRoot = pluginRoot.appendingPathComponent("hooks", isDirectory: true)
+        try FileManager.default.createDirectory(at: hooksRoot, withIntermediateDirectories: true)
+        try """
+        {"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"echo plugin"}]}]}}
+        """.write(to: hooksRoot.appendingPathComponent("hooks.json", isDirectory: false), atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"hooks/list","params":{"cwds":["\#(cwd.url.path)"]}}"#,
+            configuration: testConfiguration(
+                codexHome: codexHome.url,
+                configLayerOverrides: ConfigLayerLoaderOverrides(requirementsPath: requirementsPath)
+            )
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let data = try XCTUnwrap(result["data"] as? [[String: Any]])
+        let hooks = try XCTUnwrap(data[0]["hooks"] as? [[String: Any]])
+        XCTAssertEqual(hooks.count, 1)
+        XCTAssertEqual(hooks[0]["command"] as? String, "echo managed")
+        XCTAssertEqual(hooks[0]["sourcePath"] as? String, requirementsPath.standardizedFileURL.path)
+        XCTAssertEqual(hooks[0]["source"] as? String, "system")
+        XCTAssertEqual(hooks[0]["isManaged"] as? Bool, true)
+        XCTAssertEqual(data[0]["warnings"] as? [String], [])
+    }
+
     func testHooksListDoesNotDisableManagedRequirementHooksFromUserState() throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
@@ -28438,7 +28498,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(hooks[0]["trustStatus"] as? String, "managed")
     }
 
-    func testHooksListWarnsWhenManagedRequirementDirectoryIsMissing() throws {
+    func testHooksListUsesMissingManagedRequirementDirectoryAsHookIdentityLikeRust() throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
         let missingDir = codexHome.url.appendingPathComponent("missing-managed-hooks", isDirectory: true)
@@ -28464,12 +28524,12 @@ final class CodexAppServerTests: XCTestCase {
         )
         let result = try XCTUnwrap(response["result"] as? [String: Any])
         let data = try XCTUnwrap(result["data"] as? [[String: Any]])
-        XCTAssertEqual((data[0]["hooks"] as? [[String: Any]])?.count, 0)
-        let warnings = try XCTUnwrap(data[0]["warnings"] as? [String])
-        XCTAssertEqual(warnings.count, 1)
-        XCTAssertTrue(warnings[0].contains("managed hook directory"))
-        XCTAssertTrue(warnings[0].contains("does not exist"))
-        XCTAssertTrue(warnings[0].contains(missingDir.path))
+        let hooks = try XCTUnwrap(data[0]["hooks"] as? [[String: Any]])
+        XCTAssertEqual(hooks.count, 1)
+        XCTAssertEqual(hooks[0]["key"] as? String, "\(missingDir.standardizedFileURL.path):pre_tool_use:0:0")
+        XCTAssertEqual(hooks[0]["sourcePath"] as? String, missingDir.standardizedFileURL.path)
+        XCTAssertEqual(hooks[0]["command"] as? String, "python3 \(missingDir.appendingPathComponent("pre.py").path)")
+        XCTAssertEqual(data[0]["warnings"] as? [String], [])
     }
 
     func testHooksListRespectsDisabledHooksFeature() throws {
@@ -29140,6 +29200,7 @@ final class CodexAppServerTests: XCTestCase {
         allowed_approvals_reviewers = ["user", "guardian_subagent"]
         allowed_sandbox_modes = ["read-only", "workspace-write", "external-sandbox"]
         allowed_web_search_modes = ["cached"]
+        allow_managed_hooks_only = false
         enforce_residency = "us"
 
         [features]
@@ -29178,6 +29239,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(requirements["allowedSandboxModes"] as? [String], ["read-only", "workspace-write"])
         XCTAssertEqual(requirements["allowedApprovalsReviewers"] as? [String], ["user", "guardian_subagent"])
         XCTAssertEqual(requirements["allowedWebSearchModes"] as? [String], ["cached", "disabled"])
+        XCTAssertEqual(requirements["allowManagedHooksOnly"] as? Bool, false)
         XCTAssertEqual(requirements["featureRequirements"] as? [String: Bool], ["tool_search": true, "plugins": false])
         XCTAssertTrue(requirements["hooks"] is NSNull)
         XCTAssertEqual(requirements["enforceResidency"] as? String, "us")

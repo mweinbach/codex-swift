@@ -17439,6 +17439,7 @@ public enum CodexAppServer {
         return catalogHookProjection(
             effectiveConfig: stack.effectiveConfig(),
             managedHooks: stack.requirements.managedHooks,
+            allowManagedHooksOnly: stack.requirements.allowManagedHooksOnly == true,
             hookLayers: hookLayers,
             codexHome: configuration.codexHome
         )
@@ -17447,6 +17448,7 @@ public enum CodexAppServer {
     private static func catalogHookProjection(
         effectiveConfig: ConfigValue,
         managedHooks: ManagedHooksRequirement? = nil,
+        allowManagedHooksOnly: Bool = false,
         hookLayers: [(config: ConfigValue, configFile: URL, source: String)],
         codexHome: URL
     ) -> CatalogHookProjection {
@@ -17462,15 +17464,18 @@ public enum CodexAppServer {
                 projection: &projection
             )
         }
-        for hookLayer in hookLayers {
-            projection.hooks.append(contentsOf: configHookObjects(
-                config: hookLayer.config,
-                configFile: hookLayer.configFile,
-                source: hookLayer.source,
-                hookStates: hookStates
-            ))
+        if !allowManagedHooksOnly {
+            for hookLayer in hookLayers {
+                projection.hooks.append(contentsOf: configHookObjects(
+                    config: hookLayer.config,
+                    configFile: hookLayer.configFile,
+                    source: hookLayer.source,
+                    hookStates: hookStates
+                ))
+            }
         }
-        guard configFeatureEnabled("plugins", in: effectiveConfig, defaultValue: false),
+        guard !allowManagedHooksOnly,
+              configFeatureEnabled("plugins", in: effectiveConfig, defaultValue: false),
               configFeatureEnabled("plugin_hooks", in: effectiveConfig, defaultValue: false)
         else {
             return projection
@@ -17498,30 +17503,9 @@ public enum CodexAppServer {
         hookStates: [String: HookState],
         projection: inout CatalogHookProjection
     ) {
-        guard let managedDir = managedHooks.value.managedDirForCurrentPlatform else {
-            projection.warnings.append(
-                "skipping managed hooks from \(managedHooks.sourceDescription): no managed hook directory is configured for this platform"
-            )
-            return
-        }
-        let sourcePath = URL(fileURLWithPath: managedDir, isDirectory: true).standardizedFileURL
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: sourcePath.path, isDirectory: &isDirectory) else {
-            projection.warnings.append(
-                "skipping managed hooks from \(managedHooks.sourceDescription): managed hook directory \(managedDir) does not exist"
-            )
-            return
-        }
-        guard isDirectory.boolValue else {
-            projection.warnings.append(
-                "skipping managed hooks from \(managedHooks.sourceDescription): managed hook directory \(managedDir) is not a directory"
-            )
-            return
-        }
-
         projection.hooks.append(contentsOf: configHookObjects(
             config: .table(["hooks": managedHooks.value.hooks]),
-            configFile: sourcePath,
+            configFile: managedHooks.hookIdentitySourcePath,
             source: managedHooks.source.rawValue,
             hookStates: hookStates,
             isManaged: true

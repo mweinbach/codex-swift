@@ -2704,6 +2704,8 @@ Recent upstream audit checkpoint:
   - `configRequirements/read` now parses `allowed_approvals_reviewers` and returns Rust's camelCase `allowedApprovalsReviewers` values, including the `auto_review` input alias normalized to `guardian_subagent`.
 - `codex-rs/app-server/src/request_processors/config_processor.rs` config requirements web-search/features/residency fields
   - `configRequirements/read` now parses `allowed_web_search_modes`, `features`/`feature_requirements`, and `enforce_residency`, returning Rust's camelCase response keys while normalizing omitted `disabled` web-search mode like Rust.
+- `codex-rs/config/src/config_requirements.rs` managed-hooks-only requirement
+  - Requirements TOML now parses `allow_managed_hooks_only`, preserves explicit `false` as a configured requirement, returns the camelCase `allowManagedHooksOnly` field from `configRequirements/read`, and applies the Rust hook-discovery policy that keeps managed requirements/system hooks while skipping user/project/session and plugin hooks when the requirement is true. Managed requirement hook identity now falls back to the requirement source path when no valid platform managed directory is configured, matching Rust commit `913aad4d3c1c8a1671b3ec265e103efc0317308f`.
 - `codex-rs/config/src/config_requirements.rs` app connector requirements
   - Requirements TOML now parses `[apps.<connector_id>] enabled = ...` entries and preserves Rust's descending enablement merge semantics where any lower-precedence `enabled = false` still disables that connector while higher-precedence explicit values otherwise win.
 - `codex-rs/config/src/config_requirements.rs` MCP/plugin requirements

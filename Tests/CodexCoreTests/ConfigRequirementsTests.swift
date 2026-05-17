@@ -2,11 +2,28 @@ import CodexCore
 import XCTest
 
 final class ConfigRequirementsTests: XCTestCase {
+    func testDeserializeAllowManagedHooksOnlyPreservesExplicitFalse() throws {
+        let enabled = try ConfigRequirementsToml.parse("""
+        allow_managed_hooks_only = true
+        """)
+        XCTAssertEqual(enabled.allowManagedHooksOnly, true)
+        XCTAssertEqual(try enabled.requirements().allowManagedHooksOnly, true)
+        XCTAssertFalse(enabled.isEmpty)
+
+        let disabled = try ConfigRequirementsToml.parse("""
+        allow_managed_hooks_only = false
+        """)
+        XCTAssertEqual(disabled.allowManagedHooksOnly, false)
+        XCTAssertEqual(try disabled.requirements().allowManagedHooksOnly, false)
+        XCTAssertFalse(disabled.isEmpty)
+    }
+
     func testMergeUnsetFieldsOnlyFillsMissingValues() throws {
         let source = try ConfigRequirementsToml.parse("""
         allowed_approval_policies = ["on-request"]
         allowed_approvals_reviewers = ["guardian_subagent"]
         allowed_web_search_modes = ["cached"]
+        allow_managed_hooks_only = true
         enforce_residency = "us"
         guardian_policy_config = "Use the company guardian policy."
 
@@ -27,6 +44,7 @@ final class ConfigRequirementsTests: XCTestCase {
         XCTAssertEqual(emptyTarget.allowedApprovalPolicies, [.onRequest])
         XCTAssertEqual(emptyTarget.allowedApprovalsReviewers, [.autoReview])
         XCTAssertEqual(emptyTarget.allowedWebSearchModes, [.cached])
+        XCTAssertEqual(emptyTarget.allowManagedHooksOnly, true)
         XCTAssertEqual(emptyTarget.featureRequirements, ["tool_search": true])
         XCTAssertEqual(emptyTarget.enforceResidency, .us)
         XCTAssertEqual(emptyTarget.guardianPolicyConfig, "Use the company guardian policy.")
@@ -43,6 +61,7 @@ final class ConfigRequirementsTests: XCTestCase {
         XCTAssertEqual(populatedTarget.allowedApprovalPolicies, [.never])
         XCTAssertEqual(populatedTarget.allowedApprovalsReviewers, [.autoReview])
         XCTAssertEqual(populatedTarget.allowedWebSearchModes, [.live])
+        XCTAssertEqual(populatedTarget.allowManagedHooksOnly, true)
         XCTAssertEqual(populatedTarget.featureRequirements, ["tool_search": true])
         XCTAssertEqual(populatedTarget.enforceResidency, .us)
         XCTAssertEqual(populatedTarget.guardianPolicyConfig, "Use the company guardian policy.")

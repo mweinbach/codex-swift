@@ -18,14 +18,14 @@ public enum HookConfig {
         }
 
         let hookStates = hookStateMap(from: effectiveConfig)
+        let allowManagedHooksOnly = stack.requirements.allowManagedHooksOnly == true
         var displayOrder: Int64 = 0
         var handlers: [ConfiguredHookHandler] = []
 
-        if let managedHooks = stack.requirements.managedHooks,
-           let managedDir = managedHooks.value.managedDirForCurrentPlatform {
+        if let managedHooks = stack.requirements.managedHooks {
             appendHandlers(
                 from: .table(["hooks": managedHooks.value.hooks]),
-                sourcePath: URL(fileURLWithPath: managedDir, isDirectory: true),
+                sourcePath: managedHooks.hookIdentitySourcePath,
                 source: managedHooks.source,
                 hookStates: hookStates,
                 isManaged: true,
@@ -36,6 +36,9 @@ public enum HookConfig {
 
         for layer in stack.getLayers(ordering: .lowestPrecedenceFirst) {
             let metadata = hookLayerMetadata(for: layer.name)
+            if allowManagedHooksOnly && !metadata.isManaged {
+                continue
+            }
             appendHandlers(
                 from: layer.config,
                 sourcePath: metadata.sourcePath,
@@ -48,6 +51,7 @@ public enum HookConfig {
         }
 
         if let codexHome,
+           !allowManagedHooksOnly,
            configFeatureEnabled("plugins", in: effectiveConfig, defaultValue: false),
            configFeatureEnabled("plugin_hooks", in: effectiveConfig, defaultValue: false) {
             for pluginID in enabledLocalPluginIDs(config: effectiveConfig) {

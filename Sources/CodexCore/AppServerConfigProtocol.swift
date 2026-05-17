@@ -924,6 +924,7 @@ extension AppServerProtocol {
         public let allowedApprovalsReviewers: [ApprovalsReviewer]?
         public let allowedSandboxModes: [SandboxMode]?
         public let allowedWebSearchModes: [WebSearchMode]?
+        public let allowManagedHooksOnly: Bool?
         public let featureRequirements: [String: Bool]?
         public let hooks: ManagedHooksRequirements?
         public let enforceResidency: ResidencyRequirement?
@@ -934,6 +935,7 @@ extension AppServerProtocol {
             allowedApprovalsReviewers: [ApprovalsReviewer]? = nil,
             allowedSandboxModes: [SandboxMode]? = nil,
             allowedWebSearchModes: [WebSearchMode]? = nil,
+            allowManagedHooksOnly: Bool? = nil,
             featureRequirements: [String: Bool]? = nil,
             hooks: ManagedHooksRequirements? = nil,
             enforceResidency: ResidencyRequirement? = nil,
@@ -943,6 +945,7 @@ extension AppServerProtocol {
             self.allowedApprovalsReviewers = allowedApprovalsReviewers
             self.allowedSandboxModes = allowedSandboxModes
             self.allowedWebSearchModes = allowedWebSearchModes
+            self.allowManagedHooksOnly = allowManagedHooksOnly
             self.featureRequirements = featureRequirements
             self.hooks = hooks
             self.enforceResidency = enforceResidency
@@ -955,6 +958,7 @@ extension AppServerProtocol {
             try container.encodeNilOrValue(allowedApprovalsReviewers, forKey: .allowedApprovalsReviewers)
             try container.encodeNilOrValue(allowedSandboxModes, forKey: .allowedSandboxModes)
             try container.encodeNilOrValue(allowedWebSearchModes, forKey: .allowedWebSearchModes)
+            try container.encodeNilOrValue(allowManagedHooksOnly, forKey: .allowManagedHooksOnly)
             try container.encodeNilOrValue(featureRequirements, forKey: .featureRequirements)
             try container.encodeNilOrValue(hooks, forKey: .hooks)
             try container.encodeNilOrValue(enforceResidency, forKey: .enforceResidency)

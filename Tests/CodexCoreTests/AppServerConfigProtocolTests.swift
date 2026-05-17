@@ -353,6 +353,7 @@ final class AppServerConfigProtocolTests: XCTestCase {
             allowedApprovalsReviewers: [.autoReview],
             allowedSandboxModes: [.workspaceWrite],
             allowedWebSearchModes: [.live, .disabled],
+            allowManagedHooksOnly: true,
             enforceResidency: .us,
             network: AppServerProtocol.NetworkRequirements(
                 enabled: true,
@@ -367,6 +368,7 @@ final class AppServerConfigProtocolTests: XCTestCase {
                 "allowedApprovalsReviewers": ["guardian_subagent"],
                 "allowedSandboxModes": ["workspace-write"],
                 "allowedWebSearchModes": ["live", "disabled"],
+                "allowManagedHooksOnly": true,
                 "featureRequirements": NSNull(),
                 "hooks": NSNull(),
                 "enforceResidency": "us",
@@ -501,6 +503,7 @@ final class AppServerConfigProtocolTests: XCTestCase {
             "allowedApprovalsReviewers": NSNull(),
             "allowedSandboxModes": NSNull(),
             "allowedWebSearchModes": NSNull(),
+            "allowManagedHooksOnly": NSNull(),
             "featureRequirements": NSNull(),
             "hooks": [
                 "managedDir": "/managed/hooks",

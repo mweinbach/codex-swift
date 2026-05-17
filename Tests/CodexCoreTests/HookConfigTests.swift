@@ -169,6 +169,66 @@ final class HookConfigTests: XCTestCase {
         ])
     }
 
+    func testConfiguredHandlersAllowOnlyManagedHooksWhenRequirementEnabled() throws {
+        let command = "echo user"
+        let key = HookConfig.hookKey(
+            keySource: "/tmp/config.toml",
+            eventName: .userPromptSubmit,
+            groupIndex: 0,
+            handlerIndex: 0
+        )
+        let hash = HookConfig.commandHookHash(
+            eventName: .userPromptSubmit,
+            matcher: nil,
+            command: command,
+            timeoutSec: 600,
+            statusMessage: nil
+        )
+        let stack = try ConfigLayerStack(
+            layers: [
+                ConfigLayerEntry(
+                    name: .system(file: try path("/etc/codex/config.toml")),
+                    config: hookConfig(command: "echo system")
+                ),
+                ConfigLayerEntry(
+                    name: .user(file: try path("/tmp/config.toml")),
+                    config: hookConfig(command: command, trustedKey: key, trustedHash: hash)
+                )
+            ],
+            requirements: ConfigRequirements(
+                managedHooks: ManagedHooksRequirement(
+                    value: ManagedHooksRequirementsToml(hooks: hookGroups(command: "echo requirements")),
+                    source: .system,
+                    sourceDescription: "/etc/codex/requirements.toml"
+                ),
+                allowManagedHooksOnly: true
+            )
+        )
+
+        let handlers = HookConfig.configuredHandlers(from: stack)
+
+        XCTAssertEqual(handlers, [
+            ConfiguredHookHandler(
+                eventName: .userPromptSubmit,
+                matcher: nil,
+                command: "echo requirements",
+                timeoutSec: 600,
+                sourcePath: try path("/etc/codex/requirements.toml"),
+                source: .system,
+                displayOrder: 0
+            ),
+            ConfiguredHookHandler(
+                eventName: .userPromptSubmit,
+                matcher: nil,
+                command: "echo system",
+                timeoutSec: 600,
+                sourcePath: try path("/etc/codex/config.toml"),
+                source: .system,
+                displayOrder: 1
+            )
+        ])
+    }
+
     func testConfiguredHandlersIncludeTrustedSessionFlagHooks() throws {
         let command = "echo session"
         let key = HookConfig.hookKey(
