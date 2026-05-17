@@ -511,6 +511,22 @@ actor AppServerNotificationBroadcaster {
             await subscriber.notificationSink(data)
         }
     }
+
+    func publish(
+        data: Data,
+        method: String?,
+        to connectionIDs: [AppServerConnectionID]
+    ) async {
+        for connectionID in Set(connectionIDs).sorted() {
+            guard let subscriber = subscribers[connectionID] else {
+                continue
+            }
+            if let method, subscriber.optOutNotificationMethods.contains(method) {
+                continue
+            }
+            await subscriber.notificationSink(data)
+        }
+    }
 }
 
 public actor AppServerRemoteControlStatusBroadcaster {
@@ -28201,7 +28217,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         }
         await trackItemLifecycleNotificationsForAnalytics(notifications)
         for notification in notifications {
-            await sendNotification(notification)
+            await sendRuntimeNotification(notification, threadID: threadID)
         }
         afterNotifications?()
     }
@@ -28569,6 +28585,29 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             return
         }
         await notificationSink(data)
+    }
+
+    private func sendRuntimeNotification(
+        _ notification: [String: Any],
+        threadID: String
+    ) async {
+        let method = notification["method"] as? String
+        guard let data = CodexAppServer.encodeMessages([notification]) else {
+            return
+        }
+        let subscribedConnectionIDs = await threadStateManager.subscribedConnectionIDs(forThreadID: threadID)
+        guard !subscribedConnectionIDs.isEmpty else {
+            guard acceptsNotification(notification), let notificationSink else {
+                return
+            }
+            await notificationSink(data)
+            return
+        }
+        await configuration.notificationBroadcaster.publish(
+            data: data,
+            method: method,
+            to: subscribedConnectionIDs
+        )
     }
 
     private func sendEnvelope(_ envelope: [String: Any]) async {

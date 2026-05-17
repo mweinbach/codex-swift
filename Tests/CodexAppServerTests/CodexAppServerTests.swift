@@ -21482,6 +21482,55 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(loadedThreadIDs, [threadID])
     }
 
+    func testLiveRuntimeNotificationsFanOutToSubscribedConnectionsLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let threadStateManager = AppServerThreadStateManager()
+        let configuration = testConfiguration(codexHome: temp.url)
+        let primaryCapture = AppServerNotificationCapture()
+        let secondaryCapture = AppServerNotificationCapture()
+        let primary = try initializedProcessor(
+            configuration: configuration,
+            connectionID: 1,
+            notificationSink: { data in await primaryCapture.append(data) },
+            threadStateManager: threadStateManager
+        )
+        _ = try initializedProcessor(
+            configuration: configuration,
+            connectionID: 2,
+            notificationSink: { data in await secondaryCapture.append(data) },
+            threadStateManager: threadStateManager
+        )
+        let threadID = UUID().uuidString.lowercased()
+        let addedPrimary = await threadStateManager.tryAddConnectionToThread(threadID: threadID, connectionID: 1)
+        let addedSecondary = await threadStateManager.tryAddConnectionToThread(threadID: threadID, connectionID: 2)
+        XCTAssertTrue(addedPrimary)
+        XCTAssertTrue(addedSecondary)
+
+        await primary.handleRuntimeEvent(
+            threadID: threadID,
+            turnID: "turn-1",
+            event: .taskStarted(TaskStartedEvent(
+                turnID: "turn-1",
+                startedAt: 1_000,
+                modelContextWindow: nil
+            ))
+        )
+
+        let primaryStatus = try decodeMessages(try await nextNotificationPayload(primaryCapture))
+        let secondaryStatus = try decodeMessages(try await nextNotificationPayload(secondaryCapture))
+        XCTAssertEqual(primaryStatus[0]["method"] as? String, "thread/status/changed")
+        XCTAssertEqual(secondaryStatus[0]["method"] as? String, "thread/status/changed")
+        XCTAssertEqual((primaryStatus[0]["params"] as? [String: Any])?["threadId"] as? String, threadID)
+        XCTAssertEqual((secondaryStatus[0]["params"] as? [String: Any])?["threadId"] as? String, threadID)
+
+        let primaryStarted = try decodeMessages(try await nextNotificationPayload(primaryCapture))
+        let secondaryStarted = try decodeMessages(try await nextNotificationPayload(secondaryCapture))
+        XCTAssertEqual(primaryStarted[0]["method"] as? String, "turn/started")
+        XCTAssertEqual(secondaryStarted[0]["method"] as? String, "turn/started")
+        XCTAssertEqual((primaryStarted[0]["params"] as? [String: Any])?["threadId"] as? String, threadID)
+        XCTAssertEqual((secondaryStarted[0]["params"] as? [String: Any])?["threadId"] as? String, threadID)
+    }
+
     func testThreadUnsubscribeReportsSubscriptionStatus() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
