@@ -415,6 +415,46 @@ final class CodexCLITests: XCTestCase {
         ])
     }
 
+    func testRunAsyncLoginStatusIgnoresCredentialFlagsLikeRust() async {
+        var receivedAction: CodexCLI.LoginCommandAction?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: [
+                "login",
+                "--api-key=sk-ignored",
+                "--with-api-key",
+                "--with-access-token",
+                "status"
+            ],
+            stderr: { _ in },
+            loginRunner: { request in
+                receivedAction = request.action
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(receivedAction, .status)
+    }
+
+    func testRunAsyncLoginDeviceAuthTakesPrecedenceOverDeprecatedAPIKeyLikeRust() async {
+        var stderr: [String] = []
+        var receivedAction: CodexCLI.LoginCommandAction?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["login", "--device-auth", "--api-key=sk-ignored"],
+            stderr: { stderr.append($0) },
+            loginRunner: { request in
+                receivedAction = request.action
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertTrue(stderr.isEmpty)
+        XCTAssertEqual(receivedAction, .deviceCode(issuerBaseURL: nil, clientID: nil))
+    }
+
     func testRunAsyncLoginWithAccessTokenDelegatesToRunnerLikeRust() async {
         var receivedAction: CodexCLI.LoginCommandAction?
 

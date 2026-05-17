@@ -961,13 +961,16 @@ public struct CodexCLI: Sendable {
                 return 1
             }
         case let .command(spec, commandArguments) where spec.name == "login":
-            if usesDeprecatedAPIKeyFlag(arguments) {
-                stderr("The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`.")
-                return 1
-            }
-            if usesAPIKeyStdinFlag(arguments), usesAccessTokenStdinFlag(arguments) {
-                stderr("Choose one login credential source: --with-api-key or --with-access-token.")
-                return 1
+            let action = loginAction(arguments: arguments, commandArguments: commandArguments)
+            if action != .status {
+                if usesAPIKeyStdinFlag(arguments), usesAccessTokenStdinFlag(arguments) {
+                    stderr("Choose one login credential source: --with-api-key or --with-access-token.")
+                    return 1
+                }
+                if usesDeprecatedAPIKeyFlag(arguments), !usesDeviceAuthFlag(arguments) {
+                    stderr("The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`.")
+                    return 1
+                }
             }
             guard let loginRunner else {
                 stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
@@ -975,7 +978,7 @@ public struct CodexCLI: Sendable {
             }
             do {
                 let result = try await loginRunner(LoginCommandRequest(
-                    action: loginAction(arguments: arguments, commandArguments: commandArguments),
+                    action: action,
                     configOverrides: CliConfigOverrides(rawOverrides: try configOverrideTokens(arguments))
                 ))
                 emit(result, stdout: stdout, stderr: stderr)
@@ -1832,6 +1835,10 @@ public struct CodexCLI: Sendable {
 
     private func usesAccessTokenStdinFlag(_ arguments: [String]) -> Bool {
         arguments.contains("--with-access-token")
+    }
+
+    private func usesDeviceAuthFlag(_ arguments: [String]) -> Bool {
+        arguments.contains("--device-auth")
     }
 
     private func validateProfileV2Name(_ value: String) -> ParseResult<Void> {

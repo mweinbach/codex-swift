@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust login CLI branch ordering in
+  `codex-rs/cli/src/main.rs` and `codex-rs/cli/src/login.rs`. Swift login
+  parsing now matches Rust's ordering where `login status` ignores credential
+  mode flags, duplicate stdin credential-source rejection still wins for
+  normal login flows, and `--device-auth` takes precedence over the deprecated
+  `--api-key` flag before dispatching the device-code login action.
 - 2026-05-17: rechecked Rust apply-patch executable fixtures in
   `codex-rs/apply-patch/tests/suite/tool.rs`. Swift apply-patch summaries now
   report moved update hunks under the destination path like Rust, update-hunk
