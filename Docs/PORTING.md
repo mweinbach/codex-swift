@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `fc26af377f` (`feat: expose multi-agent
+  v2 as model-only tools`). Swift now accepts and profile-overrides
+  `features.multi_agent_v2.non_code_mode_only`, carries it into
+  non-interactive tool configuration, and keeps tests pinned to the Rust config
+  shape. The Rust `DirectModelOnly` nested code-mode filtering remains pending
+  with Swift's broader code-mode `exec` / `wait` tool surface.
 - 2026-05-17: rechecked Rust commit `9798eb377a` (`feat(cli): add codex
   doctor diagnostics`) for the app-server feedback path. Swift feedback uploads
   can now carry in-memory attachments, and `feedback/upload` includes the

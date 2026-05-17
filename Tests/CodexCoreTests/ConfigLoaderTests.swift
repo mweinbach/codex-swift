@@ -1306,6 +1306,7 @@ final class ConfigLoaderTests: XCTestCase {
         root_agent_usage_hint_text = "Root guidance."
         subagent_usage_hint_text = "Subagent guidance."
         hide_spawn_agent_metadata = true
+        non_code_mode_only = true
         """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
 
         let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
@@ -1320,7 +1321,8 @@ final class ConfigLoaderTests: XCTestCase {
             usageHintText: "Custom delegation guidance.",
             rootAgentUsageHintText: "Root guidance.",
             subagentUsageHintText: "Subagent guidance.",
-            hideSpawnAgentMetadata: true
+            hideSpawnAgentMetadata: true,
+            nonCodeModeOnly: true
         ))
         XCTAssertEqual(config.agents.maxThreads, 4)
     }
@@ -1340,6 +1342,7 @@ final class ConfigLoaderTests: XCTestCase {
         root_agent_usage_hint_text = "base root hint"
         subagent_usage_hint_text = "base subagent hint"
         hide_spawn_agent_metadata = true
+        non_code_mode_only = false
 
         [profiles.no_hint.features.multi_agent_v2]
         max_concurrent_threads_per_session = 6
@@ -1351,6 +1354,7 @@ final class ConfigLoaderTests: XCTestCase {
         root_agent_usage_hint_text = "profile root hint"
         subagent_usage_hint_text = "profile subagent hint"
         hide_spawn_agent_metadata = false
+        non_code_mode_only = true
         """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
 
         let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
@@ -1364,7 +1368,8 @@ final class ConfigLoaderTests: XCTestCase {
             usageHintText: "profile hint",
             rootAgentUsageHintText: "profile root hint",
             subagentUsageHintText: "profile subagent hint",
-            hideSpawnAgentMetadata: false
+            hideSpawnAgentMetadata: false,
+            nonCodeModeOnly: true
         ))
     }
 

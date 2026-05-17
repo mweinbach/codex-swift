@@ -254,6 +254,8 @@ public enum NonInteractiveExec {
             codeModeEnabled: config.features.isEnabled(.codeMode),
             allowLoginShell: config.allowLoginShell,
             multiAgentV2Tools: multiAgentV2Enabled,
+            multiAgentV2NonCodeModeOnly: multiAgentV2Enabled
+                && config.multiAgentV2.nonCodeModeOnly,
             availableModels: availableModels,
             spawnAgentUsageHint: config.multiAgentV2.usageHintEnabled,
             spawnAgentUsageHintText: config.multiAgentV2.usageHintText,

@@ -798,6 +798,7 @@ public struct ToolsConfig: Equatable, Sendable {
     public let codeModeEnabled: Bool
     public let allowLoginShell: Bool
     public let multiAgentV2Tools: Bool
+    public let multiAgentV2NonCodeModeOnly: Bool
     public let availableModels: [ModelPreset]
     public let spawnAgentUsageHint: Bool
     public let spawnAgentUsageHintText: String?
@@ -826,6 +827,7 @@ public struct ToolsConfig: Equatable, Sendable {
         codeModeEnabled: Bool = false,
         allowLoginShell: Bool = true,
         multiAgentV2Tools: Bool = false,
+        multiAgentV2NonCodeModeOnly: Bool = false,
         availableModels: [ModelPreset] = [],
         spawnAgentUsageHint: Bool = true,
         spawnAgentUsageHintText: String? = nil,
@@ -853,6 +855,7 @@ public struct ToolsConfig: Equatable, Sendable {
         self.codeModeEnabled = codeModeEnabled
         self.allowLoginShell = allowLoginShell
         self.multiAgentV2Tools = multiAgentV2Tools
+        self.multiAgentV2NonCodeModeOnly = multiAgentV2NonCodeModeOnly
         self.availableModels = availableModels
         self.spawnAgentUsageHint = spawnAgentUsageHint
         self.spawnAgentUsageHintText = spawnAgentUsageHintText
@@ -883,6 +886,7 @@ public struct ToolsConfig: Equatable, Sendable {
             codeModeEnabled: codeModeEnabled,
             allowLoginShell: allowLoginShell,
             multiAgentV2Tools: multiAgentV2Tools,
+            multiAgentV2NonCodeModeOnly: multiAgentV2NonCodeModeOnly,
             availableModels: availableModels,
             spawnAgentUsageHint: spawnAgentUsageHint,
             spawnAgentUsageHintText: spawnAgentUsageHintText,

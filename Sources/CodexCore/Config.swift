@@ -235,6 +235,7 @@ public struct MultiAgentV2Config: Equatable, Sendable {
     public var rootAgentUsageHintText: String?
     public var subagentUsageHintText: String?
     public var hideSpawnAgentMetadata: Bool
+    public var nonCodeModeOnly: Bool
 
     public init(
         maxConcurrentThreadsPerSession: Int = Self.defaultMaxConcurrentThreadsPerSession,
@@ -245,7 +246,8 @@ public struct MultiAgentV2Config: Equatable, Sendable {
         usageHintText: String? = nil,
         rootAgentUsageHintText: String? = nil,
         subagentUsageHintText: String? = nil,
-        hideSpawnAgentMetadata: Bool = false
+        hideSpawnAgentMetadata: Bool = false,
+        nonCodeModeOnly: Bool = false
     ) {
         self.maxConcurrentThreadsPerSession = maxConcurrentThreadsPerSession
         self.minWaitTimeoutMS = minWaitTimeoutMS
@@ -256,6 +258,7 @@ public struct MultiAgentV2Config: Equatable, Sendable {
         self.rootAgentUsageHintText = rootAgentUsageHintText
         self.subagentUsageHintText = subagentUsageHintText
         self.hideSpawnAgentMetadata = hideSpawnAgentMetadata
+        self.nonCodeModeOnly = nonCodeModeOnly
     }
 
     public func usageHintText(features: FeatureStates, sessionSource: SessionSource) -> String? {
@@ -3950,7 +3953,8 @@ private struct ParsedCodexConfigToml {
              "usage_hint_text",
              "root_agent_usage_hint_text",
              "subagent_usage_hint_text",
-             "hide_spawn_agent_metadata":
+             "hide_spawn_agent_metadata",
+             "non_code_mode_only":
             if let profileName {
                 profileMultiAgentV2[profileName, default: [:]][key] = value
             } else {
@@ -5340,7 +5344,13 @@ private struct ParsedCodexConfigToml {
                 base: base,
                 profile: profile
             ).map { try boolValue($0, key: "\(key).hide_spawn_agent_metadata") }
-                ?? defaults.hideSpawnAgentMetadata
+                ?? defaults.hideSpawnAgentMetadata,
+            nonCodeModeOnly: try layeredConfigValue(
+                field: "non_code_mode_only",
+                base: base,
+                profile: profile
+            ).map { try boolValue($0, key: "\(key).non_code_mode_only") }
+                ?? defaults.nonCodeModeOnly
         )
     }
 

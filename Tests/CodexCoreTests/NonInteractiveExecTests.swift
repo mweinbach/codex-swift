@@ -697,13 +697,19 @@ final class NonInteractiveExecTests: XCTestCase {
             defaultWaitTimeoutMS: 90_000,
             usageHintEnabled: true,
             usageHintText: "Runtime delegation hint.",
-            hideSpawnAgentMetadata: true
+            hideSpawnAgentMetadata: true,
+            nonCodeModeOnly: true
         )
         let modelFamily = ModelFamily(
             slug: "test-model",
             family: "test",
             shellType: .disabled
         )
+        let toolsConfig = NonInteractiveExec.toolsConfig(
+            modelFamily: modelFamily,
+            config: config
+        )
+        XCTAssertTrue(toolsConfig.multiAgentV2NonCodeModeOnly)
 
         let specs = NonInteractiveExec.toolSpecs(
             modelFamily: modelFamily,
