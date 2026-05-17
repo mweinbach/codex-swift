@@ -12,6 +12,13 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust CLI global `--ephemeral`,
+  `--ignore-user-config`, and `--ignore-rules` handling from
+  `codex-rs/exec/src/cli.rs` and the shared interactive command surface. Swift
+  interactive `resume`/`fork` option parsing now carries those root and
+  subcommand flags through `InteractiveCommandOptions`, matching the existing
+  `exec` flag surface and preserving the already-pinned Rust command-surface
+  tests.
 - 2026-05-17: wired live app-server runtime item emission through extension
   turn-item contributors before `item/completed` notifications are sent to the
   client. The app-server parity test now proves a contributor observes the

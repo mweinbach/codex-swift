@@ -328,6 +328,9 @@ public struct CodexCLI: Sendable {
         public let searchEnabled: Bool
         public let noAltScreen: Bool
         public let bypassHookTrust: Bool
+        public let ephemeral: Bool
+        public let ignoreUserConfig: Bool
+        public let ignoreRules: Bool
 
         public init(
             imagePaths: [String] = [],
@@ -343,7 +346,10 @@ public struct CodexCLI: Sendable {
             approvalPolicy: String? = nil,
             searchEnabled: Bool = false,
             noAltScreen: Bool = false,
-            bypassHookTrust: Bool = false
+            bypassHookTrust: Bool = false,
+            ephemeral: Bool = false,
+            ignoreUserConfig: Bool = false,
+            ignoreRules: Bool = false
         ) {
             self.imagePaths = imagePaths
             self.model = model
@@ -359,6 +365,9 @@ public struct CodexCLI: Sendable {
             self.searchEnabled = searchEnabled
             self.noAltScreen = noAltScreen
             self.bypassHookTrust = bypassHookTrust
+            self.ephemeral = ephemeral
+            self.ignoreUserConfig = ignoreUserConfig
+            self.ignoreRules = ignoreRules
         }
     }
 
@@ -1959,6 +1968,9 @@ public struct CodexCLI: Sendable {
         var dangerouslyBypassOption: String?
         var strictConfig = false
         var bypassHookTrust = false
+        var ephemeral = false
+        var ignoreUserConfig = false
+        var ignoreRules = false
     }
 
     private func parseRootInteractiveOptions(
@@ -2159,6 +2171,15 @@ public struct CodexCLI: Sendable {
         case "--dangerously-bypass-hook-trust":
             parsed.bypassHookTrust = true
             return .success(index + 1)
+        case "--ephemeral":
+            parsed.ephemeral = true
+            return .success(index + 1)
+        case "--ignore-user-config":
+            parsed.ignoreUserConfig = true
+            return .success(index + 1)
+        case "--ignore-rules":
+            parsed.ignoreRules = true
+            return .success(index + 1)
         case "--search":
             parsed.searchEnabled = true
             return .success(index + 1)
@@ -2299,7 +2320,10 @@ public struct CodexCLI: Sendable {
             approvalPolicy: subcommand.approvalPolicy ?? root.approvalPolicy,
             searchEnabled: root.searchEnabled || subcommand.searchEnabled,
             noAltScreen: root.noAltScreen || subcommand.noAltScreen,
-            bypassHookTrust: root.bypassHookTrust || subcommand.bypassHookTrust
+            bypassHookTrust: root.bypassHookTrust || subcommand.bypassHookTrust,
+            ephemeral: root.ephemeral || subcommand.ephemeral,
+            ignoreUserConfig: root.ignoreUserConfig || subcommand.ignoreUserConfig,
+            ignoreRules: root.ignoreRules || subcommand.ignoreRules
         )
     }
 
