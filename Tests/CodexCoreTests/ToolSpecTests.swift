@@ -1333,9 +1333,47 @@ final class ToolSpecTests: XCTestCase {
             extensionToolSpecs: [extensionExec, extensionWait, extensionEcho]
         )
 
-        XCTAssertNil(specs.first { $0.spec.name == "exec" })
-        XCTAssertNil(specs.first { $0.spec.name == "wait" })
+        XCTAssertEqual(specs.first { $0.spec.name == "exec" }?.spec, ToolSpecFactory.createCodeModeExecTool())
+        XCTAssertEqual(specs.first { $0.spec.name == "wait" }?.spec, ToolSpecFactory.createCodeModeWaitTool())
         XCTAssertEqual(specs.last, extensionEcho)
+    }
+
+    func testCodeModeOnlyExposesMultiAgentV2AsDirectModelOnlyToolsLikeRust() throws {
+        let specs = ToolSpecFactory.buildSpecs(config: ToolsConfig(
+            shellType: .disabled,
+            codeModeEnabled: true,
+            codeModeOnlyEnabled: true,
+            multiAgentV2Tools: true,
+            multiAgentV2NonCodeModeOnly: true
+        ))
+        XCTAssertEqual(
+            specs.map(\.spec.name),
+            [
+                "exec",
+                "wait",
+                "spawn_agent",
+                "send_message",
+                "followup_task",
+                "wait_agent",
+                "close_agent",
+                "list_agents"
+            ]
+        )
+
+        let execSpec = try XCTUnwrap(specs.first { $0.spec.name == "exec" }?.spec)
+        guard case let .freeform(execTool) = execSpec else {
+            return XCTFail("expected code-mode exec to be a freeform tool")
+        }
+        XCTAssertTrue(execTool.description.contains("Run JavaScript code"))
+        XCTAssertTrue(execTool.format.definition.contains("pragma_source"))
+        XCTAssertFalse(execTool.description.contains("spawn_agent"))
+        XCTAssertFalse(execTool.description.contains("wait_agent"))
+        XCTAssertFalse(execTool.description.contains("do not attempt to use any other tools directly"))
+
+        guard case let .function(spawnAgent) = try XCTUnwrap(specs.first { $0.spec.name == "spawn_agent" }?.spec) else {
+            return XCTFail("expected spawn_agent function tool")
+        }
+        XCTAssertFalse(spawnAgent.description.contains("exec tool declaration"))
     }
 
     func testExtensionToolSpecsMayUseExecAndWaitWhenCodeModeIsDisabledLikeRust() throws {

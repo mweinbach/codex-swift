@@ -252,6 +252,7 @@ public enum NonInteractiveExec {
             toolSearch: config.features.isEnabled(.toolSearch),
             toolSuggest: config.features.isEnabled(.toolSuggest),
             codeModeEnabled: config.features.isEnabled(.codeMode),
+            codeModeOnlyEnabled: config.features.isEnabled(.codeModeOnly),
             allowLoginShell: config.allowLoginShell,
             multiAgentV2Tools: multiAgentV2Enabled,
             multiAgentV2NonCodeModeOnly: multiAgentV2Enabled

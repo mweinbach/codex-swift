@@ -689,6 +689,8 @@ final class NonInteractiveExecTests: XCTestCase {
     func testToolSpecsForwardMultiAgentV2ConfigLikeRust() throws {
         var features = FeatureStates.withDefaults()
         features.set(.multiAgentV2, enabled: true)
+        features.set(.codeMode, enabled: true)
+        features.set(.codeModeOnly, enabled: true)
         var config = CodexRuntimeConfig(features: features)
         config.multiAgentV2 = MultiAgentV2Config(
             maxConcurrentThreadsPerSession: 7,
@@ -710,6 +712,7 @@ final class NonInteractiveExecTests: XCTestCase {
             config: config
         )
         XCTAssertTrue(toolsConfig.multiAgentV2NonCodeModeOnly)
+        XCTAssertTrue(toolsConfig.codeModeOnlyEnabled)
 
         let specs = NonInteractiveExec.toolSpecs(
             modelFamily: modelFamily,
@@ -717,6 +720,16 @@ final class NonInteractiveExecTests: XCTestCase {
             sessionSource: .cli
         )
         let names = specs.map(\.spec.name)
+        XCTAssertEqual(names.first, "exec")
+        XCTAssertEqual(names.dropFirst(), [
+            "wait",
+            "spawn_agent",
+            "send_message",
+            "followup_task",
+            "wait_agent",
+            "close_agent",
+            "list_agents"
+        ])
         XCTAssertTrue(names.contains("spawn_agent"))
         XCTAssertTrue(names.contains("send_message"))
         XCTAssertTrue(names.contains("followup_task"))

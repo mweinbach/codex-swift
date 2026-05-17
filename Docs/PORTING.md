@@ -35,9 +35,11 @@ Recent upstream audit checkpoint:
   v2 as model-only tools`). Swift now accepts and profile-overrides
   `features.multi_agent_v2.non_code_mode_only`, carries it into
   non-interactive tool configuration, preserves it in thread-start config
-  lockfiles, and keeps tests pinned to the Rust config shape. The Rust
-  `DirectModelOnly` nested code-mode filtering remains pending with Swift's
-  broader code-mode `exec` / `wait` tool surface.
+  lockfiles, and keeps tests pinned to the Rust config shape. Swift now also
+  exposes public code-mode `exec` / `wait` tools and applies the Rust
+  code-mode-only `DirectModelOnly` filter so multi-agent v2 remains
+  model-visible while ordinary nested tools are hidden. Rendering full nested
+  code-mode tool declarations remains pending.
 - 2026-05-17: rechecked Rust commit `9798eb377a` (`feat(cli): add codex
   doctor diagnostics`) for the app-server feedback path. Swift feedback uploads
   can now carry in-memory attachments, and `feedback/upload` includes the

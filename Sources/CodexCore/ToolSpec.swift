@@ -796,6 +796,7 @@ public struct ToolsConfig: Equatable, Sendable {
     public let toolSearch: Bool
     public let toolSuggest: Bool
     public let codeModeEnabled: Bool
+    public let codeModeOnlyEnabled: Bool
     public let allowLoginShell: Bool
     public let multiAgentV2Tools: Bool
     public let multiAgentV2NonCodeModeOnly: Bool
@@ -825,6 +826,7 @@ public struct ToolsConfig: Equatable, Sendable {
         toolSearch: Bool = true,
         toolSuggest: Bool = true,
         codeModeEnabled: Bool = false,
+        codeModeOnlyEnabled: Bool = false,
         allowLoginShell: Bool = true,
         multiAgentV2Tools: Bool = false,
         multiAgentV2NonCodeModeOnly: Bool = false,
@@ -853,6 +855,7 @@ public struct ToolsConfig: Equatable, Sendable {
         self.toolSearch = toolSearch
         self.toolSuggest = toolSuggest
         self.codeModeEnabled = codeModeEnabled
+        self.codeModeOnlyEnabled = codeModeOnlyEnabled
         self.allowLoginShell = allowLoginShell
         self.multiAgentV2Tools = multiAgentV2Tools
         self.multiAgentV2NonCodeModeOnly = multiAgentV2NonCodeModeOnly
@@ -884,6 +887,7 @@ public struct ToolsConfig: Equatable, Sendable {
             toolSearch: toolSearch,
             toolSuggest: toolSuggest,
             codeModeEnabled: codeModeEnabled,
+            codeModeOnlyEnabled: codeModeOnlyEnabled,
             allowLoginShell: allowLoginShell,
             multiAgentV2Tools: multiAgentV2Tools,
             multiAgentV2NonCodeModeOnly: multiAgentV2NonCodeModeOnly,
@@ -902,6 +906,59 @@ public struct ToolsConfig: Equatable, Sendable {
 }
 
 public enum ToolSpecFactory {
+    private static let codeModeExecGrammar = #"""
+start: pragma_source | plain_source
+pragma_source: PRAGMA_LINE NEWLINE SOURCE
+plain_source: SOURCE
+
+PRAGMA_LINE: /[ \t]*\/\/ @exec:[^\r\n]*/
+NEWLINE: /\r?\n/
+SOURCE: /[\s\S]+/
+"""#
+    private static let codeModeExecDescription = """
+Run JavaScript code to orchestrate/compose tool calls
+- Evaluates the provided JavaScript code in a fresh V8 isolate as an async module.
+- All nested tools are available on the global `tools` object.
+- Nested tool methods take either a string or an object as their input argument.
+- Nested tools return either an object or a string, based on the description.
+- Runs raw JavaScript -- no Node, no file system, no network access, no console.
+- Accepts raw JavaScript source text, not JSON, quoted strings, or markdown code fences.
+- You may optionally start the tool input with a first-line pragma like `// @exec: {"yield_time_ms": 10000, "max_output_tokens": 1000}`.
+- `yield_time_ms` asks `exec` to yield early after that many milliseconds if the script is still running.
+- `max_output_tokens` sets the token budget for direct `exec` results. By default the result is truncated to 10000 tokens.
+- When the JS code is fully evaluated, the isolate's lifetime ends and unawaited promises are silently discarded.
+
+- Global helpers:
+- `exit()`: Immediately ends the current script successfully.
+- `text(value: string | number | boolean | undefined | null)`: Appends a text item.
+- `image(imageUrlOrItem: string | { image_url: string; detail?: "high" | "original" | null } | ImageContent, detail?: "high" | "original" | null)`: Appends an image item.
+- `store(key: string, value: any)`: stores a serializable value under a string key for later `exec` calls.
+- `load(key: string)`: returns the stored value for a string key, or `undefined` if it is missing.
+- `notify(value: string | number | boolean | undefined | null)`: immediately injects an extra `custom_tool_call_output` for the current `exec` call.
+- `setTimeout(callback: () => void, delayMs?: number)`: schedules a callback to run later and returns a timeout id.
+- `clearTimeout(timeoutId?: number)`: cancels a timeout created by `setTimeout`.
+- `ALL_TOOLS`: metadata for the enabled nested tools as `{ name, description }` entries.
+- `yield_control()`: yields the accumulated output to the model immediately while the script keeps running.
+"""
+    private static let codeModeWaitDescription = """
+Waits on a yielded `exec` cell and returns new output or completion.
+- Use `wait` only after `exec` returns `Script running with cell ID ...`.
+- `cell_id` identifies the running `exec` cell to resume.
+- `yield_time_ms` controls how long to wait for more output before yielding again. If omitted, `wait` uses its default wait timeout.
+- `max_tokens` limits how much new output this wait call returns.
+- `terminate: true` stops the running cell instead of waiting for more output.
+- `wait` returns only the new output since the last yield, or the final completion or termination result for that cell.
+- If the cell is still running, `wait` may yield again with the same `cell_id`.
+- If the cell has already finished, `wait` returns the completed result and closes the cell.
+"""
+    private static let multiAgentV2DirectModelOnlyToolNames: Set<String> = [
+        "spawn_agent",
+        "send_message",
+        "followup_task",
+        "wait_agent",
+        "close_agent",
+        "list_agents"
+    ]
     private static let spawnAgentInheritedModelGuidance = "Spawned agents inherit your current model by default. Omit `model` to use that preferred default; set `model` only when an explicit override is needed."
     private static let spawnAgentModelOverrideDescription = "Optional model override for the new agent. Leave unset to inherit the same model as the parent, which is the preferred default. Only set this when the user explicitly asks for a different model or the task clearly requires one."
     private static let spawnAgentServiceTierOverrideDescription = "Optional service tier override for the new agent. Leave unset unless the user explicitly asks for one."
@@ -935,6 +992,11 @@ public enum ToolSpecFactory {
         discoverableTools: [DiscoverableTool]? = nil
     ) -> [ConfiguredToolSpec] {
         var specs: [ConfiguredToolSpec] = []
+
+        if config.codeModeEnabled {
+            specs.append(ConfiguredToolSpec(spec: createCodeModeExecTool(), supportsParallelToolCalls: false))
+            specs.append(ConfiguredToolSpec(spec: createCodeModeWaitTool(), supportsParallelToolCalls: false))
+        }
 
         if config.environmentMode.hasEnvironment {
             switch config.shellType {
@@ -1083,7 +1145,23 @@ public enum ToolSpecFactory {
         }
         appendExtensionToolSpecs(extensionToolSpecs, codeModeEnabled: config.codeModeEnabled, to: &specs)
 
-        return specs
+        return specs.filter { !isHiddenByCodeModeOnly($0.spec, config: config) }
+    }
+
+    private static func isHiddenByCodeModeOnly(_ spec: ToolSpec, config: ToolsConfig) -> Bool {
+        guard config.codeModeEnabled,
+              config.codeModeOnlyEnabled,
+              CodeMode.isCodeModeNestedTool(spec.name)
+        else {
+            return false
+        }
+        return !isDirectModelOnly(spec, config: config)
+    }
+
+    private static func isDirectModelOnly(_ spec: ToolSpec, config: ToolsConfig) -> Bool {
+        config.multiAgentV2Tools
+            && config.multiAgentV2NonCodeModeOnly
+            && multiAgentV2DirectModelOnlyToolNames.contains(spec.name)
     }
 
     private static func appendExtensionToolSpecs(
@@ -1156,6 +1234,34 @@ public enum ToolSpecFactory {
                 "suggest_reason": .string(description: "Concise one-line user-facing reason why this plugin or connector can help with the current request.")
             ],
             required: ["tool_type", "action_type", "tool_id", "suggest_reason"]
+        )
+    }
+
+    public static func createCodeModeExecTool() -> ToolSpec {
+        .freeform(
+            FreeformTool(
+                name: "exec",
+                description: codeModeExecDescription,
+                format: FreeformToolFormat(
+                    type: "grammar",
+                    syntax: "lark",
+                    definition: codeModeExecGrammar
+                )
+            )
+        )
+    }
+
+    public static func createCodeModeWaitTool() -> ToolSpec {
+        functionTool(
+            name: "wait",
+            description: codeModeWaitDescription,
+            properties: [
+                "cell_id": .string(description: "Identifier of the running exec cell."),
+                "yield_time_ms": .number(description: "How long to wait (in milliseconds) for more output before yielding again."),
+                "max_tokens": .number(description: "Maximum number of output tokens to return for this wait call."),
+                "terminate": .boolean(description: "Whether to terminate the running cell instead of waiting for output.")
+            ],
+            required: ["cell_id"]
         )
     }
 
