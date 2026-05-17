@@ -43,7 +43,13 @@ final class ExtensionRegistryTests: XCTestCase {
                     )),
                     supportsParallelToolCalls: true,
                     executor: { item in
-                        .init(output: item)
+                        switch item {
+                        case let .functionCall(_, _, _, arguments, _),
+                             let .customToolCall(_, _, _, _, arguments):
+                            return JSONToolOutput(.object(["arguments": .string(arguments)]))
+                        default:
+                            return JSONToolOutput(.string("ok"))
+                        }
                     }
                 )
             ]
@@ -317,7 +323,7 @@ final class ExtensionRegistryTests: XCTestCase {
         ))
         XCTAssertEqual(
             executed.output,
-            .functionCallOutput(callID: "call-1", output: FunctionCallOutputPayload(content: "ok"))
+            .functionCallOutput(callID: "call-1", output: FunctionCallOutputPayload(content: #""ok""#, success: true))
         )
 
         let approval = await registry.approvalReview(
@@ -344,5 +350,42 @@ final class ExtensionRegistryTests: XCTestCase {
             return XCTFail("expected agent message")
         }
         XCTAssertEqual(message.text, "hello turn-item")
+    }
+
+    func testJSONToolOutputMatchesRustToolOutputContract() {
+        let output = JSONToolOutput(.object(["ok": .bool(true)]), success: nil)
+
+        XCTAssertEqual(output.logPreview(), #"{"ok":true}"#)
+        XCTAssertTrue(output.successForLogging())
+        XCTAssertEqual(output.postToolUseResponse(callID: "call-1", for: .other), .object(["ok": .bool(true)]))
+        XCTAssertEqual(output.codeModeResult(isCustomToolCall: false), .object(["ok": .bool(true)]))
+        XCTAssertEqual(
+            output.toResponseItem(callID: "call-1", isCustomToolCall: false, customToolName: nil),
+            .functionCallOutput(
+                callID: "call-1",
+                output: FunctionCallOutputPayload(content: #"{"ok":true}"#, success: nil)
+            )
+        )
+        XCTAssertEqual(
+            output.toResponseItem(callID: "custom-1", isCustomToolCall: true, customToolName: "extension/echo"),
+            .customToolCallOutput(
+                callID: "custom-1",
+                name: "extension/echo",
+                output: FunctionCallOutputPayload(content: #"{"ok":true}"#, success: nil)
+            )
+        )
+    }
+
+    func testToolOutputTelemetryPreviewUsesRustLimits() {
+        let longLine = String(repeating: "é", count: 2_000)
+        let bytePreview = JSONToolOutput.telemetryPreview(longLine)
+        XCTAssertTrue(bytePreview.hasSuffix("[... telemetry preview truncated ...]"))
+        XCTAssertLessThanOrEqual(bytePreview.utf8.count, 2_100)
+        XCTAssertFalse(bytePreview.contains("\u{FFFD}"))
+
+        let manyLines = (0..<70).map { "line-\($0)" }.joined(separator: "\n")
+        let linePreview = JSONToolOutput.telemetryPreview(manyLines)
+        XCTAssertTrue(linePreview.contains("line-63\n[... telemetry preview truncated ...]"))
+        XCTAssertFalse(linePreview.contains("line-64"))
     }
 }

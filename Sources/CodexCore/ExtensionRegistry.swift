@@ -207,12 +207,12 @@ public struct ExtensionPromptFragment: Equatable, Sendable {
 public struct ExtensionTool: Sendable {
     public let spec: ToolSpec
     public let supportsParallelToolCalls: Bool
-    private let executor: @Sendable (ResponseItem) async throws -> NonInteractiveExec.FunctionCallExecutionResult
+    private let executor: @Sendable (ResponseItem) async throws -> any ExtensionToolOutput
 
     public init(
         spec: ToolSpec,
         supportsParallelToolCalls: Bool = false,
-        executor: @escaping @Sendable (ResponseItem) async throws -> NonInteractiveExec.FunctionCallExecutionResult
+        executor: @escaping @Sendable (ResponseItem) async throws -> any ExtensionToolOutput
     ) {
         self.spec = spec
         self.supportsParallelToolCalls = supportsParallelToolCalls
@@ -220,7 +220,38 @@ public struct ExtensionTool: Sendable {
     }
 
     public func execute(_ item: ResponseItem) async throws -> NonInteractiveExec.FunctionCallExecutionResult {
+        let output = try await executor(item)
+        let context = Self.callContext(from: item)
+        return NonInteractiveExec.FunctionCallExecutionResult(
+            output: output.toResponseItem(
+                callID: context.callID,
+                isCustomToolCall: context.isCustomToolCall,
+                customToolName: context.customToolName
+            )
+        )
+    }
+
+    public func executeForOutput(_ item: ResponseItem) async throws -> any ExtensionToolOutput {
         try await executor(item)
+    }
+
+    private static func callContext(from item: ResponseItem) -> (
+        callID: String,
+        isCustomToolCall: Bool,
+        customToolName: String?
+    ) {
+        switch item {
+        case let .functionCall(_, name, namespace, _, callID):
+            return (callID, false, namespace.map { "\($0)/\(name)" } ?? name)
+        case let .customToolCall(_, _, callID, name, _):
+            return (callID, true, name)
+        case let .functionCallOutput(callID, _):
+            return (callID, false, nil)
+        case let .customToolCallOutput(callID, name, _):
+            return (callID, true, name)
+        default:
+            return ("", false, nil)
+        }
     }
 }
 

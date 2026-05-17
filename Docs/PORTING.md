@@ -12,6 +12,13 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: continued Rust commit `6f1a01fbdd` (`Simplify tool executor
+  and registry plumbing`) against `codex-rs/tools/src/tool_output.rs`. Swift
+  now has the extension tool-output contract used by registry-owned tools:
+  JSON outputs own Rust-shaped function versus custom-tool response item
+  conversion, success-for-logging defaults, hook-facing response values,
+  code-mode JSON results, and telemetry log previews capped at Rust's 2 KiB /
+  64-line limits without splitting UTF-8 scalars.
 - 2026-05-17: rechecked Rust commits `5ab7e6b4c6` (`feat: add thread
   lifecycle contributor hooks`), `27e67a8c2a` (`feat: add turn lifecycle
   contributors`), `083c1962f9` (`feat: add token usage contributor hook`),
