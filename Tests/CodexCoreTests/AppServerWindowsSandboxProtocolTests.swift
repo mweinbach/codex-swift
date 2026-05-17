@@ -3,6 +3,7 @@ import XCTest
 
 final class AppServerWindowsSandboxProtocolTests: XCTestCase {
     func testWindowsWorldWritableWarningNotificationShapeMatchesRustProtocol() throws {
+        XCTAssertEqual(WindowsWorldWritableWarningNotification.method, "windows/worldWritableWarning")
         try XCTAssertJSONObjectEqual(
             WindowsWorldWritableWarningNotification(
                 samplePaths: ["C:\\Users\\Public\\bad"],

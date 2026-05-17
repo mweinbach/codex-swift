@@ -12,6 +12,13 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust server-notification method registrations in
+  `codex-rs/app-server-protocol/src/protocol/common.rs` and the v2 thread,
+  item, MCP, and Windows sandbox payload structs. Swift now carries the
+  remaining Rust app-server notification method literals for `thread/closed`,
+  legacy `item/fileChange/outputDelta`, `item/mcpToolCall/progress`,
+  deprecated `thread/compacted`, and `windows/worldWritableWarning` on the
+  matching payload models, with protocol tests pinning the exact wire names.
 - 2026-05-17: rechecked Rust app-server `environment/add` in
   `codex-rs/app-server-protocol/src/protocol/v2/environment.rs`,
   `codex-rs/app-server/src/request_processors/environment_processor.rs`, and

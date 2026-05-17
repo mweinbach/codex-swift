@@ -1,6 +1,8 @@
 extension WindowsSandboxSetupMode: Codable {}
 
 public struct WindowsWorldWritableWarningNotification: Equatable, Codable, Sendable {
+    public static let method = "windows/worldWritableWarning"
+
     public let samplePaths: [String]
     public let extraCount: Int
     public let failedScan: Bool

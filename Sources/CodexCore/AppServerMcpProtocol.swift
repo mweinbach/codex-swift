@@ -246,6 +246,8 @@ extension AppServerProtocol {
     }
 
     public struct McpToolCallProgressNotification: Codable, Equatable, Sendable {
+        public static let method = "item/mcpToolCall/progress"
+
         public let threadID: String
         public let turnID: String
         public let itemID: String

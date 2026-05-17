@@ -1729,6 +1729,8 @@ public struct CommandExecutionOutputDeltaNotification: Equatable, Codable, Senda
 }
 
 public struct FileChangeOutputDeltaNotification: Equatable, Codable, Sendable {
+    public static let method = "item/fileChange/outputDelta"
+
     public let threadID: String
     public let turnID: String
     public let itemID: String
@@ -2655,6 +2657,8 @@ public struct ThreadUnarchivedNotification: Equatable, Codable, Sendable {
 }
 
 public struct ThreadClosedNotification: Equatable, Codable, Sendable {
+    public static let method = "thread/closed"
+
     public let threadID: String
 
     private enum CodingKeys: String, CodingKey {
@@ -2729,6 +2733,8 @@ public struct ThreadGoalClearedNotification: Equatable, Codable, Sendable {
 }
 
 public struct ContextCompactedNotification: Equatable, Codable, Sendable {
+    public static let method = "thread/compacted"
+
     public let threadID: String
     public let turnID: String
 

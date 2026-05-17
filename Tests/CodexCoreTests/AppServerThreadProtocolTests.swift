@@ -2325,12 +2325,14 @@ final class AppServerThreadProtocolTests: XCTestCase {
         try XCTAssertJSONObjectEqual(ThreadUnarchivedNotification(threadID: "thread-1"), [
             "threadId": "thread-1"
         ])
+        XCTAssertEqual(ThreadClosedNotification.method, "thread/closed")
         try XCTAssertJSONObjectEqual(ThreadClosedNotification(threadID: "thread-1"), [
             "threadId": "thread-1"
         ])
         try XCTAssertJSONObjectEqual(ThreadGoalClearedNotification(threadID: "thread-1"), [
             "threadId": "thread-1"
         ])
+        XCTAssertEqual(ContextCompactedNotification.method, "thread/compacted")
         try XCTAssertJSONObjectEqual(ContextCompactedNotification(threadID: "thread-1", turnID: "turn-1"), [
             "threadId": "thread-1",
             "turnId": "turn-1"
@@ -2449,6 +2451,7 @@ final class AppServerThreadProtocolTests: XCTestCase {
                 "delta": "\u{fffd}a\n"
             ]
         )
+        XCTAssertEqual(FileChangeOutputDeltaNotification.method, "item/fileChange/outputDelta")
         try XCTAssertJSONObjectEqual(
             FileChangeOutputDeltaNotification(
                 threadID: "thread-1",

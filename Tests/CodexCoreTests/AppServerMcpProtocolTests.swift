@@ -315,6 +315,10 @@ final class AppServerMcpProtocolTests: XCTestCase {
                 "message": "Working"
             ]
         )
+        XCTAssertEqual(
+            AppServerProtocol.McpToolCallProgressNotification.method,
+            "item/mcpToolCall/progress"
+        )
         try XCTAssertJSONObjectEqual(
             AppServerProtocol.McpServerOauthLoginCompletedNotification(name: "github", success: false),
             [
