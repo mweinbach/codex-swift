@@ -2581,6 +2581,14 @@ final class ConfigLoaderTests: XCTestCase {
 
         [tui.keymap.composer]
         queue = []
+
+        [tui.keymap.list]
+        move_left = "ctrl-h"
+        move_right = "ctrl-l"
+        page_up = "ctrl-b"
+        page_down = "ctrl-f"
+        jump_top = "home"
+        jump_bottom = "end"
         """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
 
         let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
@@ -2596,6 +2604,30 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(
             config.tuiKeymap.bindings(context: .composer, action: "queue"),
             .many([])
+        )
+        XCTAssertEqual(
+            config.tuiKeymap.bindings(context: .list, action: "move_left"),
+            .one(try TuiKeybindingSpec("ctrl-h"))
+        )
+        XCTAssertEqual(
+            config.tuiKeymap.bindings(context: .list, action: "move_right"),
+            .one(try TuiKeybindingSpec("ctrl-l"))
+        )
+        XCTAssertEqual(
+            config.tuiKeymap.bindings(context: .list, action: "page_up"),
+            .one(try TuiKeybindingSpec("ctrl-b"))
+        )
+        XCTAssertEqual(
+            config.tuiKeymap.bindings(context: .list, action: "page_down"),
+            .one(try TuiKeybindingSpec("ctrl-f"))
+        )
+        XCTAssertEqual(
+            config.tuiKeymap.bindings(context: .list, action: "jump_top"),
+            .one(try TuiKeybindingSpec("home"))
+        )
+        XCTAssertEqual(
+            config.tuiKeymap.bindings(context: .list, action: "jump_bottom"),
+            .one(try TuiKeybindingSpec("end"))
         )
     }
 

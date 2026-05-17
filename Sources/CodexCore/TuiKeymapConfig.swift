@@ -237,7 +237,8 @@ public struct TuiKeymapConfig: Equatable, Sendable {
             "jump_top", "jump_bottom", "close", "close_transcript"
         ],
         .list: [
-            "move_up", "move_down", "accept", "cancel"
+            "move_up", "move_down", "move_left", "move_right", "page_up", "page_down",
+            "jump_top", "jump_bottom", "accept", "cancel"
         ],
         .approval: [
             "open_fullscreen", "open_thread", "approve", "approve_for_session", "approve_for_prefix",
