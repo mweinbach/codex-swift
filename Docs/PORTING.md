@@ -12,6 +12,16 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commits `5ab7e6b4c6` (`feat: add thread
+  lifecycle contributor hooks`), `27e67a8c2a` (`feat: add turn lifecycle
+  contributors`), `083c1962f9` (`feat: add token usage contributor hook`),
+  and `34bb85519f` (`feat: add config-change extension contributor`). Swift
+  now carries the typed extension registry contract for thread lifecycle,
+  turn lifecycle, token-usage, and config-change contributors, including
+  Rust-shaped session/thread/turn `ExtensionData` stores and stable
+  thread/turn identifiers plus before/after config snapshots. Live
+  app-server/runtime emission of these callbacks remains pending with the
+  broader first-class extension registry integration.
 - 2026-05-17: rechecked Rust commit `c9edb26755` (`windows-sandbox: fail
   elevated setup when firewall policy is ineffective`). Swift now carries
   Rust's Windows sandbox setup error-code surface, including
