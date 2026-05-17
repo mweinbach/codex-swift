@@ -32462,6 +32462,32 @@ final class CodexAppServerTests: XCTestCase {
         try await waitForCommandLineMarker(marker, shouldExist: false)
     }
 
+    func testCommandExecTerminateCleansBackgroundChildren() async throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let marker = "codex-command-exec-child-marker-\(UUID().uuidString)"
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: codexHome.url))
+
+        let command = "/bin/sh -c 'while true; do sleep 1; done' \(marker) & wait"
+        let startRequest: [String: Any] = [
+            "id": 1,
+            "method": "command/exec",
+            "params": [
+                "command": ["/bin/sh", "-c", command],
+                "processId": "cmd-child-cleanup",
+                "cwd": cwd.url.path
+            ]
+        ]
+        XCTAssertNil(processor.processLine(try JSONSerialization.data(withJSONObject: startRequest)))
+        try await waitForCommandLineMarker(marker, shouldExist: true)
+
+        let terminate = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"command/exec/terminate","params":{"processId":"cmd-child-cleanup"}}"#.utf8
+        )))
+        XCTAssertEqual((terminate["result"] as? [String: Any])?.isEmpty, true)
+        try await waitForCommandLineMarker(marker, shouldExist: false)
+    }
+
     func testCommandExecProcessIDSessionTimeoutReportsRustExitCode() async throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
@@ -33482,6 +33508,35 @@ final class CodexAppServerTests: XCTestCase {
         try await waitForCommandLineMarker(marker, shouldExist: true)
 
         firstProcessor = nil
+        try await waitForCommandLineMarker(marker, shouldExist: false)
+    }
+
+    func testProcessKillCleansBackgroundChildren() async throws {
+        let temp = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let marker = "codex-process-spawn-child-marker-\(UUID().uuidString)"
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
+        )
+
+        let command = "/bin/sh -c 'while true; do sleep 1; done' \(marker) & wait"
+        let spawn = try decode(processor.processLine(try JSONSerialization.data(withJSONObject: [
+            "id": 1,
+            "method": "process/spawn",
+            "params": [
+                "command": ["/bin/sh", "-c", command],
+                "processHandle": "proc-child-cleanup",
+                "cwd": cwd.url.path
+            ]
+        ])))
+        XCTAssertEqual((spawn["result"] as? [String: Any])?.isEmpty, true)
+        try await waitForCommandLineMarker(marker, shouldExist: true)
+
+        let kill = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"process/kill","params":{"processHandle":"proc-child-cleanup"}}"#.utf8
+        )))
+        XCTAssertEqual((kill["result"] as? [String: Any])?.isEmpty, true)
         try await waitForCommandLineMarker(marker, shouldExist: false)
     }
 

@@ -472,7 +472,7 @@ private final class ExecServerStdioProcessSupervisor: @unchecked Sendable {
 
     private let process: Process
     private let lock = NSLock()
-    private var tracker: SeatbeltPidTracker?
+    private var processTree: ProcessTreeSupervisor?
     private var terminateRequested = false
 
     init(process: Process) {
@@ -480,88 +480,29 @@ private final class ExecServerStdioProcessSupervisor: @unchecked Sendable {
     }
 
     func startTracking() {
-        let pid = process.processIdentifier
+        let tree = ProcessTreeSupervisor(rootPID: process.processIdentifier)
         lock.withLock {
-            tracker = SeatbeltPidTracker(rootPID: pid)
+            processTree = tree
         }
-        process.terminationHandler = { [weak self] _ in
-            self?.killTrackedProcessTree(signal: SIGKILL, includeRoot: false)
+        process.terminationHandler = { [weak tree] _ in
+            tree?.terminateDescendants()
         }
     }
 
     func terminate() {
-        let shouldTerminate = lock.withLock {
+        let tree = lock.withLock {
             if terminateRequested {
-                return false
+                return nil as ProcessTreeSupervisor?
             }
             terminateRequested = true
             process.terminationHandler = nil
-            return true
+            return processTree ?? ProcessTreeSupervisor(rootPID: process.processIdentifier)
         }
-        guard shouldTerminate else {
+        guard let tree else {
             return
         }
 
-        let pids = signalTrackedProcessTree(signal: SIGTERM, includeRoot: true)
-        guard !pids.isEmpty else {
-            return
-        }
-        if waitForExit(of: pids, timeout: Self.terminationGracePeriod) {
-            return
-        }
-        signalPIDs(pids, signal: SIGKILL)
-        _ = waitForExit(of: pids, timeout: Self.terminationGracePeriod)
-    }
-
-    private func killTrackedProcessTree(signal: Int32, includeRoot: Bool) {
-        _ = signalTrackedProcessTree(signal: signal, includeRoot: includeRoot)
-    }
-
-    private func signalTrackedProcessTree(signal: Int32, includeRoot: Bool) -> Set<pid_t> {
-        let pids = trackedProcessTree(includeRoot: includeRoot)
-        signalPIDs(pids, signal: signal)
-        return pids
-    }
-
-    private func trackedProcessTree(includeRoot: Bool) -> Set<pid_t> {
-        let rootPID = process.processIdentifier
-        var pids = lock.withLock {
-            let tracked = tracker?.stop() ?? []
-            tracker = nil
-            return tracked
-        }
-        collectDescendants(of: rootPID, into: &pids)
-        if includeRoot {
-            pids.insert(rootPID)
-        } else {
-            pids.remove(rootPID)
-        }
-        return pids.filter { $0 > 0 && execServerPIDIsAlive($0) }
-    }
-
-    private func collectDescendants(of parent: pid_t, into pids: inout Set<pid_t>) {
-        for child in listChildPIDs(parent: parent) {
-            if pids.insert(child).inserted {
-                collectDescendants(of: child, into: &pids)
-            }
-        }
-    }
-
-    private func signalPIDs(_ pids: Set<pid_t>, signal: Int32) {
-        for pid in pids.sorted(by: >) where execServerPIDIsAlive(pid) {
-            _ = Darwin.kill(pid, signal)
-        }
-    }
-
-    private func waitForExit(of pids: Set<pid_t>, timeout: TimeInterval) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if pids.allSatisfy({ !execServerPIDIsAlive($0) }) {
-                return true
-            }
-            Thread.sleep(forTimeInterval: 0.05)
-        }
-        return pids.allSatisfy { !execServerPIDIsAlive($0) }
+        tree.terminateProcessTree(gracePeriod: Self.terminationGracePeriod)
     }
 }
 
@@ -1156,15 +1097,4 @@ private final class FileHandleDrain: @unchecked Sendable {
             try? handle.close()
         }
     }
-}
-
-private func execServerPIDIsAlive(_ pid: pid_t) -> Bool {
-    guard pid > 0 else {
-        return false
-    }
-    let result = Darwin.kill(pid, 0)
-    if result == 0 {
-        return true
-    }
-    return errno == EPERM
 }

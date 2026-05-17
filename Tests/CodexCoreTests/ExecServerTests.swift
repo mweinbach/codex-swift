@@ -758,6 +758,38 @@ final class ExecServerTests: XCTestCase {
         ))
     }
 
+    func testConnectionProcessorTerminateCleansBackgroundChildren() async throws {
+        let connection = try await initializedConnection()
+        let cwd = FileManager.default.currentDirectoryPath
+        let marker = "codex-exec-server-child-marker-\(UUID().uuidString)"
+        let command = "/bin/sh -c 'while true; do sleep 1; done' \(marker) & wait"
+
+        _ = await connection.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(2),
+            method: execServerProcessStartMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerExecParams(
+                processId: "proc-child-cleanup",
+                argv: ["/bin/sh", "-c", command],
+                cwd: cwd,
+                env: [:],
+                tty: false
+            ))
+        ))))
+        try await waitForCommandLineMarker(marker, shouldExist: true)
+
+        let terminated = await connection.handle(.message(.request(ExecServerJSONRPCRequest(
+            id: .integer(3),
+            method: execServerProcessTerminateMethod,
+            params: try ExecServerRPC.jsonValue(from: ExecServerTerminateParams(processId: "proc-child-cleanup"))
+        ))))
+
+        XCTAssertEqual(terminated?.jsonRPCMessage, ExecServerRPC.response(
+            id: .integer(3),
+            result: .object(["running": .bool(true)])
+        ))
+        try await waitForCommandLineMarker(marker, shouldExist: false)
+    }
+
     func testConnectionProcessorReportsProcessValidationErrorsLikeRust() async throws {
         let connection = try await initializedConnection()
         let cwd = FileManager.default.currentDirectoryPath
@@ -5467,6 +5499,36 @@ final class ExecServerTests: XCTestCase {
         return (output, exitCode, false)
     }
 
+    private func waitForCommandLineMarker(
+        _ marker: String,
+        shouldExist: Bool,
+        timeoutNanoseconds: UInt64 = 5_000_000_000
+    ) async throws {
+        let start = DispatchTime.now().uptimeNanoseconds
+        while DispatchTime.now().uptimeNanoseconds - start < timeoutNanoseconds {
+            if try commandLineMarkerExists(marker) == shouldExist {
+                return
+            }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        let expectation = shouldExist ? "appear" : "exit"
+        XCTFail("process marker \(marker) did not \(expectation) before timeout")
+        throw ExecServerTestTimeout()
+    }
+
+    private func commandLineMarkerExists(_ marker: String) throws -> Bool {
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/bin/ps")
+        process.arguments = ["-axo", "command"]
+        process.standardOutput = output
+        try process.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        let commands = String(data: data, encoding: .utf8) ?? ""
+        return commands.split(separator: "\n").contains { $0.contains(marker) }
+    }
+
     private func decodeJSONValue<T: Decodable>(_ value: JSONValue, as type: T.Type) throws -> T {
         let data = try JSONEncoder().encode(value)
         return try JSONDecoder().decode(type, from: data)
@@ -5669,3 +5731,5 @@ final class ExecServerTests: XCTestCase {
         }
     }
 }
+
+private struct ExecServerTestTimeout: Error {}

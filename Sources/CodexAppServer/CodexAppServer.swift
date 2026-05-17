@@ -25737,6 +25737,7 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
     private var stdinPipe: Pipe?
     private var nullStdin: FileHandle?
     private var pseudoTerminal: AppServerPseudoTerminal?
+    private var processSupervisor: ProcessTreeSupervisor?
     private var stdinClosed = false
     private var terminated = false
     private var timedOut = false
@@ -25781,7 +25782,8 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
     func start() throws {
         let stdout = Pipe()
         let stderr = Pipe()
-        process.terminationHandler = { [exitSignal] _ in
+        process.terminationHandler = { [weak self, exitSignal] _ in
+            self?.terminateDescendants()
             exitSignal.signal()
         }
         if params.tty {
@@ -25791,6 +25793,7 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
             process.standardOutput = pty.stdoutHandle
             process.standardError = pty.stderrHandle
             try process.run()
+            installProcessSupervisor()
             Task.detached { [self] in
                 await finish(stdout: pty.master, stderr: nil)
             }
@@ -25808,6 +25811,7 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
         process.standardOutput = stdout
         process.standardError = stderr
         try process.run()
+        installProcessSupervisor()
         Task.detached { [self] in
             await finish(stdout: stdout, stderr: stderr)
         }
@@ -25878,18 +25882,34 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
     }
 
     func terminate() {
-        let shouldTerminate = lock.withLock {
+        let supervisor = lock.withLock {
             guard !terminated else {
-                return false
+                return nil as ProcessTreeSupervisor?
             }
             terminated = true
             stdinClosed = true
-            return process.isRunning
+            return process.isRunning ? processSupervisor : nil
         }
         try? stdinPipe?.fileHandleForWriting.close()
-        if shouldTerminate {
+        if let supervisor {
+            supervisor.requestTermination()
+        } else if process.isRunning {
             process.terminate()
         }
+    }
+
+    private func installProcessSupervisor() {
+        let supervisor = ProcessTreeSupervisor(rootPID: process.processIdentifier)
+        lock.withLock {
+            processSupervisor = supervisor
+        }
+    }
+
+    private func terminateDescendants() {
+        let supervisor = lock.withLock {
+            processSupervisor
+        }
+        supervisor?.terminateDescendants()
     }
 
     private func finish(stdout: Pipe, stderr: Pipe) async {
@@ -25919,6 +25939,7 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
             }
         }
         await exitSignal.wait()
+        terminateDescendants()
         try? nullStdin?.close()
         pseudoTerminal?.closeSlaveHandles()
         let stdoutCapture = await stdoutTask.value
@@ -26060,6 +26081,7 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
     private var stdinPipe: Pipe?
     private var nullStdin: FileHandle?
     private var pseudoTerminal: AppServerPseudoTerminal?
+    private var processSupervisor: ProcessTreeSupervisor?
     private var stdinClosed = false
     private var terminated = false
     private var timedOut = false
@@ -26094,7 +26116,8 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
     func start() throws {
         let stdout = Pipe()
         let stderr = Pipe()
-        process.terminationHandler = { [exitSignal] _ in
+        process.terminationHandler = { [weak self, exitSignal] _ in
+            self?.terminateDescendants()
             exitSignal.signal()
         }
         if params.tty {
@@ -26104,6 +26127,7 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
             process.standardOutput = pty.stdoutHandle
             process.standardError = pty.stderrHandle
             try process.run()
+            installProcessSupervisor()
             Task.detached { [self] in
                 await finish(stdout: pty.master, stderr: nil)
             }
@@ -26121,6 +26145,7 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
         process.standardOutput = stdout
         process.standardError = stderr
         try process.run()
+        installProcessSupervisor()
         Task.detached { [self] in
             await finish(stdout: stdout, stderr: stderr)
         }
@@ -26191,18 +26216,34 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
     }
 
     func terminate() {
-        let shouldTerminate = lock.withLock {
+        let supervisor = lock.withLock {
             guard !terminated else {
-                return false
+                return nil as ProcessTreeSupervisor?
             }
             terminated = true
             stdinClosed = true
-            return process.isRunning
+            return process.isRunning ? processSupervisor : nil
         }
         try? stdinPipe?.fileHandleForWriting.close()
-        if shouldTerminate {
+        if let supervisor {
+            supervisor.requestTermination()
+        } else if process.isRunning {
             process.terminate()
         }
+    }
+
+    private func installProcessSupervisor() {
+        let supervisor = ProcessTreeSupervisor(rootPID: process.processIdentifier)
+        lock.withLock {
+            processSupervisor = supervisor
+        }
+    }
+
+    private func terminateDescendants() {
+        let supervisor = lock.withLock {
+            processSupervisor
+        }
+        supervisor?.terminateDescendants()
     }
 
     private func finish(stdout: Pipe, stderr: Pipe) async {
@@ -26232,6 +26273,7 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
             }
         }
         await exitSignal.wait()
+        terminateDescendants()
         try? nullStdin?.close()
         pseudoTerminal?.closeSlaveHandles()
         let stdoutCapture = await stdoutTask.value

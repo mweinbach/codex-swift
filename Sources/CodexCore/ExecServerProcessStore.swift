@@ -22,9 +22,7 @@ public actor ExecServerProcessStore {
 
     public func shutdown() {
         for process in processes.values {
-            if process.process.isRunning {
-                process.process.terminate()
-            }
+            process.supervisor?.requestTermination()
             process.pseudoTerminal?.closeSlaveHandles()
             closeStdin(process)
         }
@@ -82,7 +80,8 @@ public actor ExecServerProcessStore {
             stdin: stdinHandle,
             tty: params.tty,
             pipeStdin: params.pipeStdin,
-            pseudoTerminal: pseudoTerminal
+            pseudoTerminal: pseudoTerminal,
+            supervisor: nil
         )
         processes[params.processId] = state
 
@@ -102,6 +101,7 @@ public actor ExecServerProcessStore {
 
         do {
             try process.run()
+            state.supervisor = ProcessTreeSupervisor(rootPID: process.processIdentifier)
             pseudoTerminal?.closeSlaveHandles()
             if !params.tty && !params.pipeStdin {
                 closeStdin(state)
@@ -158,7 +158,11 @@ public actor ExecServerProcessStore {
             return ExecServerTerminateResponse(running: false)
         }
         if state.process.isRunning {
-            state.process.terminate()
+            if let supervisor = state.supervisor {
+                supervisor.requestTermination()
+            } else {
+                state.process.terminate()
+            }
             state.pseudoTerminal?.closeSlaveHandles()
             return ExecServerTerminateResponse(running: true)
         }
@@ -205,6 +209,7 @@ public actor ExecServerProcessStore {
         guard let state = processes[processId] else {
             return
         }
+        state.supervisor?.terminateDescendants()
         let seq = state.nextSeq
         state.exitCode = exitCode
         state.nextSeq += 1
@@ -325,6 +330,7 @@ private final class ExecServerProcessState {
     let tty: Bool
     let pipeStdin: Bool
     let pseudoTerminal: ExecServerPseudoTerminal?
+    var supervisor: ProcessTreeSupervisor?
     var output: [ExecServerRetainedOutputChunk] = []
     var retainedBytes = 0
     var nextSeq: UInt64 = 1
@@ -340,7 +346,8 @@ private final class ExecServerProcessState {
         stdin: FileHandle?,
         tty: Bool,
         pipeStdin: Bool,
-        pseudoTerminal: ExecServerPseudoTerminal?
+        pseudoTerminal: ExecServerPseudoTerminal?,
+        supervisor: ProcessTreeSupervisor?
     ) {
         self.process = process
         self.stdout = stdout
@@ -349,6 +356,7 @@ private final class ExecServerProcessState {
         self.tty = tty
         self.pipeStdin = pipeStdin
         self.pseudoTerminal = pseudoTerminal
+        self.supervisor = supervisor
     }
 }
 
