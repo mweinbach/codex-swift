@@ -47,15 +47,17 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             }
             if let turnID = cancelledTurnID {
                 Task { [state] in
-                    await state.emit(
-                        threadID: threadID,
-                        turnID: turnID,
-                        event: .turnAborted(TurnAbortedEvent(
+                    if await state.markAbortEmitted(threadID: threadID, turnID: turnID) {
+                        await state.emit(
+                            threadID: threadID,
                             turnID: turnID,
-                            reason: .interrupted,
-                            completedAt: AppServerLiveRuntimeClock.millisecondsSinceEpoch()
-                        ))
-                    )
+                            event: .turnAborted(TurnAbortedEvent(
+                                turnID: turnID,
+                                reason: .interrupted,
+                                completedAt: AppServerLiveRuntimeClock.millisecondsSinceEpoch()
+                            ))
+                        )
+                    }
                 }
             }
             return UUID().uuidString.lowercased()
@@ -107,7 +109,12 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
     public func submitLiveRuntime(_ submission: AppServerLiveRuntimeSubmission) throws -> [EventMessage] {
         switch submission.op {
         case .userInput, .userInputWithTurnContext, .userTurn:
-            let task = Task { [weak self] in
+            let startGate = AppServerLiveRuntimeStartGate()
+            let task = Task { [weak self, startGate] in
+                await startGate.wait()
+                guard !Task.isCancelled else {
+                    return
+                }
                 guard let self else {
                     return
                 }
@@ -119,6 +126,7 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                     turnID: submission.turnID,
                     task: task
                 )
+                await startGate.open()
             }
             return []
 
@@ -217,16 +225,18 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 lastAssistantMessage: Self.lastAssistantMessage(from: loopResult.transcriptItems)
             )
         } catch is CancellationError {
-            await state.emit(
-                threadID: submission.threadID,
-                turnID: submission.turnID,
-                event: .turnAborted(TurnAbortedEvent(
+            if await state.markAbortEmitted(threadID: submission.threadID, turnID: submission.turnID) {
+                await state.emit(
+                    threadID: submission.threadID,
                     turnID: submission.turnID,
-                    reason: .interrupted,
-                    completedAt: AppServerLiveRuntimeClock.millisecondsSinceEpoch(),
-                    durationMilliseconds: AppServerLiveRuntimeClock.millisecondsSinceEpoch() - startedAt
-                ))
-            )
+                    event: .turnAborted(TurnAbortedEvent(
+                        turnID: submission.turnID,
+                        reason: .interrupted,
+                        completedAt: AppServerLiveRuntimeClock.millisecondsSinceEpoch(),
+                        durationMilliseconds: AppServerLiveRuntimeClock.millisecondsSinceEpoch() - startedAt
+                    ))
+                )
+            }
         } catch {
             await state.emit(
                 threadID: submission.threadID,
@@ -691,11 +701,38 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
     }
 }
 
+private actor AppServerLiveRuntimeStartGate {
+    private var isOpen = false
+    private var continuations: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        if isOpen {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            continuations.append(continuation)
+        }
+    }
+
+    func open() {
+        guard !isOpen else {
+            return
+        }
+        isOpen = true
+        let pending = continuations
+        continuations.removeAll()
+        for continuation in pending {
+            continuation.resume()
+        }
+    }
+}
+
 private actor AppServerLiveRuntimeState {
     private var eventSink: AppServerRuntimeEventSink?
     private var runningTurns: [String: RunningTurn] = [:]
     private var approvalContinuations: [String: CheckedContinuation<ReviewDecision, Never>] = [:]
     private var permissionContinuations: [String: CheckedContinuation<RequestPermissionsResponse, Never>] = [:]
+    private var emittedAbortKeys: Set<String> = []
 
     func setEventSink(_ sink: AppServerRuntimeEventSink?) {
         eventSink = sink
@@ -707,10 +744,10 @@ private actor AppServerLiveRuntimeState {
     }
 
     func finishTurn(threadID: String, turnID: String) {
-        guard runningTurns[threadID]?.turnID == turnID else {
-            return
+        if runningTurns[threadID]?.turnID == turnID {
+            runningTurns.removeValue(forKey: threadID)
         }
-        runningTurns.removeValue(forKey: threadID)
+        emittedAbortKeys.remove(Self.abortKey(threadID: threadID, turnID: turnID))
     }
 
     func cancelTurn(threadID: String) -> String? {
@@ -729,6 +766,7 @@ private actor AppServerLiveRuntimeState {
     func cancelAll() {
         let turns = runningTurns.values
         runningTurns.removeAll()
+        emittedAbortKeys.removeAll()
         for turn in turns {
             turn.task.cancel()
         }
@@ -744,6 +782,15 @@ private actor AppServerLiveRuntimeState {
 
     func emit(threadID: String, turnID: String, event: EventMessage) async {
         await eventSink?(threadID, turnID, event)
+    }
+
+    func markAbortEmitted(threadID: String, turnID: String) -> Bool {
+        let key = Self.abortKey(threadID: threadID, turnID: turnID)
+        guard !emittedAbortKeys.contains(key) else {
+            return false
+        }
+        emittedAbortKeys.insert(key)
+        return true
     }
 
     func pendingApproval(
@@ -767,6 +814,10 @@ private actor AppServerLiveRuntimeState {
     private struct RunningTurn {
         let turnID: String
         let task: Task<Void, Never>
+    }
+
+    private static func abortKey(threadID: String, turnID: String) -> String {
+        "\(threadID):\(turnID)"
     }
 }
 

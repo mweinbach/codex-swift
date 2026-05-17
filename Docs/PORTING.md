@@ -12,6 +12,14 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: attached a first Swift app-server live runtime manager to the
+  normal stdio, websocket, and remote-control executable paths. The manager now
+  backs the existing core/live submitter seams with running-turn tasks,
+  interrupt cancellation, approval continuations, rollout transcript
+  persistence, Responses API streaming, local tool execution, and extension
+  prompt/tool callbacks. Remaining ThreadManager parity gaps are MCP tool
+  injection and refresh inside the live loop, in-flight runtime config mutation,
+  permission-request continuations, and cross-connection runtime event fanout.
 - 2026-05-17: rechecked Rust's live `refresh_runtime_config` extension
   callback path from `codex-rs/core/src/session/mod.rs`. Swift now keeps a
   per-loaded-thread runtime config snapshot and emits app-server extension

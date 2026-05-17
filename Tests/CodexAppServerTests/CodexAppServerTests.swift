@@ -4789,6 +4789,41 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(steerError["message"] as? String, "no active turn to steer")
     }
 
+    func testAppServerLiveRuntimeManagerBacksSubmitterAndEmitsThroughSink() async throws {
+        let temp = try TemporaryDirectory()
+        let manager = AppServerLiveRuntimeManager(configuration: testConfiguration(codexHome: temp.url))
+        let capture = AppServerRuntimeEventCapture()
+        manager.setEventSink { threadID, turnID, event in
+            await capture.append(threadID: threadID, turnID: turnID, event: event)
+        }
+        defer {
+            manager.shutdown()
+        }
+        let threadID = ConversationId().description
+        let op = Op.userInput(items: [.text("Live manager smoke")])
+
+        let turnID = try manager.submitCoreOp(requestID: .integer(42), threadID: threadID, op: op)
+        let immediateEvents = try manager.submitLiveRuntime(AppServerLiveRuntimeSubmission(
+            requestID: .integer(42),
+            threadID: threadID,
+            turnID: turnID,
+            op: op
+        ))
+
+        XCTAssertEqual(immediateEvents, [])
+        let events = try await capture.waitForEvents(count: 2)
+        XCTAssertEqual(events.map(\.threadID), [threadID, threadID])
+        XCTAssertEqual(events.map(\.turnID), [turnID, turnID])
+        guard case let .error(errorEvent) = events[0].event else {
+            return XCTFail("expected missing rollout to emit a runtime error")
+        }
+        XCTAssertTrue(errorEvent.message.contains("no rollout found for conversation id \(threadID)"))
+        guard case let .taskComplete(completeEvent) = events[1].event else {
+            return XCTFail("expected missing rollout turn to complete after reporting the error")
+        }
+        XCTAssertEqual(completeEvent.turnID, turnID)
+    }
+
     func testQuickstartStyleThreadStartAndRunFlowUsesDefaultsLikeRustPythonSDK() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()
@@ -35966,6 +36001,34 @@ private final class AppServerLiveRuntimeCapture: @unchecked Sendable {
             recordedSubmissions.append(submission)
         }
         return try events(submission)
+    }
+}
+
+private actor AppServerRuntimeEventCapture {
+    struct Entry {
+        let threadID: String
+        let turnID: String
+        let event: EventMessage
+    }
+
+    private var events: [Entry] = []
+
+    func append(threadID: String, turnID: String, event: EventMessage) {
+        events.append(Entry(threadID: threadID, turnID: turnID, event: event))
+    }
+
+    func waitForEvents(
+        count: Int,
+        timeoutNanoseconds: UInt64 = 5_000_000_000
+    ) async throws -> [Entry] {
+        let start = DispatchTime.now().uptimeNanoseconds
+        while DispatchTime.now().uptimeNanoseconds - start < timeoutNanoseconds {
+            if events.count >= count {
+                return Array(events.prefix(count))
+            }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        throw AppServerTestTimeout()
     }
 }
 
