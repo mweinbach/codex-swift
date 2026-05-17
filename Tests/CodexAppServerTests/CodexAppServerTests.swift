@@ -16540,6 +16540,68 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(uninstalledSummary["installed"] as? Bool, false)
     }
 
+    func testPluginCommandHelpersAddListAndRemoveConfiguredMarketplacePlugin() throws {
+        let temp = try TemporaryDirectory()
+        let sourceRoot = try makeLocalMarketplaceRootWithPlugin(named: "debug", pluginName: "weather", in: temp.url)
+        let configuration = CodexAppServerConfiguration(codexHome: temp.url, requiresOpenAIAuth: false)
+        let sourcePath = sourceRoot.resolvingSymlinksInPath().standardizedFileURL.path
+
+        _ = try CodexAppServer.marketplaceAddCommandResult(
+            source: sourcePath,
+            refName: nil,
+            sparsePaths: [],
+            configuration: configuration
+        )
+
+        let marketplaces = try CodexAppServer.marketplaceListCommandResult(configuration: configuration)
+        let marketplaceRows = try XCTUnwrap(marketplaces["marketplaces"] as? [[String: String]])
+        XCTAssertEqual(marketplaceRows, [[
+            "marketplaceName": "debug",
+            "root": sourcePath
+        ]])
+
+        let beforeInstall = try CodexAppServer.pluginListCommandResult(
+            marketplaceName: "debug",
+            configuration: configuration
+        )
+        let beforeMarketplaces = try XCTUnwrap(beforeInstall["marketplaces"] as? [[String: Any]])
+        let beforePlugins = try XCTUnwrap(beforeMarketplaces.first?["plugins"] as? [[String: Any]])
+        XCTAssertEqual(beforePlugins.first?["id"] as? String, "weather@debug")
+        XCTAssertEqual(beforePlugins.first?["installed"] as? Bool, false)
+
+        let add = try CodexAppServer.pluginAddCommandResult(
+            plugin: "weather@debug",
+            marketplaceName: nil,
+            configuration: configuration
+        )
+        XCTAssertEqual(add["pluginName"] as? String, "weather")
+        XCTAssertEqual(add["marketplaceName"] as? String, "debug")
+        XCTAssertEqual(
+            add["installedPath"] as? String,
+            temp.url.appendingPathComponent("plugins/cache/debug/weather/local", isDirectory: true).path
+        )
+
+        let afterInstall = try CodexAppServer.pluginListCommandResult(
+            marketplaceName: "debug",
+            configuration: configuration
+        )
+        let afterMarketplaces = try XCTUnwrap(afterInstall["marketplaces"] as? [[String: Any]])
+        let afterPlugins = try XCTUnwrap(afterMarketplaces.first?["plugins"] as? [[String: Any]])
+        XCTAssertEqual(afterPlugins.first?["installed"] as? Bool, true)
+        XCTAssertEqual(afterPlugins.first?["enabled"] as? Bool, true)
+
+        let remove = try CodexAppServer.pluginRemoveCommandResult(
+            plugin: "weather",
+            marketplaceName: "debug",
+            configuration: configuration
+        )
+        XCTAssertEqual(remove["pluginName"] as? String, "weather")
+        XCTAssertEqual(remove["marketplaceName"] as? String, "debug")
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: temp.url.appendingPathComponent("plugins/cache/debug/weather/local", isDirectory: true).path
+        ))
+    }
+
     func testPluginInstallAndUninstallQueueMcpRefreshForLoadedThreads() throws {
         let temp = try TemporaryDirectory()
         let workspace = try TemporaryDirectory()

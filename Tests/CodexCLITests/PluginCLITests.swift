@@ -3,6 +3,45 @@ import CodexCore
 import XCTest
 
 final class PluginCLITests: XCTestCase {
+    func testRunAsyncPluginAddListAndRemoveParseRustForms() async {
+        var requests: [CodexCLI.PluginCommandRequest] = []
+
+        let cases: [[String]] = [
+            ["-c", "model=\"gpt-5\"", "plugin", "add", "weather@debug"],
+            ["plugin", "add", "weather", "--marketplace", "debug"],
+            ["plugin", "add", "weather", "-m", "debug"],
+            ["plugin", "list"],
+            ["plugin", "list", "--marketplace", "debug"],
+            ["plugin", "remove", "weather@debug"],
+            ["plugin", "remove", "weather", "--marketplace=debug"]
+        ]
+
+        for arguments in cases {
+            let exitCode = await CodexCLI().runAsync(
+                arguments: arguments,
+                stderr: { _ in XCTFail("stderr should not be written for \(arguments)") },
+                pluginRunner: { request in
+                    requests.append(request)
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                }
+            )
+            XCTAssertEqual(exitCode, 0, "\(arguments)")
+        }
+
+        XCTAssertEqual(requests, [
+            CodexCLI.PluginCommandRequest(
+                action: .add(plugin: "weather@debug", marketplaceName: nil),
+                configOverrides: CliConfigOverrides(rawOverrides: ["model=\"gpt-5\""])
+            ),
+            CodexCLI.PluginCommandRequest(action: .add(plugin: "weather", marketplaceName: "debug")),
+            CodexCLI.PluginCommandRequest(action: .add(plugin: "weather", marketplaceName: "debug")),
+            CodexCLI.PluginCommandRequest(action: .list(marketplaceName: nil)),
+            CodexCLI.PluginCommandRequest(action: .list(marketplaceName: "debug")),
+            CodexCLI.PluginCommandRequest(action: .remove(plugin: "weather@debug", marketplaceName: nil)),
+            CodexCLI.PluginCommandRequest(action: .remove(plugin: "weather", marketplaceName: "debug"))
+        ])
+    }
+
     func testRunAsyncPluginMarketplaceAddParsesRustFlags() async {
         var receivedRequest: CodexCLI.PluginCommandRequest?
         var stdout: [String] = []
@@ -51,6 +90,7 @@ final class PluginCLITests: XCTestCase {
         var actions: [CodexCLI.PluginCommandAction] = []
 
         for arguments in [
+            ["plugin", "marketplace", "list"],
             ["plugin", "marketplace", "upgrade"],
             ["plugin", "marketplace", "upgrade", "debug"],
             ["plugin", "marketplace", "remove", "debug"]
@@ -67,6 +107,7 @@ final class PluginCLITests: XCTestCase {
         }
 
         XCTAssertEqual(actions, [
+            .marketplaceList,
             .marketplaceUpgrade(name: nil),
             .marketplaceUpgrade(name: "debug"),
             .marketplaceRemove(name: "debug")
@@ -77,15 +118,39 @@ final class PluginCLITests: XCTestCase {
         let cases: [([String], String)] = [
             (
                 ["plugin"],
-                "codex-swift: missing required subcommand for command 'plugin': marketplace"
+                "codex-swift: missing required subcommand for command 'plugin': add|list|marketplace|remove"
             ),
             (
                 ["plugin", "install"],
                 "codex-swift: unsupported plugin subcommand: install"
             ),
             (
+                ["plugin", "add"],
+                "codex-swift: missing required argument for command 'plugin add': <PLUGIN[@MARKETPLACE]>"
+            ),
+            (
+                ["plugin", "add", "weather", "--marketplace", "debug", "--marketplace=other"],
+                "codex-swift: duplicate option for command 'plugin add': --marketplace"
+            ),
+            (
+                ["plugin", "add", "weather", "extra"],
+                "codex-swift: unexpected argument for command 'plugin add': extra"
+            ),
+            (
+                ["plugin", "list", "extra"],
+                "codex-swift: unexpected argument for command 'plugin list': extra"
+            ),
+            (
+                ["plugin", "list", "--marketplace", "debug", "-m", "other"],
+                "codex-swift: duplicate option for command 'plugin list': --marketplace"
+            ),
+            (
+                ["plugin", "remove"],
+                "codex-swift: missing required argument for command 'plugin remove': <PLUGIN[@MARKETPLACE]>"
+            ),
+            (
                 ["plugin", "marketplace"],
-                "codex-swift: missing required subcommand for command 'plugin marketplace': add|upgrade|remove"
+                "codex-swift: missing required subcommand for command 'plugin marketplace': add|list|upgrade|remove"
             ),
             (
                 ["plugin", "marketplace", "add"],
@@ -102,6 +167,10 @@ final class PluginCLITests: XCTestCase {
             (
                 ["plugin", "marketplace", "upgrade", "--all"],
                 "codex-swift: unsupported option for command 'plugin marketplace upgrade': --all"
+            ),
+            (
+                ["plugin", "marketplace", "list", "extra"],
+                "codex-swift: unexpected argument for command 'plugin marketplace list': extra"
             ),
             (
                 ["plugin", "marketplace", "remove"],

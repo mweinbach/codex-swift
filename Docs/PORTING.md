@@ -12,6 +12,14 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `74a1b46a00` (`[codex] add plugin
+  marketplace CLI commands`). Swift now exposes and executes the Rust
+  `codex plugin add`, `codex plugin list`, `codex plugin remove`, and
+  `codex plugin marketplace list` command surfaces for configured local
+  marketplaces, including `PLUGIN@MARKETPLACE`, `--marketplace`/`-m`, root
+  config override propagation, pre-runner validation for duplicate, missing,
+  unsupported, and unexpected arguments, Rust-style command output, and
+  configured marketplace snapshot load failures.
 - 2026-05-17: rechecked Rust branch commit `acdb0c3a07` (`Remove
   personality feature switch`). Swift now treats `features.personality` as a
   removed compatibility key that stays enabled by default and is ignored when

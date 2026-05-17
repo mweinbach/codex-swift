@@ -9464,7 +9464,8 @@ public enum CodexAppServer {
             let summaryPolicy = summary["authPolicy"] as? String
             return [
                 "authPolicy": summaryPolicy ?? "ON_INSTALL",
-                "appsNeedingAuth": appsNeedingAuth
+                "appsNeedingAuth": appsNeedingAuth,
+                "installedPath": installedPath.path
             ]
         } catch let error as AppServerError {
             throw error
@@ -9950,6 +9951,120 @@ public enum CodexAppServer {
         ]
     }
 
+    public static func pluginAddCommandResult(
+        plugin: String,
+        marketplaceName explicitMarketplaceName: String?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let selection = try parsePluginCommandSelection(
+            plugin: plugin,
+            explicitMarketplaceName: explicitMarketplaceName
+        )
+        let marketplace = try configuredMarketplaceForPlugin(
+            pluginName: selection.pluginName,
+            marketplaceName: selection.marketplaceName,
+            configuration: configuration
+        )
+        let marketplacePath = try rustRequiredStringParam(marketplace["path"], field: "path")
+        var result = try pluginInstallResult(
+            params: [
+                "marketplacePath": marketplacePath,
+                "pluginName": selection.pluginName
+            ],
+            configuration: configuration
+        )
+        result["pluginName"] = selection.pluginName
+        result["marketplaceName"] = selection.marketplaceName
+        return result
+    }
+
+    public static func pluginListCommandResult(
+        marketplaceName: String?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let result = try configuredLocalPluginListResult(
+            marketplaceName: marketplaceName,
+            configuration: configuration
+        )
+        let marketplaces = result["marketplaces"] as? [[String: Any]] ?? []
+        if let marketplaceName {
+            return result.merging([
+                "marketplaces": marketplaces.filter { $0["name"] as? String == marketplaceName }
+            ]) { _, new in new }
+        }
+        return result
+    }
+
+    public static func pluginRemoveCommandResult(
+        plugin: String,
+        marketplaceName explicitMarketplaceName: String?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let selection = try parsePluginCommandSelection(
+            plugin: plugin,
+            explicitMarketplaceName: explicitMarketplaceName
+        )
+        _ = try pluginUninstallResult(
+            params: ["pluginId": selection.pluginID],
+            configuration: configuration
+        )
+        return [
+            "pluginName": selection.pluginName,
+            "marketplaceName": selection.marketplaceName
+        ]
+    }
+
+    public static func marketplaceListCommandResult(
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: configuration.codexHome,
+            cliOverrides: configuration.cliConfigOverrides,
+            overrides: configuration.configLayerOverrides,
+            environment: configuration.environment
+        )
+        guard let userConfig = stack.getUserLayer()?.config,
+              let marketplaces = marketplaceConfigTable(in: userConfig),
+              !marketplaces.isEmpty
+        else {
+            return [
+                "marketplaces": [],
+                "ignored": []
+            ]
+        }
+
+        var rows: [[String: String]] = []
+        var ignored: [[String: String]] = []
+        for (marketplaceName, value) in marketplaces.sorted(by: { $0.key < $1.key }) {
+            guard let entry = configTable(value) else {
+                ignored.append([
+                    "marketplaceName": marketplaceName,
+                    "message": "expected table"
+                ])
+                continue
+            }
+            if let message = pluginSegmentValidationMessage(marketplaceName, kind: "marketplace name") {
+                ignored.append([
+                    "marketplaceName": marketplaceName,
+                    "message": message
+                ])
+                continue
+            }
+            rows.append([
+                "marketplaceName": marketplaceName,
+                "root": configuredMarketplaceRoot(
+                    name: marketplaceName,
+                    entry: entry,
+                    codexHome: configuration.codexHome
+                ) ?? "<invalid source>"
+            ])
+        }
+        return [
+            "marketplaces": rows,
+            "ignored": ignored
+        ]
+    }
+
     public static func marketplaceUpgradeCommandResult(
         marketplaceName: String?,
         configuration: CodexAppServerConfiguration
@@ -9959,6 +10074,164 @@ public enum CodexAppServer {
             params["marketplaceName"] = marketplaceName
         }
         return try marketplaceUpgradeResult(params: params, configuration: configuration)
+    }
+
+    private struct PluginCommandSelection {
+        let pluginName: String
+        let marketplaceName: String
+
+        var pluginID: String {
+            "\(pluginName)@\(marketplaceName)"
+        }
+    }
+
+    private static func parsePluginCommandSelection(
+        plugin: String,
+        explicitMarketplaceName: String?
+    ) throws -> PluginCommandSelection {
+        let parts = plugin.split(separator: "@", omittingEmptySubsequences: false)
+        switch (parts.count, explicitMarketplaceName) {
+        case (2, nil):
+            return try pluginCommandSelection(
+                pluginName: String(parts[0]),
+                marketplaceName: String(parts[1])
+            )
+        case (2, .some(let marketplaceName)):
+            let parsedMarketplaceName = String(parts[1])
+            guard parsedMarketplaceName == marketplaceName else {
+                throw AppServerError.invalidRequest(
+                    "plugin id `\(plugin)` belongs to marketplace `\(parsedMarketplaceName)`, but --marketplace specified `\(marketplaceName)`"
+                )
+            }
+            return try pluginCommandSelection(
+                pluginName: String(parts[0]),
+                marketplaceName: parsedMarketplaceName
+            )
+        case (_, .some(let marketplaceName)):
+            return try pluginCommandSelection(pluginName: plugin, marketplaceName: marketplaceName)
+        default:
+            throw AppServerError.invalidRequest(
+                "plugin requires --marketplace unless passed as <plugin>@<marketplace>"
+            )
+        }
+    }
+
+    private static func pluginCommandSelection(
+        pluginName: String,
+        marketplaceName: String
+    ) throws -> PluginCommandSelection {
+        try validatePluginSegment(pluginName, kind: "plugin name")
+        try validatePluginSegment(marketplaceName, kind: "marketplace name")
+        return PluginCommandSelection(pluginName: pluginName, marketplaceName: marketplaceName)
+    }
+
+    private static func configuredMarketplaceForPlugin(
+        pluginName: String,
+        marketplaceName: String,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let result = try configuredLocalPluginListResult(
+            marketplaceName: marketplaceName,
+            configuration: configuration
+        )
+        let marketplaces = result["marketplaces"] as? [[String: Any]] ?? []
+        let matches = marketplaces.filter { marketplace in
+            guard marketplace["name"] as? String == marketplaceName,
+                  let plugins = marketplace["plugins"] as? [[String: Any]]
+            else {
+                return false
+            }
+            return plugins.contains { $0["name"] as? String == pluginName }
+        }
+        switch matches.count {
+        case 1:
+            return matches[0]
+        case 0:
+            throw AppServerError.invalidRequest(
+                "plugin `\(pluginName)` was not found in marketplace `\(marketplaceName)`"
+            )
+        default:
+            throw AppServerError.invalidRequest(
+                "plugin `\(pluginName)` in marketplace `\(marketplaceName)` matched multiple marketplace roots"
+            )
+        }
+    }
+
+    private static func configuredLocalPluginListResult(
+        marketplaceName: String?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        let result = try pluginListResult(
+            params: ["marketplaceKinds": ["local"]],
+            configuration: configuration
+        )
+        try ensureConfiguredMarketplaceSnapshotsLoaded(
+            result: result,
+            marketplaceName: marketplaceName,
+            configuration: configuration
+        )
+        return result
+    }
+
+    private static func ensureConfiguredMarketplaceSnapshotsLoaded(
+        result: [String: Any],
+        marketplaceName: String?,
+        configuration: CodexAppServerConfiguration
+    ) throws {
+        let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: configuration.codexHome,
+            cliOverrides: configuration.cliConfigOverrides,
+            overrides: configuration.configLayerOverrides,
+            environment: configuration.environment
+        )
+        guard let userConfig = stack.getUserLayer()?.config,
+              let marketplaces = marketplaceConfigTable(in: userConfig)
+        else {
+            return
+        }
+
+        let loadErrors = result["marketplaceLoadErrors"] as? [[String: Any]] ?? []
+        var issues: [[String: String]] = []
+        for (configuredName, value) in marketplaces.sorted(by: { $0.key < $1.key }) {
+            if let marketplaceName, configuredName != marketplaceName {
+                continue
+            }
+            guard let entry = configTable(value),
+                  pluginSegmentValidationMessage(configuredName, kind: "marketplace name") == nil,
+                  let root = configuredMarketplaceRoot(
+                    name: configuredName,
+                    entry: entry,
+                    codexHome: configuration.codexHome
+                  )
+            else {
+                continue
+            }
+            guard let manifestPath = localMarketplaceManifestPath(in: URL(fileURLWithPath: root, isDirectory: true))
+            else {
+                issues.append([
+                    "marketplaceName": configuredName,
+                    "path": root,
+                    "message": "marketplace root does not contain a supported manifest"
+                ])
+                continue
+            }
+            for error in loadErrors where error["marketplacePath"] as? String == manifestPath.path {
+                issues.append([
+                    "marketplaceName": configuredName,
+                    "path": manifestPath.path,
+                    "message": error["message"] as? String ?? ""
+                ])
+            }
+        }
+        guard !issues.isEmpty else {
+            return
+        }
+        let issueLines = issues.map { issue in
+            "- `\(issue["marketplaceName"] ?? "")` at \(issue["path"] ?? ""): \(issue["message"] ?? "")"
+        }.joined(separator: "\n")
+        throw AppServerError.invalidRequest(
+            "failed to load configured marketplace snapshot(s):\n\(issueLines)"
+        )
     }
 
     private static func marketplaceUpgradeGitResult(

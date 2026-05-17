@@ -1781,6 +1781,51 @@ private func runPluginCommand(_ request: CodexCLI.PluginCommandRequest) async th
     )
 
     switch request.action {
+    case let .add(plugin, marketplaceName):
+        let result = try CodexAppServer.pluginAddCommandResult(
+            plugin: plugin,
+            marketplaceName: marketplaceName,
+            configuration: configuration
+        )
+        let pluginName = result["pluginName"] as? String ?? plugin
+        let marketplaceName = result["marketplaceName"] as? String ?? marketplaceName ?? ""
+        var lines = ["Added plugin `\(pluginName)` from marketplace `\(marketplaceName)`."]
+        if let installedPath = result["installedPath"] as? String {
+            lines.append("Installed plugin root: \(installedPath)")
+        }
+        return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: lines.joined(separator: "\n"))
+
+    case let .list(marketplaceName):
+        let result = try CodexAppServer.pluginListCommandResult(
+            marketplaceName: marketplaceName,
+            configuration: configuration
+        )
+        let marketplaces = result["marketplaces"] as? [[String: Any]] ?? []
+        guard !marketplaces.isEmpty else {
+            let message = marketplaceName.map { "No plugins found in marketplace `\($0)`." }
+                ?? "No marketplace plugins found."
+            return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: message)
+        }
+        var lines: [String] = []
+        for marketplace in marketplaces {
+            let marketplaceName = marketplace["name"] as? String ?? ""
+            lines.append("Marketplace `\(marketplaceName)`")
+            if let path = marketplace["path"] as? String {
+                lines.append("Path: \(path)")
+            }
+            let plugins = marketplace["plugins"] as? [[String: Any]] ?? []
+            for plugin in plugins {
+                let pluginID = plugin["id"] as? String ?? plugin["name"] as? String ?? ""
+                let installed = plugin["installed"] as? Bool ?? false
+                let enabled = plugin["enabled"] as? Bool ?? true
+                let state = installed && enabled
+                    ? "installed, enabled"
+                    : installed ? "installed, disabled" : "not installed"
+                lines.append("  \(pluginID) (\(state))")
+            }
+        }
+        return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: lines.joined(separator: "\n"))
+
     case let .marketplaceAdd(source, refName, sparsePaths):
         let result = try CodexAppServer.marketplaceAddCommandResult(
             source: source,
@@ -1798,6 +1843,27 @@ private func runPluginCommand(_ request: CodexCLI.PluginCommandRequest) async th
         return CodexCLI.CommandExecutionResult(
             exitCode: 0,
             stdoutMessage: "\(firstLine)\nInstalled marketplace root: \(installedRoot)"
+        )
+
+    case .marketplaceList:
+        let result = try CodexAppServer.marketplaceListCommandResult(configuration: configuration)
+        let marketplaces = result["marketplaces"] as? [[String: String]] ?? []
+        let ignored = result["ignored"] as? [[String: String]] ?? []
+        let stdoutMessage: String
+        if marketplaces.isEmpty {
+            stdoutMessage = "No configured plugin marketplaces."
+        } else {
+            stdoutMessage = marketplaces.map { marketplace in
+                "\(marketplace["marketplaceName"] ?? "")\t\(marketplace["root"] ?? "")"
+            }.joined(separator: "\n")
+        }
+        let stderrMessage = ignored.isEmpty ? nil : ignored.map { ignored in
+            "Ignoring invalid marketplace `\(ignored["marketplaceName"] ?? "")`: \(ignored["message"] ?? "")."
+        }.joined(separator: "\n")
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 0,
+            stdoutMessage: stdoutMessage,
+            stderrMessage: stderrMessage
         )
 
     case let .marketplaceUpgrade(name):
@@ -1846,6 +1912,19 @@ private func runPluginCommand(_ request: CodexCLI.PluginCommandRequest) async th
             lines.append("Removed installed marketplace root: \(installedRoot)")
         }
         return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: lines.joined(separator: "\n"))
+
+    case let .remove(plugin, marketplaceName):
+        let result = try CodexAppServer.pluginRemoveCommandResult(
+            plugin: plugin,
+            marketplaceName: marketplaceName,
+            configuration: configuration
+        )
+        let pluginName = result["pluginName"] as? String ?? plugin
+        let marketplaceName = result["marketplaceName"] as? String ?? marketplaceName ?? ""
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 0,
+            stdoutMessage: "Removed plugin `\(pluginName)` from marketplace `\(marketplaceName)`."
+        )
     }
 }
 

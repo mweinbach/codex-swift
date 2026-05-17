@@ -606,9 +606,13 @@ public struct CodexCLI: Sendable {
     }
 
     public enum PluginCommandAction: Equatable, Sendable {
+        case add(plugin: String, marketplaceName: String?)
+        case list(marketplaceName: String?)
         case marketplaceAdd(source: String, refName: String?, sparsePaths: [String])
+        case marketplaceList
         case marketplaceUpgrade(name: String?)
         case marketplaceRemove(name: String)
+        case remove(plugin: String, marketplaceName: String?)
     }
 
     public struct PluginCommandRequest: Equatable, Sendable {
@@ -5168,23 +5172,137 @@ public struct CodexCLI: Sendable {
     }
 
     private func parsePluginCommandAction(_ arguments: [String]) -> ParseResult<PluginCommandAction> {
-        guard let namespace = arguments.first else {
-            return .failure("codex-swift: missing required subcommand for command 'plugin': marketplace", 64)
+        guard let subcommand = arguments.first else {
+            return .failure("codex-swift: missing required subcommand for command 'plugin': add|list|marketplace|remove", 64)
         }
-        guard namespace == "marketplace" else {
-            return .failure("codex-swift: unsupported plugin subcommand: \(namespace)", 64)
+        let rest = Array(arguments.dropFirst())
+        switch subcommand {
+        case "add":
+            return parsePluginSelectionCommand(rest, commandName: "plugin add", action: PluginCommandAction.add)
+        case "list":
+            return parsePluginList(rest)
+        case "marketplace":
+            return parsePluginMarketplaceCommand(rest)
+        case "remove":
+            return parsePluginSelectionCommand(rest, commandName: "plugin remove", action: PluginCommandAction.remove)
+        default:
+            return .failure("codex-swift: unsupported plugin subcommand: \(subcommand)", 64)
         }
-        return parsePluginMarketplaceCommand(Array(arguments.dropFirst()))
+    }
+
+    private func parsePluginSelectionCommand(
+        _ arguments: [String],
+        commandName: String,
+        action: (String, String?) -> PluginCommandAction
+    ) -> ParseResult<PluginCommandAction> {
+        var plugin: String?
+        var marketplaceName: String?
+        var sawMarketplace = false
+        var iterator = arguments.makeIterator()
+
+        func markMarketplaceOption() -> ParseResult<Void> {
+            guard !sawMarketplace else {
+                return .failure("codex-swift: duplicate option for command '\(commandName)': --marketplace", 64)
+            }
+            sawMarketplace = true
+            return .success(())
+        }
+
+        while let argument = iterator.next() {
+            if argument == "--marketplace" || argument == "-m" {
+                switch markMarketplaceOption() {
+                case .success:
+                    break
+                case let .failure(message, code):
+                    return .failure(message, code)
+                }
+                guard let value = iterator.next() else {
+                    return .failure("codex-swift: missing value for --marketplace", 64)
+                }
+                marketplaceName = value
+                continue
+            }
+            if argument.hasPrefix("--marketplace=") {
+                switch markMarketplaceOption() {
+                case .success:
+                    break
+                case let .failure(message, code):
+                    return .failure(message, code)
+                }
+                marketplaceName = String(argument.dropFirst("--marketplace=".count))
+                continue
+            }
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command '\(commandName)': \(argument)", 64)
+            }
+            if plugin != nil {
+                return .failure("codex-swift: unexpected argument for command '\(commandName)': \(argument)", 64)
+            }
+            plugin = argument
+        }
+
+        guard let plugin else {
+            return .failure("codex-swift: missing required argument for command '\(commandName)': <PLUGIN[@MARKETPLACE]>", 64)
+        }
+        return .success(action(plugin, marketplaceName))
+    }
+
+    private func parsePluginList(_ arguments: [String]) -> ParseResult<PluginCommandAction> {
+        var marketplaceName: String?
+        var sawMarketplace = false
+        var iterator = arguments.makeIterator()
+
+        func markMarketplaceOption() -> ParseResult<Void> {
+            guard !sawMarketplace else {
+                return .failure("codex-swift: duplicate option for command 'plugin list': --marketplace", 64)
+            }
+            sawMarketplace = true
+            return .success(())
+        }
+
+        while let argument = iterator.next() {
+            if argument == "--marketplace" || argument == "-m" {
+                switch markMarketplaceOption() {
+                case .success:
+                    break
+                case let .failure(message, code):
+                    return .failure(message, code)
+                }
+                guard let value = iterator.next() else {
+                    return .failure("codex-swift: missing value for --marketplace", 64)
+                }
+                marketplaceName = value
+                continue
+            }
+            if argument.hasPrefix("--marketplace=") {
+                switch markMarketplaceOption() {
+                case .success:
+                    break
+                case let .failure(message, code):
+                    return .failure(message, code)
+                }
+                marketplaceName = String(argument.dropFirst("--marketplace=".count))
+                continue
+            }
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'plugin list': \(argument)", 64)
+            }
+            return .failure("codex-swift: unexpected argument for command 'plugin list': \(argument)", 64)
+        }
+
+        return .success(.list(marketplaceName: marketplaceName))
     }
 
     private func parsePluginMarketplaceCommand(_ arguments: [String]) -> ParseResult<PluginCommandAction> {
         guard let subcommand = arguments.first else {
-            return .failure("codex-swift: missing required subcommand for command 'plugin marketplace': add|upgrade|remove", 64)
+            return .failure("codex-swift: missing required subcommand for command 'plugin marketplace': add|list|upgrade|remove", 64)
         }
         let rest = Array(arguments.dropFirst())
         switch subcommand {
         case "add":
             return parsePluginMarketplaceAdd(rest)
+        case "list":
+            return parsePluginMarketplaceList(rest)
         case "upgrade":
             return parsePluginMarketplaceUpgrade(rest)
         case "remove":
@@ -5257,6 +5375,17 @@ public struct CodexCLI: Sendable {
             return .failure("codex-swift: missing required argument for command 'plugin marketplace add': <SOURCE>", 64)
         }
         return .success(.marketplaceAdd(source: source, refName: refName, sparsePaths: sparsePaths))
+    }
+
+    private func parsePluginMarketplaceList(_ arguments: [String]) -> ParseResult<PluginCommandAction> {
+        guard arguments.isEmpty else {
+            let argument = arguments[0]
+            if argument.hasPrefix("-") {
+                return .failure("codex-swift: unsupported option for command 'plugin marketplace list': \(argument)", 64)
+            }
+            return .failure("codex-swift: unexpected argument for command 'plugin marketplace list': \(argument)", 64)
+        }
+        return .success(.marketplaceList)
     }
 
     private func parsePluginMarketplaceUpgrade(_ arguments: [String]) -> ParseResult<PluginCommandAction> {
