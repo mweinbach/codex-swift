@@ -187,6 +187,37 @@ final class ResponsesAPITests: XCTestCase {
         XCTAssertNil(object["client_metadata"])
     }
 
+    func testResponseCreateWebSocketRequestStampsStreamRequestStartMSLikeRust() throws {
+        let request = ResponsesWebSocketRequest.responseCreate(ResponseCreateWebSocketRequest(
+            model: "gpt-test",
+            instructions: "",
+            input: [],
+            tools: [],
+            store: true,
+            clientMetadata: ["traceparent": "00-abc"]
+        ))
+        .stampingStreamRequestStartMS(milliseconds: 1_778_752_800_123)
+
+        let object = try JSONObject(request)
+        let metadata = try XCTUnwrap(object["client_metadata"] as? [String: String])
+        XCTAssertEqual(metadata["traceparent"], "00-abc")
+        XCTAssertEqual(
+            metadata[ResponsesWebSocketRequest.streamRequestStartMSClientMetadataKey],
+            "1778752800123"
+        )
+    }
+
+    func testResponseProcessedWebSocketRequestDoesNotStampStreamRequestStartMSLikeRust() throws {
+        let request = ResponsesWebSocketRequest.responseProcessed(
+            ResponseProcessedWebSocketRequest(responseID: "resp-compact")
+        )
+        .stampingStreamRequestStartMS(milliseconds: 1_778_752_800_123)
+
+        let object = try JSONObject(request)
+        XCTAssertEqual(object["type"] as? String, "response.processed")
+        XCTAssertNil(object["client_metadata"])
+    }
+
     func testWebSocketClientMetadataIncludesWindowLineageAndTurnMetadataLikeRust() throws {
         let threadID = ThreadId(uuid: UUID(uuidString: "018f7a2d-4c5b-7abc-8def-0123456789ab")!)
         let parentThreadID = ThreadId(uuid: UUID(uuidString: "01902222-3333-7444-8555-666666666666")!)

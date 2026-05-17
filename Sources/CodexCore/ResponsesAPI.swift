@@ -369,6 +369,8 @@ public enum ResponsesWebSocketContinuation {
 }
 
 public enum ResponsesWebSocketRequest: Equatable, Encodable, Sendable {
+    public static let streamRequestStartMSClientMetadataKey = "x-codex-ws-stream-request-start-ms"
+
     case responseCreate(ResponseCreateWebSocketRequest)
     case responseProcessed(ResponseProcessedWebSocketRequest)
 
@@ -420,6 +422,19 @@ public enum ResponsesWebSocketRequest: Equatable, Encodable, Sendable {
             try container.encode("response.processed", forKey: .type)
             try container.encode(request.responseID, forKey: .responseID)
         }
+    }
+
+    public func stampingStreamRequestStartMS(
+        milliseconds: Int64 = Int64((Date().timeIntervalSince1970 * 1_000).rounded(.down))
+    ) -> ResponsesWebSocketRequest {
+        guard case var .responseCreate(request) = self else {
+            return self
+        }
+
+        var metadata = request.clientMetadata ?? [:]
+        metadata[Self.streamRequestStartMSClientMetadataKey] = String(milliseconds)
+        request.clientMetadata = metadata
+        return .responseCreate(request)
     }
 }
 

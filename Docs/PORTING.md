@@ -1089,6 +1089,13 @@ Recent upstream audit checkpoint:
   helper for Responses websocket client metadata that includes installation ID,
   thread window generation, subagent lineage, parent thread ID, and valid turn
   metadata while dropping invalid header values like Rust `HeaderValue` parsing.
+- 2026-05-17: rechecked Rust commit `704ad620f6` (`Add
+  x-codex-ws-stream-request-start-ms`) in `codex-rs/core/src/client.rs`.
+  Swift `ResponsesWebSocketRequest` now has a Rust-shaped response-create stamp
+  helper that inserts `x-codex-ws-stream-request-start-ms` into
+  `client_metadata` immediately before a WebSocket stream request while leaving
+  non-stream `response.processed` payloads unchanged. Live Responses WebSocket
+  dispatch remains pending with the broader runtime path.
 - 2026-05-16: rechecked Rust unavailable MCP dummy-tool routing in
   `codex-rs/core/src/session/turn.rs`, `unavailable_tool.rs`, and
   `tools/router.rs`. This older compatibility note was superseded by the
