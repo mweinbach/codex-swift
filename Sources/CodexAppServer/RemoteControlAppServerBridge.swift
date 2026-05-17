@@ -588,6 +588,7 @@ struct RemoteControlAppServerBridge {
     private let threadStateManager: AppServerThreadStateManager
     private let notificationBuffer = RemoteControlAppServerBridgeNotificationBuffer()
     private var processors: [RemoteControlVirtualConnectionID: CodexAppServerMessageProcessor] = [:]
+    private var runtimeManagers: [RemoteControlVirtualConnectionID: AppServerLiveRuntimeManager] = [:]
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
@@ -611,14 +612,25 @@ struct RemoteControlAppServerBridge {
         switch event {
         case let .connectionOpened(connectionID, _, _):
             processors.removeValue(forKey: connectionID)?.closeConnection()
-            processors[connectionID] = CodexAppServerMessageProcessor(
+            runtimeManagers.removeValue(forKey: connectionID)?.shutdown()
+            let runtimeManager = AppServerLiveRuntimeManager(configuration: configuration)
+            let processor = CodexAppServerMessageProcessor(
                 configuration: configuration,
                 connectionID: Self.appServerConnectionID(for: connectionID),
                 notificationSink: { [notificationBuffer] data in
                     await notificationBuffer.append(data, connectionID: connectionID)
                 },
+                coreOpSubmitter: { requestID, threadID, op in
+                    try runtimeManager.submitCoreOp(requestID: requestID, threadID: threadID, op: op)
+                },
+                liveRuntimeSubmitter: runtimeManager.submitLiveRuntime,
                 threadStateManager: threadStateManager
             )
+            runtimeManager.setEventSink { [weak processor] threadID, turnID, event in
+                await processor?.handleRuntimeEvent(threadID: threadID, turnID: turnID, event: event)
+            }
+            processors[connectionID] = processor
+            runtimeManagers[connectionID] = runtimeManager
             return RemoteControlAppServerBridgeStep()
 
         case let .incomingMessage(connectionID, message):
@@ -638,6 +650,7 @@ struct RemoteControlAppServerBridge {
 
         case let .connectionClosed(connectionID):
             processors.removeValue(forKey: connectionID)?.closeConnection()
+            runtimeManagers.removeValue(forKey: connectionID)?.shutdown()
             return RemoteControlAppServerBridgeStep()
         }
     }

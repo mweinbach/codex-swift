@@ -10,6 +10,7 @@ final class CodexAppServerTests: XCTestCase {
     private final class AppServerExtensionRecorder:
         ExtensionThreadLifecycleContributor,
         ExtensionTurnLifecycleContributor,
+        ExtensionConfigContributor,
         ExtensionTokenUsageContributor,
         ExtensionContextContributor,
         ExtensionToolContributor,
@@ -48,6 +49,10 @@ final class CodexAppServerTests: XCTestCase {
 
         func onTurnAbort(_ input: ExtensionTurnAbortInput) {
             append("turn-abort:\(input.turnID):\(input.reason.rawValue)")
+        }
+
+        func onConfigChanged(_ input: ExtensionConfigChangedInput) {
+            append("config-changed:\(input.previousConfig.model ?? "nil")->\(input.newConfig.model ?? "nil")")
         }
 
         func onTokenUsage(
@@ -9162,6 +9167,55 @@ final class CodexAppServerTests: XCTestCase {
         thread = try XCTUnwrap(result["thread"] as? [String: Any])
         status = try XCTUnwrap(thread["status"] as? [String: Any])
         XCTAssertEqual(status["type"] as? String, "idle")
+    }
+
+    func testThreadResumeOverlaysLiveStartedTurnLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
+        )
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let startedThread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(startedThread["id"] as? String)
+
+        await processor.handleRuntimeEvent(
+            threadID: threadID,
+            turnID: "fallback-turn",
+            event: .taskStarted(TaskStartedEvent(
+                turnID: "live-turn-1",
+                startedAt: 1_778_330_000,
+                modelContextWindow: nil,
+                collaborationModeKind: nil
+            ))
+        )
+
+        let resumeMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"thread/resume","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        let resumeResult = try XCTUnwrap(resumeMessages[0]["result"] as? [String: Any])
+        let resumedThread = try XCTUnwrap(resumeResult["thread"] as? [String: Any])
+        let status = try XCTUnwrap(resumedThread["status"] as? [String: Any])
+        XCTAssertEqual(status["type"] as? String, "active")
+        XCTAssertEqual(status["activeFlags"] as? [String], [])
+        let turns = try XCTUnwrap(resumedThread["turns"] as? [[String: Any]])
+        XCTAssertEqual(turns.count, 1)
+        XCTAssertEqual(turns[0]["id"] as? String, "live-turn-1")
+        XCTAssertEqual(turns[0]["status"] as? String, "inProgress")
+        XCTAssertEqual(turns[0]["startedAt"] as? Int, 1_778_330_000)
+
+        let metadataOnlyResumeMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":3,"method":"thread/resume","params":{"threadId":"\#(threadID)","excludeTurns":true}}"#.utf8
+        )))
+        let metadataOnlyResult = try XCTUnwrap(metadataOnlyResumeMessages[0]["result"] as? [String: Any])
+        let metadataOnlyThread = try XCTUnwrap(metadataOnlyResult["thread"] as? [String: Any])
+        let metadataOnlyStatus = try XCTUnwrap(metadataOnlyThread["status"] as? [String: Any])
+        XCTAssertEqual(metadataOnlyStatus["type"] as? String, "active")
+        let metadataOnlyTurns = try XCTUnwrap(metadataOnlyThread["turns"] as? [[String: Any]])
+        XCTAssertTrue(metadataOnlyTurns.isEmpty)
     }
 
     func testThreadResumeUsesLatestTurnContextCwd() throws {
@@ -30102,6 +30156,38 @@ final class CodexAppServerTests: XCTestCase {
                 threadID: threadID,
                 op: .refreshRuntimeConfig(config: .table(config))
             )
+        ])
+    }
+
+    func testConfigBatchWriteReloadUserConfigNotifiesExtensionConfigContributorsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        try #"model = "gpt-old""#.write(to: configFile, atomically: true, encoding: .utf8)
+        let recorder = AppServerExtensionRecorder()
+        var builder = ExtensionRegistryBuilder()
+        builder.threadLifecycleContributor(recorder)
+        builder.configContributor(recorder)
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                extensionRegistry: builder.build()
+            )
+        )
+        let start = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let threadID = try XCTUnwrap(
+            ((start[0]["result"] as? [String: Any])?["thread"] as? [String: Any])?["id"] as? String
+        )
+
+        let response = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"config/batchWrite","params":{"edits":[{"keyPath":"model","value":"gpt-reloaded","mergeStrategy":"replace"}],"reloadUserConfig":true}}"#.utf8
+        )))
+
+        XCTAssertEqual((response["result"] as? [String: Any])?["status"] as? String, "ok")
+        XCTAssertEqual(recorder.records, [
+            "thread-start:\(threadID):gpt-old",
+            "config-changed:gpt-old->gpt-reloaded"
         ])
     }
 

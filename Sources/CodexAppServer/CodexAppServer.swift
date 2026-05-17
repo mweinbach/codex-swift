@@ -1253,13 +1253,24 @@ public enum CodexAppServer {
         stdout: FileHandle = .standardOutput
     ) throws {
         var buffer = Data()
+        let runtimeManager = AppServerLiveRuntimeManager(configuration: configuration)
         let processor = CodexAppServerMessageProcessor(
             configuration: configuration,
             notificationSink: { data in
                 stdout.write(data)
                 stdout.write(Data([0x0A]))
-            }
+            },
+            coreOpSubmitter: { requestID, threadID, op in
+                try runtimeManager.submitCoreOp(requestID: requestID, threadID: threadID, op: op)
+            },
+            liveRuntimeSubmitter: runtimeManager.submitLiveRuntime
         )
+        runtimeManager.setEventSink { [weak processor] threadID, turnID, event in
+            await processor?.handleRuntimeEvent(threadID: threadID, turnID: turnID, event: event)
+        }
+        defer {
+            runtimeManager.shutdown()
+        }
         while true {
             let data = stdin.availableData
             if data.isEmpty {
@@ -1853,7 +1864,7 @@ public enum CodexAppServer {
         let dynamicTools: [DynamicToolSpec]
     }
 
-    private struct PermissionProfileSelection {
+    fileprivate struct PermissionProfileSelection {
         let id: String
         let modifications: [ActivePermissionProfileModification]
         let additionalWritableRoots: [AbsolutePath]
@@ -1951,7 +1962,7 @@ public enum CodexAppServer {
         return source
     }
 
-    private static func loadRuntimeConfigForThreadStartup(
+    fileprivate static func loadRuntimeConfigForThreadStartup(
         configuration: CodexAppServerConfiguration,
         cwd: URL? = nil,
         runtimeWorkspaceRoots: [AbsolutePath]? = nil,
@@ -23786,7 +23797,7 @@ public enum CodexAppServer {
         ]))
     }
 
-    private static func applyRuntimeFeatureEnablement(
+    fileprivate static func applyRuntimeFeatureEnablement(
         _ runtimeFeatureEnablement: [String: Bool],
         to features: inout FeatureStates,
         protectedFeatureKeys: Set<String>
@@ -23800,7 +23811,7 @@ public enum CodexAppServer {
         features.normalizeDependencies()
     }
 
-    private static func protectedFeatureKeys(in config: ConfigValue) -> Set<String> {
+    fileprivate static func protectedFeatureKeys(in config: ConfigValue) -> Set<String> {
         guard case let .table(table) = config,
               case let .table(features)? = table["features"]
         else {
@@ -26468,6 +26479,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
     private let threadStateManager: AppServerThreadStateManager
     private let outgoingRequestBroker: AppServerOutgoingRequestBroker
     private var threadAnalyticsMetadata: [String: ThreadAnalyticsMetadata] = [:]
+    private var threadRuntimeConfigs: [String: CodexRuntimeConfig] = [:]
     private let activeChatGPTLogins = AppServerChatGPTLoginRegistry()
     private let activeDeviceCodeLogins = AppServerCancellableLoginRegistry()
     private var runtimeFeatureEnablement: [String: Bool] = [:]
@@ -26483,6 +26495,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
     private var fsWatches: [String: AppServerFSWatch] = [:]
     private var fuzzyFileSearchSessions: [String: [String]] = [:]
     private var activeTurnIDs: [String: String] = [:]
+    private var runtimeStartedTurnIDs: [String: Set<String>] = [:]
     private var runtimeTurnStartedAt: [String: [String: Int64]] = [:]
     private var runtimeTurnErrors: [String: [String: [String: Any]]] = [:]
     private var runtimeTurnErrorInfos: [String: [String: CodexErrorInfo]] = [:]
@@ -26925,6 +26938,27 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         extensionRuntimeState.emitTokenUsage(threadID: parsedThreadID, turnID: turnID, tokenUsage: tokenUsage)
     }
 
+    private func rememberThreadRuntimeConfig(threadID: String, config: CodexRuntimeConfig) {
+        threadRuntimeConfigs[threadID] = config
+    }
+
+    private func emitExtensionConfigChangedIfNeeded(
+        threadID: String,
+        previousConfig: CodexRuntimeConfig?,
+        newConfig: CodexRuntimeConfig
+    ) {
+        guard let previousConfig, previousConfig != newConfig,
+              let parsedThreadID = try? ThreadId(string: threadID)
+        else {
+            return
+        }
+        extensionRuntimeState.emitConfigChanged(
+            threadID: parsedThreadID,
+            previousConfig: previousConfig,
+            newConfig: newConfig
+        )
+    }
+
     private func extensionPromptFragments(threadID: String) throws -> [ExtensionPromptFragment] {
         guard let parsedThreadID = try? ThreadId(string: threadID) else {
             return []
@@ -27019,6 +27053,45 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             return CodexAppServer.activeThreadStatus(activeFlags: flags)
         }
         return CodexAppServer.idleThreadStatus()
+    }
+
+    private func loadedRuntimeResumeResult(
+        result: [String: Any],
+        includeTurns: Bool
+    ) -> [String: Any] {
+        guard var thread = result["thread"] as? [String: Any],
+              let threadID = CodexAppServer.stringParam(thread["id"]),
+              isThreadLoaded(threadID)
+        else {
+            return result
+        }
+        var loadedResult = result
+        if let status = loadedThreadStatus(threadID: threadID) {
+            thread["status"] = status
+        }
+        if includeTurns,
+           let activeTurn = activeRuntimeTurnObject(threadID: threadID),
+           let activeTurnID = CodexAppServer.stringParam(activeTurn["id"]) {
+            var turns = (thread["turns"] as? [[String: Any]]) ?? []
+            turns.removeAll { CodexAppServer.stringParam($0["id"]) == activeTurnID }
+            turns.append(activeTurn)
+            thread["turns"] = turns
+        }
+        loadedResult["thread"] = thread
+        return loadedResult
+    }
+
+    private func activeRuntimeTurnObject(threadID: String) -> [String: Any]? {
+        guard let activeTurnID = activeTurnIDs[threadID],
+              runtimeStartedTurnIDs[threadID]?.contains(activeTurnID) == true
+        else {
+            return nil
+        }
+        var turn = CodexAppServer.inProgressTurnObject(id: activeTurnID)
+        if let startedAt = runtimeTurnStartedAt[threadID]?[activeTurnID] {
+            turn["startedAt"] = startedAt
+        }
+        return turn
     }
 
     private func rejectMetadataUpdateForLoadedEphemeralThread(params: [String: Any]?) throws {
@@ -27542,6 +27615,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         case let .taskStarted(event):
             let runtimeTurnID = event.turnID
             activeTurnIDs[threadID] = runtimeTurnID
+            runtimeStartedTurnIDs[threadID, default: []].insert(runtimeTurnID)
             runtimeSystemErrorThreadIDs.remove(threadID)
             if let startedAt = event.startedAt {
                 runtimeTurnStartedAt[threadID, default: [:]][runtimeTurnID] = startedAt
@@ -27594,6 +27668,10 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             let errorInfo = runtimeTurnErrorInfos[threadID]?[runtimeTurnID]
             let inputMessages = runtimeTurnInputMessages[threadID]?[runtimeTurnID] ?? []
             emitExtensionTurnStop(threadID: threadID, turnID: runtimeTurnID)
+            runtimeStartedTurnIDs[threadID]?.remove(runtimeTurnID)
+            if runtimeStartedTurnIDs[threadID]?.isEmpty == true {
+                runtimeStartedTurnIDs[threadID] = nil
+            }
             runtimeTurnStartedAt[threadID]?[runtimeTurnID] = nil
             runtimeTurnErrors[threadID]?[runtimeTurnID] = nil
             runtimeTurnInputMessages[threadID]?[runtimeTurnID] = nil
@@ -27638,6 +27716,10 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             let runtimeTurnID = event.turnID ?? turnID
             let startedAt = runtimeTurnStartedAt[threadID]?[runtimeTurnID]
             emitExtensionTurnAbort(threadID: threadID, turnID: runtimeTurnID, reason: event.reason)
+            runtimeStartedTurnIDs[threadID]?.remove(runtimeTurnID)
+            if runtimeStartedTurnIDs[threadID]?.isEmpty == true {
+                runtimeStartedTurnIDs[threadID] = nil
+            }
             runtimeTurnStartedAt[threadID]?[runtimeTurnID] = nil
             runtimeTurnErrors[threadID]?[runtimeTurnID] = nil
             runtimeTurnErrorInfos[threadID]?[runtimeTurnID] = nil
@@ -28295,6 +28377,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             || runtimePendingUserInputCounts[threadID] != nil
             || runtimeSystemErrorThreadIDs.contains(threadID)
             || runtimeCommandExecutionStarted[threadID] != nil
+            || runtimeStartedTurnIDs[threadID] != nil
             || runtimeTurnStartedAt[threadID] != nil
             || runtimeTurnErrors[threadID] != nil
             || runtimeTurnErrorInfos[threadID] != nil
@@ -28308,6 +28391,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         }) ?? false
 
         activeTurnIDs.removeValue(forKey: threadID)
+        runtimeStartedTurnIDs.removeValue(forKey: threadID)
         clearRuntimePendingActiveFlags(threadID: threadID)
         runtimeSystemErrorThreadIDs.remove(threadID)
         runtimeCommandExecutionStarted.removeValue(forKey: threadID)
@@ -28323,6 +28407,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         pendingSessionStartSources.removeValue(forKey: threadID)
         loadedThreadAppsFeatureEnabled.removeValue(forKey: threadID)
         threadAnalyticsMetadata.removeValue(forKey: threadID)
+        threadRuntimeConfigs.removeValue(forKey: threadID)
         ephemeralThreadIDs.remove(threadID)
         ephemeralThreadSnapshots.removeValue(forKey: threadID)
 
@@ -28553,6 +28638,37 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         }
     }
 
+    private func runtimeConfigForLoadedThread(
+        threadID: String,
+        runtimeFeatureEnablement: [String: Bool]
+    ) throws -> CodexRuntimeConfig? {
+        guard let metadata = threadAnalyticsMetadata[threadID] else {
+            return nil
+        }
+        do {
+            var runtimeConfig = try CodexAppServer.loadRuntimeConfigForThreadStartup(
+                configuration: configuration,
+                cwd: metadata.cwd
+            )
+            let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+                codexHome: configuration.codexHome,
+                cwd: metadata.cwd,
+                cliOverrides: configuration.cliConfigOverrides,
+                threadConfigSources: configuration.threadConfigSources,
+                overrides: configuration.configLayerOverrides,
+                environment: configuration.environment
+            )
+            CodexAppServer.applyRuntimeFeatureEnablement(
+                runtimeFeatureEnablement,
+                to: &runtimeConfig.features,
+                protectedFeatureKeys: CodexAppServer.protectedFeatureKeys(in: stack.effectiveConfig())
+            )
+            return runtimeConfig
+        } catch {
+            throw AppServerError.internalError("failed to reload config for thread \(threadID): \(error)")
+        }
+    }
+
     private func queueUserConfigRefresh(
         runtimeFeatureEnablement: [String: Bool],
         requestID rawRequestID: Any?
@@ -28560,6 +28676,11 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         let requestID = rawRequestID.flatMap(AppServerRequestIDCodec.requestID(from:))
         for threadID in listLoadedThreadIDs() {
             let cwd = threadAnalyticsMetadata[threadID]?.cwd ?? configuration.cwd
+            let previousRuntimeConfig = threadRuntimeConfigs[threadID]
+            let nextRuntimeConfig = try runtimeConfigForLoadedThread(
+                threadID: threadID,
+                runtimeFeatureEnablement: runtimeFeatureEnablement
+            )
             let effectiveConfig = try CodexAppServer.effectiveConfigSnapshot(
                 configuration: configuration,
                 runtimeFeatureEnablement: runtimeFeatureEnablement,
@@ -28574,6 +28695,14 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             }
             if let coreOpSubmitter, let requestID {
                 _ = try? coreOpSubmitter(requestID, threadID, .refreshRuntimeConfig(config: effectiveConfig))
+            }
+            if let nextRuntimeConfig {
+                emitExtensionConfigChangedIfNeeded(
+                    threadID: threadID,
+                    previousConfig: previousRuntimeConfig,
+                    newConfig: nextRuntimeConfig
+                )
+                rememberThreadRuntimeConfig(threadID: threadID, config: nextRuntimeConfig)
             }
         }
     }
@@ -29374,6 +29503,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                     let result = outcome.result
                     if let thread = result["thread"] as? [String: Any],
                        let threadID = thread["id"] as? String {
+                        rememberThreadRuntimeConfig(threadID: threadID, config: outcome.runtimeConfig)
                         emitExtensionThreadStart(threadID: threadID, config: outcome.runtimeConfig)
                         notifications.append(contentsOf: try startLiveMcpManager(
                             threadID: threadID,
@@ -29485,9 +29615,17 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                         notifications.append(CodexAppServer.persistExtendedHistoryDeprecationNoticeNotification())
                     }
                     let resumeOutcome = try CodexAppServer.threadResumeResult(params: params, configuration: configuration)
-                    let result = resumeOutcome.result
+                    let includeTurns = !(try CodexAppServer.rustDefaultBoolParam(
+                        params?["excludeTurns"],
+                        defaultValue: false
+                    ))
+                    let result = loadedRuntimeResumeResult(
+                        result: resumeOutcome.result,
+                        includeTurns: includeTurns
+                    )
                     if let thread = result["thread"] as? [String: Any],
                        let threadID = thread["id"] as? String {
+                        rememberThreadRuntimeConfig(threadID: threadID, config: resumeOutcome.runtimeConfig)
                         emitExtensionThreadResume(threadID: threadID)
                         notifications.append(contentsOf: try startLiveMcpManager(
                             threadID: threadID,
@@ -29528,6 +29666,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                     let result = forkOutcome.result
                     if let thread = result["thread"] as? [String: Any],
                        let threadID = thread["id"] as? String {
+                        rememberThreadRuntimeConfig(threadID: threadID, config: forkOutcome.runtimeConfig)
                         emitExtensionThreadStart(threadID: threadID, config: forkOutcome.runtimeConfig)
                         notifications.append(contentsOf: try startLiveMcpManager(
                             threadID: threadID,
@@ -31157,7 +31296,7 @@ private func clearMemoryRootContents(_ root: URL, fileManager: FileManager = .de
     }
 }
 
-private struct RolloutSummary {
+fileprivate struct RolloutSummary {
     let id: String
     let forkedFromID: String?
     let preview: String

@@ -12,6 +12,20 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust's live `refresh_runtime_config` extension
+  callback path from `codex-rs/core/src/session/mod.rs`. Swift now keeps a
+  per-loaded-thread runtime config snapshot and emits app-server extension
+  `configChanged` contributors when `config/batchWrite` or experimental
+  feature writes reload user config for an active thread, preserving the
+  existing queued `Op::RefreshRuntimeConfig` bridge for the future
+  ThreadManager runtime.
+- 2026-05-17: tightened the live app-server loaded-resume slice against
+  Rust's running-thread resume response. When the Swift processor has observed
+  a live `task_started` event for a loaded thread, `thread/resume` now overlays
+  the live active status and merges the in-progress turn into hydrated turns;
+  `excludeTurns` still returns metadata only while preserving the active
+  status. This remains a deterministic projection over the injected runtime
+  event seam, not the full ThreadManager listener task.
 - 2026-05-17: replaced the bare `codex` exit-78 placeholder with a deliberate
   line-mode interactive fallback while the full TUI remains pending. The Swift
   entrypoint now passes an `InteractiveCommandRunner`, starts one CLI-sourced
@@ -679,9 +693,10 @@ Recent upstream audit checkpoint:
   the `memories` feature plus `[memories].use_memories`, and injects it in
   non-interactive exec and `debug prompt-input` between configured developer
   instructions and skills. Swift app-server memory startup remains wired as a
-  separate app-server concern, while a first-class live app-server extension
-  registry and config-change prompt contributor remain pending with the broader
-  live ThreadManager runtime port; no Swift protocol or persistence shape
+  separate app-server concern. The live app-server extension registry and
+  config-change contributor callback are now wired through deterministic
+  processor state, while full memory startup through ThreadManager remains
+  pending; no Swift protocol or persistence shape
   changed for this Rust commit.
 - 2026-05-16: rechecked Rust commit `d8ddeb6869` (`Support explicit MCP
   OAuth client IDs`) against `codex-rs/config/src/mcp_types.rs`. Swift already

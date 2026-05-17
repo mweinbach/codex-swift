@@ -158,6 +158,7 @@ public struct AppServerWebSocketTransport: Sendable {
             return
         }
         let writer = AppServerWebSocketFrameWriter(fileDescriptor: fileDescriptor)
+        let runtimeManager = AppServerLiveRuntimeManager(configuration: configuration)
         let processor = CodexAppServerMessageProcessor(
             configuration: configuration,
             connectionID: connectionID,
@@ -166,9 +167,17 @@ public struct AppServerWebSocketTransport: Sendable {
                     try? await writer.writeText(text)
                 }
             },
+            coreOpSubmitter: { requestID, threadID, op in
+                try runtimeManager.submitCoreOp(requestID: requestID, threadID: threadID, op: op)
+            },
+            liveRuntimeSubmitter: runtimeManager.submitLiveRuntime,
             threadStateManager: threadStateManager
         )
+        runtimeManager.setEventSink { [weak processor] threadID, turnID, event in
+            await processor?.handleRuntimeEvent(threadID: threadID, turnID: turnID, event: event)
+        }
         defer {
+            runtimeManager.shutdown()
             processor.closeConnection()
         }
 
