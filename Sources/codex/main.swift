@@ -412,6 +412,10 @@ private final class InteractiveTurnHistory: @unchecked Sendable {
     private let lock = NSLock()
     private var items: [ResponseItem] = []
 
+    init(items: [ResponseItem] = []) {
+        self.items = items
+    }
+
     func snapshot() -> [ResponseItem] {
         lock.lock()
         defer { lock.unlock() }
@@ -475,6 +479,22 @@ private final class InteractiveRolloutPathStore: @unchecked Sendable {
 }
 
 private func runInteractiveCommand(_ request: CodexCLI.InteractiveCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
+    try await runLineModeInteractiveCommand(
+        request,
+        conversationID: ConversationId(),
+        initialHistory: [],
+        resumedRolloutPath: nil,
+        firstTurnStartSource: .startup
+    )
+}
+
+private func runLineModeInteractiveCommand(
+    _ request: CodexCLI.InteractiveCommandRequest,
+    conversationID: ConversationId,
+    initialHistory: [ResponseItem],
+    resumedRolloutPath: URL?,
+    firstTurnStartSource: HookSessionStartSource
+) async throws -> CodexCLI.CommandExecutionResult {
     let io = lineModeIO()
     if request.remote != nil || request.remoteAuthTokenEnv != nil {
         return CodexCLI.CommandExecutionResult(
@@ -486,9 +506,8 @@ private func runInteractiveCommand(_ request: CodexCLI.InteractiveCommandRequest
     let options = request.interactiveOptions
     let arguments = interactiveExecArguments(from: options)
     let cwd = resolveExecWorkingDirectory(from: arguments)
-    let conversationID = ConversationId()
     let rolloutPathStore = InteractiveRolloutPathStore(options: options, cwd: cwd, conversationID: conversationID)
-    let history = InteractiveTurnHistory()
+    let history = InteractiveTurnHistory(items: initialHistory)
     let approvalHandler = lineModeApprovalHandler(io: io)
     let runtime = LineModeInteractiveRuntime(request: request, io: io) { turn in
         let streamState = InteractiveStreamState()
@@ -505,8 +524,8 @@ private func runInteractiveCommand(_ request: CodexCLI.InteractiveCommandRequest
             cwd: cwd,
             conversationID: conversationID,
             history: history.snapshot(),
-            rolloutPath: try rolloutPathStore.path(),
-            sessionStartSource: turn.turnIndex == 1 ? .startup : .resume,
+            rolloutPath: try resumedRolloutPath ?? rolloutPathStore.path(),
+            sessionStartSource: turn.turnIndex == 1 ? firstTurnStartSource : .resume,
             responseEventHandler: lineModeResponseEventHandler(streamState: streamState),
             turnHistoryHandler: { history.append($0) },
             approvalHandler: approvalHandler
@@ -2186,17 +2205,27 @@ private func runSandboxCommand(_ request: CodexCLI.SandboxCommandRequest) async 
 private func runResumeCommand(_ request: CodexCLI.ResumeCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
     let codexHome = try CodexHome.find()
     let resolution = try ResumeCommandResolver.resolve(request, codexHome: codexHome)
-    let output = ResumeCommandFormatter.render(resolution)
 
     switch resolution {
-    case .session:
-        return CodexCLI.CommandExecutionResult(
-            exitCode: 78,
-            stdoutMessage: output,
-            stderrMessage: "codex-swift: resume target resolved, but interactive resume runtime is not complete yet."
+    case let .session(session):
+        let initialHistory = try RolloutRecorder.getRolloutHistory(path: URL(fileURLWithPath: session.path))
+        let responseHistory = RolloutRecorder.reconstructResponseHistory(from: initialHistory.rolloutItems)
+        return try await runLineModeInteractiveCommand(
+            CodexCLI.InteractiveCommandRequest(
+                prompt: nil,
+                remote: request.remote,
+                remoteAuthTokenEnv: request.remoteAuthTokenEnv,
+                interactiveOptions: request.interactiveOptions,
+                configOverrides: request.configOverrides,
+                strictConfig: request.strictConfig
+            ),
+            conversationID: session.conversationID,
+            initialHistory: responseHistory,
+            resumedRolloutPath: URL(fileURLWithPath: session.path),
+            firstTurnStartSource: .resume
         )
     case .picker:
-        return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: output)
+        return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: ResumeCommandFormatter.render(resolution))
     }
 }
 

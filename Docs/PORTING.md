@@ -20,7 +20,10 @@ Recent upstream audit checkpoint:
   asks terminal approvals for shell/unified-exec/apply-patch requests. Normal
   `/quit` and EOF exits now preserve the latest successful turn's thread id so
   the CLI result keeps the persisted session target available for resume
-  messaging.
+  messaging. `codex resume` now reuses the same line-mode fallback for resolved
+  sessions, reconstructing the saved response history and appending new turns
+  to the existing rollout path/conversation id instead of stopping after target
+  resolution.
 - 2026-05-17: rechecked Rust's shell, unified-exec, and apply-patch approval
   request flow in `codex-rs/core/src/session/mod.rs`,
   `codex-rs/core/src/tools/runtimes/shell.rs`,
