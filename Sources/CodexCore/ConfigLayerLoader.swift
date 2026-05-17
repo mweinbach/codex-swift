@@ -311,7 +311,8 @@ public enum CodexConfigLayerLoader {
         if strictConfig {
             try CodexConfigLoader.validateStrictConfigValue(
                 parsed,
-                source: url.standardizedFileURL.path
+                source: url.standardizedFileURL.path,
+                contents: contents
             )
         }
         return try resolveRelativePaths(in: parsed, baseDirectory: url.deletingLastPathComponent())
@@ -373,7 +374,8 @@ public enum CodexConfigLayerLoader {
         if strictConfig {
             try CodexConfigLoader.validateStrictConfigValue(
                 value,
-                source: managedPreferencesConfigSourceName
+                source: managedPreferencesConfigSourceName,
+                contents: decodedString
             )
         }
 

@@ -24,8 +24,10 @@ Recent upstream audit checkpoint:
   Rust-shaped errors. Strict validation also now covers legacy admin config
   layers: `/etc/codex/managed_config.toml` / `CODEX_MANAGED_CONFIG_PATH` and
   macOS `com.openai.codex:config_toml_base64` managed preferences reject
-  ignored fields before merging with Rust-shaped source names. Source-range
-  diagnostics remain pending.
+  ignored fields before merging with Rust-shaped source names. Strict file and
+  managed-preference unknown-field errors now include Rust-style
+  `source:line:column:` diagnostics; CLI overrides keep the spanless
+  `-c/--config override` source.
 - 2026-05-17: rechecked Rust commit `fdda59c00b` (`Introduce tool exposure
   for deferred registration`). Swift tool-spec construction now treats
   deferred dynamic tools as search-only exposure: they feed `tool_search` but

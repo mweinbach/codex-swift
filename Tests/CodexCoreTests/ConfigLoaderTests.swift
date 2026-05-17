@@ -2882,7 +2882,7 @@ final class ConfigLoaderTests: XCTestCase {
         )) { error in
             XCTAssertEqual(
                 String(describing: error),
-                "unknown configuration field `approval_polic` in \(dir.url.appendingPathComponent("config.toml").standardizedFileURL.path)"
+                "\(dir.url.appendingPathComponent("config.toml").standardizedFileURL.path):2:1: unknown configuration field `approval_polic`"
             )
         }
     }
@@ -2922,7 +2922,7 @@ final class ConfigLoaderTests: XCTestCase {
         )) { error in
             XCTAssertEqual(
                 String(describing: error),
-                "unknown configuration field `features.foo` in \(dir.url.appendingPathComponent("config.toml").standardizedFileURL.path)"
+                "\(dir.url.appendingPathComponent("config.toml").standardizedFileURL.path):2:1: unknown configuration field `features.foo`"
             )
         }
     }
@@ -2942,7 +2942,7 @@ final class ConfigLoaderTests: XCTestCase {
         )) { error in
             XCTAssertEqual(
                 String(describing: error),
-                "unknown configuration field `profiles.work.features.foo` in \(dir.url.appendingPathComponent("config.toml").standardizedFileURL.path)"
+                "\(dir.url.appendingPathComponent("config.toml").standardizedFileURL.path):2:1: unknown configuration field `profiles.work.features.foo`"
             )
         }
     }
@@ -2980,7 +2980,7 @@ final class ConfigLoaderTests: XCTestCase {
         )) { error in
             XCTAssertEqual(
                 String(describing: error),
-                "unknown configuration field `approval_polic` in \(managedPath.standardizedFileURL.path)"
+                "\(managedPath.standardizedFileURL.path):2:1: unknown configuration field `approval_polic`"
             )
         }
     }
@@ -3004,7 +3004,7 @@ final class ConfigLoaderTests: XCTestCase {
         )) { error in
             XCTAssertEqual(
                 String(describing: error),
-                "unknown configuration field `approval_polic` in \(CodexConfigLayerLoader.managedPreferencesConfigSourceName)"
+                "\(CodexConfigLayerLoader.managedPreferencesConfigSourceName):2:1: unknown configuration field `approval_polic`"
             )
         }
     }

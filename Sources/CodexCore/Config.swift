@@ -1111,6 +1111,26 @@ public struct NoticeConfig: Equatable, Sendable {
     }
 }
 
+public struct ConfigTextPosition: Equatable, Sendable {
+    public var line: Int
+    public var column: Int
+
+    public init(line: Int, column: Int) {
+        self.line = line
+        self.column = column
+    }
+}
+
+public struct ConfigTextRange: Equatable, Sendable {
+    public var start: ConfigTextPosition
+    public var end: ConfigTextPosition
+
+    public init(start: ConfigTextPosition, end: ConfigTextPosition) {
+        self.start = start
+        self.end = end
+    }
+}
+
 public enum CodexConfigLoadError: Error, Equatable, CustomStringConvertible, Sendable {
     case invalidConfig(String)
     case invalidStringValue(String)
@@ -1128,7 +1148,7 @@ public enum CodexConfigLoadError: Error, Equatable, CustomStringConvertible, Sen
     case invalidTableHeader(String)
     case profileNotFound(String)
     case unsupportedExperimentalThreadStoreEndpoint
-    case unknownConfigurationField(field: String, source: String)
+    case unknownConfigurationField(field: String, source: String, range: ConfigTextRange?)
 
     public var description: String {
         switch self {
@@ -1165,7 +1185,10 @@ public enum CodexConfigLoadError: Error, Equatable, CustomStringConvertible, Sen
             return "config profile `\(profile)` not found"
         case .unsupportedExperimentalThreadStoreEndpoint:
             return "`experimental_thread_store_endpoint` is no longer supported; remove it from config.toml"
-        case let .unknownConfigurationField(field, source):
+        case let .unknownConfigurationField(field, source, range):
+            if let range {
+                return "\(source):\(range.start.line):\(range.start.column): unknown configuration field `\(field)`"
+            }
             return "unknown configuration field `\(field)` in \(source)"
         }
     }
@@ -1176,8 +1199,8 @@ public enum CodexConfigLoader {
         URL(fileURLWithPath: "/etc/codex/config.toml", isDirectory: false)
     }
 
-    static func validateStrictConfigValue(_ value: ConfigValue, source: String) throws {
-        try ParsedCodexConfigToml.validateStrictConfig(value, source: source)
+    static func validateStrictConfigValue(_ value: ConfigValue, source: String, contents: String? = nil) throws {
+        try ParsedCodexConfigToml.validateStrictConfig(value, source: source, contents: contents)
     }
 
     public static func load(
@@ -1209,7 +1232,8 @@ public enum CodexConfigLoader {
                 if strictConfig {
                     try ParsedCodexConfigToml.validateStrictConfig(
                         ConfigTomlParser.parse(contents),
-                        source: configFile.standardizedFileURL.path
+                        source: configFile.standardizedFileURL.path,
+                        contents: contents
                     )
                 }
                 parsed.merge(try ParsedCodexConfigToml.parse(
@@ -1231,7 +1255,8 @@ public enum CodexConfigLoader {
                     if strictConfig {
                         try ParsedCodexConfigToml.validateStrictConfig(
                             ConfigTomlParser.parse(contents),
-                            source: configFile.standardizedFileURL.path
+                            source: configFile.standardizedFileURL.path,
+                            contents: contents
                         )
                     }
                     var projectConfig = try ParsedCodexConfigToml.parse(
@@ -3071,9 +3096,13 @@ private struct ParsedCodexConfigToml {
         }
     }
 
-    static func validateStrictConfig(_ value: ConfigValue, source: String) throws {
+    static func validateStrictConfig(_ value: ConfigValue, source: String, contents: String? = nil) throws {
         if let field = firstUnknownStrictConfigField(in: value) {
-            throw CodexConfigLoadError.unknownConfigurationField(field: field, source: source)
+            throw CodexConfigLoadError.unknownConfigurationField(
+                field: field,
+                source: source,
+                range: contents.flatMap { strictConfigFieldRange(field, in: $0) }
+            )
         }
     }
 
@@ -3081,7 +3110,8 @@ private struct ParsedCodexConfigToml {
         guard isStrictConfigPathAllowed(parts) else {
             throw CodexConfigLoadError.unknownConfigurationField(
                 field: parts.joined(separator: "."),
-                source: "-c/--config override"
+                source: "-c/--config override",
+                range: nil
             )
         }
     }
@@ -3110,6 +3140,198 @@ private struct ParsedCodexConfigToml {
             }
             if let unknown = firstUnknownStrictConfigField(in: child, path: nextPath) {
                 return unknown
+            }
+        }
+        return nil
+    }
+
+    private struct TomlKeySegment: Equatable {
+        var value: String
+        var startColumn: Int
+        var endColumn: Int
+    }
+
+    private static func strictConfigFieldRange(_ field: String, in contents: String) -> ConfigTextRange? {
+        var tablePath: [String] = []
+        let targetPath = field.split(separator: ".").map(String.init)
+
+        for (lineIndex, rawLineSubsequence) in contents.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
+            let rawLineWithPossibleCarriageReturn = String(rawLineSubsequence)
+            let rawLine = rawLineWithPossibleCarriageReturn.hasSuffix("\r")
+                ? String(rawLineWithPossibleCarriageReturn.dropLast())
+                : rawLineWithPossibleCarriageReturn
+            let lineWithoutComment = stripTomlComment(from: rawLine)
+            let trimmedLine = lineWithoutComment.trimmingCharacters(in: .whitespaces)
+            guard !trimmedLine.isEmpty else { continue }
+
+            if trimmedLine.hasPrefix("[") {
+                if trimmedLine.hasPrefix("[["), trimmedLine.hasSuffix("]]") {
+                    let body = String(trimmedLine.dropFirst(2).dropLast(2))
+                    tablePath = parseTomlKeySegments(body).map(\.value)
+                } else if trimmedLine.hasSuffix("]") {
+                    let body = String(trimmedLine.dropFirst().dropLast())
+                    tablePath = parseTomlKeySegments(body).map(\.value)
+                }
+                continue
+            }
+
+            guard let equalsIndex = firstTomlEqualsIndex(in: lineWithoutComment) else {
+                continue
+            }
+            let keyText = String(lineWithoutComment[..<equalsIndex])
+            let keySegments = parseTomlKeySegments(keyText)
+            guard let finalSegment = keySegments.last else { continue }
+
+            let fullPath = tablePath + keySegments.map(\.value)
+            if fullPath == targetPath || fullPath.joined(separator: ".") == field {
+                let line = lineIndex + 1
+                return ConfigTextRange(
+                    start: ConfigTextPosition(line: line, column: finalSegment.startColumn),
+                    end: ConfigTextPosition(line: line, column: finalSegment.endColumn)
+                )
+            }
+        }
+
+        return nil
+    }
+
+    private static func parseTomlKeySegments(_ raw: String) -> [TomlKeySegment] {
+        var segments: [TomlKeySegment] = []
+        var segmentStart = raw.startIndex
+        var quote: Character?
+        var previousWasBackslash = false
+
+        var index = raw.startIndex
+        while index < raw.endIndex {
+            let character = raw[index]
+            if let activeQuote = quote {
+                if character == activeQuote && !previousWasBackslash {
+                    quote = nil
+                }
+                previousWasBackslash = character == "\\" && !previousWasBackslash
+                if character != "\\" {
+                    previousWasBackslash = false
+                }
+            } else {
+                switch character {
+                case "\"", "'":
+                    quote = character
+                case ".":
+                    appendTomlKeySegment(
+                        raw,
+                        range: segmentStart..<index,
+                        to: &segments
+                    )
+                    segmentStart = raw.index(after: index)
+                default:
+                    break
+                }
+            }
+            index = raw.index(after: index)
+        }
+
+        appendTomlKeySegment(raw, range: segmentStart..<raw.endIndex, to: &segments)
+        return segments
+    }
+
+    private static func appendTomlKeySegment(
+        _ raw: String,
+        range: Range<String.Index>,
+        to segments: inout [TomlKeySegment]
+    ) {
+        var start = range.lowerBound
+        var end = range.upperBound
+        while start < end, raw[start].isWhitespace {
+            start = raw.index(after: start)
+        }
+        while start < end, raw[raw.index(before: end)].isWhitespace {
+            end = raw.index(before: end)
+        }
+        guard start < end else { return }
+
+        let segmentText = String(raw[start..<end])
+        let value: String
+        if segmentText.hasPrefix("\"") || segmentText.hasPrefix("'"),
+           case let .string(parsed) = try? ConfigValueParser.parseTomlLiteral(segmentText)
+        {
+            value = parsed
+        } else {
+            value = segmentText
+        }
+
+        segments.append(TomlKeySegment(
+            value: value,
+            startColumn: raw.distance(from: raw.startIndex, to: start) + 1,
+            endColumn: raw.distance(from: raw.startIndex, to: raw.index(before: end)) + 1
+        ))
+    }
+
+    private static func stripTomlComment(from line: String) -> String {
+        var result = String()
+        var quote: Character?
+        var previousWasBackslash = false
+
+        for character in line {
+            if let activeQuote = quote {
+                result.append(character)
+                if character == activeQuote && !previousWasBackslash {
+                    quote = nil
+                }
+                previousWasBackslash = character == "\\" && !previousWasBackslash
+                if character != "\\" {
+                    previousWasBackslash = false
+                }
+                continue
+            }
+
+            switch character {
+            case "\"", "'":
+                quote = character
+                result.append(character)
+            case "#":
+                return result
+            default:
+                result.append(character)
+            }
+        }
+
+        return result
+    }
+
+    private static func firstTomlEqualsIndex(in line: String) -> String.Index? {
+        var quote: Character?
+        var squareDepth = 0
+        var braceDepth = 0
+        var previousWasBackslash = false
+
+        for index in line.indices {
+            let character = line[index]
+            if let activeQuote = quote {
+                if character == activeQuote && !previousWasBackslash {
+                    quote = nil
+                }
+                previousWasBackslash = character == "\\" && !previousWasBackslash
+                if character != "\\" {
+                    previousWasBackslash = false
+                }
+                continue
+            }
+
+            switch character {
+            case "\"", "'":
+                quote = character
+            case "[":
+                squareDepth += 1
+            case "]":
+                squareDepth = max(0, squareDepth - 1)
+            case "{":
+                braceDepth += 1
+            case "}":
+                braceDepth = max(0, braceDepth - 1)
+            case "=" where squareDepth == 0 && braceDepth == 0:
+                return index
+            default:
+                break
             }
         }
         return nil
