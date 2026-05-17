@@ -1024,7 +1024,7 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(result.stdoutMessage, "done")
     }
 
-    func testResponsesLoopExposesUnavailableMcpToolPlaceholderOnNextRequestLikeRust() async throws {
+    func testResponsesLoopDoesNotBackfillUnavailableMcpToolPlaceholderLikeCurrentRust() async throws {
         var features = FeatureStates.withDefaults()
         features.set(.unavailableDummyTools, enabled: true)
         let initial = Prompt(input: [
@@ -1048,7 +1048,7 @@ final class NonInteractiveExecTests: XCTestCase {
                 .success(await script.next(prompt))
             },
             executeFunctionCall: { item in
-                guard case let .functionCall(_, name, namespace, _, callID) = item else {
+                guard case let .functionCall(_, _, _, _, callID) = item else {
                     return .functionCallOutput(
                         callID: "bad",
                         output: FunctionCallOutputPayload(content: "bad", success: false)
@@ -1057,10 +1057,7 @@ final class NonInteractiveExecTests: XCTestCase {
                 return .functionCallOutput(
                     callID: callID,
                     output: FunctionCallOutputPayload(
-                        content: ToolSpecFactory.unavailableToolMessage(
-                            toolName: UnavailableToolName(namespace: namespace, name: name).flatName,
-                            nextStep: "Retry after the tool becomes available or ask the user to re-enable it."
-                        ),
+                        content: "unsupported call: mcp__codex_apps__calendar_create_event",
                         success: false
                     )
                 )
@@ -1070,17 +1067,7 @@ final class NonInteractiveExecTests: XCTestCase {
         let prompts = await script.prompts()
         XCTAssertEqual(prompts.count, 2)
         XCTAssertEqual(prompts[0].tools.map(\.name), [])
-        XCTAssertEqual(prompts[1].tools.map(\.name), ["mcp__codex_apps__calendar_create_event"])
-        guard case let .function(tool) = prompts[1].tools[0] else {
-            return XCTFail("expected unavailable placeholder function tool")
-        }
-        XCTAssertTrue(tool.description.contains(
-            "Tool `mcp__codex_apps__calendar_create_event` is not currently available."
-        ))
-        XCTAssertEqual(
-            tool.parameters,
-            .object(properties: [:], required: nil, additionalProperties: .boolean(false))
-        )
+        XCTAssertEqual(prompts[1].tools.map(\.name), [])
     }
 
     func testResponsesLoopHandlesModelsETagEventsLikeRust() async throws {
@@ -2957,7 +2944,7 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(payload.content, "unsupported call: mcp__codex_apps__calendar_create_event")
     }
 
-    func testUnavailableMcpToolCallUsesRustPlaceholderMessageWhenFeatureEnabled() async throws {
+    func testUnavailableMcpToolCallIgnoresRemovedPlaceholderFeatureLikeCurrentRust() async throws {
         var features = FeatureStates.withDefaults()
         features.set(.unavailableDummyTools, enabled: true)
 
@@ -2982,10 +2969,7 @@ final class NonInteractiveExecTests: XCTestCase {
         }
         XCTAssertEqual(callID, "call-mcp")
         XCTAssertEqual(payload.success, false)
-        XCTAssertEqual(
-            payload.content,
-            "Tool `mcp__codex_apps__calendar_create_event` is not currently available. It appeared in earlier tool calls in this conversation, but its implementation is not available in the current request. Retry after the tool becomes available or ask the user to re-enable it."
-        )
+        XCTAssertEqual(payload.content, "unsupported call: mcp__codex_apps__calendar_create_event")
     }
 
     func testReportAgentJobResultRequiresAgentJobContext() async throws {

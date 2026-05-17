@@ -765,28 +765,6 @@ private struct DeferredDynamicToolName: Hashable {
     }
 }
 
-public struct UnavailableToolName: Equatable, Hashable, Sendable {
-    public let namespace: String?
-    public let name: String
-
-    public init(namespace: String? = nil, name: String) {
-        self.namespace = namespace
-        self.name = name
-    }
-
-    public static func plain(_ name: String) -> UnavailableToolName {
-        UnavailableToolName(name: name)
-    }
-
-    public static func namespaced(_ namespace: String, _ name: String) -> UnavailableToolName {
-        UnavailableToolName(namespace: namespace, name: name)
-    }
-
-    public var flatName: String {
-        (namespace ?? "") + name
-    }
-}
-
 public struct ToolsConfig: Equatable, Sendable {
     public let shellType: ConfigShellToolType
     public let applyPatchToolType: ApplyPatchToolType?
@@ -911,16 +889,14 @@ public enum ToolSpecFactory {
         mcpTools: [String: McpTool]? = nil,
         deferredMcpTools: [String: McpTool]? = nil,
         dynamicTools: [DynamicToolSpec] = [],
-        discoverableTools: [DiscoverableTool]? = nil,
-        unavailableCalledTools: [UnavailableToolName] = []
+        discoverableTools: [DiscoverableTool]? = nil
     ) -> [ConfiguredToolSpec] {
         buildSpecs(
             config: config,
             mcpToolInfos: mcpTools.map(mcpToolInfos(from:)),
             deferredMcpToolInfos: deferredMcpTools.map(mcpToolInfos(from:)),
             dynamicTools: dynamicTools,
-            discoverableTools: discoverableTools,
-            unavailableCalledTools: unavailableCalledTools
+            discoverableTools: discoverableTools
         )
     }
 
@@ -929,8 +905,7 @@ public enum ToolSpecFactory {
         mcpToolInfos: [McpToolInfo]?,
         deferredMcpToolInfos: [McpToolInfo]? = nil,
         dynamicTools: [DynamicToolSpec] = [],
-        discoverableTools: [DiscoverableTool]? = nil,
-        unavailableCalledTools: [UnavailableToolName] = []
+        discoverableTools: [DiscoverableTool]? = nil
     ) -> [ConfiguredToolSpec] {
         var specs: [ConfiguredToolSpec] = []
 
@@ -1078,11 +1053,6 @@ public enum ToolSpecFactory {
             }
         }
 
-        appendUnavailableToolSpecs(
-            &specs,
-            unavailableCalledTools: unavailableCalledTools
-        )
-
         return specs
     }
 
@@ -1099,30 +1069,6 @@ public enum ToolSpecFactory {
                 deferredDynamicTools: deferredDynamicTools
             )
         }
-    }
-
-    public static func exposedUnavailableToolNames(from specs: [ToolSpec]) -> [UnavailableToolName] {
-        var names: [UnavailableToolName] = []
-        for spec in specs {
-            switch spec {
-            case let .function(tool):
-                names.append(.plain(tool.name))
-            case let .namespace(namespace):
-                for tool in namespace.tools {
-                    guard case let .function(function) = tool else {
-                        continue
-                    }
-                    names.append(.namespaced(namespace.name, function.name))
-                }
-            case .toolSearch,
-                 .localShell,
-                 .imageGeneration,
-                 .webSearch,
-                 .freeform:
-                continue
-            }
-        }
-        return names
     }
 
     public static func createToolsJSONForResponsesAPI(_ tools: [ToolSpec]) throws -> [Any] {
@@ -1305,68 +1251,6 @@ public enum ToolSpecFactory {
             deferLoading: tool.deferLoading ? true : nil,
             parameters: JSONSchema.sanitized(from: jsonCompatibleValue(tool.inputSchema))
         )
-    }
-
-    public static func collectUnavailableCalledTools(
-        input: [ResponseItem],
-        exposedToolNames: [UnavailableToolName]
-    ) -> [UnavailableToolName] {
-        let exposedFlatNames = Set(exposedToolNames.map(\.flatName))
-        var unavailableByFlatName: [String: UnavailableToolName] = [:]
-        for item in input {
-            guard case let .functionCall(_, name, namespace, _, _) = item,
-                  shouldCollectUnavailableTool(name: name, namespace: namespace)
-            else {
-                continue
-            }
-            let toolName = UnavailableToolName(namespace: namespace, name: name)
-            guard !exposedFlatNames.contains(toolName.flatName) else {
-                continue
-            }
-            if unavailableByFlatName[toolName.flatName] == nil {
-                unavailableByFlatName[toolName.flatName] = toolName
-            }
-        }
-        return unavailableByFlatName.keys.sorted().compactMap { unavailableByFlatName[$0] }
-    }
-
-    public static func shouldCollectUnavailableTool(name: String, namespace: String?) -> Bool {
-        namespace?.hasPrefix("mcp__") == true || name.hasPrefix("mcp__")
-    }
-
-    public static func unavailableToolMessage(toolName: String, nextStep: String) -> String {
-        "Tool `\(toolName)` is not currently available. It appeared in earlier tool calls in this conversation, but its implementation is not available in the current request. \(nextStep)"
-    }
-
-    public static func createUnavailableTool(_ toolName: UnavailableToolName) -> ToolSpec {
-        functionTool(
-            name: toolName.flatName,
-            description: unavailableToolMessage(
-                toolName: toolName.flatName,
-                nextStep: "Calling this placeholder returns an error explaining that the tool is unavailable."
-            ),
-            properties: [:],
-            required: nil
-        )
-    }
-
-    private static func appendUnavailableToolSpecs(
-        _ specs: inout [ConfiguredToolSpec],
-        unavailableCalledTools: [UnavailableToolName]
-    ) {
-        guard !unavailableCalledTools.isEmpty else {
-            return
-        }
-        var existingSpecNames = Set(specs.map(\.spec.name))
-        for toolName in unavailableCalledTools.sorted(by: { $0.flatName < $1.flatName }) {
-            guard existingSpecNames.insert(toolName.flatName).inserted else {
-                continue
-            }
-            specs.append(ConfiguredToolSpec(
-                spec: createUnavailableTool(toolName),
-                supportsParallelToolCalls: false
-            ))
-        }
     }
 
     static func createMCPResponsesAPITool(

@@ -509,7 +509,6 @@ public enum NonInteractiveExec {
                     transcriptItems.append(contentsOf: result.additionalContextItems)
                 }
             }
-            refreshUnavailableDummyTools(in: &prompt, features: features)
         }
 
         allEvents.append(.failure(.stream("too many tool call iterations")))
@@ -533,21 +532,6 @@ public enum NonInteractiveExec {
             }
             await handleModelsETag(etag)
         }
-    }
-
-    private static func refreshUnavailableDummyTools(in prompt: inout Prompt, features: FeatureStates) {
-        guard features.isEnabled(.unavailableDummyTools) else {
-            return
-        }
-        let exposedToolNames = ToolSpecFactory.exposedUnavailableToolNames(from: prompt.tools)
-        let unavailableTools = ToolSpecFactory.collectUnavailableCalledTools(
-            input: prompt.input,
-            exposedToolNames: exposedToolNames
-        )
-        guard !unavailableTools.isEmpty else {
-            return
-        }
-        prompt.tools.append(contentsOf: unavailableTools.map(ToolSpecFactory.createUnavailableTool))
     }
 
     private static func applyPatchStreamingEvents(
@@ -1643,19 +1627,6 @@ public enum NonInteractiveExec {
                     context: agentJobContext
                 ) {
                     return executed(agentJobOutput)
-                }
-                if features.isEnabled(.unavailableDummyTools),
-                   ToolSpecFactory.shouldCollectUnavailableTool(name: name, namespace: namespace)
-                {
-                    let toolName = UnavailableToolName(namespace: namespace, name: name).flatName
-                    return executed(functionOutput(
-                        callID: callID,
-                        content: ToolSpecFactory.unavailableToolMessage(
-                            toolName: toolName,
-                            nextStep: "Retry after the tool becomes available or ask the user to re-enable it."
-                        ),
-                        success: false
-                    ))
                 }
                 return executed(functionOutput(
                     callID: callID,

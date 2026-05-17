@@ -622,14 +622,6 @@ final class ToolSpecTests: XCTestCase {
             ]
         ])
 
-        XCTAssertEqual(
-            ToolSpecFactory.exposedUnavailableToolNames(from: [spec]),
-            [.namespaced("extension/", "echo")]
-        )
-        XCTAssertEqual(
-            ToolSpecFactory.exposedUnavailableToolNames(from: [spec]).map(\.flatName),
-            ["extension/echo"]
-        )
     }
 
     func testWebSearchToolSpecSerializesExpectedWireShape() throws {
@@ -798,130 +790,17 @@ final class ToolSpecTests: XCTestCase {
         XCTAssertEqual(parallelSpecs["computer_key"], true)
     }
 
-    func testCollectUnavailableCalledToolsDetectsMcpFunctionCallsLikeRust() {
-        let input = [
-            ResponseItem.functionCall(
-                name: "shell",
-                arguments: "{}",
-                callID: "call-shell"
-            ),
-            ResponseItem.functionCall(
-                name: "mcp__server__lookup",
-                arguments: "{}",
-                callID: "call-lookup"
-            ),
-            ResponseItem.functionCall(
-                name: "_create_event",
-                namespace: "mcp__codex_apps__calendar",
-                arguments: "{}",
-                callID: "call-create-event"
-            ),
-            ResponseItem.functionCall(
-                name: "mcp__server__lookup",
-                arguments: "{}",
-                callID: "call-lookup-duplicate"
-            )
-        ]
-
-        let tools = ToolSpecFactory.collectUnavailableCalledTools(
-            input: input,
-            exposedToolNames: []
-        )
-
-        XCTAssertEqual(tools, [
-            .namespaced("mcp__codex_apps__calendar", "_create_event"),
-            .plain("mcp__server__lookup")
-        ])
-    }
-
-    func testCollectUnavailableCalledToolsSkipsExposedFlatNamesLikeRust() {
-        let input = [
-            ResponseItem.functionCall(
-                name: "mcp__server__lookup",
-                arguments: "{}",
-                callID: "call-lookup"
-            ),
-            ResponseItem.functionCall(
-                name: "mcp__server__missing",
-                arguments: "{}",
-                callID: "call-missing"
-            )
-        ]
-
-        XCTAssertEqual(
-            ToolSpecFactory.collectUnavailableCalledTools(
-                input: input,
-                exposedToolNames: [.plain("mcp__server__lookup")]
-            ),
-            [.plain("mcp__server__missing")]
-        )
-        XCTAssertEqual(
-            ToolSpecFactory.collectUnavailableCalledTools(
-                input: [input[0]],
-                exposedToolNames: [.namespaced("mcp__server__", "lookup")]
-            ),
-            []
-        )
-    }
-
-    func testCollectUnavailableCalledToolsKeepsFirstFlatNameCollisionLikeRust() {
-        let input = [
-            ResponseItem.functionCall(
-                name: "mcp__server__lookup",
-                arguments: "{}",
-                callID: "call-flat"
-            ),
-            ResponseItem.functionCall(
-                name: "lookup",
-                namespace: "mcp__server__",
-                arguments: "{}",
-                callID: "call-namespaced"
-            )
-        ]
-
-        XCTAssertEqual(
-            ToolSpecFactory.collectUnavailableCalledTools(
-                input: input,
-                exposedToolNames: []
-            ),
-            [.plain("mcp__server__lookup")]
-        )
-    }
-
-    func testBuildSpecsAddsUnavailableMcpPlaceholderSpecLikeRust() throws {
-        let unavailableTool = UnavailableToolName.namespaced(
-            "mcp__codex_apps__calendar",
-            "_create_event"
-        )
-        let specs = ToolSpecFactory.buildSpecs(
-            config: ToolsConfig(
-                shellType: .disabled
-            ),
-            unavailableCalledTools: [unavailableTool]
-        )
+    func testBuildSpecsDoesNotBackfillUnavailableMcpPlaceholdersLikeCurrentRust() {
+        let specs = ToolSpecFactory.buildSpecs(config: ToolsConfig(shellType: .disabled))
 
         XCTAssertEqual(specs.map(\.spec.name), [
             "list_mcp_resources",
             "list_mcp_resource_templates",
             "read_mcp_resource",
             "update_plan",
-            "view_image",
-            "mcp__codex_apps__calendar_create_event"
+            "view_image"
         ])
-        XCTAssertEqual(specs.last?.supportsParallelToolCalls, false)
-
-        let tool = try functionTool(named: "mcp__codex_apps__calendar_create_event", in: specs)
-        XCTAssertTrue(tool.description.contains(
-            "Tool `mcp__codex_apps__calendar_create_event` is not currently available."
-        ))
-        XCTAssertEqual(
-            tool.parameters,
-            .object(
-                properties: [:],
-                required: nil,
-                additionalProperties: .boolean(false)
-            )
-        )
+        XCTAssertFalse(specs.contains { $0.spec.name == "mcp__codex_apps__calendar_create_event" })
     }
 
     func testRequestPluginInstallCanRegisterWithoutSearchTool() {
@@ -1353,10 +1232,6 @@ final class ToolSpecTests: XCTestCase {
         XCTAssertEqual(namespace.name, "extension/")
         XCTAssertEqual(namespace.description, "Tools in the extension/ namespace.")
         XCTAssertEqual(namespace.tools.map(namespaceToolName), ["echo"])
-        XCTAssertEqual(
-            ToolSpecFactory.exposedUnavailableToolNames(from: [dynamicSpec.spec]),
-            [.namespaced("extension/", "echo")]
-        )
     }
 
     func testModelVisibleSpecsFilterDeferredDynamicToolsLikeRustRouter() throws {

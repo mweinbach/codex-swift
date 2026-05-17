@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `2304ec45ca` (`Remove unavailable MCP
+  placeholder tool backfill`). Swift no longer collects historical
+  unavailable MCP calls, appends synthetic placeholder tool specs, or returns
+  the removed unavailable-tool message for unmatched MCP calls; those calls now
+  fall through the ordinary unsupported-call path like current Rust.
 - 2026-05-17: rechecked Rust idle thread teardown in
   `codex-rs/app-server/src/request_processors/thread_lifecycle.rs` and the
   app-server README. Swift runtime `shutdown_complete` handling now mirrors the
@@ -878,10 +883,9 @@ Recent upstream audit checkpoint:
   metadata while dropping invalid header values like Rust `HeaderValue` parsing.
 - 2026-05-16: rechecked Rust unavailable MCP dummy-tool routing in
   `codex-rs/core/src/session/turn.rs`, `unavailable_tool.rs`, and
-  `tools/router.rs`. Swift now refreshes non-interactive request tools after a
-  missing MCP function call so the next Responses request exposes the same
-  Rust-style unavailable placeholder function tool, while preserving the
-  existing failure output for the attempted call.
+  `tools/router.rs`. This older compatibility note was superseded by the
+  2026-05-17 recheck of Rust commit `2304ec45ca`, which removed the
+  placeholder backfill path.
 - 2026-05-16: rechecked Rust commit `314229fd72` (`Remove skills list
   extra roots`) and app-server v2 `SkillsListParams` decoding in
   `codex-rs/app-server-protocol/src/protocol/v2/plugin.rs`. Swift shared
@@ -2075,7 +2079,7 @@ Recent upstream audit checkpoint:
 - 2026-05-14: rechecked Rust `codex-rs/model-provider-info/src/lib.rs` / `model_provider_info_tests.rs` provider defaults. Swift `ModelProviderInfo` now defaults missing `wire_api` fields to `responses` like Rust while keeping explicit built-in OSS helpers on their Rust-selected wire APIs.
 - 2026-05-14: rechecked Rust commit `772e034594` and `codex-rs/models-manager/models.json`. Swift's bundled `gpt-5.4` model preset now has focused coverage for Rust's removal of the `ultrafast` service tier while retaining the legacy `fast` additional-speed tier.
 - 2026-05-14: rechecked Rust commit `46e2250bcf` and `codex-rs/hooks/src/registry.rs` / `types.rs`. Swift hook config materialization now has focused coverage that neither `AfterToolUse` nor raw `after_tool_use` legacy config entries populate handlers, leaving only the supported `PostToolUse` hook surface active.
-- 2026-05-14: rechecked Rust commit `61142b6169` and `codex-rs/core/src/unavailable_tool.rs`. Swift unavailable MCP tool collection now preserves Rust's first-wins behavior when a plain MCP name and a namespaced MCP call flatten to the same placeholder name.
+- 2026-05-14: rechecked Rust commit `61142b6169` and `codex-rs/core/src/unavailable_tool.rs`. The then-current unavailable MCP placeholder collection behavior was later superseded by Rust commit `2304ec45ca`, and Swift now follows the removed-backfill path.
 - 2026-05-14: rechecked Rust commit `5f2543b74e` and the `CODEX_HOME/environments.toml` provider selection path from `codex-rs/core/src/environment_selection.rs` / `codex-rs/exec-server/src/environment_toml.rs`. Swift now has focused coverage for the configured-provider boundary where `default = "local"` still starts new threads with all configured environments after local, while the legacy `CODEX_EXEC_SERVER_URL` fallback remains separately covered.
 - 2026-05-14: rechecked Rust's cloud requirements load metric and fetch duration timer names from `codex-rs/cloud-requirements/src/lib.rs`. Swift now exposes the same load metric tag order (`trigger`, `outcome`) and fetch duration metric name.
 - 2026-05-14: rechecked Rust commit `d5f0b6d63a` and `codex-rs/models-manager/src/manager.rs` namespaced model metadata lookup. Swift now has focused tests pinning the one-segment hyphenated provider namespace suffix retry and the multi-segment rejection boundary.
@@ -2406,8 +2410,8 @@ Recent upstream audit checkpoint:
   - user shell command start/end tag detection, duration formatting, aggregated-output records, timeout prefixes, truncation-policy integration, and message response-item wire shape
 - `codex-rs/core/src/client_common.rs` tool models and `codex-rs/core/src/tools/spec.rs`
   - shell/apply-patch tool config wire values, JSON-Schema subset and sanitizer, Responses API tool specs, MCP namespace/function conversion, hosted `tool_search`/`image_generation`/rich `web_search` wire shapes, `web_search` mode projection to `external_web_access`, forwarding configured web-search filters/user location/context size into hosted tool specs, deferred MCP `tool_search` indexing/execution, Chat Completions tool JSON rewriting, static tool ordering, parallel-tool-call support flags, internal `ResponsesApiTool.output_schema` preservation for MCP `CallToolResult` structured-content schemas while keeping the field skipped from serialized request JSON like Rust, and Rust-compatible JSON-Schema preservation for integer/null primitives, string enum constraints, explicit nullable type unions, nested `anyOf`, and default child fields on nullable object/array unions
-- `codex-rs/core/src/unavailable_tool.rs` and `codex-rs/core/src/tools/handlers/unavailable_tool.rs`
-  - unavailable MCP tool placeholders now preserve Rust's function-call collection rules, namespace/name flattening, exposed-tool filtering, placeholder Responses API schema/ordering, disabled-feature fallback, and model-facing unavailable-tool error message. Wiring the collector into live per-turn MCP exposure remains pending with the broader running-thread tool router.
+- `codex-rs/core/src/tools/spec.rs` and Rust commit `2304ec45ca`
+  - removed unavailable MCP dummy-tool backfill, including placeholder spec collection, placeholder handler routing, and the special model-facing unavailable-tool message; unmatched unavailable MCP calls now use the ordinary unsupported-call behavior.
 - `codex-rs/core/src/tools/handlers/request_plugin_install_spec.rs`
   - hosted `request_plugin_install` Responses API tool schema, description guardrails, discoverable connector/plugin listing order, plugin capability fallback summaries, `tool_suggest` registration gate, and parallel-tool-call support flag
 - `codex-rs/tools/src/tool_discovery.rs` and `codex-rs/tools/src/request_plugin_install.rs`
