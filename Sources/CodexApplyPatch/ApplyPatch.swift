@@ -788,15 +788,18 @@ public enum ApplyPatch {
                     originalContents = try String(contentsOf: sourceURL, encoding: .utf8)
                 } catch {
                     delta.exact = false
+                    let readError = FileManager.default.fileExists(atPath: sourceURL.path)
+                        ? error.localizedDescription
+                        : "No such file or directory (os error 2)"
                     throw ApplyPatchFailure(
-                        error: .io("Failed to read file to update \(path): \(error.localizedDescription)"),
+                        error: .io("Failed to read file to update \(sourceURL.path): \(readError)"),
                         delta: delta
                     )
                 }
                 let newContents: String
                 do {
                     newContents = try deriveNewContents(
-                        path: path,
+                        path: sourceURL.path,
                         originalContents: originalContents,
                         chunks: chunks
                     )
@@ -841,7 +844,7 @@ public enum ApplyPatch {
                             newContent: newContents
                         )
                     )
-                    affected.modified.append(path)
+                    affected.modified.append(movePath)
                 } else {
                     do {
                         try newContents.write(to: sourceURL, atomically: true, encoding: .utf8)

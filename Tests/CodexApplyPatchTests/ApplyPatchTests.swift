@@ -139,7 +139,7 @@ final class ApplyPatchTests: XCTestCase {
 
         let result = ApplyPatch.apply(patch, cwd: dir.url)
         XCTAssertEqual(result.stderr, "")
-        XCTAssertEqual(result.stdout, "Success. Updated the following files:\nM old/name.txt\n")
+        XCTAssertEqual(result.stdout, "Success. Updated the following files:\nM renamed/dir/name.txt\n")
         XCTAssertEqual(
             result.delta,
             AppliedPatchDelta(
@@ -263,8 +263,119 @@ final class ApplyPatchTests: XCTestCase {
 
         let result = ApplyPatch.apply(patch, cwd: dir.url)
         XCTAssertEqual(result.stdout, "")
-        XCTAssertEqual(result.stderr, "Failed to find expected lines in modify.txt:\nmissing\n")
+        XCTAssertEqual(result.stderr, "Failed to find expected lines in \(target.path):\nmissing\n")
         XCTAssertEqual(try String(contentsOf: target), "line1\nline2\n")
+    }
+
+    func testApplyPatchRequiresExistingFileForUpdateLikeRustCLI() throws {
+        let dir = try TemporaryDirectory()
+        let missing = dir.url.appendingPathComponent("missing.txt")
+
+        let patch = """
+        *** Begin Patch
+        *** Update File: missing.txt
+        @@
+        -old
+        +new
+        *** End Patch
+        """
+
+        let result = ApplyPatch.apply(patch, cwd: dir.url)
+        XCTAssertEqual(result.stdout, "")
+        XCTAssertEqual(
+            result.stderr,
+            "Failed to read file to update \(missing.path): No such file or directory (os error 2)\n"
+        )
+    }
+
+    func testApplyPatchMoveOverwritesExistingDestinationLikeRustCLI() throws {
+        let dir = try TemporaryDirectory()
+        let original = dir.url.appendingPathComponent("old/name.txt")
+        let destination = dir.url.appendingPathComponent("renamed/dir/name.txt")
+        try FileManager.default.createDirectory(at: original.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "from\n".write(to: original, atomically: true, encoding: .utf8)
+        try "existing\n".write(to: destination, atomically: true, encoding: .utf8)
+
+        let patch = """
+        *** Begin Patch
+        *** Update File: old/name.txt
+        *** Move to: renamed/dir/name.txt
+        @@
+        -from
+        +new
+        *** End Patch
+        """
+
+        let result = ApplyPatch.apply(patch, cwd: dir.url)
+        XCTAssertEqual(result.stderr, "")
+        XCTAssertEqual(result.stdout, "Success. Updated the following files:\nM renamed/dir/name.txt\n")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: original.path))
+        XCTAssertEqual(try String(contentsOf: destination), "new\n")
+    }
+
+    func testApplyPatchAddOverwritesExistingFileLikeRustCLI() throws {
+        let dir = try TemporaryDirectory()
+        let path = dir.url.appendingPathComponent("duplicate.txt")
+        try "old content\n".write(to: path, atomically: true, encoding: .utf8)
+
+        let patch = """
+        *** Begin Patch
+        *** Add File: duplicate.txt
+        +new content
+        *** End Patch
+        """
+
+        let result = ApplyPatch.apply(patch, cwd: dir.url)
+        XCTAssertEqual(result.stderr, "")
+        XCTAssertEqual(result.stdout, "Success. Updated the following files:\nA duplicate.txt\n")
+        XCTAssertEqual(try String(contentsOf: path), "new content\n")
+    }
+
+    func testApplyPatchUpdatesFileAppendsTrailingNewlineLikeRustCLI() throws {
+        let dir = try TemporaryDirectory()
+        let target = dir.url.appendingPathComponent("no_newline.txt")
+        try "no newline at end".write(to: target, atomically: true, encoding: .utf8)
+
+        let patch = """
+        *** Begin Patch
+        *** Update File: no_newline.txt
+        @@
+        -no newline at end
+        +first line
+        +second line
+        *** End Patch
+        """
+
+        let result = ApplyPatch.apply(patch, cwd: dir.url)
+        XCTAssertEqual(result.stderr, "")
+        XCTAssertEqual(result.stdout, "Success. Updated the following files:\nM no_newline.txt\n")
+        XCTAssertEqual(try String(contentsOf: target), "first line\nsecond line\n")
+    }
+
+    func testApplyPatchFailureAfterPartialSuccessLeavesChangesLikeRustCLI() throws {
+        let dir = try TemporaryDirectory()
+        let created = dir.url.appendingPathComponent("created.txt")
+        let missing = dir.url.appendingPathComponent("missing.txt")
+
+        let patch = """
+        *** Begin Patch
+        *** Add File: created.txt
+        +hello
+        *** Update File: missing.txt
+        @@
+        -old
+        +new
+        *** End Patch
+        """
+
+        let result = ApplyPatch.apply(patch, cwd: dir.url)
+        XCTAssertEqual(result.stdout, "")
+        XCTAssertEqual(
+            result.stderr,
+            "Failed to read file to update \(missing.path): No such file or directory (os error 2)\n"
+        )
+        XCTAssertEqual(try String(contentsOf: created), "hello\n")
     }
 
     func testApplyPatchFindsExpectedLinesWithRustSeekSequenceLenience() throws {

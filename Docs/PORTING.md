@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust apply-patch executable fixtures in
+  `codex-rs/apply-patch/tests/suite/tool.rs`. Swift apply-patch summaries now
+  report moved update hunks under the destination path like Rust, update-hunk
+  read/context failures use resolved paths with Rust's missing-file text, and
+  focused tests pin Rust's overwrite, trailing-newline, and partial-success
+  CLI cases.
 - 2026-05-17: rechecked Rust collaboration mode preset fixtures in
   `codex-rs/models-manager/src/collaboration_mode_presets_tests.rs`. Swift now
   pins the same preset display-name semantics and default developer instruction
