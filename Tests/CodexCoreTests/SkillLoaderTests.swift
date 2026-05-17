@@ -280,7 +280,7 @@ final class SkillLoaderTests: XCTestCase {
         XCTAssertEqual(outcome.skills.map(\.pluginID), ["linear@chatgpt-global"])
     }
 
-    func testRemoteInstalledPluginSkillRootsRespectFeatureEnablementAndLocalCacheLikeRustManager() throws {
+    func testRemoteInstalledPluginSkillRootsRespectPluginsFeatureAndLocalCacheLikeRustManager() throws {
         let tmp = try SkillLoaderTemporaryDirectory()
         let codexHome = tmp.url.appendingPathComponent("home", isDirectory: true)
         let pluginRoot = codexHome.appendingPathComponent(
@@ -301,9 +301,16 @@ final class SkillLoaderTests: XCTestCase {
             )
         ]
 
-        XCTAssertTrue(SkillLoader.configuredPluginSkillRoots(
+        XCTAssertEqual(SkillLoader.configuredPluginSkillRoots(
             codexHome: codexHome,
             configLayerStack: try remotePluginFeatureConfigStack(codexHome: codexHome, remotePluginEnabled: false),
+            remoteInstalledPlugins: remoteInstalled
+        ), [
+            PluginSkillRoot(path: pluginRoot.appendingPathComponent("skills", isDirectory: true), pluginID: "linear@chatgpt-global")
+        ])
+        XCTAssertTrue(SkillLoader.configuredPluginSkillRoots(
+            codexHome: codexHome,
+            configLayerStack: try remotePluginFeatureConfigStack(codexHome: codexHome, pluginsFeatureEnabled: false),
             remoteInstalledPlugins: remoteInstalled
         ).isEmpty)
         XCTAssertTrue(SkillLoader.configuredPluginSkillRoots(

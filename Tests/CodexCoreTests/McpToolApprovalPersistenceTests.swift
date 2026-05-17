@@ -221,7 +221,7 @@ final class McpToolApprovalPersistenceTests: XCTestCase {
         XCTAssertTrue(contents.contains("approval_mode = \"approve\""))
     }
 
-    func testConfiguredPluginMcpToolApprovalSourcesDiscoverInstalledPluginServersLikeRust() throws {
+    func testConfiguredPluginMcpToolApprovalSourcesDiscoverInstalledPluginServersWithoutRemotePluginFlagLikeRust() throws {
         let temp = try TemporaryCodexHome()
         try """
         [features]
@@ -286,7 +286,7 @@ final class McpToolApprovalPersistenceTests: XCTestCase {
         let stack = try userConfigLayerStack(codexHome: temp.url, config: .table([
             "features": .table([
                 "plugins": .bool(true),
-                "remote_plugin": .bool(true),
+                "remote_plugin": .bool(false),
             ]),
             "plugins": .table([
                 "sample@test": .table(["enabled": .bool(true)]),
@@ -317,6 +317,24 @@ final class McpToolApprovalPersistenceTests: XCTestCase {
                 ),
             ]
         )
+
+        let pluginsDisabledStack = try userConfigLayerStack(codexHome: temp.url, config: .table([
+            "features": .table([
+                "plugins": .bool(false),
+                "remote_plugin": .bool(true),
+            ]),
+        ]))
+        XCTAssertTrue(McpToolApprovalPersistence.configuredPluginMcpToolApprovalSources(
+            codexHome: temp.url,
+            configLayerStack: pluginsDisabledStack,
+            remoteInstalledPlugins: [
+                RemoteInstalledPluginReference(
+                    marketplaceName: "market",
+                    pluginName: "remote",
+                    enabled: true
+                ),
+            ]
+        ).isEmpty)
     }
 
     func testPersistCustomMcpToolApprovalDiscoversConfiguredPluginServerLikeRust() throws {

@@ -12,6 +12,13 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `9797296564` (`Relax remote plugin sync
+  gate`). Swift now mirrors Rust's relaxed remote-installed plugin cache gate:
+  already-cached remote installed plugin references contribute plugin skill
+  roots and plugin-backed MCP approval persistence whenever `features.plugins`
+  is enabled, even if `features.remote_plugin` is disabled, and remote install
+  mutation refreshes the installed-plugin cache under the same plugins feature
+  gate.
 - 2026-05-17: rechecked Rust commit `74a1b46a00` (`[codex] add plugin
   marketplace CLI commands`). Swift now exposes and executes the Rust
   `codex plugin add`, `codex plugin list`, `codex plugin remove`, and

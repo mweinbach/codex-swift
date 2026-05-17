@@ -8940,9 +8940,7 @@ public enum CodexAppServer {
         auth: AppServerAuth,
         currentMutation: (marketplaceName: String, pluginName: String)? = nil
     ) -> RemoteInstalledPluginCacheRefreshOutcome {
-        guard runtimeConfig.features.isEnabled(.plugins),
-              runtimeConfig.features.isEnabled(.remotePlugin)
-        else {
+        guard runtimeConfig.features.isEnabled(.plugins) else {
             return RemoteInstalledPluginCacheRefreshOutcome()
         }
         var outcome = RemoteInstalledPluginCacheRefreshOutcome()
@@ -26837,8 +26835,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         warmFeaturedPluginIDs(runtimeConfig: runtimeConfig)
         autoUpgradeConfiguredMarketplaces()
 
-        guard runtimeConfig.features.isEnabled(.remotePlugin),
-            let auth = try? CodexAppServer.currentAuth(configuration: configuration),
+        guard let auth = try? CodexAppServer.currentAuth(configuration: configuration),
             case .chatGPT = auth.kind
         else {
             return

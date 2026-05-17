@@ -15487,14 +15487,14 @@ final class CodexAppServerTests: XCTestCase {
         )
     }
 
-    func testPluginInstallRemoteCallsInstallMutation() throws {
+    func testPluginInstallRemoteCallsInstallMutationAndRefreshesCacheWithoutRemotePluginFlagLikeRust() throws {
         let temp = try TemporaryDirectory()
         try """
         chatgpt_base_url = "https://chatgpt.example/backend-api/"
 
         [features]
         plugins = true
-        remote_plugin = true
+        remote_plugin = false
         """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
         let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
         try """
@@ -17210,9 +17210,22 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNotNil(response["result"] as? [String: Any])
         XCTAssertFalse(FileManager.default.fileExists(atPath: cacheRoot.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: legacyCacheRoot.path))
-        XCTAssertEqual(capture.requests.map { $0.httpMethod ?? "" }, ["GET", "POST"])
-        XCTAssertEqual(capture.requests.map { $0.value(forHTTPHeaderField: "Authorization") }, ["Bearer chatgpt-token", "Bearer chatgpt-token"])
-        XCTAssertEqual(capture.requests.map { $0.value(forHTTPHeaderField: "chatgpt-account-id") }, ["account-123", "account-123"])
+        XCTAssertEqual(capture.requests.map { $0.httpMethod ?? "" }, ["GET", "POST", "GET"])
+        XCTAssertEqual(capture.requests.map { $0.url?.path }, [
+            "/backend-api/ps/plugins/\(pluginID)",
+            "/backend-api/plugins/\(pluginID)/uninstall",
+            "/backend-api/ps/plugins/installed"
+        ])
+        XCTAssertEqual(capture.requests.map { $0.value(forHTTPHeaderField: "Authorization") }, [
+            "Bearer chatgpt-token",
+            "Bearer chatgpt-token",
+            "Bearer chatgpt-token"
+        ])
+        XCTAssertEqual(capture.requests.map { $0.value(forHTTPHeaderField: "chatgpt-account-id") }, [
+            "account-123",
+            "account-123",
+            "account-123"
+        ])
     }
 
     func testPluginUninstallUsesRemoteDetailScopeForWorkspaceCache() throws {

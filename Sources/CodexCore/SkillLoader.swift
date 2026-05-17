@@ -107,13 +107,11 @@ public enum SkillLoader {
                 pluginEnablement[pluginID] = boolConfig(pluginConfig, "enabled") ?? true
             }
         }
-        if configFeatureEnabled("remote_plugin", in: effectiveConfig, defaultValue: false) {
-            for plugin in remoteInstalledPlugins {
-                guard let pluginID = remoteInstalledPluginID(plugin) else {
-                    continue
-                }
-                pluginEnablement[pluginID] = plugin.enabled
+        for plugin in remoteInstalledPlugins {
+            guard let pluginID = remoteInstalledPluginID(plugin) else {
+                continue
             }
+            pluginEnablement[pluginID] = plugin.enabled
         }
 
         var roots: [PluginSkillRoot] = []
