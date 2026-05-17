@@ -1253,6 +1253,30 @@ final class CommandSurfaceCLITests: XCTestCase {
         }
     }
 
+    func testRunAsyncRemoteControlStopRoutesDaemonStopLikeRust() async {
+        var request: CodexCLI.AppServerCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: [
+                "-c",
+                "model=\"gpt-5\"",
+                "remote-control",
+                "stop"
+            ],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            appServerRunner: {
+                request = $0
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(request?.action, .remoteControlStop)
+        XCTAssertEqual(request?.listenTransport, .off)
+        XCTAssertEqual(request?.remoteControlEnabled, false)
+        XCTAssertEqual(request?.configOverrides.rawOverrides, ["model=\"gpt-5\""])
+    }
+
     func testRunAsyncRemoteControlRejectsRootRemoteFlagsBeforeRunner() async {
         let cases: [([String], String)] = [
             (
@@ -1266,6 +1290,10 @@ final class CommandSurfaceCLITests: XCTestCase {
             (
                 ["--remote", "ws://127.0.0.1:8080", "remote-control", "start"],
                 "`--remote ws://127.0.0.1:8080` is only supported for interactive TUI commands, not `codex remote-control start`"
+            ),
+            (
+                ["--remote-auth-token-env", "CODEX_REMOTE_TOKEN", "remote-control", "stop"],
+                "`--remote-auth-token-env` is only supported for interactive TUI commands, not `codex remote-control stop`"
             )
         ]
 
@@ -1392,8 +1420,12 @@ final class CommandSurfaceCLITests: XCTestCase {
                 "codex-swift: unsupported option for command 'remote-control start': --listen"
             ),
             (
-                ["remote-control", "stop"],
-                "codex-swift: unsupported remote-control subcommand: stop"
+                ["remote-control", "stop", "extra"],
+                "codex-swift: unexpected argument for command 'remote-control stop': extra"
+            ),
+            (
+                ["remote-control", "stop", "--listen"],
+                "codex-swift: unsupported option for command 'remote-control stop': --listen"
             )
         ]
 

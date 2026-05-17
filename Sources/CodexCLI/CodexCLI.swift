@@ -443,6 +443,7 @@ public struct CodexCLI: Sendable {
     public enum AppServerCommandAction: Equatable, Sendable {
         case run
         case remoteControl
+        case remoteControlStop
         case proxy(socketPath: String?)
         case generateTS(outDir: String, prettier: String?, experimental: Bool)
         case generateJSONSchema(outDir: String, experimental: Bool)
@@ -3270,19 +3271,26 @@ public struct CodexCLI: Sendable {
         _ arguments: [String],
         rootArguments: [String]
     ) -> ParseResult<AppServerCommandRequest> {
-        let positionals = positionalTokens(rootArguments)
-        let rootUsesExplicitStart = positionals.firstIndex(of: "remote-control").map { index in
-            let nextIndex = positionals.index(after: index)
-            return nextIndex < positionals.endIndex && positionals[nextIndex] == "start"
-        } ?? false
+        let rootSubcommand = commandArgument(after: "remote-control", in: rootArguments)
         let commandName: String
         let commandArguments: [String]
-        if arguments.first == "start" || rootUsesExplicitStart {
+        let action: AppServerCommandAction
+        let remoteControlEnabled: Bool
+        if arguments.first == "start" || rootSubcommand == "start" {
             commandName = "remote-control start"
             commandArguments = arguments.first == "start" ? Array(arguments.dropFirst()) : arguments
+            action = .remoteControl
+            remoteControlEnabled = true
+        } else if arguments.first == "stop" || rootSubcommand == "stop" {
+            commandName = "remote-control stop"
+            commandArguments = arguments.first == "stop" ? Array(arguments.dropFirst()) : arguments
+            action = .remoteControlStop
+            remoteControlEnabled = false
         } else {
             commandName = "remote-control"
             commandArguments = arguments
+            action = .remoteControl
+            remoteControlEnabled = true
         }
         if let remote = rootRemoteFlagValue(named: "--remote", beforeCommand: "remote-control", in: rootArguments) {
             return .failure(
@@ -3309,9 +3317,9 @@ public struct CodexCLI: Sendable {
         switch parseConfigOverrides(from: rootArguments) {
         case let .success(configOverrides):
             return .success(AppServerCommandRequest(
-                action: .remoteControl,
+                action: action,
                 listenTransport: .off,
-                remoteControlEnabled: true,
+                remoteControlEnabled: remoteControlEnabled,
                 configOverrides: configOverrides
             ))
         case let .failure(message, exitCode):
@@ -3321,6 +3329,22 @@ public struct CodexCLI: Sendable {
 
     private func rootRemoteFlagValue(named option: String, beforeCommand command: String, in arguments: [String]) -> String? {
         rootRemoteFlagValue(named: option, beforeCommands: [command], in: arguments)
+    }
+
+    private func commandArgument(after command: String, in arguments: [String]) -> String? {
+        var index = 0
+        while index < arguments.count {
+            let argument = arguments[index]
+            if argument == command {
+                return index + 1 < arguments.count ? arguments[index + 1] : nil
+            }
+            if optionConsumesValue(argument) {
+                index += 2
+            } else {
+                index += 1
+            }
+        }
+        return nil
     }
 
     private func rootRemoteFlagValue(named option: String, beforeCommand spec: CommandSpec, in arguments: [String]) -> String? {
@@ -3584,7 +3608,14 @@ public struct CodexCLI: Sendable {
                 return nil
             }
         case "remote-control":
-            return commandArguments.first == "start" ? "remote-control start" : "remote-control"
+            switch commandArguments.first {
+            case "start":
+                return "remote-control start"
+            case "stop":
+                return "remote-control stop"
+            default:
+                return "remote-control"
+            }
         case "exec", "computer-use", "review", "login", "logout", "mcp", "plugin",
              "mcp-server", "app", "completion", "update", "cloud",
              "apply", "responses-api-proxy", "stdio-to-uds", "exec-server":
