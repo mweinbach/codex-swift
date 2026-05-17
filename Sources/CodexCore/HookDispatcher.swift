@@ -270,7 +270,10 @@ public enum HookDispatcher {
             }
 
             var parsed: [(Int, ParsedHookHandler<Data>)] = []
-            for await value in group {
+            var completionOrder = 0
+            for await var value in group {
+                value.1.completionOrder = completionOrder
+                completionOrder += 1
                 parsed.append(value)
             }
             return parsed

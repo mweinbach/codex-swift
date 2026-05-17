@@ -2,6 +2,10 @@ import CodexApplyPatch
 import Darwin
 import Foundation
 
+private struct ToolRewriteError: Error, Equatable, Sendable {
+    let message: String
+}
+
 public enum UnifiedExecTiming {
     public static let minYieldTimeMS: UInt64 = 250
     public static let minEmptyYieldTimeMS: UInt64 = 5_000
@@ -983,6 +987,8 @@ public enum NonInteractiveExec {
         registeredToolExecutor: RegisteredToolExecutor? = nil
     ) async -> FunctionCallExecutionResult {
         let hookPayload = toolHookPayload(for: item)
+        var effectiveItem = item
+        var postHookPayload = hookPayload
         var additionalItems: [ResponseItem] = []
         var approvalGranted = false
         if let hookPayload {
@@ -1002,8 +1008,20 @@ public enum NonInteractiveExec {
                     additionalContextItems: additionalItems
                 )
             }
+            if let updatedInput = preOutcome.updatedInput {
+                switch itemByApplyingPreToolUseUpdate(updatedInput, to: item) {
+                case let .success(updatedItem):
+                    effectiveItem = updatedItem
+                    postHookPayload = toolHookPayload(for: updatedItem) ?? hookPayload
+                case let .failure(error):
+                    return FunctionCallExecutionResult(
+                        output: toolRewriteErrorOutput(for: item, message: error.message),
+                        additionalContextItems: additionalItems
+                    )
+                }
+            }
             let approvalContext = shellApprovalHookContext(
-                for: item,
+                for: effectiveItem,
                 approvalPolicy: approvalPolicy,
                 sandboxPolicy: sandboxPolicy,
                 shell: shell,
@@ -1038,7 +1056,7 @@ public enum NonInteractiveExec {
         }
 
         let execution = await executeFunctionCallWithApproval(
-            item,
+            effectiveItem,
             cwd: cwd,
             approvalPolicy: approvalPolicy,
             sandboxPolicy: sandboxPolicy,
@@ -1065,7 +1083,7 @@ public enum NonInteractiveExec {
         let output = execution.output
         additionalItems.append(contentsOf: execution.additionalContextItems)
         guard toolOutputSucceeded(output),
-              let postPayload = postToolHookPayload(for: item, execution: execution, prePayload: hookPayload)
+              let postPayload = postToolHookPayload(for: effectiveItem, execution: execution, prePayload: postHookPayload)
         else {
             return FunctionCallExecutionResult(
                 output: output,
@@ -2644,6 +2662,124 @@ public enum NonInteractiveExec {
         }
     }
 
+    private static func itemByApplyingPreToolUseUpdate(
+        _ updatedInput: JSONValue,
+        to item: ResponseItem
+    ) -> Result<ResponseItem, ToolRewriteError> {
+        let command: String
+        switch updatedInput {
+        case let .object(object):
+            guard case let .string(value)? = object["command"] else {
+                return .failure(ToolRewriteError(message: "hook returned updatedInput without string field `command`"))
+            }
+            command = value
+        default:
+            return .failure(ToolRewriteError(message: "hook returned updatedInput without string field `command`"))
+        }
+
+        switch item {
+        case let .functionCall(id, name, namespace, arguments, callID):
+            switch name {
+            case "exec_command":
+                return rewriteFunctionCallArguments(
+                    id: id,
+                    name: name,
+                    namespace: namespace,
+                    arguments: arguments,
+                    callID: callID,
+                    key: "cmd",
+                    value: command
+                )
+
+            case "shell_command":
+                return rewriteFunctionCallArguments(
+                    id: id,
+                    name: name,
+                    namespace: namespace,
+                    arguments: arguments,
+                    callID: callID,
+                    key: "command",
+                    value: command
+                )
+
+            case "shell", "container.exec":
+                guard let commandWords = CommandParser.shellSplit(command) else {
+                    return .failure(ToolRewriteError(message: "hook returned shell input with an invalid command string"))
+                }
+                return rewriteFunctionCallArguments(
+                    id: id,
+                    name: name,
+                    namespace: namespace,
+                    arguments: arguments,
+                    callID: callID,
+                    key: "command",
+                    value: commandWords
+                )
+
+            default:
+                return .success(item)
+            }
+
+        case let .customToolCall(id, status, callID, name, _):
+            guard name == "apply_patch" else {
+                return .success(item)
+            }
+            return .success(.customToolCall(id: id, status: status, callID: callID, name: name, input: command))
+
+        case let .localShellCall(id, callID, status, action):
+            guard case let .exec(params) = action else {
+                return .success(item)
+            }
+            guard let commandWords = CommandParser.shellSplit(command) else {
+                return .failure(ToolRewriteError(message: "hook returned shell input with an invalid command string"))
+            }
+            return .success(.localShellCall(
+                id: id,
+                callID: callID,
+                status: status,
+                action: .exec(LocalShellExecAction(
+                    command: commandWords,
+                    timeoutMS: params.timeoutMS,
+                    workingDirectory: params.workingDirectory,
+                    env: params.env,
+                    user: params.user
+                ))
+            ))
+
+        default:
+            return .success(item)
+        }
+    }
+
+    private static func rewriteFunctionCallArguments(
+        id: String?,
+        name: String,
+        namespace: String?,
+        arguments: String,
+        callID: String,
+        key: String,
+        value: Any
+    ) -> Result<ResponseItem, ToolRewriteError> {
+        guard let data = arguments.data(using: .utf8),
+              var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        else {
+            return .failure(ToolRewriteError(message: "failed to parse function arguments while applying hook updatedInput"))
+        }
+        object[key] = value
+        guard JSONSerialization.isValidJSONObject(object),
+              let rewrittenData = try? JSONSerialization.data(withJSONObject: object, options: [.withoutEscapingSlashes])
+        else {
+            return .failure(ToolRewriteError(message: "failed to encode function arguments while applying hook updatedInput"))
+        }
+        return .success(.functionCall(
+            id: id,
+            name: name,
+            namespace: namespace,
+            arguments: String(decoding: rewrittenData, as: UTF8.self),
+            callID: callID
+        ))
+    }
+
     private static func toolHookPayload(for item: ResponseItem) -> ToolHookPayload? {
         let decoder = JSONDecoder()
         switch item {
@@ -2888,6 +3024,19 @@ public enum NonInteractiveExec {
             return functionOutput(callID: callID ?? id ?? "local_shell", content: message, success: false)
         default:
             return functionOutput(callID: hookPayload.toolUseID, content: message, success: false)
+        }
+    }
+
+    private static func toolRewriteErrorOutput(for item: ResponseItem, message: String) -> ResponseItem {
+        switch item {
+        case let .functionCall(_, _, _, _, callID):
+            return functionOutput(callID: callID, content: message, success: false)
+        case let .customToolCall(_, _, callID, _, _):
+            return .customToolCallOutput(callID: callID, output: message)
+        case let .localShellCall(id, callID, _, _):
+            return functionOutput(callID: callID ?? id ?? "local_shell", content: message, success: false)
+        default:
+            return functionOutput(callID: "unknown", content: message, success: false)
         }
     }
 

@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `d08906a944` (`Support PreToolUse
+  updatedInput rewrites`). Swift `PreToolUse` hook parsing now accepts
+  `updatedInput` only with `permissionDecision: "allow"`, carries the latest
+  completed rewrite through hook outcomes, and applies command-shaped rewrites
+  before non-interactive shell, exec-command, local-shell, and apply-patch
+  execution while preserving the original hook-facing input.
 - 2026-05-17: rechecked Rust commit `9ab7f4e6ac` (`Add Windows hook command
   overrides`). Swift hook config discovery now accepts both `command_windows`
   and `commandWindows`, selects the Windows override only on Windows, keeps the

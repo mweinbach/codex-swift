@@ -1478,6 +1478,50 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(try String(contentsOfFile: savedPath, encoding: .utf8), largeContext)
     }
 
+    func testPreToolUseHookRewritesShellCommandBeforeExecutionLikeRust() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let hookLog = temp.url.appendingPathComponent("pre-hook.json")
+        let item = ResponseItem.functionCall(
+            name: "shell_command",
+            arguments: #"{"command":"printf original","login":false}"#,
+            callID: "call-shell"
+        )
+        let hookOutput = #"{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","updatedInput":{"command":"printf rewritten"}}}"#
+
+        let result = await NonInteractiveExec.executeFunctionCallWithHooks(
+            item,
+            handlers: [
+                ConfiguredHookHandler(
+                    eventName: .preToolUse,
+                    matcher: "Bash",
+                    command: "cat > \(shellSingleQuote(hookLog.path)); printf %s \(shellSingleQuote(hookOutput))",
+                    timeoutSec: 5,
+                    sourcePath: try AbsolutePath(absolutePath: "/tmp/hooks.json"),
+                    displayOrder: 0
+                )
+            ],
+            conversationID: ConversationId(),
+            turnID: "turn-1",
+            cwd: temp.url,
+            model: "gpt-test",
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000)
+        )
+
+        guard case let .functionCallOutput(callID, payload) = result.output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-shell")
+        XCTAssertEqual(payload.success, true)
+        XCTAssertTrue(payload.content.contains("rewritten"), payload.content)
+        XCTAssertFalse(payload.content.contains("original"), payload.content)
+
+        let object = try hookInputObject(at: hookLog)
+        XCTAssertEqual((object["tool_input"] as? [String: Any])?["command"] as? String, "printf original")
+    }
+
     func testPostToolUseHooksAppendAdditionalContextAndReplaceFeedback() async throws {
         let item = ResponseItem.functionCall(
             name: "shell_command",

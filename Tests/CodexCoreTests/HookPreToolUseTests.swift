@@ -57,6 +57,18 @@ final class HookPreToolUseTests: XCTestCase {
         ])
     }
 
+    func testPermissionDecisionAllowCanUpdateInputLikeRust() throws {
+        let parsed = try parseCompleted(
+            stdout: #"{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","updatedInput":{"command":"echo rewritten"}}}"#
+        )
+
+        XCTAssertEqual(parsed.data, HookPreToolUseHandlerData(
+            updatedInput: .object(["command": .string("echo rewritten")])
+        ))
+        XCTAssertEqual(parsed.completed.run.status, .completed)
+        XCTAssertEqual(parsed.completed.run.entries, [])
+    }
+
     func testPlainStdoutIsIgnored() throws {
         let parsed = try parseCompleted(stdout: "hook ran successfully\n")
 

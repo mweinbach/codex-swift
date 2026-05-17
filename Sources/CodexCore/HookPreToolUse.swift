@@ -42,17 +42,20 @@ public struct HookPreToolUseOutcome: Equatable, Sendable {
     public var shouldBlock: Bool
     public var blockReason: String?
     public var additionalContexts: [String]
+    public var updatedInput: JSONValue?
 
     public init(
         hookEvents: [HookCompletedEvent],
         shouldBlock: Bool,
         blockReason: String?,
-        additionalContexts: [String]
+        additionalContexts: [String],
+        updatedInput: JSONValue? = nil
     ) {
         self.hookEvents = hookEvents
         self.shouldBlock = shouldBlock
         self.blockReason = blockReason
         self.additionalContexts = additionalContexts
+        self.updatedInput = updatedInput
     }
 }
 
@@ -60,25 +63,30 @@ public struct HookPreToolUseHandlerData: Equatable, Sendable {
     public var shouldBlock: Bool
     public var blockReason: String?
     public var additionalContextsForModel: [String]
+    public var updatedInput: JSONValue?
 
     public init(
         shouldBlock: Bool = false,
         blockReason: String? = nil,
-        additionalContextsForModel: [String] = []
+        additionalContextsForModel: [String] = [],
+        updatedInput: JSONValue? = nil
     ) {
         self.shouldBlock = shouldBlock
         self.blockReason = blockReason
         self.additionalContextsForModel = additionalContextsForModel
+        self.updatedInput = updatedInput
     }
 }
 
 public struct ParsedHookHandler<Data: Equatable & Sendable>: Equatable, Sendable {
     public var completed: HookCompletedEvent
     public var data: Data
+    public var completionOrder: Int
 
-    public init(completed: HookCompletedEvent, data: Data) {
+    public init(completed: HookCompletedEvent, data: Data, completionOrder: Int = 0) {
         self.completed = completed
         self.data = data
+        self.completionOrder = completionOrder
     }
 }
 
@@ -117,7 +125,8 @@ public enum HookPreToolUse {
                 hookEvents: [],
                 shouldBlock: false,
                 blockReason: nil,
-                additionalContexts: []
+                additionalContexts: [],
+                updatedInput: nil
             )
         }
 
@@ -135,7 +144,8 @@ public enum HookPreToolUse {
                 hookEvents: hookEvents,
                 shouldBlock: false,
                 blockReason: nil,
-                additionalContexts: []
+                additionalContexts: [],
+                updatedInput: nil
             )
         }
 
@@ -153,12 +163,14 @@ public enum HookPreToolUse {
         let additionalContexts = flattenAdditionalContexts(
             parsed.map(\.data.additionalContextsForModel)
         )
+        let updatedInput = shouldBlock ? nil : latestUpdatedInput(parsed)
 
         return HookPreToolUseOutcome(
             hookEvents: parsed.map { hookCompletedForToolUse($0.completed, toolUseID: request.toolUseID) },
             shouldBlock: shouldBlock,
             blockReason: blockReason,
-            additionalContexts: additionalContexts
+            additionalContexts: additionalContexts,
+            updatedInput: updatedInput
         )
     }
 
@@ -172,6 +184,7 @@ public enum HookPreToolUse {
         var shouldBlock = false
         var blockReason: String?
         var additionalContextsForModel: [String] = []
+        var updatedInput: JSONValue?
 
         if let error = runResult.error {
             status = .failed
@@ -202,6 +215,9 @@ public enum HookPreToolUse {
                             shouldBlock = true
                             blockReason = reason
                             entries.append(HookOutputEntry(kind: .feedback, text: reason))
+                        }
+                        if !shouldBlock {
+                            updatedInput = parsed.updatedInput
                         }
                     }
                 } else if HooksProtocol.looksLikeJSON(runResult.stdout) {
@@ -243,7 +259,8 @@ public enum HookPreToolUse {
             data: HookPreToolUseHandlerData(
                 shouldBlock: shouldBlock,
                 blockReason: blockReason,
-                additionalContextsForModel: additionalContextsForModel
+                additionalContextsForModel: additionalContextsForModel,
+                updatedInput: updatedInput
             )
         )
     }
@@ -288,6 +305,15 @@ public enum HookPreToolUse {
 
     private static func flattenAdditionalContexts(_ groups: [[String]]) -> [String] {
         groups.flatMap { $0 }
+    }
+
+    private static func latestUpdatedInput(_ results: [ParsedHookHandler<HookPreToolUseHandlerData>]) -> JSONValue? {
+        results
+            .compactMap { result -> (Int, JSONValue)? in
+                result.data.updatedInput.map { (result.completionOrder, $0) }
+            }
+            .max { left, right in left.0 < right.0 }?
+            .1
     }
 
     private static func trimmedNonEmpty(_ value: String?) -> String? {

@@ -100,6 +100,10 @@ public enum CommandParser {
         return tokens.map(shellQuote).joined(separator: " ")
     }
 
+    public static func shellSplit(_ input: String) -> [String]? {
+        CodexCore.shellSplit(input)
+    }
+
     public static func parseCommand(_ command: [String]) -> [ParsedCommand] {
         collapseUnknowns(dedupeParsed(parseCommandImpl(command)), originalCommand: command)
     }

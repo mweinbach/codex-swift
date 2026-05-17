@@ -306,7 +306,17 @@ final class HookEventsTests: XCTestCase {
         let updatedInput = try XCTUnwrap(HooksProtocol.parsePreToolUseOutput("""
         {"hookSpecificOutput":{"hookEventName":"PreToolUse","updatedInput":{}}}
         """))
-        XCTAssertEqual(updatedInput.invalidReason, "PreToolUse hook returned unsupported updatedInput")
+        XCTAssertEqual(updatedInput.invalidReason, "PreToolUse hook returned updatedInput without permissionDecision:allow")
+    }
+
+    func testPreToolUseOutputParsesAllowUpdatedInputLikeRust() throws {
+        let parsed = try XCTUnwrap(HooksProtocol.parsePreToolUseOutput("""
+        {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","updatedInput":{"command":"echo rewritten"}}}
+        """))
+
+        XCTAssertNil(parsed.blockReason)
+        XCTAssertEqual(parsed.updatedInput, .object(["command": .string("echo rewritten")]))
+        XCTAssertNil(parsed.invalidReason)
     }
 
     func testPreToolUseOutputRejectsUnknownFieldsAndMalformedShapesLikeRust() {

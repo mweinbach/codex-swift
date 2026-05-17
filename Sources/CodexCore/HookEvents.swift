@@ -284,17 +284,20 @@ public struct HookPreToolUseOutput: Equatable, Sendable {
     public let universal: HookUniversalOutput
     public let blockReason: String?
     public let additionalContext: String?
+    public let updatedInput: JSONValue?
     public let invalidReason: String?
 
     public init(
         universal: HookUniversalOutput,
         blockReason: String?,
         additionalContext: String?,
+        updatedInput: JSONValue? = nil,
         invalidReason: String? = nil
     ) {
         self.universal = universal
         self.blockReason = blockReason
         self.additionalContext = additionalContext
+        self.updatedInput = updatedInput
         self.invalidReason = invalidReason
     }
 }
@@ -427,7 +430,7 @@ public enum HooksProtocol {
 
         let useHookSpecificDecision = hookSpecific.permissionDecision != nil
             || hookSpecific.permissionDecisionReason != nil
-            || hookSpecific.hasUpdatedInput
+            || hookSpecific.updatedInput != nil
         let invalidReason = unsupportedPreToolUseUniversal(universal) ?? (
             useHookSpecificDecision
                 ? unsupportedPreToolUseHookSpecificOutput(hookSpecific)
@@ -445,11 +448,15 @@ public enum HooksProtocol {
         } else {
             blockReason = nil
         }
+        let updatedInput = invalidReason == nil && hookSpecific.permissionDecision == "allow"
+            ? hookSpecific.updatedInput
+            : nil
 
         return HookPreToolUseOutput(
             universal: universal,
             blockReason: blockReason,
             additionalContext: hookSpecific.additionalContext,
+            updatedInput: updatedInput,
             invalidReason: invalidReason
         )
     }
@@ -655,14 +662,14 @@ public enum HooksProtocol {
         valid: Bool,
         permissionDecision: String?,
         permissionDecisionReason: String?,
-        hasUpdatedInput: Bool,
+        updatedInput: JSONValue?,
         additionalContext: String?
     ) {
         guard let value else {
-            return (true, nil, nil, false, nil)
+            return (true, nil, nil, nil, nil)
         }
         if value is NSNull {
-            return (true, nil, nil, false, nil)
+            return (true, nil, nil, nil, nil)
         }
         guard let object = value as? [String: Any],
               Set(object.keys).isSubset(of: [
@@ -681,14 +688,14 @@ public enum HooksProtocol {
               let permissionDecisionReason = optionalStringValue(object["permissionDecisionReason"]),
               let additionalContext = optionalStringValue(object["additionalContext"])
         else {
-            return (false, nil, nil, false, nil)
+            return (false, nil, nil, nil, nil)
         }
 
         return (
             true,
             permissionDecision,
             permissionDecisionReason,
-            isNonNullJSONValue(object["updatedInput"]),
+            jsonValue(from: object["updatedInput"]),
             additionalContext
         )
     }
@@ -711,16 +718,18 @@ public enum HooksProtocol {
             valid: Bool,
             permissionDecision: String?,
             permissionDecisionReason: String?,
-            hasUpdatedInput: Bool,
+            updatedInput: JSONValue?,
             additionalContext: String?
         )
     ) -> String? {
-        if output.hasUpdatedInput {
-            return "PreToolUse hook returned unsupported updatedInput"
+        if output.updatedInput != nil, output.permissionDecision != "allow" {
+            return "PreToolUse hook returned updatedInput without permissionDecision:allow"
         }
         switch output.permissionDecision {
         case "allow":
-            return "PreToolUse hook returned unsupported permissionDecision:allow"
+            return output.updatedInput == nil
+                ? "PreToolUse hook returned unsupported permissionDecision:allow"
+                : nil
         case "ask":
             return "PreToolUse hook returned unsupported permissionDecision:ask"
         case "deny":
@@ -914,6 +923,30 @@ public enum HooksProtocol {
             return false
         }
         return !(value is NSNull)
+    }
+
+    private static func jsonValue(from value: Any?) -> JSONValue? {
+        guard let value, !(value is NSNull) else {
+            return nil
+        }
+        switch value {
+        case let value as Bool:
+            return .bool(value)
+        case let value as Int:
+            return .integer(Int64(value))
+        case let value as Int64:
+            return .integer(value)
+        case let value as Double:
+            return .double(value)
+        case let value as String:
+            return .string(value)
+        case let values as [Any]:
+            return .array(values.map { jsonValue(from: $0) ?? .null })
+        case let object as [String: Any]:
+            return .object(object.mapValues { jsonValue(from: $0) ?? .null })
+        default:
+            return nil
+        }
     }
 
     private static func optionalStringEnumValue(_ value: Any?, allowedValues: Set<String>) -> String?? {
