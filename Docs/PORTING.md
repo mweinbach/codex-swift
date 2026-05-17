@@ -12,6 +12,13 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: added the Swift host-owned extension runtime state bridge toward
+  live app-server / ThreadManager integration. `ExtensionRuntimeState` now
+  shares one Rust-shaped session `ExtensionData` store across threads, creates
+  stable per-thread and per-turn stores, dispatches registry callbacks through
+  those stores, and removes turn/thread stores after stop or abort callbacks
+  have observed them. Wiring this state into the live running-thread runtime
+  remains pending.
 - 2026-05-17: continued the first-class extension registry bridge toward the
   live runtime integration. Swift `ExtensionRegistry` now owns registration-
   order dispatch helpers for thread lifecycle, turn lifecycle, config-change,

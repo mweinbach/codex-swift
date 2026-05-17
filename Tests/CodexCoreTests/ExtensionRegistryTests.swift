@@ -389,6 +389,57 @@ final class ExtensionRegistryTests: XCTestCase {
         XCTAssertNil(unsupported)
     }
 
+    func testRuntimeStateOwnsStableSessionThreadAndTurnStoresLikeRustHost() {
+        let threadID = ThreadId(uuid: UUID(uuidString: "123e4567-e89b-12d3-a456-426614174002")!)
+        var config = CodexRuntimeConfig()
+        config.model = "gpt-runtime"
+        let recorder = Recorder()
+        var builder = ExtensionRegistryBuilder()
+        builder.threadLifecycleContributor(recorder)
+        builder.turnLifecycleContributor(recorder)
+        builder.tokenUsageContributor(recorder)
+        let state = ExtensionRuntimeState(registry: builder.build())
+        state.sessionStore.insert(SessionMarker(value: "runtime-session"))
+
+        let startedThreadStore = state.emitThreadStart(threadID: threadID, config: config)
+        startedThreadStore.insert(ThreadMarker(value: "runtime-thread"))
+        let resumedThreadStore = state.emitThreadResume(threadID: threadID)
+        XCTAssertTrue(startedThreadStore === resumedThreadStore)
+        XCTAssertTrue(startedThreadStore === state.existingThreadStore(for: threadID))
+
+        let startedTurnStore = state.emitTurnStart(threadID: threadID, turnID: "turn-runtime")
+        startedTurnStore.insert(TurnMarker(value: "runtime-turn"))
+        state.emitTokenUsage(
+            threadID: threadID,
+            turnID: "turn-runtime",
+            tokenUsage: TokenUsageInfo(
+                totalTokenUsage: TokenUsage(totalTokens: 7),
+                lastTokenUsage: TokenUsage(totalTokens: 7)
+            )
+        )
+        state.emitTurnStop(threadID: threadID, turnID: "turn-runtime")
+        XCTAssertNil(state.existingTurnStore(threadID: threadID, turnID: "turn-runtime"))
+
+        let abortTurnStore = state.emitTurnStart(threadID: threadID, turnID: "turn-aborted")
+        abortTurnStore.insert(TurnMarker(value: "abort-turn"))
+        state.emitTurnAbort(threadID: threadID, turnID: "turn-aborted", reason: .interrupted)
+        XCTAssertNil(state.existingTurnStore(threadID: threadID, turnID: "turn-aborted"))
+
+        state.emitThreadStop(threadID: threadID)
+        XCTAssertNil(state.existingThreadStore(for: threadID))
+        XCTAssertEqual(state.sessionStore.get(SessionMarker.self), SessionMarker(value: "runtime-session"))
+        XCTAssertEqual(recorder.records, [
+            "thread-start:\(threadID):gpt-runtime",
+            "thread-resume:runtime-session",
+            "turn-start:turn-runtime:missing",
+            "tokens:turn-runtime:7",
+            "turn-stop:turn-runtime",
+            "turn-start:turn-aborted:missing",
+            "turn-abort:turn-aborted:interrupted",
+            "thread-stop:runtime-thread"
+        ])
+    }
+
     func testJSONToolOutputMatchesRustToolOutputContract() {
         let output = JSONToolOutput(.object(["ok": .bool(true)]), success: nil)
 

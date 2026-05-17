@@ -669,3 +669,207 @@ public struct ExtensionRegistry: Sendable {
         }
     }
 }
+
+/// Host-owned extension state for one running session.
+///
+/// Runtime owners use this coordinator to share a single session store across
+/// thread runtimes, keep each thread's store stable for the lifetime of that
+/// thread, and keep turn stores alive through completion or abort callbacks.
+public final class ExtensionRuntimeState: @unchecked Sendable {
+    public let registry: ExtensionRegistry
+    public let sessionStore: ExtensionData
+
+    private let lock = NSLock()
+    private var threadStores: [ThreadId: ExtensionData] = [:]
+    private var turnStores: [TurnKey: ExtensionData] = [:]
+
+    public init(registry: ExtensionRegistry = .empty, sessionStore: ExtensionData = ExtensionData(id: "session")) {
+        self.registry = registry
+        self.sessionStore = sessionStore
+    }
+
+    public func threadStore(for threadID: ThreadId) -> ExtensionData {
+        lock.withLock {
+            if let store = threadStores[threadID] {
+                return store
+            }
+            let store = ExtensionData(id: threadID.description)
+            threadStores[threadID] = store
+            return store
+        }
+    }
+
+    public func existingThreadStore(for threadID: ThreadId) -> ExtensionData? {
+        lock.withLock {
+            threadStores[threadID]
+        }
+    }
+
+    public func turnStore(threadID: ThreadId, turnID: String) -> ExtensionData {
+        let key = TurnKey(threadID: threadID, turnID: turnID)
+        return lock.withLock {
+            if let store = turnStores[key] {
+                return store
+            }
+            let store = ExtensionData(id: turnID)
+            turnStores[key] = store
+            return store
+        }
+    }
+
+    public func existingTurnStore(threadID: ThreadId, turnID: String) -> ExtensionData? {
+        lock.withLock {
+            turnStores[TurnKey(threadID: threadID, turnID: turnID)]
+        }
+    }
+
+    @discardableResult
+    public func removeThreadStore(for threadID: ThreadId) -> ExtensionData? {
+        lock.withLock {
+            turnStores = turnStores.filter { $0.key.threadID != threadID }
+            return threadStores.removeValue(forKey: threadID)
+        }
+    }
+
+    @discardableResult
+    public func removeTurnStore(threadID: ThreadId, turnID: String) -> ExtensionData? {
+        lock.withLock {
+            turnStores.removeValue(forKey: TurnKey(threadID: threadID, turnID: turnID))
+        }
+    }
+
+    @discardableResult
+    public func emitThreadStart(threadID: ThreadId, config: CodexRuntimeConfig) -> ExtensionData {
+        let threadStore = threadStore(for: threadID)
+        registry.emitThreadStart(ExtensionThreadStartInput(
+            threadID: threadID,
+            config: config,
+            sessionStore: sessionStore,
+            threadStore: threadStore
+        ))
+        return threadStore
+    }
+
+    @discardableResult
+    public func emitThreadResume(threadID: ThreadId) -> ExtensionData {
+        let threadStore = threadStore(for: threadID)
+        registry.emitThreadResume(ExtensionThreadResumeInput(
+            threadID: threadID,
+            sessionStore: sessionStore,
+            threadStore: threadStore
+        ))
+        return threadStore
+    }
+
+    public func emitThreadStop(threadID: ThreadId) {
+        let threadStore = threadStore(for: threadID)
+        registry.emitThreadStop(ExtensionThreadStopInput(
+            threadID: threadID,
+            sessionStore: sessionStore,
+            threadStore: threadStore
+        ))
+        removeThreadStore(for: threadID)
+    }
+
+    @discardableResult
+    public func emitTurnStart(threadID: ThreadId, turnID: String) -> ExtensionData {
+        let threadStore = threadStore(for: threadID)
+        let turnStore = turnStore(threadID: threadID, turnID: turnID)
+        registry.emitTurnStart(ExtensionTurnStartInput(
+            threadID: threadID,
+            turnID: turnID,
+            sessionStore: sessionStore,
+            threadStore: threadStore,
+            turnStore: turnStore
+        ))
+        return turnStore
+    }
+
+    public func emitTurnStop(threadID: ThreadId, turnID: String) {
+        let threadStore = threadStore(for: threadID)
+        let turnStore = turnStore(threadID: threadID, turnID: turnID)
+        registry.emitTurnStop(ExtensionTurnStopInput(
+            threadID: threadID,
+            turnID: turnID,
+            sessionStore: sessionStore,
+            threadStore: threadStore,
+            turnStore: turnStore
+        ))
+        removeTurnStore(threadID: threadID, turnID: turnID)
+    }
+
+    public func emitTurnAbort(threadID: ThreadId, turnID: String, reason: TurnAbortReason) {
+        let threadStore = threadStore(for: threadID)
+        let turnStore = turnStore(threadID: threadID, turnID: turnID)
+        registry.emitTurnAbort(ExtensionTurnAbortInput(
+            threadID: threadID,
+            turnID: turnID,
+            reason: reason,
+            sessionStore: sessionStore,
+            threadStore: threadStore,
+            turnStore: turnStore
+        ))
+        removeTurnStore(threadID: threadID, turnID: turnID)
+    }
+
+    public func emitConfigChanged(
+        threadID: ThreadId,
+        previousConfig: CodexRuntimeConfig,
+        newConfig: CodexRuntimeConfig
+    ) {
+        let threadStore = threadStore(for: threadID)
+        registry.emitConfigChanged(ExtensionConfigChangedInput(
+            threadID: threadID,
+            sessionStore: sessionStore,
+            threadStore: threadStore,
+            previousConfig: previousConfig,
+            newConfig: newConfig
+        ))
+    }
+
+    public func emitTokenUsage(
+        threadID: ThreadId,
+        turnID: String,
+        tokenUsage: TokenUsageInfo
+    ) {
+        let threadStore = threadStore(for: threadID)
+        let turnStore = turnStore(threadID: threadID, turnID: turnID)
+        registry.emitTokenUsage(
+            sessionStore: sessionStore,
+            threadStore: threadStore,
+            turnStore: turnStore,
+            threadID: threadID,
+            turnID: turnID,
+            tokenUsage: tokenUsage
+        )
+    }
+
+    public func configuredToolSpecs(threadID: ThreadId) -> [ConfiguredToolSpec] {
+        registry.configuredToolSpecs(sessionStore: sessionStore, threadStore: threadStore(for: threadID))
+    }
+
+    public func registeredToolExecutor(threadID: ThreadId) -> NonInteractiveExec.RegisteredToolExecutor? {
+        registry.registeredToolExecutor(sessionStore: sessionStore, threadStore: threadStore(for: threadID))
+    }
+
+    public func approvalReview(threadID: ThreadId, prompt: String) async -> ReviewDecision? {
+        await registry.approvalReview(
+            sessionStore: sessionStore,
+            threadStore: threadStore(for: threadID),
+            prompt: prompt
+        )
+    }
+
+    public func contributeTurnItem(threadID: ThreadId, turnID: String, item: TurnItem) async throws -> TurnItem {
+        try await registry.contributeTurnItem(
+            threadStore: threadStore(for: threadID),
+            turnStore: turnStore(threadID: threadID, turnID: turnID),
+            item: item
+        )
+    }
+
+    private struct TurnKey: Hashable {
+        let threadID: ThreadId
+        let turnID: String
+    }
+}
