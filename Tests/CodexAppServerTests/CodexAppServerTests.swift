@@ -14551,8 +14551,16 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(listError["code"] as? Int, -32600)
         XCTAssertEqual(listError["message"] as? String, "plugin sharing is not enabled")
 
+        let checkout = try appServerResponse(
+            #"{"id":4,"method":"plugin/share/checkout","params":{"remotePluginId":"plugins~Plugin_gmail"}}"#,
+            codexHome: temp.url
+        )
+        let checkoutError = try XCTUnwrap(checkout["error"] as? [String: Any])
+        XCTAssertEqual(checkoutError["code"] as? Int, -32600)
+        XCTAssertEqual(checkoutError["message"] as? String, "plugin sharing is not enabled")
+
         let delete = try appServerResponse(
-            #"{"id":4,"method":"plugin/share/delete","params":{"remotePluginId":"plugins~Plugin_gmail"}}"#,
+            #"{"id":5,"method":"plugin/share/delete","params":{"remotePluginId":"plugins~Plugin_gmail"}}"#,
             codexHome: temp.url
         )
         let deleteError = try XCTUnwrap(delete["error"] as? [String: Any])
@@ -14601,8 +14609,19 @@ final class CodexAppServerTests: XCTestCase {
             "list remote plugin shares: chatgpt authentication required for remote plugin catalog"
         )
 
+        let checkout = try appServerResponse(
+            #"{"id":4,"method":"plugin/share/checkout","params":{"remotePluginId":"plugins~Plugin_gmail"}}"#,
+            codexHome: temp.url
+        )
+        let checkoutError = try XCTUnwrap(checkout["error"] as? [String: Any])
+        XCTAssertEqual(checkoutError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            checkoutError["message"] as? String,
+            "checkout plugin share: chatgpt authentication required for remote plugin catalog"
+        )
+
         let delete = try appServerResponse(
-            #"{"id":4,"method":"plugin/share/delete","params":{"remotePluginId":"plugins~Plugin_gmail"}}"#,
+            #"{"id":5,"method":"plugin/share/delete","params":{"remotePluginId":"plugins~Plugin_gmail"}}"#,
             codexHome: temp.url
         )
         let deleteError = try XCTUnwrap(delete["error"] as? [String: Any])
@@ -14613,7 +14632,7 @@ final class CodexAppServerTests: XCTestCase {
         )
 
         let apiKeySave = try appServerResponse(
-            #"{"id":5,"method":"plugin/share/save","params":{"pluginPath":"\#(pluginPath)"}}"#,
+            #"{"id":6,"method":"plugin/share/save","params":{"pluginPath":"\#(pluginPath)"}}"#,
             configuration: testConfiguration(
                 codexHome: temp.url,
                 environment: ["OPENAI_API_KEY": "sk-test-key"]
@@ -14651,6 +14670,14 @@ final class CodexAppServerTests: XCTestCase {
         let updateError = try XCTUnwrap(update["error"] as? [String: Any])
         XCTAssertEqual(updateError["code"] as? Int, -32600)
         XCTAssertEqual(updateError["message"] as? String, "plugin sharing is disabled")
+
+        let checkout = try appServerResponse(
+            #"{"id":3,"method":"plugin/share/checkout","params":{"remotePluginId":"plugins~Plugin_gmail"}}"#,
+            codexHome: temp.url
+        )
+        let checkoutError = try XCTUnwrap(checkout["error"] as? [String: Any])
+        XCTAssertEqual(checkoutError["code"] as? Int, -32600)
+        XCTAssertEqual(checkoutError["message"] as? String, "plugin sharing is disabled")
     }
 
     func testPluginShareRoutesValidateRustRequestRulesBeforeDisabledRemoteFallback() throws {
@@ -14725,6 +14752,14 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(invalidDeleteIDError["code"] as? Int, -32600)
         XCTAssertEqual(invalidDeleteIDError["message"] as? String, "invalid remote plugin id")
 
+        let invalidCheckoutID = try appServerResponse(
+            #"{"id":27,"method":"plugin/share/checkout","params":{"remotePluginId":"bad id"}}"#,
+            codexHome: temp.url
+        )
+        let invalidCheckoutIDError = try XCTUnwrap(invalidCheckoutID["error"] as? [String: Any])
+        XCTAssertEqual(invalidCheckoutIDError["code"] as? Int, -32600)
+        XCTAssertEqual(invalidCheckoutIDError["message"] as? String, "invalid remote plugin id")
+
         let invalidSavePathType = try appServerResponse(
             #"{"id":17,"method":"plugin/share/save","params":{"pluginPath":1}}"#,
             codexHome: temp.url
@@ -14766,6 +14801,17 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(invalidDeleteIDTypeError["code"] as? Int, -32600)
         XCTAssertEqual(
             invalidDeleteIDTypeError["message"] as? String,
+            "Invalid request: invalid type: integer `1`, expected a string"
+        )
+
+        let invalidCheckoutIDType = try appServerResponse(
+            #"{"id":28,"method":"plugin/share/checkout","params":{"remotePluginId":1}}"#,
+            codexHome: temp.url
+        )
+        let invalidCheckoutIDTypeError = try XCTUnwrap(invalidCheckoutIDType["error"] as? [String: Any])
+        XCTAssertEqual(invalidCheckoutIDTypeError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            invalidCheckoutIDTypeError["message"] as? String,
             "Invalid request: invalid type: integer `1`, expected a string"
         )
 
@@ -14893,6 +14939,14 @@ final class CodexAppServerTests: XCTestCase {
         let missingDeleteIDError = try XCTUnwrap(missingDeleteID["error"] as? [String: Any])
         XCTAssertEqual(missingDeleteIDError["code"] as? Int, -32602)
         XCTAssertEqual(missingDeleteIDError["message"] as? String, "missing field `remotePluginId`")
+
+        let missingCheckoutID = try appServerResponse(
+            #"{"id":29,"method":"plugin/share/checkout","params":{}}"#,
+            codexHome: temp.url
+        )
+        let missingCheckoutIDError = try XCTUnwrap(missingCheckoutID["error"] as? [String: Any])
+        XCTAssertEqual(missingCheckoutIDError["code"] as? Int, -32602)
+        XCTAssertEqual(missingCheckoutIDError["message"] as? String, "missing field `remotePluginId`")
     }
 
     func testPluginShareSaveUploadsLocalPluginAndRecordsLocalPath() throws {
@@ -15022,6 +15076,85 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(data.first?["localPluginPath"] as? String, pluginPath.path)
         let listedPlugin = try XCTUnwrap(data.first?["plugin"] as? [String: Any])
         XCTAssertEqual(listedPlugin["id"] as? String, "demo-plugin@workspace-shared-with-me")
+    }
+
+    func testPluginShareCheckoutAddsPersonalMarketplaceEntry() throws {
+        let temp = try TemporaryDirectory()
+        let home = try TemporaryDirectory()
+        let pluginID = "plugins_123"
+        try """
+        chatgpt_base_url = "https://chatgpt.example/backend-api/"
+
+        [features]
+        plugins = true
+        remote_plugin = true
+        plugin_sharing = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let idToken = try fakeJWT(email: "user@example.com", plan: "plus", accountID: "account-123")
+        try """
+        {
+          "auth_mode": "chatgpt",
+          "tokens": {
+            "id_token": "\(idToken)",
+            "access_token": "chatgpt-token",
+            "refresh_token": "refresh-token",
+            "account_id": "account-123"
+          }
+        }
+        """.write(to: temp.url.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
+        let bundleSource = temp.url.appendingPathComponent("bundle-source", isDirectory: true)
+        try writePluginFixture(
+            root: bundleSource,
+            relativePath: "demo-plugin",
+            pluginName: "demo-plugin",
+            version: "0.0.1-local-ignored",
+            marker: "from-remote-bundle"
+        )
+        let bundleBytes = try remotePluginBundleTarGzBytes(
+            pluginRoot: bundleSource.appendingPathComponent("demo-plugin", isDirectory: true),
+            in: temp.url
+        )
+        let detailBody = remotePluginDetailBody(
+            id: pluginID,
+            name: "demo-plugin",
+            displayName: "Demo Plugin",
+            scope: "WORKSPACE",
+            releaseVersion: "1.2.3",
+            bundleDownloadURL: "https://bundles.example/demo-plugin.tar.gz"
+        )
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            environment: [
+                "HOME": home.url.path,
+                "USERPROFILE": home.url.path
+            ],
+            pluginHTTPTransport: { request in
+                switch (request.httpMethod, request.url?.path, request.url?.query) {
+                case ("GET", "/backend-api/ps/plugins/\(pluginID)", "includeDownloadUrls=true"):
+                    return URLSessionTransportResponse(statusCode: 200, body: Data(detailBody.utf8))
+                case ("GET", "/demo-plugin.tar.gz", nil):
+                    return URLSessionTransportResponse(statusCode: 200, body: bundleBytes)
+                default:
+                    return URLSessionTransportResponse(statusCode: 404, body: Data("missing".utf8))
+                }
+            }
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/share/checkout","params":{"remotePluginId":"\#(pluginID)"}}"#,
+            configuration: configuration
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let pluginPath = home.url.appendingPathComponent("plugins/demo-plugin", isDirectory: true)
+        let marketplacePath = home.url.appendingPathComponent(".agents/plugins/marketplace.json", isDirectory: false)
+        XCTAssertEqual(result["remotePluginId"] as? String, pluginID)
+        XCTAssertEqual(result["pluginId"] as? String, "demo-plugin@codex-curated")
+        XCTAssertEqual(result["pluginPath"] as? String, pluginPath.path)
+        XCTAssertEqual(result["marketplacePath"] as? String, marketplacePath.path)
+        XCTAssertEqual(result["remoteVersion"] as? String, "1.2.3")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: pluginPath.appendingPathComponent(".codex-plugin/plugin.json").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: marketplacePath.path))
     }
 
     func testPluginShareSaveUnlistedWithoutTargetsAddsWorkspacePrincipal() throws {

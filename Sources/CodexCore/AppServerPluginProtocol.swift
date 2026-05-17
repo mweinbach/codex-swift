@@ -1317,6 +1317,56 @@ extension PluginShareListItem: Codable {
     }
 }
 
+public struct PluginShareCheckoutParams: Equatable, Codable, Sendable {
+    public let remotePluginID: String
+
+    private enum CodingKeys: String, CodingKey {
+        case remotePluginID = "remotePluginId"
+    }
+
+    public init(remotePluginID: String) {
+        self.remotePluginID = remotePluginID
+    }
+}
+
+public struct PluginShareCheckoutResponse: Equatable, Codable, Sendable {
+    public let remotePluginID: String
+    public let pluginID: String
+    public let pluginName: String
+    public let pluginPath: AbsolutePath
+    public let marketplaceName: String
+    public let marketplacePath: AbsolutePath
+    public let remoteVersion: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case remotePluginID = "remotePluginId"
+        case pluginID = "pluginId"
+        case pluginName
+        case pluginPath
+        case marketplaceName
+        case marketplacePath
+        case remoteVersion
+    }
+
+    public init(
+        remotePluginID: String,
+        pluginID: String,
+        pluginName: String,
+        pluginPath: AbsolutePath,
+        marketplaceName: String,
+        marketplacePath: AbsolutePath,
+        remoteVersion: String?
+    ) {
+        self.remotePluginID = remotePluginID
+        self.pluginID = pluginID
+        self.pluginName = pluginName
+        self.pluginPath = pluginPath
+        self.marketplaceName = marketplaceName
+        self.marketplacePath = marketplacePath
+        self.remoteVersion = remoteVersion
+    }
+}
+
 public struct PluginShareDeleteParams: Equatable, Codable, Sendable {
     public let remotePluginID: String
 

@@ -8611,6 +8611,163 @@ public enum CodexAppServer {
         return [:]
     }
 
+    private struct PluginShareCheckoutResult {
+        let remotePluginID: String
+        let pluginID: String
+        let pluginName: String
+        let pluginPath: URL
+        let marketplaceName: String
+        let marketplacePath: URL
+        let remoteVersion: String?
+    }
+
+    fileprivate static func pluginShareCheckoutResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration
+    ) throws -> [String: Any] {
+        guard params?["remotePluginId"] != nil else {
+            throw AppServerError.invalidParams("missing field `remotePluginId`")
+        }
+        let remotePluginID = try rustRequiredStringParam(params?["remotePluginId"], field: "remotePluginId")
+        if remotePluginID.isEmpty || !isValidRemotePluginID(remotePluginID) {
+            throw AppServerError.invalidRequest("invalid remote plugin id")
+        }
+        let result = try checkoutRemotePluginShare(
+            remotePluginID: remotePluginID,
+            configuration: configuration
+        )
+        recordPluginShareLocalPath(
+            codexHome: configuration.codexHome,
+            remotePluginID: result.remotePluginID,
+            pluginPath: result.pluginPath
+        )
+        return [
+            "remotePluginId": result.remotePluginID,
+            "pluginId": result.pluginID,
+            "pluginName": result.pluginName,
+            "pluginPath": result.pluginPath.path,
+            "marketplaceName": result.marketplaceName,
+            "marketplacePath": result.marketplacePath.path,
+            "remoteVersion": result.remoteVersion ?? NSNull()
+        ].nullStripped(keepNulls: true)
+    }
+
+    private static func checkoutRemotePluginShare(
+        remotePluginID: String,
+        configuration: CodexAppServerConfiguration
+    ) throws -> PluginShareCheckoutResult {
+        let (runtimeConfig, auth) = try pluginShareRuntimeConfigAndAuth(
+            configuration: configuration,
+            failurePrefix: "checkout plugin share",
+            requirePluginSharing: true
+        )
+        let detail = try remotePluginObject(
+            path: "/ps/plugins/\(remotePluginID)",
+            queryItems: [URLQueryItem(name: "includeDownloadUrls", value: "true")],
+            runtimeConfig: runtimeConfig,
+            configuration: configuration,
+            auth: auth,
+            failurePrefix: "checkout plugin share"
+        )
+        let scope = detail["scope"] as? String ?? "GLOBAL"
+        guard scope == "WORKSPACE" else {
+            throw AppServerError.invalidRequest(
+                "checkout plugin share: plugin share checkout is not available for plugin/share/checkout"
+            )
+        }
+        let bundle = try validateRemotePluginBundleMetadata(
+            remotePluginID: remotePluginID,
+            detail: detail,
+            environment: configuration.environment
+        )
+        let personalMarketplaceName = "codex-curated"
+        let personalBundle = RemotePluginBundleMetadata(
+            pluginName: bundle.pluginName,
+            marketplaceName: personalMarketplaceName,
+            version: bundle.version,
+            downloadURL: bundle.downloadURL
+        )
+        let cachedPluginPath = try downloadAndInstallRemotePluginBundle(
+            personalBundle,
+            configuration: configuration,
+            failurePrefix: "checkout plugin share"
+        )
+        let home = pluginShareHomeDirectory(configuration: configuration)
+        let pluginPath = home
+            .appendingPathComponent("plugins", isDirectory: true)
+            .appendingPathComponent(bundle.pluginName, isDirectory: true)
+        if !FileManager.default.fileExists(atPath: pluginPath.path) {
+            try FileManager.default.createDirectory(
+                at: pluginPath.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try FileManager.default.copyItem(at: cachedPluginPath, to: pluginPath)
+        }
+        let marketplacePath = home
+            .appendingPathComponent(".agents/plugins", isDirectory: true)
+            .appendingPathComponent("marketplace.json", isDirectory: false)
+        try writePersonalPluginShareMarketplace(
+            marketplacePath: marketplacePath,
+            marketplaceName: personalMarketplaceName,
+            pluginName: bundle.pluginName
+        )
+        return PluginShareCheckoutResult(
+            remotePluginID: remotePluginID,
+            pluginID: "\(bundle.pluginName)@\(personalMarketplaceName)",
+            pluginName: bundle.pluginName,
+            pluginPath: pluginPath,
+            marketplaceName: personalMarketplaceName,
+            marketplacePath: marketplacePath,
+            remoteVersion: bundle.version
+        )
+    }
+
+    private static func pluginShareHomeDirectory(configuration: CodexAppServerConfiguration) -> URL {
+        if let home = configuration.environment["HOME"], !home.isEmpty {
+            return URL(fileURLWithPath: home, isDirectory: true)
+        }
+        if let userProfile = configuration.environment["USERPROFILE"], !userProfile.isEmpty {
+            return URL(fileURLWithPath: userProfile, isDirectory: true)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
+    }
+
+    private static func writePersonalPluginShareMarketplace(
+        marketplacePath: URL,
+        marketplaceName: String,
+        pluginName: String
+    ) throws {
+        let object: [String: Any] = [
+            "name": marketplaceName,
+            "interface": [
+                "displayName": "Personal"
+            ],
+            "plugins": [[
+                "name": pluginName,
+                "source": [
+                    "source": "local",
+                    "path": "./plugins/\(pluginName)"
+                ],
+                "policy": [
+                    "installation": "AVAILABLE",
+                    "authentication": "ON_USE"
+                ]
+            ]]
+        ]
+        do {
+            try FileManager.default.createDirectory(
+                at: marketplacePath.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let data = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+            try data.write(to: marketplacePath, options: [.atomic])
+        } catch let error as AppServerError {
+            throw error
+        } catch {
+            throw AppServerError.internalError("checkout plugin share: failed to update personal marketplace: \(error)")
+        }
+    }
+
     private struct PluginShareLocalPathMapping: Codable {
         var localPluginPathsByRemotePluginId: [String: String]
     }
@@ -29439,6 +29596,10 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                             configuration: configuration
                         )
                     )
+                case "plugin/share/checkout":
+                    let result = try CodexAppServer.pluginShareCheckoutResult(params: params, configuration: configuration)
+                    clearPluginRelatedCaches()
+                    response = CodexAppServer.responseObject(id: id, result: result)
                 case "plugin/share/delete":
                     let result = try CodexAppServer.pluginShareDeleteResult(params: params, configuration: configuration)
                     clearPluginRelatedCaches()

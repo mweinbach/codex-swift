@@ -826,6 +826,29 @@ final class AppServerPluginProtocolTests: XCTestCase {
                 ]]
             ]
         )
+        try XCTAssertJSONObjectEqual(PluginShareCheckoutParams(remotePluginID: "plugins~Plugin_123"), [
+            "remotePluginId": "plugins~Plugin_123"
+        ])
+        try XCTAssertJSONObjectEqual(
+            PluginShareCheckoutResponse(
+                remotePluginID: "plugins~Plugin_123",
+                pluginID: "gmail@codex-curated",
+                pluginName: "gmail",
+                pluginPath: try AbsolutePath(absolutePath: "/Users/me/plugins/gmail"),
+                marketplaceName: "codex-curated",
+                marketplacePath: try AbsolutePath(absolutePath: "/Users/me/.agents/plugins/marketplace.json"),
+                remoteVersion: "1.2.3"
+            ),
+            [
+                "remotePluginId": "plugins~Plugin_123",
+                "pluginId": "gmail@codex-curated",
+                "pluginName": "gmail",
+                "pluginPath": "/Users/me/plugins/gmail",
+                "marketplaceName": "codex-curated",
+                "marketplacePath": "/Users/me/.agents/plugins/marketplace.json",
+                "remoteVersion": "1.2.3"
+            ]
+        )
         try XCTAssertJSONObjectEqual(PluginShareDeleteParams(remotePluginID: "plugins~Plugin_123"), [
             "remotePluginId": "plugins~Plugin_123"
         ])

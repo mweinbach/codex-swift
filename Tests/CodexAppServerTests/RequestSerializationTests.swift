@@ -131,6 +131,7 @@ final class RequestSerializationTests: XCTestCase {
             "plugin/share/save",
             "plugin/share/updateTargets",
             "plugin/share/list",
+            "plugin/share/checkout",
             "plugin/share/delete",
             "plugin/install",
             "plugin/uninstall",
