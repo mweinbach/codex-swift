@@ -3965,6 +3965,89 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(completedItem["action"]?["pattern"], .string("needle"))
     }
 
+    func testExecCommandEmitsJSONLinesCommandExecutionItemsLikeRust() async throws {
+        let id = try ConversationId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let toolCall = ResponseItem.functionCall(
+            name: "exec_command",
+            arguments: #"{"cmd":"printf 'hi\n'","yield_time_ms":10000}"#,
+            callID: "exec-tool-call"
+        )
+        let finalMessage = ResponseItem.message(role: "assistant", content: [.outputText(text: "command done")])
+        let script = SingleToolLoopScript(toolCall: toolCall, finalMessage: finalMessage)
+
+        let loopResult = await NonInteractiveExec.runResponsesLoopWithTranscript(
+            initialPrompt: Prompt(input: [
+                .message(role: "user", content: [.inputText(text: "run a command")])
+            ]),
+            streamPrompt: { prompt in
+                .success(await script.next(prompt))
+            },
+            executeFunctionCall: { item in
+                await NonInteractiveExec.executeFunctionCallWithHooks(
+                    item,
+                    handlers: [],
+                    conversationID: id,
+                    turnID: "turn-jsonl-command",
+                    cwd: temp.url,
+                    model: "gpt-test",
+                    approvalPolicy: .never,
+                    sandboxPolicy: .dangerFullAccess,
+                    shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+                    truncationPolicy: .bytes(10_000)
+                )
+            }
+        )
+
+        XCTAssertEqual(loopResult.runtimeEvents.count, 2)
+        XCTAssertTrue(loopResult.transcriptItems.contains { item in
+            guard case let .functionCallOutput(callID, output) = item else {
+                return false
+            }
+            return callID == "exec-tool-call"
+                && output.success == true
+                && output.content.contains("Process exited with code 0")
+                && output.content.contains("hi")
+        })
+
+        let result = NonInteractiveExec.finish(
+            responseEvents: loopResult.events,
+            outputMode: .jsonLines,
+            conversationID: id,
+            lastMessageFile: nil
+        )
+
+        XCTAssertEqual(result.exitCode, 0)
+        let lines = try XCTUnwrap(result.stdoutMessage?.split(separator: "\n").map(String.init))
+        let objects = try lines.map(jsonObject)
+        XCTAssertEqual(objects.map { $0["type"] }, [
+            .string("thread.started"),
+            .string("turn.started"),
+            .string("item.started"),
+            .string("item.completed"),
+            .string("item.completed"),
+            .string("turn.completed")
+        ])
+        guard case let .object(startedCommand)? = objects[2]["item"],
+              case let .object(completedCommand)? = objects[3]["item"]
+        else {
+            return XCTFail("expected command execution items")
+        }
+        XCTAssertEqual(startedCommand["id"], .string("item_0"))
+        XCTAssertEqual(startedCommand["type"], .string("command_execution"))
+        XCTAssertEqual(startedCommand["command"], .string("printf 'hi\n'"))
+        XCTAssertEqual(startedCommand["aggregated_output"], .string(""))
+        XCTAssertNil(startedCommand["exit_code"])
+        XCTAssertEqual(startedCommand["status"], .string("in_progress"))
+        XCTAssertEqual(completedCommand["id"], .string("item_0"))
+        XCTAssertEqual(completedCommand["type"], .string("command_execution"))
+        XCTAssertEqual(completedCommand["command"], .string("printf 'hi\n'"))
+        XCTAssertEqual(completedCommand["aggregated_output"], .string("hi\n"))
+        XCTAssertEqual(completedCommand["exit_code"], .integer(0))
+        XCTAssertEqual(completedCommand["status"], .string("completed"))
+        XCTAssertEqual(objects[4]["item"]?["type"], .string("agent_message"))
+    }
+
     func testUpdatePlanToolEmitsRuntimeEventAndJSONTodoListLikeRust() async throws {
         let id = try ConversationId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
         let toolCall = ResponseItem.functionCall(
@@ -4417,6 +4500,38 @@ private actor RegisteredToolLoopScript {
         return [
             .success(.outputItemDone(finalMessage)),
             .success(.completed(responseID: "resp-registered-2", tokenUsage: nil))
+        ]
+    }
+
+    func prompts() -> [Prompt] {
+        recordedPrompts
+    }
+}
+
+private actor SingleToolLoopScript {
+    private var calls = 0
+    private var recordedPrompts: [Prompt] = []
+    private let toolCall: ResponseItem
+    private let finalMessage: ResponseItem
+
+    init(toolCall: ResponseItem, finalMessage: ResponseItem) {
+        self.toolCall = toolCall
+        self.finalMessage = finalMessage
+    }
+
+    func next(_ prompt: Prompt) -> ResponseEventResults {
+        calls += 1
+        recordedPrompts.append(prompt)
+
+        if calls == 1 {
+            return [
+                .success(.outputItemDone(toolCall)),
+                .success(.completed(responseID: "resp-single-tool-1", tokenUsage: nil))
+            ]
+        }
+        return [
+            .success(.outputItemDone(finalMessage)),
+            .success(.completed(responseID: "resp-single-tool-2", tokenUsage: nil))
         ]
     }
 

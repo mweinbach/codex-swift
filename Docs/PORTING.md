@@ -12,6 +12,14 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust exec JSONL command-execution projection in
+  `codex-rs/exec/src/event_processor_with_jsonl_output.rs`,
+  `codex-rs/exec/src/exec_events.rs`, and
+  `codex-rs/exec/tests/event_processor_with_json_output.rs`. Swift
+  non-interactive `exec_command` now carries runtime `exec_command_begin` /
+  `exec_command_end` events into `--jsonl` output and emits Rust-shaped
+  `command_execution` `item.started` / `item.completed` envelopes with stable
+  item ids, command text, aggregated output, exit code, and snake-case status.
 - 2026-05-17: refreshed upstream Rust `main` to `4c89772314`
   (`sdk/python: add first-class login support`). The newest upstream changes
   above the last Swift checkpoint are Python SDK-only (`4c89772314` and

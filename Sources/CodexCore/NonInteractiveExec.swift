@@ -833,6 +833,7 @@ public enum NonInteractiveExec {
         features: FeatureStates,
         execPolicyManager: ExecPolicyManager,
         windowsSandboxLevel: WindowsSandboxLevel,
+        turnID: String = "turn-1",
         approvalGranted: Bool
     ) async -> ExecutedFunctionCall {
         switch item {
@@ -860,6 +861,7 @@ public enum NonInteractiveExec {
                 features: features,
                 execPolicyManager: execPolicyManager,
                 windowsSandboxLevel: windowsSandboxLevel,
+                turnID: turnID,
                 approvalGranted: approvalGranted
             )
 
@@ -1036,6 +1038,7 @@ public enum NonInteractiveExec {
             features: features,
             execPolicyManager: execPolicyManager,
             windowsSandboxLevel: windowsSandboxLevel,
+            turnID: turnID,
             approvalGranted: approvalGranted
         )
         let output = execution.output
@@ -1082,6 +1085,7 @@ public enum NonInteractiveExec {
         jsonEncoder.outputFormatting = [.withoutEscapingSlashes]
         var jsonLines: [String] = []
         var runningTodoList: RunningExecJSONTodoList?
+        var runningCommandIDs: [String: String] = [:]
 
         if outputMode == .jsonLines {
             jsonLines.append(encodeJSONLine(ThreadStartedEvent(threadID: conversationID.description), using: jsonEncoder))
@@ -1107,6 +1111,7 @@ public enum NonInteractiveExec {
                             jsonLines: &jsonLines,
                             itemIDs: &itemIDs,
                             runningTodoList: &runningTodoList,
+                            runningCommandIDs: &runningCommandIDs,
                             encoder: jsonEncoder
                         )
                     }
@@ -1246,25 +1251,58 @@ public enum NonInteractiveExec {
         jsonLines: inout [String],
         itemIDs: inout ExecJSONItemIDMapper,
         runningTodoList: inout RunningExecJSONTodoList?,
+        runningCommandIDs: inout [String: String],
         encoder: JSONEncoder
     ) {
-        guard case let .planUpdate(planUpdate) = event else {
-            return
-        }
-        let todoItems = planUpdate.plan.map { item in
-            ExecJSONTodoItem(text: item.step, completed: item.status == .completed)
-        }
-        let todoListItem: CompletedItem
-        if let running = runningTodoList {
-            todoListItem = CompletedItem(id: running.id, type: "todo_list", items: todoItems)
-            runningTodoList = RunningExecJSONTodoList(id: running.id, items: todoItems)
-            jsonLines.append(encodeJSONLine(ExecJSONItemUpdatedEvent(item: todoListItem), using: encoder))
-        } else {
+        switch event {
+        case let .planUpdate(planUpdate):
+            let todoItems = planUpdate.plan.map { item in
+                ExecJSONTodoItem(text: item.step, completed: item.status == .completed)
+            }
+            let todoListItem: CompletedItem
+            if let running = runningTodoList {
+                todoListItem = CompletedItem(id: running.id, type: "todo_list", items: todoItems)
+                runningTodoList = RunningExecJSONTodoList(id: running.id, items: todoItems)
+                jsonLines.append(encodeJSONLine(ExecJSONItemUpdatedEvent(item: todoListItem), using: encoder))
+            } else {
+                let itemID = itemIDs.nextID()
+                todoListItem = CompletedItem(id: itemID, type: "todo_list", items: todoItems)
+                runningTodoList = RunningExecJSONTodoList(id: itemID, items: todoItems)
+                jsonLines.append(encodeJSONLine(ExecJSONItemStartedEvent(item: todoListItem), using: encoder))
+            }
+
+        case let .execCommandBegin(begin):
             let itemID = itemIDs.nextID()
-            todoListItem = CompletedItem(id: itemID, type: "todo_list", items: todoItems)
-            runningTodoList = RunningExecJSONTodoList(id: itemID, items: todoItems)
-            jsonLines.append(encodeJSONLine(ExecJSONItemStartedEvent(item: todoListItem), using: encoder))
+            runningCommandIDs[begin.callID] = itemID
+            jsonLines.append(encodeJSONLine(ExecJSONItemStartedEvent(item: CompletedItem(
+                id: itemID,
+                type: "command_execution",
+                command: execJSONCommandString(command: begin.command, fallback: begin.interactionInput),
+                aggregatedOutput: "",
+                status: "in_progress"
+            )), using: encoder))
+
+        case let .execCommandEnd(end):
+            let itemID = runningCommandIDs.removeValue(forKey: end.callID) ?? itemIDs.nextID()
+            jsonLines.append(encodeJSONLine(ExecJSONItemCompletedEvent(item: CompletedItem(
+                id: itemID,
+                type: "command_execution",
+                command: execJSONCommandString(command: end.command, fallback: end.interactionInput),
+                aggregatedOutput: end.aggregatedOutput,
+                exitCode: end.exitCode,
+                status: end.status.rawValue
+            )), using: encoder))
+
+        default:
+            break
         }
+    }
+
+    private static func execJSONCommandString(command: [String], fallback: String?) -> String {
+        guard let fallback, !fallback.isEmpty else {
+            return command.joined(separator: " ")
+        }
+        return fallback
     }
 
     private enum ShellResponseFormat {
@@ -1450,6 +1488,7 @@ public enum NonInteractiveExec {
         features: FeatureStates,
         execPolicyManager: ExecPolicyManager,
         windowsSandboxLevel: WindowsSandboxLevel,
+        turnID: String,
         approvalGranted: Bool
     ) async -> ExecutedFunctionCall {
         let decoder = JSONDecoder()
@@ -1480,6 +1519,7 @@ public enum NonInteractiveExec {
                     execPolicyManager: execPolicyManager,
                     approvalGranted: approvalGranted,
                     windowsSandboxLevel: windowsSandboxLevel,
+                    turnID: turnID,
                     truncationPolicy: params.maxOutputTokens.map { .tokens($0) } ?? truncationPolicy,
                     environment: environment,
                     shellEnvironmentPolicy: shellEnvironmentPolicy,
@@ -2221,6 +2261,7 @@ public enum NonInteractiveExec {
         execPolicyManager: ExecPolicyManager,
         approvalGranted: Bool,
         windowsSandboxLevel: WindowsSandboxLevel,
+        turnID: String,
         truncationPolicy: TruncationPolicy,
         environment: [String: String],
         shellEnvironmentPolicy: ShellEnvironmentPolicy,
@@ -2305,11 +2346,42 @@ public enum NonInteractiveExec {
                 eventCallID: callID,
                 hookCommand: hookCommand
             )
+            let formattedOutput = formatUnifiedExecResponse(output)
+            var runtimeEvents: [EventMessage] = [
+                .execCommandBegin(ExecCommandBeginEvent(
+                    callID: callID,
+                    processID: output.processID,
+                    turnID: turnID,
+                    command: command,
+                    cwd: commandCwd.path,
+                    parsedCmd: parseCommand(command),
+                    source: .agent,
+                    interactionInput: hookCommand
+                ))
+            ]
+            if let exitCode = output.exitCode {
+                runtimeEvents.append(.execCommandEnd(ExecCommandEndEvent(
+                    callID: callID,
+                    processID: output.processID,
+                    turnID: turnID,
+                    command: command,
+                    cwd: commandCwd.path,
+                    parsedCmd: parseCommand(command),
+                    source: .agent,
+                    interactionInput: hookCommand,
+                    stdout: output.output,
+                    stderr: "",
+                    aggregatedOutput: output.output,
+                    exitCode: Int32(exitCode),
+                    duration: ProtocolDuration(timeInterval: output.duration),
+                    formattedOutput: formattedOutput
+                )))
+            }
             return executed(functionOutput(
                 callID: callID,
-                content: formatUnifiedExecResponse(output),
+                content: formattedOutput,
                 success: output.exitCode.map { $0 == 0 } ?? true
-            ), unifiedExecOutput: output)
+            ), unifiedExecOutput: output, runtimeEvents: runtimeEvents)
         } catch {
             return executed(functionOutput(
                 callID: callID,
@@ -3519,6 +3591,10 @@ private struct CompletedItem: Encodable {
     let query: String?
     let action: WebSearchAction?
     let items: [ExecJSONTodoItem]?
+    let command: String?
+    let aggregatedOutput: String?
+    let exitCode: Int32?
+    let status: String?
 
     init(
         id: String,
@@ -3526,7 +3602,11 @@ private struct CompletedItem: Encodable {
         text: String? = nil,
         query: String? = nil,
         action: WebSearchAction? = nil,
-        items: [ExecJSONTodoItem]? = nil
+        items: [ExecJSONTodoItem]? = nil,
+        command: String? = nil,
+        aggregatedOutput: String? = nil,
+        exitCode: Int32? = nil,
+        status: String? = nil
     ) {
         self.id = id
         self.type = type
@@ -3534,6 +3614,23 @@ private struct CompletedItem: Encodable {
         self.query = query
         self.action = action
         self.items = items
+        self.command = command
+        self.aggregatedOutput = aggregatedOutput
+        self.exitCode = exitCode
+        self.status = status
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case type
+        case text
+        case query
+        case action
+        case items
+        case command
+        case aggregatedOutput = "aggregated_output"
+        case exitCode = "exit_code"
+        case status
     }
 }
 
