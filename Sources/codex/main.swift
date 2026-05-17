@@ -738,6 +738,9 @@ private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) as
             exitCode: 0,
             stdoutMessage: try AppServerDaemonLifecycle.encodeOutput(output) + "\n"
         )
+    case .daemonPidUpdateLoop:
+        try await AppServerDaemonLifecycle.runPidUpdateLoop()
+        return CodexCLI.CommandExecutionResult(exitCode: 0)
     case let .proxy(socketPath):
         let resolvedSocketPath: String
         if let socketPath {

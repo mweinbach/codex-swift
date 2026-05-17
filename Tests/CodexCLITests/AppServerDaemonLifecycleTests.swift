@@ -3,6 +3,83 @@ import Foundation
 import XCTest
 
 final class AppServerDaemonLifecycleTests: XCTestCase {
+    func testUpdaterIdentityUsesRustSHA256Digest() {
+        let identity = AppServerDaemonExecutableIdentity(bytes: Data("same".utf8))
+
+        XCTAssertEqual(
+            identity.digestHex,
+            "0967115f2813a3541eaef77de9d9d5773f1c0c04314b0bbfe4ff3b3b1c55b5d5"
+        )
+    }
+
+    func testUpdateModesForIdentitiesMatchRust() {
+        let current = AppServerDaemonExecutableIdentity(bytes: Data("same".utf8))
+        let sameManaged = AppServerDaemonExecutableIdentity(bytes: Data("same".utf8))
+        let changedManaged = AppServerDaemonExecutableIdentity(bytes: Data("managed".utf8))
+
+        XCTAssertEqual(
+            AppServerDaemonLifecycle.updateModesForIdentities(currentUpdater: current, managedCodex: sameManaged),
+            AppServerDaemonUpdateModes(restartMode: .ifVersionChanged, updaterRefreshMode: .none)
+        )
+        XCTAssertEqual(
+            AppServerDaemonLifecycle.updateModesForIdentities(currentUpdater: current, managedCodex: changedManaged),
+            AppServerDaemonUpdateModes(
+                restartMode: .always,
+                updaterRefreshMode: .reexecIfManagedBinaryChanged
+            )
+        )
+    }
+
+    func testRestartDecisionMatchesRust() {
+        XCTAssertEqual(
+            AppServerDaemonLifecycle.restartDecision(
+                mode: .ifVersionChanged,
+                appServerVersion: nil,
+                managedVersion: "1.2.3"
+            ),
+            .notReady
+        )
+        XCTAssertEqual(
+            AppServerDaemonLifecycle.restartDecision(
+                mode: .ifVersionChanged,
+                appServerVersion: "1.2.3",
+                managedVersion: "1.2.3"
+            ),
+            .alreadyCurrent
+        )
+        XCTAssertEqual(
+            AppServerDaemonLifecycle.restartDecision(
+                mode: .ifVersionChanged,
+                appServerVersion: "1.2.2",
+                managedVersion: "1.2.3"
+            ),
+            .restart
+        )
+        XCTAssertEqual(
+            AppServerDaemonLifecycle.restartDecision(
+                mode: .always,
+                appServerVersion: "1.2.3",
+                managedVersion: "1.2.3"
+            ),
+            .restart
+        )
+    }
+
+    func testShouldReexecUpdaterMatchesRust() {
+        XCTAssertFalse(AppServerDaemonLifecycle.shouldReexecUpdater(
+            refreshMode: .none,
+            outcome: .restarted
+        ))
+        XCTAssertFalse(AppServerDaemonLifecycle.shouldReexecUpdater(
+            refreshMode: .reexecIfManagedBinaryChanged,
+            outcome: .alreadyCurrent
+        ))
+        XCTAssertTrue(AppServerDaemonLifecycle.shouldReexecUpdater(
+            refreshMode: .reexecIfManagedBinaryChanged,
+            outcome: .restarted
+        ))
+    }
+
     func testRemoteControlStartFailsWithRustManagedInstallGuidanceWhenMissing() async throws {
         let temp = try AppServerDaemonTemporaryDirectory()
 

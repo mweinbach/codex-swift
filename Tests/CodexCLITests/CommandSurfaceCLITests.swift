@@ -1109,6 +1109,7 @@ final class CommandSurfaceCLITests: XCTestCase {
             (["app-server", "daemon", "restart"], .daemonRestart),
             (["app-server", "daemon", "stop"], .daemonStop),
             (["app-server", "daemon", "version"], .daemonVersion),
+            (["app-server", "daemon", "pid-update-loop"], .daemonPidUpdateLoop),
             (["app-server", "daemon", "bootstrap"], .daemonBootstrap(remoteControlEnabled: false)),
             (
                 ["app-server", "daemon", "bootstrap", "--remote-control"],
@@ -1386,6 +1387,10 @@ final class CommandSurfaceCLITests: XCTestCase {
                 "`--remote ws://root.example.test` is only supported for interactive TUI commands, not `codex app-server daemon start`"
             ),
             (
+                ["--remote", "ws://root.example.test", "app-server", "daemon", "pid-update-loop"],
+                "`--remote ws://root.example.test` is only supported for interactive TUI commands, not `codex app-server daemon pid-update-loop`"
+            ),
+            (
                 ["--remote-auth-token-env", "CODEX_REMOTE_TOKEN", "app-server", "daemon", "bootstrap"],
                 "`--remote-auth-token-env` is only supported for interactive TUI commands, not `codex app-server daemon bootstrap`"
             ),
@@ -1580,6 +1585,14 @@ final class CommandSurfaceCLITests: XCTestCase {
             (
                 ["app-server", "daemon", "start", "--remote-control"],
                 "codex-swift: unsupported option for command 'app-server daemon start': --remote-control"
+            ),
+            (
+                ["app-server", "daemon", "pid-update-loop", "extra"],
+                "codex-swift: unexpected argument for command 'app-server daemon pid-update-loop': extra"
+            ),
+            (
+                ["app-server", "daemon", "pid-update-loop", "--bad"],
+                "codex-swift: unsupported option for command 'app-server daemon pid-update-loop': --bad"
             ),
             (
                 ["app-server", "daemon", "bootstrap", "extra"],

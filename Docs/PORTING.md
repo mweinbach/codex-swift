@@ -31,7 +31,10 @@ Recent upstream audit checkpoint:
   command family, including daemon-specific parser errors, root remote-flag
   rejection wording, persisted remote-control settings, restart-on-toggle
   behavior, and Rust-shaped lifecycle/version JSON. The hidden
-  `pid-update-loop` updater runtime remains pending.
+  `pid-update-loop` command surface is now accepted, and Swift ports the
+  updater executable-identity, restart-mode, and updater-reexec decision
+  helpers; the live updater loop (installer fetch, retry loop, termination
+  handling, and managed-binary reexec) remains pending.
 - 2026-05-17: rechecked Rust commit `e6939e3969` (`feat: namespace in ext`).
   Swift does not yet have the Rust extension executor registry, but the shared
   Responses tool-spec surface now has explicit parity coverage that namespace

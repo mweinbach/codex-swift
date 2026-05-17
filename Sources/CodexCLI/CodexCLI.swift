@@ -463,6 +463,7 @@ public struct CodexCLI: Sendable {
         case daemonDisableRemoteControl
         case daemonStop
         case daemonVersion
+        case daemonPidUpdateLoop
         case proxy(socketPath: String?)
         case generateTS(outDir: String, prettier: String?, experimental: Bool)
         case generateJSONSchema(outDir: String, experimental: Bool)
@@ -3393,6 +3394,8 @@ public struct CodexCLI: Sendable {
             return parseNoArguments(remainder, commandName: "app-server daemon stop", action: .daemonStop)
         case "version":
             return parseNoArguments(remainder, commandName: "app-server daemon version", action: .daemonVersion)
+        case "pid-update-loop":
+            return parseNoArguments(remainder, commandName: "app-server daemon pid-update-loop", action: .daemonPidUpdateLoop)
         case "enable-remote-control":
             return parseNoArguments(remainder, commandName: "app-server daemon enable-remote-control", action: .daemonEnableRemoteControl)
         case "disable-remote-control":
@@ -3866,6 +3869,8 @@ public struct CodexCLI: Sendable {
                 return "app-server daemon stop"
             case "version":
                 return "app-server daemon version"
+            case "pid-update-loop":
+                return "app-server daemon pid-update-loop"
             default:
                 return "app-server daemon"
             }

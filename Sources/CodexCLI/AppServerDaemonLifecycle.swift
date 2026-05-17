@@ -1,4 +1,5 @@
 import Darwin
+import CryptoKit
 import Foundation
 
 public enum AppServerDaemonBackendKind: String, Codable, Sendable {
@@ -142,6 +143,53 @@ public struct AppServerDaemonSpawnRequest: Equatable, Sendable {
     }
 }
 
+public struct AppServerDaemonExecutableIdentity: Equatable, Sendable {
+    public let digestHex: String
+
+    public init(bytes: Data) {
+        digestHex = SHA256.hash(data: bytes)
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+}
+
+public enum AppServerDaemonRestartMode: Equatable, Sendable {
+    case ifVersionChanged
+    case always
+}
+
+public enum AppServerDaemonUpdaterRefreshMode: Equatable, Sendable {
+    case none
+    case reexecIfManagedBinaryChanged
+}
+
+public struct AppServerDaemonUpdateModes: Equatable, Sendable {
+    public let restartMode: AppServerDaemonRestartMode
+    public let updaterRefreshMode: AppServerDaemonUpdaterRefreshMode
+
+    public init(
+        restartMode: AppServerDaemonRestartMode,
+        updaterRefreshMode: AppServerDaemonUpdaterRefreshMode
+    ) {
+        self.restartMode = restartMode
+        self.updaterRefreshMode = updaterRefreshMode
+    }
+}
+
+public enum AppServerDaemonRestartDecision: Equatable, Sendable {
+    case notReady
+    case alreadyCurrent
+    case restart
+}
+
+public enum AppServerDaemonRestartIfRunningOutcome: Equatable, Sendable {
+    case busy
+    case notRunning
+    case notReady
+    case alreadyCurrent
+    case restarted
+}
+
 public struct AppServerDaemonProcessClient: Sendable {
     public var processStartTime: @Sendable (UInt32) async throws -> String?
     public var signalProcess: @Sendable (UInt32, AppServerDaemonSignal) async throws -> Void
@@ -205,6 +253,46 @@ public struct AppServerDaemonStopOptions: Sendable {
 }
 
 public enum AppServerDaemonLifecycle {
+    public static func updateModesForIdentities(
+        currentUpdater: AppServerDaemonExecutableIdentity,
+        managedCodex: AppServerDaemonExecutableIdentity
+    ) -> AppServerDaemonUpdateModes {
+        if currentUpdater == managedCodex {
+            return AppServerDaemonUpdateModes(restartMode: .ifVersionChanged, updaterRefreshMode: .none)
+        }
+        return AppServerDaemonUpdateModes(restartMode: .always, updaterRefreshMode: .reexecIfManagedBinaryChanged)
+    }
+
+    public static func restartDecision(
+        mode: AppServerDaemonRestartMode,
+        appServerVersion: String?,
+        managedVersion: String?
+    ) -> AppServerDaemonRestartDecision {
+        switch mode {
+        case .ifVersionChanged:
+            guard let appServerVersion else {
+                return .notReady
+            }
+            if appServerVersion == managedVersion {
+                return .alreadyCurrent
+            }
+            return .restart
+        case .always:
+            return .restart
+        }
+    }
+
+    public static func shouldReexecUpdater(
+        refreshMode: AppServerDaemonUpdaterRefreshMode,
+        outcome: AppServerDaemonRestartIfRunningOutcome
+    ) -> Bool {
+        refreshMode == .reexecIfManagedBinaryChanged && outcome == .restarted
+    }
+
+    public static func runPidUpdateLoop() async throws {
+        throw AppServerDaemonLifecycleError("app-server daemon pid-update-loop runtime is not implemented in Swift yet")
+    }
+
     public static func start(
         codexHome: URL,
         cliVersion: String,
