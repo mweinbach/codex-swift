@@ -1395,10 +1395,12 @@ final class ToolSpecTests: XCTestCase {
         }
 
         XCTAssertTrue(execTool.description.starts(with: "Run JavaScript code to orchestrate/compose tool calls"))
+        XCTAssertFalse(execTool.description.contains("do not attempt to use any other tools directly"))
         XCTAssertTrue(execTool.description.contains("### `update_plan`"))
         XCTAssertTrue(execTool.description.contains("declare const tools: { update_plan(args:"))
         XCTAssertTrue(execTool.description.contains("### `view_image`"))
         XCTAssertTrue(execTool.description.contains("declare const tools: { view_image(args:"))
+        XCTAssertFalse(execTool.description.contains("do not print the full `ALL_TOOLS` array"))
     }
 
     func testCodeModeAugmentsMCPNamespaceToolDescriptionsLikeRust() throws {

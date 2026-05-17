@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `3de4d7f238` (`clean up instructions`).
+  Swift code-mode exec tool descriptions now pin Rust's shorter instruction
+  surface: the removed code-mode-only preface and deferred `ALL_TOOLS`
+  full-print warning stay absent while hidden nested tool declarations remain
+  available in code-mode-only descriptions.
 - 2026-05-17: rechecked Rust commit `f11ad1eacb` (`[codex] Add search term
   coverage for tool_search`). Swift now has focused coverage that deferred MCP
   `tool_search` entries match Rust's indexed terms for raw tool names, tool
