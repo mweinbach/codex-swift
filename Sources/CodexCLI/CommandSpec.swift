@@ -29,7 +29,7 @@ public enum CodexCommandRegistry {
         CommandSpec(name: "plugin", summary: "Manage Codex plugins."),
         CommandSpec(name: "mcp-server", summary: "Start Codex as an MCP server (stdio)."),
         CommandSpec(name: "app-server", summary: "[experimental] Run the app server or related tooling."),
-        CommandSpec(name: "remote-control", summary: "[experimental] Start a headless app-server with remote control enabled."),
+        CommandSpec(name: "remote-control", summary: "[experimental] Manage a headless app-server with remote control enabled."),
         CommandSpec(name: "app", summary: "Launch the Codex desktop app (opens the app installer if missing)."),
         CommandSpec(name: "completion", summary: "Generate shell completion scripts."),
         CommandSpec(name: "update", summary: "Update Codex to the latest version."),

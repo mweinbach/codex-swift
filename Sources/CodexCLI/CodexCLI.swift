@@ -3270,24 +3270,41 @@ public struct CodexCLI: Sendable {
         _ arguments: [String],
         rootArguments: [String]
     ) -> ParseResult<AppServerCommandRequest> {
+        let positionals = positionalTokens(rootArguments)
+        let rootUsesExplicitStart = positionals.firstIndex(of: "remote-control").map { index in
+            let nextIndex = positionals.index(after: index)
+            return nextIndex < positionals.endIndex && positionals[nextIndex] == "start"
+        } ?? false
+        let commandName: String
+        let commandArguments: [String]
+        if arguments.first == "start" || rootUsesExplicitStart {
+            commandName = "remote-control start"
+            commandArguments = arguments.first == "start" ? Array(arguments.dropFirst()) : arguments
+        } else {
+            commandName = "remote-control"
+            commandArguments = arguments
+        }
         if let remote = rootRemoteFlagValue(named: "--remote", beforeCommand: "remote-control", in: rootArguments) {
             return .failure(
-                "`--remote \(remote)` is only supported for interactive TUI commands, not `codex remote-control`",
+                "`--remote \(remote)` is only supported for interactive TUI commands, not `codex \(commandName)`",
                 1
             )
         }
         if rootRemoteFlagValue(named: "--remote-auth-token-env", beforeCommand: "remote-control", in: rootArguments) != nil {
             return .failure(
-                "`--remote-auth-token-env` is only supported for interactive TUI commands, not `codex remote-control`",
+                "`--remote-auth-token-env` is only supported for interactive TUI commands, not `codex \(commandName)`",
                 1
             )
         }
-        guard arguments.isEmpty else {
-            let argument = arguments[0]
+        guard commandArguments.isEmpty else {
+            let argument = commandArguments[0]
             if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'remote-control': \(argument)", 64)
+                return .failure("codex-swift: unsupported option for command '\(commandName)': \(argument)", 64)
             }
-            return .failure("codex-swift: unexpected argument for command 'remote-control': \(argument)", 64)
+            if commandName == "remote-control" {
+                return .failure("codex-swift: unsupported remote-control subcommand: \(argument)", 64)
+            }
+            return .failure("codex-swift: unexpected argument for command '\(commandName)': \(argument)", 64)
         }
         switch parseConfigOverrides(from: rootArguments) {
         case let .success(configOverrides):
@@ -3566,8 +3583,10 @@ public struct CodexCLI: Sendable {
             default:
                 return nil
             }
+        case "remote-control":
+            return commandArguments.first == "start" ? "remote-control start" : "remote-control"
         case "exec", "computer-use", "review", "login", "logout", "mcp", "plugin",
-             "mcp-server", "remote-control", "app", "completion", "update", "cloud",
+             "mcp-server", "app", "completion", "update", "cloud",
              "apply", "responses-api-proxy", "stdio-to-uds", "exec-server":
             return spec.name
         default:

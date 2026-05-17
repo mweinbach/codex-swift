@@ -1220,31 +1220,37 @@ final class CommandSurfaceCLITests: XCTestCase {
     }
 
     func testRunAsyncRemoteControlUsesRuntimeFlagWithoutFeatureOverrideLikeRust() async {
-        var request: CodexCLI.AppServerCommandRequest?
+        let commandForms = [
+            ["remote-control"],
+            ["remote-control", "start"]
+        ]
 
-        let exitCode = await CodexCLI().runAsync(
-            arguments: [
-                "-c",
+        for commandForm in commandForms {
+            var request: CodexCLI.AppServerCommandRequest?
+
+            let exitCode = await CodexCLI().runAsync(
+                arguments: [
+                    "-c",
+                    "features.remote_control=false",
+                    "--enable",
+                    "web_search_request"
+                ] + commandForm,
+                stderr: { _ in XCTFail("stderr should not be written for \(commandForm)") },
+                appServerRunner: {
+                    request = $0
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                }
+            )
+
+            XCTAssertEqual(exitCode, 0, "\(commandForm)")
+            XCTAssertEqual(request?.action, .remoteControl, "\(commandForm)")
+            XCTAssertEqual(request?.listenTransport, .off, "\(commandForm)")
+            XCTAssertEqual(request?.remoteControlEnabled, true, "\(commandForm)")
+            XCTAssertEqual(request?.configOverrides.rawOverrides, [
                 "features.remote_control=false",
-                "--enable",
-                "web_search_request",
-                "remote-control"
-            ],
-            stderr: { _ in XCTFail("stderr should not be written") },
-            appServerRunner: {
-                request = $0
-                return CodexCLI.CommandExecutionResult(exitCode: 0)
-            }
-        )
-
-        XCTAssertEqual(exitCode, 0)
-        XCTAssertEqual(request?.action, .remoteControl)
-        XCTAssertEqual(request?.listenTransport, .off)
-        XCTAssertEqual(request?.remoteControlEnabled, true)
-        XCTAssertEqual(request?.configOverrides.rawOverrides, [
-            "features.remote_control=false",
-            "features.web_search_request=true"
-        ])
+                "features.web_search_request=true"
+            ], "\(commandForm)")
+        }
     }
 
     func testRunAsyncRemoteControlRejectsRootRemoteFlagsBeforeRunner() async {
@@ -1256,6 +1262,10 @@ final class CommandSurfaceCLITests: XCTestCase {
             (
                 ["--remote-auth-token-env", "CODEX_REMOTE_TOKEN", "remote-control"],
                 "`--remote-auth-token-env` is only supported for interactive TUI commands, not `codex remote-control`"
+            ),
+            (
+                ["--remote", "ws://127.0.0.1:8080", "remote-control", "start"],
+                "`--remote ws://127.0.0.1:8080` is only supported for interactive TUI commands, not `codex remote-control start`"
             )
         ]
 
@@ -1367,11 +1377,23 @@ final class CommandSurfaceCLITests: XCTestCase {
         let cases: [([String], String)] = [
             (
                 ["remote-control", "extra"],
-                "codex-swift: unexpected argument for command 'remote-control': extra"
+                "codex-swift: unsupported remote-control subcommand: extra"
             ),
             (
                 ["remote-control", "--listen"],
                 "codex-swift: unsupported option for command 'remote-control': --listen"
+            ),
+            (
+                ["remote-control", "start", "extra"],
+                "codex-swift: unexpected argument for command 'remote-control start': extra"
+            ),
+            (
+                ["remote-control", "start", "--listen"],
+                "codex-swift: unsupported option for command 'remote-control start': --listen"
+            ),
+            (
+                ["remote-control", "stop"],
+                "codex-swift: unsupported remote-control subcommand: stop"
             )
         ]
 

@@ -12,6 +12,13 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `512f8f8012` (`Improve remote-control
+  daemon UX`). Swift CLI now accepts `codex remote-control start` as the
+  explicit Rust start spelling while preserving bare `codex remote-control` as
+  the same remote-control runtime path and root remote-flag rejection wording.
+  Rust's `codex remote-control stop` and managed standalone install diagnostic
+  still depend on the broader app-server daemon lifecycle port and remain
+  pending.
 - 2026-05-17: rechecked Rust commit `e6939e3969` (`feat: namespace in ext`).
   Swift does not yet have the Rust extension executor registry, but the shared
   Responses tool-spec surface now has explicit parity coverage that namespace
