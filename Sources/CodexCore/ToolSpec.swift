@@ -917,10 +917,11 @@ public enum ToolSpecFactory {
         var specs: [ConfiguredToolSpec] = []
 
         switch config.shellType {
-        case .default:
-            specs.append(ConfiguredToolSpec(spec: createShellTool(), supportsParallelToolCalls: false))
-        case .local:
-            specs.append(ConfiguredToolSpec(spec: .localShell, supportsParallelToolCalls: false))
+        case .default, .local, .shellCommand:
+            specs.append(ConfiguredToolSpec(
+                spec: createShellCommandTool(allowLoginShell: config.allowLoginShell),
+                supportsParallelToolCalls: false
+            ))
         case .unifiedExec:
             specs.append(ConfiguredToolSpec(
                 spec: createExecCommandTool(allowLoginShell: config.allowLoginShell),
@@ -929,11 +930,6 @@ public enum ToolSpecFactory {
             specs.append(ConfiguredToolSpec(spec: createWriteStdinTool(), supportsParallelToolCalls: false))
         case .disabled:
             break
-        case .shellCommand:
-            specs.append(ConfiguredToolSpec(
-                spec: createShellCommandTool(allowLoginShell: config.allowLoginShell),
-                supportsParallelToolCalls: false
-            ))
         }
 
         specs.append(ConfiguredToolSpec(spec: createListMCPResourcesTool(), supportsParallelToolCalls: true))

@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `83decfa300` (`[codex] Remove unused
+  legacy shell tools`). Swift tool-spec construction now normalizes
+  `ConfigShellToolType.default`, `.local`, and `.shellCommand` to
+  `shell_command`, and non-interactive model-family tool selection applies the
+  same normalization so removed raw `shell` / `local_shell` specs are no
+  longer advertised while persisted-history decoding stays compatible.
 - 2026-05-17: tightened Rust commit `702e6a3c64` (`[rollout-trace] Add a
   trace ID to MCP calls`). Swift debug trace reduction now accepts
   `mcp_tool_call_correlation_assigned`, stores the Rust `mcp_call_id` field on

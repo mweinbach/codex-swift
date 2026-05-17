@@ -224,6 +224,8 @@ public enum NonInteractiveExec {
             shellType = .unifiedExec
         } else if modelFamily.shellType == .unifiedExec {
             shellType = .shellCommand
+        } else if modelFamily.shellType == .default || modelFamily.shellType == .local {
+            shellType = .shellCommand
         } else {
             shellType = modelFamily.shellType
         }

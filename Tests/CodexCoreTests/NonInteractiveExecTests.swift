@@ -568,6 +568,23 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(toolsConfig.shellType, .shellCommand)
     }
 
+    func testToolsConfigNormalizesLegacyModelShellTypesLikeRust() {
+        var features = FeatureStates.withDefaults()
+        features.set(.unifiedExec, enabled: false)
+        let config = CodexRuntimeConfig(features: features)
+        for shellType in [ConfigShellToolType.default, .local, .shellCommand] {
+            let modelFamily = ModelFamily(
+                slug: "test-model",
+                family: "test",
+                shellType: shellType
+            )
+
+            let toolsConfig = NonInteractiveExec.toolsConfig(modelFamily: modelFamily, config: config)
+
+            XCTAssertEqual(toolsConfig.shellType, .shellCommand)
+        }
+    }
+
     func testFallbackApplyPatchModelsDoNotUseRemovedFreeformToolByDefaultLikeRust() throws {
         let modelFamily = ModelFamily(
             slug: "fallback-model",

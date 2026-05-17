@@ -803,6 +803,15 @@ final class ToolSpecTests: XCTestCase {
         XCTAssertFalse(specs.contains { $0.spec.name == "mcp__codex_apps__calendar_create_event" })
     }
 
+    func testBuildSpecsNormalizesRemovedLegacyShellSelectionsLikeRust() {
+        for shellType in [ConfigShellToolType.default, .local, .shellCommand] {
+            let specs = ToolSpecFactory.buildSpecs(config: ToolsConfig(shellType: shellType))
+            XCTAssertEqual(specs.first?.spec.name, "shell_command")
+            XCTAssertFalse(specs.contains { $0.spec.name == "shell" })
+            XCTAssertFalse(specs.contains { $0.spec.name == "local_shell" })
+        }
+    }
+
     func testRequestPluginInstallCanRegisterWithoutSearchTool() {
         let specs = ToolSpecFactory.buildSpecs(
             config: ToolsConfig(
