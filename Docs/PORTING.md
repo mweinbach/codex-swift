@@ -12,6 +12,13 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `e6939e3969` (`feat: namespace in ext`).
+  Swift does not yet have the Rust extension executor registry, but the shared
+  Responses tool-spec surface now has explicit parity coverage that namespace
+  specs preserve Rust's slash-terminated extension namespace shape
+  (`extension/` + `echo`) and expose the same flattened tool name
+  (`extension/echo`) for registered-tool accounting. Dynamic tool validation
+  remains intentionally restricted to Responses identifier namespaces.
 - 2026-05-17: rechecked Rust commit `4a1f1df8ce` (`[codex] fix plugin CLI
   active user layer compile`). Swift plugin CLI helper surfaces now have
   explicit coverage that `codex plugin marketplace list` and

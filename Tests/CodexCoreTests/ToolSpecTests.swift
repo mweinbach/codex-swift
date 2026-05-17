@@ -539,6 +539,62 @@ final class ToolSpecTests: XCTestCase {
         ])
     }
 
+    func testNamespaceToolSpecPreservesExtensionSlashNamespaceLikeRust() throws {
+        let spec = ToolSpec.namespace(
+            ResponsesAPINamespace(
+                name: "extension/",
+                description: "Tools in the extension/ namespace.",
+                tools: [
+                    .function(
+                        ResponsesAPITool(
+                            name: "echo",
+                            description: "Echoes arguments through an extension tool.",
+                            strict: true,
+                            parameters: .object(
+                                properties: [
+                                    "message": .string(description: nil)
+                                ],
+                                required: ["message"],
+                                additionalProperties: .boolean(false)
+                            )
+                        )
+                    )
+                ]
+            )
+        )
+
+        try XCTAssertJSONObjectEqual(spec, [
+            "type": "namespace",
+            "name": "extension/",
+            "description": "Tools in the extension/ namespace.",
+            "tools": [
+                [
+                    "type": "function",
+                    "name": "echo",
+                    "description": "Echoes arguments through an extension tool.",
+                    "strict": true,
+                    "parameters": [
+                        "type": "object",
+                        "properties": [
+                            "message": ["type": "string"]
+                        ],
+                        "required": ["message"],
+                        "additionalProperties": false
+                    ]
+                ]
+            ]
+        ])
+
+        XCTAssertEqual(
+            ToolSpecFactory.exposedUnavailableToolNames(from: [spec]),
+            [.namespaced("extension/", "echo")]
+        )
+        XCTAssertEqual(
+            ToolSpecFactory.exposedUnavailableToolNames(from: [spec]).map(\.flatName),
+            ["extension/echo"]
+        )
+    }
+
     func testWebSearchToolSpecSerializesExpectedWireShape() throws {
         let spec = ToolSpec.webSearch(
             externalWebAccess: true,
