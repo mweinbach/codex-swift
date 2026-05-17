@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust rollout cursor anchor normalization in
+  `codex-rs/rollout/src/state_db_tests.rs`. Swift `RolloutListing` now has
+  explicit coverage that legacy rollout filename timestamp cursors such as
+  `2026-01-27T12-34-56` and timestamp/UUID cursor tokens parse to the same
+  anchor and re-emit as Rust's RFC3339 cursor token.
 - 2026-05-17: rechecked Rust exec JSONL command-execution projection in
   `codex-rs/exec/src/event_processor_with_jsonl_output.rs`,
   `codex-rs/exec/src/exec_events.rs`, and

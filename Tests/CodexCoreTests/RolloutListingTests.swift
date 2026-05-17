@@ -90,6 +90,18 @@ final class RolloutListingTests: XCTestCase {
         XCTAssertNil(secondPage.nextCursor)
     }
 
+    func testFilenameTimestampCursorNormalizesToRustAnchorFormat() throws {
+        let cursor = try XCTUnwrap(RolloutListing.parseCursor("2026-01-27T12-34-56"))
+
+        XCTAssertEqual(cursor.token, "2026-01-27T12:34:56Z")
+        XCTAssertEqual(
+            RolloutListing.parseCursor(
+                "2026-01-27T12-34-56|00000000-0000-0000-0000-000000000001"
+            ),
+            cursor
+        )
+    }
+
     func testListsConversationsWithRustSortDirectionAndBackwardsCursor() throws {
         let temp = try TemporaryDirectory()
         let olderID = try XCTUnwrap(UUID(uuidString: "00000000-0000-0000-0000-000000000004"))
