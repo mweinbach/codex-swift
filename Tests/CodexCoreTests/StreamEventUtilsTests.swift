@@ -2,6 +2,34 @@ import CodexCore
 import XCTest
 
 final class StreamEventUtilsTests: XCTestCase {
+    private struct RewriteAgentMessageContributor: StreamEventUtils.TurnItemContributor {
+        func contribute(to item: inout TurnItem) {
+            guard case let .agentMessage(agentMessage) = item else {
+                return
+            }
+            item = .agentMessage(AgentMessageItem(
+                id: agentMessage.id,
+                content: [.text("contributed assistant text")],
+                phase: agentMessage.phase,
+                memoryCitation: agentMessage.memoryCitation
+            ))
+        }
+    }
+
+    private struct MemoryCitationContributor: StreamEventUtils.TurnItemContributor {
+        func contribute(to item: inout TurnItem) {
+            guard case let .agentMessage(agentMessage) = item else {
+                return
+            }
+            item = .agentMessage(AgentMessageItem(
+                id: agentMessage.id,
+                content: agentMessage.content,
+                phase: agentMessage.phase,
+                memoryCitation: MemoryCitation()
+            ))
+        }
+    }
+
     func testLastAssistantMessageConcatenatesOutputText() {
         let item = ResponseItem.message(role: "assistant", content: [
             .outputText(text: "first"),
@@ -34,6 +62,45 @@ final class StreamEventUtilsTests: XCTestCase {
             .agentMessage(AgentMessageItem(id: "msg1", content: [.text("done")]))
         )
         XCTAssertNil(StreamEventUtils.handleNonToolResponseItem(toolOutput))
+    }
+
+    func testHandleNonToolResponseItemRunsTurnItemContributorsBeforeCitationStrippingLikeRust() {
+        let item = ResponseItem.message(id: "msg1", role: "assistant", content: [
+            .outputText(text: "original<oai-mem-citation>hidden</oai-mem-citation>")
+        ])
+
+        let turnItem = StreamEventUtils.handleNonToolResponseItem(
+            item,
+            contributors: [RewriteAgentMessageContributor()]
+        )
+
+        XCTAssertEqual(
+            turnItem,
+            .agentMessage(AgentMessageItem(
+                id: "msg1",
+                content: [.text("contributed assistant text")]
+            ))
+        )
+    }
+
+    func testHandleNonToolResponseItemPreservesContributorMemoryCitationLikeRust() {
+        let item = ResponseItem.message(id: "msg1", role: "assistant", content: [
+            .outputText(text: "hello<oai-mem-citation><citation_entries>\nMEMORY.md:1-2|note=[x]\n</citation_entries>\n<rollout_ids>\n019cc2ea-1dff-7902-8d40-c8f6e5d83cc4\n</rollout_ids></oai-mem-citation> world")
+        ])
+
+        let turnItem = StreamEventUtils.handleNonToolResponseItem(
+            item,
+            contributors: [MemoryCitationContributor()]
+        )
+
+        XCTAssertEqual(
+            turnItem,
+            .agentMessage(AgentMessageItem(
+                id: "msg1",
+                content: [.text("hello world")],
+                memoryCitation: MemoryCitation()
+            ))
+        )
     }
 
     func testHandleNonToolResponseItemStripsCitationsFromAssistantMessage() {

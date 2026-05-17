@@ -14,6 +14,18 @@ public enum ImageGenerationArtifactError: Error, Equatable, CustomStringConverti
 public enum StreamEventUtils {
     private static let generatedImageArtifactsDirectory = "generated_images"
 
+    /// Mutates a parsed turn item before Swift derives visible assistant text,
+    /// memory-citation metadata, and final-message facts.
+    ///
+    /// Extension runtimes implement this protocol to attach or rewrite
+    /// metadata for non-tool response items. Callers may rely on contributors
+    /// running before hidden assistant markup is stripped; if a contributor
+    /// sets an agent message memory citation, Swift preserves that value rather
+    /// than replacing it with the fallback citation parser result.
+    public protocol TurnItemContributor: Sendable {
+        func contribute(to item: inout TurnItem)
+    }
+
     public struct HandledNonToolResponseItem: Equatable, Sendable {
         public let turnItem: TurnItem
         public let supplementalHistoryItems: [ResponseItem]
@@ -28,13 +40,15 @@ public enum StreamEventUtils {
         _ item: ResponseItem,
         codexHome: URL? = nil,
         sessionID: String? = nil,
-        planMode: Bool = false
+        planMode: Bool = false,
+        contributors: [any TurnItemContributor] = []
     ) -> TurnItem? {
         handleNonToolResponseItemWithSupplementalHistory(
             item,
             codexHome: codexHome,
             sessionID: sessionID,
-            planMode: planMode
+            planMode: planMode,
+            contributors: contributors
         )?.turnItem
     }
 
@@ -42,7 +56,8 @@ public enum StreamEventUtils {
         _ item: ResponseItem,
         codexHome: URL? = nil,
         sessionID: String? = nil,
-        planMode: Bool = false
+        planMode: Bool = false,
+        contributors: [any TurnItemContributor] = []
     ) -> HandledNonToolResponseItem? {
         switch item {
         case .message,
@@ -52,6 +67,7 @@ public enum StreamEventUtils {
             guard var turnItem = EventMapping.parseTurnItem(item) else {
                 return nil
             }
+            applyTurnItemContributors(contributors, to: &turnItem)
             if case let .agentMessage(agentMessage) = turnItem {
                 let combined = agentMessage.content.map { content in
                     switch content {
@@ -67,7 +83,7 @@ public enum StreamEventUtils {
                     id: agentMessage.id,
                     content: [.text(visibleText)],
                     phase: agentMessage.phase,
-                    memoryCitation: memoryCitation
+                    memoryCitation: agentMessage.memoryCitation ?? memoryCitation
                 ))
             }
             if case let .imageGeneration(imageItem) = turnItem,
@@ -107,6 +123,15 @@ public enum StreamEventUtils {
              .knownPersisted,
              .other:
             return nil
+        }
+    }
+
+    private static func applyTurnItemContributors(
+        _ contributors: [any TurnItemContributor],
+        to turnItem: inout TurnItem
+    ) {
+        for contributor in contributors {
+            contributor.contribute(to: &turnItem)
         }
     }
 

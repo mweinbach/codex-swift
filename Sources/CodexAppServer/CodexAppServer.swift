@@ -26915,8 +26915,15 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             let submitter = coreOpSubmitter
             afterNotifications = {
                 Task { [broker, submitter, threadID, turnID, event] in
-                    guard let cwd = try? AbsolutePath(absolutePath: event.cwd) else {
-                        return
+                    let isNetworkApproval = event.networkApprovalContext != nil
+                    let cwd: AbsolutePath?
+                    if isNetworkApproval {
+                        cwd = nil
+                    } else {
+                        guard let commandCWD = try? AbsolutePath(absolutePath: event.cwd) else {
+                            return
+                        }
+                        cwd = commandCWD
                     }
                     let result = await broker.requestCommandExecutionApproval(
                         params: AppServerProtocol.CommandExecutionRequestApprovalParams(
@@ -26927,9 +26934,9 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                             approvalID: event.approvalID,
                             reason: event.reason,
                             networkApprovalContext: event.networkApprovalContext,
-                            command: CommandParser.shlexJoin(event.command),
+                            command: isNetworkApproval ? nil : CommandParser.shlexJoin(event.command),
                             cwd: cwd,
-                            commandActions: event.parsedCmd.map {
+                            commandActions: isNetworkApproval ? nil : event.parsedCmd.map {
                                 Self.commandAction($0, cwd: event.cwd)
                             },
                             additionalPermissions: Self.additionalPermissionProfile(event.additionalPermissions),

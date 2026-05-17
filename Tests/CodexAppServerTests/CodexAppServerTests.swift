@@ -6703,6 +6703,74 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(decision, .approved)
     }
 
+    func testRuntimeNetworkApprovalRequestOmitsCommandPresentationLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let coreOpCapture = AppServerCoreOpCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) },
+            coreOpSubmitter: coreOpCapture.submit
+        )
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-runtime",
+            event: .execApprovalRequest(ExecApprovalRequestEvent(
+                callID: "network-1",
+                approvalID: "approval-1",
+                turnID: "turn-runtime",
+                startedAtMilliseconds: 111,
+                command: ["network-access", "https://example.com:8443"],
+                cwd: "/repo",
+                reason: "allow managed network request",
+                networkApprovalContext: NetworkApprovalContext(host: "example.com", protocol: .https),
+                parsedCmd: [.unknown(cmd: "network-access https://example.com:8443")]
+            ))
+        )
+
+        let networkRequest = try await nextClientRequest(
+            notificationCapture,
+            method: "item/commandExecution/requestApproval"
+        )
+        let networkRequestID = try XCTUnwrap(networkRequest["id"])
+        let networkParams = try XCTUnwrap(networkRequest["params"] as? [String: Any])
+        XCTAssertEqual(networkParams["itemId"] as? String, "network-1")
+        XCTAssertEqual(networkParams["approvalId"] as? String, "approval-1")
+        XCTAssertNil(networkParams["command"])
+        XCTAssertNil(networkParams["cwd"])
+        XCTAssertNil(networkParams["commandActions"])
+        XCTAssertEqual(networkParams["networkApprovalContext"] as? [String: String], [
+            "host": "example.com",
+            "protocol": "https"
+        ])
+        XCTAssertEqual(networkParams["availableDecisions"] as? [String], [
+            "accept",
+            "acceptForSession",
+            "cancel"
+        ])
+
+        let response = try JSONSerialization.data(withJSONObject: [
+            "method": "item/commandExecution/requestApproval",
+            "id": networkRequestID,
+            "response": ["decision": "acceptForSession"]
+        ])
+        XCTAssertNil(processor.processLine(response))
+        try await assertResolvedServerRequest(
+            notificationCapture,
+            threadID: "thread-1",
+            requestID: networkRequestID
+        )
+
+        let submissions = try await waitForSubmissions(coreOpCapture, count: 1)
+        guard case let .execApproval(id, turnID, decision) = submissions[0].op else {
+            return XCTFail("expected exec approval")
+        }
+        XCTAssertEqual(id, "approval-1")
+        XCTAssertEqual(turnID, "turn-runtime")
+        XCTAssertEqual(decision, .approvedForSession)
+    }
+
     func testServerRequestResolvedNotificationCanBeOptedOutLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()
