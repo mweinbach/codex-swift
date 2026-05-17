@@ -58,6 +58,15 @@ Recent upstream audit checkpoint:
   `profiles."team.prod".model` update a dotted profile name without
   accidentally writing `profiles.team.prod.model`, while bare segments such as
   `sample@catalog` remain valid.
+- 2026-05-17: rechecked Rust commit `6d65686313` (`feat: make ToolExecutor
+  an async trait`). Swift does not carry Rust's boxed trait-object tool
+  registry, so there is no matching protocol signature to migrate. The current
+  Swift surfaces that map to those Rust handlers already expose native async
+  execution boundaries through direct async helpers such as
+  `AgentJobToolExecutor.execute`, non-interactive tool dispatch, endpoint
+  transports, and app-server runtime submitters; live app-server/session
+  tool-handler registration remains tracked with the broader runtime work
+  rather than this Rust-only trait refactor.
 - 2026-05-17: rechecked Rust commit `92930a8d40` (`Refactor chatwidget
   state into modules`). Swift now carries the reusable TUI rate-limit warning
   helper from `chatwidget/rate_limits.rs`, including Rust's threshold
