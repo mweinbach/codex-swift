@@ -235,6 +235,34 @@ public struct ExtensionTool: Sendable {
         try await executor(item)
     }
 
+    public func matches(_ item: ResponseItem) -> Bool {
+        switch item {
+        case let .functionCall(_, name, namespace, _, _):
+            let flatName = namespace.map { "\($0)\(name)" } ?? name
+            switch spec {
+            case let .function(tool):
+                return tool.name == flatName
+            case let .namespace(toolNamespace):
+                return namespace == toolNamespace.name
+                    && toolNamespace.tools.contains { namespaceTool in
+                        if case let .function(tool) = namespaceTool {
+                            return tool.name == name
+                        }
+                        return false
+                    }
+            default:
+                return false
+            }
+        case let .customToolCall(_, _, _, name, _):
+            if case let .function(tool) = spec {
+                return tool.name == name
+            }
+            return false
+        default:
+            return false
+        }
+    }
+
     private static func callContext(from item: ResponseItem) -> (
         callID: String,
         isCustomToolCall: Bool,
@@ -497,6 +525,43 @@ public struct ExtensionRegistry: Sendable {
         ExtensionRegistry()
     }
 
+    public func tools(sessionStore: ExtensionData, threadStore: ExtensionData) -> [ExtensionTool] {
+        toolContributors.flatMap {
+            $0.tools(sessionStore: sessionStore, threadStore: threadStore)
+        }
+    }
+
+    public func configuredToolSpecs(
+        sessionStore: ExtensionData,
+        threadStore: ExtensionData
+    ) -> [ConfiguredToolSpec] {
+        tools(sessionStore: sessionStore, threadStore: threadStore).map {
+            ConfiguredToolSpec(spec: $0.spec, supportsParallelToolCalls: $0.supportsParallelToolCalls)
+        }
+    }
+
+    public func registeredToolExecutor(
+        sessionStore: ExtensionData,
+        threadStore: ExtensionData
+    ) -> NonInteractiveExec.RegisteredToolExecutor? {
+        let tools = tools(sessionStore: sessionStore, threadStore: threadStore)
+        guard !tools.isEmpty else {
+            return nil
+        }
+        return { item in
+            guard let tool = tools.first(where: { $0.matches(item) }) else {
+                return nil
+            }
+            do {
+                return try await tool.execute(item)
+            } catch {
+                return NonInteractiveExec.FunctionCallExecutionResult(
+                    output: ExtensionRegistry.errorOutput(for: item, message: String(describing: error))
+                )
+            }
+        }
+    }
+
     public func approvalReview(
         sessionStore: ExtensionData,
         threadStore: ExtensionData,
@@ -512,5 +577,17 @@ public struct ExtensionRegistry: Sendable {
             }
         }
         return nil
+    }
+
+    private static func errorOutput(for item: ResponseItem, message: String) -> ResponseItem {
+        let output = FunctionCallOutputPayload(content: message, success: false)
+        switch item {
+        case let .functionCall(_, _, _, _, callID):
+            return .functionCallOutput(callID: callID, output: output)
+        case let .customToolCall(_, _, callID, name, _):
+            return .customToolCallOutput(callID: callID, name: name, output: output)
+        default:
+            return .functionCallOutput(callID: "", output: output)
+        }
     }
 }

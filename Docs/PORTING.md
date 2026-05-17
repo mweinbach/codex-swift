@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: continued the Rust extension-tool executor bridge from
+  `codex-rs/core/src/tools/router.rs`. Swift extension registries now collect
+  contributor-owned tools into `ConfiguredToolSpec` values and expose a
+  registry-backed non-interactive tool dispatcher, preserving the Rust path
+  where the same extension tool handle is both model-visible and dispatchable.
 - 2026-05-17: tightened app-server `command/exec` sandbox override parity
   against Rust `CommandExecRequestProcessor`. Swift now rechecks explicit
   per-request `sandboxPolicy` values against managed sandbox requirements

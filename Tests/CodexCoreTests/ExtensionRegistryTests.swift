@@ -352,6 +352,53 @@ final class ExtensionRegistryTests: XCTestCase {
         XCTAssertEqual(message.text, "hello turn-item")
     }
 
+    func testRegistryBuildsExtensionToolSpecsAndExecutorLikeRustRouter() async throws {
+        let sessionStore = ExtensionData(id: "session")
+        let threadStore = ExtensionData(id: "thread")
+        var builder = ExtensionRegistryBuilder()
+        builder.toolContributor(ToolRecorder())
+        let registry = builder.build()
+
+        let specs = registry.configuredToolSpecs(sessionStore: sessionStore, threadStore: threadStore)
+        XCTAssertEqual(specs.map(\.spec.name), ["extension/echo"])
+        XCTAssertEqual(specs.map(\.supportsParallelToolCalls), [true])
+
+        let allSpecs = ToolSpecFactory.buildSpecs(
+            config: ToolsConfig(shellType: .disabled),
+            extensionToolSpecs: specs
+        )
+        XCTAssertTrue(allSpecs.contains { $0.spec.name == "extension/echo" })
+
+        let executor = try XCTUnwrap(registry.registeredToolExecutor(
+            sessionStore: sessionStore,
+            threadStore: threadStore
+        ))
+        let item = ResponseItem.functionCall(
+            name: "echo",
+            namespace: "extension/",
+            arguments: #"{"message":"hello"}"#,
+            callID: "call-extension"
+        )
+
+        let maybeResult = await executor(item)
+        let result = try XCTUnwrap(maybeResult)
+        XCTAssertEqual(
+            result.output,
+            .functionCallOutput(
+                callID: "call-extension",
+                output: FunctionCallOutputPayload(content: #"{"arguments":"{\"message\":\"hello\"}"}"#, success: true)
+            )
+        )
+
+        let unsupported = await executor(.functionCall(
+            name: "other",
+            namespace: "extension/",
+            arguments: "{}",
+            callID: "call-other"
+        ))
+        XCTAssertNil(unsupported)
+    }
+
     func testJSONToolOutputMatchesRustToolOutputContract() {
         let output = JSONToolOutput(.object(["ok": .bool(true)]), success: nil)
 
