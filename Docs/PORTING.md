@@ -446,6 +446,14 @@ Recent upstream audit checkpoint:
   compact grouped human summary output, and exits nonzero when config loading
   fails. Live WebSocket handshake probing and full diagnostic report generation
   beyond those local checks remain broader `codex doctor` runtime gaps.
+- 2026-05-17: rechecked the CLI/runtime-option portion of Rust commit
+  `deedf3b2c4` (`feat: add layered --profile-v2 config files`). Swift's CLI
+  now treats `--profile-v2 <name>` as a shared root option, validates Rust's
+  plain ASCII profile names, rejects it for non-runtime config-management
+  commands with Rust's message, carries the selected profile into `exec` and
+  `review` runtime config loading as `$CODEX_HOME/<name>.config.toml`, and
+  preserves the selected profile on interactive/resume/fork/debug request
+  surfaces for the remaining runtime ports.
 - 2026-05-16: rechecked Rust commit `a5e5faf216` (`Reject legacy [profiles]
   when using profile-v2`). Swift config-layer loading now accepts an explicit
   profile-v2 user config file/profile selection, overlays the selected profile

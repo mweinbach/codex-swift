@@ -640,6 +640,104 @@ final class CodexCLITests: XCTestCase {
         XCTAssertEqual(receivedRequest?.configOverrides.rawOverrides, ["profile=\"work\""])
     }
 
+    func testRunAsyncProfileV2IsRejectedForConfigManagementCommandsLikeRust() async {
+        var stderr: [String] = []
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["--profile-v2", "work", "features", "list"],
+            stdout: { _ in XCTFail("stdout should not be written") },
+            stderr: { stderr.append($0) },
+            featuresRunner: { _ in
+                XCTFail("runner should not be called")
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 64)
+        XCTAssertEqual(stderr, [
+            "--profile-v2 only applies to runtime commands: `codex`, `codex exec`, `codex review`, `codex resume`, `codex fork`, and `codex debug prompt-input`."
+        ])
+    }
+
+    func testRunAsyncProfileV2RejectsPathLikeRust() async {
+        var stderr: [String] = []
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["--profile-v2", "nested/work", "exec", "hello"],
+            stdout: { _ in XCTFail("stdout should not be written") },
+            stderr: { stderr.append($0) },
+            execRunner: { _ in
+                XCTFail("runner should not be called")
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 64)
+        XCTAssertEqual(stderr, ["invalid --profile-v2 value `nested/work`; pass a plain name such as `work`"])
+    }
+
+    func testRunAsyncProfileV2IsCarriedForRuntimeCommandsLikeRust() async {
+        var execRequest: CodexCLI.ExecCommandRequest?
+        var reviewRequest: CodexCLI.ReviewCommandRequest?
+        var debugRequest: CodexCLI.DebugCommandRequest?
+
+        let execExitCode = await CodexCLI().runAsync(
+            arguments: ["--profile-v2", "work", "exec", "hello"],
+            stdout: { _ in },
+            stderr: { _ in },
+            execRunner: { request in
+                execRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+        let reviewExitCode = await CodexCLI().runAsync(
+            arguments: ["--profile-v2=research", "review", "--uncommitted"],
+            stdout: { _ in },
+            stderr: { _ in },
+            reviewRunner: { request in
+                reviewRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+        let debugExitCode = await CodexCLI().runAsync(
+            arguments: ["--profile-v2", "debug-work", "debug", "prompt-input"],
+            stdout: { _ in },
+            stderr: { _ in },
+            debugRunner: { request in
+                debugRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(execExitCode, 0)
+        XCTAssertEqual(reviewExitCode, 0)
+        XCTAssertEqual(debugExitCode, 0)
+        XCTAssertEqual(execRequest?.options.configProfileV2, "work")
+        XCTAssertEqual(execRequest?.configOverrides.rawOverrides, [])
+        XCTAssertEqual(reviewRequest?.configProfileV2, "research")
+        XCTAssertEqual(reviewRequest?.configOverrides.rawOverrides, [])
+        XCTAssertEqual(debugRequest?.configProfileV2, "debug-work")
+        XCTAssertEqual(debugRequest?.configOverrides.rawOverrides, [])
+    }
+
+    func testRunAsyncExecAcceptsSubcommandProfileV2LikeRustSharedOptions() async {
+        var receivedRequest: CodexCLI.ExecCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["exec", "--profile-v2=work", "hello"],
+            stdout: { _ in },
+            stderr: { _ in },
+            execRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(receivedRequest?.options.configProfileV2, "work")
+        XCTAssertEqual(receivedRequest?.configOverrides.rawOverrides, [])
+    }
+
     func testRunAsyncFeaturesDisableDelegatesToRunner() async {
         var receivedRequest: CodexCLI.FeaturesCommandRequest?
 

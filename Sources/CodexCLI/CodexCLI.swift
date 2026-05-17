@@ -190,6 +190,7 @@ public struct CodexCLI: Sendable {
         public let ephemeral: Bool
         public let ignoreUserConfig: Bool
         public let ignoreRules: Bool
+        public let configProfileV2: String?
         public let removedFullAuto: Bool
 
         public init(
@@ -201,6 +202,7 @@ public struct CodexCLI: Sendable {
             ephemeral: Bool = false,
             ignoreUserConfig: Bool = false,
             ignoreRules: Bool = false,
+            configProfileV2: String? = nil,
             removedFullAuto: Bool = false
         ) {
             self.json = json
@@ -211,6 +213,7 @@ public struct CodexCLI: Sendable {
             self.ephemeral = ephemeral
             self.ignoreUserConfig = ignoreUserConfig
             self.ignoreRules = ignoreRules
+            self.configProfileV2 = configProfileV2
             self.removedFullAuto = removedFullAuto
         }
 
@@ -287,10 +290,16 @@ public struct CodexCLI: Sendable {
 
     public struct ReviewCommandRequest: Equatable, Sendable {
         public let target: ReviewCommandTarget
+        public let configProfileV2: String?
         public let configOverrides: CliConfigOverrides
 
-        public init(target: ReviewCommandTarget, configOverrides: CliConfigOverrides = CliConfigOverrides()) {
+        public init(
+            target: ReviewCommandTarget,
+            configProfileV2: String? = nil,
+            configOverrides: CliConfigOverrides = CliConfigOverrides()
+        ) {
             self.target = target
+            self.configProfileV2 = configProfileV2
             self.configOverrides = configOverrides
         }
     }
@@ -301,6 +310,7 @@ public struct CodexCLI: Sendable {
         public let useOSSProvider: Bool
         public let localProvider: String?
         public let configProfile: String?
+        public let configProfileV2: String?
         public let sandboxMode: String?
         public let dangerouslyBypassApprovalsAndSandbox: Bool
         public let cwd: String?
@@ -315,6 +325,7 @@ public struct CodexCLI: Sendable {
             useOSSProvider: Bool = false,
             localProvider: String? = nil,
             configProfile: String? = nil,
+            configProfileV2: String? = nil,
             sandboxMode: String? = nil,
             dangerouslyBypassApprovalsAndSandbox: Bool = false,
             cwd: String? = nil,
@@ -328,6 +339,7 @@ public struct CodexCLI: Sendable {
             self.useOSSProvider = useOSSProvider
             self.localProvider = localProvider
             self.configProfile = configProfile
+            self.configProfileV2 = configProfileV2
             self.sandboxMode = sandboxMode
             self.dangerouslyBypassApprovalsAndSandbox = dangerouslyBypassApprovalsAndSandbox
             self.cwd = cwd
@@ -559,10 +571,16 @@ public struct CodexCLI: Sendable {
 
     public struct DebugCommandRequest: Equatable, Sendable {
         public let action: DebugCommandAction
+        public let configProfileV2: String?
         public let configOverrides: CliConfigOverrides
 
-        public init(action: DebugCommandAction, configOverrides: CliConfigOverrides = CliConfigOverrides()) {
+        public init(
+            action: DebugCommandAction,
+            configProfileV2: String? = nil,
+            configOverrides: CliConfigOverrides = CliConfigOverrides()
+        ) {
             self.action = action
+            self.configProfileV2 = configProfileV2
             self.configOverrides = configOverrides
         }
     }
@@ -787,6 +805,7 @@ public struct CodexCLI: Sendable {
           --oss                             Select the local open source model provider.
           --local-provider <PROVIDER>       Specify lmstudio or ollama.
           -p, --profile <PROFILE>           Configuration profile from config.toml.
+          --profile-v2 <PROFILE>            Layer $CODEX_HOME/<PROFILE>.config.toml.
           -s, --sandbox <MODE>              Sandbox policy for model-generated shell commands.
           -a, --ask-for-approval <POLICY>   Configure command approval policy.
           --dangerously-bypass-approvals-and-sandbox
@@ -880,6 +899,10 @@ public struct CodexCLI: Sendable {
             invocation: invocation,
             arguments: arguments
         ) {
+            stderr(message)
+            return 64
+        }
+        if let message = rootProfileV2RejectionMessage(invocation: invocation, arguments: arguments) {
             stderr(message)
             return 64
         }
@@ -1229,6 +1252,7 @@ public struct CodexCLI: Sendable {
                 do {
                     let result = try await debugRunner(DebugCommandRequest(
                         action: mergedAction,
+                        configProfileV2: rootProfileV2(beforeCommand: "debug", in: arguments),
                         configOverrides: CliConfigOverrides(rawOverrides: try configOverrideTokens(arguments))
                     ))
                     emit(result, stdout: stdout, stderr: stderr)
@@ -1481,6 +1505,7 @@ public struct CodexCLI: Sendable {
             "--local-provider",
             "-p",
             "--profile",
+            "--profile-v2",
             "-s",
             "--sandbox",
             "-a",
@@ -1801,6 +1826,21 @@ public struct CodexCLI: Sendable {
         arguments.contains("--with-access-token")
     }
 
+    private func validateProfileV2Name(_ value: String) -> ParseResult<Void> {
+        guard !value.isEmpty,
+              value.utf8.allSatisfy({ byte in
+                  (byte >= UInt8(ascii: "A") && byte <= UInt8(ascii: "Z")) ||
+                      (byte >= UInt8(ascii: "a") && byte <= UInt8(ascii: "z")) ||
+                      (byte >= UInt8(ascii: "0") && byte <= UInt8(ascii: "9")) ||
+                      byte == UInt8(ascii: "_") ||
+                      byte == UInt8(ascii: "-")
+              })
+        else {
+            return .failure("invalid --profile-v2 value `\(value)`; pass a plain name such as `work`", 64)
+        }
+        return .success(())
+    }
+
     private func parseConfigOverrides(from arguments: [String]) -> ParseResult<CliConfigOverrides> {
         do {
             return .success(CliConfigOverrides(rawOverrides: try configOverrideTokens(arguments)))
@@ -1817,6 +1857,7 @@ public struct CodexCLI: Sendable {
         var useOSSProvider = false
         var localProvider: String?
         var configProfile: String?
+        var configProfileV2: String?
         var sandboxMode: String?
         var dangerouslyBypassApprovalsAndSandbox = false
         var selectedSandboxMode = false
@@ -1929,6 +1970,19 @@ public struct CodexCLI: Sendable {
             case let .success(profile):
                 parsed.configProfile = profile
                 return .success(index + 2)
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
+        case "--profile-v2":
+            switch value(after: argument) {
+            case let .success(profile):
+                switch validateProfileV2Name(profile) {
+                case .success:
+                    parsed.configProfileV2 = profile
+                    return .success(index + 2)
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
             case let .failure(message, exitCode):
                 return .failure(message, exitCode)
             }
@@ -2045,6 +2099,16 @@ public struct CodexCLI: Sendable {
             parsed.configProfile = compactValue(prefix: "--profile=")
             return .success(index + 1)
         }
+        if argument.hasPrefix("--profile-v2=") {
+            let profile = compactValue(prefix: "--profile-v2=")
+            switch validateProfileV2Name(profile) {
+            case .success:
+                parsed.configProfileV2 = profile
+                return .success(index + 1)
+            case let .failure(message, exitCode):
+                return .failure(message, exitCode)
+            }
+        }
         if argument.hasPrefix("-p"), argument.count > 2, !argument.hasPrefix("--") {
             parsed.configProfile = compactValue(prefix: "-p")
             return .success(index + 1)
@@ -2130,6 +2194,7 @@ public struct CodexCLI: Sendable {
             useOSSProvider: root.useOSSProvider || subcommand.useOSSProvider,
             localProvider: subcommand.localProvider ?? root.localProvider,
             configProfile: subcommand.configProfile ?? root.configProfile,
+            configProfileV2: subcommand.configProfileV2 ?? root.configProfileV2,
             sandboxMode: sandboxMode,
             dangerouslyBypassApprovalsAndSandbox: dangerouslyBypass,
             cwd: subcommand.cwd ?? root.cwd,
@@ -2215,6 +2280,7 @@ public struct CodexCLI: Sendable {
         var ephemeral = false
         var ignoreUserConfig = false
         var ignoreRules = false
+        var configProfileV2: String?
         var removedFullAuto = false
         var dangerouslyBypassApprovalsAndSandbox = rootDangerouslyBypassBeforeExec(in: rootArguments)
         var actionTokens: [String] = []
@@ -2255,6 +2321,20 @@ public struct CodexCLI: Sendable {
                 ignoreRules = true
                 index += 1
                 continue
+            case "--profile-v2":
+                switch value(after: argument, at: index) {
+                case let .success(profile):
+                    switch validateProfileV2Name(profile) {
+                    case .success:
+                        configProfileV2 = profile
+                        index += 2
+                        continue
+                    case let .failure(message, exitCode):
+                        return .failure(message, exitCode)
+                    }
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
             case "--full-auto":
                 removedFullAuto = true
                 index += 1
@@ -2313,6 +2393,17 @@ public struct CodexCLI: Sendable {
                 imagePaths.append(contentsOf: splitCommaDelimited(String(argument.dropFirst("--image=".count))))
                 index += 1
                 continue
+            }
+            if argument.hasPrefix("--profile-v2=") {
+                let profile = String(argument.dropFirst("--profile-v2=".count))
+                switch validateProfileV2Name(profile) {
+                case .success:
+                    configProfileV2 = profile
+                    index += 1
+                    continue
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
             }
             if argument.hasPrefix("-i"), argument.count > 2, !argument.hasPrefix("--") {
                 imagePaths.append(contentsOf: splitCommaDelimited(String(argument.dropFirst(2))))
@@ -2411,6 +2502,7 @@ public struct CodexCLI: Sendable {
                     ephemeral: ephemeral,
                     ignoreUserConfig: ignoreUserConfig,
                     ignoreRules: ignoreRules,
+                    configProfileV2: configProfileV2 ?? rootProfileV2(beforeCommands: ["exec", "e"], in: rootArguments),
                     removedFullAuto: removedFullAuto
                 ),
                 configOverrides: configOverrides
@@ -2621,6 +2713,7 @@ public struct CodexCLI: Sendable {
             "--local-provider",
             "-p",
             "--profile",
+            "--profile-v2",
             "-s",
             "--sandbox",
             "-a",
@@ -2654,6 +2747,7 @@ public struct CodexCLI: Sendable {
             "--model=",
             "--local-provider=",
             "--profile=",
+            "--profile-v2=",
             "--sandbox=",
             "--ask-for-approval=",
             "--cd=",
@@ -2837,7 +2931,11 @@ public struct CodexCLI: Sendable {
 
         switch parseConfigOverrides(from: rootArguments) {
         case let .success(configOverrides):
-            return .success(ReviewCommandRequest(target: parsedTarget, configOverrides: configOverrides))
+            return .success(ReviewCommandRequest(
+                target: parsedTarget,
+                configProfileV2: rootProfileV2(beforeCommand: "review", in: rootArguments),
+                configOverrides: configOverrides
+            ))
         case let .failure(message, exitCode):
             return .failure(message, exitCode)
         }
@@ -3331,6 +3429,14 @@ public struct CodexCLI: Sendable {
         rootRemoteFlagValue(named: option, beforeCommands: [command], in: arguments)
     }
 
+    private func rootProfileV2(beforeCommand command: String, in arguments: [String]) -> String? {
+        rootOptionValue(named: "--profile-v2", beforeCommands: [command], in: arguments)
+    }
+
+    private func rootProfileV2(beforeCommands commands: [String], in arguments: [String]) -> String? {
+        rootOptionValue(named: "--profile-v2", beforeCommands: commands, in: arguments)
+    }
+
     private func commandArgument(after command: String, in arguments: [String]) -> String? {
         var index = 0
         while index < arguments.count {
@@ -3371,6 +3477,10 @@ public struct CodexCLI: Sendable {
     }
 
     private func rootRemoteFlagValue(named option: String, beforeCommands commands: [String], in arguments: [String]) -> String? {
+        rootOptionValue(named: option, beforeCommands: commands, in: arguments)
+    }
+
+    private func rootOptionValue(named option: String, beforeCommands commands: [String], in arguments: [String]) -> String? {
         var index = 0
         while index < arguments.count {
             let argument = arguments[index]
@@ -3408,6 +3518,37 @@ public struct CodexCLI: Sendable {
         }
     }
 
+    private func rootProfileV2RejectionMessage(invocation: Invocation, arguments: [String]) -> String? {
+        let commandNames: [String] = switch invocation {
+        case let .command(spec, _):
+            [spec.name] + spec.aliases
+        case .version, .help, .interactive, .unknown:
+            []
+        }
+        guard let profile = rootOptionValue(named: "--profile-v2", beforeCommands: commandNames, in: arguments) else {
+            return nil
+        }
+        if case let .failure(message, _) = validateProfileV2Name(profile) {
+            return message
+        }
+
+        switch invocation {
+        case .interactive:
+            return nil
+        case let .command(spec, commandArguments):
+            switch spec.name {
+            case "exec", "review", "resume", "fork":
+                return nil
+            case "debug" where commandArguments.first == "prompt-input":
+                return nil
+            default:
+                return "--profile-v2 only applies to runtime commands: `codex`, `codex exec`, `codex review`, `codex resume`, `codex fork`, and `codex debug prompt-input`."
+            }
+        case .version, .help, .unknown:
+            return nil
+        }
+    }
+
     private struct RootDuplicateOptionSpec {
         let displayName: String
         let longValueName: String?
@@ -3436,6 +3577,7 @@ public struct CodexCLI: Sendable {
         RootDuplicateOptionSpec(displayName: "--model", longValueName: "--model", shortValueName: "-m", flagNames: []),
         RootDuplicateOptionSpec(displayName: "--oss", longValueName: nil, shortValueName: nil, flagNames: ["--oss"]),
         RootDuplicateOptionSpec(displayName: "--profile", longValueName: "--profile", shortValueName: "-p", flagNames: []),
+        RootDuplicateOptionSpec(displayName: "--profile-v2", longValueName: "--profile-v2", shortValueName: nil, flagNames: []),
         RootDuplicateOptionSpec(displayName: "--sandbox", longValueName: "--sandbox", shortValueName: "-s", flagNames: []),
         RootDuplicateOptionSpec(
             displayName: "--ask-for-approval",

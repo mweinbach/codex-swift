@@ -87,11 +87,20 @@ private func resolvedAuthSettings(
     return (codexHome, settings)
 }
 
-private func execLoaderOverrides(options: CodexCLI.ExecCommandOptions) -> ConfigLayerLoaderOverrides {
-    ConfigLayerLoaderOverrides(
+private func profileV2ConfigPath(codexHome: URL, profile: String) -> URL {
+    codexHome.appendingPathComponent("\(profile).config.toml", isDirectory: false).standardizedFileURL
+}
+
+private func execLoaderOverrides(options: CodexCLI.ExecCommandOptions, codexHome: URL) -> ConfigLayerLoaderOverrides {
+    var overrides = ConfigLayerLoaderOverrides(
         ignoreUserConfig: options.ignoreUserConfig,
         ignoreUserAndProjectExecPolicyRules: options.ignoreRules
     )
+    if let profile = options.configProfileV2 {
+        overrides.userConfigPath = profileV2ConfigPath(codexHome: codexHome, profile: profile)
+        overrides.userConfigProfile = profile
+    }
+    return overrides
 }
 
 private func runLoginCommand(_ request: CodexCLI.LoginCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
@@ -492,7 +501,7 @@ private func runReviewCommand(_ request: CodexCLI.ReviewCommandRequest) async th
     return try await runNonInteractiveExec(
         promptResolution: NonInteractivePromptResolution(prompt: resolved.prompt),
         outputSchema: nil,
-        options: CodexCLI.ExecCommandOptions(),
+        options: CodexCLI.ExecCommandOptions(configProfileV2: request.configProfileV2),
         arguments: [],
         configOverrides: request.configOverrides,
         cwd: cwd
@@ -976,11 +985,13 @@ private func runNonInteractiveExec(
     )
 
     let environment = ProcessInfo.processInfo.environment
-    let loaderOverrides = execLoaderOverrides(options: options)
-    let (codexHome, settings) = try resolvedAuthSettings(
+    let codexHome = try CodexHome.find()
+    let loaderOverrides = execLoaderOverrides(options: options, codexHome: codexHome)
+    let settings = try CodexConfigLoader.load(
+        codexHome: codexHome,
+        cwd: cwd,
         overrides: configOverrides,
-        loaderOverrides: loaderOverrides,
-        cwd: cwd
+        managedConfigOverrides: loaderOverrides
     )
     let configStack = try CodexConfigLayerLoader.loadConfigLayerStack(
         codexHome: codexHome,
