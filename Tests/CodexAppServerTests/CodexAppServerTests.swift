@@ -2364,6 +2364,85 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(page.items.count, 0)
     }
 
+    func testEnvironmentAddRegistersRemoteEnvironmentForThreadStartLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
+        )
+
+        let missingMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"environments":[{"environmentId":"remote-dev","cwd":"\#(temp.url.path)"}]}}"#.utf8
+        )))
+        let missingError = try XCTUnwrap(missingMessages[0]["error"] as? [String: Any])
+        XCTAssertEqual(missingError["message"] as? String, "unknown turn environment id `remote-dev`")
+
+        let addMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"environment/add","params":{"environmentId":"remote-dev","execServerUrl":" ws://127.0.0.1:8765 "}}"#.utf8
+        )))
+        XCTAssertEqual(addMessages.count, 1)
+        XCTAssertNotNil(addMessages[0]["result"] as? [String: Any])
+        XCTAssertNil(addMessages[0]["error"])
+
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":3,"method":"thread/start","params":{"environments":[{"environmentId":"remote-dev","cwd":"\#(temp.url.path)"}]}}"#.utf8
+        )))
+        XCTAssertNil(startMessages[0]["error"])
+        let result = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        XCTAssertNotNil(thread["id"] as? String)
+    }
+
+    func testEnvironmentAddRequiresExperimentalAPIAndValidatesRustInputs() throws {
+        let temp = try TemporaryDirectory()
+        let nonExperimental = try appServerResponse(
+            #"{"id":1,"method":"environment/add","params":{"environmentId":"remote-dev","execServerUrl":"ws://127.0.0.1:8765"}}"#,
+            codexHome: temp.url
+        )
+        let nonExperimentalError = try XCTUnwrap(nonExperimental["error"] as? [String: Any])
+        XCTAssertEqual(nonExperimentalError["code"] as? Int, -32600)
+        XCTAssertEqual(
+            nonExperimentalError["message"] as? String,
+            "environment/add requires experimentalApi capability"
+        )
+
+        let cases: [(params: String, message: String)] = [
+            (
+                #"{"environmentId":"","execServerUrl":"ws://127.0.0.1:8765"}"#,
+                "exec-server protocol error: environment id cannot be empty"
+            ),
+            (
+                #"{"environmentId":"remote-dev","execServerUrl":"none"}"#,
+                "exec-server protocol error: remote environment cannot use disabled exec-server url"
+            ),
+            (
+                #"{"environmentId":"remote-dev","execServerUrl":"   "}"#,
+                "exec-server protocol error: remote environment requires an exec-server url"
+            ),
+            (
+                #"{"execServerUrl":"ws://127.0.0.1:8765"}"#,
+                "missing field `environmentId`"
+            ),
+            (
+                #"{"environmentId":"remote-dev"}"#,
+                "missing field `execServerUrl`"
+            )
+        ]
+
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
+        )
+        for (index, testCase) in cases.enumerated() {
+            let messages = try decodeMessages(processor.processLine(Data(
+                #"{"id":\#(index + 2),"method":"environment/add","params":\#(testCase.params)}"#.utf8
+            )))
+            let error = try XCTUnwrap(messages[0]["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+            XCTAssertEqual(error["message"] as? String, testCase.message)
+        }
+    }
+
     func testThreadStartRejectsDuplicateEnvironmentBeforeCreatingThreadLikeRust() throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(

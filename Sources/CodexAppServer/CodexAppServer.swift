@@ -261,6 +261,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     let notificationBroadcaster: AppServerNotificationBroadcaster
     public let remoteControlStatusSnapshot: RemoteControlStatusSnapshot?
     public let remoteControlStatusBroadcaster: AppServerRemoteControlStatusBroadcaster?
+    public let environmentRegistry: AppServerEnvironmentRegistry
     public let pluginStartupTasksEnabled: Bool
     public let curatedPluginStartupSyncEnabled: Bool
     public let memoryStartupTaskStarter: AppServerMemoryStartupTaskStarter?
@@ -299,6 +300,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         configWarnings: [ConfigWarning] = [],
         remoteControlStatusSnapshot: RemoteControlStatusSnapshot? = nil,
         remoteControlStatusBroadcaster: AppServerRemoteControlStatusBroadcaster? = nil,
+        environmentRegistry: AppServerEnvironmentRegistry = AppServerEnvironmentRegistry(),
         pluginStartupTasksEnabled: Bool = true,
         curatedPluginStartupSyncEnabled: Bool = true,
         memoryStartupTaskStarter: AppServerMemoryStartupTaskStarter? = nil,
@@ -350,6 +352,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         self.remoteControlStatusSnapshot = remoteControlStatusSnapshot
         self.remoteControlStatusBroadcaster = remoteControlStatusBroadcaster
             ?? remoteControlStatusSnapshot.map(AppServerRemoteControlStatusBroadcaster.init(snapshot:))
+        self.environmentRegistry = environmentRegistry
         self.pluginStartupTasksEnabled = pluginStartupTasksEnabled
         self.curatedPluginStartupSyncEnabled = curatedPluginStartupSyncEnabled
         self.memoryStartupTaskStarter = memoryStartupTaskStarter
@@ -374,6 +377,62 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
             lhs.remoteControlStatusSnapshot == rhs.remoteControlStatusSnapshot &&
             lhs.pluginStartupTasksEnabled == rhs.pluginStartupTasksEnabled &&
             lhs.curatedPluginStartupSyncEnabled == rhs.curatedPluginStartupSyncEnabled
+    }
+}
+
+public actor AppServerEnvironmentRegistry {
+    private var remoteEnvironmentURLs: [String: String] = [:]
+
+    public init() {}
+
+    public func upsert(environmentID: String, execServerURL: String) throws {
+        guard !environmentID.isEmpty else {
+            throw ConfiguredEnvironmentLoadError.protocolError("environment id cannot be empty")
+        }
+        let normalized = Self.normalizeExecServerURL(execServerURL)
+        if normalized.disabled {
+            throw ConfiguredEnvironmentLoadError.protocolError(
+                "remote environment cannot use disabled exec-server url"
+            )
+        }
+        guard let url = normalized.url else {
+            throw ConfiguredEnvironmentLoadError.protocolError("remote environment requires an exec-server url")
+        }
+        remoteEnvironmentURLs[environmentID] = url
+    }
+
+    public func applying(to snapshot: ConfiguredEnvironmentSnapshot) -> ConfiguredEnvironmentSnapshot {
+        guard !remoteEnvironmentURLs.isEmpty else {
+            return snapshot
+        }
+
+        var entries = snapshot.environments
+        for (environmentID, execServerURL) in remoteEnvironmentURLs {
+            let entry = ConfiguredEnvironmentEntry(
+                id: environmentID,
+                transport: .websocketURL(execServerURL)
+            )
+            if let index = entries.firstIndex(where: { $0.id == environmentID }) {
+                entries[index] = entry
+            } else {
+                entries.append(entry)
+            }
+        }
+        return ConfiguredEnvironmentSnapshot(
+            environments: entries,
+            defaultEnvironment: snapshot.defaultEnvironment
+        )
+    }
+
+    private static func normalizeExecServerURL(_ rawValue: String) -> (url: String?, disabled: Bool) {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return (nil, false)
+        }
+        if trimmed.caseInsensitiveCompare("none") == .orderedSame {
+            return (nil, true)
+        }
+        return (trimmed, false)
     }
 }
 
@@ -3301,10 +3360,13 @@ public enum CodexAppServer {
             )
         }
 
-        let snapshot = try ConfiguredEnvironmentLoader.load(
+        let loadedSnapshot = try ConfiguredEnvironmentLoader.load(
             codexHome: configuration.codexHome,
             environment: configuration.environment
         )
+        let snapshot = try runAsyncBlocking {
+            await configuration.environmentRegistry.applying(to: loadedSnapshot)
+        }
         var seenEnvironmentIDs = Set<String>()
         var selections: [TurnEnvironmentSelection] = []
         for rawEnvironment in environments {
@@ -3327,6 +3389,27 @@ public enum CodexAppServer {
             ))
         }
         return selections
+    }
+
+    fileprivate static func environmentAddResult(
+        params: [String: Any]?,
+        configuration: CodexAppServerConfiguration,
+        experimentalAPIEnabled: Bool
+    ) throws -> [String: Any] {
+        try requireExperimentalAPI(method: "environment/add", experimentalAPIEnabled: experimentalAPIEnabled)
+        let environmentID = try rustRequiredStringParam(params?["environmentId"], field: "environmentId")
+        let execServerURL = try rustRequiredStringParam(params?["execServerUrl"], field: "execServerUrl")
+        do {
+            try runAsyncBlocking {
+                try await configuration.environmentRegistry.upsert(
+                    environmentID: environmentID,
+                    execServerURL: execServerURL
+                )
+            }
+        } catch let error as ConfiguredEnvironmentLoadError {
+            throw AppServerError.invalidRequest(error.description)
+        }
+        return [:]
     }
 
     fileprivate static func requireThreadStartExperimentalFieldsAPI(
@@ -29591,6 +29674,15 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                             configuration: configuration,
                             loadedThreadModel: loadedThreadMetadata?.modelSlug,
                             loadedThreadApprovalPolicy: loadedThreadMetadata?.approvalPolicy
+                        )
+                    )
+                case "environment/add":
+                    response = CodexAppServer.responseObject(
+                        id: id,
+                        result: try CodexAppServer.environmentAddResult(
+                            params: params,
+                            configuration: configuration,
+                            experimentalAPIEnabled: experimentalAPIEnabled
                         )
                     )
                 case "fs/readFile":

@@ -111,6 +111,33 @@ final class AppServerThreadProtocolTests: XCTestCase {
         XCTAssertEqual(decodedResponse.echoed, "hello")
     }
 
+    func testEnvironmentAddParamsRoundTripLikeRustProtocol() throws {
+        try XCTAssertJSONObjectEqual(
+            EnvironmentAddParams(
+                environmentID: "remote-dev",
+                execServerURL: "ws://127.0.0.1:8765"
+            ),
+            [
+                "environmentId": "remote-dev",
+                "execServerUrl": "ws://127.0.0.1:8765"
+            ]
+        )
+
+        let decoded = try JSONDecoder().decode(
+            EnvironmentAddParams.self,
+            from: Data(#"{"environmentId":"remote-dev","execServerUrl":"ws://127.0.0.1:8765"}"#.utf8)
+        )
+        XCTAssertEqual(
+            decoded,
+            EnvironmentAddParams(
+                environmentID: "remote-dev",
+                execServerURL: "ws://127.0.0.1:8765"
+            )
+        )
+
+        try XCTAssertJSONObjectEqual(EnvironmentAddResponse(), [:])
+    }
+
     func testThreadStartResumeAndForkParamsPreserveRustDoubleOptionServiceTier() throws {
         let startDefault = try JSONObject(ThreadStartParams())
         XCTAssertFalse(startDefault.keys.contains("serviceTier"))

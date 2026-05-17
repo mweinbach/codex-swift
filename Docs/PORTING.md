@@ -12,6 +12,15 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust app-server `environment/add` in
+  `codex-rs/app-server-protocol/src/protocol/v2/environment.rs`,
+  `codex-rs/app-server/src/request_processors/environment_processor.rs`, and
+  `codex-rs/exec-server/src/environment.rs`. Swift now exposes the
+  experimental `environment/add` request, preserves Rust's dynamic remote
+  environment upsert errors for empty ids and disabled or missing exec-server
+  URLs, keeps added environments in an app-server registry without changing the
+  configured default selection, and lets later thread/turn environment
+  selections resolve those ids.
 - 2026-05-17: rechecked Rust login CLI branch ordering in
   `codex-rs/cli/src/main.rs` and `codex-rs/cli/src/login.rs`. Swift login
   parsing now matches Rust's ordering where `login status` ignores credential
