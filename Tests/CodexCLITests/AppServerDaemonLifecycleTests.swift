@@ -231,6 +231,89 @@ final class AppServerDaemonLifecycleTests: XCTestCase {
         XCTAssertEqual(reexecs, [temp.managedCodexBin])
     }
 
+    func testRunPidUpdateLoopOnceRetriesBusyRestartLikeRust() async throws {
+        let temp = try AppServerDaemonTemporaryDirectory()
+        try temp.createManagedCodexBin(contents: Data("managed".utf8))
+        let running = AppServerDaemonExecutableIdentity(bytes: Data("running".utf8))
+        let loop = AppServerDaemonFakeUpdateLoop(
+            managedCodexBin: temp.managedCodexBin,
+            managedIdentity: AppServerDaemonExecutableIdentity(bytes: Data("managed".utf8)),
+            restartOutcomes: [.busy, .restarted]
+        )
+
+        let control = try await AppServerDaemonLifecycle.runPidUpdateLoopOnce(
+            codexHome: temp.url,
+            runningUpdaterIdentity: running,
+            retryInterval: 0.25,
+            client: loop.client()
+        )
+
+        XCTAssertEqual(control, .continueRunning)
+        let events = await loop.eventsSnapshot()
+        XCTAssertEqual(events, [
+            .installLatestStandalone,
+            .resolveManagedCodex(temp.managedCodexBin),
+            .executableIdentity(temp.managedCodexBin),
+            .tryRestart(.always, .reexecIfManagedBinaryChanged, temp.managedCodexBin),
+            .sleepOrTerminate(0.25),
+            .tryRestart(.always, .reexecIfManagedBinaryChanged, temp.managedCodexBin)
+        ])
+    }
+
+    func testRunPidUpdateLoopOnceStopsWhenTerminationArrivesDuringBusyRetryLikeRust() async throws {
+        let temp = try AppServerDaemonTemporaryDirectory()
+        try temp.createManagedCodexBin(contents: Data("same".utf8))
+        let running = AppServerDaemonExecutableIdentity(bytes: Data("same".utf8))
+        let loop = AppServerDaemonFakeUpdateLoop(
+            managedCodexBin: temp.managedCodexBin,
+            managedIdentity: AppServerDaemonExecutableIdentity(bytes: Data("same".utf8)),
+            restartOutcomes: [.busy],
+            terminateOnSleep: true
+        )
+
+        let control = try await AppServerDaemonLifecycle.runPidUpdateLoopOnce(
+            codexHome: temp.url,
+            runningUpdaterIdentity: running,
+            retryInterval: 0.05,
+            client: loop.client()
+        )
+
+        XCTAssertEqual(control, .stop)
+        let events = await loop.eventsSnapshot()
+        XCTAssertEqual(events, [
+            .installLatestStandalone,
+            .resolveManagedCodex(temp.managedCodexBin),
+            .executableIdentity(temp.managedCodexBin),
+            .tryRestart(.ifVersionChanged, .none, temp.managedCodexBin),
+            .sleepOrTerminate(0.05)
+        ])
+    }
+
+    func testRunPidUpdateLoopStopsBeforeFirstUpdateWhenInitialSleepTerminatesLikeRust() async throws {
+        let temp = try AppServerDaemonTemporaryDirectory()
+        let running = AppServerDaemonExecutableIdentity(bytes: Data("same".utf8))
+        let loop = AppServerDaemonFakeUpdateLoop(
+            managedCodexBin: temp.managedCodexBin,
+            managedIdentity: running,
+            currentUpdaterIdentity: running,
+            sleepResults: [true]
+        )
+
+        try await AppServerDaemonLifecycle.runPidUpdateLoop(
+            codexHome: temp.url,
+            initialDelay: 5,
+            updateInterval: 10,
+            retryInterval: 0.05,
+            client: loop.client()
+        )
+
+        let events = await loop.eventsSnapshot()
+        XCTAssertEqual(events, [
+            .currentUpdaterIdentity,
+            .sleepOrTerminate(5)
+        ])
+    }
+
     func testRemoteControlStartFailsWithRustManagedInstallGuidanceWhenMissing() async throws {
         let temp = try AppServerDaemonTemporaryDirectory()
 
@@ -663,9 +746,9 @@ private final class AppServerDaemonTemporaryDirectory {
         try writePidRecord(pid: pid, processStartTime: processStartTime, path: updatePidFile)
     }
 
-    func createManagedCodexBin() throws {
+    func createManagedCodexBin(contents: Data = Data()) throws {
         try FileManager.default.createDirectory(at: managedCodexBin.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data().write(to: managedCodexBin)
+        try contents.write(to: managedCodexBin)
     }
 
     func writeSettings(remoteControlEnabled: Bool) throws {
@@ -727,6 +810,127 @@ private actor AppServerDaemonFakeUpdater {
 
     private func recordReexec(_ managedCodexBin: URL) {
         reexecs.append(managedCodexBin)
+    }
+}
+
+private enum AppServerDaemonUpdateLoopEvent: Equatable {
+    case currentUpdaterIdentity
+    case installLatestStandalone
+    case resolveManagedCodex(URL)
+    case executableIdentity(URL)
+    case tryRestart(AppServerDaemonRestartMode, AppServerDaemonUpdaterRefreshMode, URL)
+    case sleepOrTerminate(TimeInterval)
+}
+
+private actor AppServerDaemonFakeUpdateLoop {
+    private let managedCodexBin: URL
+    private let managedIdentity: AppServerDaemonExecutableIdentity
+    private let currentIdentity: AppServerDaemonExecutableIdentity
+    private var restartOutcomes: [AppServerDaemonRestartIfRunningOutcome]
+    private var sleepResults: [Bool]
+    private let terminateOnSleep: Bool
+    private var terminated = false
+    private var events: [AppServerDaemonUpdateLoopEvent] = []
+
+    init(
+        managedCodexBin: URL,
+        managedIdentity: AppServerDaemonExecutableIdentity,
+        currentUpdaterIdentity: AppServerDaemonExecutableIdentity? = nil,
+        restartOutcomes: [AppServerDaemonRestartIfRunningOutcome] = [.notRunning],
+        sleepResults: [Bool] = [],
+        terminateOnSleep: Bool = false
+    ) {
+        self.managedCodexBin = managedCodexBin
+        self.managedIdentity = managedIdentity
+        currentIdentity = currentUpdaterIdentity ?? AppServerDaemonExecutableIdentity(bytes: Data("running".utf8))
+        self.restartOutcomes = restartOutcomes
+        self.sleepResults = sleepResults
+        self.terminateOnSleep = terminateOnSleep
+    }
+
+    func client() -> AppServerDaemonUpdateLoopClient {
+        AppServerDaemonUpdateLoopClient(
+            currentUpdaterIdentity: { [weak self] in
+                guard let self else {
+                    return AppServerDaemonExecutableIdentity(bytes: Data())
+                }
+                return await self.recordCurrentUpdaterIdentity()
+            },
+            installLatestStandalone: { [weak self] in
+                await self?.record(.installLatestStandalone)
+            },
+            resolvedManagedCodexBin: { [weak self] codexBin in
+                await self?.record(.resolveManagedCodex(codexBin))
+                return self?.managedCodexBin ?? codexBin
+            },
+            executableIdentity: { [weak self] executable in
+                guard let self else {
+                    return AppServerDaemonExecutableIdentity(bytes: Data())
+                }
+                return await self.recordExecutableIdentity(executable)
+            },
+            tryRestartIfRunning: { [weak self] restartMode, updaterRefreshMode, managedCodexBin in
+                guard let self else { return .notRunning }
+                return await self.nextRestartOutcome(
+                    restartMode: restartMode,
+                    updaterRefreshMode: updaterRefreshMode,
+                    managedCodexBin: managedCodexBin
+                )
+            },
+            sleepOrTerminate: { [weak self] seconds in
+                guard let self else { return false }
+                return await self.nextSleepResult(seconds: seconds)
+            },
+            terminationRequested: { [weak self] in
+                await self?.terminationRequested() ?? false
+            }
+        )
+    }
+
+    func eventsSnapshot() -> [AppServerDaemonUpdateLoopEvent] {
+        events
+    }
+
+    private func record(_ event: AppServerDaemonUpdateLoopEvent) {
+        events.append(event)
+    }
+
+    private func recordCurrentUpdaterIdentity() -> AppServerDaemonExecutableIdentity {
+        events.append(.currentUpdaterIdentity)
+        return currentIdentity
+    }
+
+    private func recordExecutableIdentity(_ executable: URL) -> AppServerDaemonExecutableIdentity {
+        events.append(.executableIdentity(executable))
+        return managedIdentity
+    }
+
+    private func nextRestartOutcome(
+        restartMode: AppServerDaemonRestartMode,
+        updaterRefreshMode: AppServerDaemonUpdaterRefreshMode,
+        managedCodexBin: URL
+    ) -> AppServerDaemonRestartIfRunningOutcome {
+        events.append(.tryRestart(restartMode, updaterRefreshMode, managedCodexBin))
+        guard !restartOutcomes.isEmpty else {
+            return .notRunning
+        }
+        return restartOutcomes.removeFirst()
+    }
+
+    private func nextSleepResult(seconds: TimeInterval) -> Bool {
+        events.append(.sleepOrTerminate(seconds))
+        if terminateOnSleep {
+            terminated = true
+            return true
+        }
+        guard !sleepResults.isEmpty else {
+            return false
+        }
+        return sleepResults.removeFirst()
+    }
+
+    private func terminationRequested() -> Bool {
+        terminated
     }
 }
 

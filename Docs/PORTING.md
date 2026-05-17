@@ -36,8 +36,13 @@ Recent upstream audit checkpoint:
   helpers. Swift now also ports the Rust updater restart-if-running seam:
   nonblocking daemon lock detection, managed-version parsing, not-running /
   not-ready / already-current / restarted outcomes, restart from the resolved
-  managed binary, and managed-updater reexec triggering. The live updater loop
-  (installer fetch, retry loop, and termination handling) remains pending.
+  managed binary, and managed-updater reexec triggering. Swift now ports the
+  Rust updater loop's installer/update-once control flow: initial-delay stop,
+  standalone installer invocation hook, managed-binary canonicalization,
+  identity-based mode selection, busy restart retry, per-iteration error
+  swallowing, and termination-aware retry/interval sleeps. Remaining daemon
+  updater gaps are live installer/network edge-case parity and broader
+  long-running process hardening.
 - 2026-05-17: rechecked Rust commit `e6939e3969` (`feat: namespace in ext`).
   Swift does not yet have the Rust extension executor registry, but the shared
   Responses tool-spec surface now has explicit parity coverage that namespace

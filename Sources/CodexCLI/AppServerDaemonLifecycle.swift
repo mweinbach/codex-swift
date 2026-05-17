@@ -1,3 +1,5 @@
+import CodexCore
+import Dispatch
 import Darwin
 import CryptoKit
 import Foundation
@@ -212,6 +214,11 @@ public enum AppServerDaemonRestartIfRunningOutcome: Equatable, Sendable {
     case restarted
 }
 
+public enum AppServerDaemonUpdateLoopControl: Equatable, Sendable {
+    case continueRunning
+    case stop
+}
+
 public struct AppServerDaemonProcessClient: Sendable {
     public var processStartTime: @Sendable (UInt32) async throws -> String?
     public var signalProcess: @Sendable (UInt32, AppServerDaemonSignal) async throws -> Void
@@ -274,6 +281,88 @@ public struct AppServerDaemonStopOptions: Sendable {
     }
 }
 
+public struct AppServerDaemonUpdateLoopClient: Sendable {
+    public var currentUpdaterIdentity: @Sendable () async throws -> AppServerDaemonExecutableIdentity
+    public var installLatestStandalone: @Sendable () async throws -> Void
+    public var resolvedManagedCodexBin: @Sendable (URL) async throws -> URL
+    public var executableIdentity: @Sendable (URL) async throws -> AppServerDaemonExecutableIdentity
+    public var tryRestartIfRunning: @Sendable (
+        AppServerDaemonRestartMode,
+        AppServerDaemonUpdaterRefreshMode,
+        URL
+    ) async throws -> AppServerDaemonRestartIfRunningOutcome
+    public var sleepOrTerminate: @Sendable (TimeInterval) async throws -> Bool
+    public var terminationRequested: @Sendable () async -> Bool
+
+    public init(
+        currentUpdaterIdentity: @escaping @Sendable () async throws -> AppServerDaemonExecutableIdentity,
+        installLatestStandalone: @escaping @Sendable () async throws -> Void,
+        resolvedManagedCodexBin: @escaping @Sendable (URL) async throws -> URL,
+        executableIdentity: @escaping @Sendable (URL) async throws -> AppServerDaemonExecutableIdentity,
+        tryRestartIfRunning: @escaping @Sendable (
+            AppServerDaemonRestartMode,
+            AppServerDaemonUpdaterRefreshMode,
+            URL
+        ) async throws -> AppServerDaemonRestartIfRunningOutcome,
+        sleepOrTerminate: @escaping @Sendable (TimeInterval) async throws -> Bool,
+        terminationRequested: @escaping @Sendable () async -> Bool
+    ) {
+        self.currentUpdaterIdentity = currentUpdaterIdentity
+        self.installLatestStandalone = installLatestStandalone
+        self.resolvedManagedCodexBin = resolvedManagedCodexBin
+        self.executableIdentity = executableIdentity
+        self.tryRestartIfRunning = tryRestartIfRunning
+        self.sleepOrTerminate = sleepOrTerminate
+        self.terminationRequested = terminationRequested
+    }
+
+    public static func live(
+        codexHome: URL,
+        processClient: AppServerDaemonProcessClient = .live,
+        updaterClient: AppServerDaemonUpdaterRuntimeClient = .live,
+        options: AppServerDaemonStopOptions = AppServerDaemonStopOptions()
+    ) -> AppServerDaemonUpdateLoopClient {
+        let termination = AppServerDaemonTerminationFlag()
+        AppServerDaemonLifecycle.installTerminationHandler(termination: termination)
+        return AppServerDaemonUpdateLoopClient(
+            currentUpdaterIdentity: {
+                try AppServerDaemonLifecycle.currentUpdaterIdentity()
+            },
+            installLatestStandalone: {
+                try await AppServerDaemonLifecycle.installLatestStandalone()
+            },
+            resolvedManagedCodexBin: { codexBin in
+                try AppServerDaemonLifecycle.resolvedManagedCodexBin(codexBin)
+            },
+            executableIdentity: { executable in
+                try AppServerDaemonLifecycle.executableIdentity(at: executable)
+            },
+            tryRestartIfRunning: { restartMode, updaterRefreshMode, managedCodexBin in
+                try await AppServerDaemonLifecycle.tryRestartIfRunning(
+                    codexHome: codexHome,
+                    restartMode: restartMode,
+                    updaterRefreshMode: updaterRefreshMode,
+                    managedCodexBin: managedCodexBin,
+                    processClient: processClient,
+                    updaterClient: updaterClient,
+                    options: options
+                )
+            },
+            sleepOrTerminate: { seconds in
+                try await AppServerDaemonLifecycle.sleepOrTerminate(
+                    seconds,
+                    termination: termination,
+                    processClient: processClient,
+                    pollInterval: options.pollInterval
+                )
+            },
+            terminationRequested: {
+                await termination.isTerminated()
+            }
+        )
+    }
+}
+
 public enum AppServerDaemonLifecycle {
     public static func executableIdentity(at executable: URL) throws -> AppServerDaemonExecutableIdentity {
         do {
@@ -320,6 +409,18 @@ public enum AppServerDaemonLifecycle {
             }
             return try parseManagedCodexVersionOutput(output)
         }.value
+    }
+
+    public static func resolvedManagedCodexBin(_ codexBin: URL) throws -> URL {
+        var buffer = [CChar](repeating: 0, count: Int(PATH_MAX))
+        guard realpath(codexBin.path, &buffer) != nil else {
+            throw AppServerDaemonLifecycleError(
+                "failed to resolve managed Codex binary \(codexBin.path): \(String(cString: strerror(errno)))"
+            )
+        }
+        let end = buffer.firstIndex(of: 0) ?? buffer.endIndex
+        let pathBytes = buffer[..<end].map { UInt8(bitPattern: $0) }
+        return URL(fileURLWithPath: String(decoding: pathBytes, as: UTF8.self), isDirectory: false)
     }
 
     public static func updateModesForIdentities(
@@ -423,7 +524,102 @@ public enum AppServerDaemonLifecycle {
     }
 
     public static func runPidUpdateLoop() async throws {
-        throw AppServerDaemonLifecycleError("app-server daemon pid-update-loop runtime is not implemented in Swift yet")
+        try await runPidUpdateLoop(codexHome: try CodexHome.find())
+    }
+
+    public static func runPidUpdateLoop(
+        codexHome: URL,
+        initialDelay: TimeInterval = 5 * 60,
+        updateInterval: TimeInterval = 60 * 60,
+        retryInterval: TimeInterval = 0.05,
+        client: AppServerDaemonUpdateLoopClient? = nil
+    ) async throws {
+        let updateLoopClient = client ?? AppServerDaemonUpdateLoopClient.live(codexHome: codexHome)
+        let runningUpdaterIdentity = try await updateLoopClient.currentUpdaterIdentity()
+        if try await updateLoopClient.sleepOrTerminate(initialDelay) {
+            return
+        }
+        while true {
+            do {
+                switch try await runPidUpdateLoopOnce(
+                    codexHome: codexHome,
+                    runningUpdaterIdentity: runningUpdaterIdentity,
+                    retryInterval: retryInterval,
+                    client: updateLoopClient
+                ) {
+                case .continueRunning:
+                    break
+                case .stop:
+                    return
+                }
+            } catch {
+                // Rust swallows per-iteration updater errors and retries after the normal interval.
+            }
+            if try await updateLoopClient.sleepOrTerminate(updateInterval) {
+                return
+            }
+        }
+    }
+
+    public static func runPidUpdateLoopOnce(
+        codexHome: URL,
+        runningUpdaterIdentity: AppServerDaemonExecutableIdentity,
+        retryInterval: TimeInterval = 0.05,
+        client: AppServerDaemonUpdateLoopClient
+    ) async throws -> AppServerDaemonUpdateLoopControl {
+        let paths = AppServerDaemonPaths(codexHome: codexHome)
+        try await client.installLatestStandalone()
+        let managedCodexBin = try await client.resolvedManagedCodexBin(paths.managedCodexBin)
+        let managedIdentity = try await client.executableIdentity(managedCodexBin)
+        let modes = updateModesForIdentities(
+            currentUpdater: runningUpdaterIdentity,
+            managedCodex: managedIdentity
+        )
+        while true {
+            if await client.terminationRequested() {
+                return .stop
+            }
+            switch try await client.tryRestartIfRunning(
+                modes.restartMode,
+                modes.updaterRefreshMode,
+                managedCodexBin
+            ) {
+            case .busy:
+                if try await client.sleepOrTerminate(retryInterval) {
+                    return .stop
+                }
+            case .notRunning, .notReady, .alreadyCurrent, .restarted:
+                return .continueRunning
+            }
+        }
+    }
+
+    public static func installLatestStandalone(
+        scriptURL: URL = URL(string: "https://chatgpt.com/codex/install.sh")!
+    ) async throws {
+        let script: Data
+        do {
+            let (data, response) = try await URLSession.shared.data(from: scriptURL)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw AppServerDaemonLifecycleError("standalone Codex updater request failed")
+            }
+            guard (200..<300).contains(httpResponse.statusCode) else {
+                throw AppServerDaemonLifecycleError("standalone Codex updater request failed")
+            }
+            script = data
+        } catch let error as AppServerDaemonLifecycleError {
+            throw error
+        } catch {
+            throw AppServerDaemonLifecycleError("failed to fetch standalone Codex updater: \(error)")
+        }
+        try runStandaloneUpdaterScript(script)
+    }
+
+    public static func currentUpdaterIdentity() throws -> AppServerDaemonExecutableIdentity {
+        guard let executable = Bundle.main.executableURL else {
+            throw AppServerDaemonLifecycleError("failed to resolve current updater executable")
+        }
+        return try executableIdentity(at: executable)
     }
 
     public static func start(
@@ -1227,6 +1423,64 @@ public enum AppServerDaemonLifecycle {
         return UInt32(process.processIdentifier)
     }
 
+    static func runStandaloneUpdaterScript(_ script: Data) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-s"]
+        let stdin = Pipe()
+        process.standardInput = stdin
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            throw AppServerDaemonLifecycleError("failed to invoke standalone Codex updater: \(error)")
+        }
+        stdin.fileHandleForWriting.write(script)
+        stdin.fileHandleForWriting.closeFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw AppServerDaemonLifecycleError(
+                "standalone Codex updater exited with status \(process.terminationStatus)"
+            )
+        }
+    }
+
+    static func installTerminationHandler(termination: AppServerDaemonTerminationFlag) {
+        signal(SIGTERM, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global())
+        source.setEventHandler {
+            Task {
+                await termination.markTerminated()
+            }
+        }
+        source.resume()
+        AppServerDaemonSignalSourceStore.shared.retain(source)
+    }
+
+    static func sleepOrTerminate(
+        _ seconds: TimeInterval,
+        termination: AppServerDaemonTerminationFlag,
+        processClient: AppServerDaemonProcessClient,
+        pollInterval: TimeInterval
+    ) async throws -> Bool {
+        try await withThrowingTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                try await processClient.sleep(seconds)
+                return false
+            }
+            group.addTask {
+                while await !termination.isTerminated() {
+                    try await processClient.sleep(pollInterval)
+                }
+                return true
+            }
+            let result = try await group.next() ?? false
+            group.cancelAll()
+            return result
+        }
+    }
+
     static func reexecManagedUpdater(managedCodexBin: URL) throws {
         let arguments = [
             managedCodexBin.path,
@@ -1471,6 +1725,33 @@ private struct AppServerDaemonPidRecord: Codable, Equatable {
 
 private struct AppServerDaemonSettings: Codable, Equatable {
     var remoteControlEnabled: Bool = false
+}
+
+public actor AppServerDaemonTerminationFlag {
+    private var terminated = false
+
+    public init() {}
+
+    public func markTerminated() {
+        terminated = true
+    }
+
+    public func isTerminated() -> Bool {
+        terminated
+    }
+}
+
+private final class AppServerDaemonSignalSourceStore: @unchecked Sendable {
+    static let shared = AppServerDaemonSignalSourceStore()
+
+    private let lock = NSLock()
+    private var sources: [DispatchSourceSignal] = []
+
+    func retain(_ source: DispatchSourceSignal) {
+        lock.lock()
+        sources.append(source)
+        lock.unlock()
+    }
 }
 
 private extension URL {
