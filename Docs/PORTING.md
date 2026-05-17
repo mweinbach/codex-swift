@@ -509,11 +509,12 @@ Recent upstream audit checkpoint:
   prefixes, provider-setup/auth-resolution warning rows, plus Rust-shaped DNS
   IPv4/IPv6 family detail rows for the planned WebSocket endpoint. When config
   loading fails, Swift now mirrors Rust's
-  fallback `state.paths` row, default ChatGPT reachability plan, and default
-  WebSocket planning row before emitting the failed `config.load` row. The
-  report emits the redacted `--json` support map keyed by check id, renders
-  compact grouped human summary output, and exits nonzero when config loading
-  fails.
+  fallback `state.paths` row and default ChatGPT reachability plan before
+  emitting the failed `config.load` row; like Rust, Swift skips config-dependent
+  auth, updates, MCP, sandbox, background-server, provider-specific WebSocket,
+  and state database checks on that path. The report emits the redacted
+  `--json` support map keyed by check id, renders compact grouped human summary
+  output, and exits nonzero when config loading fails.
 - 2026-05-17: rechecked Rust's `codex doctor` Responses WebSocket probe in
   `codex-rs/cli/src/doctor.rs`. Swift now resolves the active provider/auth
   into a Rust-shaped WebSocket handshake probe request, preserving provider

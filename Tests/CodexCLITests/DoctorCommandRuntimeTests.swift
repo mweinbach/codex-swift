@@ -1543,6 +1543,7 @@ final class DoctorCommandRuntimeTests: XCTestCase {
             reachabilityDetails["ChatGPT base URL"] as? String,
             "https://chatgpt.com/backend-api/ reachable (HTTP 200)"
         )
+        XCTAssertNil(checks["network.websocket_reachability"])
     }
 
     func testFallbackStatePathsCheckMatchesRustConfigFailurePath() {
