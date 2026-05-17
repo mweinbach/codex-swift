@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: continued Rust commit `cccde930ce` (`Move memory prompt
+  injection to app-server extension`). Swift now has the concrete memories
+  extension contributor that owns Rust-shaped thread-start memory settings,
+  config-change refresh, and developer-policy prompt contribution while keeping
+  memory read/retrieval tools unregistered for app-server extension use.
 - 2026-05-17: continued Rust commit `6f1a01fbdd` (`Simplify tool executor
   and registry plumbing`) against `codex-rs/tools/src/tool_output.rs`. Swift
   now has the extension tool-output contract used by registry-owned tools:

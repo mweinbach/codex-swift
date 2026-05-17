@@ -388,4 +388,87 @@ final class ExtensionRegistryTests: XCTestCase {
         XCTAssertTrue(linePreview.contains("line-63\n[... telemetry preview truncated ...]"))
         XCTAssertFalse(linePreview.contains("line-64"))
     }
+
+    func testMemoriesExtensionOwnsPromptStateAcrossThreadStartAndConfigChangeLikeRust() async throws {
+        let codexHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-swift-memories-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: codexHome) }
+
+        let memories = codexHome.appendingPathComponent("memories", isDirectory: true)
+        try FileManager.default.createDirectory(at: memories, withIntermediateDirectories: true)
+        try "Remember extension-owned prompt state.".write(
+            to: memories.appendingPathComponent("memory_summary.md", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        var builder = ExtensionRegistryBuilder()
+        installMemoriesExtension(into: &builder, codexHome: codexHome)
+        let registry = builder.build()
+        XCTAssertEqual(registry.threadLifecycleContributors.count, 1)
+        XCTAssertEqual(registry.configContributors.count, 1)
+        XCTAssertEqual(registry.contextContributors.count, 1)
+        XCTAssertTrue(registry.toolContributors.isEmpty)
+
+        let sessionStore = ExtensionData(id: "session")
+        let threadStore = ExtensionData(id: "thread")
+        let threadID = ThreadId(uuid: UUID(uuidString: "123e4567-e89b-12d3-a456-426614174001")!)
+        let enabledConfig = memoryConfig(enabled: true, useMemories: true)
+        registry.threadLifecycleContributors[0].onThreadStart(ExtensionThreadStartInput(
+            threadID: threadID,
+            config: enabledConfig,
+            sessionStore: sessionStore,
+            threadStore: threadStore
+        ))
+
+        var fragments = await registry.contextContributors[0].contribute(
+            sessionStore: sessionStore,
+            threadStore: threadStore
+        )
+        XCTAssertEqual(fragments.count, 1)
+        XCTAssertEqual(fragments[0].slot, .developerPolicy)
+        XCTAssertTrue(fragments[0].text.contains("Remember extension-owned prompt state."))
+
+        let disabledConfig = memoryConfig(enabled: true, useMemories: false)
+        registry.configContributors[0].onConfigChanged(ExtensionConfigChangedInput(
+            threadID: threadID,
+            sessionStore: sessionStore,
+            threadStore: threadStore,
+            previousConfig: enabledConfig,
+            newConfig: disabledConfig
+        ))
+        fragments = await registry.contextContributors[0].contribute(
+            sessionStore: sessionStore,
+            threadStore: threadStore
+        )
+        XCTAssertTrue(fragments.isEmpty)
+
+        registry.configContributors[0].onConfigChanged(ExtensionConfigChangedInput(
+            threadID: threadID,
+            sessionStore: sessionStore,
+            threadStore: threadStore,
+            previousConfig: disabledConfig,
+            newConfig: enabledConfig
+        ))
+        fragments = await registry.contextContributors[0].contribute(
+            sessionStore: sessionStore,
+            threadStore: threadStore
+        )
+        XCTAssertEqual(fragments.count, 1)
+        XCTAssertEqual(threadStore.get(MemoriesExtensionConfig.self), .fromRuntimeConfig(
+            enabledConfig,
+            codexHome: codexHome
+        ))
+    }
+
+    private func memoryConfig(enabled: Bool, useMemories: Bool) -> CodexRuntimeConfig {
+        var features = FeatureStates.withDefaults()
+        features.set(.memoryTool, enabled: enabled)
+        return CodexRuntimeConfig(
+            modelProvider: "test-provider",
+            features: features,
+            memories: MemoriesConfig(useMemories: useMemories),
+            projectDocMaxBytes: 0
+        )
+    }
 }
