@@ -153,6 +153,28 @@ public struct AppServerDaemonExecutableIdentity: Equatable, Sendable {
     }
 }
 
+public struct AppServerDaemonUpdaterRuntimeClient: Sendable {
+    public var managedCodexVersion: @Sendable (URL) async throws -> String
+    public var reexecManagedUpdater: @Sendable (URL) async throws -> Void
+
+    public init(
+        managedCodexVersion: @escaping @Sendable (URL) async throws -> String,
+        reexecManagedUpdater: @escaping @Sendable (URL) async throws -> Void
+    ) {
+        self.managedCodexVersion = managedCodexVersion
+        self.reexecManagedUpdater = reexecManagedUpdater
+    }
+
+    public static let live = AppServerDaemonUpdaterRuntimeClient(
+        managedCodexVersion: { codexBin in
+            try await AppServerDaemonLifecycle.managedCodexVersion(codexBin: codexBin)
+        },
+        reexecManagedUpdater: { managedCodexBin in
+            try AppServerDaemonLifecycle.reexecManagedUpdater(managedCodexBin: managedCodexBin)
+        }
+    )
+}
+
 public enum AppServerDaemonRestartMode: Equatable, Sendable {
     case ifVersionChanged
     case always
@@ -253,6 +275,53 @@ public struct AppServerDaemonStopOptions: Sendable {
 }
 
 public enum AppServerDaemonLifecycle {
+    public static func executableIdentity(at executable: URL) throws -> AppServerDaemonExecutableIdentity {
+        do {
+            return AppServerDaemonExecutableIdentity(bytes: try Data(contentsOf: executable))
+        } catch {
+            throw AppServerDaemonLifecycleError("failed to read executable \(executable.path): \(error)")
+        }
+    }
+
+    public static func parseManagedCodexVersionOutput(_ output: String) throws -> String {
+        guard let version = output.split(whereSeparator: \.isWhitespace).dropFirst().first,
+              !version.isEmpty else {
+            throw AppServerDaemonLifecycleError("managed Codex version output was malformed")
+        }
+        return String(version)
+    }
+
+    public static func managedCodexVersion(codexBin: URL) async throws -> String {
+        try await Task.detached {
+            let process = Process()
+            process.executableURL = codexBin
+            process.arguments = ["--version"]
+            let stdout = Pipe()
+            process.standardOutput = stdout
+            process.standardError = Pipe()
+            do {
+                try process.run()
+            } catch {
+                throw AppServerDaemonLifecycleError(
+                    "failed to invoke managed Codex binary \(codexBin.path): \(error)"
+                )
+            }
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else {
+                throw AppServerDaemonLifecycleError(
+                    "managed Codex binary \(codexBin.path) exited with status \(process.terminationStatus)"
+                )
+            }
+            let data = stdout.fileHandleForReading.readDataToEndOfFile()
+            guard let output = String(data: data, encoding: .utf8) else {
+                throw AppServerDaemonLifecycleError(
+                    "managed Codex version was not utf-8: \(codexBin.path)"
+                )
+            }
+            return try parseManagedCodexVersionOutput(output)
+        }.value
+    }
+
     public static func updateModesForIdentities(
         currentUpdater: AppServerDaemonExecutableIdentity,
         managedCodex: AppServerDaemonExecutableIdentity
@@ -287,6 +356,70 @@ public enum AppServerDaemonLifecycle {
         outcome: AppServerDaemonRestartIfRunningOutcome
     ) -> Bool {
         refreshMode == .reexecIfManagedBinaryChanged && outcome == .restarted
+    }
+
+    public static func tryRestartIfRunning(
+        codexHome: URL,
+        restartMode: AppServerDaemonRestartMode,
+        updaterRefreshMode: AppServerDaemonUpdaterRefreshMode,
+        managedCodexBin: URL,
+        processClient: AppServerDaemonProcessClient = .live,
+        updaterClient: AppServerDaemonUpdaterRuntimeClient = .live,
+        options: AppServerDaemonStopOptions = AppServerDaemonStopOptions()
+    ) async throws -> AppServerDaemonRestartIfRunningOutcome {
+        let paths = AppServerDaemonPaths(codexHome: codexHome)
+        try FileManager.default.createDirectory(at: paths.stateDirectory, withIntermediateDirectories: true)
+        guard let lock = try AppServerDaemonOperationLock.tryAcquire(path: paths.operationLockFile) else {
+            return .busy
+        }
+        defer { lock.close() }
+
+        let settings = try loadSettings(path: paths.settingsFile)
+        let outcome: AppServerDaemonRestartIfRunningOutcome
+        if try await isPidBackendStartingOrRunning(
+            pidFile: paths.pidFile,
+            processClient: processClient,
+            options: options
+        ) {
+            let appServerVersion = try? await processClient.probeAppServerVersion(paths.socketPath)
+            let managedVersion = appServerVersion == nil
+                ? nil
+                : try await updaterClient.managedCodexVersion(managedCodexBin)
+            switch restartDecision(
+                mode: restartMode,
+                appServerVersion: appServerVersion,
+                managedVersion: managedVersion
+            ) {
+            case .notReady:
+                return .notReady
+            case .alreadyCurrent:
+                outcome = .alreadyCurrent
+            case .restart:
+                try await stopPidBackend(pidFile: paths.pidFile, processClient: processClient, options: options)
+                _ = try await startPidBackend(
+                    pidFile: paths.pidFile,
+                    codexBin: managedCodexBin,
+                    kind: .appServer(remoteControlEnabled: settings.remoteControlEnabled),
+                    processClient: processClient,
+                    options: options
+                )
+                _ = try await waitUntilReady(
+                    socketPath: paths.socketPath,
+                    processClient: processClient,
+                    options: options
+                )
+                outcome = .restarted
+            }
+        } else if (try? await processClient.probeAppServerVersion(paths.socketPath)) != nil {
+            throw AppServerDaemonLifecycleError("app server is running but is not managed by codex app-server daemon")
+        } else {
+            outcome = .notRunning
+        }
+
+        if shouldReexecUpdater(refreshMode: updaterRefreshMode, outcome: outcome) {
+            try await updaterClient.reexecManagedUpdater(managedCodexBin)
+        }
+        return outcome
     }
 
     public static func runPidUpdateLoop() async throws {
@@ -1094,6 +1227,25 @@ public enum AppServerDaemonLifecycle {
         return UInt32(process.processIdentifier)
     }
 
+    static func reexecManagedUpdater(managedCodexBin: URL) throws {
+        let arguments = [
+            managedCodexBin.path,
+            "app-server",
+            "daemon",
+            "pid-update-loop"
+        ]
+        let cArguments = arguments.map { strdup($0) } + [nil]
+        defer {
+            for argument in cArguments {
+                free(argument)
+            }
+        }
+        execv(managedCodexBin.path, cArguments)
+        throw AppServerDaemonLifecycleError(
+            "failed to replace updater with managed Codex binary \(managedCodexBin.path): \(String(cString: strerror(errno)))"
+        )
+    }
+
     static func probeAppServerVersion(socketPath: String) async throws -> String {
         try await Task.detached {
             try probeAppServerVersionSynchronously(socketPath: socketPath)
@@ -1360,6 +1512,24 @@ private final class AppServerDaemonOperationLock {
             try await sleep(pollInterval)
         }
         return lock
+    }
+
+    static func tryAcquire(path: URL) throws -> AppServerDaemonOperationLock? {
+        let descriptor = Darwin.open(path.path, O_CREAT | O_RDWR, 0o600)
+        guard descriptor >= 0 else {
+            throw AppServerDaemonLifecycleError("failed to open daemon operation lock \(path.path): \(String(cString: strerror(errno)))")
+        }
+        let lock = AppServerDaemonOperationLock(descriptor: descriptor)
+        if flock(descriptor, LOCK_EX | LOCK_NB) == 0 {
+            return lock
+        }
+        if errno == EWOULDBLOCK {
+            lock.close()
+            return nil
+        }
+        let message = String(cString: strerror(errno))
+        lock.close()
+        throw AppServerDaemonLifecycleError("failed to lock daemon operation lock \(path.path): \(message)")
     }
 
     func close() {

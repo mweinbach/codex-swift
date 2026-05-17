@@ -1,8 +1,38 @@
 import CodexCLI
+import Darwin
 import Foundation
 import XCTest
 
 final class AppServerDaemonLifecycleTests: XCTestCase {
+    func testParseManagedCodexVersionOutputMatchesRust() throws {
+        XCTAssertEqual(
+            try AppServerDaemonLifecycle.parseManagedCodexVersionOutput("codex 1.2.3\n"),
+            "1.2.3"
+        )
+        XCTAssertEqual(
+            try AppServerDaemonLifecycle.parseManagedCodexVersionOutput("codex\t2.0.0 extra\n"),
+            "2.0.0"
+        )
+        XCTAssertThrowsError(try AppServerDaemonLifecycle.parseManagedCodexVersionOutput("codex\n")) { error in
+            XCTAssertEqual(
+                (error as? AppServerDaemonLifecycleError)?.description,
+                "managed Codex version output was malformed"
+            )
+        }
+    }
+
+    func testExecutableIdentityReadsBinaryContentsLikeRust() throws {
+        let temp = try AppServerDaemonTemporaryDirectory()
+        let path = temp.url.appendingPathComponent("codex", isDirectory: false)
+        try Data("old".utf8).write(to: path)
+        let old = try AppServerDaemonLifecycle.executableIdentity(at: path)
+        let same = AppServerDaemonExecutableIdentity(bytes: Data("old".utf8))
+        let new = AppServerDaemonExecutableIdentity(bytes: Data("new".utf8))
+
+        XCTAssertEqual(old, same)
+        XCTAssertNotEqual(old, new)
+    }
+
     func testUpdaterIdentityUsesRustSHA256Digest() {
         let identity = AppServerDaemonExecutableIdentity(bytes: Data("same".utf8))
 
@@ -78,6 +108,127 @@ final class AppServerDaemonLifecycleTests: XCTestCase {
             refreshMode: .reexecIfManagedBinaryChanged,
             outcome: .restarted
         ))
+    }
+
+    func testTryRestartIfRunningReturnsBusyWhenOperationLockIsHeldLikeRust() async throws {
+        let temp = try AppServerDaemonTemporaryDirectory()
+        try FileManager.default.createDirectory(at: temp.stateDirectory, withIntermediateDirectories: true)
+        let descriptor = Darwin.open(temp.operationLockFile.path, O_CREAT | O_RDWR, 0o600)
+        XCTAssertGreaterThanOrEqual(descriptor, 0)
+        defer {
+            _ = flock(descriptor, LOCK_UN)
+            _ = Darwin.close(descriptor)
+        }
+        XCTAssertEqual(flock(descriptor, LOCK_EX | LOCK_NB), 0)
+
+        let outcome = try await AppServerDaemonLifecycle.tryRestartIfRunning(
+            codexHome: temp.url,
+            restartMode: .always,
+            updaterRefreshMode: .none,
+            managedCodexBin: temp.managedCodexBin,
+            processClient: .testClient(),
+            updaterClient: .testClient(),
+            options: .test
+        )
+
+        XCTAssertEqual(outcome, .busy)
+    }
+
+    func testTryRestartIfRunningReturnsNotRunningWhenNoManagedBackendOrSocketLikeRust() async throws {
+        let temp = try AppServerDaemonTemporaryDirectory()
+
+        let outcome = try await AppServerDaemonLifecycle.tryRestartIfRunning(
+            codexHome: temp.url,
+            restartMode: .ifVersionChanged,
+            updaterRefreshMode: .none,
+            managedCodexBin: temp.managedCodexBin,
+            processClient: .testClient(),
+            updaterClient: .testClient(),
+            options: .test
+        )
+
+        XCTAssertEqual(outcome, .notRunning)
+    }
+
+    func testTryRestartIfRunningReturnsNotReadyWhenManagedBackendProbeFailsLikeRust() async throws {
+        let temp = try AppServerDaemonTemporaryDirectory()
+        try temp.writePidRecord(pid: 1234, processStartTime: "start")
+        let updater = AppServerDaemonFakeUpdater()
+
+        let outcome = try await AppServerDaemonLifecycle.tryRestartIfRunning(
+            codexHome: temp.url,
+            restartMode: .ifVersionChanged,
+            updaterRefreshMode: .none,
+            managedCodexBin: temp.managedCodexBin,
+            processClient: .testClient(startTimes: [1234: "start"]),
+            updaterClient: updater.client(),
+            options: .test
+        )
+
+        XCTAssertEqual(outcome, .notReady)
+        let requestedVersions = await updater.requestedVersionsSnapshot()
+        XCTAssertEqual(requestedVersions, [])
+    }
+
+    func testTryRestartIfRunningSkipsRestartWhenVersionAlreadyCurrentLikeRust() async throws {
+        let temp = try AppServerDaemonTemporaryDirectory()
+        try temp.writePidRecord(pid: 1234, processStartTime: "start")
+        let fakeProcess = AppServerDaemonFakeProcess(
+            startTimes: [1234: "start"],
+            probeResults: [.success("1.2.3")]
+        )
+        let updater = AppServerDaemonFakeUpdater(managedVersions: ["1.2.3"])
+
+        let outcome = try await AppServerDaemonLifecycle.tryRestartIfRunning(
+            codexHome: temp.url,
+            restartMode: .ifVersionChanged,
+            updaterRefreshMode: .reexecIfManagedBinaryChanged,
+            managedCodexBin: temp.managedCodexBin,
+            processClient: fakeProcess.client(),
+            updaterClient: updater.client(),
+            options: .test
+        )
+
+        XCTAssertEqual(outcome, .alreadyCurrent)
+        let signals = await fakeProcess.signalsSnapshot()
+        let spawns = await fakeProcess.spawnsSnapshot()
+        let reexecs = await updater.reexecsSnapshot()
+        XCTAssertEqual(signals, [])
+        XCTAssertEqual(spawns, [])
+        XCTAssertEqual(reexecs, [])
+    }
+
+    func testTryRestartIfRunningRestartsAndReexecsChangedManagedUpdaterLikeRust() async throws {
+        let temp = try AppServerDaemonTemporaryDirectory()
+        try temp.writeSettings(remoteControlEnabled: true)
+        try temp.writePidRecord(pid: 1234, processStartTime: "old-start")
+        let fakeProcess = AppServerDaemonFakeProcess(
+            startTimes: [1234: "old-start"],
+            spawnedStartTimes: [2001: "new-start"],
+            probeResults: [.success("1.2.2"), .success("1.2.3")]
+        )
+        let updater = AppServerDaemonFakeUpdater(managedVersions: ["1.2.3"])
+
+        let outcome = try await AppServerDaemonLifecycle.tryRestartIfRunning(
+            codexHome: temp.url,
+            restartMode: .always,
+            updaterRefreshMode: .reexecIfManagedBinaryChanged,
+            managedCodexBin: temp.managedCodexBin,
+            processClient: fakeProcess.client(),
+            updaterClient: updater.client(),
+            options: .test
+        )
+
+        XCTAssertEqual(outcome, .restarted)
+        let signals = await fakeProcess.signalsSnapshot()
+        XCTAssertEqual(signals, [.terminate])
+        let spawns = await fakeProcess.spawnsSnapshot()
+        XCTAssertEqual(spawns.map(\.executablePath), [temp.managedCodexBin.path])
+        XCTAssertEqual(spawns.map(\.arguments), [
+            ["app-server", "--remote-control", "--listen", "unix://"]
+        ])
+        let reexecs = await updater.reexecsSnapshot()
+        XCTAssertEqual(reexecs, [temp.managedCodexBin])
     }
 
     func testRemoteControlStartFailsWithRustManagedInstallGuidanceWhenMissing() async throws {
@@ -448,8 +599,21 @@ private extension AppServerDaemonStopOptions {
     )
 }
 
+private extension AppServerDaemonUpdaterRuntimeClient {
+    static func testClient() -> AppServerDaemonUpdaterRuntimeClient {
+        AppServerDaemonUpdaterRuntimeClient(
+            managedCodexVersion: { _ in "1.2.3" },
+            reexecManagedUpdater: { _ in }
+        )
+    }
+}
+
 private final class AppServerDaemonTemporaryDirectory {
     let url: URL
+
+    var stateDirectory: URL {
+        url.appendingPathComponent("app-server-daemon", isDirectory: true)
+    }
 
     var socketPath: URL {
         url
@@ -458,21 +622,19 @@ private final class AppServerDaemonTemporaryDirectory {
     }
 
     var pidFile: URL {
-        url
-            .appendingPathComponent("app-server-daemon", isDirectory: true)
-            .appendingPathComponent("app-server.pid", isDirectory: false)
+        stateDirectory.appendingPathComponent("app-server.pid", isDirectory: false)
     }
 
     var updatePidFile: URL {
-        url
-            .appendingPathComponent("app-server-daemon", isDirectory: true)
-            .appendingPathComponent("app-server-updater.pid", isDirectory: false)
+        stateDirectory.appendingPathComponent("app-server-updater.pid", isDirectory: false)
+    }
+
+    var operationLockFile: URL {
+        stateDirectory.appendingPathComponent("daemon.lock", isDirectory: false)
     }
 
     var settingsFile: URL {
-        url
-            .appendingPathComponent("app-server-daemon", isDirectory: true)
-            .appendingPathComponent("settings.json", isDirectory: false)
+        stateDirectory.appendingPathComponent("settings.json", isDirectory: false)
     }
 
     var managedCodexBin: URL {
@@ -523,6 +685,48 @@ private final class AppServerDaemonTemporaryDirectory {
         try FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
         let data = #"{"pid":\#(pid),"processStartTime":"\#(processStartTime)"}"#.data(using: .utf8)!
         try data.write(to: path)
+    }
+}
+
+private actor AppServerDaemonFakeUpdater {
+    private var managedVersions: [String]
+    private var requestedVersions: [URL] = []
+    private var reexecs: [URL] = []
+
+    init(managedVersions: [String] = []) {
+        self.managedVersions = managedVersions
+    }
+
+    func client() -> AppServerDaemonUpdaterRuntimeClient {
+        AppServerDaemonUpdaterRuntimeClient(
+            managedCodexVersion: { [weak self] codexBin in
+                guard let self else { return "1.2.3" }
+                return await self.nextManagedVersion(codexBin: codexBin)
+            },
+            reexecManagedUpdater: { [weak self] managedCodexBin in
+                await self?.recordReexec(managedCodexBin)
+            }
+        )
+    }
+
+    func requestedVersionsSnapshot() -> [URL] {
+        requestedVersions
+    }
+
+    func reexecsSnapshot() -> [URL] {
+        reexecs
+    }
+
+    private func nextManagedVersion(codexBin: URL) -> String {
+        requestedVersions.append(codexBin)
+        guard !managedVersions.isEmpty else {
+            return "1.2.3"
+        }
+        return managedVersions.removeFirst()
+    }
+
+    private func recordReexec(_ managedCodexBin: URL) {
+        reexecs.append(managedCodexBin)
     }
 }
 

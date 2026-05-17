@@ -33,8 +33,11 @@ Recent upstream audit checkpoint:
   behavior, and Rust-shaped lifecycle/version JSON. The hidden
   `pid-update-loop` command surface is now accepted, and Swift ports the
   updater executable-identity, restart-mode, and updater-reexec decision
-  helpers; the live updater loop (installer fetch, retry loop, termination
-  handling, and managed-binary reexec) remains pending.
+  helpers. Swift now also ports the Rust updater restart-if-running seam:
+  nonblocking daemon lock detection, managed-version parsing, not-running /
+  not-ready / already-current / restarted outcomes, restart from the resolved
+  managed binary, and managed-updater reexec triggering. The live updater loop
+  (installer fetch, retry loop, and termination handling) remains pending.
 - 2026-05-17: rechecked Rust commit `e6939e3969` (`feat: namespace in ext`).
   Swift does not yet have the Rust extension executor registry, but the shared
   Responses tool-spec surface now has explicit parity coverage that namespace
