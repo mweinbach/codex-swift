@@ -15572,6 +15572,15 @@ public enum CodexAppServer {
         ]
     }
 
+    fileprivate static func threadClosedNotification(threadID: String) -> [String: Any] {
+        [
+            "method": ThreadClosedNotification.method,
+            "params": [
+                "threadId": threadID
+            ]
+        ]
+    }
+
     fileprivate static func threadArchivedNotification(threadID: String) -> [String: Any] {
         [
             "method": "thread/archived",
@@ -27666,9 +27675,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             pendingRollbackRequests[threadID] = nil
             notifications = []
         case .shutdownComplete:
-            notifications = [
-                markRuntimeThreadShutdown(threadID: threadID)
-            ].compactMap(\.self)
+            notifications = markRuntimeThreadShutdown(threadID: threadID)
         case let .dynamicToolCallRequest(event):
             notifications = [
                 CodexAppServer.dynamicToolCallStartedNotification(threadID: threadID, event: event)
@@ -28026,7 +28033,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         runtimePendingUserInputCounts.removeValue(forKey: threadID)
     }
 
-    private func markRuntimeThreadShutdown(threadID: String) -> [String: Any]? {
+    private func markRuntimeThreadShutdown(threadID: String) -> [[String: Any]] {
         let hadRuntimeState = activeTurnIDs[threadID] != nil
             || runtimePendingApprovalCounts[threadID] != nil
             || runtimePendingUserInputCounts[threadID] != nil
@@ -28063,12 +28070,15 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         ephemeralThreadSnapshots.removeValue(forKey: threadID)
 
         guard wasLoaded || hadRuntimeState else {
-            return nil
+            return []
         }
-        return threadStatusChangedNotification(
-            threadID: threadID,
-            status: CodexAppServer.notLoadedThreadStatus()
-        )
+        return [
+            threadStatusChangedNotification(
+                threadID: threadID,
+                status: CodexAppServer.notLoadedThreadStatus()
+            ),
+            CodexAppServer.threadClosedNotification(threadID: threadID)
+        ].compactMap(\.self)
     }
 
     private func sendNotification(_ notification: [String: Any]) async {

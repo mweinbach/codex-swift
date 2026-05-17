@@ -7727,7 +7727,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(completedTurn["durationMs"] as? Int, 5_000)
     }
 
-    func testRuntimeShutdownCompleteMarksThreadNotLoadedLikeRust() async throws {
+    func testRuntimeShutdownCompleteMarksThreadNotLoadedAndClosedLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let threadStateManager = AppServerThreadStateManager()
         let notificationCapture = AppServerNotificationCapture()
@@ -7768,6 +7768,11 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(notLoadedParams["threadId"] as? String, threadID)
         let notLoadedStatus = try XCTUnwrap(notLoadedParams["status"] as? [String: Any])
         XCTAssertEqual(notLoadedStatus["type"] as? String, "notLoaded")
+        let closedMessages = try await nextNotificationMessages(notificationCapture, method: "thread/closed")
+        let closed = try XCTUnwrap(closedMessages.first)
+        XCTAssertEqual(closed["method"] as? String, "thread/closed")
+        let closedParams = try XCTUnwrap(closed["params"] as? [String: Any])
+        XCTAssertEqual(closedParams["threadId"] as? String, threadID)
         let loadedAfterShutdown = await threadStateManager.listLoadedThreadIDs()
         XCTAssertEqual(loadedAfterShutdown, [])
 

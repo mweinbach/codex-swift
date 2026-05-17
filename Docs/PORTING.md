@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust idle thread teardown in
+  `codex-rs/app-server/src/request_processors/thread_lifecycle.rs` and the
+  app-server README. Swift runtime `shutdown_complete` handling now mirrors the
+  Rust loaded-thread unload notification sequence by removing loaded-thread
+  state, emitting `thread/status/changed` with `notLoaded`, and then emitting
+  `thread/closed` for the same `threadId`.
 - 2026-05-17: rechecked Rust server-notification method registrations in
   `codex-rs/app-server-protocol/src/protocol/common.rs` and the v2 thread,
   item, MCP, and Windows sandbox payload structs. Swift now carries the
