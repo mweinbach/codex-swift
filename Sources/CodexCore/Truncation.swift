@@ -149,6 +149,51 @@ public enum Truncation {
         return output
     }
 
+    public static func formattedTruncateFunctionOutputItems(
+        _ items: [FunctionCallOutputContentItem],
+        policy: TruncationPolicy
+    ) -> (items: [FunctionCallOutputContentItem], originalTokenCount: Int?) {
+        var textSegments: [String] = []
+        textSegments.reserveCapacity(items.count)
+        for item in items {
+            if case let .inputText(text) = item {
+                textSegments.append(text)
+            }
+        }
+
+        if textSegments.isEmpty {
+            return (items, nil)
+        }
+
+        var combined = ""
+        for text in textSegments {
+            if !combined.isEmpty {
+                combined.append("\n")
+            }
+            combined.append(text)
+        }
+
+        if combined.utf8.count <= policy.byteBudget {
+            return (items, nil)
+        }
+
+        var output: [FunctionCallOutputContentItem] = [
+            .inputText(text: formattedTruncateText(combined, policy: policy))
+        ]
+        output.reserveCapacity(items.count)
+        for item in items {
+            switch item {
+            case .inputText:
+                continue
+            case .inputImage,
+                 .inputAudio:
+                output.append(item)
+            }
+        }
+
+        return (output, approxTokenCount(combined))
+    }
+
     public static func truncateWithTokenBudget(
         _ text: String,
         policy: TruncationPolicy
@@ -236,6 +281,13 @@ public enum Truncation {
     public static func approxTokensFromByteCount(_ bytes: Int) -> UInt64 {
         let value = UInt64(max(0, bytes))
         return (value + UInt64(approxBytesPerToken - 1)) / UInt64(approxBytesPerToken)
+    }
+
+    public static func approxTokensFromSignedByteCount(_ bytes: Int64) -> Int64 {
+        guard bytes > 0 else {
+            return 0
+        }
+        return Int64(clamping: approxTokensFromByteCount(Int(clamping: bytes)))
     }
 
     private static func truncateWithByteEstimate(_ text: String, policy: TruncationPolicy) -> String {

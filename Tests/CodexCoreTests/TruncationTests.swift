@@ -186,10 +186,85 @@ final class TruncationTests: XCTestCase {
         XCTAssertTrue(summaryText.contains("omitted 2 text items"))
     }
 
+    func testFormattedFunctionOutputItemsReturnsOriginalUnderLimit() {
+        let items: [FunctionCallOutputContentItem] = [
+            .inputText(text: "alpha"),
+            .inputText(text: ""),
+            .inputText(text: "beta")
+        ]
+
+        let output = Truncation.formattedTruncateFunctionOutputItems(items, policy: .bytes(32))
+
+        XCTAssertEqual(output.items, items)
+        XCTAssertNil(output.originalTokenCount)
+    }
+
+    func testFormattedFunctionOutputItemsPreservesEmptyLeadingTextBehavior() {
+        let items: [FunctionCallOutputContentItem] = [
+            .inputText(text: ""),
+            .inputText(text: "abc")
+        ]
+
+        let output = Truncation.formattedTruncateFunctionOutputItems(items, policy: .bytes(0))
+
+        XCTAssertEqual(
+            output.items,
+            [
+                .inputText(text: "Total output lines: 1\n\n…3 chars truncated…")
+            ]
+        )
+        XCTAssertEqual(output.originalTokenCount, 1)
+    }
+
+    func testFormattedFunctionOutputItemsMergesTextAndAppendsMedia() {
+        let items: [FunctionCallOutputContentItem] = [
+            .inputText(text: "abcd"),
+            .inputImage(imageURL: "img:one", detail: defaultImageDetail),
+            .inputText(text: "efgh"),
+            .inputText(text: "ijkl"),
+            .inputImage(imageURL: "img:two", detail: defaultImageDetail)
+        ]
+
+        let output = Truncation.formattedTruncateFunctionOutputItems(items, policy: .bytes(8))
+
+        XCTAssertEqual(
+            output.items,
+            [
+                .inputText(text: "Total output lines: 3\n\nabcd…6 chars truncated…ijkl"),
+                .inputImage(imageURL: "img:one", detail: defaultImageDetail),
+                .inputImage(imageURL: "img:two", detail: defaultImageDetail)
+            ]
+        )
+        XCTAssertEqual(output.originalTokenCount, 4)
+    }
+
+    func testFormattedFunctionOutputItemsMergesAllTextForTokenBudget() {
+        let items: [FunctionCallOutputContentItem] = [
+            .inputText(text: "abcdefgh"),
+            .inputText(text: "ijklmnop")
+        ]
+
+        let output = Truncation.formattedTruncateFunctionOutputItems(items, policy: .tokens(2))
+
+        XCTAssertEqual(
+            output.items,
+            [
+                .inputText(text: "Total output lines: 2\n\nabcd…3 tokens truncated…mnop")
+            ]
+        )
+        XCTAssertEqual(output.originalTokenCount, 5)
+    }
+
     func testPolicyMultiplierAndBudgetsMatchRustHeuristic() {
         XCTAssertEqual(TruncationPolicy.bytes(3).multiplied(by: 1.5), .bytes(5))
         XCTAssertEqual(TruncationPolicy.tokens(3).multiplied(by: 1.5), .tokens(5))
         XCTAssertEqual(TruncationPolicy.bytes(9).tokenBudget, 3)
         XCTAssertEqual(TruncationPolicy.tokens(9).byteBudget, 36)
+    }
+
+    func testSignedByteCountConversionClampsNonPositiveValues() {
+        XCTAssertEqual(Truncation.approxTokensFromSignedByteCount(-1), 0)
+        XCTAssertEqual(Truncation.approxTokensFromSignedByteCount(0), 0)
+        XCTAssertEqual(Truncation.approxTokensFromSignedByteCount(5), 2)
     }
 }

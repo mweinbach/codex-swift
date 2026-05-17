@@ -12,6 +12,13 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked `codex-rs/utils/output-truncation/src/lib.rs` and
+  `truncate_tests.rs`. Swift `Truncation` now includes the Rust merged
+  function-output content-item formatter that combines text segments with
+  Rust's empty-leading-text newline behavior, formats the merged text once,
+  returns the original approximate token count, and appends media items after
+  the truncated text. The signed byte-count-to-token conversion now also clamps
+  non-positive values like Rust's `approx_tokens_from_byte_count_i64`.
 - 2026-05-17: rechecked Rust commit `4454e1411b` (`Deprecate TurnContext cwd
   and resolve_path`). Swift `TurnContext` now keeps the legacy `cwd` accessor
   behavior-preserving but deprecated, exposes `selectedEnvironmentCwd` as the
