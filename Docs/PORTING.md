@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `941e7f825e` (`Improve goal completion
+  usage reporting`). Swift now has the shared goal-tool response shape that
+  mirrors Rust's `remainingTokens` calculation, explicit-null optional fields,
+  and structured `completionBudgetReport` guidance so completion responses ask
+  the model to cite `goal.tokensUsed`, `goal.tokenBudget`, and
+  `goal.timeUsedSeconds` instead of embedding stale numeric prose.
 - 2026-05-17: rechecked Rust commit `9025550709` (`app-server-protocol:
   remove PermissionProfile from API`). Swift `command/exec.permissionProfile`
   now preserves the post-cleanup app-server API boundary by accepting only the

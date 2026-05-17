@@ -2970,6 +2970,14 @@ final class AppServerThreadProtocolTests: XCTestCase {
         try XCTAssertJSONObjectEqual(ThreadGoalGetResponse(goal: nil), [
             "goal": NSNull()
         ])
+        try XCTAssertJSONObjectEqual(
+            ThreadGoalToolResponse(goal: nil, completionReportMode: .include),
+            [
+                "goal": NSNull(),
+                "remainingTokens": NSNull(),
+                "completionBudgetReport": NSNull()
+            ]
+        )
         try XCTAssertJSONObjectEqual(ThreadGoalClearParams(threadID: threadID.description), [
             "threadId": threadID.description
         ])
@@ -3010,6 +3018,98 @@ final class AppServerThreadProtocolTests: XCTestCase {
             from: Data(#"{"threadId":"\#(threadID.description)","tokenBudget":99}"#.utf8)
         )
         XCTAssertEqual(set.tokenBudget, .set(99))
+    }
+
+    func testThreadGoalToolResponseReportsCompletionUsageLikeRust() throws {
+        let threadID = try ThreadId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
+        let goal = ThreadGoal(
+            threadID: threadID,
+            objective: "Keep optimizing",
+            status: .complete,
+            tokenBudget: 10_000,
+            tokensUsed: 3_250,
+            timeUsedSeconds: 75,
+            createdAt: 1,
+            updatedAt: 2
+        )
+
+        try XCTAssertJSONObjectEqual(
+            ThreadGoalToolResponse(goal: goal, completionReportMode: .include),
+            [
+                "goal": [
+                    "threadId": threadID.description,
+                    "objective": "Keep optimizing",
+                    "status": "complete",
+                    "tokenBudget": 10_000,
+                    "tokensUsed": 3_250,
+                    "timeUsedSeconds": 75,
+                    "createdAt": 1,
+                    "updatedAt": 2
+                ],
+                "remainingTokens": 6_750,
+                "completionBudgetReport": ThreadGoalToolResponse.completionBudgetReportMessage
+            ]
+        )
+    }
+
+    func testThreadGoalToolResponseOmitsCompletionUsageWhenRustDoes() throws {
+        let threadID = try ThreadId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
+        let unbudgetedGoal = ThreadGoal(
+            threadID: threadID,
+            objective: "Write a poem",
+            status: .complete,
+            tokenBudget: nil,
+            tokensUsed: 120,
+            timeUsedSeconds: 0,
+            createdAt: 1,
+            updatedAt: 2
+        )
+        let activeBudgetedGoal = ThreadGoal(
+            threadID: threadID,
+            objective: "Keep going",
+            status: .active,
+            tokenBudget: 500,
+            tokensUsed: 600,
+            timeUsedSeconds: 10,
+            createdAt: 1,
+            updatedAt: 2
+        )
+
+        try XCTAssertJSONObjectEqual(
+            ThreadGoalToolResponse(goal: unbudgetedGoal, completionReportMode: .include),
+            [
+                "goal": [
+                    "threadId": threadID.description,
+                    "objective": "Write a poem",
+                    "status": "complete",
+                    "tokenBudget": NSNull(),
+                    "tokensUsed": 120,
+                    "timeUsedSeconds": 0,
+                    "createdAt": 1,
+                    "updatedAt": 2
+                ],
+                "remainingTokens": NSNull(),
+                "completionBudgetReport": NSNull()
+            ]
+        )
+
+        try XCTAssertJSONObjectEqual(
+            ThreadGoalToolResponse(goal: activeBudgetedGoal, completionReportMode: .include),
+            [
+                "goal": [
+                    "threadId": threadID.description,
+                    "objective": "Keep going",
+                    "status": "active",
+                    "tokenBudget": 500,
+                    "tokensUsed": 600,
+                    "timeUsedSeconds": 10,
+                    "createdAt": 1,
+                    "updatedAt": 2
+                ],
+                "remainingTokens": 0,
+                "completionBudgetReport": NSNull()
+            ]
+        )
     }
 
     func testThreadReadRollbackMetadataAndMemoryResetRoundTripLikeRustProtocol() throws {

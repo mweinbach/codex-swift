@@ -89,3 +89,73 @@ public struct ThreadGoalUpdatedEvent: Equatable, Codable, Sendable {
         try container.encode(goal, forKey: .goal)
     }
 }
+
+public enum ThreadGoalCompletionReportMode: Equatable, Sendable {
+    case include
+    case omit
+}
+
+public struct ThreadGoalToolResponse: Equatable, Codable, Sendable {
+    public static let completionBudgetReportMessage =
+        "Goal achieved. Report final usage from this tool result's structured goal fields. If `goal.tokenBudget` is present, include token usage from `goal.tokensUsed` and `goal.tokenBudget`. If `goal.timeUsedSeconds` is greater than 0, summarize elapsed time in a concise, human-friendly form appropriate to the response language."
+
+    public let goal: ThreadGoal?
+    public let remainingTokens: Int64?
+    public let completionBudgetReport: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case goal
+        case remainingTokens
+        case completionBudgetReport
+    }
+
+    public init(
+        goal: ThreadGoal?,
+        completionReportMode: ThreadGoalCompletionReportMode
+    ) {
+        self.goal = goal
+        remainingTokens = if let goal, let tokenBudget = goal.tokenBudget {
+            max(tokenBudget - goal.tokensUsed, 0)
+        } else {
+            nil
+        }
+        completionBudgetReport = Self.completionBudgetReport(
+            for: goal,
+            completionReportMode: completionReportMode
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        if let goal {
+            try container.encode(goal, forKey: .goal)
+        } else {
+            try container.encodeNil(forKey: .goal)
+        }
+        if let remainingTokens {
+            try container.encode(remainingTokens, forKey: .remainingTokens)
+        } else {
+            try container.encodeNil(forKey: .remainingTokens)
+        }
+        if let completionBudgetReport {
+            try container.encode(completionBudgetReport, forKey: .completionBudgetReport)
+        } else {
+            try container.encodeNil(forKey: .completionBudgetReport)
+        }
+    }
+
+    private static func completionBudgetReport(
+        for goal: ThreadGoal?,
+        completionReportMode: ThreadGoalCompletionReportMode
+    ) -> String? {
+        guard
+            completionReportMode == .include,
+            let goal,
+            goal.status == .complete,
+            goal.tokenBudget != nil || goal.timeUsedSeconds > 0
+        else {
+            return nil
+        }
+        return completionBudgetReportMessage
+    }
+}
