@@ -1076,7 +1076,7 @@ public enum ToolSpecFactory {
             }
         }
 
-        for spec in createDynamicToolSpecs(from: dynamicTools) {
+        for spec in createDynamicToolSpecs(from: dynamicTools.filter { !$0.deferLoading }) {
             if config.namespaceTools || !isNamespace(spec) {
                 specs.append(ConfiguredToolSpec(spec: spec, supportsParallelToolCalls: false))
             }

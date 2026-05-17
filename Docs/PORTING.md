@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `fdda59c00b` (`Introduce tool exposure
+  for deferred registration`). Swift tool-spec construction now treats
+  deferred dynamic tools as search-only exposure: they feed `tool_search` but
+  are omitted from the initial model-visible function/namespace spec list,
+  while direct dynamic tools remain exposed immediately.
 - 2026-05-17: rechecked Rust commit `fc26af377f` (`feat: expose multi-agent
   v2 as model-only tools`). Swift now accepts and profile-overrides
   `features.multi_agent_v2.non_code_mode_only`, carries it into
