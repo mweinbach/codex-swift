@@ -2413,13 +2413,13 @@ final class ExecServerTests: XCTestCase {
     func testAppServerExecutableTransportValidatorAcceptsStdioAndUnauthenticatedWebSocket() {
         XCTAssertNoThrow(try AppServerExecutableTransportValidator.validateSupportedTransport(
             .stdio,
-            remoteControlFeatureEnabled: false,
+            remoteControlEnabled: false,
             stateStoreAvailable: false
         ))
 
         XCTAssertNoThrow(try AppServerExecutableTransportValidator.validateSupportedTransport(
             .webSocket(host: "::1", port: 4500),
-            remoteControlFeatureEnabled: false,
+            remoteControlEnabled: false,
             stateStoreAvailable: false
         ))
     }
@@ -2427,14 +2427,14 @@ final class ExecServerTests: XCTestCase {
     func testAppServerExecutableTransportValidatorRejectsUnsupportedRuntimeModes() {
         XCTAssertNoThrow(try AppServerExecutableTransportValidator.validateSupportedTransport(
             .off,
-            remoteControlFeatureEnabled: true,
+            remoteControlEnabled: true,
             stateStoreAvailable: true,
             remoteControlBaseURL: "https://chatgpt.com/backend-api"
         ))
 
         XCTAssertThrowsError(try AppServerExecutableTransportValidator.validateSupportedTransport(
             .off,
-            remoteControlFeatureEnabled: false,
+            remoteControlEnabled: false,
             stateStoreAvailable: true
         )) { error in
             XCTAssertEqual(error as? AppServerExecutableTransportError, .noTransportConfigured)
@@ -2446,7 +2446,7 @@ final class ExecServerTests: XCTestCase {
 
         XCTAssertThrowsError(try AppServerExecutableTransportValidator.validateSupportedTransport(
             .off,
-            remoteControlFeatureEnabled: true,
+            remoteControlEnabled: true,
             stateStoreAvailable: false
         )) { error in
             XCTAssertEqual(error as? AppServerExecutableTransportError, .remoteControlUnavailableWithoutStateDB)
@@ -2460,14 +2460,14 @@ final class ExecServerTests: XCTestCase {
     func testAppServerExecutableTransportValidatorValidatesRemoteControlURLLikeRustStartup() {
         XCTAssertNoThrow(try AppServerExecutableTransportValidator.validateSupportedTransport(
             .stdio,
-            remoteControlFeatureEnabled: true,
+            remoteControlEnabled: true,
             stateStoreAvailable: true,
             remoteControlBaseURL: "https://chatgpt.com/backend-api"
         ))
 
         XCTAssertThrowsError(try AppServerExecutableTransportValidator.validateSupportedTransport(
             .stdio,
-            remoteControlFeatureEnabled: true,
+            remoteControlEnabled: true,
             stateStoreAvailable: true,
             remoteControlBaseURL: "https://example.com/backend-api"
         )) { error in
@@ -2479,7 +2479,7 @@ final class ExecServerTests: XCTestCase {
 
         XCTAssertNoThrow(try AppServerExecutableTransportValidator.validateSupportedTransport(
             .stdio,
-            remoteControlFeatureEnabled: true,
+            remoteControlEnabled: true,
             stateStoreAvailable: false,
             remoteControlBaseURL: "https://example.com/backend-api"
         ))
@@ -2488,7 +2488,7 @@ final class ExecServerTests: XCTestCase {
     func testAppServerExecutableTransportValidatorAllowsUnixSocketAfterControlSocketPort() {
         XCTAssertNoThrow(try AppServerExecutableTransportValidator.validateSupportedTransport(
             .unixSocket(socketPath: "/tmp/codex.sock"),
-            remoteControlFeatureEnabled: false,
+            remoteControlEnabled: false,
             stateStoreAvailable: false
         ))
     }
@@ -2497,7 +2497,7 @@ final class ExecServerTests: XCTestCase {
         XCTAssertNoThrow(try AppServerExecutableTransportValidator.validateSupportedTransport(
             .webSocket(host: "::1", port: 4500),
             websocketAuth: AppServerWebsocketAuthSettings(config: .capabilityToken(source: .tokenSHA256([]))),
-            remoteControlFeatureEnabled: false,
+            remoteControlEnabled: false,
             stateStoreAvailable: false
         ))
     }

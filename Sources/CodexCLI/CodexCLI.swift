@@ -454,6 +454,7 @@ public struct CodexCLI: Sendable {
         public let listenTransport: AppServerListenTransport
         public let sessionSource: SessionSource
         public let analyticsDefaultEnabled: Bool
+        public let remoteControlEnabled: Bool
         public let websocketAuth: AppServerWebsocketAuthArguments
         public let configOverrides: CliConfigOverrides
 
@@ -462,6 +463,7 @@ public struct CodexCLI: Sendable {
             listenTransport: AppServerListenTransport = .stdio,
             sessionSource: SessionSource = .vscode,
             analyticsDefaultEnabled: Bool = false,
+            remoteControlEnabled: Bool = false,
             websocketAuth: AppServerWebsocketAuthArguments = AppServerWebsocketAuthArguments(),
             configOverrides: CliConfigOverrides = CliConfigOverrides()
         ) {
@@ -469,6 +471,7 @@ public struct CodexCLI: Sendable {
             self.listenTransport = listenTransport
             self.sessionSource = sessionSource
             self.analyticsDefaultEnabled = analyticsDefaultEnabled
+            self.remoteControlEnabled = remoteControlEnabled
             self.websocketAuth = websocketAuth
             self.configOverrides = configOverrides
         }
@@ -3288,12 +3291,11 @@ public struct CodexCLI: Sendable {
         }
         switch parseConfigOverrides(from: rootArguments) {
         case let .success(configOverrides):
-            var rawOverrides = configOverrides.rawOverrides
-            rawOverrides.append("features.remote_control=true")
             return .success(AppServerCommandRequest(
                 action: .remoteControl,
                 listenTransport: .off,
-                configOverrides: CliConfigOverrides(rawOverrides: rawOverrides)
+                remoteControlEnabled: true,
+                configOverrides: configOverrides
             ))
         case let .failure(message, exitCode):
             return .failure(message, exitCode)
@@ -3633,6 +3635,7 @@ public struct CodexCLI: Sendable {
                 listenTransport: options.listenTransport,
                 sessionSource: options.sessionSource,
                 analyticsDefaultEnabled: options.analyticsDefaultEnabled,
+                remoteControlEnabled: options.remoteControlEnabled,
                 websocketAuth: options.websocketAuth,
                 configOverrides: configOverrides
             ))
@@ -3645,6 +3648,7 @@ public struct CodexCLI: Sendable {
         var listenTransport: AppServerListenTransport = .stdio
         var sessionSource: SessionSource = .vscode
         var analyticsDefaultEnabled = false
+        var remoteControlEnabled = false
         var websocketAuth = AppServerWebsocketAuthArguments()
     }
 
@@ -3680,6 +3684,11 @@ public struct CodexCLI: Sendable {
             let argument = arguments[index]
             if argument == "--analytics-default-enabled" {
                 options.analyticsDefaultEnabled = true
+                index += 1
+                continue
+            }
+            if argument == "--remote-control" {
+                options.remoteControlEnabled = true
                 index += 1
                 continue
             }
@@ -3878,6 +3887,7 @@ public struct CodexCLI: Sendable {
                     listenTransport: options.listenTransport,
                     sessionSource: options.sessionSource,
                     analyticsDefaultEnabled: options.analyticsDefaultEnabled,
+                    remoteControlEnabled: options.remoteControlEnabled,
                     websocketAuth: AppServerWebsocketAuthArguments(
                         mode: websocketAuthMode,
                         tokenFile: tokenFile,

@@ -596,14 +596,14 @@ private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) as
         try AppServerExecutableTransportValidator.validateSupportedTransport(
             request.listenTransport,
             websocketAuth: websocketAuth,
-            remoteControlFeatureEnabled: settings.features.isEnabled(.remoteControl),
+            remoteControlEnabled: request.remoteControlEnabled,
             stateStoreAvailable: stateStore != nil,
             remoteControlBaseURL: settings.chatgptBaseURL
         )
         let remoteControlStartState = try RemoteControlStartState(
             remoteControlURL: settings.chatgptBaseURL,
             installationID: try InstallationIDResolver.resolve(codexHome: codexHome),
-            requestedEnabled: settings.features.isEnabled(.remoteControl),
+            requestedEnabled: request.remoteControlEnabled,
             stateDatabaseAvailable: stateStore != nil
         )
         let configuration = CodexAppServerConfiguration(

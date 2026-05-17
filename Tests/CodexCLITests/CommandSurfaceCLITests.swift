@@ -1135,6 +1135,7 @@ final class CommandSurfaceCLITests: XCTestCase {
         XCTAssertEqual(request?.listenTransport, .webSocket(host: "127.0.0.1", port: 4500))
         XCTAssertEqual(request?.sessionSource, .custom("atlas"))
         XCTAssertEqual(request?.analyticsDefaultEnabled, true)
+        XCTAssertEqual(request?.remoteControlEnabled, false)
         XCTAssertEqual(request?.websocketAuth, AppServerWebsocketAuthArguments(
             mode: .signedBearerToken,
             sharedSecretFile: "/tmp/secret",
@@ -1158,6 +1159,34 @@ final class CommandSurfaceCLITests: XCTestCase {
 
         XCTAssertEqual(exitCode, 0)
         XCTAssertEqual(request?.sessionSource, .vscode)
+        XCTAssertEqual(request?.remoteControlEnabled, false)
+    }
+
+    func testRunAsyncAppServerParsesHiddenRemoteControlRuntimeFlagLikeRust() async {
+        var request: CodexCLI.AppServerCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: [
+                "-c",
+                "features.remote_control=false",
+                "app-server",
+                "--remote-control",
+                "--listen=off"
+            ],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            appServerRunner: {
+                request = $0
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(request?.action, .run)
+        XCTAssertEqual(request?.listenTransport, .off)
+        XCTAssertEqual(request?.remoteControlEnabled, true)
+        XCTAssertEqual(request?.configOverrides.rawOverrides, [
+            "features.remote_control=false"
+        ])
     }
 
     func testRunAsyncAppServerParsesCapabilityTokenFlagsBeforeSubcommand() async {
@@ -1190,7 +1219,7 @@ final class CommandSurfaceCLITests: XCTestCase {
         ))
     }
 
-    func testRunAsyncRemoteControlAppendsFeatureOverrideAfterRootOverrides() async {
+    func testRunAsyncRemoteControlUsesRuntimeFlagWithoutFeatureOverrideLikeRust() async {
         var request: CodexCLI.AppServerCommandRequest?
 
         let exitCode = await CodexCLI().runAsync(
@@ -1211,10 +1240,10 @@ final class CommandSurfaceCLITests: XCTestCase {
         XCTAssertEqual(exitCode, 0)
         XCTAssertEqual(request?.action, .remoteControl)
         XCTAssertEqual(request?.listenTransport, .off)
+        XCTAssertEqual(request?.remoteControlEnabled, true)
         XCTAssertEqual(request?.configOverrides.rawOverrides, [
             "features.remote_control=false",
-            "features.web_search_request=true",
-            "features.remote_control=true"
+            "features.web_search_request=true"
         ])
     }
 

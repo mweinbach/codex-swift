@@ -142,11 +142,11 @@ public enum AppServerExecutableTransportValidator {
     public static func validateSupportedTransport(
         _ transport: AppServerListenTransport,
         websocketAuth: AppServerWebsocketAuthSettings = AppServerWebsocketAuthSettings(),
-        remoteControlFeatureEnabled: Bool,
+        remoteControlEnabled: Bool,
         stateStoreAvailable: Bool,
         remoteControlBaseURL: String? = nil
     ) throws {
-        if remoteControlFeatureEnabled, stateStoreAvailable, let remoteControlBaseURL {
+        if remoteControlEnabled, stateStoreAvailable, let remoteControlBaseURL {
             _ = try RemoteControlURLNormalizer.normalize(remoteControlBaseURL)
         }
 
@@ -154,7 +154,7 @@ public enum AppServerExecutableTransportValidator {
         case .stdio:
             return
         case .off:
-            guard remoteControlFeatureEnabled else {
+            guard remoteControlEnabled else {
                 throw AppServerExecutableTransportError.noTransportConfigured
             }
             guard stateStoreAvailable else {
