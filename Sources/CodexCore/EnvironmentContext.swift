@@ -190,14 +190,7 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
             lines.append("  <timezone>\(timezone)</timezone>")
         }
         if let network {
-            lines.append("  <network enabled=\"true\">")
-            for allowedDomain in network.allowedDomains {
-                lines.append("    <allowed>\(allowedDomain)</allowed>")
-            }
-            for deniedDomain in network.deniedDomains {
-                lines.append("    <denied>\(deniedDomain)</denied>")
-            }
-            lines.append("  </network>")
+            lines.append("  \(renderNetwork(network))")
         }
         lines.append(Self.closeTag)
         return lines.joined(separator: "\n")
@@ -282,5 +275,20 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
         default:
             return false
         }
+    }
+
+    private func renderNetwork(_ network: EnvironmentContextNetwork) -> String {
+        var rendered = #"<network enabled="true">"#
+        appendDomainElement("allowed", domains: network.allowedDomains, to: &rendered)
+        appendDomainElement("denied", domains: network.deniedDomains, to: &rendered)
+        rendered += "</network>"
+        return rendered
+    }
+
+    private func appendDomainElement(_ name: String, domains: [String], to rendered: inout String) {
+        guard !domains.isEmpty else {
+            return
+        }
+        rendered += "<\(name)>\(domains.joined(separator: ","))</\(name)>"
     }
 }

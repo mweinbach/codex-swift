@@ -328,16 +328,24 @@ private struct PersistedEnvironmentContext: Equatable {
             lines.append("  <timezone>\(timezone)</timezone>")
         }
         if let network {
-            lines.append("  <network enabled=\"true\">")
-            for allowed in network.allowedDomains {
-                lines.append("    <allowed>\(allowed)</allowed>")
-            }
-            for denied in network.deniedDomains {
-                lines.append("    <denied>\(denied)</denied>")
-            }
-            lines.append("  </network>")
+            lines.append("  \(renderNetwork(network))")
         }
         lines.append(EnvironmentContext.closeTag)
         return lines.joined(separator: "\n")
+    }
+
+    private func renderNetwork(_ network: TurnContextNetworkItem) -> String {
+        var rendered = #"<network enabled="true">"#
+        appendDomainElement("allowed", domains: network.allowedDomains, to: &rendered)
+        appendDomainElement("denied", domains: network.deniedDomains, to: &rendered)
+        rendered += "</network>"
+        return rendered
+    }
+
+    private func appendDomainElement(_ name: String, domains: [String], to rendered: inout String) {
+        guard !domains.isEmpty else {
+            return
+        }
+        rendered += "<\(name)>\(domains.joined(separator: ","))</\(name)>"
     }
 }

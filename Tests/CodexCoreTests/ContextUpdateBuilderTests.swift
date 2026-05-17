@@ -25,10 +25,7 @@ final class ContextUpdateBuilderTests: XCTestCase {
           <shell>bash</shell>
           <current_date>2026-05-10</current_date>
           <timezone>America/New_York</timezone>
-          <network enabled="true">
-            <allowed>api.example.com</allowed>
-            <denied>blocked.example.com</denied>
-          </network>
+          <network enabled="true"><allowed>api.example.com</allowed><denied>blocked.example.com</denied></network>
         </environment_context>
         """])
     }
@@ -51,10 +48,7 @@ final class ContextUpdateBuilderTests: XCTestCase {
 
         XCTAssertEqual(userTexts(in: items), ["""
         <environment_context>
-          <network enabled="true">
-            <allowed>api.example.com</allowed>
-            <denied>blocked.example.com</denied>
-          </network>
+          <network enabled="true"><allowed>api.example.com</allowed><denied>blocked.example.com</denied></network>
         </environment_context>
         """])
     }

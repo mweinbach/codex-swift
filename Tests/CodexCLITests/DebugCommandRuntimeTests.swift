@@ -520,10 +520,9 @@ final class DebugCommandRuntimeTests: XCTestCase {
         XCTAssertTrue(environmentText.contains("      <cwd>/repo/local</cwd>"))
         XCTAssertTrue(environmentText.contains("  <current_date>2026-02-26</current_date>"))
         XCTAssertTrue(environmentText.contains("  <timezone>America/Los_Angeles</timezone>"))
-        XCTAssertTrue(environmentText.contains("  <network enabled=\"true\">"))
-        XCTAssertTrue(environmentText.contains("    <allowed>*.openai.com</allowed>"))
-        XCTAssertTrue(environmentText.contains("    <allowed>api.example.com</allowed>"))
-        XCTAssertTrue(environmentText.contains("    <denied>blocked.example.com</denied>"))
+        XCTAssertTrue(environmentText.contains(
+            "  <network enabled=\"true\"><allowed>*.openai.com,api.example.com</allowed><denied>blocked.example.com</denied></network>"
+        ))
         XCTAssertFalse(environmentText.contains("\n  <cwd>"))
         XCTAssertFalse(environmentText.contains("\n  <shell>"))
     }

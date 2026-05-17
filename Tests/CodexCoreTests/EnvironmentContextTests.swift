@@ -183,11 +183,7 @@ final class EnvironmentContextTests: XCTestCase {
           <shell>bash</shell>
           <current_date>2026-02-26</current_date>
           <timezone>America/Los_Angeles</timezone>
-          <network enabled="true">
-            <allowed>api.example.com</allowed>
-            <allowed>*.openai.com</allowed>
-            <denied>blocked.example.com</denied>
-          </network>
+          <network enabled="true"><allowed>api.example.com,*.openai.com</allowed><denied>blocked.example.com</denied></network>
         </environment_context>
         """#)
     }

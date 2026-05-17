@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `77d9223e9f` (`[codex] compact
+  network context rendering`). Swift `<environment_context>` prompt rendering
+  now emits managed network allow/deny domains in Rust's compact one-line
+  shape, with comma-separated `<allowed>` and `<denied>` values instead of one
+  XML element per domain.
 - 2026-05-17: continued Rust commit `889ee018e7` (`config: add strict config
   parsing`). Swift `CodexConfigLoader.load` now has opt-in strict config
   validation for parsed config files and `-c` / `--config` override layers:
