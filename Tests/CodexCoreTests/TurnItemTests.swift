@@ -1032,4 +1032,70 @@ final class TurnItemTests: XCTestCase {
             ))
         ])
     }
+
+    func testItemCompletedEventPreservesMcpResultMetaLikeRustExecJSONL() throws {
+        let threadID = try ConversationId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
+        let completed = ItemCompletedEvent(
+            threadID: threadID,
+            turnID: "turn-1",
+            item: .mcpToolCall(McpToolCallItem(
+                id: "mcp-1",
+                server: "browser",
+                tool: "search",
+                arguments: .object(["query": .string("codex")]),
+                status: .completed,
+                result: McpCallToolResult(
+                    content: [.text(McpTextContent(text: "done"))],
+                    isError: false,
+                    structuredContent: .object(["ok": .bool(true)]),
+                    meta: .object([
+                        "raw_messages": .array([
+                            .object(["ref_id": .string("turn0search0")])
+                        ])
+                    ])
+                ),
+                duration: ProtocolDuration(secs: 0, nanos: 25_000_000)
+            )),
+            completedAtMilliseconds: 123
+        )
+
+        try XCTAssertJSONObjectEqual(completed, [
+            "thread_id": "018f7a2d-4c5b-7abc-8def-0123456789ab",
+            "turn_id": "turn-1",
+            "item": [
+                "type": "McpToolCall",
+                "id": "mcp-1",
+                "server": "browser",
+                "tool": "search",
+                "arguments": ["query": "codex"],
+                "status": "completed",
+                "result": [
+                    "content": [
+                        [
+                            "type": "text",
+                            "text": "done"
+                        ]
+                    ],
+                    "isError": false,
+                    "structuredContent": ["ok": true],
+                    "_meta": [
+                        "raw_messages": [
+                            ["ref_id": "turn0search0"]
+                        ]
+                    ]
+                ],
+                "duration": [
+                    "secs": 0,
+                    "nanos": 25_000_000
+                ]
+            ],
+            "completed_at_ms": 123
+        ])
+
+        let encoded = try JSONSerialization.jsonObject(with: try JSONEncoder().encode(completed)) as? [String: Any]
+        let item = try XCTUnwrap(encoded?["item"] as? [String: Any])
+        let result = try XCTUnwrap(item["result"] as? [String: Any])
+        XCTAssertNotNil(result["_meta"])
+        XCTAssertNil(result["meta"])
+    }
 }

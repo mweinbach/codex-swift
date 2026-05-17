@@ -3382,6 +3382,8 @@ Recent upstream audit checkpoint:
   - added Swift parity for bundled consequential tool approval templates, exact connector/server/tool-title matching, connector-name substitution, literal templates without connector names, template parameter relabeling, duplicate display-label rejection, object-only tool params, and sorted fallback display parameters.
 - `codex-rs/protocol/src/mcp_approval_meta.rs` / `codex-rs/core/src/mcp_tool_call.rs` MCP approval elicitation metadata
   - added Swift MCP approval metadata keys, prompt options, elicitation request construction, fallback tool-parameter display ordering, and Rust-shaped `_meta` payloads for MCP tool approvals including session/always persistence, connector-source metadata for `codex_apps`, tool params, and snake-case `tool_params_display`.
+- `codex-rs/exec/src/exec_events.rs` MCP tool call result metadata
+  - rechecked Rust commit `6941f5c2c5`; Swift already carried MCP `CallToolResult` metadata through core turn items and app-server thread item conversion, and now pins item-completed event serialization so result metadata stays under Rust's `_meta` key and never leaks as `meta`.
 
 ## Known Gaps
 
