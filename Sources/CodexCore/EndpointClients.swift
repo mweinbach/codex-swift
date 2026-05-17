@@ -868,43 +868,74 @@ public struct ResponsesClient<Transport: APITransport, Auth: APIAuthProvider> {
         await streamEvents(body: request.body, extraHeaders: request.headers)
     }
 
+    private func promptRequest(
+        model: String,
+        instructions: String,
+        prompt: Prompt,
+        options: ResponsesOptions = ResponsesOptions()
+    ) throws -> ResponsesRequest {
+        let tools: [JSONValue]
+        do {
+            tools = try Self.toolsJSONValues(ToolSpecFactory.createToolsJSONForResponsesAPI(prompt.tools))
+        } catch {
+            throw error
+        }
+
+        var input = prompt.input
+        ContextNormalization.normalizeHistory(&input)
+        ContextNormalization.stripUnsupportedMediaContent(inputModalities: options.inputModalities, items: &input)
+        let serviceTier = options.supportedServiceTierIDs.map { supportedIDs in
+            options.serviceTier.flatMap { supportedIDs.contains($0) ? $0 : nil }
+        } ?? options.serviceTier
+
+        return try ResponsesRequestBuilder(model: model, instructions: instructions, input: input)
+            .tools(tools)
+            .parallelToolCalls(prompt.parallelToolCalls)
+            .reasoning(options.reasoning)
+            .include(options.include)
+            .serviceTier(serviceTier)
+            .promptCacheKey(options.promptCacheKey)
+            .text(options.text)
+            .conversation(options.conversationID)
+            .sessionSource(options.sessionSource)
+            .storeOverride(options.storeOverride)
+            .clientMetadata(options.clientMetadata)
+            .turnMetadataHeader(options.turnMetadataHeader)
+            .extraHeaders(options.extraHeaders)
+            .build(provider: streaming.provider)
+    }
+
     public func streamPrompt(
         model: String,
         instructions: String,
         prompt: Prompt,
         options: ResponsesOptions = ResponsesOptions()
     ) async -> Result<ResponseEventResults, APIError> {
-        let tools: [JSONValue]
         do {
-            tools = try Self.toolsJSONValues(ToolSpecFactory.createToolsJSONForResponsesAPI(prompt.tools))
+            return await streamRequest(try promptRequest(
+                model: model,
+                instructions: instructions,
+                prompt: prompt,
+                options: options
+            ))
         } catch {
             return .failure(.stream(String(describing: error)))
         }
+    }
 
+    public func streamPromptEvents(
+        model: String,
+        instructions: String,
+        prompt: Prompt,
+        options: ResponsesOptions = ResponsesOptions()
+    ) async -> Result<ResponseEventStream, APIError> {
         do {
-            var input = prompt.input
-            ContextNormalization.normalizeHistory(&input)
-            ContextNormalization.stripUnsupportedMediaContent(inputModalities: options.inputModalities, items: &input)
-            let serviceTier = options.supportedServiceTierIDs.map { supportedIDs in
-                options.serviceTier.flatMap { supportedIDs.contains($0) ? $0 : nil }
-            } ?? options.serviceTier
-
-            let request = try ResponsesRequestBuilder(model: model, instructions: instructions, input: input)
-                .tools(tools)
-                .parallelToolCalls(prompt.parallelToolCalls)
-                .reasoning(options.reasoning)
-                .include(options.include)
-                .serviceTier(serviceTier)
-                .promptCacheKey(options.promptCacheKey)
-                .text(options.text)
-                .conversation(options.conversationID)
-                .sessionSource(options.sessionSource)
-                .storeOverride(options.storeOverride)
-                .clientMetadata(options.clientMetadata)
-                .turnMetadataHeader(options.turnMetadataHeader)
-                .extraHeaders(options.extraHeaders)
-                .build(provider: streaming.provider)
-            return await streamRequest(request)
+            return await streamEventRequest(try promptRequest(
+                model: model,
+                instructions: instructions,
+                prompt: prompt,
+                options: options
+            ))
         } catch {
             return .failure(.stream(String(describing: error)))
         }
@@ -1054,9 +1085,53 @@ public extension ResponsesClient where Auth == StaticAPIAuthProvider {
             options: options
         )
     }
+
+    func streamPromptEventsRetryingProviderCommandAuth(
+        model: String,
+        instructions: String,
+        prompt: Prompt,
+        options: ResponsesOptions = ResponsesOptions(),
+        providerInfo: ModelProviderInfo,
+        commandRunner: ProviderAuthCommandRunner
+    ) async -> Result<ResponseEventStream, APIError> {
+        let result = await streamPromptEvents(
+            model: model,
+            instructions: instructions,
+            prompt: prompt,
+            options: options
+        )
+        guard result.isUnauthorized,
+              let providerAuth = providerInfo.auth,
+              let refreshedToken = try? await commandRunner.refreshToken(config: providerAuth)
+        else {
+            return result
+        }
+
+        return await ResponsesClient(
+            transport: streaming.transport,
+            provider: streaming.provider,
+            auth: StaticAPIAuthProvider(bearerToken: refreshedToken),
+            attestationProvider: attestationProvider
+        )
+        .streamPromptEvents(
+            model: model,
+            instructions: instructions,
+            prompt: prompt,
+            options: options
+        )
+    }
 }
 
 private extension Result where Success == ResponseEventResults, Failure == APIError {
+    var isUnauthorized: Bool {
+        guard case let .failure(.transport(.http(statusCode, _, _, _))) = self else {
+            return false
+        }
+        return statusCode == 401
+    }
+}
+
+private extension Result where Success == ResponseEventStream, Failure == APIError {
     var isUnauthorized: Bool {
         guard case let .failure(.transport(.http(statusCode, _, _, _))) = self else {
             return false

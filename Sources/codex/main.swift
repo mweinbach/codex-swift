@@ -53,6 +53,7 @@ let exitCode = await cli.runAsync(
     execRunner: { request in try await runExecCommand(request) },
     computerUseRunner: runComputerUseCommand,
     reviewRunner: runReviewCommand,
+    interactiveRunner: runInteractiveCommand,
     resumeRunner: runResumeCommand,
     forkRunner: runForkCommand,
     execServerRunner: runExecServerCommand,
@@ -405,6 +406,339 @@ private func underDevelopmentFeatureWarning(codexHome: URL, feature: String, pro
     }
     let configPath = codexHome.appendingPathComponent("config.toml", isDirectory: false).path
     return "Under-development features enabled: \(feature). Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in \(configPath)."
+}
+
+private final class InteractiveTurnHistory: @unchecked Sendable {
+    private let lock = NSLock()
+    private var items: [ResponseItem] = []
+
+    func snapshot() -> [ResponseItem] {
+        lock.lock()
+        defer { lock.unlock() }
+        return items
+    }
+
+    func append(_ newItems: [ResponseItem]) {
+        lock.lock()
+        items.append(contentsOf: newItems)
+        lock.unlock()
+    }
+}
+
+private final class InteractiveStreamState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var didStreamText = false
+
+    func markTextStreamed() {
+        lock.lock()
+        didStreamText = true
+        lock.unlock()
+    }
+
+    func consumeTextStreamed() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        let value = didStreamText
+        didStreamText = false
+        return value
+    }
+}
+
+private final class InteractiveRolloutPathStore: @unchecked Sendable {
+    private let lock = NSLock()
+    private let options: CodexCLI.InteractiveCommandOptions
+    private let cwd: URL
+    private let conversationID: ConversationId
+    private var didResolve = false
+    private var cachedPath: URL?
+
+    init(options: CodexCLI.InteractiveCommandOptions, cwd: URL, conversationID: ConversationId) {
+        self.options = options
+        self.cwd = cwd
+        self.conversationID = conversationID
+    }
+
+    func path() throws -> URL? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !didResolve else {
+            return cachedPath
+        }
+        cachedPath = try createLineModeRolloutPath(
+            options: options,
+            cwd: cwd,
+            conversationID: conversationID
+        )
+        didResolve = true
+        return cachedPath
+    }
+}
+
+private func runInteractiveCommand(_ request: CodexCLI.InteractiveCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
+    let io = lineModeIO()
+    if request.remote != nil || request.remoteAuthTokenEnv != nil {
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 78,
+            stderrMessage: "codex-swift: line-mode interactive fallback does not support remote sessions yet."
+        )
+    }
+
+    let options = request.interactiveOptions
+    let arguments = interactiveExecArguments(from: options)
+    let cwd = resolveExecWorkingDirectory(from: arguments)
+    let conversationID = ConversationId()
+    let rolloutPathStore = InteractiveRolloutPathStore(options: options, cwd: cwd, conversationID: conversationID)
+    let history = InteractiveTurnHistory()
+    let approvalHandler = lineModeApprovalHandler(io: io)
+    let runtime = LineModeInteractiveRuntime(request: request, io: io) { turn in
+        let streamState = InteractiveStreamState()
+        let result = try await runNonInteractiveExec(
+            promptResolution: NonInteractivePromptResolution(prompt: turn.prompt),
+            outputSchema: nil,
+            options: interactiveExecOptions(
+                from: options,
+                request: request,
+                imagePaths: turn.turnIndex == 1 ? options.imagePaths : []
+            ),
+            arguments: arguments,
+            configOverrides: request.configOverrides,
+            cwd: cwd,
+            conversationID: conversationID,
+            history: history.snapshot(),
+            rolloutPath: try rolloutPathStore.path(),
+            sessionStartSource: turn.turnIndex == 1 ? .startup : .resume,
+            responseEventHandler: lineModeResponseEventHandler(streamState: streamState),
+            turnHistoryHandler: { history.append($0) },
+            approvalHandler: approvalHandler
+        )
+        if streamState.consumeTextStreamed() {
+            fputs("\n", stdout)
+            fflush(stdout)
+            return CodexCLI.CommandExecutionResult(
+                exitCode: result.exitCode,
+                stdoutMessage: nil,
+                stderrMessage: result.stderrMessage,
+                threadID: result.threadID
+            )
+        }
+        return result
+    }
+    let result = await runtime.run()
+    return CodexCLI.CommandExecutionResult(
+        exitCode: result.exitCode,
+        threadID: result.threadID
+    )
+}
+
+private func lineModeIO() -> LineModeInteractiveRuntime.IO {
+    LineModeInteractiveRuntime.IO(
+        readLine: { Swift.readLine(strippingNewline: true) },
+        writeStdout: { message in
+            print(message)
+        },
+        writeStderr: { message in
+            fputs(message.hasSuffix("\n") ? message : "\(message)\n", Darwin.stderr)
+            fflush(Darwin.stderr)
+        },
+        writePrompt: { prompt in
+            fputs(prompt, Darwin.stderr)
+            fflush(Darwin.stderr)
+        }
+    )
+}
+
+private func createLineModeRolloutPath(
+    options: CodexCLI.InteractiveCommandOptions,
+    cwd: URL,
+    conversationID: ConversationId
+) throws -> URL? {
+    guard !options.ephemeral else {
+        return nil
+    }
+    let recorder = try RolloutRecorder.create(
+        codexHome: CodexHome.find(),
+        cwd: cwd,
+        conversationID: conversationID,
+        instructions: nil,
+        source: .cli,
+        originator: "codex_swift",
+        cliVersion: CodexCLI.version,
+        modelProvider: nil
+    )
+    let path = recorder.rolloutPath
+    try recorder.shutdown()
+    return path
+}
+
+private func interactiveExecOptions(
+    from options: CodexCLI.InteractiveCommandOptions,
+    request: CodexCLI.InteractiveCommandRequest,
+    imagePaths: [String]
+) -> CodexCLI.ExecCommandOptions {
+    CodexCLI.ExecCommandOptions(
+        imagePaths: imagePaths,
+        skipGitRepoCheck: true,
+        ephemeral: options.ephemeral,
+        ignoreUserConfig: options.ignoreUserConfig,
+        ignoreRules: options.ignoreRules,
+        configProfileV2: options.configProfileV2,
+        strictConfig: request.strictConfig,
+        bypassHookTrust: options.bypassHookTrust
+    )
+}
+
+private func interactiveExecArguments(from options: CodexCLI.InteractiveCommandOptions) -> [String] {
+    var arguments: [String] = []
+    appendOption("--model", value: options.model, to: &arguments)
+    if options.useOSSProvider {
+        arguments.append("--oss")
+    }
+    appendOption("--local-provider", value: options.localProvider, to: &arguments)
+    appendOption("--profile", value: options.configProfile, to: &arguments)
+    appendOption("--profile-v2", value: options.configProfileV2, to: &arguments)
+    appendOption("--sandbox", value: options.sandboxMode, to: &arguments)
+    if options.dangerouslyBypassApprovalsAndSandbox {
+        arguments.append("--dangerously-bypass-approvals-and-sandbox")
+    }
+    appendOption("--cd", value: options.cwd, to: &arguments)
+    for root in options.additionalWritableRoots {
+        appendOption("--add-dir", value: root, to: &arguments)
+    }
+    appendOption("--ask-for-approval", value: options.approvalPolicy, to: &arguments)
+    if options.searchEnabled {
+        arguments.append("--search")
+    }
+    if options.ephemeral {
+        arguments.append("--ephemeral")
+    }
+    if options.ignoreUserConfig {
+        arguments.append("--ignore-user-config")
+    }
+    if options.ignoreRules {
+        arguments.append("--ignore-rules")
+    }
+    if options.bypassHookTrust {
+        arguments.append("--dangerously-bypass-hook-trust")
+    }
+    return arguments
+}
+
+private func appendOption(_ name: String, value: String?, to arguments: inout [String]) {
+    guard let value else {
+        return
+    }
+    arguments.append(contentsOf: [name, value])
+}
+
+private func lineModeResponseEventHandler(
+    streamState: InteractiveStreamState
+) -> NonInteractiveResponseEventHandler {
+    { result in
+        switch result {
+        case let .success(.outputTextDelta(delta)):
+            streamState.markTextStreamed()
+            fputs(delta, stdout)
+            fflush(stdout)
+        case let .success(.runtimeEvent(event)):
+            emitLineModeRuntimeEvent(event)
+        case let .failure(error):
+            fputs("codex-swift: stream error: \(String(describing: error))\n", Darwin.stderr)
+            fflush(Darwin.stderr)
+        default:
+            break
+        }
+    }
+}
+
+private func emitLineModeRuntimeEvent(_ event: EventMessage) {
+    switch event {
+    case let .execCommandBegin(event):
+        fputs("\n[command] \(event.command.joined(separator: " "))\n", Darwin.stderr)
+        fflush(Darwin.stderr)
+    case let .execCommandEnd(event):
+        fputs("[command exited \(event.exitCode)]\n", Darwin.stderr)
+        fflush(Darwin.stderr)
+    case let .patchApplyBegin(event):
+        fputs("\n[apply_patch] \(event.changes.count) file(s)\n", Darwin.stderr)
+        fflush(Darwin.stderr)
+    case let .patchApplyEnd(event):
+        fputs("[apply_patch \(event.success ? "completed" : "failed")]\n", Darwin.stderr)
+        fflush(Darwin.stderr)
+    default:
+        break
+    }
+}
+
+private func lineModeApprovalHandler(io: LineModeInteractiveRuntime.IO) -> NonInteractiveExec.FunctionCallApprovalHandler {
+    { request in
+        switch request {
+        case let .exec(event):
+            return promptForLineModeApproval(
+                io: io,
+                title: "Command approval requested",
+                detail: event.reason,
+                body: [
+                    "cwd: \(event.cwd)",
+                    "command: \(event.command.joined(separator: " "))"
+                ],
+                availableDecisions: event.effectiveAvailableDecisions
+            )
+        case let .applyPatch(event):
+            return promptForLineModeApproval(
+                io: io,
+                title: "Patch approval requested",
+                detail: event.reason,
+                body: [
+                    "root: \(event.grantRoot ?? "")",
+                    "files: \(event.changes.keys.sorted().joined(separator: ", "))"
+                ],
+                availableDecisions: [.approved, .abort]
+            )
+        }
+    }
+}
+
+private func promptForLineModeApproval(
+    io: LineModeInteractiveRuntime.IO,
+    title: String,
+    detail: String?,
+    body: [String],
+    availableDecisions: [ReviewDecision]
+) -> ReviewDecision {
+    io.writeStderr("")
+    io.writeStderr(title)
+    if let detail, !detail.isEmpty {
+        io.writeStderr(detail)
+    }
+    for line in body where !line.isEmpty {
+        io.writeStderr(line)
+    }
+    let allowsSession = availableDecisions.contains(.approvedForSession)
+    let prompt = allowsSession
+        ? "Approve? [y]es/[s]ession/[n]o/[a]bort: "
+        : "Approve? [y]es/[n]o/[a]bort: "
+
+    while true {
+        io.writePrompt(prompt)
+        guard let answer = io.readLine() else {
+            return .denied
+        }
+        switch answer.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "y", "yes":
+            return .approved
+        case "s", "session":
+            if allowsSession {
+                return .approvedForSession
+            }
+            io.writeStderr("Session approval is not available for this request.")
+        case "n", "no", "":
+            return .denied
+        case "a", "abort", "cancel":
+            return .abort
+        default:
+            io.writeStderr("Enter y, n, or a.")
+        }
+    }
 }
 
 private func runExecCommand(
@@ -1050,6 +1384,9 @@ private func tomlKey(_ value: String) -> String {
     return tomlString(value)
 }
 
+private typealias NonInteractiveResponseEventHandler = @Sendable (Result<ResponseEvent, APIError>) async -> Void
+private typealias NonInteractiveTurnHistoryHandler = @Sendable ([ResponseItem]) async -> Void
+
 private func runNonInteractiveExec(
     promptResolution: NonInteractivePromptResolution,
     outputSchema: JSONValue?,
@@ -1061,7 +1398,10 @@ private func runNonInteractiveExec(
     history: [ResponseItem] = [],
     rolloutPath: URL? = nil,
     baseInstructionsOverride: String? = nil,
-    sessionStartSource: HookSessionStartSource = .startup
+    sessionStartSource: HookSessionStartSource = .startup,
+    responseEventHandler: NonInteractiveResponseEventHandler? = nil,
+    turnHistoryHandler: NonInteractiveTurnHistoryHandler? = nil,
+    approvalHandler: NonInteractiveExec.FunctionCallApprovalHandler? = nil
 ) async throws -> CodexCLI.CommandExecutionResult {
     try NonInteractiveInput.enforceGitRepository(
         cwd: cwd,
@@ -1360,20 +1700,42 @@ private func runNonInteractiveExec(
             )
         },
         streamPrompt: { nextPrompt in
-            await client.streamPromptRetryingProviderCommandAuth(
+            let responseOptions = NonInteractiveExec.responsesOptions(
+                conversationID: conversationID,
+                modelFamily: modelFamily,
+                reasoningEffort: settings.modelReasoningEffort,
+                reasoningSummary: settings.modelReasoningSummary,
+                verbosity: settings.modelVerbosity,
+                serviceTier: settings.serviceTier,
+                outputSchema: outputSchema,
+                requestTrace: requestTrace
+            )
+            if let responseEventHandler {
+                switch await client.streamPromptEventsRetryingProviderCommandAuth(
+                    model: resolvedModel,
+                    instructions: nextPrompt.fullInstructions(for: modelFamily),
+                    prompt: nextPrompt,
+                    options: responseOptions,
+                    providerInfo: providerResolution.info,
+                    commandRunner: commandAuthRunner
+                ) {
+                case let .success(stream):
+                    var results: ResponseEventResults = []
+                    for await result in ResponseEventAggregator.aggregate(stream, mode: .streaming) {
+                        results.append(result)
+                        await responseEventHandler(result)
+                    }
+                    return .success(results)
+                case let .failure(error):
+                    return .failure(error)
+                }
+            }
+
+            return await client.streamPromptRetryingProviderCommandAuth(
                 model: resolvedModel,
                 instructions: nextPrompt.fullInstructions(for: modelFamily),
                 prompt: nextPrompt,
-                options: NonInteractiveExec.responsesOptions(
-                    conversationID: conversationID,
-                    modelFamily: modelFamily,
-                    reasoningEffort: settings.modelReasoningEffort,
-                    reasoningSummary: settings.modelReasoningSummary,
-                    verbosity: settings.modelVerbosity,
-                    serviceTier: settings.serviceTier,
-                    outputSchema: outputSchema,
-                    requestTrace: requestTrace
-                ),
+                options: responseOptions,
                 providerInfo: providerResolution.info,
                 commandRunner: commandAuthRunner
             )
@@ -1408,11 +1770,21 @@ private func runNonInteractiveExec(
                 configuredEnvironmentSnapshot: configuredEnvironmentSnapshot,
                 features: settings.features,
                 execPolicyManager: execPolicyManager,
-                windowsSandboxLevel: settings.windowsSandboxLevel
+                windowsSandboxLevel: settings.windowsSandboxLevel,
+                approvalHandler: approvalHandler
             )
         }
     )
     try recorder?.recordItems(loopResult.transcriptItems.map(RolloutRecordItem.responseItem))
+    var completedTurnHistory: [ResponseItem] = []
+    if let userPromptItem {
+        completedTurnHistory.append(userPromptItem)
+    }
+    completedTurnHistory.append(contentsOf: hookAdditionalItems)
+    completedTurnHistory.append(contentsOf: loopResult.transcriptItems)
+    if !completedTurnHistory.isEmpty {
+        await turnHistoryHandler?(completedTurnHistory)
+    }
 
     let result = NonInteractiveExec.finish(
         responseEvents: loopResult.events,

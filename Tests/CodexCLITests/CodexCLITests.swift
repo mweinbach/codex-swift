@@ -199,6 +199,9 @@ final class CodexCLITests: XCTestCase {
                 "-c",
                 #"model="override""#,
                 "--no-alt-screen",
+                "--ephemeral",
+                "--ignore-user-config",
+                "--ignore-rules",
                 "hello\r\ncodex"
             ],
             stderr: { _ in XCTFail("stderr should not be written") },
@@ -224,7 +227,10 @@ final class CodexCLITests: XCTestCase {
                 additionalWritableRoots: ["/root-extra"],
                 approvalPolicy: "on-request",
                 searchEnabled: true,
-                noAltScreen: true
+                noAltScreen: true,
+                ephemeral: true,
+                ignoreUserConfig: true,
+                ignoreRules: true
             ),
             configOverrides: .init(rawOverrides: [
                 #"model="override""#,
@@ -268,6 +274,46 @@ final class CodexCLITests: XCTestCase {
         XCTAssertEqual(receivedRequest?.remote, nil)
         XCTAssertEqual(receivedRequest?.configOverrides.rawOverrides, [])
         XCTAssertEqual(receivedRequest?.interactiveOptions.searchEnabled, false)
+    }
+
+    func testLineModeInteractiveRuntimeRunsInitialPromptAndInputLoop() async {
+        let harness = LineModeIOHarness(inputs: ["second prompt", "/quit"])
+        let recorder = LineModeTurnRecorder()
+        let runtime = LineModeInteractiveRuntime(
+            request: CodexCLI.InteractiveCommandRequest(prompt: "first prompt"),
+            io: harness.io()
+        ) { turn in
+            await recorder.record(prompt: turn.prompt, turnIndex: turn.turnIndex)
+            return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: "ok \(turn.turnIndex)")
+        }
+
+        let result = await runtime.run()
+
+        XCTAssertEqual(result.exitCode, 0)
+        let recordedTurns = await recorder.values()
+        XCTAssertEqual(recordedTurns, [
+            LineModeRecordedTurn(prompt: "first prompt", turnIndex: 1),
+            LineModeRecordedTurn(prompt: "second prompt", turnIndex: 2)
+        ])
+        XCTAssertEqual(harness.stdoutLines(), ["ok 1", "ok 2"])
+        XCTAssertEqual(harness.prompts(), ["codex> ", "codex> "])
+    }
+
+    func testLineModeInteractiveRuntimePropagatesTurnFailure() async {
+        let harness = LineModeIOHarness(inputs: ["ignored"])
+        let runtime = LineModeInteractiveRuntime(
+            request: CodexCLI.InteractiveCommandRequest(prompt: "fail"),
+            io: harness.io()
+        ) { _ in
+            CodexCLI.CommandExecutionResult(exitCode: 2, stderrMessage: "failed turn")
+        }
+
+        let result = await runtime.run()
+
+        XCTAssertEqual(result.exitCode, 2)
+        XCTAssertEqual(result.stderrMessage, "failed turn")
+        XCTAssertEqual(Array(harness.stderrLines().suffix(1)), ["failed turn"])
+        XCTAssertEqual(harness.prompts(), [])
     }
 
     func testApplyInvocationCarriesTaskIDArgument() {
@@ -1217,5 +1263,96 @@ final class CodexCLITests: XCTestCase {
             XCTAssertEqual(exitCode, 64, "\(arguments)")
             XCTAssertEqual(stderr, [expectedMessage], "\(arguments)")
         }
+    }
+}
+
+private struct LineModeRecordedTurn: Equatable {
+    let prompt: String
+    let turnIndex: Int
+}
+
+private actor LineModeTurnRecorder {
+    private var turns: [LineModeRecordedTurn] = []
+
+    func record(prompt: String, turnIndex: Int) {
+        turns.append(LineModeRecordedTurn(prompt: prompt, turnIndex: turnIndex))
+    }
+
+    func values() -> [LineModeRecordedTurn] {
+        turns
+    }
+}
+
+private final class LineModeIOHarness: @unchecked Sendable {
+    private let lock = NSLock()
+    private var inputs: [String]
+    private var stdout: [String] = []
+    private var stderr: [String] = []
+    private var promptValues: [String] = []
+
+    init(inputs: [String]) {
+        self.inputs = inputs
+    }
+
+    func io() -> LineModeInteractiveRuntime.IO {
+        LineModeInteractiveRuntime.IO(
+            readLine: { [weak self] in
+                self?.nextInput()
+            },
+            writeStdout: { [weak self] line in
+                self?.appendStdout(line)
+            },
+            writeStderr: { [weak self] line in
+                self?.appendStderr(line)
+            },
+            writePrompt: { [weak self] prompt in
+                self?.appendPrompt(prompt)
+            }
+        )
+    }
+
+    func stdoutLines() -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return stdout
+    }
+
+    func stderrLines() -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return stderr
+    }
+
+    func prompts() -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return promptValues
+    }
+
+    private func nextInput() -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !inputs.isEmpty else {
+            return nil
+        }
+        return inputs.removeFirst()
+    }
+
+    private func appendStdout(_ line: String) {
+        lock.lock()
+        stdout.append(line)
+        lock.unlock()
+    }
+
+    private func appendStderr(_ line: String) {
+        lock.lock()
+        stderr.append(line)
+        lock.unlock()
+    }
+
+    private func appendPrompt(_ prompt: String) {
+        lock.lock()
+        promptValues.append(prompt)
+        lock.unlock()
     }
 }

@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: replaced the bare `codex` exit-78 placeholder with a deliberate
+  line-mode interactive fallback while the full TUI remains pending. The Swift
+  entrypoint now passes an `InteractiveCommandRunner`, starts one CLI-sourced
+  thread/rollout, accepts an initial prompt plus subsequent `codex>` prompts,
+  streams assistant text, reuses the non-interactive Responses/tool loop, and
+  asks terminal approvals for shell/unified-exec/apply-patch requests.
 - 2026-05-17: rechecked Rust's shell, unified-exec, and apply-patch approval
   request flow in `codex-rs/core/src/session/mod.rs`,
   `codex-rs/core/src/tools/runtimes/shell.rs`,
