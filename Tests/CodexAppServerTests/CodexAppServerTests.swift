@@ -25482,6 +25482,35 @@ final class CodexAppServerTests: XCTestCase {
         ]))
     }
 
+    func testWindowsSandboxSetupStartReportsStructuredSetupFailureLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let processor = try initializedProcessor(configuration: testConfiguration(
+            codexHome: temp.url,
+            windowsSandboxSetupRunner: { _ in
+                throw WindowsSandboxSetupFailure(
+                    code: .helperFirewallPolicyIneffective,
+                    message: "local firewall policy modifications will not take effect"
+                )
+            }
+        ))
+
+        let messages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"windowsSandbox/setupStart","params":{"mode":"elevated"}}"#.utf8
+        )))
+
+        XCTAssertEqual(messages.count, 2)
+        let result = try XCTUnwrap(messages[0]["result"] as? [String: Any])
+        XCTAssertEqual(result["started"] as? Bool, true)
+        XCTAssertEqual(messages[1]["method"] as? String, "windowsSandbox/setupCompleted")
+        let params = try XCTUnwrap(messages[1]["params"] as? [String: Any])
+        XCTAssertEqual(params["mode"] as? String, "elevated")
+        XCTAssertEqual(params["success"] as? Bool, false)
+        XCTAssertEqual(
+            params["error"] as? String,
+            "helper_firewall_policy_ineffective: local firewall policy modifications will not take effect"
+        )
+    }
+
     func testWindowsSandboxSetupStartRejectsRelativeCwdBeforeStarting() throws {
         let temp = try TemporaryDirectory()
 

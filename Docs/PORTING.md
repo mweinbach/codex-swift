@@ -12,6 +12,14 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `c9edb26755` (`windows-sandbox: fail
+  elevated setup when firewall policy is ineffective`). Swift now carries
+  Rust's Windows sandbox setup error-code surface, including
+  `helper_firewall_policy_ineffective`, and preserves the Rust setup failure
+  display string through app-server `windowsSandbox/setupCompleted`
+  notifications when the setup runner reports a structured native setup
+  failure. Native Windows firewall `LocalPolicyModifyState` probing remains
+  pending with the broader native Windows setup runtime.
 - 2026-05-17: tightened Rust commit `941e7f825e` (`Improve goal completion
   usage reporting`) coverage. Swift now directly pins the Rust
   `completionBudgetReport` boundary where a completed goal with no

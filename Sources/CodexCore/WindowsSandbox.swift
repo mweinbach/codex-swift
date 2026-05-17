@@ -41,6 +41,49 @@ public enum WindowsSandboxSetupError: Error, Equatable, CustomStringConvertible 
     }
 }
 
+public enum WindowsSandboxSetupErrorCode: String, Codable, CaseIterable, Sendable {
+    case orchestratorSandboxDirCreateFailed = "orchestrator_sandbox_dir_create_failed"
+    case orchestratorElevationCheckFailed = "orchestrator_elevation_check_failed"
+    case orchestratorPayloadSerializeFailed = "orchestrator_payload_serialize_failed"
+    case orchestratorHelperLaunchFailed = "orchestrator_helper_launch_failed"
+    case orchestratorHelperLaunchCanceled = "orchestrator_helper_launch_canceled"
+    case orchestratorHelperExitNonzero = "orchestrator_helper_exit_nonzero"
+    case orchestratorHelperReportReadFailed = "orchestrator_helper_report_read_failed"
+    case helperRequestArgsFailed = "helper_request_args_failed"
+    case helperSandboxDirCreateFailed = "helper_sandbox_dir_create_failed"
+    case helperLogFailed = "helper_log_failed"
+    case helperUserProvisionFailed = "helper_user_provision_failed"
+    case helperUsersGroupCreateFailed = "helper_users_group_create_failed"
+    case helperUserCreateOrUpdateFailed = "helper_user_create_or_update_failed"
+    case helperDpapiProtectFailed = "helper_dpapi_protect_failed"
+    case helperUsersFileWriteFailed = "helper_users_file_write_failed"
+    case helperSetupMarkerWriteFailed = "helper_setup_marker_write_failed"
+    case helperSidResolveFailed = "helper_sid_resolve_failed"
+    case helperCapabilitySidFailed = "helper_capability_sid_failed"
+    case helperFirewallComInitFailed = "helper_firewall_com_init_failed"
+    case helperFirewallPolicyAccessFailed = "helper_firewall_policy_access_failed"
+    case helperFirewallPolicyIneffective = "helper_firewall_policy_ineffective"
+    case helperFirewallRuleCreateOrAddFailed = "helper_firewall_rule_create_or_add_failed"
+    case helperFirewallRuleVerifyFailed = "helper_firewall_rule_verify_failed"
+    case helperReadAclHelperSpawnFailed = "helper_read_acl_helper_spawn_failed"
+    case helperSandboxLockFailed = "helper_sandbox_lock_failed"
+    case helperUnknownError = "helper_unknown_error"
+}
+
+public struct WindowsSandboxSetupFailure: Error, Equatable, Codable, CustomStringConvertible, Sendable {
+    public let code: WindowsSandboxSetupErrorCode
+    public let message: String
+
+    public init(code: WindowsSandboxSetupErrorCode, message: String) {
+        self.code = code
+        self.message = message
+    }
+
+    public var description: String {
+        "\(code.rawValue): \(message)"
+    }
+}
+
 public func windowsSandboxSetupIsComplete(codexHome: URL) -> Bool {
     _ = codexHome
     #if os(Windows)

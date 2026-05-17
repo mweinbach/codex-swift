@@ -52,6 +52,30 @@ final class WindowsSandboxTests: XCTestCase {
         #endif
     }
 
+    func testSetupErrorCodesIncludeFirewallPolicyIneffectiveLikeRust() throws {
+        let encoded = try JSONEncoder().encode(WindowsSandboxSetupErrorCode.helperFirewallPolicyIneffective)
+        XCTAssertEqual(String(data: encoded, encoding: .utf8), #""helper_firewall_policy_ineffective""#)
+        XCTAssertEqual(
+            try JSONDecoder().decode(WindowsSandboxSetupErrorCode.self, from: encoded),
+            .helperFirewallPolicyIneffective
+        )
+        XCTAssertTrue(
+            WindowsSandboxSetupErrorCode.allCases.contains(.helperFirewallPolicyIneffective)
+        )
+    }
+
+    func testSetupFailureDescriptionMatchesRustDisplay() {
+        let failure = WindowsSandboxSetupFailure(
+            code: .helperFirewallPolicyIneffective,
+            message: "local firewall policy modifications will not take effect"
+        )
+
+        XCTAssertEqual(
+            String(describing: failure),
+            "helper_firewall_policy_ineffective: local firewall policy modifications will not take effect"
+        )
+    }
+
     func testRuntimeBinDirectoryUsesLocalAppDataBeforeUserProfileLikeRust() throws {
         let dir = try WindowsSandboxTemporaryDirectory()
         let localAppData = dir.url.appendingPathComponent("local-app-data", isDirectory: true)
