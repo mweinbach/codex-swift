@@ -325,6 +325,72 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertTrue(event.success)
     }
 
+    func testMcpToolCallRoundTripEmitsBeginAndEndEventsLikeRust() async throws {
+        let item = ResponseItem.functionCall(
+            name: "lookup",
+            namespace: "mcp__docs__",
+            arguments: #"{"topic":"protocol"}"#,
+            callID: "mcp-call"
+        )
+        let toolInfo = McpToolInfo(
+            serverName: "docs",
+            tool: McpTool(
+                name: "lookup",
+                inputSchema: McpToolInputSchema(rawValue: .object(["type": .string("object")]))
+            )
+        )
+        let requestCapture = McpToolCallRequestCapture()
+        let response = McpCallToolResult(content: [.text(McpTextContent(text: "found"))])
+
+        let result = await NonInteractiveExec.executeFunctionCallWithHooks(
+            item,
+            handlers: [],
+            conversationID: ConversationId(),
+            turnID: "turn-1",
+            cwd: FileManager.default.temporaryDirectory,
+            model: "gpt-test",
+            approvalPolicy: .never,
+            sandboxPolicy: .newWorkspaceWritePolicy(),
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            mcpToolInfos: [toolInfo],
+            mcpToolCallHandler: { request in
+                requestCapture.set(request)
+                return .success(response)
+            }
+        )
+
+        let request = try XCTUnwrap(requestCapture.get())
+        XCTAssertEqual(request.callID, "mcp-call")
+        XCTAssertEqual(request.turnID, "turn-1")
+        XCTAssertEqual(request.server, "docs")
+        XCTAssertEqual(request.tool, "lookup")
+        XCTAssertEqual(request.arguments, .object(["topic": .string("protocol")]))
+        guard case let .functionCallOutput(callID, payload) = result.output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "mcp-call")
+        XCTAssertEqual(payload.success, true)
+        XCTAssertEqual(payload.content, #"[{"text":"found","type":"text"}]"#)
+        XCTAssertNil(payload.contentItems)
+        XCTAssertEqual(result.runtimeEvents.count, 2)
+        guard case let .mcpToolCallBegin(begin) = result.runtimeEvents[0] else {
+            return XCTFail("expected MCP begin event")
+        }
+        XCTAssertEqual(begin.callID, "mcp-call")
+        XCTAssertEqual(begin.invocation, McpInvocation(
+            server: "docs",
+            tool: "lookup",
+            arguments: .object(["topic": .string("protocol")])
+        ))
+        guard case let .mcpToolCallEnd(end) = result.runtimeEvents[1] else {
+            return XCTFail("expected MCP end event")
+        }
+        XCTAssertEqual(end.callID, "mcp-call")
+        XCTAssertEqual(end.invocation, begin.invocation)
+        XCTAssertEqual(end.result, .ok(response))
+    }
+
     func testGrantedRequestPermissionsApplyToLaterShellCommandLikeRust() async throws {
         let workspace = try NonInteractiveExecTemporaryDirectory()
         let outside = try NonInteractiveExecTemporaryDirectory()
@@ -1592,6 +1658,52 @@ final class NonInteractiveExecTests: XCTestCase {
         }
         XCTAssertEqual(item["type"], .string("agent_message"))
         XCTAssertEqual(item["text"], .string("done"))
+    }
+
+    func testResponsesLoopAcceptsSharedToolRouterForRegisteredToolsLikeRust() async throws {
+        let userMessage = ResponseItem.message(
+            role: "user",
+            content: [.inputText(text: "call the registered echo tool")]
+        )
+        let toolCall = ResponseItem.functionCall(
+            name: "registered_echo",
+            arguments: #"{"value":7}"#,
+            callID: "call-router"
+        )
+        let toolOutput = ResponseItem.functionCallOutput(
+            callID: "call-router",
+            output: FunctionCallOutputPayload(content: #"{"echoed":7}"#, success: true)
+        )
+        let finalMessage = ResponseItem.message(role: "assistant", content: [.outputText(text: "done")])
+        let script = RegisteredToolLoopScript(toolCall: toolCall, finalMessage: finalMessage)
+        let capture = RegisteredToolCapture()
+        let router = NonInteractiveExec.ToolRouter(
+            cwd: FileManager.default.temporaryDirectory,
+            model: "gpt-test",
+            approvalPolicy: .never,
+            sandboxPolicy: .newWorkspaceWritePolicy(),
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            registeredToolExecutor: { item in
+                await capture.record(item)
+                return NonInteractiveExec.FunctionCallExecutionResult(output: toolOutput)
+            }
+        )
+
+        let result = await NonInteractiveExec.runResponsesLoopWithTranscript(
+            initialPrompt: Prompt(input: [userMessage]),
+            streamPrompt: { prompt in
+                .success(await script.next(prompt))
+            },
+            toolRouter: router
+        )
+
+        let capturedCalls = await capture.recorded()
+        XCTAssertEqual(capturedCalls, [toolCall])
+        XCTAssertEqual(result.transcriptItems, [toolCall, toolOutput, finalMessage])
+        let prompts = await script.prompts()
+        XCTAssertEqual(prompts.count, 2)
+        XCTAssertEqual(prompts[1].input, [userMessage, toolCall, toolOutput])
     }
 
     func testGenericFunctionHookInputUsesExtensionToolJSONRulesLikeRust() async throws {
@@ -5029,6 +5141,23 @@ private final class DynamicToolCallRequestCapture: @unchecked Sendable {
     }
 
     func get() -> DynamicToolCallRequest? {
+        lock.withLock {
+            request
+        }
+    }
+}
+
+private final class McpToolCallRequestCapture: @unchecked Sendable {
+    private let lock = NSLock()
+    private var request: NonInteractiveExec.McpToolCallRequest?
+
+    func set(_ request: NonInteractiveExec.McpToolCallRequest) {
+        lock.withLock {
+            self.request = request
+        }
+    }
+
+    func get() -> NonInteractiveExec.McpToolCallRequest? {
         lock.withLock {
             request
         }

@@ -154,6 +154,19 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         }
     }
 
+    private static func mcpToolInfos(from tools: [String: McpTool]) -> [McpToolInfo] {
+        tools.compactMap { qualifiedName, tool in
+            guard let split = McpToolName.splitQualifiedToolName(qualifiedName) else {
+                return nil
+            }
+            return McpToolInfo(
+                serverName: split.serverName,
+                namespaceDescription: tool.namespaceDescription,
+                tool: tool
+            )
+        }
+    }
+
     private func runTurn(_ submission: AppServerLiveRuntimeSubmission) async {
         let startedAt = AppServerLiveRuntimeClock.millisecondsSinceEpoch()
         do {
@@ -340,12 +353,15 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             ?? PermissionProfile.fromLegacySandboxPolicyForCwd(sandboxPolicy, cwd: cwd.path)
         let shell = ShellResolver.defaultUserShell()
         let turnEnvironmentSelections = turnInput.environments ?? []
+        let mcpToolInfos = Self.mcpToolInfos(from: submission.mcpTools)
         let configuredTools = NonInteractiveExec.toolSpecs(
             modelFamily: modelFamily,
             config: settings,
             sessionSource: configuration.sessionSource,
             environmentMode: .fromCount(turnEnvironmentSelections.count),
-            dynamicTools: summary.dynamicTools
+            dynamicTools: summary.dynamicTools,
+            mcpToolInfos: mcpToolInfos,
+            mcpTools: submission.mcpTools
         )
         var input = NonInteractiveExec.makeInitialPromptInput(
             cwd: cwd,
@@ -420,6 +436,7 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             shell: shell,
             turnEnvironmentSelections: turnEnvironmentSelections,
             prompt: prompt,
+            mcpToolInfos: mcpToolInfos,
             dynamicTools: summary.dynamicTools,
             userPromptText: turnInput.promptText,
             outputSchema: turnInput.outputSchema,
@@ -444,6 +461,75 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         let clientVersion = ModelsManager.formatClientVersion(packageVersion: configuration.version)
         let permissionGrantState = AppServerLiveRuntimePermissionGrantState(
             grantedPermissions: await state.sessionGrantedPermissions(threadID: submission.threadID)
+        )
+        let stopHookContext = NonInteractiveExec.StopHookContext(
+            handlers: setup.hookHandlers,
+            conversationID: setup.conversationID,
+            turnID: submission.turnID,
+            cwd: setup.cwd,
+            model: setup.model,
+            approvalPolicy: setup.approvalPolicy
+        )
+        let toolRouter = NonInteractiveExec.ToolRouter(
+            hookContext: stopHookContext,
+            cwd: setup.cwd,
+            model: setup.model,
+            approvalPolicy: setup.approvalPolicy,
+            sandboxPolicy: setup.sandboxPolicy,
+            shell: setup.shell,
+            truncationPolicy: setup.modelFamily.truncationPolicy,
+            environment: configuration.environment,
+            shellEnvironmentPolicy: setup.settings.shellEnvironmentPolicy,
+            explicitEnvOverrides: setup.settings.shellEnvironmentPolicy.set,
+            allowLoginShell: setup.settings.allowLoginShell,
+            canRequestOriginalImageDetail: setup.modelFamily.supportsImageDetailOriginal,
+            backgroundTerminalMaxTimeoutMS: setup.settings.backgroundTerminalMaxTimeoutMS,
+            turnEnvironmentSelections: setup.turnEnvironmentSelections,
+            configuredEnvironmentSnapshot: ConfiguredEnvironmentLoader.legacyEnvironmentSnapshot(
+                environment: configuration.environment
+            ),
+            features: setup.settings.features,
+            execPolicyManager: ExecPolicyManager(),
+            windowsSandboxLevel: setup.settings.windowsSandboxLevel,
+            mcpToolInfos: setup.mcpToolInfos,
+            dynamicTools: setup.dynamicTools,
+            registeredToolExecutor: submission.extensionRegisteredToolExecutor,
+            approvalHandler: { [state, submission] request in
+                await Self.resolveApprovalRequest(
+                    request,
+                    state: state,
+                    threadID: submission.threadID,
+                    turnID: submission.turnID
+                )
+            },
+            requestUserInputHandler: { [state, submission] request in
+                await Self.resolveRequestUserInputRequest(
+                    request,
+                    state: state,
+                    threadID: submission.threadID,
+                    turnID: submission.turnID
+                )
+            },
+            requestPermissionsHandler: { [state, submission] request in
+                await Self.resolveRequestPermissionsRequest(
+                    request,
+                    state: state,
+                    threadID: submission.threadID,
+                    turnID: submission.turnID
+                )
+            },
+            mcpToolCallHandler: submission.mcpToolCallHandler,
+            dynamicToolHandler: { [state, submission] request in
+                await Self.resolveDynamicToolRequest(
+                    request,
+                    state: state,
+                    threadID: submission.threadID,
+                    turnID: submission.turnID
+                )
+            },
+            grantedPermissionsProvider: {
+                await permissionGrantState.grantedPermissions()
+            }
         )
         return await NonInteractiveExec.runResponsesLoopWithTranscript(
             initialPrompt: prompt,
@@ -499,75 +585,9 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                     return .failure(error)
                 }
             },
-            stopHookContext: NonInteractiveExec.StopHookContext(
-                handlers: setup.hookHandlers,
-                conversationID: setup.conversationID,
-                turnID: submission.turnID,
-                cwd: setup.cwd,
-                model: setup.model,
-                approvalPolicy: setup.approvalPolicy
-            ),
-            executeFunctionCall: { [configuration, state, setup, submission] item in
-                let result = await NonInteractiveExec.executeFunctionCallWithHooks(
-                    item,
-                    handlers: setup.hookHandlers,
-                    conversationID: setup.conversationID,
-                    turnID: submission.turnID,
-                    cwd: setup.cwd,
-                    model: setup.model,
-                    approvalPolicy: setup.approvalPolicy,
-                    sandboxPolicy: setup.sandboxPolicy,
-                    shell: setup.shell,
-                    truncationPolicy: setup.modelFamily.truncationPolicy,
-                    environment: configuration.environment,
-                    shellEnvironmentPolicy: setup.settings.shellEnvironmentPolicy,
-                    explicitEnvOverrides: setup.settings.shellEnvironmentPolicy.set,
-                    allowLoginShell: setup.settings.allowLoginShell,
-                    canRequestOriginalImageDetail: setup.modelFamily.supportsImageDetailOriginal,
-                    backgroundTerminalMaxTimeoutMS: setup.settings.backgroundTerminalMaxTimeoutMS,
-                    turnEnvironmentSelections: setup.turnEnvironmentSelections,
-                    configuredEnvironmentSnapshot: ConfiguredEnvironmentLoader.legacyEnvironmentSnapshot(
-                        environment: configuration.environment
-                    ),
-                    features: setup.settings.features,
-                    execPolicyManager: ExecPolicyManager(),
-                    windowsSandboxLevel: setup.settings.windowsSandboxLevel,
-                    dynamicTools: setup.dynamicTools,
-                    registeredToolExecutor: submission.extensionRegisteredToolExecutor,
-                    approvalHandler: { request in
-                        await Self.resolveApprovalRequest(
-                            request,
-                            state: state,
-                            threadID: submission.threadID,
-                            turnID: submission.turnID
-                        )
-                    },
-                    requestUserInputHandler: { request in
-                        await Self.resolveRequestUserInputRequest(
-                            request,
-                            state: state,
-                            threadID: submission.threadID,
-                            turnID: submission.turnID
-                        )
-                    },
-                    requestPermissionsHandler: { request in
-                        await Self.resolveRequestPermissionsRequest(
-                            request,
-                            state: state,
-                            threadID: submission.threadID,
-                            turnID: submission.turnID
-                        )
-                    },
-                    dynamicToolHandler: { request in
-                        await Self.resolveDynamicToolRequest(
-                            request,
-                            state: state,
-                            threadID: submission.threadID,
-                            turnID: submission.turnID
-                        )
-                    },
-                    grantedPermissions: await permissionGrantState.grantedPermissions()
-                )
+            stopHookContext: stopHookContext,
+            executeFunctionCall: { [state, submission] item in
+                let result = await toolRouter.execute(item)
                 for event in result.runtimeEvents {
                     await state.emit(
                         threadID: submission.threadID,
@@ -1112,6 +1132,7 @@ private struct PreparedLiveTurn {
     let shell: Shell
     let turnEnvironmentSelections: [TurnEnvironmentSelection]
     let prompt: Prompt
+    let mcpToolInfos: [McpToolInfo]
     let dynamicTools: [DynamicToolSpec]
     let userPromptText: String
     let outputSchema: JSONValue?

@@ -1757,6 +1757,35 @@ private func runNonInteractiveExec(
     )
     let clientVersion = ModelsManager.formatClientVersion(packageVersion: CodexCLI.version)
     let requestTrace = W3CTraceContext.fromEnvironment()
+    let stopHookContext = NonInteractiveExec.StopHookContext(
+        handlers: hookHandlers,
+        conversationID: conversationID,
+        turnID: "turn-1",
+        cwd: cwd,
+        model: resolvedModel,
+        approvalPolicy: approvalPolicy
+    )
+    let toolRouter = NonInteractiveExec.ToolRouter(
+        hookContext: stopHookContext,
+        cwd: cwd,
+        model: resolvedModel,
+        approvalPolicy: approvalPolicy,
+        sandboxPolicy: sandboxPolicy,
+        shell: shell,
+        truncationPolicy: modelFamily.truncationPolicy,
+        environment: environment,
+        shellEnvironmentPolicy: settings.shellEnvironmentPolicy,
+        explicitEnvOverrides: settings.shellEnvironmentPolicy.set,
+        allowLoginShell: settings.allowLoginShell,
+        canRequestOriginalImageDetail: modelFamily.supportsImageDetailOriginal,
+        backgroundTerminalMaxTimeoutMS: settings.backgroundTerminalMaxTimeoutMS,
+        turnEnvironmentSelections: turnEnvironmentSelections,
+        configuredEnvironmentSnapshot: configuredEnvironmentSnapshot,
+        features: settings.features,
+        execPolicyManager: execPolicyManager,
+        windowsSandboxLevel: settings.windowsSandboxLevel,
+        approvalHandler: approvalHandler
+    )
     let loopResult = await NonInteractiveExec.runResponsesLoopWithTranscript(
         initialPrompt: prompt,
         features: settings.features,
@@ -1812,40 +1841,8 @@ private func runNonInteractiveExec(
                 commandRunner: commandAuthRunner
             )
         },
-        stopHookContext: NonInteractiveExec.StopHookContext(
-            handlers: hookHandlers,
-            conversationID: conversationID,
-            turnID: "turn-1",
-            cwd: cwd,
-            model: resolvedModel,
-            approvalPolicy: approvalPolicy
-        ),
-        executeFunctionCall: { item in
-            await NonInteractiveExec.executeFunctionCallWithHooks(
-                item,
-                handlers: hookHandlers,
-                conversationID: conversationID,
-                turnID: "turn-1",
-                cwd: cwd,
-                model: resolvedModel,
-                approvalPolicy: approvalPolicy,
-                sandboxPolicy: sandboxPolicy,
-                shell: shell,
-                truncationPolicy: modelFamily.truncationPolicy,
-                environment: environment,
-                shellEnvironmentPolicy: settings.shellEnvironmentPolicy,
-                explicitEnvOverrides: settings.shellEnvironmentPolicy.set,
-                allowLoginShell: settings.allowLoginShell,
-                canRequestOriginalImageDetail: modelFamily.supportsImageDetailOriginal,
-                backgroundTerminalMaxTimeoutMS: settings.backgroundTerminalMaxTimeoutMS,
-                turnEnvironmentSelections: turnEnvironmentSelections,
-                configuredEnvironmentSnapshot: configuredEnvironmentSnapshot,
-                features: settings.features,
-                execPolicyManager: execPolicyManager,
-                windowsSandboxLevel: settings.windowsSandboxLevel,
-                approvalHandler: approvalHandler
-            )
-        }
+        stopHookContext: stopHookContext,
+        toolRouter: toolRouter
     )
     try recorder?.recordItems(loopResult.transcriptItems.map(RolloutRecordItem.responseItem))
     var completedTurnHistory: [ResponseItem] = []

@@ -4520,6 +4520,112 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(claimedReview, .approvedForSession)
     }
 
+    func testTurnStartLiveRuntimeSubmissionCarriesLoadedMcpToolsAndHandlerLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [mcp_servers.docs]
+        url = "https://mcp.example.test/mcp"
+        startup_timeout_sec = 3
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let capture = MCPHTTPTransportCapture()
+        let coreCapture = AppServerCoreOpCapture()
+        let liveRuntime = AppServerLiveRuntimeCapture { _ in [] }
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                requiresOpenAIAuth: false,
+                environment: [
+                    CodexConfigLayerLoader.managedConfigEnvironmentVariable: temp.url
+                        .appendingPathComponent("missing-managed-config.toml", isDirectory: false)
+                        .path
+                ],
+                mcpHTTPTransport: { request in
+                    capture.append(request)
+                    let body = try XCTUnwrap(request.httpBody)
+                    let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                    switch object["method"] as? String {
+                    case "initialize":
+                        return URLSessionTransportResponse(
+                            statusCode: 200,
+                            headers: ["mcp-session-id": "live-mcp-session"],
+                            body: Data(#"{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"docs","version":"1.0.0"}}}"#.utf8)
+                        )
+                    case "tools/list":
+                        return URLSessionTransportResponse(
+                            statusCode: 200,
+                            body: Data(#"{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"lookup","description":"Lookup docs.","inputSchema":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}}]}}"#.utf8)
+                        )
+                    case "resources/list":
+                        return URLSessionTransportResponse(
+                            statusCode: 200,
+                            body: Data(#"{"jsonrpc":"2.0","id":2,"result":{"resources":[]}}"#.utf8)
+                        )
+                    case "resources/templates/list":
+                        return URLSessionTransportResponse(
+                            statusCode: 200,
+                            body: Data(#"{"jsonrpc":"2.0","id":3,"result":{"resourceTemplates":[]}}"#.utf8)
+                        )
+                    case "tools/call":
+                        let params = try XCTUnwrap(object["params"] as? [String: Any])
+                        XCTAssertEqual(params["name"] as? String, "lookup")
+                        XCTAssertEqual((params["arguments"] as? [String: Any])?["query"] as? String, "swift")
+                        XCTAssertNotNil((params["_meta"] as? [String: Any])?["threadId"] as? String)
+                        return URLSessionTransportResponse(
+                            statusCode: 200,
+                            body: Data(#"{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"lookup result"}],"structuredContent":{"answer":"lookup result"},"isError":false}}"#.utf8)
+                        )
+                    default:
+                        return URLSessionTransportResponse(
+                            statusCode: 500,
+                            body: Data(#"{"jsonrpc":"2.0","id":99,"error":{"code":-32601,"message":"unexpected method"}}"#.utf8)
+                        )
+                    }
+                }
+            ),
+            coreOpSubmitter: coreCapture.submit,
+            liveRuntimeSubmitter: liveRuntime.submit,
+            experimentalAPIEnabled: true
+        )
+
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"model":"gpt-mcp","modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        let turnMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Lookup docs"}]}}"#.utf8
+        )))
+        XCTAssertNil(turnMessages.first?["error"])
+
+        let submission = try XCTUnwrap(liveRuntime.submissions.first)
+        let tool = try XCTUnwrap(submission.mcpTools["mcp__docs__lookup"])
+        XCTAssertEqual(tool.description, "Lookup docs.")
+        let handler = try XCTUnwrap(submission.mcpToolCallHandler)
+        let handlerResult = await handler(NonInteractiveExec.McpToolCallRequest(
+            callID: "call-live-mcp",
+            turnID: submission.turnID,
+            server: "docs",
+            tool: "lookup",
+            arguments: .object(["query": .string("swift")])
+        ))
+        guard case let .success(callResult)? = handlerResult else {
+            return XCTFail("expected successful live MCP tool call")
+        }
+        XCTAssertEqual(callResult.structuredContent, .object(["answer": .string("lookup result")]))
+        XCTAssertEqual(callResult.isError, false)
+        XCTAssertEqual(
+            try capture.requests.map { request -> String in
+                let body = try XCTUnwrap(request.httpBody)
+                let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                return try XCTUnwrap(object["method"] as? String)
+            },
+            ["initialize", "tools/list", "initialize", "tools/call"]
+        )
+    }
+
     func testLiveRuntimeAppliesExtensionTurnItemContributorsBeforeItemCompletedLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()

@@ -292,17 +292,36 @@ public enum NonInteractiveExec {
         config: CodexRuntimeConfig,
         sessionSource: SessionSource = .default,
         environmentMode: ToolEnvironmentMode = .single,
-        dynamicTools: [DynamicToolSpec] = []
+        dynamicTools: [DynamicToolSpec] = [],
+        mcpToolInfos: [McpToolInfo] = [],
+        mcpTools: [String: McpTool]? = nil,
+        deferredMcpTools: [String: McpTool]? = nil
     ) -> [ConfiguredToolSpec] {
-        ToolSpecFactory.buildSpecs(
+        let activeMcpToolInfos = mcpToolInfos.isEmpty ? mcpTools.map(Self.mcpToolInfos(from:)) : mcpToolInfos
+        return ToolSpecFactory.buildSpecs(
             config: toolsConfig(
                 modelFamily: modelFamily,
                 config: config,
                 sessionSource: sessionSource,
                 environmentMode: environmentMode
             ),
+            mcpToolInfos: activeMcpToolInfos,
+            deferredMcpToolInfos: deferredMcpTools.map(Self.mcpToolInfos(from:)),
             dynamicTools: dynamicTools
         )
+    }
+
+    private static func mcpToolInfos(from tools: [String: McpTool]) -> [McpToolInfo] {
+        tools.compactMap { qualifiedName, tool in
+            guard let split = McpToolName.splitQualifiedToolName(qualifiedName) else {
+                return nil
+            }
+            return McpToolInfo(
+                serverName: split.serverName,
+                namespaceDescription: tool.namespaceDescription,
+                tool: tool
+            )
+        }
     }
 
     private static func webSearchMode(for config: CodexRuntimeConfig) -> WebSearchMode? {
@@ -365,6 +384,35 @@ public enum NonInteractiveExec {
     public typealias ModelsETagHandler = (String) async -> Void
     public typealias RequestUserInputHandler = @Sendable (RequestUserInputEvent) async -> RequestUserInputResponse?
     public typealias DynamicToolCallHandler = @Sendable (DynamicToolCallRequest) async -> DynamicToolResponse?
+
+    public struct McpToolCallRequest: Equatable, Sendable {
+        public let callID: String
+        public let turnID: String
+        public let server: String
+        public let tool: String
+        public let arguments: JSONValue
+
+        public init(
+            callID: String,
+            turnID: String,
+            server: String,
+            tool: String,
+            arguments: JSONValue
+        ) {
+            self.callID = callID
+            self.turnID = turnID
+            self.server = server
+            self.tool = tool
+            self.arguments = arguments
+        }
+    }
+
+    public enum McpToolCallHandlerResult: Equatable, Sendable {
+        case success(McpCallToolResult)
+        case failure(String)
+    }
+
+    public typealias McpToolCallHandler = @Sendable (McpToolCallRequest) async -> McpToolCallHandlerResult?
 
     public struct FunctionCallExecutionResult: Equatable, Sendable {
         public var output: ResponseItem
@@ -441,6 +489,299 @@ public enum NonInteractiveExec {
         }
     }
 
+    public typealias GrantedPermissionsProvider = @Sendable () async -> RequestPermissionProfile?
+
+    /// Shared router for model-requested tools.
+    ///
+    /// The router owns the execution context, hook context, dynamic tool bridge,
+    /// extension registry bridge, approval handlers, and permission state used by
+    /// both non-interactive and live runtimes. New frontends should construct one
+    /// of these per running turn and pass `execute(_:)` into the Responses loop
+    /// instead of rebuilding a separate tool dispatch switch.
+    public struct ToolRouter {
+        public var hookContext: StopHookContext?
+        public var cwd: URL
+        public var model: String
+        public var approvalPolicy: AskForApproval
+        public var sandboxPolicy: SandboxPolicy
+        public var shell: Shell
+        public var truncationPolicy: TruncationPolicy
+        public var environment: [String: String]
+        public var shellEnvironmentPolicy: ShellEnvironmentPolicy
+        public var explicitEnvOverrides: [String: String]
+        public var allowLoginShell: Bool
+        public var canRequestOriginalImageDetail: Bool
+        public var backgroundTerminalMaxTimeoutMS: UInt64
+        public var toolSearchIndex: ToolSearchIndex?
+        public var agentJobContext: AgentJobToolContext?
+        public var turnEnvironmentSelections: [TurnEnvironmentSelection]?
+        public var configuredEnvironmentSnapshot: ConfiguredEnvironmentSnapshot?
+        public var remoteEnvironmentFileSystems: [String: ExecServerRemoteFileSystem]
+        public var features: FeatureStates
+        public var execPolicyManager: ExecPolicyManager
+        public var windowsSandboxLevel: WindowsSandboxLevel
+        public var mcpToolInfos: [McpToolInfo]
+        public var dynamicTools: [DynamicToolSpec]
+        public var registeredToolExecutor: RegisteredToolExecutor?
+        public var approvalHandler: FunctionCallApprovalHandler?
+        public var requestUserInputHandler: RequestUserInputHandler?
+        public var requestPermissionsHandler: RequestPermissionsHandler?
+        public var mcpToolCallHandler: McpToolCallHandler?
+        public var dynamicToolHandler: DynamicToolCallHandler?
+        public var grantedPermissionsProvider: GrantedPermissionsProvider
+
+        public init(
+            hookContext: StopHookContext? = nil,
+            cwd: URL,
+            model: String,
+            approvalPolicy: AskForApproval,
+            sandboxPolicy: SandboxPolicy,
+            shell: Shell,
+            truncationPolicy: TruncationPolicy,
+            environment: [String: String] = ProcessInfo.processInfo.environment,
+            shellEnvironmentPolicy: ShellEnvironmentPolicy = ShellEnvironmentPolicy(),
+            explicitEnvOverrides: [String: String] = [:],
+            allowLoginShell: Bool = true,
+            canRequestOriginalImageDetail: Bool = false,
+            backgroundTerminalMaxTimeoutMS: UInt64 = CodexConfigDefaults.backgroundTerminalMaxTimeoutMS,
+            toolSearchIndex: ToolSearchIndex? = nil,
+            agentJobContext: AgentJobToolContext? = nil,
+            turnEnvironmentSelections: [TurnEnvironmentSelection]? = nil,
+            configuredEnvironmentSnapshot: ConfiguredEnvironmentSnapshot? = nil,
+            remoteEnvironmentFileSystems: [String: ExecServerRemoteFileSystem] = [:],
+            features: FeatureStates = .withDefaults(),
+            execPolicyManager: ExecPolicyManager = ExecPolicyManager(),
+            windowsSandboxLevel: WindowsSandboxLevel = .disabled,
+            mcpToolInfos: [McpToolInfo] = [],
+            dynamicTools: [DynamicToolSpec] = [],
+            registeredToolExecutor: RegisteredToolExecutor? = nil,
+            approvalHandler: FunctionCallApprovalHandler? = nil,
+            requestUserInputHandler: RequestUserInputHandler? = nil,
+            requestPermissionsHandler: RequestPermissionsHandler? = nil,
+            mcpToolCallHandler: McpToolCallHandler? = nil,
+            dynamicToolHandler: DynamicToolCallHandler? = nil,
+            grantedPermissionsProvider: @escaping GrantedPermissionsProvider = { nil }
+        ) {
+            self.hookContext = hookContext
+            self.cwd = cwd
+            self.model = model
+            self.approvalPolicy = approvalPolicy
+            self.sandboxPolicy = sandboxPolicy
+            self.shell = shell
+            self.truncationPolicy = truncationPolicy
+            self.environment = environment
+            self.shellEnvironmentPolicy = shellEnvironmentPolicy
+            self.explicitEnvOverrides = explicitEnvOverrides
+            self.allowLoginShell = allowLoginShell
+            self.canRequestOriginalImageDetail = canRequestOriginalImageDetail
+            self.backgroundTerminalMaxTimeoutMS = backgroundTerminalMaxTimeoutMS
+            self.toolSearchIndex = toolSearchIndex
+            self.agentJobContext = agentJobContext
+            self.turnEnvironmentSelections = turnEnvironmentSelections
+            self.configuredEnvironmentSnapshot = configuredEnvironmentSnapshot
+            self.remoteEnvironmentFileSystems = remoteEnvironmentFileSystems
+            self.features = features
+            self.execPolicyManager = execPolicyManager
+            self.windowsSandboxLevel = windowsSandboxLevel
+            self.mcpToolInfos = mcpToolInfos
+            self.dynamicTools = dynamicTools
+            self.registeredToolExecutor = registeredToolExecutor
+            self.approvalHandler = approvalHandler
+            self.requestUserInputHandler = requestUserInputHandler
+            self.requestPermissionsHandler = requestPermissionsHandler
+            self.mcpToolCallHandler = mcpToolCallHandler
+            self.dynamicToolHandler = dynamicToolHandler
+            self.grantedPermissionsProvider = grantedPermissionsProvider
+        }
+
+        public func execute(_ item: ResponseItem) async -> FunctionCallExecutionResult {
+            let grantedPermissions = await grantedPermissionsProvider()
+            guard let hookContext else {
+                return await executeWithoutHooks(item, grantedPermissions: grantedPermissions)
+            }
+
+            let hookPayload = NonInteractiveExec.toolHookPayload(for: item)
+            var effectiveItem = item
+            var postHookPayload = hookPayload
+            var additionalItems: [ResponseItem] = []
+            var approvalGranted = false
+            if let hookPayload {
+                let preOutcome = await NonInteractiveExec.runPreToolUseHooks(
+                    handlers: hookContext.handlers,
+                    hookPayload: hookPayload,
+                    conversationID: hookContext.conversationID,
+                    turnID: hookContext.turnID,
+                    cwd: hookContext.cwd,
+                    model: hookContext.model,
+                    approvalPolicy: hookContext.approvalPolicy
+                )
+                additionalItems = NonInteractiveExec.hookAdditionalContextItems(preOutcome.additionalContexts)
+                if preOutcome.shouldBlock {
+                    return FunctionCallExecutionResult(
+                        output: NonInteractiveExec.blockedToolOutput(
+                            for: item,
+                            hookPayload: hookPayload,
+                            reason: preOutcome.blockReason
+                        ),
+                        additionalContextItems: additionalItems
+                    )
+                }
+                if let updatedInput = preOutcome.updatedInput {
+                    switch NonInteractiveExec.itemByApplyingPreToolUseUpdate(updatedInput, to: item) {
+                    case let .success(updatedItem):
+                        effectiveItem = updatedItem
+                        postHookPayload = NonInteractiveExec.toolHookPayload(for: updatedItem) ?? hookPayload
+                    case let .failure(error):
+                        return FunctionCallExecutionResult(
+                            output: NonInteractiveExec.toolRewriteErrorOutput(for: item, message: error.message),
+                            additionalContextItems: additionalItems
+                        )
+                    }
+                }
+                let approvalContext = NonInteractiveExec.shellApprovalHookContext(
+                    for: effectiveItem,
+                    approvalPolicy: approvalPolicy,
+                    sandboxPolicy: sandboxPolicy,
+                    shell: shell,
+                    allowLoginShell: allowLoginShell,
+                    features: features,
+                    execPolicyManager: execPolicyManager
+                )
+                if NonInteractiveExec.shouldRunPermissionRequestHooks(
+                    approvalContext: approvalContext,
+                    approvalPolicy: approvalPolicy
+                ),
+                   let permissionDecision = await NonInteractiveExec.runPermissionRequestHooks(
+                       handlers: hookContext.handlers,
+                       hookPayload: hookPayload,
+                       conversationID: hookContext.conversationID,
+                       turnID: hookContext.turnID,
+                       cwd: hookContext.cwd,
+                       model: hookContext.model,
+                       approvalPolicy: hookContext.approvalPolicy
+                   )
+                {
+                    switch permissionDecision {
+                    case .allow:
+                        approvalGranted = true
+                    case let .deny(message):
+                        return FunctionCallExecutionResult(
+                            output: NonInteractiveExec.deniedPermissionOutput(
+                                for: item,
+                                hookPayload: hookPayload,
+                                message: message
+                            ),
+                            additionalContextItems: additionalItems
+                        )
+                    }
+                }
+            }
+
+            let execution = await executeCore(
+                effectiveItem,
+                grantedPermissions: grantedPermissions,
+                turnID: hookContext.turnID,
+                approvalGranted: approvalGranted
+            )
+            let output = execution.output
+            additionalItems.append(contentsOf: execution.additionalContextItems)
+            guard NonInteractiveExec.toolOutputSucceeded(output),
+                  let postPayload = NonInteractiveExec.postToolHookPayload(
+                      for: effectiveItem,
+                      execution: execution,
+                      prePayload: postHookPayload
+                  )
+            else {
+                return FunctionCallExecutionResult(
+                    output: output,
+                    additionalContextItems: additionalItems,
+                    runtimeEvents: execution.runtimeEvents,
+                    requestPermissionsResponse: execution.requestPermissionsResponse
+                )
+            }
+
+            let postOutcome = await NonInteractiveExec.runPostToolUseHooks(
+                handlers: hookContext.handlers,
+                hookPayload: postPayload,
+                conversationID: hookContext.conversationID,
+                turnID: hookContext.turnID,
+                cwd: hookContext.cwd,
+                model: hookContext.model,
+                approvalPolicy: hookContext.approvalPolicy
+            )
+            additionalItems.append(contentsOf: NonInteractiveExec.hookAdditionalContextItems(postOutcome.additionalContexts))
+            return FunctionCallExecutionResult(
+                output: NonInteractiveExec.replacingToolOutputIfNeeded(output, with: postOutcome),
+                additionalContextItems: additionalItems,
+                runtimeEvents: execution.runtimeEvents,
+                requestPermissionsResponse: execution.requestPermissionsResponse
+            )
+        }
+
+        public func executeOutput(_ item: ResponseItem) async -> ResponseItem {
+            await execute(item).output
+        }
+
+        private func executeWithoutHooks(
+            _ item: ResponseItem,
+            grantedPermissions: RequestPermissionProfile?
+        ) async -> FunctionCallExecutionResult {
+            let execution = await executeCore(
+                item,
+                grantedPermissions: grantedPermissions,
+                turnID: hookContext?.turnID ?? "turn-1",
+                approvalGranted: false
+            )
+            return FunctionCallExecutionResult(
+                output: execution.output,
+                additionalContextItems: execution.additionalContextItems,
+                runtimeEvents: execution.runtimeEvents,
+                requestPermissionsResponse: execution.requestPermissionsResponse
+            )
+        }
+
+        private func executeCore(
+            _ item: ResponseItem,
+            grantedPermissions: RequestPermissionProfile?,
+            turnID: String,
+            approvalGranted: Bool
+        ) async -> ExecutedFunctionCall {
+            await NonInteractiveExec.executeFunctionCallWithApproval(
+                item,
+                cwd: cwd,
+                approvalPolicy: approvalPolicy,
+                sandboxPolicy: sandboxPolicy,
+                shell: shell,
+                truncationPolicy: truncationPolicy,
+                environment: environment,
+                shellEnvironmentPolicy: shellEnvironmentPolicy,
+                explicitEnvOverrides: explicitEnvOverrides,
+                allowLoginShell: allowLoginShell,
+                canRequestOriginalImageDetail: canRequestOriginalImageDetail,
+                backgroundTerminalMaxTimeoutMS: backgroundTerminalMaxTimeoutMS,
+                toolSearchIndex: toolSearchIndex,
+                agentJobContext: agentJobContext,
+                turnEnvironmentSelections: turnEnvironmentSelections,
+                configuredEnvironmentSnapshot: configuredEnvironmentSnapshot,
+                remoteEnvironmentFileSystems: remoteEnvironmentFileSystems,
+                features: features,
+                execPolicyManager: execPolicyManager,
+                windowsSandboxLevel: windowsSandboxLevel,
+                mcpToolInfos: mcpToolInfos,
+                dynamicTools: dynamicTools,
+                registeredToolExecutor: registeredToolExecutor,
+                approvalHandler: approvalHandler,
+                requestUserInputHandler: requestUserInputHandler,
+                requestPermissionsHandler: requestPermissionsHandler,
+                mcpToolCallHandler: mcpToolCallHandler,
+                dynamicToolHandler: dynamicToolHandler,
+                grantedPermissions: grantedPermissions,
+                turnID: turnID,
+                approvalGranted: approvalGranted
+            )
+        }
+    }
+
     public static func runResponsesLoop(
         initialPrompt: Prompt,
         maxToolIterations: Int = 20,
@@ -475,6 +816,28 @@ public enum NonInteractiveExec {
             streamPrompt: streamPrompt,
             executeFunctionCall: { item in
                 FunctionCallExecutionResult(output: await executeFunctionCall(item))
+            }
+        )
+    }
+
+    public static func runResponsesLoopWithTranscript(
+        initialPrompt: Prompt,
+        maxToolIterations: Int = 20,
+        features: FeatureStates = .withDefaults(),
+        handleModelsETag: ModelsETagHandler? = nil,
+        streamPrompt: ResponseStreamer,
+        stopHookContext: StopHookContext? = nil,
+        toolRouter: ToolRouter
+    ) async -> NonInteractiveExecLoopResult {
+        await runResponsesLoopWithTranscript(
+            initialPrompt: initialPrompt,
+            maxToolIterations: maxToolIterations,
+            features: features,
+            handleModelsETag: handleModelsETag,
+            streamPrompt: streamPrompt,
+            stopHookContext: stopHookContext,
+            executeFunctionCall: { item in
+                await toolRouter.execute(item)
             }
         )
     }
@@ -813,17 +1176,19 @@ public enum NonInteractiveExec {
         features: FeatureStates = .withDefaults(),
         execPolicyManager: ExecPolicyManager = ExecPolicyManager(),
         windowsSandboxLevel: WindowsSandboxLevel = .disabled,
+        mcpToolInfos: [McpToolInfo] = [],
         dynamicTools: [DynamicToolSpec] = [],
         registeredToolExecutor: RegisteredToolExecutor? = nil,
         approvalHandler: FunctionCallApprovalHandler? = nil,
         requestUserInputHandler: RequestUserInputHandler? = nil,
         requestPermissionsHandler: RequestPermissionsHandler? = nil,
+        mcpToolCallHandler: McpToolCallHandler? = nil,
         dynamicToolHandler: DynamicToolCallHandler? = nil,
         grantedPermissions: RequestPermissionProfile? = nil
     ) async -> ResponseItem {
-        await executeFunctionCallWithApproval(
-            item,
+        await ToolRouter(
             cwd: cwd,
+            model: "",
             approvalPolicy: approvalPolicy,
             sandboxPolicy: sandboxPolicy,
             shell: shell,
@@ -842,15 +1207,16 @@ public enum NonInteractiveExec {
             features: features,
             execPolicyManager: execPolicyManager,
             windowsSandboxLevel: windowsSandboxLevel,
+            mcpToolInfos: mcpToolInfos,
             dynamicTools: dynamicTools,
             registeredToolExecutor: registeredToolExecutor,
             approvalHandler: approvalHandler,
             requestUserInputHandler: requestUserInputHandler,
             requestPermissionsHandler: requestPermissionsHandler,
+            mcpToolCallHandler: mcpToolCallHandler,
             dynamicToolHandler: dynamicToolHandler,
-            grantedPermissions: grantedPermissions,
-            approvalGranted: false
-        ).output
+            grantedPermissionsProvider: { grantedPermissions }
+        ).executeOutput(item)
     }
 
     private struct ExecutedFunctionCall: Sendable {
@@ -907,11 +1273,13 @@ public enum NonInteractiveExec {
         features: FeatureStates,
         execPolicyManager: ExecPolicyManager,
         windowsSandboxLevel: WindowsSandboxLevel,
+        mcpToolInfos: [McpToolInfo],
         dynamicTools: [DynamicToolSpec],
         registeredToolExecutor: RegisteredToolExecutor?,
         approvalHandler: FunctionCallApprovalHandler?,
         requestUserInputHandler: RequestUserInputHandler?,
         requestPermissionsHandler: RequestPermissionsHandler?,
+        mcpToolCallHandler: McpToolCallHandler?,
         dynamicToolHandler: DynamicToolCallHandler?,
         grantedPermissions: RequestPermissionProfile?,
         turnID: String = "turn-1",
@@ -942,12 +1310,14 @@ public enum NonInteractiveExec {
                 features: features,
                 execPolicyManager: execPolicyManager,
                 windowsSandboxLevel: windowsSandboxLevel,
+                mcpToolInfos: mcpToolInfos,
                 dynamicTools: dynamicTools,
                 registeredToolExecutor: registeredToolExecutor,
                 turnID: turnID,
                 approvalHandler: approvalHandler,
                 requestUserInputHandler: requestUserInputHandler,
                 requestPermissionsHandler: requestPermissionsHandler,
+                mcpToolCallHandler: mcpToolCallHandler,
                 dynamicToolHandler: dynamicToolHandler,
                 grantedPermissions: grantedPermissions,
                 approvalGranted: approvalGranted
@@ -1060,86 +1430,27 @@ public enum NonInteractiveExec {
         features: FeatureStates = .withDefaults(),
         execPolicyManager: ExecPolicyManager = ExecPolicyManager(),
         windowsSandboxLevel: WindowsSandboxLevel = .disabled,
+        mcpToolInfos: [McpToolInfo] = [],
         dynamicTools: [DynamicToolSpec] = [],
         registeredToolExecutor: RegisteredToolExecutor? = nil,
         approvalHandler: FunctionCallApprovalHandler? = nil,
         requestUserInputHandler: RequestUserInputHandler? = nil,
         requestPermissionsHandler: RequestPermissionsHandler? = nil,
+        mcpToolCallHandler: McpToolCallHandler? = nil,
         dynamicToolHandler: DynamicToolCallHandler? = nil,
         grantedPermissions: RequestPermissionProfile? = nil
     ) async -> FunctionCallExecutionResult {
-        let hookPayload = toolHookPayload(for: item)
-        var effectiveItem = item
-        var postHookPayload = hookPayload
-        var additionalItems: [ResponseItem] = []
-        var approvalGranted = false
-        if let hookPayload {
-            let preOutcome = await runPreToolUseHooks(
+        await ToolRouter(
+            hookContext: StopHookContext(
                 handlers: handlers,
-                hookPayload: hookPayload,
                 conversationID: conversationID,
                 turnID: turnID,
                 cwd: cwd,
                 model: model,
                 approvalPolicy: approvalPolicy
-            )
-            additionalItems = hookAdditionalContextItems(preOutcome.additionalContexts)
-            if preOutcome.shouldBlock {
-                return FunctionCallExecutionResult(
-                    output: blockedToolOutput(for: item, hookPayload: hookPayload, reason: preOutcome.blockReason),
-                    additionalContextItems: additionalItems
-                )
-            }
-            if let updatedInput = preOutcome.updatedInput {
-                switch itemByApplyingPreToolUseUpdate(updatedInput, to: item) {
-                case let .success(updatedItem):
-                    effectiveItem = updatedItem
-                    postHookPayload = toolHookPayload(for: updatedItem) ?? hookPayload
-                case let .failure(error):
-                    return FunctionCallExecutionResult(
-                        output: toolRewriteErrorOutput(for: item, message: error.message),
-                        additionalContextItems: additionalItems
-                    )
-                }
-            }
-            let approvalContext = shellApprovalHookContext(
-                for: effectiveItem,
-                approvalPolicy: approvalPolicy,
-                sandboxPolicy: sandboxPolicy,
-                shell: shell,
-                allowLoginShell: allowLoginShell,
-                features: features,
-                execPolicyManager: execPolicyManager
-            )
-            if shouldRunPermissionRequestHooks(
-                approvalContext: approvalContext,
-                approvalPolicy: approvalPolicy
             ),
-               let permissionDecision = await runPermissionRequestHooks(
-                   handlers: handlers,
-                   hookPayload: hookPayload,
-                   conversationID: conversationID,
-                   turnID: turnID,
-                   cwd: cwd,
-                   model: model,
-                   approvalPolicy: approvalPolicy
-               )
-            {
-                switch permissionDecision {
-                case .allow:
-                    approvalGranted = true
-                case let .deny(message):
-                    return FunctionCallExecutionResult(
-                        output: deniedPermissionOutput(for: item, hookPayload: hookPayload, message: message),
-                        additionalContextItems: additionalItems
-                    )
-                }
-            }
-        }
-
-        let execution = await executeFunctionCallWithApproval(
-            effectiveItem,
             cwd: cwd,
+            model: model,
             approvalPolicy: approvalPolicy,
             sandboxPolicy: sandboxPolicy,
             shell: shell,
@@ -1158,45 +1469,16 @@ public enum NonInteractiveExec {
             features: features,
             execPolicyManager: execPolicyManager,
             windowsSandboxLevel: windowsSandboxLevel,
+            mcpToolInfos: mcpToolInfos,
             dynamicTools: dynamicTools,
             registeredToolExecutor: registeredToolExecutor,
             approvalHandler: approvalHandler,
             requestUserInputHandler: requestUserInputHandler,
             requestPermissionsHandler: requestPermissionsHandler,
+            mcpToolCallHandler: mcpToolCallHandler,
             dynamicToolHandler: dynamicToolHandler,
-            grantedPermissions: grantedPermissions,
-            turnID: turnID,
-            approvalGranted: approvalGranted
-        )
-        let output = execution.output
-        additionalItems.append(contentsOf: execution.additionalContextItems)
-        guard toolOutputSucceeded(output),
-              let postPayload = postToolHookPayload(for: effectiveItem, execution: execution, prePayload: postHookPayload)
-        else {
-            return FunctionCallExecutionResult(
-                output: output,
-                additionalContextItems: additionalItems,
-                runtimeEvents: execution.runtimeEvents,
-                requestPermissionsResponse: execution.requestPermissionsResponse
-            )
-        }
-
-        let postOutcome = await runPostToolUseHooks(
-            handlers: handlers,
-            hookPayload: postPayload,
-            conversationID: conversationID,
-            turnID: turnID,
-            cwd: cwd,
-            model: model,
-            approvalPolicy: approvalPolicy
-        )
-        additionalItems.append(contentsOf: hookAdditionalContextItems(postOutcome.additionalContexts))
-        return FunctionCallExecutionResult(
-            output: replacingToolOutputIfNeeded(output, with: postOutcome),
-            additionalContextItems: additionalItems,
-            runtimeEvents: execution.runtimeEvents,
-            requestPermissionsResponse: execution.requestPermissionsResponse
-        )
+            grantedPermissionsProvider: { grantedPermissions }
+        ).execute(item)
     }
 
     public static func finish(
@@ -1747,12 +2029,14 @@ public enum NonInteractiveExec {
         features: FeatureStates,
         execPolicyManager: ExecPolicyManager,
         windowsSandboxLevel: WindowsSandboxLevel,
+        mcpToolInfos: [McpToolInfo],
         dynamicTools: [DynamicToolSpec],
         registeredToolExecutor: RegisteredToolExecutor?,
         turnID: String,
         approvalHandler: FunctionCallApprovalHandler?,
         requestUserInputHandler: RequestUserInputHandler?,
         requestPermissionsHandler: RequestPermissionsHandler?,
+        mcpToolCallHandler: McpToolCallHandler?,
         dynamicToolHandler: DynamicToolCallHandler?,
         grantedPermissions: RequestPermissionProfile?,
         approvalGranted: Bool
@@ -2001,6 +2285,22 @@ public enum NonInteractiveExec {
                         handler: dynamicToolHandler
                     )
                 }
+                if let mcpToolInfo = matchingMcpTool(namespace: namespace, name: name, mcpToolInfos: mcpToolInfos) {
+                    guard let mcpToolCallHandler else {
+                        return executed(functionOutput(
+                            callID: callID,
+                            content: "unsupported call: \(toolNameDisplay(namespace: namespace, name: name))",
+                            success: false
+                        ))
+                    }
+                    return try await executeMcpToolCall(
+                        callID: callID,
+                        turnID: turnID,
+                        toolInfo: mcpToolInfo,
+                        arguments: arguments,
+                        handler: mcpToolCallHandler
+                    )
+                }
                 if let registeredResult = await registeredToolExecutor?(.functionCall(
                     name: name,
                     namespace: namespace,
@@ -2033,6 +2333,20 @@ public enum NonInteractiveExec {
     ) -> DynamicToolSpec? {
         dynamicTools.first { tool in
             tool.namespace == namespace && tool.name == name
+        }
+    }
+
+    private static func matchingMcpTool(
+        namespace: String?,
+        name: String,
+        mcpToolInfos: [McpToolInfo]
+    ) -> McpToolInfo? {
+        McpToolName.normalizeToolsForModel(mcpToolInfos).first { toolInfo in
+            if toolInfo.callableNamespace == namespace,
+               toolInfo.callableName == name {
+                return true
+            }
+            return namespace == nil && toolInfo.canonicalToolName == name
         }
     }
 
@@ -2082,6 +2396,59 @@ public enum NonInteractiveExec {
             dynamicToolFunctionOutput(callID: callID, response: response),
             runtimeEvents: [.dynamicToolCallResponse(responseEvent)]
         )
+    }
+
+    private static func executeMcpToolCall(
+        callID: String,
+        turnID: String,
+        toolInfo: McpToolInfo,
+        arguments: String,
+        handler: McpToolCallHandler
+    ) async throws -> ExecutedFunctionCall {
+        let argumentsValue = try JSONDecoder().decode(JSONValue.self, from: Data(arguments.utf8))
+        let invocation = McpInvocation(
+            server: toolInfo.serverName,
+            tool: toolInfo.tool.name,
+            arguments: argumentsValue == .null ? nil : argumentsValue
+        )
+        let startedAt = Date()
+        let begin = EventMessage.mcpToolCallBegin(McpToolCallBeginEvent(
+            callID: callID,
+            invocation: invocation
+        ))
+        let request = McpToolCallRequest(
+            callID: callID,
+            turnID: turnID,
+            server: toolInfo.serverName,
+            tool: toolInfo.tool.name,
+            arguments: argumentsValue
+        )
+        let response = await handler(request)
+        let duration = ProtocolDuration(timeInterval: Date().timeIntervalSince(startedAt))
+        let result: McpToolCallResult
+        let output: ResponseItem
+        switch response {
+        case let .success(toolResult)?:
+            result = .ok(toolResult)
+            output = .functionCallOutput(
+                callID: callID,
+                output: FunctionCallOutputPayload(callToolResult: toolResult)
+            )
+        case let .failure(message)?:
+            result = .err(message)
+            output = functionOutput(callID: callID, content: message, success: false)
+        case nil:
+            let message = "MCP tool call was cancelled before receiving a response"
+            result = .err(message)
+            output = functionOutput(callID: callID, content: message, success: false)
+        }
+        let end = EventMessage.mcpToolCallEnd(McpToolCallEndEvent(
+            callID: callID,
+            invocation: invocation,
+            duration: duration,
+            result: result.truncatedForEvent()
+        ))
+        return executed(output, runtimeEvents: [begin, end])
     }
 
     private static func dynamicToolFunctionOutput(callID: String, response: DynamicToolResponse) -> ResponseItem {

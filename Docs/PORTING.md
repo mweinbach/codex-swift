@@ -12,6 +12,15 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: wired live MCP tool inventory into the Swift app-server
+  Responses runtime. `thread/start` live MCP startup now feeds discovered MCP
+  tools into each `turn/start` live runtime submission, those tools are exposed
+  through the same namespace tool specs used by Rust's turn tool router, and
+  model MCP calls dispatch through a typed handler that emits
+  `mcp_tool_call_begin` / `mcp_tool_call_end` runtime events before returning
+  Rust-shaped MCP tool results to the model. Remaining ThreadManager parity
+  gaps are in-flight runtime config mutation and cross-connection runtime event
+  fanout.
 - 2026-05-17: wired the Rust `request_permissions` tool into the Swift
   Responses/tool loop and live app-server runtime. Swift now advertises the
   Rust-shaped function tool behind `features.request_permissions_tool`, parses
@@ -22,8 +31,8 @@ Recent upstream audit checkpoint:
   accumulated with Rust's merge/intersection rules and applied implicitly to
   later `shell_command`, `shell`, local shell, and unified `exec_command` calls,
   including preapproved sandbox widening without a second prompt. Remaining
-  ThreadManager parity gaps are MCP tool injection/refresh, in-flight runtime
-  config mutation, and cross-connection runtime event fanout.
+  ThreadManager parity gaps are in-flight runtime config mutation and
+  cross-connection runtime event fanout.
 - 2026-05-17: Swift's live Responses/tool loop now exposes Rust's
   `request_user_input` tool and thread dynamic-tool specs, routes calls through
   live app-server pending continuations, and resumes the same turn from
@@ -414,6 +423,22 @@ Recent upstream audit checkpoint:
   transports, and app-server runtime submitters; live app-server/session
   tool-handler registration remains tracked with the broader runtime work
   rather than this Rust-only trait refactor.
+- 2026-05-17: Swift now has an explicit shared
+  `NonInteractiveExec.ToolRouter` for model-requested tool calls. `codex exec`
+  and the live app-server Responses loop both construct the router instead of
+  rebuilding separate dispatch closures, while compatibility static helpers
+  delegate back into the same route for shell/apply-patch/tool-search,
+  registered extension tools, request-permissions, request-user-input, and
+  dynamic-tool calls. Broader every-tool-family parity is still tracked as
+  concrete handler coverage on this shared router surface.
+- 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
+  manager's tool inventory into runtime submissions and model-visible tool
+  specs, plus an MCP tool-call handler that routes matching model calls through
+  the existing app-server `mcpServer/tool/call` bridge. This closes the first
+  direct live MCP tool injection/dispatch slice; Rust's full
+  `build_mcp_tool_exposure` direct/deferred/app-connector selection and
+  in-turn MCP refresh replacement remain tracked with the broader live runtime
+  parity work.
 - 2026-05-17: rechecked Rust commit `702e6a3c64` (`[rollout-trace] Add a
   trace ID to MCP calls`). Swift app-server MCP tool calls now have an
   injectable MCP call trace ID provider and preserve Rust's bridge-private
@@ -2651,7 +2676,7 @@ Recent upstream audit checkpoint:
 - `codex-rs/core/src/session/turn.rs` streamed apply-patch argument diff dispatch
   - non-interactive Responses loops now replay `output_item.added`, `custom_tool_call_input.delta`, and item completion order to collect Rust-shaped `patch_apply_updated` runtime events for freeform `apply_patch` tool calls, gated by the loaded `apply_patch_streaming_events` feature state, ignoring mismatched call ids, and flushing buffered progress when the item completes
 - `codex-rs/core/src/session/turn.rs` Responses tool-call continuation loop
-  - non-interactive Responses loops now dispatch a deterministic registered function/custom tool call through the injected handler, append the model call and tool result in Rust order, normalize a cloned prompt history before each model continuation request, and preserve the final JSONL item/turn notifications for the completion response. Broader live parallel-router parity and every tool family remain pending.
+  - non-interactive Responses loops now dispatch a deterministic registered function/custom tool call through the injected handler, append the model call and tool result in Rust order, normalize a cloned prompt history before each model continuation request, and preserve the final JSONL item/turn notifications for the completion response. Swift now routes both `codex exec` and live app-server Responses turns through a shared `NonInteractiveExec.ToolRouter`; every tool family beyond the currently ported handlers remains pending as coverage on that shared surface.
 - `codex-rs/exec/src/event_processor_with_jsonl_output.rs` hosted web-search JSONL events
   - `codex exec --json` now emits Rust-shaped `item.started` and `item.completed` events for hosted web-search response items, preserving stable `item_N` ids between start and completion and carrying the query/action payload through the JSONL item
 - `codex-rs/apply-patch/src/invocation.rs`
@@ -3751,7 +3776,7 @@ Recent upstream audit checkpoint:
   - `thread/start` app-server dynamic-tool parameter encoding now preserves Rust's app-server protocol distinction from rollout persistence by serializing an absent dynamic-tool namespace as explicit `null` while keeping the shared rollout/model `DynamicToolSpec` encoder's omitted-nil namespace behavior.
   - added direct Swift core coverage for Rust's accepted sanitizable/nullable schemas, shared names across different namespaces, identifier length limits, leading/trailing whitespace rejection, reserved `mcp` names/namespaces, duplicate unnamespaced tools, and deferred-without-namespace failures.
   - `InitialHistory` now exposes the first session-meta dynamic tools like Rust's rollout history helper, and `thread/fork` plus legacy `resumeConversation` carry source dynamic tools into the newly-created session metadata for later resume/fork fallback. When a Swift SQLite state store is configured, newly-created thread rollouts are indexed with their dynamic tools, and fork/legacy resume restore source-thread dynamic tools from the state store before falling back to rollout metadata, matching Rust's resumed/forked session priority.
-  - Swift tool-spec planning now converts accepted dynamic tools into Rust-shaped Responses function/namespace specs, coalesces repeated namespaces, hides namespaced dynamic tools when namespace tools are disabled, preserves `defer_loading`, and includes deferred dynamic tools in `tool_search` with Rust's dynamic-tools source description. Deferred dynamic `tool_search` entries now sort by Rust's structural `ToolName` ordering, use Rust's name/spaced-name/description/namespace/property search text, skip namespace outputs when namespace tools are disabled, and remain unbucketed like Rust. Swift also mirrors Rust's router split between registered specs and model-visible specs by filtering deferred dynamic tools out of the model-visible list while keeping them registered for lookup/dispatch; full live tool-handler registry dispatch is still pending.
+  - Swift tool-spec planning now converts accepted dynamic tools into Rust-shaped Responses function/namespace specs, coalesces repeated namespaces, hides namespaced dynamic tools when namespace tools are disabled, preserves `defer_loading`, and includes deferred dynamic tools in `tool_search` with Rust's dynamic-tools source description. Deferred dynamic `tool_search` entries now sort by Rust's structural `ToolName` ordering, use Rust's name/spaced-name/description/namespace/property search text, skip namespace outputs when namespace tools are disabled, and remain unbucketed like Rust. Swift also mirrors Rust's router split between registered specs and model-visible specs by filtering deferred dynamic tools out of the model-visible list while keeping them registered for lookup/dispatch; live app-server registered and dynamic tool dispatch now goes through the shared `NonInteractiveExec.ToolRouter`, with broader every-family parity still pending on that router.
   - Runtime dynamic tool call requests now mirror Rust's app-server client bridge: `dynamic_tool_call_request` emits an `item/started` notification with a `dynamicToolCall` item, sends the v2 `item/tool/call` server request, decodes successful client responses into `Op.dynamicToolResponse`, maps malformed client payloads to the exact `dynamic tool response was invalid` fallback, maps request errors to `dynamic tool request failed`, and suppresses `turnTransition` request errors. Runtime `dynamic_tool_call_response` now also projects Rust's `item/completed` notification with `completed`/`failed` dynamic-tool status, content items, success, and duration milliseconds. `thread/read` turn reconstruction now rebuilds dynamic-tool request/response rollout events into the same `dynamicToolCall` items and response upsert behavior as Rust.
 - `codex-rs/app-server-protocol` turn-start experimental field gating
   - matched Rust's field-level experimental API guards for `turn/start.responsesapiClientMetadata`, `turn/start.environments`, `turn/start.permissions`, `turn/start.collaborationMode`, and nested `askForApproval.granular`.

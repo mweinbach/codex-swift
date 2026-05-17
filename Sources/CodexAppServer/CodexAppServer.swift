@@ -110,6 +110,8 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
     public let op: Op
     public let turnMetadataHeader: String?
     public let mcpElicitationsAutoDeny: Bool
+    public let mcpTools: [String: McpTool]
+    public let mcpToolCallHandler: NonInteractiveExec.McpToolCallHandler?
     public let extensionPromptFragments: [ExtensionPromptFragment]
     public let extensionToolSpecs: [ConfiguredToolSpec]
     public let extensionRegisteredToolExecutor: NonInteractiveExec.RegisteredToolExecutor?
@@ -122,6 +124,8 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
         op: Op,
         turnMetadataHeader: String? = nil,
         mcpElicitationsAutoDeny: Bool = false,
+        mcpTools: [String: McpTool] = [:],
+        mcpToolCallHandler: NonInteractiveExec.McpToolCallHandler? = nil,
         extensionPromptFragments: [ExtensionPromptFragment] = [],
         extensionToolSpecs: [ConfiguredToolSpec] = [],
         extensionRegisteredToolExecutor: NonInteractiveExec.RegisteredToolExecutor? = nil,
@@ -133,6 +137,8 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
         self.op = op
         self.turnMetadataHeader = turnMetadataHeader
         self.mcpElicitationsAutoDeny = mcpElicitationsAutoDeny
+        self.mcpTools = mcpTools
+        self.mcpToolCallHandler = mcpToolCallHandler
         self.extensionPromptFragments = extensionPromptFragments
         self.extensionToolSpecs = extensionToolSpecs
         self.extensionRegisteredToolExecutor = extensionRegisteredToolExecutor
@@ -146,6 +152,7 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
             && lhs.op == rhs.op
             && lhs.turnMetadataHeader == rhs.turnMetadataHeader
             && lhs.mcpElicitationsAutoDeny == rhs.mcpElicitationsAutoDeny
+            && lhs.mcpTools == rhs.mcpTools
             && lhs.extensionPromptFragments == rhs.extensionPromptFragments
             && lhs.extensionToolSpecs == rhs.extensionToolSpecs
     }
@@ -27073,6 +27080,55 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         return extensionRuntimeState.registeredToolExecutor(threadID: parsedThreadID)
     }
 
+    private func liveMcpTools(threadID: String) -> [String: McpTool] {
+        guard let toolsByServer = liveMcpManagers[threadID]?.statusSnapshot.toolsByServer else {
+            return [:]
+        }
+        var entries: [(serverName: String, tool: McpTool)] = []
+        for server in toolsByServer.keys.sorted() {
+            guard let tools = toolsByServer[server] else {
+                continue
+            }
+            for rawTool in tools.values {
+                guard JSONSerialization.isValidJSONObject(rawTool),
+                      let data = try? JSONSerialization.data(withJSONObject: rawTool),
+                      let tool = try? JSONDecoder().decode(McpTool.self, from: data)
+                else {
+                    continue
+                }
+                entries.append((serverName: server, tool: tool))
+            }
+        }
+        return McpToolName.qualifyTools(entries)
+    }
+
+    private func liveMcpToolCallHandler(threadID: String) -> NonInteractiveExec.McpToolCallHandler? {
+        guard !liveMcpTools(threadID: threadID).isEmpty else {
+            return nil
+        }
+        return { [configuration] request in
+            let argumentsObject = CodexAppServer.jsonObject(from: request.arguments)
+            do {
+                let result = try CodexAppServer.mcpServerToolCallResult(
+                    params: [
+                        "threadId": threadID,
+                        "server": request.server,
+                        "tool": request.tool,
+                        "arguments": argumentsObject
+                    ],
+                    configuration: configuration
+                )
+                let data = try JSONSerialization.data(withJSONObject: result)
+                let callResult = try JSONDecoder().decode(McpCallToolResult.self, from: data)
+                return .success(callResult)
+            } catch let error as AppServerError {
+                return .failure(error.description)
+            } catch {
+                return .failure(String(describing: error))
+            }
+        }
+    }
+
     private func extensionApprovalReviewer(threadID: String) -> AppServerExtensionApprovalReviewer? {
         guard let parsedThreadID = try? ThreadId(string: threadID),
               !extensionRuntimeState.registry.approvalReviewContributors.isEmpty
@@ -29432,6 +29488,8 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                     clientName: appServerClientName,
                     clientVersion: appServerClientVersion
                 ),
+                mcpTools: liveMcpTools(threadID: threadID),
+                mcpToolCallHandler: liveMcpToolCallHandler(threadID: threadID),
                 extensionPromptFragments: try extensionPromptFragments(threadID: threadID),
                 extensionToolSpecs: extensionToolSpecs(threadID: threadID),
                 extensionRegisteredToolExecutor: extensionRegisteredToolExecutor(threadID: threadID),
