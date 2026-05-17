@@ -342,6 +342,7 @@ public enum NonInteractiveExec {
     public typealias ResponseStreamer = (Prompt) async -> Result<ResponseEventResults, APIError>
     public typealias FunctionCallExecutor = (ResponseItem) async -> ResponseItem
     public typealias FunctionCallResultExecutor = (ResponseItem) async -> FunctionCallExecutionResult
+    public typealias RegisteredToolExecutor = @Sendable (ResponseItem) async -> FunctionCallExecutionResult?
     public typealias ModelsETagHandler = (String) async -> Void
 
     public struct FunctionCallExecutionResult: Equatable, Sendable {
@@ -756,7 +757,8 @@ public enum NonInteractiveExec {
         remoteEnvironmentFileSystems: [String: ExecServerRemoteFileSystem] = [:],
         features: FeatureStates = .withDefaults(),
         execPolicyManager: ExecPolicyManager = ExecPolicyManager(),
-        windowsSandboxLevel: WindowsSandboxLevel = .disabled
+        windowsSandboxLevel: WindowsSandboxLevel = .disabled,
+        registeredToolExecutor: RegisteredToolExecutor? = nil
     ) async -> ResponseItem {
         await executeFunctionCallWithApproval(
             item,
@@ -779,6 +781,7 @@ public enum NonInteractiveExec {
             features: features,
             execPolicyManager: execPolicyManager,
             windowsSandboxLevel: windowsSandboxLevel,
+            registeredToolExecutor: registeredToolExecutor,
             approvalGranted: false
         ).output
     }
@@ -787,14 +790,29 @@ public enum NonInteractiveExec {
         var output: ResponseItem
         var unifiedExecOutput: UnifiedExecToolOutput?
         var runtimeEvents: [EventMessage] = []
+        var additionalContextItems: [ResponseItem] = []
     }
 
     private static func executed(
         _ output: ResponseItem,
         unifiedExecOutput: UnifiedExecToolOutput? = nil,
-        runtimeEvents: [EventMessage] = []
+        runtimeEvents: [EventMessage] = [],
+        additionalContextItems: [ResponseItem] = []
     ) -> ExecutedFunctionCall {
-        ExecutedFunctionCall(output: output, unifiedExecOutput: unifiedExecOutput, runtimeEvents: runtimeEvents)
+        ExecutedFunctionCall(
+            output: output,
+            unifiedExecOutput: unifiedExecOutput,
+            runtimeEvents: runtimeEvents,
+            additionalContextItems: additionalContextItems
+        )
+    }
+
+    private static func executed(_ result: FunctionCallExecutionResult) -> ExecutedFunctionCall {
+        executed(
+            result.output,
+            runtimeEvents: result.runtimeEvents,
+            additionalContextItems: result.additionalContextItems
+        )
     }
 
     private static func executeFunctionCallWithApproval(
@@ -818,6 +836,7 @@ public enum NonInteractiveExec {
         features: FeatureStates,
         execPolicyManager: ExecPolicyManager,
         windowsSandboxLevel: WindowsSandboxLevel,
+        registeredToolExecutor: RegisteredToolExecutor?,
         turnID: String = "turn-1",
         approvalGranted: Bool
     ) async -> ExecutedFunctionCall {
@@ -846,11 +865,17 @@ public enum NonInteractiveExec {
                 features: features,
                 execPolicyManager: execPolicyManager,
                 windowsSandboxLevel: windowsSandboxLevel,
+                registeredToolExecutor: registeredToolExecutor,
                 turnID: turnID,
                 approvalGranted: approvalGranted
             )
 
         case let .customToolCall(_, _, callID, name, input):
+            if name != "apply_patch",
+               let registeredResult = await registeredToolExecutor?(item)
+            {
+                return executed(registeredResult)
+            }
             return executed(executeCustomToolCall(
                 name: name,
                 input: input,
@@ -945,7 +970,8 @@ public enum NonInteractiveExec {
         remoteEnvironmentFileSystems: [String: ExecServerRemoteFileSystem] = [:],
         features: FeatureStates = .withDefaults(),
         execPolicyManager: ExecPolicyManager = ExecPolicyManager(),
-        windowsSandboxLevel: WindowsSandboxLevel = .disabled
+        windowsSandboxLevel: WindowsSandboxLevel = .disabled,
+        registeredToolExecutor: RegisteredToolExecutor? = nil
     ) async -> FunctionCallExecutionResult {
         let hookPayload = toolHookPayload(for: item)
         var additionalItems: [ResponseItem] = []
@@ -1023,10 +1049,12 @@ public enum NonInteractiveExec {
             features: features,
             execPolicyManager: execPolicyManager,
             windowsSandboxLevel: windowsSandboxLevel,
+            registeredToolExecutor: registeredToolExecutor,
             turnID: turnID,
             approvalGranted: approvalGranted
         )
         let output = execution.output
+        additionalItems.append(contentsOf: execution.additionalContextItems)
         guard toolOutputSucceeded(output),
               let postPayload = postToolHookPayload(for: item, execution: execution, prePayload: hookPayload)
         else {
@@ -1515,6 +1543,7 @@ public enum NonInteractiveExec {
         features: FeatureStates,
         execPolicyManager: ExecPolicyManager,
         windowsSandboxLevel: WindowsSandboxLevel,
+        registeredToolExecutor: RegisteredToolExecutor?,
         turnID: String,
         approvalGranted: Bool
     ) async -> ExecutedFunctionCall {
@@ -1670,6 +1699,14 @@ public enum NonInteractiveExec {
                     context: agentJobContext
                 ) {
                     return executed(agentJobOutput)
+                }
+                if let registeredResult = await registeredToolExecutor?(.functionCall(
+                    name: name,
+                    namespace: namespace,
+                    arguments: arguments,
+                    callID: callID
+                )) {
+                    return executed(registeredResult)
                 }
                 return executed(functionOutput(
                     callID: callID,

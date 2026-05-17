@@ -278,8 +278,12 @@ Recent upstream audit checkpoint:
   Rust's extension registration collision rule by skipping extension specs whose
   flat name is already registered, including code-mode public `exec`/`wait`
   reservations, preserving builtin/dynamic tools and extension parallel-call
-  metadata. The broader live extension executor handle
-  registry and dispatch path remains pending.
+  metadata. Swift's non-interactive execution helper now accepts a registered
+  tool executor and routes non-builtin custom tools plus unknown namespaced
+  function calls through that handler before falling back to Rust's unsupported
+  call messages, while preserving builtin dispatch precedence for tools such as
+  `apply_patch` and the agent-job helpers. The broader live app-server
+  extension executor handle registry remains pending.
 - 2026-05-17: rechecked Rust commit `4a1f1df8ce` (`[codex] fix plugin CLI
   active user layer compile`). Swift plugin CLI helper surfaces now have
   explicit coverage that `codex plugin marketplace list` and

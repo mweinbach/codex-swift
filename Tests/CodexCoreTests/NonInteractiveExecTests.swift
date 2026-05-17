@@ -3326,6 +3326,95 @@ final class NonInteractiveExecTests: XCTestCase {
         )
     }
 
+    func testRegisteredCustomToolCallDispatchesBeforeUnsupportedFallbackLikeRustExtensions() async throws {
+        let item = ResponseItem.customToolCall(
+            callID: "custom-extension",
+            name: "extension/echo",
+            input: #"{"message":"hi"}"#
+        )
+        let capture = RegisteredToolCapture()
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            item,
+            cwd: URL(fileURLWithPath: "/tmp", isDirectory: true),
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: [:],
+            registeredToolExecutor: { item in
+                await capture.record(item)
+                guard case let .customToolCall(_, _, callID, name, input) = item else {
+                    return nil
+                }
+                return NonInteractiveExec.FunctionCallExecutionResult(
+                    output: .customToolCallOutput(
+                        callID: callID,
+                        output: #"{"tool":"\#(name)","input":\#(input)}"#
+                    )
+                )
+            }
+        )
+
+        let recordedItems = await capture.recorded()
+        XCTAssertEqual(recordedItems, [item])
+        XCTAssertEqual(
+            output,
+            .customToolCallOutput(
+                callID: "custom-extension",
+                output: #"{"tool":"extension/echo","input":{"message":"hi"}}"#
+            )
+        )
+    }
+
+    func testRegisteredNamespacedFunctionCallDispatchesBeforeUnsupportedFallbackLikeRustExtensions() async throws {
+        let item = ResponseItem.functionCall(
+            name: "echo",
+            namespace: "extension/",
+            arguments: #"{"message":"hi"}"#,
+            callID: "call-extension"
+        )
+        let capture = RegisteredToolCapture()
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            item,
+            cwd: URL(fileURLWithPath: "/tmp", isDirectory: true),
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: [:],
+            registeredToolExecutor: { item in
+                await capture.record(item)
+                guard case let .functionCall(_, name, namespace, arguments, callID) = item else {
+                    return nil
+                }
+                return NonInteractiveExec.FunctionCallExecutionResult(
+                    output: .functionCallOutput(
+                        callID: callID,
+                        output: FunctionCallOutputPayload(
+                            content: #"registered \#(namespace ?? "")\#(name): \#(arguments)"#,
+                            success: true
+                        )
+                    )
+                )
+            }
+        )
+
+        let recordedItems = await capture.recorded()
+        XCTAssertEqual(recordedItems, [item])
+        XCTAssertEqual(
+            output,
+            .functionCallOutput(
+                callID: "call-extension",
+                output: FunctionCallOutputPayload(
+                    content: #"registered extension/echo: {"message":"hi"}"#,
+                    success: true
+                )
+            )
+        )
+    }
+
     func testApplyPatchCustomToolCallAppliesFreeformInput() async throws {
         let temp = try NonInteractiveExecTemporaryDirectory()
         let patch = """
@@ -4586,6 +4675,18 @@ private actor RegisteredToolLoopScript {
 
     func prompts() -> [Prompt] {
         recordedPrompts
+    }
+}
+
+private actor RegisteredToolCapture {
+    private var items: [ResponseItem] = []
+
+    func record(_ item: ResponseItem) {
+        items.append(item)
+    }
+
+    func recorded() -> [ResponseItem] {
+        items
     }
 }
 
