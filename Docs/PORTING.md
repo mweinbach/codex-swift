@@ -12,6 +12,14 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `b200dd1b6f` (`exec-server:
+  support auth-backed remote executor registration`). Swift remote
+  `exec-server` registration now matches Rust's current registry wire shape:
+  the registry client posts to `/cloud/executor/{executor_id}/register` with
+  the configured auth-provider headers, sends no JSON body/content type,
+  decodes the Rust response payload containing only `executor_id` and `url`,
+  and logs the Rust-shaped remote registration message before connecting to
+  the rendezvous websocket.
 - 2026-05-17: rechecked Rust commit `0445b290fe` (`[1 of 4] tui:
   route primary settings writes through app server`). Swift app-server
   `config/value/write` and `config/batchWrite` now parse config `keyPath`

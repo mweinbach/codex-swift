@@ -1,7 +1,5 @@
-import CryptoKit
 import Foundation
 
-private let execServerRemoteProtocolVersion = "codex-exec-server-v1"
 private let execServerRegistryErrorPreviewBytes = 4096
 
 public enum ExecServerRemoteExecutorError: Error, CustomStringConvertible, Equatable, Sendable {
@@ -22,49 +20,16 @@ public enum ExecServerRemoteExecutorError: Error, CustomStringConvertible, Equat
     }
 }
 
-public struct ExecServerRemoteExecutorRegistrationRequest: Codable, Equatable, Sendable {
-    public let idempotencyId: String
-    public let executorId: String
-    public let name: String?
-    public let labels: [String: String]
-    public let metadata: JSONValue
-
-    public init(
-        idempotencyId: String,
-        executorId: String,
-        name: String?,
-        labels: [String: String] = [:],
-        metadata: JSONValue = .object([:])
-    ) {
-        self.idempotencyId = idempotencyId
-        self.executorId = executorId
-        self.name = name
-        self.labels = labels
-        self.metadata = metadata
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case idempotencyId = "idempotency_id"
-        case executorId = "executor_id"
-        case name
-        case labels
-        case metadata
-    }
-}
-
 public struct ExecServerRemoteExecutorRegistrationResponse: Codable, Equatable, Sendable {
-    public let id: String
     public let executorId: String
     public let url: String
 
-    public init(id: String, executorId: String, url: String) {
-        self.id = id
+    public init(executorId: String, url: String) {
         self.executorId = executorId
         self.url = url
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id
         case executorId = "executor_id"
         case url
     }
@@ -99,17 +64,15 @@ public struct ExecServerRemoteExecutorRegistryClient: Sendable {
     }
 
     public func registerExecutor(
-        _ request: ExecServerRemoteExecutorRegistrationRequest
+        executorID: String
     ) async throws -> ExecServerRemoteExecutorRegistrationResponse {
-        let endpoint = "\(baseURL)/cloud/executor/\(request.executorId)/register"
+        let endpoint = "\(baseURL)/cloud/executor/\(executorID)/register"
         guard let url = URL(string: endpoint) else {
             throw ExecServerRemoteExecutorError.registryRequest("bad URL: \(endpoint)")
         }
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "POST"
         urlRequest.addAuthHeaders(from: authProvider)
-        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.httpBody = try JSONEncoder().encode(request)
 
         let response: URLSessionTransportResponse
         do {
@@ -195,7 +158,7 @@ public struct ExecServerRemoteExecutorRegistryClient: Sendable {
 
 public struct ExecServerRemoteExecutor: Sendable {
     public typealias RegisterExecutor = @Sendable (
-        ExecServerRemoteExecutorRegistrationRequest
+        String
     ) async throws -> ExecServerRemoteExecutorRegistrationResponse
     public typealias ConnectAndServe = @Sendable (
         String,
@@ -205,7 +168,6 @@ public struct ExecServerRemoteExecutor: Sendable {
     public typealias MessageSink = @Sendable (String) async -> Void
 
     private let config: ExecServerRemoteExecutorConfiguration
-    private let registrationID: UUID
     private let processor: ExecServerConnectionProcessor
     private let registerExecutor: RegisterExecutor
     private let connectAndServe: ConnectAndServe
@@ -214,7 +176,6 @@ public struct ExecServerRemoteExecutor: Sendable {
 
     public init(
         config: ExecServerRemoteExecutorConfiguration,
-        registrationID: UUID = UUID(),
         processor: ExecServerConnectionProcessor = ExecServerConnectionProcessor(),
         registerExecutor: @escaping RegisterExecutor,
         connectAndServe: @escaping ConnectAndServe = ExecServerRemoteExecutor.urlSessionConnectAndServe,
@@ -222,7 +183,6 @@ public struct ExecServerRemoteExecutor: Sendable {
         messageSink: @escaping MessageSink = ExecServerRemoteExecutor.standardErrorMessageSink
     ) {
         self.config = config
-        self.registrationID = registrationID
         self.processor = processor
         self.registerExecutor = registerExecutor
         self.connectAndServe = connectAndServe
@@ -232,7 +192,6 @@ public struct ExecServerRemoteExecutor: Sendable {
 
     public init(
         config: ExecServerRemoteExecutorConfiguration,
-        registrationID: UUID = UUID(),
         processor: ExecServerConnectionProcessor = ExecServerConnectionProcessor(),
         connectAndServe: @escaping ConnectAndServe = ExecServerRemoteExecutor.urlSessionConnectAndServe,
         sleep: @escaping Sleep = ExecServerRemoteExecutor.taskSleep,
@@ -244,9 +203,8 @@ public struct ExecServerRemoteExecutor: Sendable {
         )
         self.init(
             config: config,
-            registrationID: registrationID,
             processor: processor,
-            registerExecutor: { request in try await client.registerExecutor(request) },
+            registerExecutor: { executorID in try await client.registerExecutor(executorID: executorID) },
             connectAndServe: connectAndServe,
             sleep: sleep,
             messageSink: messageSink
@@ -257,10 +215,9 @@ public struct ExecServerRemoteExecutor: Sendable {
         var backoffSeconds = 1.0
 
         while !Task.isCancelled {
-            let request = config.registrationRequest(registrationID: registrationID)
-            let response = try await registerExecutor(request)
+            let response = try await registerExecutor(config.executorID)
             await messageSink(
-                "codex exec-server remote executor \(response.id) registered with executor_id \(response.executorId)"
+                "codex exec-server remote executor registered with executor_id \(response.executorId)"
             )
 
             do {
@@ -388,42 +345,7 @@ private struct RegistryError: Decodable {
 }
 
 extension ExecServerRemoteExecutorConfiguration {
-    public func registrationRequest(registrationID: UUID) -> ExecServerRemoteExecutorRegistrationRequest {
-        ExecServerRemoteExecutorRegistrationRequest(
-            idempotencyId: defaultIdempotencyID(registrationID: registrationID),
-            executorId: executorID,
-            name: name,
-            labels: [:],
-            metadata: .object([:])
-        )
-    }
-
-    public func defaultIdempotencyID(registrationID: UUID) -> String {
-        var hasher = SHA256()
-        hasher.update(data: Data(executorID.utf8))
-        hasher.update(data: Data([0]))
-        hasher.update(data: Data(name.utf8))
-        hasher.update(data: Data([0]))
-        hasher.update(data: Data(execServerRemoteProtocolVersion.utf8))
-        hasher.update(data: Data([0]))
-        hasher.update(data: Data(registrationID.uuidBytes))
-        let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
-        return "codex-exec-server-\(digest)"
-    }
-
     static func normalizedBaseURL(_ baseURL: String) throws -> String {
         try normalizeBaseURL(baseURL)
-    }
-}
-
-private extension UUID {
-    var uuidBytes: [UInt8] {
-        [
-            uuid.0, uuid.1, uuid.2, uuid.3,
-            uuid.4, uuid.5,
-            uuid.6, uuid.7,
-            uuid.8, uuid.9,
-            uuid.10, uuid.11, uuid.12, uuid.13, uuid.14, uuid.15
-        ]
     }
 }

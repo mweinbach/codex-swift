@@ -4859,34 +4859,11 @@ final class ExecServerTests: XCTestCase {
         XCTAssertEqual(config.authProvider, StaticAPIAuthProvider(bearerToken: "token", accountID: "workspace-123"))
     }
 
-    func testRemoteExecutorRegistrationRequestMatchesRustShape() throws {
-        let config = try ExecServerRemoteExecutorConfiguration(
-            baseURL: "https://registry.example.test",
-            executorID: "exec-requested",
-            authProvider: StaticAPIAuthProvider(bearerToken: "registry-token")
-        )
-        let registrationID = try XCTUnwrap(UUID(uuidString: "00000000-0000-0000-0000-000000000001"))
-        let request = config.registrationRequest(registrationID: registrationID)
-
-        XCTAssertEqual(
-            request.idempotencyId,
-            "codex-exec-server-ca85dcc8eab43dfc6a5e632a7fe44adb7f5e904895bec68497baa50e37305fed"
-        )
-        try XCTAssertJSONObjectEqual(request, [
-            "idempotency_id": request.idempotencyId,
-            "executor_id": "exec-requested",
-            "name": "codex-exec-server",
-            "labels": [:],
-            "metadata": [:]
-        ])
-    }
-
     func testRemoteExecutorRegistryClientPostsWithAuthProviderHeadersLikeRust() async throws {
         let recorder = HTTPRequestRecorder(response: URLSessionTransportResponse(
             statusCode: 200,
             body: Data(#"""
             {
-              "id": "registration-1",
               "executor_id": "exec-1",
               "url": "wss://rendezvous.test/executor/exec-1?role=executor&sig=abc"
             }
@@ -4898,14 +4875,9 @@ final class ExecServerTests: XCTestCase {
             send: { request in await recorder.send(request) }
         )
 
-        let response = try await client.registerExecutor(ExecServerRemoteExecutorRegistrationRequest(
-            idempotencyId: "idem-1",
-            executorId: "exec-requested",
-            name: "codex-exec-server"
-        ))
+        let response = try await client.registerExecutor(executorID: "exec-requested")
 
         XCTAssertEqual(response, ExecServerRemoteExecutorRegistrationResponse(
-            id: "registration-1",
             executorId: "exec-1",
             url: "wss://rendezvous.test/executor/exec-1?role=executor&sig=abc"
         ))
@@ -4915,15 +4887,8 @@ final class ExecServerTests: XCTestCase {
         XCTAssertEqual(request.httpMethod, "POST")
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer registry-token")
         XCTAssertEqual(request.value(forHTTPHeaderField: "ChatGPT-Account-ID"), "workspace-123")
-        let body = try XCTUnwrap(request.httpBody)
-        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
-        XCTAssertEqual(NSDictionary(dictionary: object), NSDictionary(dictionary: [
-            "idempotency_id": "idem-1",
-            "executor_id": "exec-requested",
-            "name": "codex-exec-server",
-            "labels": [:],
-            "metadata": [:]
-        ]))
+        XCTAssertNil(request.value(forHTTPHeaderField: "Content-Type"))
+        XCTAssertNil(request.httpBody)
     }
 
     func testRemoteExecutorRegistryClientPostsAgentAssertionAuthHeaderLikeRust() async throws {
@@ -4931,7 +4896,6 @@ final class ExecServerTests: XCTestCase {
             statusCode: 200,
             body: Data(#"""
             {
-              "id": "registration-1",
               "executor_id": "exec-1",
               "url": "wss://rendezvous.test/executor/exec-1?role=executor&sig=abc"
             }
@@ -4946,11 +4910,7 @@ final class ExecServerTests: XCTestCase {
             send: { request in await recorder.send(request) }
         )
 
-        _ = try await client.registerExecutor(ExecServerRemoteExecutorRegistrationRequest(
-            idempotencyId: "idem-1",
-            executorId: "exec-requested",
-            name: "codex-exec-server"
-        ))
+        _ = try await client.registerExecutor(executorID: "exec-requested")
 
         let recordedRequest = await recorder.firstRequest()
         let request = try XCTUnwrap(recordedRequest)
@@ -4968,11 +4928,7 @@ final class ExecServerTests: XCTestCase {
             ) }
         )
         await XCTAssertThrowsExecServerRemoteError(
-            try await authClient.registerExecutor(ExecServerRemoteExecutorRegistrationRequest(
-                idempotencyId: "idem-1",
-                executorId: "exec-1",
-                name: nil
-            )),
+            try await authClient.registerExecutor(executorID: "exec-1"),
             description: "executor registry authentication error: executor registry authentication failed (403): bad token"
         )
 
@@ -4985,11 +4941,7 @@ final class ExecServerTests: XCTestCase {
             ) }
         )
         await XCTAssertThrowsExecServerRemoteError(
-            try await httpClient.registerExecutor(ExecServerRemoteExecutorRegistrationRequest(
-                idempotencyId: "idem-1",
-                executorId: "exec-1",
-                name: nil
-            )),
+            try await httpClient.registerExecutor(executorID: "exec-1"),
             description: "executor registry request failed (500, registry_failed): try again"
         )
     }
@@ -5000,10 +4952,8 @@ final class ExecServerTests: XCTestCase {
             executorID: "exec-requested",
             authProvider: StaticAPIAuthProvider(bearerToken: "registry-token")
         )
-        let registrationID = try XCTUnwrap(UUID(uuidString: "00000000-0000-0000-0000-000000000001"))
         let recorder = RemoteExecutorRunRecorder(
             responses: [ExecServerRemoteExecutorRegistrationResponse(
-                id: "registration-1",
                 executorId: "exec-1",
                 url: "wss://rendezvous.test/executor/exec-1"
             )],
@@ -5011,8 +4961,7 @@ final class ExecServerTests: XCTestCase {
         )
         let executor = ExecServerRemoteExecutor(
             config: config,
-            registrationID: registrationID,
-            registerExecutor: { request in await recorder.register(request) },
+            registerExecutor: { executorID in await recorder.register(executorID: executorID) },
             connectAndServe: { url, _ in try await recorder.connect(url) },
             sleep: { seconds in try await recorder.sleep(seconds, stopAfter: 1) },
             messageSink: { message in await recorder.message(message) }
@@ -5027,14 +4976,11 @@ final class ExecServerTests: XCTestCase {
         }
 
         let snapshot = await recorder.snapshot()
-        XCTAssertEqual(snapshot.requests.map(\.executorId), ["exec-requested"])
-        XCTAssertEqual(snapshot.requests.map(\.idempotencyId), [
-            "codex-exec-server-ca85dcc8eab43dfc6a5e632a7fe44adb7f5e904895bec68497baa50e37305fed"
-        ])
+        XCTAssertEqual(snapshot.executorIDs, ["exec-requested"])
         XCTAssertEqual(snapshot.connectedURLs, ["wss://rendezvous.test/executor/exec-1"])
         XCTAssertEqual(snapshot.sleeps, [1.0])
         XCTAssertEqual(snapshot.messages, [
-            "codex exec-server remote executor registration-1 registered with executor_id exec-1"
+            "codex exec-server remote executor registered with executor_id exec-1"
         ])
     }
 
@@ -5044,16 +4990,13 @@ final class ExecServerTests: XCTestCase {
             executorID: "exec-requested",
             authProvider: StaticAPIAuthProvider(bearerToken: "registry-token")
         )
-        let registrationID = try XCTUnwrap(UUID(uuidString: "00000000-0000-0000-0000-000000000001"))
         let recorder = RemoteExecutorRunRecorder(
             responses: [
                 ExecServerRemoteExecutorRegistrationResponse(
-                    id: "registration-1",
                     executorId: "exec-1",
                     url: "wss://rendezvous.test/first"
                 ),
                 ExecServerRemoteExecutorRegistrationResponse(
-                    id: "registration-2",
                     executorId: "exec-1",
                     url: "wss://rendezvous.test/second"
                 )
@@ -5062,8 +5005,7 @@ final class ExecServerTests: XCTestCase {
         )
         let executor = ExecServerRemoteExecutor(
             config: config,
-            registrationID: registrationID,
-            registerExecutor: { request in await recorder.register(request) },
+            registerExecutor: { executorID in await recorder.register(executorID: executorID) },
             connectAndServe: { url, _ in try await recorder.connect(url) },
             sleep: { seconds in try await recorder.sleep(seconds, stopAfter: 2) },
             messageSink: { message in await recorder.message(message) }
@@ -5078,17 +5020,16 @@ final class ExecServerTests: XCTestCase {
         }
 
         let snapshot = await recorder.snapshot()
-        XCTAssertEqual(snapshot.requests.count, 2)
-        XCTAssertEqual(Set(snapshot.requests.map(\.idempotencyId)).count, 1)
+        XCTAssertEqual(snapshot.executorIDs, ["exec-requested", "exec-requested"])
         XCTAssertEqual(snapshot.connectedURLs, [
             "wss://rendezvous.test/first",
             "wss://rendezvous.test/second"
         ])
         XCTAssertEqual(snapshot.sleeps, [1.0, 2.0])
         XCTAssertEqual(snapshot.messages, [
-            "codex exec-server remote executor registration-1 registered with executor_id exec-1",
+            "codex exec-server remote executor registered with executor_id exec-1",
             "failed to connect remote exec-server websocket: test websocket connect failed",
-            "codex exec-server remote executor registration-2 registered with executor_id exec-1",
+            "codex exec-server remote executor registered with executor_id exec-1",
             "failed to connect remote exec-server websocket: test websocket connect failed"
         ])
     }
@@ -5393,7 +5334,7 @@ final class ExecServerTests: XCTestCase {
     private actor RemoteExecutorRunRecorder {
         private var responses: [ExecServerRemoteExecutorRegistrationResponse]
         private var connectFailures: [Bool]
-        private var requests: [ExecServerRemoteExecutorRegistrationRequest] = []
+        private var executorIDs: [String] = []
         private var connectedURLs: [String] = []
         private var sleeps: [TimeInterval] = []
         private var messages: [String] = []
@@ -5407,9 +5348,9 @@ final class ExecServerTests: XCTestCase {
         }
 
         func register(
-            _ request: ExecServerRemoteExecutorRegistrationRequest
+            executorID: String
         ) -> ExecServerRemoteExecutorRegistrationResponse {
-            requests.append(request)
+            executorIDs.append(executorID)
             if responses.count > 1 {
                 return responses.removeFirst()
             }
@@ -5436,12 +5377,12 @@ final class ExecServerTests: XCTestCase {
         }
 
         func snapshot() -> (
-            requests: [ExecServerRemoteExecutorRegistrationRequest],
+            executorIDs: [String],
             connectedURLs: [String],
             sleeps: [TimeInterval],
             messages: [String]
         ) {
-            (requests, connectedURLs, sleeps, messages)
+            (executorIDs, connectedURLs, sleeps, messages)
         }
     }
 
