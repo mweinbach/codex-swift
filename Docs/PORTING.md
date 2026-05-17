@@ -215,7 +215,12 @@ Recent upstream audit checkpoint:
   values with Rust's quoted-segment rules, so paths like
   `profiles."team.prod".model` update a dotted profile name without
   accidentally writing `profiles.team.prod.model`, while bare segments such as
-  `sample@catalog` remain valid.
+  `sample@catalog` remain valid. Swift also now pins the Rust TUI helper's
+  primary-settings batch payload shape: profile-scoped `model`,
+  `model_reasoning_effort`, `personality`, cleared `service_tier`,
+  `plan_mode_reasoning_effort`, `approvals_reviewer`, and the root
+  `notice.fast_default_opt_out` opt-out write are applied through
+  `config/batchWrite` with `reloadUserConfig`.
 - 2026-05-17: rechecked Rust commit `6d65686313` (`feat: make ToolExecutor
   an async trait`). Swift does not carry Rust's boxed trait-object tool
   registry, so there is no matching protocol signature to migrate. The current

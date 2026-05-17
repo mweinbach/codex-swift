@@ -30457,6 +30457,44 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(catalogServer["command"] as? String, "echo")
     }
 
+    func testConfigBatchWriteUpdatesPrimaryProfileSettingsLikeRustTui() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        try """
+        profile = "team.prod"
+
+        [profiles."team.prod"]
+        service_tier = "fast"
+
+        """.write(to: configFile, atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"config/batchWrite","params":{"filePath":"\#(configFile.path)","edits":[{"keyPath":"profiles.\"team.prod\".model","value":"gpt-5.5","mergeStrategy":"replace"},{"keyPath":"profiles.\"team.prod\".model_reasoning_effort","value":"high","mergeStrategy":"replace"},{"keyPath":"profiles.\"team.prod\".personality","value":"friendly","mergeStrategy":"replace"},{"keyPath":"profiles.\"team.prod\".service_tier","value":null,"mergeStrategy":"replace"},{"keyPath":"profiles.\"team.prod\".plan_mode_reasoning_effort","value":"medium","mergeStrategy":"replace"},{"keyPath":"profiles.\"team.prod\".approvals_reviewer","value":"auto_review","mergeStrategy":"replace"},{"keyPath":"notice.fast_default_opt_out","value":true,"mergeStrategy":"replace"}],"reloadUserConfig":true}}"#,
+            codexHome: temp.url
+        )
+        guard let result = response["result"] as? [String: Any] else {
+            return XCTFail("expected result, got \(response)")
+        }
+        XCTAssertEqual(result["status"] as? String, "ok")
+
+        let verify = try appServerResponse(
+            #"{"id":2,"method":"config/read","params":{}}"#,
+            codexHome: temp.url
+        )
+        let verifyResult = try XCTUnwrap(verify["result"] as? [String: Any])
+        let config = try XCTUnwrap(verifyResult["config"] as? [String: Any])
+        let profiles = try XCTUnwrap(config["profiles"] as? [String: Any])
+        let profile = try XCTUnwrap(profiles["team.prod"] as? [String: Any])
+        XCTAssertEqual(profile["model"] as? String, "gpt-5.5")
+        XCTAssertEqual(profile["model_reasoning_effort"] as? String, "high")
+        XCTAssertEqual(profile["personality"] as? String, "friendly")
+        XCTAssertTrue(profile["service_tier"] is NSNull)
+        XCTAssertEqual(profile["plan_mode_reasoning_effort"] as? String, "medium")
+        XCTAssertEqual(profile["approvals_reviewer"] as? String, "auto_review")
+        let notice = try XCTUnwrap(config["notice"] as? [String: Any])
+        XCTAssertEqual(notice["fast_default_opt_out"] as? Bool, true)
+    }
+
     func testGetUserSavedConfigReturnsLegacyRustShape() throws {
         let temp = try TemporaryDirectory()
         let writableRoot = temp.url.appendingPathComponent("workspace", isDirectory: true).path
