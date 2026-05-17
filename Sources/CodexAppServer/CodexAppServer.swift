@@ -18,6 +18,7 @@ public typealias AppServerCoreOpSubmitter = @Sendable (
 public typealias AppServerLiveRuntimeSubmitter = @Sendable (
     _ submission: AppServerLiveRuntimeSubmission
 ) throws -> [EventMessage]
+public typealias AppServerExtensionApprovalReviewer = @Sendable (_ prompt: String) async -> ReviewDecision?
 public typealias AppServerMemoryStartupTaskStarter = @Sendable (_ request: AppServerMemoryStartupTaskRequest) -> Void
 public typealias AppServerWindowsSandboxSetupRunner = @Sendable (_ request: WindowsSandboxSetupRequest) throws -> Void
 public typealias AppServerAccessibleConnectorProvider = @Sendable (
@@ -112,6 +113,7 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
     public let extensionPromptFragments: [ExtensionPromptFragment]
     public let extensionToolSpecs: [ConfiguredToolSpec]
     public let extensionRegisteredToolExecutor: NonInteractiveExec.RegisteredToolExecutor?
+    public let extensionApprovalReviewer: AppServerExtensionApprovalReviewer?
 
     public init(
         requestID: RequestID,
@@ -122,7 +124,8 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
         mcpElicitationsAutoDeny: Bool = false,
         extensionPromptFragments: [ExtensionPromptFragment] = [],
         extensionToolSpecs: [ConfiguredToolSpec] = [],
-        extensionRegisteredToolExecutor: NonInteractiveExec.RegisteredToolExecutor? = nil
+        extensionRegisteredToolExecutor: NonInteractiveExec.RegisteredToolExecutor? = nil,
+        extensionApprovalReviewer: AppServerExtensionApprovalReviewer? = nil
     ) {
         self.requestID = requestID
         self.threadID = threadID
@@ -133,6 +136,7 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
         self.extensionPromptFragments = extensionPromptFragments
         self.extensionToolSpecs = extensionToolSpecs
         self.extensionRegisteredToolExecutor = extensionRegisteredToolExecutor
+        self.extensionApprovalReviewer = extensionApprovalReviewer
     }
 
     public static func == (lhs: AppServerLiveRuntimeSubmission, rhs: AppServerLiveRuntimeSubmission) -> Bool {
@@ -26953,6 +26957,24 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         return extensionRuntimeState.registeredToolExecutor(threadID: parsedThreadID)
     }
 
+    private func extensionApprovalReviewer(threadID: String) -> AppServerExtensionApprovalReviewer? {
+        guard let parsedThreadID = try? ThreadId(string: threadID),
+              !extensionRuntimeState.registry.approvalReviewContributors.isEmpty
+        else {
+            return nil
+        }
+        let registry = extensionRuntimeState.registry
+        let sessionStore = extensionRuntimeState.sessionStore
+        let threadStore = extensionRuntimeState.threadStore(for: parsedThreadID)
+        return { prompt in
+            await registry.approvalReview(
+                sessionStore: sessionStore,
+                threadStore: threadStore,
+                prompt: prompt
+            )
+        }
+    }
+
     private func unsubscribeCurrentConnection(fromThreadID threadID: String) -> Bool {
         let manager = threadStateManager
         let connectionID = connectionID
@@ -29148,7 +29170,8 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                 ),
                 extensionPromptFragments: try extensionPromptFragments(threadID: threadID),
                 extensionToolSpecs: extensionToolSpecs(threadID: threadID),
-                extensionRegisteredToolExecutor: extensionRegisteredToolExecutor(threadID: threadID)
+                extensionRegisteredToolExecutor: extensionRegisteredToolExecutor(threadID: threadID),
+                extensionApprovalReviewer: extensionApprovalReviewer(threadID: threadID)
             ))
         } catch {
             throw AppServerError.internalError("\(failureMessage): \(error)")

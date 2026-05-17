@@ -13,6 +13,7 @@ final class CodexAppServerTests: XCTestCase {
         ExtensionTokenUsageContributor,
         ExtensionContextContributor,
         ExtensionToolContributor,
+        ExtensionApprovalReviewContributor,
         @unchecked Sendable
     {
         private let lock = NSLock()
@@ -84,6 +85,19 @@ final class CodexAppServerTests: XCTestCase {
                     executor: { _ in JSONToolOutput(.string("ok")) }
                 )
             ]
+        }
+
+        func contribute(
+            sessionStore: ExtensionData,
+            threadStore: ExtensionData,
+            prompt: String
+        ) async -> ReviewDecision? {
+            guard threadStore.get(String.self) == "thread-started",
+                  prompt.contains("claim")
+            else {
+                return nil
+            }
+            return .approvedForSession
         }
 
         private func append(_ value: String) {
@@ -4381,6 +4395,7 @@ final class CodexAppServerTests: XCTestCase {
         builder.tokenUsageContributor(recorder)
         builder.promptContributor(recorder)
         builder.toolContributor(recorder)
+        builder.approvalReviewContributor(recorder)
         let liveRuntime = AppServerLiveRuntimeCapture { submission in
             guard submission.turnID == "turn-3" else {
                 return []
@@ -4473,6 +4488,11 @@ final class CodexAppServerTests: XCTestCase {
                 output: FunctionCallOutputPayload(content: #""ok""#, success: true)
             )
         )
+        let approvalReviewer = try XCTUnwrap(firstSubmission.extensionApprovalReviewer)
+        let unclaimedReview = await approvalReviewer("leave this to the host")
+        XCTAssertNil(unclaimedReview)
+        let claimedReview = await approvalReviewer("claim this prompt")
+        XCTAssertEqual(claimedReview, .approvedForSession)
     }
 
     func testTurnStartRejectsUnsupportedImageDetailLikeRust() throws {

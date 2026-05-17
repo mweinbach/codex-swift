@@ -12,13 +12,18 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: completed the current live app-server extension runtime handoff by
+  carrying a thread-scoped approval-review closure into
+  `AppServerLiveRuntimeSubmission`. The live runtime parity test now verifies
+  extension prompt fragments, configured tools, dispatchable `extension/` tool
+  execution, and first-claim approval-review decisions against the stable thread
+  store seeded by `thread/start`.
 - 2026-05-17: extended the live app-server extension runtime bridge from
   model-visible prompt/tool data to dispatchable extension tools.
   `AppServerLiveRuntimeSubmission` now carries the thread-scoped registered
   extension tool executor produced from `ExtensionRuntimeState`, and the live
   runtime parity test executes the submitted `extension/` tool through that
-  handle. Approval-review contributor use in the live runtime loop remains
-  pending.
+  handle.
 - 2026-05-17: continued the live app-server extension runtime bridge by
   carrying extension prompt fragments and configured extension tool specs into
   `AppServerLiveRuntimeSubmission` for `turn/start`. The submitted Swift live
@@ -87,9 +92,10 @@ Recent upstream audit checkpoint:
   carries Rust's remaining extension registry contributor families for prompt
   fragments, native tools, approval-review claims, and ordered turn-item
   contributions, including first-claim approval-review dispatch and
-  executor-backed extension tool contracts. Live app-server/runtime emission
-  of these callbacks remains pending with the broader first-class extension
-  registry integration.
+  executor-backed extension tool contracts. Live app-server submission now
+  carries prompt fragments, configured tools, dispatchable extension tool
+  execution, and approval-review dispatch; ordered turn-item emission remains
+  pending with the broader running-thread integration.
 - 2026-05-17: rechecked Rust commit `c9edb26755` (`windows-sandbox: fail
   elevated setup when firewall policy is ineffective`). Swift now carries
   Rust's Windows sandbox setup error-code surface, including
