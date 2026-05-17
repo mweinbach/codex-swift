@@ -209,7 +209,8 @@ Recent upstream audit checkpoint:
   lock replay stripping likewise follows Rust by clearing the supported
   `model_instructions_file` input without carrying removed experimental-key
   plumbing.
-- 2026-05-16: rechecked Rust commit `8a5306ff88` (`app-server: use
+- 2026-05-16: rechecked Rust commits `c25d905f61` (`permissions: support
+  workspace roots in profiles`) and `8a5306ff88` (`app-server: use
   permission ids and runtime workspace roots`). Swift app-server protocol
   params now carry `runtimeWorkspaceRoots` on `thread/start`,
   `thread/resume`, `thread/fork`, and `turn/start` with matching experimental
