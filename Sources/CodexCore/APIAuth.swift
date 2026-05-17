@@ -1,17 +1,33 @@
 import Foundation
 
 public protocol APIAuthProvider: Sendable {
+    var authorizationHeader: String? { get }
     var bearerToken: String? { get }
     var accountID: String? { get }
 }
 
 public struct StaticAPIAuthProvider: APIAuthProvider, Equatable, Sendable {
+    private let explicitAuthorizationHeader: String?
     public let bearerToken: String?
     public let accountID: String?
+    public var authorizationHeader: String? {
+        explicitAuthorizationHeader ?? bearerToken.map { "Bearer \($0)" }
+    }
 
-    public init(bearerToken: String? = nil, accountID: String? = nil) {
+    public init(
+        bearerToken: String? = nil,
+        accountID: String? = nil,
+        authorizationHeader: String? = nil
+    ) {
+        self.explicitAuthorizationHeader = authorizationHeader
         self.bearerToken = bearerToken
         self.accountID = accountID
+    }
+}
+
+public extension APIAuthProvider {
+    var authorizationHeader: String? {
+        bearerToken.map { "Bearer \($0)" }
     }
 }
 
@@ -89,11 +105,8 @@ public enum APIAuthHeaders {
     ) -> APIRequest {
         var copy = request
 
-        if let token = auth.bearerToken {
-            let value = "Bearer \(token)"
-            if isValidHeaderValue(value) {
-                copy.headers[authorization] = value
-            }
+        if let value = auth.authorizationHeader, isValidHeaderValue(value) {
+            copy.headers[authorization] = value
         }
 
         if let accountID = auth.accountID, isValidHeaderValue(accountID) {
@@ -113,5 +126,26 @@ public enum APIAuthHeaders {
 public extension APIRequest {
     func addingAuthHeaders<Auth: APIAuthProvider>(from auth: Auth) -> APIRequest {
         APIAuthHeaders.addAuthHeaders(auth, to: self)
+    }
+}
+
+public extension URLRequest {
+    mutating func addAuthHeaders<Auth: APIAuthProvider>(from auth: Auth) {
+        if let value = auth.authorizationHeader,
+           APIAuthHeaders.isValidURLRequestHeaderValue(value) {
+            setValue(value, forHTTPHeaderField: APIAuthHeaders.authorization)
+        }
+        if let accountID = auth.accountID,
+           APIAuthHeaders.isValidURLRequestHeaderValue(accountID) {
+            setValue(accountID, forHTTPHeaderField: APIAuthHeaders.chatGPTAccountID)
+        }
+    }
+}
+
+public extension APIAuthHeaders {
+    static func isValidURLRequestHeaderValue(_ value: String) -> Bool {
+        value.unicodeScalars.allSatisfy { scalar in
+            scalar.value == 0x09 || (scalar.value >= 0x20 && scalar.value != 0x7F)
+        }
     }
 }

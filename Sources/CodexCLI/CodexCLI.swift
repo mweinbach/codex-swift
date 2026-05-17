@@ -433,7 +433,7 @@ public struct CodexCLI: Sendable {
 
     public enum ExecServerCommandAction: Equatable, Sendable {
         case listen(url: String)
-        case remote(baseURL: String, executorID: String, name: String?)
+        case remote(baseURL: String, executorID: String, name: String?, useAgentIdentityAuth: Bool)
     }
 
     public struct ExecServerCommandRequest: Equatable, Sendable {
@@ -3181,6 +3181,7 @@ public struct CodexCLI: Sendable {
         var remote: String?
         var executorID: String?
         var name: String?
+        var useAgentIdentityAuth = false
         var seenSingleValueOptions = Set<String>()
         var index = 0
 
@@ -3267,6 +3268,9 @@ public struct CodexCLI: Sendable {
                     }
                     name = String(argument.dropFirst("--name=".count))
                     index += 1
+                } else if argument == "--use-agent-identity-auth" {
+                    useAgentIdentityAuth = true
+                    index += 1
                 } else if argument.hasPrefix("-") {
                     return .failure("codex-swift: unsupported option for command 'exec-server': \(argument)", 64)
                 } else {
@@ -3282,8 +3286,16 @@ public struct CodexCLI: Sendable {
             return .success(ExecServerCommandRequest(action: .remote(
                 baseURL: remote,
                 executorID: executorID,
-                name: name
+                name: name,
+                useAgentIdentityAuth: useAgentIdentityAuth
             )))
+        }
+
+        if useAgentIdentityAuth {
+            return .failure(
+                "codex-swift: --use-agent-identity-auth requires --remote",
+                64
+            )
         }
 
         return .success(ExecServerCommandRequest(action: .listen(

@@ -1,8 +1,6 @@
 import Darwin
 import Foundation
 
-public let codexExecServerRemoteBearerTokenEnvironmentVariable = "CODEX_EXEC_SERVER_REMOTE_BEARER_TOKEN"
-
 public let defaultExecServerListenURL = "ws://127.0.0.1:0"
 
 public let execServerInitializeMethod = "initialize"
@@ -869,37 +867,18 @@ public struct ExecServerRemoteExecutorConfiguration: Equatable, Sendable {
     public let baseURL: String
     public let executorID: String
     public let name: String
-    public let bearerToken: String
+    public let authProvider: StaticAPIAuthProvider
 
     public init(
         baseURL: String,
         executorID: String,
         name: String = "codex-exec-server",
-        bearerToken: String
+        authProvider: StaticAPIAuthProvider
     ) throws {
         self.baseURL = try Self.normalizeBaseURL(baseURL)
         self.executorID = try Self.normalizeExecutorID(executorID)
         self.name = name
-        self.bearerToken = try Self.normalizeBearerToken(bearerToken)
-    }
-
-    public static func fromEnvironment(
-        baseURL: String,
-        executorID: String,
-        name: String? = nil,
-        environment: [String: String] = ProcessInfo.processInfo.environment
-    ) throws -> Self {
-        guard let bearerToken = environment[codexExecServerRemoteBearerTokenEnvironmentVariable] else {
-            throw ExecServerConfigurationError.executorRegistryAuth(
-                "executor registry bearer token environment variable `\(codexExecServerRemoteBearerTokenEnvironmentVariable)` is not set"
-            )
-        }
-        return try Self(
-            baseURL: baseURL,
-            executorID: executorID,
-            name: name ?? "codex-exec-server",
-            bearerToken: bearerToken
-        )
+        self.authProvider = authProvider
     }
 
     static func normalizeBaseURL(_ baseURL: String) throws -> String {
@@ -923,15 +902,6 @@ public struct ExecServerRemoteExecutorConfiguration: Equatable, Sendable {
         return trimmed
     }
 
-    private static func normalizeBearerToken(_ bearerToken: String) throws -> String {
-        let trimmed = bearerToken.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            throw ExecServerConfigurationError.executorRegistryAuth(
-                "executor registry bearer token environment variable `\(codexExecServerRemoteBearerTokenEnvironmentVariable)` is empty"
-            )
-        }
-        return trimmed
-    }
 }
 
 public enum ExecServerListenURLParser {

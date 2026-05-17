@@ -25,6 +25,21 @@ final class APIAuthTests: XCTestCase {
         XCTAssertNil(authed.timeoutMilliseconds)
     }
 
+    func testAddAuthHeadersUsesExplicitAuthorizationHeaderLikeRustAuthProvider() {
+        let request = APIRequest(method: .get, url: "https://example.com/models")
+
+        let authed = request.addingAuthHeaders(from: StaticAPIAuthProvider(
+            bearerToken: "ignored-bearer",
+            accountID: "account-id",
+            authorizationHeader: "AgentAssertion signed-payload"
+        ))
+
+        XCTAssertEqual(authed.headers, [
+            "authorization": "AgentAssertion signed-payload",
+            "ChatGPT-Account-ID": "account-id"
+        ])
+    }
+
     func testAddAuthHeadersSkipsMissingValues() {
         let request = APIRequest(method: .get, url: "https://example.com/models")
 

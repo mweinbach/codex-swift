@@ -904,6 +904,14 @@ final class CommandSurfaceCLITests: XCTestCase {
                 "--executor-id=exec-123",
                 "--name",
                 "Local Executor"
+            ],
+            [
+                "exec-server",
+                "--remote",
+                "https://registry.example.test",
+                "--executor-id",
+                "exec-123",
+                "--use-agent-identity-auth"
             ]
         ] {
             let exitCode = await CodexCLI().runAsync(
@@ -924,12 +932,20 @@ final class CommandSurfaceCLITests: XCTestCase {
             CodexCLI.ExecServerCommandRequest(action: .remote(
                 baseURL: "https://registry.example.test",
                 executorID: "exec-123",
-                name: nil
+                name: nil,
+                useAgentIdentityAuth: false
             )),
             CodexCLI.ExecServerCommandRequest(action: .remote(
                 baseURL: "https://registry.example.test/",
                 executorID: "exec-123",
-                name: "Local Executor"
+                name: "Local Executor",
+                useAgentIdentityAuth: false
+            )),
+            CodexCLI.ExecServerCommandRequest(action: .remote(
+                baseURL: "https://registry.example.test",
+                executorID: "exec-123",
+                name: nil,
+                useAgentIdentityAuth: true
             ))
         ])
     }
@@ -979,6 +995,11 @@ final class CommandSurfaceCLITests: XCTestCase {
             (
                 ["exec-server", "--remote", "https://registry.example.test", "--executor-id", "exec-1", "--name", "a", "--name=b"],
                 "codex-swift: duplicate option for command 'exec-server': --name",
+                64
+            ),
+            (
+                ["exec-server", "--use-agent-identity-auth"],
+                "codex-swift: --use-agent-identity-auth requires --remote",
                 64
             ),
             (

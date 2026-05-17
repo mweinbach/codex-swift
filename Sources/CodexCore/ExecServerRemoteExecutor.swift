@@ -74,27 +74,27 @@ public struct ExecServerRemoteExecutorRegistryClient: Sendable {
     public typealias Send = @Sendable (URLRequest) async throws -> URLSessionTransportResponse
 
     private let baseURL: String
-    private let bearerToken: String
+    private let authProvider: StaticAPIAuthProvider
     private let send: Send
 
     public init(
         baseURL: String,
-        bearerToken: String
+        authProvider: StaticAPIAuthProvider
     ) throws {
         try self.init(
             baseURL: baseURL,
-            bearerToken: bearerToken,
+            authProvider: authProvider,
             send: ExecServerRemoteExecutorRegistryClient.urlSessionSend
         )
     }
 
     public init(
         baseURL: String,
-        bearerToken: String,
+        authProvider: StaticAPIAuthProvider,
         send: @escaping Send
     ) throws {
         self.baseURL = try ExecServerRemoteExecutorConfiguration.normalizedBaseURL(baseURL)
-        self.bearerToken = bearerToken
+        self.authProvider = authProvider
         self.send = send
     }
 
@@ -107,7 +107,7 @@ public struct ExecServerRemoteExecutorRegistryClient: Sendable {
         }
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "POST"
-        urlRequest.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
+        urlRequest.addAuthHeaders(from: authProvider)
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         urlRequest.httpBody = try JSONEncoder().encode(request)
 
@@ -240,7 +240,7 @@ public struct ExecServerRemoteExecutor: Sendable {
     ) throws {
         let client = try ExecServerRemoteExecutorRegistryClient(
             baseURL: config.baseURL,
-            bearerToken: config.bearerToken
+            authProvider: config.authProvider
         )
         self.init(
             config: config,

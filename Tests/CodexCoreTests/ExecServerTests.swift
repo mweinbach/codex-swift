@@ -4847,24 +4847,23 @@ final class ExecServerTests: XCTestCase {
     }
 
     func testRemoteExecutorConfigurationNormalizesRustValues() throws {
-        let config = try ExecServerRemoteExecutorConfiguration.fromEnvironment(
+        let config = try ExecServerRemoteExecutorConfiguration(
             baseURL: " https://registry.example.test/// ",
             executorID: " exec-123 ",
-            name: nil,
-            environment: [codexExecServerRemoteBearerTokenEnvironmentVariable: " token "]
+            authProvider: StaticAPIAuthProvider(bearerToken: "token", accountID: "workspace-123")
         )
 
         XCTAssertEqual(config.baseURL, "https://registry.example.test")
         XCTAssertEqual(config.executorID, "exec-123")
         XCTAssertEqual(config.name, "codex-exec-server")
-        XCTAssertEqual(config.bearerToken, "token")
+        XCTAssertEqual(config.authProvider, StaticAPIAuthProvider(bearerToken: "token", accountID: "workspace-123"))
     }
 
     func testRemoteExecutorRegistrationRequestMatchesRustShape() throws {
         let config = try ExecServerRemoteExecutorConfiguration(
             baseURL: "https://registry.example.test",
             executorID: "exec-requested",
-            bearerToken: "registry-token"
+            authProvider: StaticAPIAuthProvider(bearerToken: "registry-token")
         )
         let registrationID = try XCTUnwrap(UUID(uuidString: "00000000-0000-0000-0000-000000000001"))
         let request = config.registrationRequest(registrationID: registrationID)
@@ -4882,7 +4881,7 @@ final class ExecServerTests: XCTestCase {
         ])
     }
 
-    func testRemoteExecutorRegistryClientPostsWithBearerTokenLikeRust() async throws {
+    func testRemoteExecutorRegistryClientPostsWithAuthProviderHeadersLikeRust() async throws {
         let recorder = HTTPRequestRecorder(response: URLSessionTransportResponse(
             statusCode: 200,
             body: Data(#"""
@@ -4895,7 +4894,7 @@ final class ExecServerTests: XCTestCase {
         ))
         let client = try ExecServerRemoteExecutorRegistryClient(
             baseURL: "https://registry.example.test/",
-            bearerToken: "registry-token",
+            authProvider: StaticAPIAuthProvider(bearerToken: "registry-token", accountID: "workspace-123"),
             send: { request in await recorder.send(request) }
         )
 
@@ -4915,6 +4914,7 @@ final class ExecServerTests: XCTestCase {
         XCTAssertEqual(request.url?.absoluteString, "https://registry.example.test/cloud/executor/exec-requested/register")
         XCTAssertEqual(request.httpMethod, "POST")
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer registry-token")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "ChatGPT-Account-ID"), "workspace-123")
         let body = try XCTUnwrap(request.httpBody)
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
         XCTAssertEqual(NSDictionary(dictionary: object), NSDictionary(dictionary: [
@@ -4926,10 +4926,42 @@ final class ExecServerTests: XCTestCase {
         ]))
     }
 
+    func testRemoteExecutorRegistryClientPostsAgentAssertionAuthHeaderLikeRust() async throws {
+        let recorder = HTTPRequestRecorder(response: URLSessionTransportResponse(
+            statusCode: 200,
+            body: Data(#"""
+            {
+              "id": "registration-1",
+              "executor_id": "exec-1",
+              "url": "wss://rendezvous.test/executor/exec-1?role=executor&sig=abc"
+            }
+            """#.utf8)
+        ))
+        let client = try ExecServerRemoteExecutorRegistryClient(
+            baseURL: "https://registry.example.test/",
+            authProvider: StaticAPIAuthProvider(
+                accountID: "workspace-123",
+                authorizationHeader: "AgentAssertion signed-payload"
+            ),
+            send: { request in await recorder.send(request) }
+        )
+
+        _ = try await client.registerExecutor(ExecServerRemoteExecutorRegistrationRequest(
+            idempotencyId: "idem-1",
+            executorId: "exec-requested",
+            name: "codex-exec-server"
+        ))
+
+        let recordedRequest = await recorder.firstRequest()
+        let request = try XCTUnwrap(recordedRequest)
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "AgentAssertion signed-payload")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "ChatGPT-Account-ID"), "workspace-123")
+    }
+
     func testRemoteExecutorRegistryClientErrorsMatchRustMessages() async throws {
         let authClient = try ExecServerRemoteExecutorRegistryClient(
             baseURL: "https://registry.example.test",
-            bearerToken: "registry-token",
+            authProvider: StaticAPIAuthProvider(bearerToken: "registry-token"),
             send: { _ in URLSessionTransportResponse(
                 statusCode: 403,
                 body: Data(#"{"error":{"message":"bad token"}}"#.utf8)
@@ -4946,7 +4978,7 @@ final class ExecServerTests: XCTestCase {
 
         let httpClient = try ExecServerRemoteExecutorRegistryClient(
             baseURL: "https://registry.example.test",
-            bearerToken: "registry-token",
+            authProvider: StaticAPIAuthProvider(bearerToken: "registry-token"),
             send: { _ in URLSessionTransportResponse(
                 statusCode: 500,
                 body: Data(#"{"error":{"code":"registry_failed","message":"try again"}}"#.utf8)
@@ -4966,7 +4998,7 @@ final class ExecServerTests: XCTestCase {
         let config = try ExecServerRemoteExecutorConfiguration(
             baseURL: "https://registry.example.test",
             executorID: "exec-requested",
-            bearerToken: "registry-token"
+            authProvider: StaticAPIAuthProvider(bearerToken: "registry-token")
         )
         let registrationID = try XCTUnwrap(UUID(uuidString: "00000000-0000-0000-0000-000000000001"))
         let recorder = RemoteExecutorRunRecorder(
@@ -5010,7 +5042,7 @@ final class ExecServerTests: XCTestCase {
         let config = try ExecServerRemoteExecutorConfiguration(
             baseURL: "https://registry.example.test",
             executorID: "exec-requested",
-            bearerToken: "registry-token"
+            authProvider: StaticAPIAuthProvider(bearerToken: "registry-token")
         )
         let registrationID = try XCTUnwrap(UUID(uuidString: "00000000-0000-0000-0000-000000000001"))
         let recorder = RemoteExecutorRunRecorder(
@@ -5062,21 +5094,10 @@ final class ExecServerTests: XCTestCase {
     }
 
     func testRemoteExecutorConfigurationErrorsMatchRustMessages() {
-        XCTAssertThrowsError(try ExecServerRemoteExecutorConfiguration.fromEnvironment(
-            baseURL: "https://registry.example.test",
-            executorID: "exec-123",
-            environment: [:]
-        )) { error in
-            XCTAssertEqual(
-                String(describing: error),
-                "executor registry authentication error: executor registry bearer token environment variable `CODEX_EXEC_SERVER_REMOTE_BEARER_TOKEN` is not set"
-            )
-        }
-
         XCTAssertThrowsError(try ExecServerRemoteExecutorConfiguration(
             baseURL: "https://registry.example.test",
             executorID: " ",
-            bearerToken: "token"
+            authProvider: StaticAPIAuthProvider(bearerToken: "token")
         )) { error in
             XCTAssertEqual(
                 String(describing: error),
@@ -5087,7 +5108,7 @@ final class ExecServerTests: XCTestCase {
         XCTAssertThrowsError(try ExecServerRemoteExecutorConfiguration(
             baseURL: " ",
             executorID: "exec-123",
-            bearerToken: "token"
+            authProvider: StaticAPIAuthProvider(bearerToken: "token")
         )) { error in
             XCTAssertEqual(
                 String(describing: error),
@@ -5095,16 +5116,6 @@ final class ExecServerTests: XCTestCase {
             )
         }
 
-        XCTAssertThrowsError(try ExecServerRemoteExecutorConfiguration(
-            baseURL: "https://registry.example.test",
-            executorID: "exec-123",
-            bearerToken: " "
-        )) { error in
-            XCTAssertEqual(
-                String(describing: error),
-                "executor registry authentication error: executor registry bearer token environment variable `CODEX_EXEC_SERVER_REMOTE_BEARER_TOKEN` is empty"
-            )
-        }
     }
 
     private func makeTemporaryDirectory() throws -> URL {

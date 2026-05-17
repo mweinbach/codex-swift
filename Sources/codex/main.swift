@@ -1839,16 +1839,77 @@ private func runExecServerCommand(_ request: CodexCLI.ExecServerCommandRequest) 
             }
             return CodexCLI.CommandExecutionResult(exitCode: 0)
         }
-    case let .remote(baseURL, executorID, name):
-        let config = try ExecServerRemoteExecutorConfiguration.fromEnvironment(
+    case let .remote(baseURL, executorID, name, useAgentIdentityAuth):
+        let authProvider = try await execServerRemoteAuthProvider(
+            useAgentIdentityAuth: useAgentIdentityAuth
+        )
+        let config = try ExecServerRemoteExecutorConfiguration(
             baseURL: baseURL,
             executorID: executorID,
-            name: name
+            name: name ?? "codex-exec-server",
+            authProvider: authProvider
         )
         let executor = try ExecServerRemoteExecutor(config: config)
         try await executor.run()
         return CodexCLI.CommandExecutionResult(exitCode: 0)
     }
+}
+
+private func execServerRemoteAuthProvider(
+    useAgentIdentityAuth: Bool,
+    environment: [String: String] = ProcessInfo.processInfo.environment
+) async throws -> StaticAPIAuthProvider {
+    let codexHome = try CodexHome.find()
+    let settings = try CodexConfigLoader.load(codexHome: codexHome, systemConfigFile: nil)
+
+    if useAgentIdentityAuth {
+        guard let accessToken = CodexAuthStorage.readCodexAccessTokenFromEnvironment(environment) else {
+            throw CodexRuntimeError.fatal("CODEX_ACCESS_TOKEN is required when --use-agent-identity-auth is set")
+        }
+        let claims = try AgentIdentity.decodeJWTClaims(accessToken)
+        let key = AgentIdentityKey(
+            agentRuntimeID: claims.agentRuntimeID,
+            privateKeyPKCS8Base64: claims.agentPrivateKey
+        )
+        let taskID = try await AgentIdentity.registerAgentTask(
+            transport: URLSessionAPITransport(),
+            chatGPTBaseURL: settings.chatgptBaseURL,
+            key: key
+        )
+        let authorizationHeader = try AgentIdentity.authorizationHeaderForAgentTask(
+            key: key,
+            target: AgentTaskAuthorizationTarget(agentRuntimeID: claims.agentRuntimeID, taskID: taskID)
+        )
+        return StaticAPIAuthProvider(
+            accountID: claims.accountID,
+            authorizationHeader: authorizationHeader
+        )
+    }
+
+    let storedAuth = try CodexAuthStorage.loadEffectiveAuthDotJSON(
+        codexHome: codexHome,
+        mode: settings.cliAuthCredentialsStoreMode
+    )
+    guard storedAuth?.openAIAPIKey == nil,
+          storedAuth?.authMode != .agentIdentity
+    else {
+        throw CodexRuntimeError.fatal(
+            "remote exec-server registration requires ChatGPT authentication; API key and Agent Identity auth are not supported"
+        )
+    }
+    guard let tokens = try await CodexAuthStorage.loadFreshTokenData(
+        codexHome: codexHome,
+        mode: settings.cliAuthCredentialsStoreMode
+    ) else {
+        throw CodexRuntimeError.fatal(
+            "remote exec-server registration requires ChatGPT authentication; run `codex login` first"
+        )
+    }
+
+    return StaticAPIAuthProvider(
+        bearerToken: tokens.accessToken,
+        accountID: tokens.accountID
+    )
 }
 
 private func runStdioToUDSCommand(_ request: CodexCLI.StdioToUDSCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
