@@ -13,8 +13,24 @@ public enum ApplyPatchToolType: String, Codable, CaseIterable, Equatable, Sendab
 }
 
 public enum ToolEnvironmentMode: Equatable, Sendable {
+    case none
     case single
     case multiple
+
+    public static func fromCount(_ count: Int) -> ToolEnvironmentMode {
+        switch count {
+        case 0:
+            .none
+        case 1:
+            .single
+        default:
+            .multiple
+        }
+    }
+
+    public var hasEnvironment: Bool {
+        self != .none
+    }
 }
 
 public enum WebSearchToolType: String, Codable, CaseIterable, Equatable, Sendable {
@@ -916,20 +932,22 @@ public enum ToolSpecFactory {
     ) -> [ConfiguredToolSpec] {
         var specs: [ConfiguredToolSpec] = []
 
-        switch config.shellType {
-        case .default, .local, .shellCommand:
-            specs.append(ConfiguredToolSpec(
-                spec: createShellCommandTool(allowLoginShell: config.allowLoginShell),
-                supportsParallelToolCalls: false
-            ))
-        case .unifiedExec:
-            specs.append(ConfiguredToolSpec(
-                spec: createExecCommandTool(allowLoginShell: config.allowLoginShell),
-                supportsParallelToolCalls: false
-            ))
-            specs.append(ConfiguredToolSpec(spec: createWriteStdinTool(), supportsParallelToolCalls: false))
-        case .disabled:
-            break
+        if config.environmentMode.hasEnvironment {
+            switch config.shellType {
+            case .default, .local, .shellCommand:
+                specs.append(ConfiguredToolSpec(
+                    spec: createShellCommandTool(allowLoginShell: config.allowLoginShell),
+                    supportsParallelToolCalls: false
+                ))
+            case .unifiedExec:
+                specs.append(ConfiguredToolSpec(
+                    spec: createExecCommandTool(allowLoginShell: config.allowLoginShell),
+                    supportsParallelToolCalls: false
+                ))
+                specs.append(ConfiguredToolSpec(spec: createWriteStdinTool(), supportsParallelToolCalls: false))
+            case .disabled:
+                break
+            }
         }
 
         specs.append(ConfiguredToolSpec(spec: createListMCPResourcesTool(), supportsParallelToolCalls: true))
@@ -962,11 +980,13 @@ public enum ToolSpecFactory {
             ))
         }
 
-        switch config.applyPatchToolType {
-        case .freeform:
-            specs.append(ConfiguredToolSpec(spec: createApplyPatchFreeformTool(), supportsParallelToolCalls: false))
-        case nil:
-            break
+        if config.environmentMode.hasEnvironment {
+            switch config.applyPatchToolType {
+            case .freeform:
+                specs.append(ConfiguredToolSpec(spec: createApplyPatchFreeformTool(), supportsParallelToolCalls: false))
+            case nil:
+                break
+            }
         }
 
         if config.experimentalSupportedTools.contains("test_sync_tool") {
@@ -1012,13 +1032,15 @@ public enum ToolSpecFactory {
             ))
         }
 
-        specs.append(ConfiguredToolSpec(
-            spec: createViewImageTool(
-                canRequestOriginalImageDetail: config.canRequestOriginalImageDetail,
-                includeEnvironmentID: config.environmentMode == .multiple
-            ),
-            supportsParallelToolCalls: true
-        ))
+        if config.environmentMode.hasEnvironment {
+            specs.append(ConfiguredToolSpec(
+                spec: createViewImageTool(
+                    canRequestOriginalImageDetail: config.canRequestOriginalImageDetail,
+                    includeEnvironmentID: config.environmentMode == .multiple
+                ),
+                supportsParallelToolCalls: true
+            ))
+        }
 
         if config.multiAgentV2Tools {
             specs.append(contentsOf: createMultiAgentV2ToolSpecs(

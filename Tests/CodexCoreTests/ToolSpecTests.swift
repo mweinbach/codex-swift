@@ -790,6 +790,24 @@ final class ToolSpecTests: XCTestCase {
         XCTAssertEqual(parallelSpecs["computer_key"], true)
     }
 
+    func testBuildSpecsOmitEnvironmentBackedToolsWhenEnvironmentDisabledLikeRust() {
+        let specs = ToolSpecFactory.buildSpecs(
+            config: ToolsConfig(
+                shellType: .unifiedExec,
+                applyPatchToolType: .freeform,
+                environmentMode: .none
+            )
+        )
+        let names = specs.map(\.spec.name)
+
+        XCTAssertFalse(names.contains("exec_command"))
+        XCTAssertFalse(names.contains("write_stdin"))
+        XCTAssertFalse(names.contains("apply_patch"))
+        XCTAssertFalse(names.contains("view_image"))
+        XCTAssertTrue(names.contains("list_mcp_resources"))
+        XCTAssertTrue(names.contains("update_plan"))
+    }
+
     func testBuildSpecsDoesNotBackfillUnavailableMcpPlaceholdersLikeCurrentRust() {
         let specs = ToolSpecFactory.buildSpecs(config: ToolsConfig(shellType: .disabled))
 

@@ -662,6 +662,30 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertTrue(workerNames.contains("report_agent_job_result"))
     }
 
+    func testToolSpecsHonorDisabledEnvironmentModeLikeRust() {
+        var features = FeatureStates.withDefaults()
+        features.set(.unifiedExec, enabled: true)
+        let config = CodexRuntimeConfig(features: features)
+        let modelFamily = ModelFamily(
+            slug: "test-model",
+            family: "test",
+            applyPatchToolType: .freeform,
+            shellType: .unifiedExec
+        )
+
+        let names = NonInteractiveExec.toolSpecs(
+            modelFamily: modelFamily,
+            config: config,
+            environmentMode: .none
+        ).map(\.spec.name)
+
+        XCTAssertFalse(names.contains("exec_command"))
+        XCTAssertFalse(names.contains("write_stdin"))
+        XCTAssertFalse(names.contains("apply_patch"))
+        XCTAssertFalse(names.contains("view_image"))
+        XCTAssertTrue(names.contains("update_plan"))
+    }
+
     func testToolSpecsForwardMultiAgentV2ConfigLikeRust() throws {
         var features = FeatureStates.withDefaults()
         features.set(.multiAgentV2, enabled: true)

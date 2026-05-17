@@ -1173,7 +1173,11 @@ private func runNonInteractiveExec(
         ? ConfiguredEnvironmentLoader.legacyEnvironmentSnapshot(environment: environment)
         : ConfiguredEnvironmentLoader.load(codexHome: codexHome, environment: environment)
     let turnEnvironmentSelections = configuredEnvironmentSnapshot.defaultThreadEnvironmentSelections(cwd: cwd.path)
-    let configuredTools = NonInteractiveExec.toolSpecs(modelFamily: modelFamily, config: settings)
+    let configuredTools = NonInteractiveExec.toolSpecs(
+        modelFamily: modelFamily,
+        config: settings,
+        environmentMode: .fromCount(turnEnvironmentSelections.count)
+    )
     let configSummary = ConfigSummary.renderStartupBanner(
         version: CodexCLI.version,
         entries: ConfigSummary.createEntries(

@@ -213,7 +213,8 @@ public enum NonInteractiveExec {
     public static func toolsConfig(
         modelFamily: ModelFamily,
         config: CodexRuntimeConfig,
-        sessionSource: SessionSource = .default
+        sessionSource: SessionSource = .default,
+        environmentMode: ToolEnvironmentMode = .single
     ) -> ToolsConfig {
         let shellType: ConfigShellToolType
         if !config.features.isEnabled(.shellTool) {
@@ -245,6 +246,7 @@ public enum NonInteractiveExec {
             webSearchMode: webSearchMode(for: config),
             webSearchConfig: config.webSearchConfig,
             canRequestOriginalImageDetail: modelFamily.supportsImageDetailOriginal,
+            environmentMode: environmentMode,
             includeComputerUseTools: config.features.isEnabled(.computerUse),
             experimentalSupportedTools: modelFamily.experimentalSupportedTools,
             toolSearch: config.features.isEnabled(.toolSearch),
@@ -279,12 +281,14 @@ public enum NonInteractiveExec {
     public static func toolSpecs(
         modelFamily: ModelFamily,
         config: CodexRuntimeConfig,
-        sessionSource: SessionSource = .default
+        sessionSource: SessionSource = .default,
+        environmentMode: ToolEnvironmentMode = .single
     ) -> [ConfiguredToolSpec] {
         ToolSpecFactory.buildSpecs(config: toolsConfig(
             modelFamily: modelFamily,
             config: config,
-            sessionSource: sessionSource
+            sessionSource: sessionSource,
+            environmentMode: environmentMode
         ))
     }
 

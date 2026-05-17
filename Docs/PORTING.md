@@ -411,9 +411,10 @@ Recent upstream audit checkpoint:
   agent-job tool executor now resolves relative input and output CSV paths
   against the single selected turn environment cwd and rejects multi-environment
   calls with Rust's `spawn_agents_on_csv requires exactly one local environment`
-  model-facing error. The local/remote environment-object distinction remains
-  pending for live session tool registration, where Swift does not yet carry
-  the full Rust `TurnEnvironment` value into this shared executor.
+  model-facing error. Swift tool-spec planning now also carries Rust's
+  `ToolEnvironmentMode.none` equivalent and omits environment-backed tools when
+  the selected environment list is empty, including CLI sessions whose
+  `environments.toml` disables the default environment.
 - 2026-05-16: rechecked Rust commit `e3bf0cfc63` (`[codex] Canonicalize
   shared workspace plugin IDs`) against `codex-rs/core-plugins/src/remote.rs`,
   `codex-rs/core-plugins/src/remote/remote_installed_plugin_sync.rs`, and the
