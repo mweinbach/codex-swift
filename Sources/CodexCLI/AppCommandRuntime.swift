@@ -3,8 +3,16 @@ import Foundation
 public enum AppCommandRuntime {
     public static let macArm64DMGURL = "https://persistent.oaistatic.com/codex-app-prod/Codex.dmg"
     public static let macX64DMGURL = "https://persistent.oaistatic.com/codex-app-prod/Codex-latest-x64.dmg"
+    public static let windowsInstallerURL = "https://get.microsoft.com/installer/download/9PLM9XGG6VKS?cid=website_cta_psi"
+    public static let windowsMicrosoftStoreURL = "https://apps.microsoft.com/detail/9plm9xgg6vks"
+
+    public enum Platform: Equatable, Sendable {
+        case macOS
+        case windows
+    }
 
     public struct Dependencies: Sendable {
+        public var platform: @Sendable () -> Platform
         public var currentDirectory: @Sendable () -> URL
         public var canonicalizePath: @Sendable (String, URL) -> URL?
         public var homeDirectory: @Sendable () -> URL?
@@ -18,6 +26,13 @@ public enum AppCommandRuntime {
         public var runProcessWithOutput: @Sendable (String, [String]) throws -> ProcessOutput
 
         public init(
+            platform: @escaping @Sendable () -> Platform = {
+                #if os(Windows)
+                return .windows
+                #else
+                return .macOS
+                #endif
+            },
             currentDirectory: @escaping @Sendable () -> URL = {
                 URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
             },
@@ -67,6 +82,7 @@ public enum AppCommandRuntime {
                 try ProcessOutput.run(command: command, arguments: arguments)
             }
         ) {
+            self.platform = platform
             self.currentDirectory = currentDirectory
             self.canonicalizePath = canonicalizePath
             self.homeDirectory = homeDirectory
@@ -144,6 +160,14 @@ public enum AppCommandRuntime {
         let workspace = dependencies.canonicalizePath(request.path, dependencies.currentDirectory())
             ?? URL(fileURLWithPath: request.path, relativeTo: request.path.hasPrefix("/") ? nil : dependencies.currentDirectory())
 
+        if dependencies.platform() == .windows {
+            return try runWindowsAppOpenOrInstall(
+                workspace: workspace,
+                downloadURLOverride: request.downloadURLOverride,
+                dependencies: dependencies
+            )
+        }
+
         guard let existingApp = findExistingCodexAppPath(dependencies: dependencies) else {
             return try downloadInstallAndOpen(
                 workspace: workspace,
@@ -184,9 +208,95 @@ public enum AppCommandRuntime {
         }.first
     }
 
+    public static func displayWindowsWorkspacePath(_ path: String) -> String {
+        let path = path.windowsExtendedPathSuffix ?? path
+        if let stripped = path.removingPrefix(#"\\?\UNC\"#) {
+            return #"\\\#(stripped)"#
+        }
+        if let stripped = path.removingPrefix(#"\\?\"#) {
+            return stripped
+        }
+        return path
+    }
+
     private static func findExistingCodexAppPath(dependencies: Dependencies) -> URL? {
         candidateCodexAppPaths(homeDirectory: dependencies.homeDirectory())
             .first(where: dependencies.isDirectory)
+    }
+
+    private static func runWindowsAppOpenOrInstall(
+        workspace: URL,
+        downloadURLOverride: String?,
+        dependencies: Dependencies
+    ) throws -> CodexCLI.CommandExecutionResult {
+        let workspaceDisplay = displayWindowsWorkspacePath(workspace.path)
+        if let appID = try findWindowsCodexAppID(dependencies: dependencies) {
+            try openWindowsCodexApp(appID: appID, dependencies: dependencies)
+            return CodexCLI.CommandExecutionResult(
+                exitCode: 0,
+                stderrMessage: [
+                    "Opening Codex Desktop...",
+                    "In Codex Desktop, open workspace \(workspaceDisplay)."
+                ].joined(separator: "\n")
+            )
+        }
+
+        let downloadURL = downloadURLOverride ?? windowsInstallerURL
+        let installerStatus = try openWindowsURL(downloadURL, dependencies: dependencies)
+        if !installerStatus.isSuccess, downloadURLOverride == nil {
+            let storeStatus = try openWindowsURL(windowsMicrosoftStoreURL, dependencies: dependencies)
+            guard storeStatus.isSuccess else {
+                throw AppCommandRuntimeError.windowsOpenFailed(
+                    target: windowsMicrosoftStoreURL,
+                    status: storeStatus.description
+                )
+            }
+        } else if !installerStatus.isSuccess {
+            throw AppCommandRuntimeError.windowsOpenFailed(
+                target: downloadURL,
+                status: installerStatus.description
+            )
+        }
+
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 0,
+            stderrMessage: [
+                "Codex Desktop not found; opening Windows installer...",
+                "After installing Codex Desktop, open workspace \(workspaceDisplay)."
+            ].joined(separator: "\n")
+        )
+    }
+
+    private static func findWindowsCodexAppID(dependencies: Dependencies) throws -> String? {
+        let output = try dependencies.runProcessWithOutput("powershell.exe", [
+            "-NoProfile",
+            "-Command",
+            "Get-StartApps -Name 'Codex' | Select-Object -First 1 -ExpandProperty AppID"
+        ])
+        guard output.status.isSuccess else {
+            return nil
+        }
+        let appID = output.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        return appID.isEmpty ? nil : appID
+    }
+
+    private static func openWindowsCodexApp(
+        appID: String,
+        dependencies: Dependencies
+    ) throws {
+        _ = try dependencies.runProcess("explorer.exe", ["shell:AppsFolder\\\(appID)"])
+    }
+
+    private static func openWindowsURL(
+        _ url: String,
+        dependencies: Dependencies
+    ) throws -> ProcessStatus {
+        try dependencies.runProcess("powershell.exe", [
+            "-NoProfile",
+            "-Command",
+            "& { param($target) Start-Process -FilePath $target }",
+            url
+        ])
     }
 
     private static func downloadInstallAndOpen(
@@ -316,6 +426,7 @@ public enum AppCommandRuntimeError: Error, Equatable, CustomStringConvertible, S
     case mountPointParseFailed(stdout: String)
     case missingMountedApp(mountPoint: String)
     case installFailed
+    case windowsOpenFailed(target: String, status: String)
 
     public var description: String {
         switch self {
@@ -331,7 +442,25 @@ public enum AppCommandRuntimeError: Error, Equatable, CustomStringConvertible, S
             return "no .app bundle found at \(mountPoint)"
         case .installFailed:
             return "failed to install Codex.app to any applications directory"
+        case let .windowsOpenFailed(target, status):
+            return "failed to open \(target) with \(status)"
         }
+    }
+}
+
+private extension String {
+    func removingPrefix(_ prefix: String) -> String? {
+        guard hasPrefix(prefix) else {
+            return nil
+        }
+        return String(dropFirst(prefix.count))
+    }
+
+    var windowsExtendedPathSuffix: String? {
+        guard let range = range(of: #"\\?\"#) else {
+            return nil
+        }
+        return String(self[range.lowerBound...])
     }
 }
 

@@ -126,6 +126,121 @@ final class AppCommandRuntimeTests: XCTestCase {
         XCTAssertTrue(result.stderrMessage?.contains("Codex Desktop not found; downloading installer...") == true)
         XCTAssertTrue(result.stderrMessage?.contains("Launching Codex Desktop from \(userApp.path)...") == true)
     }
+
+    func testWindowsExistingAppOpensShellTargetLikeRust() throws {
+        let capture = AppProcessCapture()
+        let workspace = URL(fileURLWithPath: #"\\?\C:\Users\test\code\codex"#, isDirectory: true)
+
+        let result = try AppCommandRuntime.run(
+            CodexCLI.AppCommandRequest(path: workspace.path),
+            dependencies: AppCommandRuntime.Dependencies(
+                platform: { .windows },
+                currentDirectory: { URL(fileURLWithPath: #"C:\Users\test"#, isDirectory: true) },
+                canonicalizePath: { _, _ in workspace },
+                runProcess: { command, arguments in
+                    capture.record(command: command, arguments: arguments)
+                    return AppCommandRuntime.ProcessStatus(isSuccess: true, description: "exit status: 0")
+                },
+                runProcessWithOutput: { command, arguments in
+                    capture.record(command: command, arguments: arguments)
+                    return AppCommandRuntime.ProcessOutput(
+                        status: AppCommandRuntime.ProcessStatus(isSuccess: true, description: "exit status: 0"),
+                        stdout: "OpenAI.Codex_abc123!App\n"
+                    )
+                }
+            )
+        )
+
+        XCTAssertEqual(capture.commands, [
+            AppProcessCapture.Command(command: "powershell.exe", arguments: [
+                "-NoProfile",
+                "-Command",
+                "Get-StartApps -Name 'Codex' | Select-Object -First 1 -ExpandProperty AppID"
+            ]),
+            AppProcessCapture.Command(command: "explorer.exe", arguments: [
+                #"shell:AppsFolder\OpenAI.Codex_abc123!App"#
+            ])
+        ])
+        XCTAssertEqual(result, CodexCLI.CommandExecutionResult(
+            exitCode: 0,
+            stderrMessage: [
+                "Opening Codex Desktop...",
+                #"In Codex Desktop, open workspace C:\Users\test\code\codex."#
+            ].joined(separator: "\n")
+        ))
+    }
+
+    func testMissingWindowsAppOpensInstallerAndFallsBackToStoreLikeRust() throws {
+        let capture = AppProcessCapture()
+        let workspace = URL(fileURLWithPath: #"\\?\UNC\server\share\codex"#, isDirectory: true)
+
+        let result = try AppCommandRuntime.run(
+            CodexCLI.AppCommandRequest(path: workspace.path),
+            dependencies: AppCommandRuntime.Dependencies(
+                platform: { .windows },
+                currentDirectory: { URL(fileURLWithPath: #"C:\Users\test"#, isDirectory: true) },
+                canonicalizePath: { _, _ in workspace },
+                runProcess: { command, arguments in
+                    capture.record(command: command, arguments: arguments)
+                    if arguments.last == AppCommandRuntime.windowsInstallerURL {
+                        capture.incrementInstallerAttempts()
+                        return AppCommandRuntime.ProcessStatus(isSuccess: false, description: "exit status: 1")
+                    }
+                    return AppCommandRuntime.ProcessStatus(isSuccess: true, description: "exit status: 0")
+                },
+                runProcessWithOutput: { command, arguments in
+                    capture.record(command: command, arguments: arguments)
+                    return AppCommandRuntime.ProcessOutput(
+                        status: AppCommandRuntime.ProcessStatus(isSuccess: false, description: "exit status: 1"),
+                        stdout: ""
+                    )
+                }
+            )
+        )
+
+        XCTAssertEqual(capture.installerAttempts, 1)
+        XCTAssertEqual(capture.commands, [
+            AppProcessCapture.Command(command: "powershell.exe", arguments: [
+                "-NoProfile",
+                "-Command",
+                "Get-StartApps -Name 'Codex' | Select-Object -First 1 -ExpandProperty AppID"
+            ]),
+            AppProcessCapture.Command(command: "powershell.exe", arguments: [
+                "-NoProfile",
+                "-Command",
+                "& { param($target) Start-Process -FilePath $target }",
+                AppCommandRuntime.windowsInstallerURL
+            ]),
+            AppProcessCapture.Command(command: "powershell.exe", arguments: [
+                "-NoProfile",
+                "-Command",
+                "& { param($target) Start-Process -FilePath $target }",
+                AppCommandRuntime.windowsMicrosoftStoreURL
+            ])
+        ])
+        XCTAssertEqual(result, CodexCLI.CommandExecutionResult(
+            exitCode: 0,
+            stderrMessage: [
+                "Codex Desktop not found; opening Windows installer...",
+                #"After installing Codex Desktop, open workspace \\server\share\codex."#
+            ].joined(separator: "\n")
+        ))
+    }
+
+    func testWindowsDisplayWorkspacePathMatchesRust() {
+        XCTAssertEqual(
+            AppCommandRuntime.displayWindowsWorkspacePath(#"\\?\C:\Users\test\code\codex"#),
+            #"C:\Users\test\code\codex"#
+        )
+        XCTAssertEqual(
+            AppCommandRuntime.displayWindowsWorkspacePath(#"\\?\UNC\server\share\codex"#),
+            #"\\server\share\codex"#
+        )
+        XCTAssertEqual(
+            AppCommandRuntime.displayWindowsWorkspacePath(#"C:\Users\test\code\codex"#),
+            #"C:\Users\test\code\codex"#
+        )
+    }
 }
 
 private final class AppProcessCapture: @unchecked Sendable {
@@ -138,6 +253,7 @@ private final class AppProcessCapture: @unchecked Sendable {
     private var recordedCommands: [Command] = []
     var createdDirectories: [String] = []
     var installedDirectories = Set<String>()
+    private var recordedInstallerAttempts = 0
 
     var commands: [Command] {
         lock.lock()
@@ -145,9 +261,21 @@ private final class AppProcessCapture: @unchecked Sendable {
         return recordedCommands
     }
 
+    var installerAttempts: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return recordedInstallerAttempts
+    }
+
     func record(command: String, arguments: [String]) {
         lock.lock()
         recordedCommands.append(Command(command: command, arguments: arguments))
+        lock.unlock()
+    }
+
+    func incrementInstallerAttempts() {
+        lock.lock()
+        recordedInstallerAttempts += 1
         lock.unlock()
     }
 }
