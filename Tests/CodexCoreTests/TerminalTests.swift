@@ -58,6 +58,48 @@ final class TerminalTests: XCTestCase {
         ])
         XCTAssertEqual(terminal, info(.warpTerminal, termProgram: "WarpTerminal", version: "v0.2025.12.10.08.12.stable_03"))
         XCTAssertEqual(terminal.userAgentToken, "WarpTerminal/v0.2025.12.10.08.12.stable_03")
+
+        terminal = detect([
+            "TERM_PROGRAM": "kitty",
+            "TERM_PROGRAM_VERSION": "0.30.1"
+        ])
+        XCTAssertEqual(terminal, info(.kitty, termProgram: "kitty", version: "0.30.1"))
+        XCTAssertEqual(terminal.userAgentToken, "kitty/0.30.1")
+
+        terminal = detect([
+            "TERM_PROGRAM": "Alacritty",
+            "TERM_PROGRAM_VERSION": "0.13.2"
+        ])
+        XCTAssertEqual(terminal, info(.alacritty, termProgram: "Alacritty", version: "0.13.2"))
+        XCTAssertEqual(terminal.userAgentToken, "Alacritty/0.13.2")
+
+        terminal = detect([
+            "TERM_PROGRAM": "Konsole",
+            "TERM_PROGRAM_VERSION": "230800"
+        ])
+        XCTAssertEqual(terminal, info(.konsole, termProgram: "Konsole", version: "230800"))
+        XCTAssertEqual(terminal.userAgentToken, "Konsole/230800")
+
+        terminal = detect([
+            "TERM_PROGRAM": "gnome-terminal",
+            "TERM_PROGRAM_VERSION": "3.50"
+        ])
+        XCTAssertEqual(terminal, info(.gnomeTerminal, termProgram: "gnome-terminal", version: "3.50"))
+        XCTAssertEqual(terminal.userAgentToken, "gnome-terminal/3.50")
+
+        terminal = detect([
+            "TERM_PROGRAM": "VTE",
+            "TERM_PROGRAM_VERSION": "7000"
+        ])
+        XCTAssertEqual(terminal, info(.vte, termProgram: "VTE", version: "7000"))
+        XCTAssertEqual(terminal.userAgentToken, "VTE/7000")
+
+        terminal = detect([
+            "TERM_PROGRAM": "WindowsTerminal",
+            "TERM_PROGRAM_VERSION": "1.21"
+        ])
+        XCTAssertEqual(terminal, info(.windowsTerminal, termProgram: "WindowsTerminal", version: "1.21"))
+        XCTAssertEqual(terminal.userAgentToken, "WindowsTerminal/1.21")
     }
 
     func testDetectsTmuxMultiplexerClientInfo() {
@@ -236,6 +278,7 @@ final class TerminalTests: XCTestCase {
     func testNameNormalizationAndHeaderSanitization() {
         XCTAssertEqual(Terminal.terminalName(fromTermProgram: "iTerm.app"), .iterm2)
         XCTAssertEqual(Terminal.terminalName(fromTermProgram: "Warp-Terminal"), .warpTerminal)
+        XCTAssertEqual(Terminal.terminalName(fromTermProgram: "gnome-terminal"), .gnomeTerminal)
         XCTAssertEqual(Terminal.terminalName(fromTermProgram: "Windows_Terminal"), .windowsTerminal)
         XCTAssertEqual(Terminal.terminalName(fromTermProgram: "dumb"), .dumb)
         XCTAssertNil(Terminal.terminalName(fromTermProgram: "Mystery Term"))

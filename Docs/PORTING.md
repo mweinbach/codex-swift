@@ -1796,6 +1796,11 @@ Recent upstream audit checkpoint:
   `TerminalMultiplexer.zellij(version:)`, exposes the Rust-shaped
   `isZellij` helper on `TerminalInfo`, and keeps doctor output compatible by
   rendering `zellij <version>` only when a version is known.
+- 2026-05-17: rechecked Rust's `TERM_PROGRAM` terminal-name normalization
+  fixtures in `codex-rs/terminal-detection/src/terminal_tests.rs`. Swift now
+  has focused parity coverage for the remaining Rust `TERM_PROGRAM` aliases
+  and user-agent tokens, including kitty, Alacritty, Konsole, GNOME Terminal,
+  VTE, and Windows Terminal.
 - 2026-05-15: rechecked Rust's `ConfigRequirementsReadResponse` in
   `codex-rs/app-server-protocol/src/protocol/v2/config.rs`. Swift's shared
   app-server config protocol now carries the typed `configRequirements/read`
@@ -2230,7 +2235,7 @@ Recent upstream audit checkpoint:
 - `codex-rs/core/src/path_utils.rs`
   - path canonicalization for comparison and WSL `/mnt/<drive>` case-insensitive path normalization
 - `codex-rs/terminal-detection/src/lib.rs`
-  - remaining terminal metadata detection from environment variables, terminal-name normalization, Rust's `TERM=dumb` / WezTerm fallback classification, and user-agent token sanitization
+  - remaining terminal metadata detection from environment variables, Rust's `TERM=dumb` / WezTerm fallback classification, and user-agent token sanitization
 - `codex-rs/core/src/user_shell_command.rs` and exec-output formatting dependency from `codex-rs/core/src/tools/mod.rs`
   - user shell command start/end tag detection, duration formatting, aggregated-output records, timeout prefixes, truncation-policy integration, and message response-item wire shape
 - `codex-rs/core/src/client_common.rs` tool models and `codex-rs/core/src/tools/spec.rs`
