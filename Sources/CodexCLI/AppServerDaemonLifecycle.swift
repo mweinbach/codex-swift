@@ -6,8 +6,14 @@ public enum AppServerDaemonBackendKind: String, Codable, Sendable {
 }
 
 public enum AppServerDaemonLifecycleStatus: String, Codable, Sendable {
+    case alreadyRunning
+    case started
     case stopped
     case notRunning
+}
+
+public enum AppServerDaemonBootstrapStatus: String, Codable, Sendable {
+    case bootstrapped
 }
 
 public struct AppServerDaemonLifecycleOutput: Equatable, Codable, Sendable {
@@ -44,24 +50,83 @@ public struct AppServerDaemonLifecycleOutput: Equatable, Codable, Sendable {
     }
 }
 
+public struct AppServerDaemonBootstrapOutput: Equatable, Codable, Sendable {
+    public let status: AppServerDaemonBootstrapStatus
+    public let backend: AppServerDaemonBackendKind
+    public let autoUpdateEnabled: Bool
+    public let remoteControlEnabled: Bool
+    public let managedCodexPath: String
+    public let socketPath: String
+    public let cliVersion: String
+    public let appServerVersion: String
+
+    public init(
+        status: AppServerDaemonBootstrapStatus,
+        backend: AppServerDaemonBackendKind,
+        autoUpdateEnabled: Bool,
+        remoteControlEnabled: Bool,
+        managedCodexPath: String,
+        socketPath: String,
+        cliVersion: String,
+        appServerVersion: String
+    ) {
+        self.status = status
+        self.backend = backend
+        self.autoUpdateEnabled = autoUpdateEnabled
+        self.remoteControlEnabled = remoteControlEnabled
+        self.managedCodexPath = managedCodexPath
+        self.socketPath = socketPath
+        self.cliVersion = cliVersion
+        self.appServerVersion = appServerVersion
+    }
+}
+
+public enum AppServerDaemonRemoteControlStartOutput: Equatable, Sendable {
+    case bootstrap(AppServerDaemonBootstrapOutput)
+    case start(AppServerDaemonLifecycleOutput)
+}
+
 public enum AppServerDaemonSignal: Equatable, Sendable {
     case terminate
     case kill
+}
+
+public struct AppServerDaemonSpawnRequest: Equatable, Sendable {
+    public enum Kind: Equatable, Sendable {
+        case appServer(remoteControlEnabled: Bool)
+        case updateLoop
+    }
+
+    public let executablePath: String
+    public let arguments: [String]
+    public let kind: Kind
+
+    public init(executablePath: String, arguments: [String], kind: Kind) {
+        self.executablePath = executablePath
+        self.arguments = arguments
+        self.kind = kind
+    }
 }
 
 public struct AppServerDaemonProcessClient: Sendable {
     public var processStartTime: @Sendable (UInt32) async throws -> String?
     public var signalProcess: @Sendable (UInt32, AppServerDaemonSignal) async throws -> Void
     public var sleep: @Sendable (TimeInterval) async throws -> Void
+    public var spawnDetached: @Sendable (AppServerDaemonSpawnRequest) async throws -> UInt32
+    public var probeAppServerVersion: @Sendable (String) async throws -> String
 
     public init(
         processStartTime: @escaping @Sendable (UInt32) async throws -> String?,
         signalProcess: @escaping @Sendable (UInt32, AppServerDaemonSignal) async throws -> Void,
-        sleep: @escaping @Sendable (TimeInterval) async throws -> Void
+        sleep: @escaping @Sendable (TimeInterval) async throws -> Void,
+        spawnDetached: @escaping @Sendable (AppServerDaemonSpawnRequest) async throws -> UInt32,
+        probeAppServerVersion: @escaping @Sendable (String) async throws -> String
     ) {
         self.processStartTime = processStartTime
         self.signalProcess = signalProcess
         self.sleep = sleep
+        self.spawnDetached = spawnDetached
+        self.probeAppServerVersion = probeAppServerVersion
     }
 
     public static let live = AppServerDaemonProcessClient(
@@ -73,23 +138,32 @@ public struct AppServerDaemonProcessClient: Sendable {
         },
         sleep: { seconds in
             try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+        },
+        spawnDetached: { request in
+            try AppServerDaemonLifecycle.spawnDetached(request)
+        },
+        probeAppServerVersion: { socketPath in
+            try await AppServerDaemonLifecycle.probeAppServerVersion(socketPath: socketPath)
         }
     )
 }
 
 public struct AppServerDaemonStopOptions: Sendable {
     public let pollInterval: TimeInterval
+    public let startTimeout: TimeInterval
     public let gracePeriod: TimeInterval
     public let timeout: TimeInterval
     public let operationLockTimeout: TimeInterval
 
     public init(
         pollInterval: TimeInterval = 0.05,
+        startTimeout: TimeInterval = 10,
         gracePeriod: TimeInterval = 60,
         timeout: TimeInterval = 70,
         operationLockTimeout: TimeInterval = 75
     ) {
         self.pollInterval = pollInterval
+        self.startTimeout = startTimeout
         self.gracePeriod = gracePeriod
         self.timeout = timeout
         self.operationLockTimeout = operationLockTimeout
@@ -97,6 +171,51 @@ public struct AppServerDaemonStopOptions: Sendable {
 }
 
 public enum AppServerDaemonLifecycle {
+    public static func ensureRemoteControlStarted(
+        codexHome: URL,
+        cliVersion: String,
+        processClient: AppServerDaemonProcessClient = .live,
+        options: AppServerDaemonStopOptions = AppServerDaemonStopOptions()
+    ) async throws -> AppServerDaemonRemoteControlStartOutput {
+        let paths = AppServerDaemonPaths(codexHome: codexHome)
+        try FileManager.default.createDirectory(
+            at: paths.stateDirectory,
+            withIntermediateDirectories: true
+        )
+        let lock = try await AppServerDaemonOperationLock.acquire(
+            path: paths.operationLockFile,
+            timeout: options.operationLockTimeout,
+            pollInterval: options.pollInterval,
+            sleep: processClient.sleep
+        )
+        defer { lock.close() }
+
+        _ = try loadSettings(path: paths.settingsFile)
+        if try await isPidBackendStartingOrRunning(
+            pidFile: paths.updatePidFile,
+            processClient: processClient,
+            options: options
+        ) {
+            try saveSettings(AppServerDaemonSettings(remoteControlEnabled: true), path: paths.settingsFile)
+            let output = try await startWithLockHeld(
+                paths: paths,
+                cliVersion: cliVersion,
+                processClient: processClient,
+                options: options,
+                remoteControlEnabled: true
+            )
+            return .start(output)
+        }
+
+        return .bootstrap(try await bootstrapWithLockHeld(
+            paths: paths,
+            cliVersion: cliVersion,
+            processClient: processClient,
+            options: options,
+            remoteControlEnabled: true
+        ))
+    }
+
     public static func stop(
         codexHome: URL,
         cliVersion: String,
@@ -130,6 +249,7 @@ public enum AppServerDaemonLifecycle {
         processClient: AppServerDaemonProcessClient,
         options: AppServerDaemonStopOptions
     ) async throws -> AppServerDaemonLifecycleOutput {
+        _ = try loadSettings(path: paths.settingsFile)
         while true {
             guard let record = try readPidRecord(path: paths.pidFile) else {
                 return output(
@@ -173,6 +293,122 @@ public enum AppServerDaemonLifecycle {
         }
     }
 
+    private static func startWithLockHeld(
+        paths: AppServerDaemonPaths,
+        cliVersion: String,
+        processClient: AppServerDaemonProcessClient,
+        options: AppServerDaemonStopOptions,
+        remoteControlEnabled: Bool
+    ) async throws -> AppServerDaemonLifecycleOutput {
+        let settings = try loadSettings(path: paths.settingsFile)
+        if let appServerVersion = try? await processClient.probeAppServerVersion(paths.socketPath) {
+            return output(
+                status: .alreadyRunning,
+                backend: try await runningBackend(
+                    pidFile: paths.pidFile,
+                    processClient: processClient,
+                    options: options
+                ),
+                socketPath: paths.socketPath,
+                cliVersion: cliVersion,
+                appServerVersion: appServerVersion
+            )
+        }
+
+        if try await isPidBackendStartingOrRunning(
+            pidFile: paths.pidFile,
+            processClient: processClient,
+            options: options
+        ) {
+            let appServerVersion = try await waitUntilReady(
+                socketPath: paths.socketPath,
+                processClient: processClient,
+                options: options
+            )
+            return output(
+                status: .alreadyRunning,
+                backend: .pid,
+                socketPath: paths.socketPath,
+                cliVersion: cliVersion,
+                appServerVersion: appServerVersion
+            )
+        }
+
+        try ensureManagedCodexBin(paths.managedCodexBin)
+        let pid = try await startPidBackend(
+            pidFile: paths.pidFile,
+            codexBin: paths.managedCodexBin,
+            kind: .appServer(remoteControlEnabled: settings.remoteControlEnabled || remoteControlEnabled),
+            processClient: processClient,
+            options: options
+        )
+        let appServerVersion = try await waitUntilReady(
+            socketPath: paths.socketPath,
+            processClient: processClient,
+            options: options
+        )
+        return AppServerDaemonLifecycleOutput(
+            status: .started,
+            backend: .pid,
+            pid: pid,
+            socketPath: paths.socketPath,
+            cliVersion: cliVersion,
+            appServerVersion: appServerVersion
+        )
+    }
+
+    private static func bootstrapWithLockHeld(
+        paths: AppServerDaemonPaths,
+        cliVersion: String,
+        processClient: AppServerDaemonProcessClient,
+        options: AppServerDaemonStopOptions,
+        remoteControlEnabled: Bool
+    ) async throws -> AppServerDaemonBootstrapOutput {
+        try ensureManagedCodexBin(paths.managedCodexBin)
+        let settings = AppServerDaemonSettings(remoteControlEnabled: remoteControlEnabled)
+        if (try? await processClient.probeAppServerVersion(paths.socketPath)) != nil,
+           try await runningBackend(pidFile: paths.pidFile, processClient: processClient, options: options) == nil {
+            throw AppServerDaemonLifecycleError("app server is running but is not managed by codex app-server daemon")
+        }
+        try saveSettings(settings, path: paths.settingsFile)
+
+        if try await isPidBackendStartingOrRunning(pidFile: paths.pidFile, processClient: processClient, options: options) {
+            _ = try await stopWithLockHeld(paths: paths, cliVersion: cliVersion, processClient: processClient, options: options)
+        }
+        _ = try await startPidBackend(
+            pidFile: paths.pidFile,
+            codexBin: paths.managedCodexBin,
+            kind: .appServer(remoteControlEnabled: settings.remoteControlEnabled),
+            processClient: processClient,
+            options: options
+        )
+        if try await isPidBackendStartingOrRunning(pidFile: paths.updatePidFile, processClient: processClient, options: options) {
+            try await stopPidBackend(pidFile: paths.updatePidFile, processClient: processClient, options: options)
+        }
+        _ = try await startPidBackend(
+            pidFile: paths.updatePidFile,
+            codexBin: paths.managedCodexBin,
+            kind: .updateLoop,
+            processClient: processClient,
+            options: options
+        )
+        let appServerVersion = try await waitUntilReady(
+            socketPath: paths.socketPath,
+            processClient: processClient,
+            options: options
+        )
+        return AppServerDaemonBootstrapOutput(
+            status: .bootstrapped,
+            backend: .pid,
+            autoUpdateEnabled: true,
+            remoteControlEnabled: settings.remoteControlEnabled,
+            managedCodexPath: paths.managedCodexBin.path,
+            socketPath: paths.socketPath,
+            cliVersion: cliVersion,
+            appServerVersion: appServerVersion
+        )
+    }
+
     public static func encodeOutput(_ output: AppServerDaemonLifecycleOutput) throws -> String {
         var fields = [
             "\"status\":\(try jsonString(output.status.rawValue))"
@@ -193,6 +429,29 @@ public enum AppServerDaemonLifecycle {
         return "{\(fields.joined(separator: ","))}"
     }
 
+    public static func encodeRemoteControlStartOutput(_ output: AppServerDaemonRemoteControlStartOutput) throws -> String {
+        switch output {
+        case let .start(output):
+            return try encodeOutput(output)
+        case let .bootstrap(output):
+            return try encodeBootstrapOutput(output)
+        }
+    }
+
+    public static func encodeBootstrapOutput(_ output: AppServerDaemonBootstrapOutput) throws -> String {
+        let fields = [
+            "\"status\":\(try jsonString(output.status.rawValue))",
+            "\"backend\":\(try jsonString(output.backend.rawValue))",
+            "\"autoUpdateEnabled\":\(output.autoUpdateEnabled)",
+            "\"remoteControlEnabled\":\(output.remoteControlEnabled)",
+            "\"managedCodexPath\":\(try jsonString(output.managedCodexPath))",
+            "\"socketPath\":\(try jsonString(output.socketPath))",
+            "\"cliVersion\":\(try jsonString(output.cliVersion))",
+            "\"appServerVersion\":\(try jsonString(output.appServerVersion))"
+        ]
+        return "{\(fields.joined(separator: ","))}"
+    }
+
     private static func jsonString(_ value: String) throws -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.withoutEscapingSlashes]
@@ -205,7 +464,8 @@ public enum AppServerDaemonLifecycle {
         status: AppServerDaemonLifecycleStatus,
         backend: AppServerDaemonBackendKind?,
         socketPath: String,
-        cliVersion: String
+        cliVersion: String,
+        appServerVersion: String? = nil
     ) -> AppServerDaemonLifecycleOutput {
         AppServerDaemonLifecycleOutput(
             status: status,
@@ -213,8 +473,200 @@ public enum AppServerDaemonLifecycle {
             pid: nil,
             socketPath: socketPath,
             cliVersion: cliVersion,
-            appServerVersion: nil
+            appServerVersion: appServerVersion
         )
+    }
+
+    private static func runningBackend(
+        pidFile: URL,
+        processClient: AppServerDaemonProcessClient,
+        options: AppServerDaemonStopOptions
+    ) async throws -> AppServerDaemonBackendKind? {
+        try await isPidBackendStartingOrRunning(
+            pidFile: pidFile,
+            processClient: processClient,
+            options: options
+        ) ? .pid : nil
+    }
+
+    private static func isPidBackendStartingOrRunning(
+        pidFile: URL,
+        processClient: AppServerDaemonProcessClient,
+        options: AppServerDaemonStopOptions
+    ) async throws -> Bool {
+        while true {
+            guard let record = try readPidRecord(path: pidFile) else {
+                return false
+            }
+            if try await recordIsActive(record, processClient: processClient) {
+                return true
+            }
+            try? FileManager.default.removeItem(at: pidFile)
+        }
+    }
+
+    private static func stopPidBackend(
+        pidFile: URL,
+        processClient: AppServerDaemonProcessClient,
+        options: AppServerDaemonStopOptions
+    ) async throws {
+        while true {
+            guard let record = try readPidRecord(path: pidFile) else {
+                return
+            }
+            guard try await recordIsActive(record, processClient: processClient) else {
+                try? FileManager.default.removeItem(at: pidFile)
+                continue
+            }
+            try await processClient.signalProcess(record.pid, .terminate)
+            let deadline = Date().addingTimeInterval(options.timeout)
+            while Date() < deadline {
+                if try await !recordIsActive(record, processClient: processClient) {
+                    try? FileManager.default.removeItem(at: pidFile)
+                    return
+                }
+                try await processClient.sleep(options.pollInterval)
+            }
+            throw AppServerDaemonLifecycleError("timed out waiting for pid-managed app server \(record.pid) to stop")
+        }
+    }
+
+    private static func startPidBackend(
+        pidFile: URL,
+        codexBin: URL,
+        kind: AppServerDaemonSpawnRequest.Kind,
+        processClient: AppServerDaemonProcessClient,
+        options: AppServerDaemonStopOptions
+    ) async throws -> UInt32? {
+        if let parent = pidFile.deletingLastPathComponentIfPresent() {
+            try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        }
+        let reservationLock = try await AppServerDaemonOperationLock.acquire(
+            path: pidFile.deletingPathExtension().appendingPathExtension("pid.lock"),
+            timeout: options.startTimeout,
+            pollInterval: options.pollInterval,
+            sleep: processClient.sleep
+        )
+        defer { reservationLock.close() }
+
+        if let record = try readPidRecord(path: pidFile) {
+            if try await recordIsActive(record, processClient: processClient) {
+                return nil
+            }
+            try? FileManager.default.removeItem(at: pidFile)
+        }
+
+        FileManager.default.createFile(atPath: pidFile.path, contents: Data())
+        let request = AppServerDaemonSpawnRequest(
+            executablePath: codexBin.path,
+            arguments: commandArguments(for: kind),
+            kind: kind
+        )
+        let pid: UInt32
+        do {
+            pid = try await processClient.spawnDetached(request)
+        } catch {
+            try? FileManager.default.removeItem(at: pidFile)
+            throw AppServerDaemonLifecycleError(
+                "failed to spawn detached app-server process using \(codexBin.path): \(error)"
+            )
+        }
+
+        let processStartTime: String
+        do {
+            guard let startTime = try await processClient.processStartTime(pid) else {
+                throw AppServerDaemonLifecycleError("pid-managed app server \(pid) has no recorded start time")
+            }
+            processStartTime = startTime
+        } catch {
+            try? await processClient.signalProcess(pid, .terminate)
+            try? FileManager.default.removeItem(at: pidFile)
+            throw error
+        }
+
+        let record = AppServerDaemonPidRecord(pid: pid, processStartTime: processStartTime)
+        let data = try JSONEncoder().encode(record)
+        let tempFile = pidFile.deletingPathExtension().appendingPathExtension("pid.tmp")
+        do {
+            try data.write(to: tempFile)
+            if FileManager.default.fileExists(atPath: pidFile.path) {
+                try FileManager.default.removeItem(at: pidFile)
+            }
+            try FileManager.default.moveItem(at: tempFile, to: pidFile)
+        } catch {
+            try? await processClient.signalProcess(pid, .terminate)
+            try? FileManager.default.removeItem(at: tempFile)
+            try? FileManager.default.removeItem(at: pidFile)
+            throw error
+        }
+        return pid
+    }
+
+    private static func commandArguments(for kind: AppServerDaemonSpawnRequest.Kind) -> [String] {
+        switch kind {
+        case .appServer(remoteControlEnabled: true):
+            return ["app-server", "--remote-control", "--listen", "unix://"]
+        case .appServer(remoteControlEnabled: false):
+            return ["app-server", "--listen", "unix://"]
+        case .updateLoop:
+            return ["app-server", "daemon", "pid-update-loop"]
+        }
+    }
+
+    private static func waitUntilReady(
+        socketPath: String,
+        processClient: AppServerDaemonProcessClient,
+        options: AppServerDaemonStopOptions
+    ) async throws -> String {
+        let deadline = Date().addingTimeInterval(options.startTimeout)
+        var lastError: Error?
+        repeat {
+            do {
+                return try await processClient.probeAppServerVersion(socketPath)
+            } catch {
+                lastError = error
+                try await processClient.sleep(options.pollInterval)
+            }
+        } while Date() < deadline
+        throw AppServerDaemonLifecycleError(
+            "app server did not become ready on \(socketPath): \(lastError?.localizedDescription ?? "probe failed")"
+        )
+    }
+
+    private static func ensureManagedCodexBin(_ path: URL) throws {
+        guard FileManager.default.isExecutableFile(atPath: path.path) || FileManager.default.fileExists(atPath: path.path) else {
+            throw AppServerDaemonLifecycleError(
+                """
+                managed standalone Codex install not found at \(path.path)
+
+                This command requires the standalone install managed by the Codex installer, because the daemon starts and updates app-server from that fixed path.
+
+                Install it with:
+                  curl -fsSL https://chatgpt.com/codex/install.sh | sh
+
+                Then rerun the command you just tried.
+                """
+            )
+        }
+    }
+
+    private static func loadSettings(path: URL) throws -> AppServerDaemonSettings {
+        guard FileManager.default.fileExists(atPath: path.path) else {
+            return AppServerDaemonSettings()
+        }
+        do {
+            return try JSONDecoder().decode(AppServerDaemonSettings.self, from: Data(contentsOf: path))
+        } catch {
+            throw AppServerDaemonLifecycleError("failed to parse daemon settings \(path.path): \(error)")
+        }
+    }
+
+    private static func saveSettings(_ settings: AppServerDaemonSettings, path: URL) throws {
+        try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
+        let data = try encoder.encode(settings)
+        try data.write(to: path)
     }
 
     private static func recordIsActive(
@@ -291,18 +743,229 @@ public enum AppServerDaemonLifecycle {
         let result = Darwin.kill(rawPid, 0)
         return result == 0 || errno == EPERM
     }
+
+    static func spawnDetached(_ request: AppServerDaemonSpawnRequest) throws -> UInt32 {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: request.executablePath)
+        process.arguments = request.arguments
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        return UInt32(process.processIdentifier)
+    }
+
+    static func probeAppServerVersion(socketPath: String) async throws -> String {
+        try await Task.detached {
+            try probeAppServerVersionSynchronously(socketPath: socketPath)
+        }.value
+    }
+
+    private static func probeAppServerVersionSynchronously(socketPath: String) throws -> String {
+        let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else {
+            throw AppServerDaemonLifecycleError("failed to connect to \(socketPath): \(posixMessage(operation: "socket"))")
+        }
+        defer { Darwin.close(fd) }
+        var timeout = timeval(tv_sec: 2, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+
+        var address = try unixSocketAddress(path: socketPath)
+        let connectResult = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                Darwin.connect(fd, sockaddrPointer, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        guard connectResult == 0 else {
+            throw AppServerDaemonLifecycleError("failed to connect to \(socketPath): \(posixMessage(operation: "connect"))")
+        }
+
+        let key = Data((0..<16).map { _ in UInt8.random(in: UInt8.min...UInt8.max) }).base64EncodedString()
+        let request = """
+        GET / HTTP/1.1\r
+        Host: localhost\r
+        Upgrade: websocket\r
+        Connection: Upgrade\r
+        Sec-WebSocket-Key: \(key)\r
+        Sec-WebSocket-Version: 13\r
+        \r
+
+        """
+        try writeAll(Data(request.utf8), to: fd, context: "failed to upgrade \(socketPath)")
+        let response = try readHTTPHeaders(from: fd, socketPath: socketPath)
+        guard response.contains(" 101 ") || response.contains(" 101\r\n") else {
+            throw AppServerDaemonLifecycleError("failed to upgrade \(socketPath): \(response.components(separatedBy: "\r\n").first ?? response)")
+        }
+
+        let initialize = """
+        {"id":1,"method":"initialize","params":{"clientInfo":{"name":"codex_app_server_daemon","title":"Codex App Server Daemon","version":"\(CodexCLI.version)"},"capabilities":null}}
+        """
+        try writeWebSocketText(initialize, to: fd)
+        while true {
+            let frame = try readWebSocketFrame(from: fd, socketPath: socketPath)
+            guard frame.opcode == 0x1, let text = String(data: frame.payload, encoding: .utf8) else {
+                continue
+            }
+            guard let object = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any],
+                  (object["id"] as? Int) == 1,
+                  let result = object["result"] as? [String: Any],
+                  let userAgent = result["userAgent"] as? String else {
+                continue
+            }
+            let initialized = #"{"method":"initialized"}"#
+            try? writeWebSocketText(initialized, to: fd)
+            return try appServerVersion(fromUserAgent: userAgent)
+        }
+    }
+
+    private static func appServerVersion(fromUserAgent userAgent: String) throws -> String {
+        guard let slash = userAgent.firstIndex(of: "/") else {
+            throw AppServerDaemonLifecycleError("app-server user-agent omitted version separator")
+        }
+        let rest = userAgent[userAgent.index(after: slash)...]
+        guard let version = rest.split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "\n" }).first,
+              !version.isEmpty else {
+            throw AppServerDaemonLifecycleError("app-server user-agent omitted version")
+        }
+        return String(version)
+    }
+
+    private static func readHTTPHeaders(from fd: Int32, socketPath: String) throws -> String {
+        var buffer = Data()
+        while !buffer.contains(Data("\r\n\r\n".utf8)) {
+            var byte = UInt8.zero
+            let count = Darwin.recv(fd, &byte, 1, 0)
+            guard count > 0 else {
+                throw AppServerDaemonLifecycleError("failed to upgrade \(socketPath): \(posixMessage(operation: "recv"))")
+            }
+            buffer.append(byte)
+            if buffer.count > 16_384 {
+                throw AppServerDaemonLifecycleError("failed to upgrade \(socketPath): websocket response headers are too large")
+            }
+        }
+        return String(decoding: buffer, as: UTF8.self)
+    }
+
+    private static func writeWebSocketText(_ text: String, to fd: Int32) throws {
+        var frame = Data([0x81])
+        let payload = Data(text.utf8)
+        switch payload.count {
+        case 0..<126:
+            frame.append(UInt8(0x80 | payload.count))
+        case 126...Int(UInt16.max):
+            frame.append(0x80 | 126)
+            frame.append(UInt8((payload.count >> 8) & 0xff))
+            frame.append(UInt8(payload.count & 0xff))
+        default:
+            frame.append(0x80 | 127)
+            for shift in stride(from: 56, through: 0, by: -8) {
+                frame.append(UInt8((UInt64(payload.count) >> UInt64(shift)) & 0xff))
+            }
+        }
+        let mask = (0..<4).map { _ in UInt8.random(in: UInt8.min...UInt8.max) }
+        frame.append(contentsOf: mask)
+        for (index, byte) in payload.enumerated() {
+            frame.append(byte ^ mask[index % 4])
+        }
+        try writeAll(frame, to: fd, context: "failed to send initialize request")
+    }
+
+    private static func readWebSocketFrame(from fd: Int32, socketPath: String) throws -> (opcode: UInt8, payload: Data) {
+        let header = try readExactly(2, from: fd, socketPath: socketPath)
+        let opcode = header[0] & 0x0f
+        let masked = (header[1] & 0x80) != 0
+        var length = UInt64(header[1] & 0x7f)
+        if length == 126 {
+            let bytes = try readExactly(2, from: fd, socketPath: socketPath)
+            length = (UInt64(bytes[0]) << 8) | UInt64(bytes[1])
+        } else if length == 127 {
+            let bytes = try readExactly(8, from: fd, socketPath: socketPath)
+            length = bytes.reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
+        }
+        let mask = masked ? try readExactly(4, from: fd, socketPath: socketPath) : Data()
+        var payload = try readExactly(Int(length), from: fd, socketPath: socketPath)
+        if masked {
+            for index in payload.indices {
+                payload[index] ^= mask[index % 4]
+            }
+        }
+        if opcode == 0x8 {
+            throw AppServerDaemonLifecycleError("app-server closed before initialize response")
+        }
+        return (opcode, payload)
+    }
+
+    private static func readExactly(_ count: Int, from fd: Int32, socketPath: String) throws -> Data {
+        var buffer = Data(count: count)
+        var offset = 0
+        while offset < count {
+            let read = buffer.withUnsafeMutableBytes { rawBuffer in
+                Darwin.recv(fd, rawBuffer.baseAddress!.advanced(by: offset), count - offset, 0)
+            }
+            guard read > 0 else {
+                throw AppServerDaemonLifecycleError("failed to read from \(socketPath): \(posixMessage(operation: "recv"))")
+            }
+            offset += read
+        }
+        return buffer
+    }
+
+    private static func writeAll(_ data: Data, to fd: Int32, context: String) throws {
+        try data.withUnsafeBytes { rawBuffer in
+            guard let baseAddress = rawBuffer.baseAddress else {
+                return
+            }
+            var written = 0
+            while written < data.count {
+                let count = Darwin.send(fd, baseAddress.advanced(by: written), data.count - written, 0)
+                guard count > 0 else {
+                    throw AppServerDaemonLifecycleError("\(context): \(posixMessage(operation: "send"))")
+                }
+                written += count
+            }
+        }
+    }
+
+    private static func unixSocketAddress(path: String) throws -> sockaddr_un {
+        let pathBytes = Array(path.utf8)
+        guard pathBytes.count < MemoryLayout.size(ofValue: sockaddr_un().sun_path) else {
+            throw AppServerDaemonLifecycleError("socket path is too long: \(path)")
+        }
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        withUnsafeMutableBytes(of: &address.sun_path) { rawBuffer in
+            rawBuffer.copyBytes(from: pathBytes)
+            rawBuffer[pathBytes.count] = 0
+        }
+        return address
+    }
+
+    private static func posixMessage(operation: String) -> String {
+        "\(operation): \(String(cString: strerror(errno)))"
+    }
 }
 
 private struct AppServerDaemonPaths {
     let stateDirectory: URL
     let pidFile: URL
+    let updatePidFile: URL
     let operationLockFile: URL
+    let settingsFile: URL
+    let managedCodexBin: URL
     let socketPath: String
 
     init(codexHome: URL) {
         stateDirectory = codexHome.appendingPathComponent("app-server-daemon", isDirectory: true)
         pidFile = stateDirectory.appendingPathComponent("app-server.pid", isDirectory: false)
+        updatePidFile = stateDirectory.appendingPathComponent("app-server-updater.pid", isDirectory: false)
         operationLockFile = stateDirectory.appendingPathComponent("daemon.lock", isDirectory: false)
+        settingsFile = stateDirectory.appendingPathComponent("settings.json", isDirectory: false)
+        managedCodexBin = codexHome
+            .appendingPathComponent("packages", isDirectory: true)
+            .appendingPathComponent("standalone", isDirectory: true)
+            .appendingPathComponent("current", isDirectory: true)
+            .appendingPathComponent("codex", isDirectory: false)
         socketPath = codexHome
             .appendingPathComponent("app-server-control", isDirectory: true)
             .appendingPathComponent("app-server-control.sock", isDirectory: false)
@@ -313,6 +976,17 @@ private struct AppServerDaemonPaths {
 private struct AppServerDaemonPidRecord: Codable, Equatable {
     let pid: UInt32
     let processStartTime: String
+}
+
+private struct AppServerDaemonSettings: Codable, Equatable {
+    var remoteControlEnabled: Bool = false
+}
+
+private extension URL {
+    func deletingLastPathComponentIfPresent() -> URL? {
+        let parent = deletingLastPathComponent()
+        return parent.path == path ? nil : parent
+    }
 }
 
 private final class AppServerDaemonOperationLock {

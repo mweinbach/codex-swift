@@ -21,8 +21,13 @@ Recent upstream audit checkpoint:
   wording, routes it to a distinct daemon-stop action, and implements the
   executable pid-file daemon stop path with Rust-shaped `stopped`/`notRunning`
   JSON output, stale pid cleanup, `SIGTERM` then `SIGKILL` escalation, and the
-  shared operation lock. Managed standalone install diagnostics and the
-  start/bootstrap daemon lifecycle remain pending.
+  shared operation lock. Swift now also routes `codex remote-control start`
+  through the daemon lifecycle: it uses the managed standalone binary path,
+  writes Rust-shaped daemon settings, starts pid-backed app-server and updater
+  processes with the Rust arguments, probes the control socket for
+  `appServerVersion`, and emits untagged Rust-shaped `bootstrapped` or
+  `started` output. The broader `app-server daemon ...` command family remains
+  pending.
 - 2026-05-17: rechecked Rust commit `e6939e3969` (`feat: namespace in ext`).
   Swift does not yet have the Rust extension executor registry, but the shared
   Responses tool-spec surface now has explicit parity coverage that namespace

@@ -3,6 +3,94 @@ import Foundation
 import XCTest
 
 final class AppServerDaemonLifecycleTests: XCTestCase {
+    func testRemoteControlStartFailsWithRustManagedInstallGuidanceWhenMissing() async throws {
+        let temp = try AppServerDaemonTemporaryDirectory()
+
+        do {
+            _ = try await AppServerDaemonLifecycle.ensureRemoteControlStarted(
+                codexHome: temp.url,
+                cliVersion: "1.2.3",
+                processClient: .testClient(),
+                options: .test
+            )
+            XCTFail("Expected missing managed install to fail")
+        } catch let error as AppServerDaemonLifecycleError {
+            XCTAssertTrue(error.description.contains("managed standalone Codex install not found at \(temp.managedCodexBin.path)"))
+            XCTAssertTrue(error.description.contains("curl -fsSL https://chatgpt.com/codex/install.sh | sh"))
+        }
+    }
+
+    func testRemoteControlStartBootstrapsAppServerAndUpdaterLikeRust() async throws {
+        let temp = try AppServerDaemonTemporaryDirectory()
+        try temp.createManagedCodexBin()
+        let fakeProcess = AppServerDaemonFakeProcess(
+            startTimes: [:],
+            spawnedStartTimes: [2001: "app-start", 2002: "updater-start"],
+            probeResults: [.failure(AppServerDaemonLifecycleError("not ready")), .success("1.2.4")]
+        )
+
+        let output = try await AppServerDaemonLifecycle.ensureRemoteControlStarted(
+            codexHome: temp.url,
+            cliVersion: "1.2.3",
+            processClient: fakeProcess.client(),
+            options: .test
+        )
+
+        guard case let .bootstrap(bootstrap) = output else {
+            return XCTFail("Expected bootstrap output")
+        }
+        XCTAssertEqual(bootstrap, AppServerDaemonBootstrapOutput(
+            status: .bootstrapped,
+            backend: .pid,
+            autoUpdateEnabled: true,
+            remoteControlEnabled: true,
+            managedCodexPath: temp.managedCodexBin.path,
+            socketPath: temp.socketPath.path,
+            cliVersion: "1.2.3",
+            appServerVersion: "1.2.4"
+        ))
+        XCTAssertEqual(try temp.settingsJSON(), #"{"remoteControlEnabled":true}"#)
+        let spawns = await fakeProcess.spawnsSnapshot()
+        XCTAssertEqual(spawns.map(\.arguments), [
+            ["app-server", "--remote-control", "--listen", "unix://"],
+            ["app-server", "daemon", "pid-update-loop"]
+        ])
+        XCTAssertEqual(
+            try AppServerDaemonLifecycle.encodeRemoteControlStartOutput(output),
+            #"{"status":"bootstrapped","backend":"pid","autoUpdateEnabled":true,"remoteControlEnabled":true,"managedCodexPath":"\#(temp.managedCodexBin.path)","socketPath":"\#(temp.socketPath.path)","cliVersion":"1.2.3","appServerVersion":"1.2.4"}"#
+        )
+    }
+
+    func testRemoteControlStartUsesBootstrappedStartOutputWithoutWrapperTag() async throws {
+        let temp = try AppServerDaemonTemporaryDirectory()
+        try temp.createManagedCodexBin()
+        try temp.writeUpdaterPidRecord(pid: 9001, processStartTime: "updater")
+        let fakeProcess = AppServerDaemonFakeProcess(
+            startTimes: [9001: "updater"],
+            spawnedStartTimes: [2001: "app-start"],
+            probeResults: [.failure(AppServerDaemonLifecycleError("not ready")), .success("1.2.4")]
+        )
+
+        let output = try await AppServerDaemonLifecycle.ensureRemoteControlStarted(
+            codexHome: temp.url,
+            cliVersion: "1.2.3",
+            processClient: fakeProcess.client(),
+            options: .test
+        )
+
+        guard case let .start(start) = output else {
+            return XCTFail("Expected start output")
+        }
+        XCTAssertEqual(start.status, .started)
+        XCTAssertEqual(start.backend, .pid)
+        XCTAssertEqual(start.pid, 2001)
+        XCTAssertEqual(start.appServerVersion, "1.2.4")
+        XCTAssertEqual(
+            try AppServerDaemonLifecycle.encodeRemoteControlStartOutput(output),
+            #"{"status":"started","backend":"pid","pid":2001,"socketPath":"\#(temp.socketPath.path)","cliVersion":"1.2.3","appServerVersion":"1.2.4"}"#
+        )
+    }
+
     func testStopReturnsRustNotRunningOutputWhenPidFileIsMissing() async throws {
         let temp = try AppServerDaemonTemporaryDirectory()
 
@@ -100,7 +188,9 @@ private extension AppServerDaemonProcessClient {
         AppServerDaemonProcessClient(
             processStartTime: { pid in startTimes[pid] ?? nil },
             signalProcess: { _, _ in },
-            sleep: { _ in }
+            sleep: { _ in },
+            spawnDetached: { _ in 0 },
+            probeAppServerVersion: { _ in throw AppServerDaemonLifecycleError("not ready") }
         )
     }
 }
@@ -117,10 +207,36 @@ private extension AppServerDaemonStopOptions {
 private final class AppServerDaemonTemporaryDirectory {
     let url: URL
 
+    var socketPath: URL {
+        url
+            .appendingPathComponent("app-server-control", isDirectory: true)
+            .appendingPathComponent("app-server-control.sock", isDirectory: false)
+    }
+
     var pidFile: URL {
         url
             .appendingPathComponent("app-server-daemon", isDirectory: true)
             .appendingPathComponent("app-server.pid", isDirectory: false)
+    }
+
+    var updatePidFile: URL {
+        url
+            .appendingPathComponent("app-server-daemon", isDirectory: true)
+            .appendingPathComponent("app-server-updater.pid", isDirectory: false)
+    }
+
+    var settingsFile: URL {
+        url
+            .appendingPathComponent("app-server-daemon", isDirectory: true)
+            .appendingPathComponent("settings.json", isDirectory: false)
+    }
+
+    var managedCodexBin: URL {
+        url
+            .appendingPathComponent("packages", isDirectory: true)
+            .appendingPathComponent("standalone", isDirectory: true)
+            .appendingPathComponent("current", isDirectory: true)
+            .appendingPathComponent("codex", isDirectory: false)
     }
 
     init() throws {
@@ -134,25 +250,52 @@ private final class AppServerDaemonTemporaryDirectory {
     }
 
     func writePidRecord(pid: UInt32, processStartTime: String) throws {
+        try writePidRecord(pid: pid, processStartTime: processStartTime, path: pidFile)
+    }
+
+    func writeUpdaterPidRecord(pid: UInt32, processStartTime: String) throws {
+        try writePidRecord(pid: pid, processStartTime: processStartTime, path: updatePidFile)
+    }
+
+    func createManagedCodexBin() throws {
+        try FileManager.default.createDirectory(at: managedCodexBin.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data().write(to: managedCodexBin)
+    }
+
+    func settingsJSON() throws -> String {
+        let object = try JSONSerialization.jsonObject(with: Data(contentsOf: settingsFile))
+        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private func writePidRecord(pid: UInt32, processStartTime: String, path: URL) throws {
         let stateDir = pidFile.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
         let data = #"{"pid":\#(pid),"processStartTime":"\#(processStartTime)"}"#.data(using: .utf8)!
-        try data.write(to: pidFile)
+        try data.write(to: path)
     }
 }
 
 private actor AppServerDaemonFakeProcess {
     private var startTimes: [UInt32: String]
+    private var spawnedStartTimes: [UInt32: String]
+    private var nextSpawnPID: UInt32 = 2001
+    private var probeResults: [Result<String, Error>]
     private let terminateRemovesProcess: Bool
     private let killRemovesProcess: Bool
     private(set) var signals: [AppServerDaemonSignal] = []
+    private(set) var spawns: [AppServerDaemonSpawnRequest] = []
 
     init(
         startTimes: [UInt32: String],
+        spawnedStartTimes: [UInt32: String] = [:],
+        probeResults: [Result<String, Error>] = [],
         terminateRemovesProcess: Bool = true,
         killRemovesProcess: Bool = true
     ) {
         self.startTimes = startTimes
+        self.spawnedStartTimes = spawnedStartTimes
+        self.probeResults = probeResults
         self.terminateRemovesProcess = terminateRemovesProcess
         self.killRemovesProcess = killRemovesProcess
     }
@@ -167,12 +310,41 @@ private actor AppServerDaemonFakeProcess {
                 guard let self else { return }
                 await self.recordSignal(signal, pid: pid)
             },
-            sleep: { _ in }
+            sleep: { _ in },
+            spawnDetached: { [weak self] request in
+                guard let self else { return 0 }
+                return await self.recordSpawn(request)
+            },
+            probeAppServerVersion: { [weak self] _ in
+                guard let self else { throw AppServerDaemonLifecycleError("not ready") }
+                return try await self.nextProbeResult()
+            }
         )
     }
 
     func signalsSnapshot() -> [AppServerDaemonSignal] {
         signals
+    }
+
+    func spawnsSnapshot() -> [AppServerDaemonSpawnRequest] {
+        spawns
+    }
+
+    private func recordSpawn(_ request: AppServerDaemonSpawnRequest) -> UInt32 {
+        let pid = nextSpawnPID
+        nextSpawnPID += 1
+        spawns.append(request)
+        if let startTime = spawnedStartTimes[pid] {
+            startTimes[pid] = startTime
+        }
+        return pid
+    }
+
+    private func nextProbeResult() throws -> String {
+        guard !probeResults.isEmpty else {
+            throw AppServerDaemonLifecycleError("not ready")
+        }
+        return try probeResults.removeFirst().get()
     }
 
     private func recordSignal(_ signal: AppServerDaemonSignal, pid: UInt32) {

@@ -576,7 +576,7 @@ private func runMcpServerCommand(_ request: CodexCLI.McpServerCommandRequest) as
 
 private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) async throws -> CodexCLI.CommandExecutionResult {
     switch request.action {
-    case .run, .remoteControl:
+    case .run:
         let websocketAuth = try AppServerWebsocketAuthValidator.settings(from: request.websocketAuth)
         let codexHome = try CodexHome.find()
         let settings = try CodexConfigLoader.load(
@@ -654,6 +654,15 @@ private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) as
             )
         }
         return CodexCLI.CommandExecutionResult(exitCode: 0)
+    case .remoteControl:
+        let output = try await AppServerDaemonLifecycle.ensureRemoteControlStarted(
+            codexHome: try CodexHome.find(),
+            cliVersion: CodexCLI.version
+        )
+        return CodexCLI.CommandExecutionResult(
+            exitCode: 0,
+            stdoutMessage: try AppServerDaemonLifecycle.encodeRemoteControlStartOutput(output) + "\n"
+        )
     case .remoteControlStop:
         let output = try await AppServerDaemonLifecycle.stop(
             codexHome: try CodexHome.find(),
