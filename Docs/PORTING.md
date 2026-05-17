@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust code-mode `image(...)` helper detail
+  declarations in `codex-rs/code-mode/src/description.rs`. Swift code-mode
+  exec tool descriptions now advertise the same helper detail union
+  (`auto`, `low`, `high`, `original`, or `null`) while keeping the stricter
+  `view_image.detail` argument validation separate.
 - 2026-05-17: rechecked Rust commit `77d9223e9f` (`[codex] compact
   network context rendering`). Swift `<environment_context>` prompt rendering
   now emits managed network allow/deny domains in Rust's compact one-line

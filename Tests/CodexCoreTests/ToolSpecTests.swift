@@ -1371,6 +1371,7 @@ final class ToolSpecTests: XCTestCase {
         }
         XCTAssertTrue(execTool.description.contains("Run JavaScript code"))
         XCTAssertTrue(execTool.format.definition.contains("pragma_source"))
+        XCTAssertTrue(execTool.description.contains(#"detail?: "auto" | "low" | "high" | "original" | null"#))
         XCTAssertFalse(execTool.description.contains("spawn_agent"))
         XCTAssertFalse(execTool.description.contains("wait_agent"))
         XCTAssertFalse(execTool.description.contains("do not attempt to use any other tools directly"))
