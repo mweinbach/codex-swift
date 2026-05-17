@@ -365,18 +365,17 @@ final class DebugCommandRuntimeTests: XCTestCase {
         XCTAssertTrue(skillsText.contains(skill.path))
     }
 
-    func testPromptInputIncludesCommitAttributionOnlyWhenFeatureEnabled() async throws {
+    func testPromptInputOmitsRemovedGitCommitAttributionEvenWhenFeatureEnabled() async throws {
         let temp = try TemporaryDirectory()
         var features = FeatureStates.withDefaults()
         features.set(.codexGitCommit, enabled: true)
 
-        let enabledResult = try await DebugCommandRuntime.run(
+        let result = try await DebugCommandRuntime.run(
             CodexCLI.DebugCommandRequest(action: .promptInput(prompt: "inspect", imagePaths: [])),
             dependencies: testDependencies(
                 codexHome: temp.url,
                 config: CodexRuntimeConfig(
                     modelProvider: "test-provider",
-                    commitAttribution: "AgentX <agent@example.com>",
                     features: features,
                     memories: MemoriesConfig(),
                     projectDocMaxBytes: 0
@@ -384,34 +383,41 @@ final class DebugCommandRuntimeTests: XCTestCase {
             )
         )
 
-        let enabledOutput = try XCTUnwrap(enabledResult.stdoutMessage)
-        let enabledDecoded = try JSONDecoder().decode([ResponseItem].self, from: Data(enabledOutput.utf8))
-        guard case let .message(_, developerRole, developerContent, _) = enabledDecoded[0] else {
+        let output = try XCTUnwrap(result.stdoutMessage)
+        let decoded = try JSONDecoder().decode([ResponseItem].self, from: Data(output.utf8))
+        guard case let .message(_, developerRole, developerContent, _) = decoded[0] else {
             return XCTFail("expected developer context message")
         }
         XCTAssertEqual(developerRole, "developer")
-        XCTAssertEqual(developerContent.count, 2)
-        guard case let .inputText(commitText) = developerContent[1] else {
-            return XCTFail("expected commit attribution after permissions")
-        }
-        XCTAssertTrue(commitText.contains("Co-authored-by: AgentX <agent@example.com>"))
-        XCTAssertTrue(commitText.contains("exactly once"))
+        let developerText = developerContent.compactMap { item -> String? in
+            guard case let .inputText(text) = item else { return nil }
+            return text
+        }.joined(separator: "\n")
+        XCTAssertFalse(developerText.contains("Co-authored-by:"))
+        XCTAssertFalse(developerText.contains("exactly once"))
+    }
 
-        let disabledResult = try await DebugCommandRuntime.run(
+    func testPromptInputIgnoresRemovedCommitAttributionConfigKeyLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        try """
+        commit_attribution = "AgentX <agent@example.com>"
+
+        [features]
+        codex_git_commit = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: temp.url, cwd: temp.url, systemConfigFile: nil)
+        let result = try await DebugCommandRuntime.run(
             CodexCLI.DebugCommandRequest(action: .promptInput(prompt: "inspect", imagePaths: [])),
             dependencies: testDependencies(
                 codexHome: temp.url,
-                config: CodexRuntimeConfig(
-                    modelProvider: "test-provider",
-                    commitAttribution: "AgentX <agent@example.com>",
-                    memories: MemoriesConfig(),
-                    projectDocMaxBytes: 0
-                )
+                config: config
             )
         )
 
-        let disabledOutput = try XCTUnwrap(disabledResult.stdoutMessage)
-        XCTAssertFalse(disabledOutput.contains("Co-authored-by: AgentX <agent@example.com>"))
+        let output = try XCTUnwrap(result.stdoutMessage)
+        XCTAssertFalse(output.contains("Co-authored-by: AgentX <agent@example.com>"))
+        XCTAssertFalse(output.contains("commit message"))
     }
 
     func testPromptInputAvailableSkillsHonorConfigRules() async throws {

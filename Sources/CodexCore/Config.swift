@@ -361,7 +361,6 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var baseInstructions: String?
     public var developerInstructions: String?
     public var compactPrompt: String?
-    public var commitAttribution: String?
     public var includePermissionsInstructions: Bool
     public var includeAppsInstructions: Bool
     public var includeCollaborationModeInstructions: Bool
@@ -488,7 +487,6 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         baseInstructions: String? = nil,
         developerInstructions: String? = nil,
         compactPrompt: String? = nil,
-        commitAttribution: String? = nil,
         includePermissionsInstructions: Bool = true,
         includeAppsInstructions: Bool = true,
         includeCollaborationModeInstructions: Bool = true,
@@ -567,7 +565,6 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.baseInstructions = baseInstructions
         self.developerInstructions = developerInstructions
         self.compactPrompt = compactPrompt
-        self.commitAttribution = commitAttribution
         self.includePermissionsInstructions = includePermissionsInstructions
         self.includeAppsInstructions = includeAppsInstructions
         self.includeCollaborationModeInstructions = includeCollaborationModeInstructions
@@ -4272,12 +4269,6 @@ private struct ParsedCodexConfigToml {
         if let notify = values["notify"] {
             config.notify = try stringArrayValue(notify, key: "\(keyPrefix)notify")
         }
-        if let commitAttribution = values["commit_attribution"] {
-            config.commitAttribution = try stringValue(
-                commitAttribution,
-                key: "\(keyPrefix)commit_attribution"
-            )
-        }
         if let hideAgentReasoning = values["hide_agent_reasoning"] {
             config.hideAgentReasoning = try boolValue(
                 hideAgentReasoning,
@@ -4513,7 +4504,6 @@ private struct ParsedCodexConfigToml {
             || key == "default_permissions"
             || key == "allow_login_shell"
             || key == "notify"
-            || key == "commit_attribution"
             || key == "hide_agent_reasoning"
             || key == "show_raw_agent_reasoning"
             || key == "model_reasoning_effort"

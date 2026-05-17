@@ -360,7 +360,7 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertTrue(skillsText.contains("### Available skills"))
     }
 
-    func testMakePromptIncludesCommitAttributionAfterSkillsLikeRust() throws {
+    func testMakePromptKeepsSkillsAsLastDeveloperContextAfterGitAttributionRemovalLikeRust() throws {
         let availableSkills = try XCTUnwrap(Skills.buildAvailableSkills(
             outcome: SkillLoadOutcome(
                 skills: [
@@ -376,9 +376,6 @@ final class NonInteractiveExecTests: XCTestCase {
             ),
             budget: .characters(120)
         ))
-        let instruction = try XCTUnwrap(
-            CommitAttribution.commitMessageTrailerInstruction(configAttribution: "AgentX <agent@example.com>")
-        )
         let prompt = NonInteractiveExec.makePrompt(
             prompt: "ship it",
             imagePaths: [],
@@ -388,7 +385,6 @@ final class NonInteractiveExecTests: XCTestCase {
             sandboxPolicy: .readOnly,
             shell: Shell(shellType: .zsh, shellPath: "/bin/zsh"),
             developerInstructions: "Follow developer notes.",
-            commitMessageTrailerInstruction: instruction,
             availableSkills: availableSkills
         )
 
@@ -396,16 +392,16 @@ final class NonInteractiveExecTests: XCTestCase {
             return XCTFail("expected developer context message")
         }
         XCTAssertEqual(developerRole, "developer")
-        XCTAssertEqual(developerContent.count, 4)
-        guard case let .inputText(skillsText) = developerContent[2],
-              case let .inputText(commitText) = developerContent[3]
-        else {
-            return XCTFail("expected skills followed by commit attribution")
+        XCTAssertEqual(developerContent.count, 3)
+        guard case let .inputText(skillsText) = developerContent[2] else {
+            return XCTFail("expected skills as final developer context")
         }
         XCTAssertTrue(skillsText.contains("### Available skills"))
-        XCTAssertEqual(commitText, instruction)
-        XCTAssertTrue(commitText.contains("Co-authored-by: AgentX <agent@example.com>"))
-        XCTAssertFalse(commitText.contains("Generated-with"))
+        let developerText = developerContent.compactMap { item -> String? in
+            guard case let .inputText(text) = item else { return nil }
+            return text
+        }.joined(separator: "\n")
+        XCTAssertFalse(developerText.contains("Co-authored-by:"))
     }
 
     func testMakePromptIncludesAvailableSkillsAsDeveloperContextLikeRust() throws {

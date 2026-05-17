@@ -992,7 +992,6 @@ final class ConfigLoaderTests: XCTestCase {
         sandbox_mode = "workspace-write"
         allow_login_shell = false
         notify = ["notify-send", "Codex"]
-        commit_attribution = "Codex Swift <codex-swift@example.test>"
         model_reasoning_effort = "high"
         plan_mode_reasoning_effort = "medium"
         model_reasoning_summary = "detailed"
@@ -1095,7 +1094,6 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.sandboxMode, .workspaceWrite)
         XCTAssertFalse(config.allowLoginShell)
         XCTAssertEqual(config.notify, ["notify-send", "Codex"])
-        XCTAssertEqual(config.commitAttribution, "Codex Swift <codex-swift@example.test>")
         XCTAssertEqual(config.modelReasoningEffort, .high)
         XCTAssertEqual(config.planModeReasoningEffort, .medium)
         XCTAssertEqual(config.modelReasoningSummary, .detailed)

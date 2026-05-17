@@ -370,9 +370,6 @@ public enum DebugCommandRuntime {
             config: ProjectDocConfig(runtimeConfig: config, cwd: cwd)
         ).map { UserInstructions(directory: cwd.path, text: $0) }
         let memoryToolDeveloperInstructions = MemoryToolInstructions.build(codexHome: codexHome, config: config)
-        let commitMessageTrailerInstruction = config.features.isEnabled(.codexGitCommit)
-            ? CommitAttribution.commitMessageTrailerInstruction(configAttribution: config.commitAttribution)
-            : nil
         let loadedSkills = config.includeSkillInstructions
             ? SkillLoader.load(cwd: cwd, codexHome: codexHome, configLayerStack: configLayerStack)
             : nil
@@ -401,7 +398,6 @@ public enum DebugCommandRuntime {
             includePermissionsInstructions: config.includePermissionsInstructions,
             developerInstructions: config.developerInstructions,
             memoryToolDeveloperInstructions: memoryToolDeveloperInstructions,
-            commitMessageTrailerInstruction: commitMessageTrailerInstruction,
             multiAgentV2UsageHintText: multiAgentV2UsageHintText,
             availableSkills: availableSkills,
             userInstructions: projectInstructions,

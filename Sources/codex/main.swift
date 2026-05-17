@@ -1208,9 +1208,6 @@ private func runNonInteractiveExec(
         )
     }
     let memoryToolDeveloperInstructions = MemoryToolInstructions.build(codexHome: codexHome, config: settings)
-    let commitMessageTrailerInstruction = settings.features.isEnabled(.codexGitCommit)
-        ? CommitAttribution.commitMessageTrailerInstruction(configAttribution: settings.commitAttribution)
-        : nil
     let multiAgentV2UsageHintText = settings.multiAgentV2.usageHintText(
         features: settings.features,
         sessionSource: .exec
@@ -1228,7 +1225,6 @@ private func runNonInteractiveExec(
         includePermissionsInstructions: settings.includePermissionsInstructions,
         developerInstructions: settings.developerInstructions,
         memoryToolDeveloperInstructions: memoryToolDeveloperInstructions,
-        commitMessageTrailerInstruction: commitMessageTrailerInstruction,
         multiAgentV2UsageHintText: multiAgentV2UsageHintText,
         availableSkills: availableSkills,
         userInstructions: projectInstructions,
