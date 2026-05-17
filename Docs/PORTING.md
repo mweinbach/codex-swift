@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `6941f5c2c5` (`[codex] preserve
+  MCP result meta in McpToolCallItemResult`). Swift non-interactive JSONL
+  output now emits `mcp_tool_call` `item.started` / `item.completed`
+  envelopes from runtime MCP begin/end events and preserves successful MCP
+  result metadata under `_meta`, not `meta`, matching Rust's exec JSONL
+  projection.
 - 2026-05-17: rechecked Rust commit `2304ec45ca` (`Remove unavailable MCP
   placeholder tool backfill`). Swift no longer collects historical
   unavailable MCP calls, appends synthetic placeholder tool specs, or returns
@@ -3590,7 +3596,7 @@ Recent upstream audit checkpoint:
 - `codex-rs/protocol/src/mcp_approval_meta.rs` / `codex-rs/core/src/mcp_tool_call.rs` MCP approval elicitation metadata
   - added Swift MCP approval metadata keys, prompt options, elicitation request construction, fallback tool-parameter display ordering, and Rust-shaped `_meta` payloads for MCP tool approvals including session/always persistence, connector-source metadata for `codex_apps`, tool params, and snake-case `tool_params_display`.
 - `codex-rs/exec/src/exec_events.rs` MCP tool call result metadata
-  - rechecked Rust commit `6941f5c2c5`; Swift already carried MCP `CallToolResult` metadata through core turn items and app-server thread item conversion, and now pins item-completed event serialization so result metadata stays under Rust's `_meta` key and never leaks as `meta`.
+  - rechecked Rust commit `6941f5c2c5`; Swift already carried MCP `CallToolResult` metadata through core turn items and app-server thread item conversion, and now pins exec JSONL MCP tool-call item serialization so result metadata stays under Rust's `_meta` key and never leaks as `meta`.
 
 ## Known Gaps
 

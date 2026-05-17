@@ -1070,6 +1070,7 @@ public enum NonInteractiveExec {
         var jsonLines: [String] = []
         var runningTodoList: RunningExecJSONTodoList?
         var runningCommandIDs: [String: String] = [:]
+        var runningMcpCallIDs: [String: String] = [:]
 
         if outputMode == .jsonLines {
             jsonLines.append(encodeJSONLine(ThreadStartedEvent(threadID: conversationID.description), using: jsonEncoder))
@@ -1096,6 +1097,7 @@ public enum NonInteractiveExec {
                             itemIDs: &itemIDs,
                             runningTodoList: &runningTodoList,
                             runningCommandIDs: &runningCommandIDs,
+                            runningMcpCallIDs: &runningMcpCallIDs,
                             encoder: jsonEncoder
                         )
                     }
@@ -1236,6 +1238,7 @@ public enum NonInteractiveExec {
         itemIDs: inout ExecJSONItemIDMapper,
         runningTodoList: inout RunningExecJSONTodoList?,
         runningCommandIDs: inout [String: String],
+        runningMcpCallIDs: inout [String: String],
         encoder: JSONEncoder
     ) {
         switch event {
@@ -1276,6 +1279,45 @@ public enum NonInteractiveExec {
                 exitCode: end.exitCode,
                 status: end.status.rawValue
             )), using: encoder))
+
+        case let .mcpToolCallBegin(begin):
+            let itemID = itemIDs.nextID()
+            runningMcpCallIDs[begin.callID] = itemID
+            jsonLines.append(encodeJSONLine(ExecJSONItemStartedEvent(item: CompletedItem(
+                id: itemID,
+                type: "mcp_tool_call",
+                server: begin.invocation.server,
+                tool: begin.invocation.tool,
+                arguments: begin.invocation.arguments ?? .null,
+                status: "in_progress"
+            )), using: encoder))
+
+        case let .mcpToolCallEnd(end):
+            let itemID = runningMcpCallIDs.removeValue(forKey: end.callID) ?? itemIDs.nextID()
+            let item: CompletedItem
+            switch end.result {
+            case let .ok(result):
+                item = CompletedItem(
+                    id: itemID,
+                    type: "mcp_tool_call",
+                    server: end.invocation.server,
+                    tool: end.invocation.tool,
+                    arguments: end.invocation.arguments ?? .null,
+                    result: ExecJSONMcpToolCallResult(result),
+                    status: end.isSuccess ? "completed" : "failed"
+                )
+            case let .err(message):
+                item = CompletedItem(
+                    id: itemID,
+                    type: "mcp_tool_call",
+                    server: end.invocation.server,
+                    tool: end.invocation.tool,
+                    arguments: end.invocation.arguments ?? .null,
+                    error: ExecJSONMcpToolCallError(message: message),
+                    status: "failed"
+                )
+            }
+            jsonLines.append(encodeJSONLine(ExecJSONItemCompletedEvent(item: item), using: encoder))
 
         default:
             break
@@ -3565,6 +3607,11 @@ private struct CompletedItem: Encodable {
     let command: String?
     let aggregatedOutput: String?
     let exitCode: Int32?
+    let server: String?
+    let tool: String?
+    let arguments: JSONValue?
+    let result: ExecJSONMcpToolCallResult?
+    let error: ExecJSONMcpToolCallError?
     let status: String?
 
     init(
@@ -3577,6 +3624,11 @@ private struct CompletedItem: Encodable {
         command: String? = nil,
         aggregatedOutput: String? = nil,
         exitCode: Int32? = nil,
+        server: String? = nil,
+        tool: String? = nil,
+        arguments: JSONValue? = nil,
+        result: ExecJSONMcpToolCallResult? = nil,
+        error: ExecJSONMcpToolCallError? = nil,
         status: String? = nil
     ) {
         self.id = id
@@ -3588,6 +3640,11 @@ private struct CompletedItem: Encodable {
         self.command = command
         self.aggregatedOutput = aggregatedOutput
         self.exitCode = exitCode
+        self.server = server
+        self.tool = tool
+        self.arguments = arguments
+        self.result = result
+        self.error = error
         self.status = status
     }
 
@@ -3601,8 +3658,46 @@ private struct CompletedItem: Encodable {
         case command
         case aggregatedOutput = "aggregated_output"
         case exitCode = "exit_code"
+        case server
+        case tool
+        case arguments
+        case result
+        case error
         case status
     }
+}
+
+private struct ExecJSONMcpToolCallResult: Encodable {
+    let content: [McpContentBlock]
+    let meta: JSONValue?
+    let structuredContent: JSONValue?
+
+    init(_ result: McpCallToolResult) {
+        content = result.content
+        meta = result.meta
+        structuredContent = result.structuredContent
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case content
+        case meta = "_meta"
+        case structuredContent = "structured_content"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(content, forKey: .content)
+        try container.encodeIfPresent(meta, forKey: .meta)
+        if let structuredContent {
+            try container.encode(structuredContent, forKey: .structuredContent)
+        } else {
+            try container.encodeNil(forKey: .structuredContent)
+        }
+    }
+}
+
+private struct ExecJSONMcpToolCallError: Encodable {
+    let message: String
 }
 
 private struct ExecJSONTodoItem: Encodable, Equatable, Sendable {

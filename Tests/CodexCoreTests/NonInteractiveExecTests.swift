@@ -3833,6 +3833,103 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(item["text"], .string("summary one\nsummary two"))
     }
 
+    func testJSONLinesMcpToolCallResultPreservesMetaLikeCurrentRust() throws {
+        let id = try ConversationId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
+        let result = NonInteractiveExec.finish(
+            responseEvents: [
+                .success(.runtimeEvent(.mcpToolCallBegin(McpToolCallBeginEvent(
+                    callID: "mcp-1",
+                    invocation: McpInvocation(
+                        server: "search service",
+                        tool: "web_run",
+                        arguments: .object([
+                            "search_query": .array([
+                                .object(["q": .string("OpenAI Codex CLI documentation")])
+                            ])
+                        ])
+                    )
+                )))),
+                .success(.runtimeEvent(.mcpToolCallEnd(McpToolCallEndEvent(
+                    callID: "mcp-1",
+                    invocation: McpInvocation(
+                        server: "search service",
+                        tool: "web_run",
+                        arguments: .object([
+                            "search_query": .array([
+                                .object(["q": .string("OpenAI Codex CLI documentation")])
+                            ])
+                        ])
+                    ),
+                    duration: ProtocolDuration(secs: 0, nanos: 42_000_000),
+                    result: .ok(McpCallToolResult(
+                        content: [.text(McpTextContent(text: "search result"))],
+                        structuredContent: .object(["count": .integer(1)]),
+                        meta: .object([
+                            "raw_messages": .array([
+                                .object(["ref_id": .string("turn0search0")])
+                            ])
+                        ])
+                    ))
+                )))),
+                .success(.runtimeEvent(.mcpToolCallBegin(McpToolCallBeginEvent(
+                    callID: "mcp-2",
+                    invocation: McpInvocation(server: "filesystem", tool: "read_file")
+                )))),
+                .success(.runtimeEvent(.mcpToolCallEnd(McpToolCallEndEvent(
+                    callID: "mcp-2",
+                    invocation: McpInvocation(server: "filesystem", tool: "read_file"),
+                    duration: ProtocolDuration(secs: 0, nanos: 1),
+                    result: .ok(McpCallToolResult(content: []))
+                )))),
+                .success(.completed(responseID: "resp_1", tokenUsage: nil))
+            ],
+            outputMode: .jsonLines,
+            conversationID: id,
+            lastMessageFile: nil
+        )
+
+        XCTAssertEqual(result.exitCode, 0)
+        let lines = try XCTUnwrap(result.stdoutMessage?.split(separator: "\n").map(String.init))
+        let objects = try lines.map(jsonObject)
+        XCTAssertEqual(objects.map { $0["type"] }, [
+            .string("thread.started"),
+            .string("turn.started"),
+            .string("item.started"),
+            .string("item.completed"),
+            .string("item.started"),
+            .string("item.completed"),
+            .string("turn.completed")
+        ])
+        guard case let .object(startedItem)? = objects[2]["item"],
+              case let .object(completedItem)? = objects[3]["item"],
+              case let .object(resultObject)? = completedItem["result"],
+              case let .object(secondCompletedItem)? = objects[5]["item"],
+              case let .object(secondResultObject)? = secondCompletedItem["result"]
+        else {
+            return XCTFail("expected MCP tool call items")
+        }
+        XCTAssertEqual(startedItem["id"], .string("item_0"))
+        XCTAssertEqual(startedItem["type"], .string("mcp_tool_call"))
+        XCTAssertEqual(startedItem["server"], .string("search service"))
+        XCTAssertEqual(startedItem["tool"], .string("web_run"))
+        XCTAssertEqual(startedItem["status"], .string("in_progress"))
+        XCTAssertEqual(completedItem["id"], .string("item_0"))
+        XCTAssertEqual(completedItem["type"], .string("mcp_tool_call"))
+        XCTAssertEqual(completedItem["status"], .string("completed"))
+        guard case let .array(rawMessages)? = resultObject["_meta"]?["raw_messages"],
+              case let .object(firstRawMessage)? = rawMessages.first
+        else {
+            return XCTFail("expected MCP result metadata")
+        }
+        XCTAssertEqual(firstRawMessage["ref_id"], .string("turn0search0"))
+        XCTAssertNil(resultObject["meta"])
+        XCTAssertEqual(resultObject["structured_content"]?["count"], .integer(1))
+        XCTAssertEqual(secondCompletedItem["id"], .string("item_1"))
+        XCTAssertEqual(secondCompletedItem["arguments"], .null)
+        XCTAssertNil(secondResultObject["_meta"])
+        XCTAssertEqual(secondResultObject["structured_content"], .null)
+    }
+
     func testJSONLinesReasoningItemSkipsEmptySummaryLikeRust() throws {
         let id = try ConversationId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
         let result = NonInteractiveExec.finish(
