@@ -45,8 +45,13 @@ Recent upstream audit checkpoint:
   lockfiles, and keeps tests pinned to the Rust config shape. Swift now also
   exposes public code-mode `exec` / `wait` tools and applies the Rust
   code-mode-only `DirectModelOnly` filter so multi-agent v2 remains
-  model-visible while ordinary nested tools are hidden. Rendering full nested
-  code-mode tool declarations remains pending.
+  model-visible while ordinary nested tools are hidden. Swift now also mirrors
+  Rust's code-mode nested tool metadata path: nested function, namespace, and
+  extension tool descriptions include TypeScript `tools.<name>(...)`
+  declarations, code-mode-only `exec` descriptions embed the hidden nested
+  tool reference, direct-model-only multi-agent tools stay declaration-free,
+  and JSON-schema required arrays survive JSONValue-backed MCP schema
+  sanitization.
 - 2026-05-17: rechecked Rust commit `9798eb377a` (`feat(cli): add codex
   doctor diagnostics`) for the app-server feedback path. Swift feedback uploads
   can now carry in-memory attachments, and `feedback/upload` includes the

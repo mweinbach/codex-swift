@@ -1335,7 +1335,12 @@ final class ToolSpecTests: XCTestCase {
 
         XCTAssertEqual(specs.first { $0.spec.name == "exec" }?.spec, ToolSpecFactory.createCodeModeExecTool())
         XCTAssertEqual(specs.first { $0.spec.name == "wait" }?.spec, ToolSpecFactory.createCodeModeWaitTool())
-        XCTAssertEqual(specs.last, extensionEcho)
+        guard case let .function(echoTool)? = specs.last?.spec else {
+            return XCTFail("expected extension_echo function tool")
+        }
+        XCTAssertEqual(echoTool.name, "extension_echo")
+        XCTAssertTrue(echoTool.description.contains("Echoes arguments through an extension tool."))
+        XCTAssertTrue(echoTool.description.contains("declare const tools: { extension_echo"))
     }
 
     func testCodeModeOnlyExposesMultiAgentV2AsDirectModelOnlyToolsLikeRust() throws {
@@ -1374,6 +1379,55 @@ final class ToolSpecTests: XCTestCase {
             return XCTFail("expected spawn_agent function tool")
         }
         XCTAssertFalse(spawnAgent.description.contains("exec tool declaration"))
+    }
+
+    func testCodeModeOnlyExecDescriptionIncludesHiddenNestedToolDetailsLikeRust() throws {
+        let specs = ToolSpecFactory.buildSpecs(config: ToolsConfig(
+            shellType: .disabled,
+            codeModeEnabled: true,
+            codeModeOnlyEnabled: true
+        ))
+
+        let execSpec = try XCTUnwrap(specs.first { $0.spec.name == "exec" }?.spec)
+        guard case let .freeform(execTool) = execSpec else {
+            return XCTFail("expected code-mode exec to be a freeform tool")
+        }
+
+        XCTAssertTrue(execTool.description.starts(with: "Run JavaScript code to orchestrate/compose tool calls"))
+        XCTAssertTrue(execTool.description.contains("### `update_plan`"))
+        XCTAssertTrue(execTool.description.contains("declare const tools: { update_plan(args:"))
+        XCTAssertTrue(execTool.description.contains("### `view_image`"))
+        XCTAssertTrue(execTool.description.contains("declare const tools: { view_image(args:"))
+    }
+
+    func testCodeModeAugmentsMCPNamespaceToolDescriptionsLikeRust() throws {
+        let specs = ToolSpecFactory.buildSpecs(
+            config: ToolsConfig(shellType: .disabled, namespaceTools: true, codeModeEnabled: true),
+            mcpTools: [
+                "mcp__sample__echo": McpTool(
+                    name: "echo",
+                    inputSchema: McpToolInputSchema(rawValue: .object([
+                        "type": .string("object"),
+                        "properties": .object([
+                            "message": .object(["type": .string("string")])
+                        ]),
+                        "required": .array([.string("message")]),
+                        "additionalProperties": .bool(false)
+                    ])),
+                    description: "Echo text"
+                )
+            ]
+        )
+
+        guard case let .namespace(namespace)? = specs.first(where: { $0.spec.name == "mcp__sample__" })?.spec,
+              case let .function(echoTool)? = namespace.tools.first
+        else {
+            return XCTFail("expected namespaced MCP function tool")
+        }
+
+        XCTAssertEqual(echoTool.name, "echo")
+        XCTAssertTrue(echoTool.description.contains("Echo text"))
+        XCTAssertTrue(echoTool.description.contains("declare const tools: { mcp__sample__echo(args: { message: string; }): Promise<CallToolResult"))
     }
 
     func testExtensionToolSpecsMayUseExecAndWaitWhenCodeModeIsDisabledLikeRust() throws {

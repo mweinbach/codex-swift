@@ -230,7 +230,7 @@ public indirect enum JSONSchema: Equatable, Codable, Sendable {
         let types = normalizedTypes(for: object)
         let enumValues = enumValues(from: object)
         let properties = sanitizedProperties(object["properties"])
-        let required = object["required"] as? [String]
+        let required = sanitizedRequired(object["required"])
         let additionalProperties = sanitizedAdditionalProperties(object["additionalProperties"])
         let items = object["items"].map(sanitized(from:))
 
@@ -321,6 +321,17 @@ public indirect enum JSONSchema: Equatable, Codable, Sendable {
             return [:]
         }
         return properties.mapValues(sanitized(from:))
+    }
+
+    private static func sanitizedRequired(_ value: Any?) -> [String]? {
+        if let strings = value as? [String] {
+            return strings
+        }
+        guard let values = value as? [Any] else {
+            return nil
+        }
+        let strings = values.compactMap { $0 as? String }
+        return strings.count == values.count ? strings : nil
     }
 
     private static func sanitizedAdditionalProperties(_ value: Any?) -> JSONSchemaAdditionalProperties? {
@@ -918,7 +929,7 @@ SOURCE: /[\s\S]+/
     private static let codeModeExecDescription = """
 Run JavaScript code to orchestrate/compose tool calls
 - Evaluates the provided JavaScript code in a fresh V8 isolate as an async module.
-- All nested tools are available on the global `tools` object.
+- All nested tools are available on the global `tools` object, for example `await tools.exec_command(...)`. Tool names are exposed as normalized JavaScript identifiers, for example `await tools.mcp__ologs__get_profile(...)`.
 - Nested tool methods take either a string or an object as their input argument.
 - Nested tools return either an object or a string, based on the description.
 - Runs raw JavaScript -- no Node, no file system, no network access, no console.
@@ -929,13 +940,13 @@ Run JavaScript code to orchestrate/compose tool calls
 - When the JS code is fully evaluated, the isolate's lifetime ends and unawaited promises are silently discarded.
 
 - Global helpers:
-- `exit()`: Immediately ends the current script successfully.
-- `text(value: string | number | boolean | undefined | null)`: Appends a text item.
-- `image(imageUrlOrItem: string | { image_url: string; detail?: "high" | "original" | null } | ImageContent, detail?: "high" | "original" | null)`: Appends an image item.
-- `store(key: string, value: any)`: stores a serializable value under a string key for later `exec` calls.
+- `exit()`: Immediately ends the current script successfully (like an early return from the top level).
+- `text(value: string | number | boolean | undefined | null)`: Appends a text item. Non-string values are stringified with `JSON.stringify(...)` when possible.
+- `image(imageUrlOrItem: string | { image_url: string; detail?: "high" | "original" | null } | ImageContent, detail?: "high" | "original" | null)`: Appends an image item. `image_url` can be an HTTPS URL or a base64-encoded `data:` URL. To forward an MCP tool image, pass an individual `ImageContent` block from `result.content`, for example `image(result.content[0])`. MCP image blocks may request detail with `_meta: { "codex/imageDetail": "original" }`. When provided, the second `detail` argument overrides any detail embedded in the first argument.
+- `store(key: string, value: any)`: stores a serializable value under a string key for later `exec` calls in the same session.
 - `load(key: string)`: returns the stored value for a string key, or `undefined` if it is missing.
-- `notify(value: string | number | boolean | undefined | null)`: immediately injects an extra `custom_tool_call_output` for the current `exec` call.
-- `setTimeout(callback: () => void, delayMs?: number)`: schedules a callback to run later and returns a timeout id.
+- `notify(value: string | number | boolean | undefined | null)`: immediately injects an extra `custom_tool_call_output` for the current `exec` call. Values are stringified like `text(...)`.
+- `setTimeout(callback: () => void, delayMs?: number)`: schedules a callback to run later and returns a timeout id. Pending timeouts do not keep `exec` alive by themselves; await an explicit promise if you need to wait for one.
 - `clearTimeout(timeoutId?: number)`: cancels a timeout created by `setTimeout`.
 - `ALL_TOOLS`: metadata for the enabled nested tools as `{ name, description }` entries.
 - `yield_control()`: yields the accumulated output to the model immediately while the script keeps running.
@@ -951,6 +962,40 @@ Waits on a yielded `exec` cell and returns new output or completion.
 - If the cell is still running, `wait` may yield again with the same `cell_id`.
 - If the cell has already finished, `wait` returns the completed result and closes the cell.
 """
+    private static let deferredNestedToolsGuidance = """
+Some nested MCP/app tools may be omitted from this description. They are still available on the global `tools` object and listed in `ALL_TOOLS`.
+To find one, filter `ALL_TOOLS` by `name` and `description`.
+"""
+    private static let mcpTypescriptPreamble = #"""
+type Role = "user" | "assistant";
+type MetaObject = Record<string, unknown>;
+type Annotations = {
+  audience?: Role[];
+  priority?: number;
+  lastModified?: string;
+};
+type TextContent = {
+  type: "text";
+  text: string;
+  annotations?: Annotations;
+  _meta?: MetaObject;
+};
+type ImageContent = {
+  type: "image";
+  data: string;
+  mimeType: string;
+  annotations?: Annotations;
+  _meta?: MetaObject;
+};
+type ContentBlock = TextContent | ImageContent | { [key: string]: unknown };
+type CallToolResult<TStructured = { [key: string]: unknown }> = {
+  _meta?: MetaObject;
+  content: ContentBlock[];
+  isError?: boolean;
+  structuredContent?: TStructured;
+  [key: string]: unknown;
+};
+"""#
     private static let multiAgentV2DirectModelOnlyToolNames: Set<String> = [
         "spawn_agent",
         "send_message",
@@ -1145,6 +1190,15 @@ Waits on a yielded `exec` cell and returns new output or completion.
         }
         appendExtensionToolSpecs(extensionToolSpecs, codeModeEnabled: config.codeModeEnabled, to: &specs)
 
+        if config.codeModeEnabled {
+            specs = augmentCodeModeToolDescriptions(
+                specs,
+                config: config,
+                deferredToolsAvailable: config.toolSearch
+                    && (deferredMcpToolsForSearch?.isEmpty == false || !deferredDynamicTools.isEmpty)
+            )
+        }
+
         return specs.filter { !isHiddenByCodeModeOnly($0.spec, config: config) }
     }
 
@@ -1177,6 +1231,274 @@ Waits on a yielded `exec` cell and returns new output or completion.
         for extensionToolSpec in extensionToolSpecs
             where registeredNames.insert(extensionToolSpec.spec.name).inserted {
             specs.append(extensionToolSpec)
+        }
+    }
+
+    private static func augmentCodeModeToolDescriptions(
+        _ specs: [ConfiguredToolSpec],
+        config: ToolsConfig,
+        deferredToolsAvailable: Bool
+    ) -> [ConfiguredToolSpec] {
+        let nestedDefinitions = specs.flatMap { configuredTool in
+            nestedCodeModeToolDefinitions(configuredTool, config: config)
+        }
+        let execDescription = buildCodeModeExecDescription(
+            nestedDefinitions: nestedDefinitions,
+            codeModeOnly: config.codeModeOnlyEnabled,
+            deferredToolsAvailable: deferredToolsAvailable
+        )
+
+        return specs.map { configuredTool in
+            ConfiguredToolSpec(
+                spec: augmentCodeModeToolDescription(configuredTool.spec, config: config, execDescription: execDescription),
+                supportsParallelToolCalls: configuredTool.supportsParallelToolCalls
+            )
+        }
+    }
+
+    private struct CodeModeToolDefinition {
+        let headingName: String
+        let declarationName: String
+        let description: String
+        let inputName: String
+        let inputType: String
+        let outputType: String
+        let includesMCPCallResult: Bool
+    }
+
+    private static func nestedCodeModeToolDefinitions(
+        _ configuredTool: ConfiguredToolSpec,
+        config: ToolsConfig
+    ) -> [CodeModeToolDefinition] {
+        switch configuredTool.spec {
+        case let .function(tool):
+            guard CodeMode.isCodeModeNestedTool(tool.name),
+                  !isDirectModelOnly(configuredTool.spec, config: config)
+            else {
+                return []
+            }
+            return [codeModeDefinition(name: tool.name, tool: tool, inputName: "args")]
+        case let .namespace(namespace):
+            return namespace.tools.compactMap { namespaceTool in
+                guard case let .function(tool) = namespaceTool else {
+                    return nil
+                }
+                let fullName = namespace.name + tool.name
+                return codeModeDefinition(name: fullName, tool: tool, inputName: "args")
+            }
+        case let .freeform(tool):
+            guard CodeMode.isCodeModeNestedTool(tool.name) else {
+                return []
+            }
+            return [CodeModeToolDefinition(
+                headingName: tool.name,
+                declarationName: tool.name,
+                description: tool.description,
+                inputName: "input",
+                inputType: "string",
+                outputType: "unknown",
+                includesMCPCallResult: false
+            )]
+        default:
+            return []
+        }
+    }
+
+    private static func codeModeDefinition(
+        name: String,
+        tool: ResponsesAPITool,
+        inputName: String
+    ) -> CodeModeToolDefinition {
+        let outputType = codeModeOutputType(from: tool.outputSchema)
+        return CodeModeToolDefinition(
+            headingName: name,
+            declarationName: name,
+            description: tool.description,
+            inputName: inputName,
+            inputType: renderJSONSchemaToTypescript(tool.parameters),
+            outputType: outputType.type,
+            includesMCPCallResult: outputType.includesMCPCallResult
+        )
+    }
+
+    private static func buildCodeModeExecDescription(
+        nestedDefinitions: [CodeModeToolDefinition],
+        codeModeOnly: Bool,
+        deferredToolsAvailable: Bool
+    ) -> String {
+        var sections = [codeModeExecDescription]
+        if deferredToolsAvailable {
+            sections.append(deferredNestedToolsGuidance)
+        }
+        guard codeModeOnly, !nestedDefinitions.isEmpty else {
+            return sections.joined(separator: "\n\n")
+        }
+        if nestedDefinitions.contains(where: \.includesMCPCallResult) {
+            sections.append("Shared MCP Types:\n```ts\n\(mcpTypescriptPreamble)\n```")
+        }
+        sections.append(nestedDefinitions.map(codeModeToolReference).joined(separator: "\n\n"))
+        return sections.joined(separator: "\n\n")
+    }
+
+    private static func augmentCodeModeToolDescription(
+        _ spec: ToolSpec,
+        config: ToolsConfig,
+        execDescription: String
+    ) -> ToolSpec {
+        switch spec {
+        case let .freeform(tool) where tool.name == "exec":
+            return .freeform(FreeformTool(name: tool.name, description: execDescription, format: tool.format))
+        case let .function(tool) where CodeMode.isCodeModeNestedTool(tool.name) && !isDirectModelOnly(spec, config: config):
+            return .function(ResponsesAPITool(
+                name: tool.name,
+                description: codeModeSampleDescription(for: codeModeDefinition(name: tool.name, tool: tool, inputName: "args")),
+                strict: tool.strict,
+                deferLoading: tool.deferLoading,
+                parameters: tool.parameters,
+                outputSchema: tool.outputSchema
+            ))
+        case let .namespace(namespace):
+            return .namespace(ResponsesAPINamespace(
+                name: namespace.name,
+                description: namespace.description,
+                tools: namespace.tools.map { namespaceTool in
+                    guard case let .function(tool) = namespaceTool else {
+                        return namespaceTool
+                    }
+                    let fullName = namespace.name + tool.name
+                    return .function(ResponsesAPITool(
+                        name: tool.name,
+                        description: codeModeSampleDescription(for: codeModeDefinition(name: fullName, tool: tool, inputName: "args")),
+                        strict: tool.strict,
+                        deferLoading: tool.deferLoading,
+                        parameters: tool.parameters,
+                        outputSchema: tool.outputSchema
+                    ))
+                }
+            ))
+        default:
+            return spec
+        }
+    }
+
+    private static func codeModeToolReference(_ definition: CodeModeToolDefinition) -> String {
+        "### `\(CodeMode.normalizeCodeModeIdentifier(definition.headingName))`\n\(codeModeSampleDescription(for: definition))"
+    }
+
+    private static func codeModeSampleDescription(for definition: CodeModeToolDefinition) -> String {
+        let description = definition.description.trimmingCharacters(in: .whitespacesAndNewlines)
+        let declaration = "declare const tools: { \(codeModeToolDeclaration(definition)) };"
+        return "\(description)\n\nexec tool declaration:\n```ts\n\(declaration)\n```"
+    }
+
+    private static func codeModeToolDeclaration(_ definition: CodeModeToolDefinition) -> String {
+        let toolName = CodeMode.normalizeCodeModeIdentifier(definition.declarationName)
+        return "\(toolName)(\(definition.inputName): \(definition.inputType)): Promise<\(definition.outputType)>;"
+    }
+
+    private static func codeModeOutputType(from schema: JSONValue?) -> (type: String, includesMCPCallResult: Bool) {
+        guard let schema else {
+            return ("unknown", false)
+        }
+        if let structuredContent = mcpStructuredContentSchema(schema) {
+            let structuredType = renderJSONValueSchemaToTypescript(structuredContent)
+            if structuredType == "unknown" {
+                return ("CallToolResult", true)
+            }
+            return ("CallToolResult<\(structuredType)>", true)
+        }
+        return (renderJSONValueSchemaToTypescript(schema), false)
+    }
+
+    private static func mcpStructuredContentSchema(_ schema: JSONValue) -> JSONValue? {
+        guard case let .object(object) = schema,
+              case let .object(properties)? = object["properties"],
+              let structuredContent = properties["structuredContent"]
+        else {
+            return nil
+        }
+        return structuredContent
+    }
+
+    private static func renderJSONValueSchemaToTypescript(_ schema: JSONValue) -> String {
+        renderJSONSchemaToTypescript(JSONSchema.sanitized(from: jsonCompatibleValue(schema)))
+    }
+
+    private static func renderJSONSchemaToTypescript(_ schema: JSONSchema) -> String {
+        switch schema {
+        case .boolean:
+            return "boolean"
+        case .number, .integer:
+            return "number"
+        case .string:
+            return "string"
+        case let .stringEnum(values, _):
+            let rendered = values.compactMap(typescriptLiteral)
+            return rendered.isEmpty ? "string" : rendered.joined(separator: " | ")
+        case .null:
+            return "null"
+        case let .array(items, _):
+            return "Array<\(renderJSONSchemaToTypescript(items))>"
+        case let .object(properties, required, _):
+            return renderTypescriptObject(properties: properties, required: Set(required ?? []))
+        case let .anyOf(variants, _):
+            return renderTypescriptUnion(variants.map(renderJSONSchemaToTypescript))
+        case let .typeUnion(types, _, enumValues, items, properties, required, _):
+            if let enumValues, !enumValues.isEmpty {
+                return renderTypescriptUnion(enumValues.compactMap(typescriptLiteral))
+            }
+            let rendered = types.map { type -> String in
+                switch type {
+                case "array":
+                    return "Array<\(items.map(renderJSONSchemaToTypescript) ?? "unknown")>"
+                case "object":
+                    return renderTypescriptObject(properties: properties ?? [:], required: Set(required ?? []))
+                case "boolean":
+                    return "boolean"
+                case "number", "integer":
+                    return "number"
+                case "null":
+                    return "null"
+                case "string":
+                    return "string"
+                default:
+                    return "unknown"
+                }
+            }
+            return renderTypescriptUnion(rendered)
+        }
+    }
+
+    private static func renderTypescriptObject(properties: [String: JSONSchema], required: Set<String>) -> String {
+        guard !properties.isEmpty else {
+            return "{ [key: string]: unknown }"
+        }
+        let fields = properties.keys.sorted().map { key in
+            let optional = required.contains(key) ? "" : "?"
+            return "\(key)\(optional): \(renderJSONSchemaToTypescript(properties[key] ?? .string(description: nil)));"
+        }
+        return "{ \(fields.joined(separator: " ")) }"
+    }
+
+    private static func renderTypescriptUnion(_ values: [String]) -> String {
+        let unique = Array(NSOrderedSet(array: values.filter { !$0.isEmpty })) as? [String] ?? []
+        return unique.isEmpty ? "unknown" : unique.joined(separator: " | ")
+    }
+
+    private static func typescriptLiteral(_ value: JSONValue) -> String? {
+        switch value {
+        case .null:
+            return "null"
+        case let .bool(value):
+            return value ? "true" : "false"
+        case let .integer(value):
+            return "\(value)"
+        case let .double(value):
+            return "\(value)"
+        case let .string(value):
+            return "\"\(value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\""))\""
+        case .array, .object:
+            return nil
         }
     }
 
