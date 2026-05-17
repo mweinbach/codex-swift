@@ -284,6 +284,12 @@ Recent upstream audit checkpoint:
   call messages, while preserving builtin dispatch precedence for tools such as
   `apply_patch` and the agent-job helpers. The broader live app-server
   extension executor handle registry remains pending.
+- 2026-05-17: rechecked Rust app-server dynamic-tool unsubscribe coverage
+  (`thread_unsubscribe_during_turn_keeps_turn_running`). Swift now pins the
+  live app-server bridge contract that `thread/unsubscribe` only removes the
+  connection subscription: a pending `item/tool/call` dynamic request keeps the
+  thread loaded and still accepts the client response, submitting
+  `Op::DynamicToolResponse` back into the running turn.
 - 2026-05-17: rechecked Rust commit `4a1f1df8ce` (`[codex] fix plugin CLI
   active user layer compile`). Swift plugin CLI helper surfaces now have
   explicit coverage that `codex plugin marketplace list` and

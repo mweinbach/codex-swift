@@ -6591,6 +6591,88 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(toolResponse, DynamicToolResponse(contentItems: [.text("done")], success: true))
     }
 
+    func testRuntimeDynamicToolCallSurvivesThreadUnsubscribeLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let coreOpCapture = AppServerCoreOpCapture()
+        let threadStateManager = AppServerThreadStateManager()
+        let connectionID: AppServerConnectionID = 101
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            connectionID: connectionID,
+            notificationSink: { data in await notificationCapture.append(data) },
+            coreOpSubmitter: coreOpCapture.submit,
+            threadStateManager: threadStateManager
+        )
+        let threadID = UUID().uuidString.lowercased()
+        let didLoadThread = await threadStateManager.tryAddConnectionToThread(
+            threadID: threadID,
+            connectionID: connectionID
+        )
+        XCTAssertTrue(didLoadThread)
+
+        await processor.handleRuntimeEvent(
+            threadID: threadID,
+            turnID: "turn-fallback",
+            event: .dynamicToolCallRequest(DynamicToolCallRequest(
+                callID: "dyn-unsubscribe",
+                turnID: "turn-runtime",
+                startedAtMilliseconds: 123,
+                namespace: "codex_app",
+                tool: "lookup",
+                arguments: .object(["topic": .string("protocol")])
+            ))
+        )
+
+        let startedMessages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(startedMessages[0]["method"] as? String, "item/started")
+        let startedParams = try XCTUnwrap(startedMessages[0]["params"] as? [String: Any])
+        XCTAssertEqual(startedParams["threadId"] as? String, threadID)
+        let startedItem = try XCTUnwrap(startedParams["item"] as? [String: Any])
+        XCTAssertEqual(startedItem["id"] as? String, "dyn-unsubscribe")
+        XCTAssertEqual(startedItem["status"] as? String, "inProgress")
+
+        let request = try await nextClientRequest(notificationCapture, method: "item/tool/call")
+        let requestID = try XCTUnwrap(request["id"])
+        let requestParams = try XCTUnwrap(request["params"] as? [String: Any])
+        XCTAssertEqual(requestParams["threadId"] as? String, threadID)
+        XCTAssertEqual(requestParams["callId"] as? String, "dyn-unsubscribe")
+
+        let unsubscribeMessages = try decodeMessages(processor.processLine(Data(#"{"id":2,"method":"thread/unsubscribe","params":{"threadId":"\#(threadID)"}}"#.utf8)))
+        let unsubscribeResult = try XCTUnwrap(unsubscribeMessages.first?["result"] as? [String: Any])
+        XCTAssertEqual(unsubscribeResult["status"] as? String, "unsubscribed")
+        let subscribedConnectionIDs = await threadStateManager.subscribedConnectionIDs(forThreadID: threadID)
+        let loadedThreadIDs = await threadStateManager.listLoadedThreadIDs()
+        XCTAssertEqual(subscribedConnectionIDs, [])
+        XCTAssertEqual(loadedThreadIDs, [threadID])
+
+        let response = try JSONSerialization.data(withJSONObject: [
+            "method": "item/tool/call",
+            "id": requestID,
+            "response": [
+                "contentItems": [
+                    [
+                        "type": "inputText",
+                        "text": "done after unsubscribe"
+                    ]
+                ],
+                "success": true
+            ]
+        ])
+        XCTAssertNil(processor.processLine(response))
+
+        let submissions = try await waitForSubmissions(coreOpCapture, count: 1)
+        XCTAssertEqual(submissions[0].threadID, threadID)
+        guard case let .dynamicToolResponse(id, toolResponse) = submissions[0].op else {
+            return XCTFail("expected dynamic tool response")
+        }
+        XCTAssertEqual(id, "dyn-unsubscribe")
+        XCTAssertEqual(
+            toolResponse,
+            DynamicToolResponse(contentItems: [.text("done after unsubscribe")], success: true)
+        )
+    }
+
     func testRuntimeApprovalAndUserInputRequestsSubmitClientResponsesLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()
