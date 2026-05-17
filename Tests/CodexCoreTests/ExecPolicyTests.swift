@@ -4631,6 +4631,26 @@ final class ExecPolicyTests: XCTestCase {
         )
     }
 
+    func testRulesPathFileReturnsReadDirectoryErrorLikeRust() throws {
+        let tempDir = try CoreTemporaryDirectory()
+        let rulesPath = tempDir.url.appendingPathComponent("rules", isDirectory: false)
+        try "rules should be a directory".write(to: rulesPath, atomically: true, encoding: .utf8)
+        let configPath = tempDir.url.appendingPathComponent("config.toml", isDirectory: false)
+        let stack = try ConfigLayerStack(layers: [
+            ConfigLayerEntry(
+                name: .user(file: try AbsolutePath(absolutePath: configPath.path)),
+                config: .table([:])
+            )
+        ])
+
+        XCTAssertThrowsError(try ExecPolicyManager.loadExecPolicy(configStack: stack)) { error in
+            XCTAssertEqual(
+                error as? ExecPolicyLoadError,
+                .readDirectory(dir: rulesPath.path, message: "path is not a directory")
+            )
+        }
+    }
+
     func testLoadExecPolicyLoadsRulesFromConfigLayerFolders() throws {
         let tempDir = try CoreTemporaryDirectory()
         let userFolder = tempDir.url.appendingPathComponent("user-codex", isDirectory: true)

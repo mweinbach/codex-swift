@@ -1347,6 +1347,11 @@ Recent upstream audit checkpoint:
   parse-error warning loader that returns an empty exec policy while surfacing
   the parse warning, plus `formatExecPolicyErrorWithSource` display formatting
   for Starlark-style file/line messages.
+- 2026-05-17: rechecked Rust commit `35451ba79c` and
+  `codex-rs/core/src/exec_policy_tests.rs`. Swift exec-policy loading now has
+  focused coverage that a `rules` path which is a file surfaces as a
+  read-directory load error instead of being ignored or treated as a policy
+  file.
 - 2026-05-15: rechecked Rust commit `e783341b70` (`Delete
   function-style apply_patch`). Swift non-interactive hook dispatch now mirrors
   Rust's freeform-only boundary by skipping `apply_patch` hook payloads for
