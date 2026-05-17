@@ -208,70 +208,62 @@ final class ExtensionRegistryTests: XCTestCase {
         builder.tokenUsageContributor(recorder)
         let registry = builder.build()
 
-        registry.threadLifecycleContributors.forEach {
-            $0.onThreadStart(ExtensionThreadStartInput(
-                threadID: threadID,
-                config: previousConfig,
-                sessionStore: sessionStore,
-                threadStore: threadStore
-            ))
-            $0.onThreadResume(ExtensionThreadResumeInput(
-                threadID: threadID,
-                sessionStore: sessionStore,
-                threadStore: threadStore
-            ))
-            $0.onThreadStop(ExtensionThreadStopInput(
-                threadID: threadID,
-                sessionStore: sessionStore,
-                threadStore: threadStore
-            ))
-        }
-        registry.turnLifecycleContributors.forEach {
-            $0.onTurnStart(ExtensionTurnStartInput(
-                threadID: threadID,
-                turnID: "turn-1",
-                sessionStore: sessionStore,
-                threadStore: threadStore,
-                turnStore: turnStore
-            ))
-            $0.onTurnStop(ExtensionTurnStopInput(
-                threadID: threadID,
-                turnID: "turn-1",
-                sessionStore: sessionStore,
-                threadStore: threadStore,
-                turnStore: turnStore
-            ))
-            $0.onTurnAbort(ExtensionTurnAbortInput(
-                threadID: threadID,
-                turnID: "turn-2",
-                reason: .interrupted,
-                sessionStore: sessionStore,
-                threadStore: threadStore,
-                turnStore: turnStore
-            ))
-        }
-        registry.configContributors.forEach {
-            $0.onConfigChanged(ExtensionConfigChangedInput(
-                threadID: threadID,
-                sessionStore: sessionStore,
-                threadStore: threadStore,
-                previousConfig: previousConfig,
-                newConfig: newConfig
-            ))
-        }
-        registry.tokenUsageContributors.forEach {
-            $0.onTokenUsage(
-                sessionStore: sessionStore,
-                threadStore: threadStore,
-                turnStore: turnStore,
-                threadID: threadID,
-                turnID: "turn-1",
-                tokenUsage: TokenUsageInfo(
-                    totalTokenUsage: TokenUsage(totalTokens: 42),
-                    lastTokenUsage: TokenUsage(totalTokens: 42)
-                )
+        registry.emitThreadStart(ExtensionThreadStartInput(
+            threadID: threadID,
+            config: previousConfig,
+            sessionStore: sessionStore,
+            threadStore: threadStore
+        ))
+        registry.emitThreadResume(ExtensionThreadResumeInput(
+            threadID: threadID,
+            sessionStore: sessionStore,
+            threadStore: threadStore
+        ))
+        registry.emitThreadStop(ExtensionThreadStopInput(
+            threadID: threadID,
+            sessionStore: sessionStore,
+            threadStore: threadStore
+        ))
+        registry.emitTurnStart(ExtensionTurnStartInput(
+            threadID: threadID,
+            turnID: "turn-1",
+            sessionStore: sessionStore,
+            threadStore: threadStore,
+            turnStore: turnStore
+        ))
+        registry.emitTurnStop(ExtensionTurnStopInput(
+            threadID: threadID,
+            turnID: "turn-1",
+            sessionStore: sessionStore,
+            threadStore: threadStore,
+            turnStore: turnStore
+        ))
+        registry.emitTurnAbort(ExtensionTurnAbortInput(
+            threadID: threadID,
+            turnID: "turn-2",
+            reason: .interrupted,
+            sessionStore: sessionStore,
+            threadStore: threadStore,
+            turnStore: turnStore
+        ))
+        registry.emitConfigChanged(ExtensionConfigChangedInput(
+            threadID: threadID,
+            sessionStore: sessionStore,
+            threadStore: threadStore,
+            previousConfig: previousConfig,
+            newConfig: newConfig
+        ))
+        registry.emitTokenUsage(
+            sessionStore: sessionStore,
+            threadStore: threadStore,
+            turnStore: turnStore,
+            threadID: threadID,
+            turnID: "turn-1",
+            tokenUsage: TokenUsageInfo(
+                totalTokenUsage: TokenUsage(totalTokens: 42),
+                lastTokenUsage: TokenUsage(totalTokens: 42)
             )
-        }
+        )
 
         XCTAssertEqual(recorder.records, [
             "thread-start:\(threadID):gpt-before",
@@ -333,20 +325,18 @@ final class ExtensionRegistryTests: XCTestCase {
         )
         XCTAssertEqual(approval, .approvedForSession)
 
-        var item = TurnItem.agentMessage(AgentMessageItem(
+        let item = TurnItem.agentMessage(AgentMessageItem(
             id: "msg-1",
             content: [.text("hello")],
             phase: nil,
             memoryCitation: nil
         ))
-        for contributor in registry.turnItemContributors {
-            item = try await contributor.contribute(
-                threadStore: threadStore,
-                turnStore: turnStore,
-                item: item
-            )
-        }
-        guard case let .agentMessage(message) = item else {
+        let contributed = try await registry.contributeTurnItem(
+            threadStore: threadStore,
+            turnStore: turnStore,
+            item: item
+        )
+        guard case let .agentMessage(message) = contributed else {
             return XCTFail("expected agent message")
         }
         XCTAssertEqual(message.text, "hello turn-item")

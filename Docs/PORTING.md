@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: continued the first-class extension registry bridge toward the
+  live runtime integration. Swift `ExtensionRegistry` now owns registration-
+  order dispatch helpers for thread lifecycle, turn lifecycle, config-change,
+  token-usage, and turn-item contributor callbacks, so future app-server /
+  ThreadManager wiring can call one Rust-shaped emission surface instead of
+  hand-iterating contributor families.
 - 2026-05-17: continued the Rust extension-tool executor bridge from
   `codex-rs/core/src/tools/router.rs`. Swift extension registries now collect
   contributor-owned tools into `ConfiguredToolSpec` values and expose a

@@ -562,6 +562,84 @@ public struct ExtensionRegistry: Sendable {
         }
     }
 
+    public func emitThreadStart(_ input: ExtensionThreadStartInput) {
+        for contributor in threadLifecycleContributors {
+            contributor.onThreadStart(input)
+        }
+    }
+
+    public func emitThreadResume(_ input: ExtensionThreadResumeInput) {
+        for contributor in threadLifecycleContributors {
+            contributor.onThreadResume(input)
+        }
+    }
+
+    public func emitThreadStop(_ input: ExtensionThreadStopInput) {
+        for contributor in threadLifecycleContributors {
+            contributor.onThreadStop(input)
+        }
+    }
+
+    public func emitTurnStart(_ input: ExtensionTurnStartInput) {
+        for contributor in turnLifecycleContributors {
+            contributor.onTurnStart(input)
+        }
+    }
+
+    public func emitTurnStop(_ input: ExtensionTurnStopInput) {
+        for contributor in turnLifecycleContributors {
+            contributor.onTurnStop(input)
+        }
+    }
+
+    public func emitTurnAbort(_ input: ExtensionTurnAbortInput) {
+        for contributor in turnLifecycleContributors {
+            contributor.onTurnAbort(input)
+        }
+    }
+
+    public func emitConfigChanged(_ input: ExtensionConfigChangedInput) {
+        for contributor in configContributors {
+            contributor.onConfigChanged(input)
+        }
+    }
+
+    public func emitTokenUsage(
+        sessionStore: ExtensionData,
+        threadStore: ExtensionData,
+        turnStore: ExtensionData,
+        threadID: ThreadId,
+        turnID: String,
+        tokenUsage: TokenUsageInfo
+    ) {
+        for contributor in tokenUsageContributors {
+            contributor.onTokenUsage(
+                sessionStore: sessionStore,
+                threadStore: threadStore,
+                turnStore: turnStore,
+                threadID: threadID,
+                turnID: turnID,
+                tokenUsage: tokenUsage
+            )
+        }
+    }
+
+    public func contributeTurnItem(
+        threadStore: ExtensionData,
+        turnStore: ExtensionData,
+        item: TurnItem
+    ) async throws -> TurnItem {
+        var current = item
+        for contributor in turnItemContributors {
+            current = try await contributor.contribute(
+                threadStore: threadStore,
+                turnStore: turnStore,
+                item: current
+            )
+        }
+        return current
+    }
+
     public func approvalReview(
         sessionStore: ExtensionData,
         threadStore: ExtensionData,
