@@ -464,7 +464,8 @@ Recent upstream audit checkpoint:
   `id`/`extends` shape without `modifications`, encodes permission-profile
   selection params as the Rust string id, and decodes the prior object shape for
   legacy callers. `command/exec.permissionProfile` now selects an active profile
-  by id/extends and reloads config for the command cwd before sandbox
+  by id/extends, rejects the removed low-level runtime profile payloads at the
+  protocol boundary, and reloads config for the command cwd before sandbox
   selection, preserving configured deny-read restrictions while retaining the
   Rust conflict with per-request `sandboxPolicy`. The selected profile is also
   applied before the initial command config load, so a request-selected custom

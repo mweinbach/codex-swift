@@ -75,6 +75,22 @@ final class AppServerCommandExecProtocolTests: XCTestCase {
         ])
     }
 
+    func testCommandExecParamsRejectRemovedRuntimePermissionProfileShapeLikeRustProtocol() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                CommandExecParams.self,
+                from: Data(#"{"command":["/bin/echo","hi"],"permissionProfile":{"type":"disabled"}}"#.utf8)
+            )
+        )
+
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                CommandExecParams.self,
+                from: Data(#"{"command":["/bin/echo","hi"],"permissionProfile":{"type":"managed","network":{"enabled":false},"fileSystem":{"type":"unrestricted"}}}"#.utf8)
+            )
+        )
+    }
+
     func testCommandExecParamsRoundTripDisabledLimitShapesLikeRustProtocol() throws {
         let disabledTimeout = CommandExecParams(
             command: ["sleep", "30"],
