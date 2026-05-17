@@ -12,6 +12,15 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust's shell, unified-exec, and apply-patch approval
+  request flow in `codex-rs/core/src/session/mod.rs`,
+  `codex-rs/core/src/tools/runtimes/shell.rs`,
+  `codex-rs/core/src/tools/runtimes/unified_exec.rs`, and
+  `codex-rs/core/src/tools/runtimes/apply_patch.rs`. Swift non-interactive
+  tool execution now accepts an injected approval handler, emits Rust-shaped
+  exec/apply-patch approval request payloads with available decisions and
+  parsed commands, resumes approved shell/unified/apply_patch calls, and returns
+  Rust's normalized rejection text for denied approval decisions.
 - 2026-05-17: rechecked Rust CLI global `--ephemeral`,
   `--ignore-user-config`, and `--ignore-rules` handling from
   `codex-rs/exec/src/cli.rs` and the shared interactive command surface. Swift
@@ -3327,7 +3336,7 @@ Recent upstream audit checkpoint:
   - `ResponseItem` now decodes legacy `ghost_snapshot` payloads as Rust's `Other` variant while rollout loading still recognizes and drops old snapshot records before they pollute reconstructed history.
 - `codex-rs/protocol/src/models.rs` shell tool approval hints
   - `ShellToolCallParams` and `ShellCommandToolCallParams` now decode Rust's `prefix_rule` and `additional_permissions` fields alongside timeout aliases, sandbox permissions, and justifications, preserving model-provided approval hints for later approval/runtime plumbing.
-  - `ExecCommandToolCallParams` now decodes Rust's `prefix_rule` and `additional_permissions` approval hints too. Non-interactive shell-like execution now consults the configured exec-policy manager for `shell`, `shell_command`, `local_shell`, and `exec_command`; trusted `PermissionRequest` hooks can approve policy-prompted commands, denied or unapproved prompt requirements reject before spawning, and allow-prefix rules can bypass the first sandbox attempt like Rust. Non-interactive `shell`, `shell_command`, and `exec_command` now validate Rust's `with_additional_permissions` feature/policy rules, reject non-deny glob grants, normalize/dedupe filesystem grants, and widen the macOS Seatbelt policy for approved additional network/filesystem permissions. Broader live app-server runtime orchestration for sticky granted permissions remains pending.
+  - `ExecCommandToolCallParams` now decodes Rust's `prefix_rule` and `additional_permissions` approval hints too. Non-interactive shell-like execution now consults the configured exec-policy manager for `shell`, `shell_command`, `local_shell`, and `exec_command`; trusted `PermissionRequest` hooks can approve policy-prompted commands, denied or unapproved prompt requirements reject before spawning, injected approval handlers can now receive Rust-shaped exec/apply_patch approval request events and resume or reject shell/unified/apply_patch calls, and allow-prefix rules can bypass the first sandbox attempt like Rust. Non-interactive `shell`, `shell_command`, and `exec_command` now validate Rust's `with_additional_permissions` feature/policy rules, reject non-deny glob grants, normalize/dedupe filesystem grants, and widen the macOS Seatbelt policy for approved additional network/filesystem permissions. Broader live app-server runtime orchestration for sticky granted permissions remains pending.
 - `codex-rs/protocol/src/models.rs` tool-search call params
   - Added public `SearchToolCallParams` with Rust's `query` and optional `limit` wire shape, and routed `ToolSearchIndex` argument decoding through it so deferred-tool search uses the shared protocol model.
 - `codex-rs/protocol/src/models.rs` content image detail

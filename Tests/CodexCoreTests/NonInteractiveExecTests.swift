@@ -2094,6 +2094,108 @@ final class NonInteractiveExecTests: XCTestCase {
         ))
     }
 
+    func testApprovalHandlerApprovesPolicyPromptedShellCommandLikeRust() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let recorder = ApprovalRequestRecorder(decisions: [.approved])
+        let item = ResponseItem.functionCall(
+            name: "shell_command",
+            arguments: #"{"command":"touch approved-by-handler.txt","login":false,"justification":"create marker"}"#,
+            callID: "call-shell-approval-handler"
+        )
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            item,
+            cwd: temp.url,
+            approvalPolicy: .unlessTrusted,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: ["PATH": "/bin:/usr/bin", "HOME": temp.url.path],
+            approvalHandler: { request in
+                await recorder.record(request)
+            }
+        )
+
+        guard case let .functionCallOutput(callID, payload) = output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-shell-approval-handler")
+        XCTAssertEqual(payload.success, true, payload.content)
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: temp.url.appendingPathComponent("approved-by-handler.txt").path
+        ))
+
+        let requests = await recorder.values()
+        XCTAssertEqual(requests.count, 1)
+        guard case let .exec(event) = try XCTUnwrap(requests.first) else {
+            return XCTFail("expected exec approval request")
+        }
+        XCTAssertEqual(event.callID, "call-shell-approval-handler")
+        XCTAssertEqual(event.approvalID, "call-shell-approval-handler")
+        XCTAssertEqual(event.turnID, "turn-1")
+        XCTAssertEqual(event.command, ["/bin/sh", "-c", "touch approved-by-handler.txt"])
+        XCTAssertEqual(event.cwd, temp.url.standardizedFileURL.path)
+        XCTAssertEqual(event.reason, "create marker")
+        XCTAssertEqual(event.availableDecisions, [
+            .approved,
+            .approvedExecpolicyAmendment(proposedExecpolicyAmendment: ExecPolicyAmendment(
+                command: ["touch", "approved-by-handler.txt"]
+            )),
+            .abort
+        ])
+        XCTAssertEqual(event.parsedCmd, [.unknown(cmd: "touch approved-by-handler.txt")])
+    }
+
+    func testApprovalHandlerDeniesUnifiedExecCommandLikeRust() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let recorder = ApprovalRequestRecorder(decisions: [.denied])
+        let item = ResponseItem.functionCall(
+            name: "exec_command",
+            arguments: #"{"cmd":"touch denied-by-handler.txt","login":false,"justification":"create marker"}"#,
+            callID: "call-exec-approval-denied"
+        )
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            item,
+            cwd: temp.url,
+            approvalPolicy: .unlessTrusted,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: ["PATH": "/bin:/usr/bin", "HOME": temp.url.path],
+            approvalHandler: { request in
+                await recorder.record(request)
+            }
+        )
+
+        guard case let .functionCallOutput(callID, payload) = output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-exec-approval-denied")
+        XCTAssertEqual(payload.success, false)
+        XCTAssertEqual(payload.content, "exec command rejected by user")
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: temp.url.appendingPathComponent("denied-by-handler.txt").path
+        ))
+
+        let requests = await recorder.values()
+        XCTAssertEqual(requests.count, 1)
+        guard case let .exec(event) = try XCTUnwrap(requests.first) else {
+            return XCTFail("expected exec approval request")
+        }
+        XCTAssertEqual(event.callID, "call-exec-approval-denied")
+        XCTAssertEqual(event.command, ["/bin/sh", "-c", "touch denied-by-handler.txt"])
+        XCTAssertEqual(event.reason, "create marker")
+        XCTAssertEqual(event.availableDecisions, [
+            .approved,
+            .approvedExecpolicyAmendment(proposedExecpolicyAmendment: ExecPolicyAmendment(
+                command: ["touch", "denied-by-handler.txt"]
+            )),
+            .abort
+        ])
+        XCTAssertEqual(event.parsedCmd, [.unknown(cmd: "touch denied-by-handler.txt")])
+    }
+
     func testPermissionRequestHookAllowsPolicyPromptedShellCommandLikeRust() async throws {
         let temp = try NonInteractiveExecTemporaryDirectory()
         let hookInputLog = temp.url.appendingPathComponent("permission-hook-input.json")
@@ -3582,6 +3684,54 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("blocked.txt").path))
     }
 
+    func testApprovalHandlerApprovesCustomApplyPatchLikeRust() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let recorder = ApprovalRequestRecorder(decisions: [.approved])
+        let patch = """
+        *** Begin Patch
+        *** Add File: approved-patch.txt
+        +approved
+        *** End Patch
+        """
+        let item = ResponseItem.customToolCall(callID: "custom-patch-approval", name: "apply_patch", input: patch)
+
+        let output = await NonInteractiveExec.executeFunctionCall(
+            item,
+            cwd: temp.url,
+            approvalPolicy: .onRequest,
+            sandboxPolicy: .readOnly,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: [:],
+            approvalHandler: { request in
+                await recorder.record(request)
+            }
+        )
+
+        XCTAssertEqual(
+            output,
+            .customToolCallOutput(
+                callID: "custom-patch-approval",
+                output: "Success. Updated the following files:\nA approved-patch.txt\n"
+            )
+        )
+        XCTAssertEqual(
+            try String(contentsOf: temp.url.appendingPathComponent("approved-patch.txt"), encoding: .utf8),
+            "approved\n"
+        )
+
+        let requests = await recorder.values()
+        XCTAssertEqual(requests.count, 1)
+        guard case let .applyPatch(event) = try XCTUnwrap(requests.first) else {
+            return XCTFail("expected apply_patch approval request")
+        }
+        XCTAssertEqual(event.callID, "custom-patch-approval")
+        XCTAssertEqual(event.turnID, "turn-1")
+        XCTAssertEqual(event.reason, "apply_patch requires approval")
+        XCTAssertEqual(event.grantRoot, temp.url.standardizedFileURL.path)
+        XCTAssertEqual(event.changes["approved-patch.txt"], .add(content: "approved\n"))
+    }
+
     func testApplyPatchShellCommandInterceptAppliesVerifiedHeredoc() async throws {
         let temp = try NonInteractiveExecTemporaryDirectory()
         let script = """
@@ -4707,6 +4857,27 @@ private actor ToolCallCounter {
 
     func value() -> Int {
         count
+    }
+}
+
+private actor ApprovalRequestRecorder {
+    private var decisions: [ReviewDecision]
+    private var requests: [NonInteractiveExec.FunctionCallApprovalRequest] = []
+
+    init(decisions: [ReviewDecision]) {
+        self.decisions = decisions
+    }
+
+    func record(_ request: NonInteractiveExec.FunctionCallApprovalRequest) -> ReviewDecision {
+        requests.append(request)
+        guard !decisions.isEmpty else {
+            return .denied
+        }
+        return decisions.removeFirst()
+    }
+
+    func values() -> [NonInteractiveExec.FunctionCallApprovalRequest] {
+        requests
     }
 }
 

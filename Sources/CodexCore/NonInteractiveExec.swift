@@ -374,6 +374,13 @@ public enum NonInteractiveExec {
         }
     }
 
+    public enum FunctionCallApprovalRequest: Equatable, Sendable {
+        case exec(ExecApprovalRequestEvent)
+        case applyPatch(ApplyPatchApprovalRequestEvent)
+    }
+
+    public typealias FunctionCallApprovalHandler = @Sendable (FunctionCallApprovalRequest) async -> ReviewDecision
+
     public struct StopHookContext: Equatable, Sendable {
         public var handlers: [ConfiguredHookHandler]
         public var conversationID: ConversationId
@@ -771,7 +778,8 @@ public enum NonInteractiveExec {
         features: FeatureStates = .withDefaults(),
         execPolicyManager: ExecPolicyManager = ExecPolicyManager(),
         windowsSandboxLevel: WindowsSandboxLevel = .disabled,
-        registeredToolExecutor: RegisteredToolExecutor? = nil
+        registeredToolExecutor: RegisteredToolExecutor? = nil,
+        approvalHandler: FunctionCallApprovalHandler? = nil
     ) async -> ResponseItem {
         await executeFunctionCallWithApproval(
             item,
@@ -795,6 +803,7 @@ public enum NonInteractiveExec {
             execPolicyManager: execPolicyManager,
             windowsSandboxLevel: windowsSandboxLevel,
             registeredToolExecutor: registeredToolExecutor,
+            approvalHandler: approvalHandler,
             approvalGranted: false
         ).output
     }
@@ -850,6 +859,7 @@ public enum NonInteractiveExec {
         execPolicyManager: ExecPolicyManager,
         windowsSandboxLevel: WindowsSandboxLevel,
         registeredToolExecutor: RegisteredToolExecutor?,
+        approvalHandler: FunctionCallApprovalHandler?,
         turnID: String = "turn-1",
         approvalGranted: Bool
     ) async -> ExecutedFunctionCall {
@@ -880,6 +890,7 @@ public enum NonInteractiveExec {
                 windowsSandboxLevel: windowsSandboxLevel,
                 registeredToolExecutor: registeredToolExecutor,
                 turnID: turnID,
+                approvalHandler: approvalHandler,
                 approvalGranted: approvalGranted
             )
 
@@ -889,14 +900,16 @@ public enum NonInteractiveExec {
             {
                 return executed(registeredResult)
             }
-            return executed(executeCustomToolCall(
+            return executed(await executeCustomToolCall(
                 name: name,
                 input: input,
                 callID: callID,
                 cwd: cwd,
                 approvalPolicy: approvalPolicy,
                 sandboxPolicy: sandboxPolicy,
-                environment: environment
+                environment: environment,
+                turnID: turnID,
+                approvalHandler: approvalHandler
             ))
 
         case let .localShellCall(id, callID, _, action):
@@ -917,6 +930,7 @@ public enum NonInteractiveExec {
                 sandboxPermissions: .useDefault,
                 prefixRule: nil,
                 additionalPermissions: nil,
+                approvalDescription: nil,
                 callID: callID ?? id ?? "local_shell",
                 cwd: cwd,
                 approvalPolicy: approvalPolicy,
@@ -924,6 +938,8 @@ public enum NonInteractiveExec {
                 features: features,
                 execPolicyManager: execPolicyManager,
                 approvalGranted: approvalGranted,
+                approvalHandler: approvalHandler,
+                turnID: turnID,
                 windowsSandboxLevel: windowsSandboxLevel,
                 truncationPolicy: truncationPolicy,
                 environment: environment,
@@ -984,7 +1000,8 @@ public enum NonInteractiveExec {
         features: FeatureStates = .withDefaults(),
         execPolicyManager: ExecPolicyManager = ExecPolicyManager(),
         windowsSandboxLevel: WindowsSandboxLevel = .disabled,
-        registeredToolExecutor: RegisteredToolExecutor? = nil
+        registeredToolExecutor: RegisteredToolExecutor? = nil,
+        approvalHandler: FunctionCallApprovalHandler? = nil
     ) async -> FunctionCallExecutionResult {
         let hookPayload = toolHookPayload(for: item)
         var effectiveItem = item
@@ -1077,6 +1094,7 @@ public enum NonInteractiveExec {
             execPolicyManager: execPolicyManager,
             windowsSandboxLevel: windowsSandboxLevel,
             registeredToolExecutor: registeredToolExecutor,
+            approvalHandler: approvalHandler,
             turnID: turnID,
             approvalGranted: approvalGranted
         )
@@ -1437,6 +1455,93 @@ public enum NonInteractiveExec {
         }
     }
 
+    private static func shellApprovalNeedsInteractiveDecision(
+        approvalRequirement: ExecApprovalRequirement,
+        sandboxPermissions: SandboxPermissions,
+        approvalPolicy: AskForApproval,
+        approvalGranted: Bool
+    ) -> Bool {
+        guard !approvalGranted else {
+            return false
+        }
+        if sandboxPermissions.requestsSandboxOverride {
+            return approvalPolicy == .onRequest
+        }
+        if case .needsApproval = approvalRequirement {
+            return true
+        }
+        return false
+    }
+
+    private static func shellApprovalReason(
+        approvalDescription: String?,
+        approvalRequirement: ExecApprovalRequirement,
+        sandboxPermissions: SandboxPermissions
+    ) -> String? {
+        if let approvalDescription,
+           !approvalDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
+            return approvalDescription
+        }
+        if case let .needsApproval(reason, _) = approvalRequirement {
+            return reason
+        }
+        return nil
+    }
+
+    private static func execApprovalAvailableDecisions(
+        approvalRequirement: ExecApprovalRequirement,
+        additionalPermissions: RequestPermissionProfile?
+    ) -> [ReviewDecision] {
+        ExecApprovalRequestEvent.defaultAvailableDecisions(
+            networkApprovalContext: nil,
+            proposedExecPolicyAmendment: approvalRequirement.proposedExecPolicyAmendment,
+            proposedNetworkPolicyAmendments: nil,
+            additionalPermissions: additionalPermissions
+        )
+    }
+
+    private static func approvalAllowsExecution(_ decision: ReviewDecision) -> Bool {
+        switch decision {
+        case .approved,
+             .approvedExecpolicyAmendment,
+             .approvedForSession,
+             .networkPolicyAmendment:
+            return true
+        case .denied,
+             .timedOut,
+             .abort:
+            return false
+        }
+    }
+
+    private static func approvalRejectionMessage(_ decision: ReviewDecision, action: String) -> String {
+        switch decision {
+        case .abort,
+             .denied:
+            if action.contains("command") {
+                return "exec command rejected by user"
+            }
+            return "patch rejected by user"
+        case .timedOut:
+            return """
+            The automatic permission approval review did not finish before its deadline. Do not assume the action is unsafe based on the timeout alone. You may retry once, or ask the user for guidance or explicit approval.
+            """
+        case .approved,
+             .approvedExecpolicyAmendment,
+             .approvedForSession,
+             .networkPolicyAmendment:
+            if action.contains("command") {
+                return "exec command rejected by user"
+            }
+            return "patch rejected by user"
+        }
+    }
+
+    private static func startedAtMilliseconds(_ date: Date = Date()) -> Int64 {
+        Int64((date.timeIntervalSince1970 * 1_000).rounded())
+    }
+
     private static func shouldBypassSandbox(
         sandboxPermissions: SandboxPermissions,
         approvalRequirement: ExecApprovalRequirement
@@ -1572,6 +1677,7 @@ public enum NonInteractiveExec {
         windowsSandboxLevel: WindowsSandboxLevel,
         registeredToolExecutor: RegisteredToolExecutor?,
         turnID: String,
+        approvalHandler: FunctionCallApprovalHandler?,
         approvalGranted: Bool
     ) async -> ExecutedFunctionCall {
         let decoder = JSONDecoder()
@@ -1593,6 +1699,7 @@ public enum NonInteractiveExec {
                     sandboxPermissions: params.sandboxPermissions,
                     prefixRule: params.prefixRule,
                     additionalPermissions: params.additionalPermissions,
+                    approvalDescription: params.justification,
                     callID: callID,
                     hookCommand: params.cmd,
                     cwd: cwd,
@@ -1601,6 +1708,7 @@ public enum NonInteractiveExec {
                     features: features,
                     execPolicyManager: execPolicyManager,
                     approvalGranted: approvalGranted,
+                    approvalHandler: approvalHandler,
                     windowsSandboxLevel: windowsSandboxLevel,
                     turnID: turnID,
                     truncationPolicy: params.maxOutputTokens.map { .tokens($0) } ?? truncationPolicy,
@@ -1623,6 +1731,7 @@ public enum NonInteractiveExec {
                     sandboxPermissions: params.sandboxPermissions ?? .useDefault,
                     prefixRule: params.prefixRule,
                     additionalPermissions: params.additionalPermissions,
+                    approvalDescription: params.justification,
                     callID: callID,
                     cwd: cwd,
                     approvalPolicy: approvalPolicy,
@@ -1630,6 +1739,8 @@ public enum NonInteractiveExec {
                     features: features,
                     execPolicyManager: execPolicyManager,
                     approvalGranted: approvalGranted,
+                    approvalHandler: approvalHandler,
+                    turnID: turnID,
                     windowsSandboxLevel: windowsSandboxLevel,
                     truncationPolicy: truncationPolicy,
                     environment: environment,
@@ -1650,6 +1761,7 @@ public enum NonInteractiveExec {
                     sandboxPermissions: params.sandboxPermissions ?? .useDefault,
                     prefixRule: params.prefixRule,
                     additionalPermissions: params.additionalPermissions,
+                    approvalDescription: params.justification,
                     callID: callID,
                     cwd: cwd,
                     approvalPolicy: approvalPolicy,
@@ -1657,6 +1769,8 @@ public enum NonInteractiveExec {
                     features: features,
                     execPolicyManager: execPolicyManager,
                     approvalGranted: approvalGranted,
+                    approvalHandler: approvalHandler,
+                    turnID: turnID,
                     windowsSandboxLevel: windowsSandboxLevel,
                     truncationPolicy: truncationPolicy,
                     environment: environment,
@@ -2184,6 +2298,7 @@ public enum NonInteractiveExec {
         sandboxPermissions: SandboxPermissions,
         prefixRule: [String]?,
         additionalPermissions: RequestPermissionProfile?,
+        approvalDescription: String?,
         callID: String,
         cwd: URL,
         approvalPolicy: AskForApproval,
@@ -2191,6 +2306,8 @@ public enum NonInteractiveExec {
         features: FeatureStates,
         execPolicyManager: ExecPolicyManager,
         approvalGranted: Bool,
+        approvalHandler: FunctionCallApprovalHandler?,
+        turnID: String,
         windowsSandboxLevel: WindowsSandboxLevel,
         truncationPolicy: TruncationPolicy,
         environment: [String: String],
@@ -2232,11 +2349,49 @@ public enum NonInteractiveExec {
             features: features,
             execPolicyManager: execPolicyManager
         )
+        var effectiveApprovalGranted = approvalGranted
+        if shellApprovalNeedsInteractiveDecision(
+            approvalRequirement: approvalRequirement,
+            sandboxPermissions: sandboxPermissions,
+            approvalPolicy: approvalPolicy,
+            approvalGranted: effectiveApprovalGranted
+        ),
+            let approvalHandler
+        {
+            let decision = await approvalHandler(.exec(ExecApprovalRequestEvent(
+                callID: callID,
+                approvalID: callID,
+                turnID: turnID,
+                startedAtMilliseconds: startedAtMilliseconds(),
+                command: command,
+                cwd: commandCwd.path,
+                reason: shellApprovalReason(
+                    approvalDescription: approvalDescription,
+                    approvalRequirement: approvalRequirement,
+                    sandboxPermissions: sandboxPermissions
+                ),
+                proposedExecPolicyAmendment: approvalRequirement.proposedExecPolicyAmendment,
+                additionalPermissions: normalizedAdditionalPermissions,
+                availableDecisions: execApprovalAvailableDecisions(
+                    approvalRequirement: approvalRequirement,
+                    additionalPermissions: normalizedAdditionalPermissions
+                ),
+                parsedCmd: parseCommand(command)
+            )))
+            guard approvalAllowsExecution(decision) else {
+                return functionOutput(
+                    callID: callID,
+                    content: approvalRejectionMessage(decision, action: "command"),
+                    success: false
+                )
+            }
+            effectiveApprovalGranted = true
+        }
         if let rejection = shellApprovalRejection(
             approvalRequirement: approvalRequirement,
             sandboxPermissions: sandboxPermissions,
             approvalPolicy: approvalPolicy,
-            approvalGranted: approvalGranted
+            approvalGranted: effectiveApprovalGranted
         ) {
             return functionOutput(
                 callID: callID,
@@ -2248,12 +2403,15 @@ public enum NonInteractiveExec {
         let childEnvironment = ExecEnvironment.createEnv(policy: shellEnvironmentPolicy, environment: environment)
         switch maybeParseApplyPatchVerified(command, cwd: commandCwd) {
         case let .body(action):
-            let result = executeApplyPatch(
+            let result = await executeApplyPatch(
                 patch: action.patch,
                 cwd: URL(fileURLWithPath: action.cwd, isDirectory: true),
+                callID: callID,
+                turnID: turnID,
                 approvalPolicy: approvalPolicy,
                 sandboxPolicy: commandSandboxPolicy,
-                environment: environment
+                environment: environment,
+                approvalHandler: approvalHandler
             )
             let output = ExecToolCallOutput(
                 exitCode: result.success ? 0 : 1,
@@ -2330,6 +2488,7 @@ public enum NonInteractiveExec {
         sandboxPermissions: SandboxPermissions,
         prefixRule: [String]?,
         additionalPermissions: RequestPermissionProfile?,
+        approvalDescription: String?,
         callID: String,
         hookCommand: String,
         cwd: URL,
@@ -2338,6 +2497,7 @@ public enum NonInteractiveExec {
         features: FeatureStates,
         execPolicyManager: ExecPolicyManager,
         approvalGranted: Bool,
+        approvalHandler: FunctionCallApprovalHandler?,
         windowsSandboxLevel: WindowsSandboxLevel,
         turnID: String,
         truncationPolicy: TruncationPolicy,
@@ -2379,11 +2539,49 @@ public enum NonInteractiveExec {
             features: features,
             execPolicyManager: execPolicyManager
         )
+        var effectiveApprovalGranted = approvalGranted
+        if shellApprovalNeedsInteractiveDecision(
+            approvalRequirement: approvalRequirement,
+            sandboxPermissions: sandboxPermissions,
+            approvalPolicy: approvalPolicy,
+            approvalGranted: effectiveApprovalGranted
+        ),
+            let approvalHandler
+        {
+            let decision = await approvalHandler(.exec(ExecApprovalRequestEvent(
+                callID: callID,
+                approvalID: callID,
+                turnID: turnID,
+                startedAtMilliseconds: startedAtMilliseconds(),
+                command: command,
+                cwd: commandCwd.path,
+                reason: shellApprovalReason(
+                    approvalDescription: approvalDescription,
+                    approvalRequirement: approvalRequirement,
+                    sandboxPermissions: sandboxPermissions
+                ),
+                proposedExecPolicyAmendment: approvalRequirement.proposedExecPolicyAmendment,
+                additionalPermissions: normalizedAdditionalPermissions,
+                availableDecisions: execApprovalAvailableDecisions(
+                    approvalRequirement: approvalRequirement,
+                    additionalPermissions: normalizedAdditionalPermissions
+                ),
+                parsedCmd: parseCommand(command)
+            )))
+            guard approvalAllowsExecution(decision) else {
+                return executed(functionOutput(
+                    callID: callID,
+                    content: approvalRejectionMessage(decision, action: "exec command"),
+                    success: false
+                ))
+            }
+            effectiveApprovalGranted = true
+        }
         if let rejection = shellApprovalRejection(
             approvalRequirement: approvalRequirement,
             sandboxPermissions: sandboxPermissions,
             approvalPolicy: approvalPolicy,
-            approvalGranted: approvalGranted
+            approvalGranted: effectiveApprovalGranted
         ) {
             return executed(functionOutput(
                 callID: callID,
@@ -3092,18 +3290,23 @@ public enum NonInteractiveExec {
         cwd: URL,
         approvalPolicy: AskForApproval,
         sandboxPolicy: SandboxPolicy,
-        environment: [String: String]
-    ) -> ResponseItem {
+        environment: [String: String],
+        turnID: String,
+        approvalHandler: FunctionCallApprovalHandler?
+    ) async -> ResponseItem {
         guard name == "apply_patch" else {
             return .customToolCallOutput(callID: callID, output: "unsupported custom tool call: \(name)")
         }
 
-        let result = executeApplyPatch(
+        let result = await executeApplyPatch(
             patch: input,
             cwd: cwd,
+            callID: callID,
+            turnID: turnID,
             approvalPolicy: approvalPolicy,
             sandboxPolicy: sandboxPolicy,
-            environment: environment
+            environment: environment,
+            approvalHandler: approvalHandler
         )
         return .customToolCallOutput(callID: callID, output: result.content)
     }
@@ -3111,10 +3314,13 @@ public enum NonInteractiveExec {
     private static func executeApplyPatch(
         patch: String,
         cwd: URL,
+        callID: String,
+        turnID: String,
         approvalPolicy: AskForApproval,
         sandboxPolicy: SandboxPolicy,
-        environment: [String: String]
-    ) -> (content: String, success: Bool) {
+        environment: [String: String],
+        approvalHandler: FunctionCallApprovalHandler?
+    ) async -> (content: String, success: Bool) {
         let parsed: ApplyPatchArgs
         do {
             parsed = try ApplyPatch.parsePatch(patch)
@@ -3140,7 +3346,22 @@ public enum NonInteractiveExec {
         case let .reject(reason):
             return ("apply_patch rejected: \(reason)", false)
         case .askUser:
-            return ("apply_patch requires approval", false)
+            guard let approvalHandler else {
+                return ("apply_patch requires approval", false)
+            }
+            let decision = await approvalHandler(.applyPatch(ApplyPatchApprovalRequestEvent(
+                callID: callID,
+                turnID: turnID,
+                startedAtMilliseconds: startedAtMilliseconds(),
+                changes: ApplyPatchArgumentDiffConsumer.fileChanges(from: parsed.hunks),
+                reason: "apply_patch requires approval",
+                grantRoot: cwd.standardizedFileURL.path
+            )))
+            guard approvalAllowsExecution(decision) else {
+                return (approvalRejectionMessage(decision, action: "apply_patch"), false)
+            }
+            let result = ApplyPatch.apply(patch, cwd: cwd)
+            return (result.stderr.isEmpty ? result.stdout : result.stderr, result.stderr.isEmpty)
         }
     }
 
