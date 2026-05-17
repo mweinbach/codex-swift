@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `a98b57d065` (`Reuse Apps MCP path
+  override for plugin-service rollout`). Swift config loading now mirrors
+  Rust's enabled-boolean default for `[features] apps_mcp_path_override = true`
+  by materializing `appsMcpPathOverride` as `/ps/mcp`, while preserving
+  explicit `[features.apps_mcp_path_override].path` values and leaving disabled
+  configs unset.
 - 2026-05-17: rechecked Rust commit `512f8f8012` (`Improve remote-control
   daemon UX`). Swift CLI now accepts `codex remote-control start` as the
   explicit Rust start spelling while preserving bare `codex remote-control` as

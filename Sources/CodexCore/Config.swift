@@ -4619,7 +4619,7 @@ private struct ParsedCodexConfigToml {
             return nil
         }
         let value = profile?["path"] ?? base["path"]
-        return try value.map { try stringValue($0, key: "features.apps_mcp_path_override.path") }
+        return try value.map { try stringValue($0, key: "features.apps_mcp_path_override.path") } ?? "/ps/mcp"
     }
 
     private static func windowsSandboxLevelValue(

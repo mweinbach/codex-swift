@@ -2879,6 +2879,35 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.runtimeMcpConfig.appsMcpPathOverride, "/profile/mcp")
     }
 
+    func testEnabledAppsMcpPathOverrideDefaultsToPluginServicePathLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [features]
+        apps_mcp_path_override = true
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertTrue(config.features.isEnabled(.appsMcpPathOverride))
+        XCTAssertEqual(config.appsMcpPathOverride, "/ps/mcp")
+        XCTAssertEqual(config.runtimeMcpConfig.appsMcpPathOverride, "/ps/mcp")
+    }
+
+    func testExplicitAppsMcpPathOverridePathWinsOverRustPluginServiceDefault() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [features.apps_mcp_path_override]
+        enabled = true
+        path = "/custom/mcp"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertTrue(config.features.isEnabled(.appsMcpPathOverride))
+        XCTAssertEqual(config.appsMcpPathOverride, "/custom/mcp")
+        XCTAssertEqual(config.runtimeMcpConfig.appsMcpPathOverride, "/custom/mcp")
+    }
+
     func testAppsMcpPathOverrideHonorsExplicitDisabledConfigLikeRust() throws {
         let dir = try CoreTemporaryDirectory()
         try """
