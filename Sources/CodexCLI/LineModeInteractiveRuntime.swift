@@ -35,15 +35,18 @@ public struct LineModeInteractiveRuntime: Sendable {
     public typealias TurnRunner = @Sendable (Turn) async throws -> CodexCLI.CommandExecutionResult
 
     private let request: CodexCLI.InteractiveCommandRequest
+    private let initialThreadID: String?
     private let io: IO
     private let turnRunner: TurnRunner
 
     public init(
         request: CodexCLI.InteractiveCommandRequest,
+        initialThreadID: String? = nil,
         io: IO,
         turnRunner: @escaping TurnRunner
     ) {
         self.request = request
+        self.initialThreadID = initialThreadID
         self.io = io
         self.turnRunner = turnRunner
     }
@@ -59,7 +62,7 @@ public struct LineModeInteractiveRuntime: Sendable {
         io.writeStderr("codex-swift: starting line-mode interactive fallback. Type /quit or /exit to leave.")
 
         var turnIndex = 0
-        var lastThreadID: String?
+        var lastThreadID = initialThreadID
         if let prompt = request.prompt, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             turnIndex += 1
             let result = await runTurn(prompt: prompt, turnIndex: turnIndex)

@@ -453,13 +453,23 @@ private final class InteractiveRolloutPathStore: @unchecked Sendable {
     private let options: CodexCLI.InteractiveCommandOptions
     private let cwd: URL
     private let conversationID: ConversationId
+    private let forkedFromID: ConversationId?
+    private let initialHistory: InitialHistory?
     private var didResolve = false
     private var cachedPath: URL?
 
-    init(options: CodexCLI.InteractiveCommandOptions, cwd: URL, conversationID: ConversationId) {
+    init(
+        options: CodexCLI.InteractiveCommandOptions,
+        cwd: URL,
+        conversationID: ConversationId,
+        forkedFromID: ConversationId? = nil,
+        initialHistory: InitialHistory? = nil
+    ) {
         self.options = options
         self.cwd = cwd
         self.conversationID = conversationID
+        self.forkedFromID = forkedFromID
+        self.initialHistory = initialHistory
     }
 
     func path() throws -> URL? {
@@ -471,7 +481,9 @@ private final class InteractiveRolloutPathStore: @unchecked Sendable {
         cachedPath = try createLineModeRolloutPath(
             options: options,
             cwd: cwd,
-            conversationID: conversationID
+            conversationID: conversationID,
+            forkedFromID: forkedFromID,
+            initialHistory: initialHistory
         )
         didResolve = true
         return cachedPath
@@ -484,7 +496,10 @@ private func runInteractiveCommand(_ request: CodexCLI.InteractiveCommandRequest
         conversationID: ConversationId(),
         initialHistory: [],
         resumedRolloutPath: nil,
-        firstTurnStartSource: .startup
+        forkedFromID: nil,
+        initialHistoryForNewRollout: nil,
+        firstTurnStartSource: .startup,
+        initialThreadID: nil
     )
 }
 
@@ -493,7 +508,10 @@ private func runLineModeInteractiveCommand(
     conversationID: ConversationId,
     initialHistory: [ResponseItem],
     resumedRolloutPath: URL?,
-    firstTurnStartSource: HookSessionStartSource
+    forkedFromID: ConversationId?,
+    initialHistoryForNewRollout: InitialHistory?,
+    firstTurnStartSource: HookSessionStartSource,
+    initialThreadID: String?
 ) async throws -> CodexCLI.CommandExecutionResult {
     let io = lineModeIO()
     if request.remote != nil || request.remoteAuthTokenEnv != nil {
@@ -506,10 +524,17 @@ private func runLineModeInteractiveCommand(
     let options = request.interactiveOptions
     let arguments = interactiveExecArguments(from: options)
     let cwd = resolveExecWorkingDirectory(from: arguments)
-    let rolloutPathStore = InteractiveRolloutPathStore(options: options, cwd: cwd, conversationID: conversationID)
+    let rolloutPathStore = InteractiveRolloutPathStore(
+        options: options,
+        cwd: cwd,
+        conversationID: conversationID,
+        forkedFromID: forkedFromID,
+        initialHistory: initialHistoryForNewRollout
+    )
     let history = InteractiveTurnHistory(items: initialHistory)
     let approvalHandler = lineModeApprovalHandler(io: io)
-    let runtime = LineModeInteractiveRuntime(request: request, io: io) { turn in
+    let fixedRolloutPath = try resumedRolloutPath ?? (forkedFromID == nil ? nil : rolloutPathStore.path())
+    let runtime = LineModeInteractiveRuntime(request: request, initialThreadID: initialThreadID, io: io) { turn in
         let streamState = InteractiveStreamState()
         let result = try await runNonInteractiveExec(
             promptResolution: NonInteractivePromptResolution(prompt: turn.prompt),
@@ -524,7 +549,7 @@ private func runLineModeInteractiveCommand(
             cwd: cwd,
             conversationID: conversationID,
             history: history.snapshot(),
-            rolloutPath: try resumedRolloutPath ?? rolloutPathStore.path(),
+            rolloutPath: try fixedRolloutPath ?? rolloutPathStore.path(),
             sessionStartSource: turn.turnIndex == 1 ? firstTurnStartSource : .resume,
             responseEventHandler: lineModeResponseEventHandler(streamState: streamState),
             turnHistoryHandler: { history.append($0) },
@@ -569,24 +594,52 @@ private func lineModeIO() -> LineModeInteractiveRuntime.IO {
 private func createLineModeRolloutPath(
     options: CodexCLI.InteractiveCommandOptions,
     cwd: URL,
-    conversationID: ConversationId
+    conversationID: ConversationId,
+    forkedFromID: ConversationId? = nil,
+    initialHistory: InitialHistory? = nil
 ) throws -> URL? {
     guard !options.ephemeral else {
         return nil
     }
-    let recorder = try RolloutRecorder.create(
-        codexHome: CodexHome.find(),
-        cwd: cwd,
-        conversationID: conversationID,
-        instructions: nil,
-        source: .cli,
-        originator: "codex_swift",
-        cliVersion: CodexCLI.version,
-        modelProvider: nil
-    )
+    let codexHome = try CodexHome.find()
+    let recorder: RolloutRecorder
+    if let forkedFromID, let initialHistory {
+        recorder = try RolloutRecorder.createFork(
+            codexHome: codexHome,
+            cwd: cwd,
+            conversationID: conversationID,
+            forkedFromID: forkedFromID,
+            initialHistory: initialHistory,
+            source: .cli,
+            threadSource: .user,
+            originator: "codex_swift",
+            cliVersion: CodexCLI.version,
+            modelProvider: firstSessionMeta(in: initialHistory.rolloutItems)?.modelProvider
+        )
+    } else {
+        recorder = try RolloutRecorder.create(
+            codexHome: codexHome,
+            cwd: cwd,
+            conversationID: conversationID,
+            instructions: nil,
+            source: .cli,
+            originator: "codex_swift",
+            cliVersion: CodexCLI.version,
+            modelProvider: nil
+        )
+    }
     let path = recorder.rolloutPath
     try recorder.shutdown()
     return path
+}
+
+private func firstSessionMeta(in items: [RolloutRecordItem]) -> SessionMeta? {
+    items.compactMap { item -> SessionMeta? in
+        guard case let .sessionMeta(metaLine) = item else {
+            return nil
+        }
+        return metaLine.meta
+    }.first
 }
 
 private func interactiveExecOptions(
@@ -2222,7 +2275,10 @@ private func runResumeCommand(_ request: CodexCLI.ResumeCommandRequest) async th
             conversationID: session.conversationID,
             initialHistory: responseHistory,
             resumedRolloutPath: URL(fileURLWithPath: session.path),
-            firstTurnStartSource: .resume
+            forkedFromID: nil,
+            initialHistoryForNewRollout: nil,
+            firstTurnStartSource: .resume,
+            initialThreadID: session.conversationID.description
         )
     case .picker:
         return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: ResumeCommandFormatter.render(resolution))
@@ -2238,17 +2294,32 @@ private func runForkCommand(_ request: CodexCLI.ForkCommandRequest) async throws
         configOverrides: request.configOverrides
     )
     let resolution = try ResumeCommandResolver.resolve(resumeRequest, codexHome: codexHome)
-    let output = ResumeCommandFormatter.render(resolution)
 
     switch resolution {
-    case .session:
-        return CodexCLI.CommandExecutionResult(
-            exitCode: 78,
-            stdoutMessage: output,
-            stderrMessage: "codex-swift: fork target resolved, but interactive fork runtime is not complete yet."
+    case let .session(session):
+        let initialHistory = try RolloutRecorder.getRolloutHistory(path: URL(fileURLWithPath: session.path))
+        let initialRolloutItems = RolloutRecorder.forkedRolloutItems(from: initialHistory)
+        let responseHistory = RolloutRecorder.reconstructResponseHistory(from: initialRolloutItems)
+        let conversationID = ConversationId()
+        return try await runLineModeInteractiveCommand(
+            CodexCLI.InteractiveCommandRequest(
+                prompt: nil,
+                remote: request.remote,
+                remoteAuthTokenEnv: request.remoteAuthTokenEnv,
+                interactiveOptions: request.interactiveOptions,
+                configOverrides: request.configOverrides,
+                strictConfig: request.strictConfig
+            ),
+            conversationID: conversationID,
+            initialHistory: responseHistory,
+            resumedRolloutPath: nil,
+            forkedFromID: session.conversationID,
+            initialHistoryForNewRollout: initialHistory,
+            firstTurnStartSource: .startup,
+            initialThreadID: conversationID.description
         )
     case .picker:
-        return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: output)
+        return CodexCLI.CommandExecutionResult(exitCode: 0, stdoutMessage: ResumeCommandFormatter.render(resolution))
     }
 }
 

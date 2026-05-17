@@ -329,6 +329,23 @@ final class CodexCLITests: XCTestCase {
         XCTAssertEqual(result.threadID, "thread-after-initial-prompt")
     }
 
+    func testLineModeInteractiveRuntimeReturnsInitialThreadIDOnQuitWithoutTurns() async {
+        let harness = LineModeIOHarness(inputs: ["/quit"])
+        let runtime = LineModeInteractiveRuntime(
+            request: CodexCLI.InteractiveCommandRequest(),
+            initialThreadID: "resolved-thread",
+            io: harness.io()
+        ) { _ in
+            XCTFail("turn runner should not be called before /quit")
+            return CodexCLI.CommandExecutionResult(exitCode: 0)
+        }
+
+        let result = await runtime.run()
+
+        XCTAssertEqual(result.exitCode, 0)
+        XCTAssertEqual(result.threadID, "resolved-thread")
+    }
+
     func testLineModeInteractiveRuntimePropagatesTurnFailure() async {
         let harness = LineModeIOHarness(inputs: ["ignored"])
         let runtime = LineModeInteractiveRuntime(

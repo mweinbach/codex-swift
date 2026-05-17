@@ -23,7 +23,9 @@ Recent upstream audit checkpoint:
   messaging. `codex resume` now reuses the same line-mode fallback for resolved
   sessions, reconstructing the saved response history and appending new turns
   to the existing rollout path/conversation id instead of stopping after target
-  resolution.
+  resolution. `codex fork` now uses that fallback too, but starts a fresh
+  conversation and rollout, preserves the parent history as fork context, and
+  writes the new session metadata with Rust's `forked_from_id`.
 - 2026-05-17: rechecked Rust's shell, unified-exec, and apply-patch approval
   request flow in `codex-rs/core/src/session/mod.rs`,
   `codex-rs/core/src/tools/runtimes/shell.rs`,
@@ -2989,7 +2991,7 @@ Recent upstream audit checkpoint:
 - `codex-rs/cli/src/main.rs`, `codex-rs/tui/src/lib.rs`, and `codex-rs/exec/src/lib.rs` resume target resolution
   - default interactive `codex [OPTIONS] [PROMPT]` now has a tested Swift CLI runner request surface carrying Rust's shared TUI flags, prompt newline normalization, root `--remote` / `--remote-auth-token-env`, config/profile/search overrides, and extra prompt-argument rejection. The actual interactive TUI runtime remains pending.
   - `codex resume` parser-to-runtime bridge for explicit session IDs, `--last`, provider-filtered newest-session lookup, `--all` provider bypass, Rust's default interactive source filter for picker/`--last`, `--include-non-interactive` source-filter bypass, root and resume-scoped `--remote` / `--remote-auth-token-env` option precedence, Rust's shared interactive flags after the subcommand (`-m`/`--model`, `--oss`, `--local-provider`, `-p`/`--profile`, `-s`/`--sandbox`, `--dangerously-bypass-approvals-and-sandbox`/`--yolo`, `-C`/`--cd`, `--add-dir`, `-a`/`--ask-for-approval`, `--search`, `-i`/`--image`, `--no-alt-screen`), subcommand-over-root merge semantics, and picker listing over saved rollout files
-  - `codex fork` parser-to-runtime bridge for explicit session IDs, `--last`, `--all`, root and fork-scoped `--remote` / `--remote-auth-token-env` option precedence, Rust's shared interactive flags after the subcommand, subcommand-over-root merge semantics, provider-filtered newest-session lookup, default interactive source filtering, and picker listing over saved rollout files; the actual interactive fork TUI remains pending with the broader interactive runtime
+  - `codex fork` parser-to-runtime bridge for explicit session IDs, `--last`, `--all`, root and fork-scoped `--remote` / `--remote-auth-token-env` option precedence, Rust's shared interactive flags after the subcommand, subcommand-over-root merge semantics, provider-filtered newest-session lookup, default interactive source filtering, picker listing over saved rollout files, and the line-mode fallback runtime for resolved fork targets. The full interactive fork TUI remains pending with the broader TUI runtime.
   - The shared interactive parser now rejects same-scope `--dangerously-bypass-approvals-and-sandbox` / `--yolo` with `--ask-for-approval` like Rust, while preserving Rust's separate root and subcommand parser scopes for `resume` and `fork`.
 - `codex-rs/exec-server/src/server/transport.rs`, `remote.rs`, and CLI `exec-server`
   - `codex exec-server` now parses Rust's `--listen`, `--remote`, `--executor-id`, `--name`, and `--use-agent-identity-auth` flags, rejects duplicate single-value options and root remote-mode flags, enforces `--listen`/`--remote` conflicts, remote executor-id requirements, and agent-identity opt-in scoping, validates `stdio`/`stdio://`/`ws://IP:PORT` listen URLs, preserves remote executor base URL, executor id, and name validation, runs the `--listen stdio` transport over process stdin/stdout, serves `ws://IP:PORT` listeners with Rust's ephemeral-port stdout announcement, WebSocket upgrade, text/binary JSON-RPC routing, ping/pong, close handling, shared session registry, and queued outbound notifications, posts Rust-shaped auth-provider remote executor registry registrations with deterministic idempotency ids, ChatGPT account headers, AgentAssertion support from Rust commit `b200dd1b6f`, and Rust error text, and loops over the returned remote rendezvous WebSocket with Rust's registration reuse, stderr status line, connection processor routing, warning text, and 1s-to-30s reconnect backoff.
@@ -3890,7 +3892,7 @@ The executable is not functionally equivalent yet. Some commands have native run
 
 - interactive TUI runtime
 - Rust-complete non-interactive live tool orchestration
-- full interactive resume continuation after rollout target resolution
+- full interactive TUI resume/fork UX beyond the line-mode fallback
 - Rust-complete exec runtime event emission beyond the initial thread/turn/item/turn JSONL envelope
 - remaining model-provider parity beyond account/capability/auth helpers, including command-auth managers, model-manager dispatch, and provider-specific runtime clients
 - LM Studio local-provider runtime wiring

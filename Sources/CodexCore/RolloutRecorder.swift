@@ -125,6 +125,61 @@ public final class RolloutRecorder {
         )
     }
 
+    public static func createFork(
+        codexHome: URL,
+        cwd: URL,
+        conversationID: ConversationId,
+        forkedFromID: ConversationId,
+        initialHistory: InitialHistory,
+        instructions: String? = nil,
+        source: SessionSource,
+        threadSource: ThreadSource? = nil,
+        originator: String,
+        cliVersion: String,
+        modelProvider: String?,
+        dynamicTools: [DynamicToolSpec]? = nil,
+        gitInfo: GitInfo? = nil,
+        eventPersistenceMode: EventPersistenceMode = .limited,
+        calendar: Calendar = .current,
+        timestampProvider: @escaping () -> Date = Date.init,
+        fileManager: FileManager = .default
+    ) throws -> RolloutRecorder {
+        let recorder = try create(
+            codexHome: codexHome,
+            cwd: cwd,
+            conversationID: conversationID,
+            instructions: instructions,
+            source: source,
+            forkedFromID: forkedFromID,
+            threadSource: threadSource,
+            originator: originator,
+            cliVersion: cliVersion,
+            modelProvider: modelProvider,
+            dynamicTools: dynamicTools ?? initialHistory.dynamicTools,
+            gitInfo: gitInfo,
+            eventPersistenceMode: eventPersistenceMode,
+            calendar: calendar,
+            timestampProvider: timestampProvider,
+            fileManager: fileManager
+        )
+        do {
+            try recorder.recordItems(forkedRolloutItems(from: initialHistory))
+        } catch {
+            try? recorder.shutdown()
+            throw error
+        }
+        return recorder
+    }
+
+    public static func forkedRolloutItems(from history: InitialHistory) -> [RolloutRecordItem] {
+        history.rolloutItems.filter { item in
+            if case .sessionMeta = item {
+                return false
+            }
+            return true
+        }
+    }
+
     public static func create(
         codexHome: URL,
         cwd: URL,
