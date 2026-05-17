@@ -54,8 +54,11 @@ Recent upstream audit checkpoint:
   (`extension/` + `echo`) and expose the same flattened tool name
   (`extension/echo`) for registered-tool accounting. Swift dynamic namespace
   tool specs now also follow Rust's `spec_plan.rs` namespace merge behavior by
-  sorting functions within a namespace by tool name. Dynamic tool validation
-  remains intentionally restricted to Responses identifier namespaces.
+  sorting functions within a namespace by tool name. Swift generic function
+  hook input now also mirrors Rust's extension-tool adapter: JSON arguments are
+  parsed for hook `tool_input`, whitespace arguments become `{}`, and malformed
+  arguments are preserved as strings. Dynamic tool validation remains
+  intentionally restricted to Responses identifier namespaces.
 - 2026-05-17: rechecked Rust commit `4a1f1df8ce` (`[codex] fix plugin CLI
   active user layer compile`). Swift plugin CLI helper surfaces now have
   explicit coverage that `codex plugin marketplace list` and

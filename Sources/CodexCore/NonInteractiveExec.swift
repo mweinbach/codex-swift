@@ -2483,14 +2483,7 @@ public enum NonInteractiveExec {
                 return nil
 
             default:
-                guard let toolInput = try? JSONDecoder().decode(JSONValue.self, from: Data(arguments.utf8)) else {
-                    return ToolHookPayload(
-                        toolName: name,
-                        matcherAliases: [],
-                        toolUseID: callID,
-                        toolInput: .object([:])
-                    )
-                }
+                let toolInput = extensionStyleToolHookInput(arguments)
                 return ToolHookPayload(toolName: name, matcherAliases: [], toolUseID: callID, toolInput: toolInput)
             }
 
@@ -2519,6 +2512,13 @@ public enum NonInteractiveExec {
         default:
             return nil
         }
+    }
+
+    private static func extensionStyleToolHookInput(_ arguments: String) -> JSONValue {
+        if arguments.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return .object([:])
+        }
+        return (try? JSONDecoder().decode(JSONValue.self, from: Data(arguments.utf8))) ?? .string(arguments)
     }
 
     private static func postToolHookPayload(

@@ -1229,6 +1229,43 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(item["text"], .string("done"))
     }
 
+    func testGenericFunctionHookInputUsesExtensionToolJSONRulesLikeRust() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let objectLog = temp.url.appendingPathComponent("extension-object-hook.json")
+        let emptyLog = temp.url.appendingPathComponent("extension-empty-hook.json")
+        let stringLog = temp.url.appendingPathComponent("extension-string-hook.json")
+
+        _ = try await Self.executeGenericFunctionForHookLog(
+            name: "extension_echo",
+            arguments: #"{"message":"hello"}"#,
+            log: objectLog,
+            temp: temp
+        )
+        var object = try hookInputObject(at: objectLog)
+        XCTAssertEqual(object["tool_name"] as? String, "extension_echo")
+        XCTAssertEqual((object["tool_input"] as? [String: Any])?["message"] as? String, "hello")
+
+        _ = try await Self.executeGenericFunctionForHookLog(
+            name: "extension_echo",
+            arguments: " \n\t ",
+            log: emptyLog,
+            temp: temp
+        )
+        object = try hookInputObject(at: emptyLog)
+        XCTAssertEqual(object["tool_name"] as? String, "extension_echo")
+        XCTAssertEqual((object["tool_input"] as? [String: Any])?.isEmpty, true)
+
+        _ = try await Self.executeGenericFunctionForHookLog(
+            name: "extension_echo",
+            arguments: "not json",
+            log: stringLog,
+            temp: temp
+        )
+        object = try hookInputObject(at: stringLog)
+        XCTAssertEqual(object["tool_name"] as? String, "extension_echo")
+        XCTAssertEqual(object["tool_input"] as? String, "not json")
+    }
+
     func testResponsesLoopCarriesHookAdditionalContextAfterToolOutput() async throws {
         let initial = Prompt(input: [
             .message(role: "user", content: [.inputText(text: "run echo")])
@@ -3985,6 +4022,36 @@ private extension NonInteractiveExecTests {
             timeoutSec: 5,
             sourcePath: try AbsolutePath(absolutePath: "/tmp/hooks.json"),
             displayOrder: 0
+        )
+    }
+
+    static func executeGenericFunctionForHookLog(
+        name: String,
+        arguments: String,
+        log: URL,
+        temp: NonInteractiveExecTemporaryDirectory
+    ) async throws -> NonInteractiveExec.FunctionCallExecutionResult {
+        await NonInteractiveExec.executeFunctionCallWithHooks(
+            .functionCall(name: name, arguments: arguments, callID: "call-\(name)"),
+            handlers: [
+                ConfiguredHookHandler(
+                    eventName: .preToolUse,
+                    matcher: name,
+                    command: "cat > \(shellSingleQuote(log.path)); printf '{}'",
+                    timeoutSec: 5,
+                    sourcePath: try AbsolutePath(absolutePath: "/tmp/hooks.json"),
+                    displayOrder: 0
+                )
+            ],
+            conversationID: ConversationId(),
+            turnID: "turn-1",
+            cwd: temp.url,
+            model: "gpt-test",
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            environment: ["PATH": "/bin:/usr/bin", "HOME": temp.url.path]
         )
     }
 
