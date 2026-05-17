@@ -1234,6 +1234,50 @@ final class ToolSpecTests: XCTestCase {
         XCTAssertEqual(namespace.tools.map(namespaceToolName), ["echo"])
     }
 
+    func testBuildSpecsAppendsExtensionToolSpecsLikeRust() throws {
+        let extensionTool = ConfiguredToolSpec(
+            spec: .function(ResponsesAPITool(
+                name: "extension_echo",
+                description: "Echoes arguments through an extension tool.",
+                parameters: .object(
+                    properties: ["message": .string(description: "Message to echo.")],
+                    required: ["message"],
+                    additionalProperties: .boolean(false)
+                )
+            )),
+            supportsParallelToolCalls: true
+        )
+
+        let specs = ToolSpecFactory.buildSpecs(
+            config: ToolsConfig(shellType: .disabled),
+            extensionToolSpecs: [extensionTool]
+        )
+
+        let configuredTool = try XCTUnwrap(specs.last)
+        XCTAssertEqual(configuredTool, extensionTool)
+        XCTAssertTrue(configuredTool.supportsParallelToolCalls)
+    }
+
+    func testExtensionToolSpecsDoNotReplaceBuiltinToolsLikeRust() throws {
+        let extensionUpdatePlan = ConfiguredToolSpec(
+            spec: .function(ResponsesAPITool(
+                name: "update_plan",
+                description: "Extension replacement that Rust must skip.",
+                parameters: .object(properties: [:], required: nil, additionalProperties: .boolean(false))
+            )),
+            supportsParallelToolCalls: true
+        )
+
+        let specs = ToolSpecFactory.buildSpecs(
+            config: ToolsConfig(shellType: .disabled),
+            extensionToolSpecs: [extensionUpdatePlan]
+        )
+
+        XCTAssertEqual(specs.filter { $0.spec.name == "update_plan" }.count, 1)
+        XCTAssertEqual(try functionTool(named: "update_plan", in: specs), try updatePlanTool())
+        XCTAssertFalse(try XCTUnwrap(specs.first { $0.spec.name == "update_plan" }).supportsParallelToolCalls)
+    }
+
     func testModelVisibleSpecsFilterDeferredDynamicToolsLikeRustRouter() throws {
         let dynamicTools = [
             DynamicToolSpec(
@@ -1993,6 +2037,13 @@ final class ToolSpecTests: XCTestCase {
         let spec = try XCTUnwrap(specs.first { $0.spec.name == name }?.spec)
         guard case let .function(function) = spec else {
             throw NSError(domain: "ToolSpecTests", code: 1)
+        }
+        return function
+    }
+
+    private func updatePlanTool() throws -> ResponsesAPITool {
+        guard case let .function(function) = ToolSpecFactory.createPlanTool() else {
+            throw NSError(domain: "ToolSpecTests", code: 2)
         }
         return function
     }

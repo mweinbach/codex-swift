@@ -889,6 +889,7 @@ public enum ToolSpecFactory {
         mcpTools: [String: McpTool]? = nil,
         deferredMcpTools: [String: McpTool]? = nil,
         dynamicTools: [DynamicToolSpec] = [],
+        extensionToolSpecs: [ConfiguredToolSpec] = [],
         discoverableTools: [DiscoverableTool]? = nil
     ) -> [ConfiguredToolSpec] {
         buildSpecs(
@@ -896,6 +897,7 @@ public enum ToolSpecFactory {
             mcpToolInfos: mcpTools.map(mcpToolInfos(from:)),
             deferredMcpToolInfos: deferredMcpTools.map(mcpToolInfos(from:)),
             dynamicTools: dynamicTools,
+            extensionToolSpecs: extensionToolSpecs,
             discoverableTools: discoverableTools
         )
     }
@@ -905,6 +907,7 @@ public enum ToolSpecFactory {
         mcpToolInfos: [McpToolInfo]?,
         deferredMcpToolInfos: [McpToolInfo]? = nil,
         dynamicTools: [DynamicToolSpec] = [],
+        extensionToolSpecs: [ConfiguredToolSpec] = [],
         discoverableTools: [DiscoverableTool]? = nil
     ) -> [ConfiguredToolSpec] {
         var specs: [ConfiguredToolSpec] = []
@@ -1052,8 +1055,20 @@ public enum ToolSpecFactory {
                 specs.append(ConfiguredToolSpec(spec: spec, supportsParallelToolCalls: false))
             }
         }
+        appendExtensionToolSpecs(extensionToolSpecs, to: &specs)
 
         return specs
+    }
+
+    private static func appendExtensionToolSpecs(
+        _ extensionToolSpecs: [ConfiguredToolSpec],
+        to specs: inout [ConfiguredToolSpec]
+    ) {
+        var registeredNames = Set(specs.map(\.spec.name))
+        for extensionToolSpec in extensionToolSpecs
+            where registeredNames.insert(extensionToolSpec.spec.name).inserted {
+            specs.append(extensionToolSpec)
+        }
     }
 
     public static func modelVisibleSpecs(

@@ -273,7 +273,12 @@ Recent upstream audit checkpoint:
   parsed for hook `tool_input`, whitespace arguments become `{}`, and malformed
   arguments are preserved as strings. Dynamic tool validation now accepts
   Rust's slash-terminated extension namespaces such as `extension/` while still
-  rejecting embedded slashes and reserved Responses/MCP namespace names.
+  rejecting embedded slashes and reserved Responses/MCP namespace names. Swift
+  tool planning now also accepts extension-provided configured specs and mirrors
+  Rust's extension registration collision rule by skipping extension specs whose
+  flat name is already registered, preserving builtin/dynamic tools and
+  extension parallel-call metadata. The broader live extension executor handle
+  registry and dispatch path remains pending.
 - 2026-05-17: rechecked Rust commit `4a1f1df8ce` (`[codex] fix plugin CLI
   active user layer compile`). Swift plugin CLI helper surfaces now have
   explicit coverage that `codex plugin marketplace list` and
