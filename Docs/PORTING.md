@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust collaboration mode preset fixtures in
+  `codex-rs/models-manager/src/collaboration_mode_presets_tests.rs`. Swift now
+  pins the same preset display-name semantics and default developer instruction
+  template guarantees, including replacement of the `KNOWN_MODE_NAMES`
+  placeholder with `Default and Plan` and the Rust request-user-input fallback
+  guidance snippets.
 - 2026-05-17: rechecked Rust commit `d1430fd61e` (`feat: Expose plugin
   versions and gate plugin sharing`). Swift plugin protocol models now carry
   Rust's `PluginSummary.localVersion` and `PluginShareContext.remoteVersion`

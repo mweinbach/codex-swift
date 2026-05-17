@@ -123,6 +123,25 @@ final class ProtocolConfigTypesTests: XCTestCase {
         ])
     }
 
+    func testBuiltinCollaborationModeDeveloperInstructionsMatchRustTemplates() throws {
+        let defaultInstructions = try XCTUnwrap(
+            CollaborationModeRegistry.builtinDeveloperInstructions(for: .defaultMode)
+        )
+        XCTAssertFalse(defaultInstructions.contains("{{KNOWN_MODE_NAMES}}"))
+        XCTAssertTrue(defaultInstructions.contains("Known mode names are Default and Plan."))
+        XCTAssertTrue(defaultInstructions.contains(
+            "Use the `request_user_input` tool only when it is listed in the available tools"
+        ))
+        XCTAssertTrue(defaultInstructions.contains(
+            "ask the user directly with a concise plain-text question"
+        ))
+
+        let planInstructions = try XCTUnwrap(
+            CollaborationModeRegistry.builtinDeveloperInstructions(for: .plan)
+        )
+        XCTAssertTrue(planInstructions.contains("# Plan Mode (Conversational)"))
+    }
+
     func testCollaborationModeMaskCanClearOptionalFieldsLikeRust() {
         let mode = CollaborationMode(
             mode: .defaultMode,
