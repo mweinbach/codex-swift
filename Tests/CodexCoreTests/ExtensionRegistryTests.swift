@@ -14,6 +14,73 @@ final class ExtensionRegistryTests: XCTestCase {
         let value: String
     }
 
+    private struct ContextRecorder: ExtensionContextContributor {
+        func contribute(
+            sessionStore: ExtensionData,
+            threadStore: ExtensionData
+        ) async -> [ExtensionPromptFragment] {
+            [
+                .developerPolicy(sessionStore.get(SessionMarker.self)?.value ?? "missing-session"),
+                .developerCapability(threadStore.get(ThreadMarker.self)?.value ?? "missing-thread"),
+                .contextualUser("context"),
+                .separateDeveloper("separate")
+            ]
+        }
+    }
+
+    private struct ToolRecorder: ExtensionToolContributor {
+        func tools(sessionStore: ExtensionData, threadStore: ExtensionData) -> [ExtensionTool] {
+            [
+                ExtensionTool(
+                    spec: .function(ResponsesAPITool(
+                        name: "extension/echo",
+                        description: "Echo through extension",
+                        parameters: .object(
+                            properties: [:],
+                            required: [],
+                            additionalProperties: .boolean(false)
+                        )
+                    )),
+                    supportsParallelToolCalls: true,
+                    executor: { item in
+                        .init(output: item)
+                    }
+                )
+            ]
+        }
+    }
+
+    private struct ApprovalRecorder: ExtensionApprovalReviewContributor {
+        let decision: ReviewDecision?
+
+        func contribute(
+            sessionStore: ExtensionData,
+            threadStore: ExtensionData,
+            prompt: String
+        ) async -> ReviewDecision? {
+            prompt.contains("claim") ? decision : nil
+        }
+    }
+
+    private struct TurnItemRecorder: ExtensionTurnItemContributor {
+        func contribute(
+            threadStore: ExtensionData,
+            turnStore: ExtensionData,
+            item: TurnItem
+        ) async throws -> TurnItem {
+            guard case let .agentMessage(message) = item else {
+                return item
+            }
+            let suffix = turnStore.get(TurnMarker.self)?.value ?? "missing-turn"
+            return .agentMessage(AgentMessageItem(
+                id: message.id,
+                content: message.content + [.text(" \(suffix)")],
+                phase: message.phase,
+                memoryCitation: message.memoryCitation
+            ))
+        }
+    }
+
     private final class Recorder:
         ExtensionThreadLifecycleContributor,
         ExtensionTurnLifecycleContributor,
@@ -96,13 +163,22 @@ final class ExtensionRegistryTests: XCTestCase {
         builder.turnLifecycleContributor(recorder)
         builder.configContributor(recorder)
         builder.tokenUsageContributor(recorder)
+        builder.promptContributor(ContextRecorder())
+        builder.toolContributor(ToolRecorder())
+        builder.approvalReviewContributor(ApprovalRecorder(decision: .approved))
+        builder.turnItemContributor(TurnItemRecorder())
         let registry = builder.build()
 
         XCTAssertEqual(registry.threadLifecycleContributors.count, 1)
         XCTAssertEqual(registry.turnLifecycleContributors.count, 1)
         XCTAssertEqual(registry.configContributors.count, 1)
         XCTAssertEqual(registry.tokenUsageContributors.count, 1)
+        XCTAssertEqual(registry.contextContributors.count, 1)
+        XCTAssertEqual(registry.toolContributors.count, 1)
+        XCTAssertEqual(registry.approvalReviewContributors.count, 1)
+        XCTAssertEqual(registry.turnItemContributors.count, 1)
         XCTAssertTrue(ExtensionRegistry.empty.threadLifecycleContributors.isEmpty)
+        XCTAssertTrue(ExtensionRegistry.empty.contextContributors.isEmpty)
     }
 
     func testContributorInputsCarryStableStoresAndSnapshotsLikeRust() {
@@ -201,5 +277,72 @@ final class ExtensionRegistryTests: XCTestCase {
             "config:gpt-before->gpt-after",
             "tokens:turn-1:42"
         ])
+    }
+
+    func testPromptToolApprovalAndTurnItemContributorsMatchRustRegistryFamilies() async throws {
+        let sessionStore = ExtensionData(id: "session")
+        let threadStore = ExtensionData(id: "thread")
+        let turnStore = ExtensionData(id: "turn")
+        sessionStore.insert(SessionMarker(value: "session-prompt"))
+        threadStore.insert(ThreadMarker(value: "thread-prompt"))
+        turnStore.insert(TurnMarker(value: "turn-item"))
+
+        var builder = ExtensionRegistryBuilder()
+        builder.promptContributor(ContextRecorder())
+        builder.toolContributor(ToolRecorder())
+        builder.approvalReviewContributor(ApprovalRecorder(decision: nil))
+        builder.approvalReviewContributor(ApprovalRecorder(decision: .approvedForSession))
+        builder.turnItemContributor(TurnItemRecorder())
+        let registry = builder.build()
+
+        let fragments = await registry.contextContributors[0].contribute(
+            sessionStore: sessionStore,
+            threadStore: threadStore
+        )
+        XCTAssertEqual(fragments, [
+            ExtensionPromptFragment(slot: .developerPolicy, text: "session-prompt"),
+            ExtensionPromptFragment(slot: .developerCapabilities, text: "thread-prompt"),
+            ExtensionPromptFragment(slot: .contextualUser, text: "context"),
+            ExtensionPromptFragment(slot: .separateDeveloper, text: "separate")
+        ])
+
+        let tools = registry.toolContributors.flatMap {
+            $0.tools(sessionStore: sessionStore, threadStore: threadStore)
+        }
+        XCTAssertEqual(tools.map(\.spec.name), ["extension/echo"])
+        XCTAssertEqual(tools.map(\.supportsParallelToolCalls), [true])
+        let executed = try await tools[0].execute(.functionCallOutput(
+            callID: "call-1",
+            output: FunctionCallOutputPayload(content: "ok")
+        ))
+        XCTAssertEqual(
+            executed.output,
+            .functionCallOutput(callID: "call-1", output: FunctionCallOutputPayload(content: "ok"))
+        )
+
+        let approval = await registry.approvalReview(
+            sessionStore: sessionStore,
+            threadStore: threadStore,
+            prompt: "please claim this"
+        )
+        XCTAssertEqual(approval, .approvedForSession)
+
+        var item = TurnItem.agentMessage(AgentMessageItem(
+            id: "msg-1",
+            content: [.text("hello")],
+            phase: nil,
+            memoryCitation: nil
+        ))
+        for contributor in registry.turnItemContributors {
+            item = try await contributor.contribute(
+                threadStore: threadStore,
+                turnStore: turnStore,
+                item: item
+            )
+        }
+        guard case let .agentMessage(message) = item else {
+            return XCTFail("expected agent message")
+        }
+        XCTAssertEqual(message.text, "hello turn-item")
     }
 }

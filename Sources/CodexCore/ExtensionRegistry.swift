@@ -171,6 +171,59 @@ public struct ExtensionConfigChangedInput: Sendable {
     }
 }
 
+public enum ExtensionPromptSlot: String, Sendable {
+    case developerPolicy
+    case developerCapabilities
+    case contextualUser
+    case separateDeveloper
+}
+
+public struct ExtensionPromptFragment: Equatable, Sendable {
+    public let slot: ExtensionPromptSlot
+    public let text: String
+
+    public init(slot: ExtensionPromptSlot, text: String) {
+        self.slot = slot
+        self.text = text
+    }
+
+    public static func developerPolicy(_ text: String) -> Self {
+        Self(slot: .developerPolicy, text: text)
+    }
+
+    public static func developerCapability(_ text: String) -> Self {
+        Self(slot: .developerCapabilities, text: text)
+    }
+
+    public static func contextualUser(_ text: String) -> Self {
+        Self(slot: .contextualUser, text: text)
+    }
+
+    public static func separateDeveloper(_ text: String) -> Self {
+        Self(slot: .separateDeveloper, text: text)
+    }
+}
+
+public struct ExtensionTool: Sendable {
+    public let spec: ToolSpec
+    public let supportsParallelToolCalls: Bool
+    private let executor: @Sendable (ResponseItem) async throws -> NonInteractiveExec.FunctionCallExecutionResult
+
+    public init(
+        spec: ToolSpec,
+        supportsParallelToolCalls: Bool = false,
+        executor: @escaping @Sendable (ResponseItem) async throws -> NonInteractiveExec.FunctionCallExecutionResult
+    ) {
+        self.spec = spec
+        self.supportsParallelToolCalls = supportsParallelToolCalls
+        self.executor = executor
+    }
+
+    public func execute(_ item: ResponseItem) async throws -> NonInteractiveExec.FunctionCallExecutionResult {
+        try await executor(item)
+    }
+}
+
 /// Observes host-owned thread lifecycle gates for extension-private state.
 ///
 /// Implementers seed, rehydrate, and flush thread-scoped state. The host owns
@@ -243,11 +296,93 @@ public extension ExtensionTokenUsageContributor {
     ) {}
 }
 
+/// Contributes prompt fragments during model-input assembly.
+///
+/// Implementers return model-visible text for explicit prompt slots while using
+/// only the stable session and thread stores exposed by the host.
+public protocol ExtensionContextContributor: Sendable {
+    func contribute(
+        sessionStore: ExtensionData,
+        threadStore: ExtensionData
+    ) async -> [ExtensionPromptFragment]
+}
+
+public extension ExtensionContextContributor {
+    func contribute(
+        sessionStore: ExtensionData,
+        threadStore: ExtensionData
+    ) async -> [ExtensionPromptFragment] {
+        []
+    }
+}
+
+/// Exposes extension-owned native tools for the current session and thread.
+///
+/// Implementers provide both tool specs and executors so hosts can keep
+/// extension tool registration separate from built-in tool dispatch.
+public protocol ExtensionToolContributor: Sendable {
+    func tools(sessionStore: ExtensionData, threadStore: ExtensionData) -> [ExtensionTool]
+}
+
+public extension ExtensionToolContributor {
+    func tools(sessionStore: ExtensionData, threadStore: ExtensionData) -> [ExtensionTool] {
+        []
+    }
+}
+
+/// Reviews rendered approval prompts before the host asks the user.
+///
+/// Implementers may claim a prompt by returning a decision, or return nil to
+/// leave the prompt available for later contributors and the normal host flow.
+public protocol ExtensionApprovalReviewContributor: Sendable {
+    func contribute(
+        sessionStore: ExtensionData,
+        threadStore: ExtensionData,
+        prompt: String
+    ) async -> ReviewDecision?
+}
+
+public extension ExtensionApprovalReviewContributor {
+    func contribute(
+        sessionStore: ExtensionData,
+        threadStore: ExtensionData,
+        prompt: String
+    ) async -> ReviewDecision? {
+        nil
+    }
+}
+
+/// Rewrites or annotates parsed turn items before the host emits them.
+///
+/// Implementers receive only thread- and turn-scoped stores plus the parsed item,
+/// and return the item that should continue through the stream pipeline.
+public protocol ExtensionTurnItemContributor: Sendable {
+    func contribute(
+        threadStore: ExtensionData,
+        turnStore: ExtensionData,
+        item: TurnItem
+    ) async throws -> TurnItem
+}
+
+public extension ExtensionTurnItemContributor {
+    func contribute(
+        threadStore: ExtensionData,
+        turnStore: ExtensionData,
+        item: TurnItem
+    ) async throws -> TurnItem {
+        item
+    }
+}
+
 public struct ExtensionRegistryBuilder: Sendable {
     private var threadLifecycleContributors: [any ExtensionThreadLifecycleContributor] = []
     private var turnLifecycleContributors: [any ExtensionTurnLifecycleContributor] = []
     private var configContributors: [any ExtensionConfigContributor] = []
     private var tokenUsageContributors: [any ExtensionTokenUsageContributor] = []
+    private var contextContributors: [any ExtensionContextContributor] = []
+    private var toolContributors: [any ExtensionToolContributor] = []
+    private var approvalReviewContributors: [any ExtensionApprovalReviewContributor] = []
+    private var turnItemContributors: [any ExtensionTurnItemContributor] = []
 
     public init() {}
 
@@ -267,12 +402,32 @@ public struct ExtensionRegistryBuilder: Sendable {
         tokenUsageContributors.append(contributor)
     }
 
+    public mutating func promptContributor(_ contributor: any ExtensionContextContributor) {
+        contextContributors.append(contributor)
+    }
+
+    public mutating func toolContributor(_ contributor: any ExtensionToolContributor) {
+        toolContributors.append(contributor)
+    }
+
+    public mutating func approvalReviewContributor(_ contributor: any ExtensionApprovalReviewContributor) {
+        approvalReviewContributors.append(contributor)
+    }
+
+    public mutating func turnItemContributor(_ contributor: any ExtensionTurnItemContributor) {
+        turnItemContributors.append(contributor)
+    }
+
     public func build() -> ExtensionRegistry {
         ExtensionRegistry(
             threadLifecycleContributors: threadLifecycleContributors,
             turnLifecycleContributors: turnLifecycleContributors,
             configContributors: configContributors,
-            tokenUsageContributors: tokenUsageContributors
+            tokenUsageContributors: tokenUsageContributors,
+            contextContributors: contextContributors,
+            toolContributors: toolContributors,
+            approvalReviewContributors: approvalReviewContributors,
+            turnItemContributors: turnItemContributors
         )
     }
 }
@@ -282,20 +437,49 @@ public struct ExtensionRegistry: Sendable {
     public let turnLifecycleContributors: [any ExtensionTurnLifecycleContributor]
     public let configContributors: [any ExtensionConfigContributor]
     public let tokenUsageContributors: [any ExtensionTokenUsageContributor]
+    public let contextContributors: [any ExtensionContextContributor]
+    public let toolContributors: [any ExtensionToolContributor]
+    public let approvalReviewContributors: [any ExtensionApprovalReviewContributor]
+    public let turnItemContributors: [any ExtensionTurnItemContributor]
 
     public init(
         threadLifecycleContributors: [any ExtensionThreadLifecycleContributor] = [],
         turnLifecycleContributors: [any ExtensionTurnLifecycleContributor] = [],
         configContributors: [any ExtensionConfigContributor] = [],
-        tokenUsageContributors: [any ExtensionTokenUsageContributor] = []
+        tokenUsageContributors: [any ExtensionTokenUsageContributor] = [],
+        contextContributors: [any ExtensionContextContributor] = [],
+        toolContributors: [any ExtensionToolContributor] = [],
+        approvalReviewContributors: [any ExtensionApprovalReviewContributor] = [],
+        turnItemContributors: [any ExtensionTurnItemContributor] = []
     ) {
         self.threadLifecycleContributors = threadLifecycleContributors
         self.turnLifecycleContributors = turnLifecycleContributors
         self.configContributors = configContributors
         self.tokenUsageContributors = tokenUsageContributors
+        self.contextContributors = contextContributors
+        self.toolContributors = toolContributors
+        self.approvalReviewContributors = approvalReviewContributors
+        self.turnItemContributors = turnItemContributors
     }
 
     public static var empty: ExtensionRegistry {
         ExtensionRegistry()
+    }
+
+    public func approvalReview(
+        sessionStore: ExtensionData,
+        threadStore: ExtensionData,
+        prompt: String
+    ) async -> ReviewDecision? {
+        for contributor in approvalReviewContributors {
+            if let decision = await contributor.contribute(
+                sessionStore: sessionStore,
+                threadStore: threadStore,
+                prompt: prompt
+            ) {
+                return decision
+            }
+        }
+        return nil
     }
 }

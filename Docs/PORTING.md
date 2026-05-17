@@ -19,9 +19,13 @@ Recent upstream audit checkpoint:
   now carries the typed extension registry contract for thread lifecycle,
   turn lifecycle, token-usage, and config-change contributors, including
   Rust-shaped session/thread/turn `ExtensionData` stores and stable
-  thread/turn identifiers plus before/after config snapshots. Live
-  app-server/runtime emission of these callbacks remains pending with the
-  broader first-class extension registry integration.
+  thread/turn identifiers plus before/after config snapshots. Swift now also
+  carries Rust's remaining extension registry contributor families for prompt
+  fragments, native tools, approval-review claims, and ordered turn-item
+  contributions, including first-claim approval-review dispatch and
+  executor-backed extension tool contracts. Live app-server/runtime emission
+  of these callbacks remains pending with the broader first-class extension
+  registry integration.
 - 2026-05-17: rechecked Rust commit `c9edb26755` (`windows-sandbox: fail
   elevated setup when firewall policy is ineffective`). Swift now carries
   Rust's Windows sandbox setup error-code surface, including
