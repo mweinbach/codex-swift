@@ -2867,6 +2867,103 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertFalse(config.features.isEnabled(.memoryTool))
     }
 
+    func testStrictConfigRejectsUnknownTopLevelFieldLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        model = "gpt-test"
+        approval_polic = "on-request"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(
+            codexHome: dir.url,
+            systemConfigFile: nil,
+            managedConfigOverrides: .withoutManagedConfigForTests(codexHome: dir.url),
+            strictConfig: true
+        )) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "unknown configuration field `approval_polic` in \(dir.url.appendingPathComponent("config.toml").standardizedFileURL.path)"
+            )
+        }
+    }
+
+    func testDefaultConfigParsingIgnoresUnknownTopLevelFieldLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        model = "gpt-test"
+        approval_polic = "on-request"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(
+            codexHome: dir.url,
+            systemConfigFile: nil,
+            managedConfigOverrides: .withoutManagedConfigForTests(codexHome: dir.url)
+        )
+
+        XCTAssertEqual(config.model, "gpt-test")
+        XCTAssertNil(config.approvalPolicy)
+    }
+
+    func testStrictConfigRejectsUnknownFeatureKeysLikeRustSerdeIgnored() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [features]
+        foo = true
+
+        [profiles.work.features]
+        memories = false
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(
+            codexHome: dir.url,
+            systemConfigFile: nil,
+            managedConfigOverrides: .withoutManagedConfigForTests(codexHome: dir.url),
+            strictConfig: true
+        )) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "unknown configuration field `features.foo` in \(dir.url.appendingPathComponent("config.toml").standardizedFileURL.path)"
+            )
+        }
+    }
+
+    func testStrictConfigRejectsUnknownProfileFeatureKeysLikeRustSerdeIgnored() throws {
+        let dir = try CoreTemporaryDirectory()
+        try """
+        [profiles.work.features]
+        foo = true
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(
+            codexHome: dir.url,
+            systemConfigFile: nil,
+            managedConfigOverrides: .withoutManagedConfigForTests(codexHome: dir.url),
+            strictConfig: true
+        )) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "unknown configuration field `profiles.work.features.foo` in \(dir.url.appendingPathComponent("config.toml").standardizedFileURL.path)"
+            )
+        }
+    }
+
+    func testStrictConfigRejectsUnknownCLIOverrideLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(
+            codexHome: dir.url,
+            overrides: CliConfigOverrides(rawOverrides: ["foo=bar"]),
+            systemConfigFile: nil,
+            managedConfigOverrides: .withoutManagedConfigForTests(codexHome: dir.url),
+            strictConfig: true
+        )) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "unknown configuration field `foo` in -c/--config override"
+            )
+        }
+    }
+
     func testRuntimeMcpConfigIncludesBuiltinMemoriesWhenMemoriesFeatureEnablesIt() throws {
         let dir = try CoreTemporaryDirectory()
         try """

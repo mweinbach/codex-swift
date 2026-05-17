@@ -12,6 +12,14 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: started Rust commit `889ee018e7` (`config: add strict config
+  parsing`). Swift `CodexConfigLoader.load` now has opt-in strict config
+  validation for parsed config files and `-c` / `--config` override layers:
+  unknown top-level fields, unknown `[features]` keys, and unknown
+  `[profiles.<name>.features]` keys fail with Rust-shaped unknown-field
+  diagnostics while the default config path remains permissive. CLI flag
+  exposure, managed-preferences source names, and source-range diagnostics
+  remain pending.
 - 2026-05-17: rechecked Rust commit `fdda59c00b` (`Introduce tool exposure
   for deferred registration`). Swift tool-spec construction now treats
   deferred dynamic tools as search-only exposure: they feed `tool_search` but

@@ -1128,6 +1128,7 @@ public enum CodexConfigLoadError: Error, Equatable, CustomStringConvertible, Sen
     case invalidTableHeader(String)
     case profileNotFound(String)
     case unsupportedExperimentalThreadStoreEndpoint
+    case unknownConfigurationField(field: String, source: String)
 
     public var description: String {
         switch self {
@@ -1164,6 +1165,8 @@ public enum CodexConfigLoadError: Error, Equatable, CustomStringConvertible, Sen
             return "config profile `\(profile)` not found"
         case .unsupportedExperimentalThreadStoreEndpoint:
             return "`experimental_thread_store_endpoint` is no longer supported; remove it from config.toml"
+        case let .unknownConfigurationField(field, source):
+            return "unknown configuration field `\(field)` in \(source)"
         }
     }
 }
@@ -1182,7 +1185,8 @@ public enum CodexConfigLoader {
         fileManager: FileManager = .default,
         systemConfigFile: URL? = defaultSystemConfigFile(),
         managedConfigOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides(),
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        strictConfig: Bool = false
     ) throws -> CodexRuntimeConfig {
         var parsed = ParsedCodexConfigToml()
         let userConfigFile = codexHome.appendingPathComponent("config.toml", isDirectory: false).standardizedFileURL
@@ -1198,6 +1202,12 @@ public enum CodexConfigLoader {
             }
             if fileManager.fileExists(atPath: configFile.path) {
                 let contents = try String(contentsOf: configFile, encoding: .utf8)
+                if strictConfig {
+                    try ParsedCodexConfigToml.validateStrictConfig(
+                        ConfigTomlParser.parse(contents),
+                        source: configFile.standardizedFileURL.path
+                    )
+                }
                 parsed.merge(try ParsedCodexConfigToml.parse(
                     contents,
                     baseURL: configFile.deletingLastPathComponent()
@@ -1214,6 +1224,12 @@ public enum CodexConfigLoader {
             ) {
                 if fileManager.fileExists(atPath: configFile.path) {
                     let contents = try String(contentsOf: configFile, encoding: .utf8)
+                    if strictConfig {
+                        try ParsedCodexConfigToml.validateStrictConfig(
+                            ConfigTomlParser.parse(contents),
+                            source: configFile.standardizedFileURL.path
+                        )
+                    }
                     var projectConfig = try ParsedCodexConfigToml.parse(
                         contents,
                         baseURL: configFile.deletingLastPathComponent()
@@ -1230,7 +1246,7 @@ public enum CodexConfigLoader {
             }
         }
 
-        try parsed.apply(overrides: overrides)
+        try parsed.apply(overrides: overrides, strictConfig: strictConfig)
         for source in threadConfigSources {
             if let layer = try source.configLayerEntry() {
                 try parsed.merge(layer.config)
@@ -2756,10 +2772,13 @@ private struct ParsedCodexConfigToml {
         otel["tracestate"] = tracestate
     }
 
-    mutating func apply(overrides: CliConfigOverrides) throws {
+    mutating func apply(overrides: CliConfigOverrides, strictConfig: Bool = false) throws {
         for (path, value) in try overrides.parseOverrides() {
             let parts = try Self.parseDottedKey(path)
             guard let first = parts.first else { continue }
+            if strictConfig {
+                try Self.validateStrictOverridePath(parts)
+            }
 
             if parts.count == 1, Self.isRelevantTopLevelKey(first) {
                 topLevel[first] = value
@@ -3044,6 +3063,156 @@ private struct ParsedCodexConfigToml {
             if parts.first == "profiles" {
                 throw CodexConfigLoadError.invalidConfigLine(path)
             }
+        }
+    }
+
+    static func validateStrictConfig(_ value: ConfigValue, source: String) throws {
+        if let field = firstUnknownStrictConfigField(in: value) {
+            throw CodexConfigLoadError.unknownConfigurationField(field: field, source: source)
+        }
+    }
+
+    private static func validateStrictOverridePath(_ parts: [String]) throws {
+        guard isStrictConfigPathAllowed(parts) else {
+            throw CodexConfigLoadError.unknownConfigurationField(
+                field: parts.joined(separator: "."),
+                source: "-c/--config override"
+            )
+        }
+    }
+
+    private static func firstUnknownStrictConfigField(in value: ConfigValue) -> String? {
+        guard case let .table(table) = value else {
+            return nil
+        }
+        return firstUnknownStrictConfigField(in: table, path: [])
+    }
+
+    private static func firstUnknownStrictConfigField(
+        in table: [String: ConfigValue],
+        path: [String]
+    ) -> String? {
+        for key in table.keys.sorted() {
+            let nextPath = path + [key]
+            guard isStrictConfigPathAllowed(nextPath) else {
+                return nextPath.joined(separator: ".")
+            }
+            guard case let .table(child)? = table[key] else {
+                continue
+            }
+            if isStrictConfigSubtreeOpen(nextPath) {
+                continue
+            }
+            if let unknown = firstUnknownStrictConfigField(in: child, path: nextPath) {
+                return unknown
+            }
+        }
+        return nil
+    }
+
+    private static func isStrictConfigPathAllowed(_ path: [String]) -> Bool {
+        guard let first = path.first else { return true }
+        if path.count == 1 {
+            return isRelevantTopLevelKey(first)
+                || [
+                    "features",
+                    "profiles",
+                    "mcp_servers",
+                    "model_providers",
+                    "sandbox_workspace_write",
+                    "history",
+                    "notice",
+                    "windows",
+                    "analytics",
+                    "feedback",
+                    "otel",
+                    "agents",
+                    "permissions",
+                    "audio",
+                    "realtime",
+                    "tui",
+                    "skills",
+                    "tool_suggest",
+                    "tools",
+                    "debug",
+                    "memories"
+                ].contains(first)
+        }
+
+        switch first {
+        case "features":
+            return isStrictFeaturePathAllowed(Array(path.dropFirst()))
+        case "profiles":
+            guard path.count >= 3 else { return true }
+            if path[2] == "features" {
+                return isStrictFeaturePathAllowed(Array(path.dropFirst(3)))
+            }
+            if path[2] == "tools", path.count >= 4, path[3] == "web_search" {
+                return true
+            }
+            if ["tui", "analytics", "windows"].contains(path[2]) {
+                return true
+            }
+            return path.count == 3 && isRelevantProfileKey(path[2])
+        case "tools":
+            return path.count >= 2 && path[1] == "web_search"
+        case "agents":
+            if path.count == 2 {
+                return true
+            }
+            if path.count == 3 {
+                return isRelevantAgentRoleKey(path[2])
+            }
+            return false
+        case "debug":
+            return path.count >= 2 && path[1] == "config_lockfile"
+        case "skills":
+            return path == ["skills", "include_instructions"]
+        case "mcp_servers", "model_providers", "permissions", "sandbox_workspace_write",
+             "history", "notice", "windows", "analytics", "feedback", "otel",
+             "audio", "realtime", "tui", "tool_suggest", "memories":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func isStrictFeaturePathAllowed(_ path: [String]) -> Bool {
+        guard let first = path.first else { return true }
+        if first == "multi_agent_v2" {
+            guard path.count >= 2 else { return true }
+            return [
+                "enabled",
+                "max_concurrent_threads_per_session",
+                "min_wait_timeout_ms",
+                "max_wait_timeout_ms",
+                "default_wait_timeout_ms",
+                "usage_hint_enabled",
+                "usage_hint_text",
+                "root_agent_usage_hint_text",
+                "subagent_usage_hint_text",
+                "hide_spawn_agent_metadata",
+                "non_code_mode_only"
+            ].contains(path[1])
+        }
+        if first == "apps_mcp_path_override" {
+            guard path.count >= 2 else { return true }
+            return ["enabled", "path"].contains(path[1])
+        }
+        return path.count == 1 && FeatureKeys.isKnown(first)
+    }
+
+    private static func isStrictConfigSubtreeOpen(_ path: [String]) -> Bool {
+        guard let first = path.first else { return false }
+        switch first {
+        case "mcp_servers", "model_providers", "permissions", "sandbox_workspace_write",
+             "history", "notice", "windows", "analytics", "feedback", "otel",
+             "audio", "realtime", "tui", "tool_suggest", "memories":
+            return true
+        case "tools":
+            return path.count >= 2 && path[1] == "web_search"
+        default:
+            return false
         }
     }
 
