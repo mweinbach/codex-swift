@@ -75,6 +75,18 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             }
             return UUID().uuidString.lowercased()
 
+        case let .userInputAnswer(id, response):
+            AppServerLiveRuntimeBlocking.run {
+                await self.state.resolveUserInput(id: id, response: response)
+            }
+            return UUID().uuidString.lowercased()
+
+        case let .dynamicToolResponse(id, response):
+            AppServerLiveRuntimeBlocking.run {
+                await self.state.resolveDynamicTool(id: id, response: response)
+            }
+            return UUID().uuidString.lowercased()
+
         case .shutdown:
             AppServerLiveRuntimeBlocking.run {
                 await self.state.cancelThread(threadID: threadID)
@@ -97,9 +109,7 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
              .review,
              .interAgentCommunication,
              .overrideTurnContext,
-             .userInputAnswer,
              .resolveElicitation,
-             .dynamicToolResponse,
              .realtimeConversationStart,
              .realtimeConversationAudio,
              .realtimeConversationText,
@@ -334,7 +344,8 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             modelFamily: modelFamily,
             config: settings,
             sessionSource: configuration.sessionSource,
-            environmentMode: .fromCount(turnEnvironmentSelections.count)
+            environmentMode: .fromCount(turnEnvironmentSelections.count),
+            dynamicTools: summary.dynamicTools
         )
         var input = NonInteractiveExec.makeInitialPromptInput(
             cwd: cwd,
@@ -409,6 +420,7 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             shell: shell,
             turnEnvironmentSelections: turnEnvironmentSelections,
             prompt: prompt,
+            dynamicTools: summary.dynamicTools,
             userPromptText: turnInput.promptText,
             outputSchema: turnInput.outputSchema,
             serviceTier: turnInput.serviceTier ?? settings.serviceTier,
@@ -430,6 +442,9 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         )
         let requestTrace = W3CTraceContext.fromEnvironment(configuration.environment)
         let clientVersion = ModelsManager.formatClientVersion(packageVersion: configuration.version)
+        let permissionGrantState = AppServerLiveRuntimePermissionGrantState(
+            grantedPermissions: await state.sessionGrantedPermissions(threadID: submission.threadID)
+        )
         return await NonInteractiveExec.runResponsesLoopWithTranscript(
             initialPrompt: prompt,
             features: setup.settings.features,
@@ -517,9 +532,18 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                     features: setup.settings.features,
                     execPolicyManager: ExecPolicyManager(),
                     windowsSandboxLevel: setup.settings.windowsSandboxLevel,
+                    dynamicTools: setup.dynamicTools,
                     registeredToolExecutor: submission.extensionRegisteredToolExecutor,
                     approvalHandler: { request in
                         await Self.resolveApprovalRequest(
+                            request,
+                            state: state,
+                            threadID: submission.threadID,
+                            turnID: submission.turnID
+                        )
+                    },
+                    requestUserInputHandler: { request in
+                        await Self.resolveRequestUserInputRequest(
                             request,
                             state: state,
                             threadID: submission.threadID,
@@ -533,7 +557,16 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                             threadID: submission.threadID,
                             turnID: submission.turnID
                         )
-                    }
+                    },
+                    dynamicToolHandler: { request in
+                        await Self.resolveDynamicToolRequest(
+                            request,
+                            state: state,
+                            threadID: submission.threadID,
+                            turnID: submission.turnID
+                        )
+                    },
+                    grantedPermissions: await permissionGrantState.grantedPermissions()
                 )
                 for event in result.runtimeEvents {
                     await state.emit(
@@ -541,6 +574,15 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                         turnID: submission.turnID,
                         event: event
                     )
+                }
+                if let response = result.requestPermissionsResponse {
+                    await permissionGrantState.record(response)
+                    if response.scope == .session {
+                        await state.recordSessionGrantedPermissions(
+                            threadID: submission.threadID,
+                            permissions: response.permissions
+                        )
+                    }
                 }
                 return result
             }
@@ -729,6 +771,55 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         )
     }
 
+    private static func resolveRequestUserInputRequest(
+        _ request: RequestUserInputEvent,
+        state: AppServerLiveRuntimeState,
+        threadID: String,
+        turnID fallbackTurnID: String
+    ) async -> RequestUserInputResponse? {
+        let turnID = request.turnID.isEmpty ? fallbackTurnID : request.turnID
+        let event = RequestUserInputEvent(
+            callID: request.callID,
+            turnID: turnID,
+            questions: request.questions
+        )
+        return await withTaskCancellationHandler {
+            await state.pendingUserInput(id: turnID) {
+                await state.emit(threadID: threadID, turnID: turnID, event: .requestUserInput(event))
+            }
+        } onCancel: {
+            Task {
+                await state.cancelUserInput(id: turnID)
+            }
+        }
+    }
+
+    private static func resolveDynamicToolRequest(
+        _ request: DynamicToolCallRequest,
+        state: AppServerLiveRuntimeState,
+        threadID: String,
+        turnID fallbackTurnID: String
+    ) async -> DynamicToolResponse? {
+        let turnID = request.turnID.isEmpty ? fallbackTurnID : request.turnID
+        let event = DynamicToolCallRequest(
+            callID: request.callID,
+            turnID: turnID,
+            startedAtMilliseconds: request.startedAtMilliseconds,
+            namespace: request.namespace,
+            tool: request.tool,
+            arguments: request.arguments
+        )
+        return await withTaskCancellationHandler {
+            await state.pendingDynamicTool(id: request.callID, turnID: turnID) {
+                await state.emit(threadID: threadID, turnID: turnID, event: .dynamicToolCallRequest(event))
+            }
+        } onCancel: {
+            Task {
+                await state.cancelDynamicTool(id: request.callID)
+            }
+        }
+    }
+
     private static func normalizeRequestPermissionsResponse(
         _ response: RequestPermissionsResponse,
         requested: RequestPermissionProfile,
@@ -793,11 +884,33 @@ private actor AppServerLiveRuntimeStartGate {
     }
 }
 
+private actor AppServerLiveRuntimePermissionGrantState {
+    private var current: RequestPermissionProfile?
+
+    init(grantedPermissions: RequestPermissionProfile?) {
+        self.current = grantedPermissions
+    }
+
+    func grantedPermissions() -> RequestPermissionProfile? {
+        current
+    }
+
+    func record(_ response: RequestPermissionsResponse) {
+        current = RequestPermissionProfile.mergeAdditionalPermissionProfiles(
+            base: current,
+            permissions: response.permissions
+        )
+    }
+}
+
 private actor AppServerLiveRuntimeState {
     private var eventSink: AppServerRuntimeEventSink?
     private var runningTurns: [String: RunningTurn] = [:]
     private var approvalContinuations: [String: CheckedContinuation<ReviewDecision, Never>] = [:]
     private var permissionContinuations: [String: CheckedContinuation<RequestPermissionsResponse, Never>] = [:]
+    private var userInputContinuations: [String: CheckedContinuation<RequestUserInputResponse?, Never>] = [:]
+    private var dynamicToolContinuations: [String: PendingDynamicTool] = [:]
+    private var sessionGrantedPermissionProfiles: [String: RequestPermissionProfile] = [:]
     private var emittedAbortKeys: Set<String> = []
 
     func setEventSink(_ sink: AppServerRuntimeEventSink?) {
@@ -813,6 +926,7 @@ private actor AppServerLiveRuntimeState {
         if runningTurns[threadID]?.turnID == turnID {
             runningTurns.removeValue(forKey: threadID)
         }
+        cancelPendingContinuations(turnID: turnID)
         emittedAbortKeys.remove(Self.abortKey(threadID: threadID, turnID: turnID))
     }
 
@@ -822,16 +936,22 @@ private actor AppServerLiveRuntimeState {
         }
         running.task.cancel()
         runningTurns.removeValue(forKey: threadID)
+        cancelPendingContinuations(turnID: running.turnID)
         return running.turnID
     }
 
     func cancelThread(threadID: String) {
-        runningTurns.removeValue(forKey: threadID)?.task.cancel()
+        if let running = runningTurns.removeValue(forKey: threadID) {
+            running.task.cancel()
+            cancelPendingContinuations(turnID: running.turnID)
+        }
+        sessionGrantedPermissionProfiles.removeValue(forKey: threadID)
     }
 
     func cancelAll() {
         let turns = runningTurns.values
         runningTurns.removeAll()
+        sessionGrantedPermissionProfiles.removeAll()
         emittedAbortKeys.removeAll()
         for turn in turns {
             turn.task.cancel()
@@ -844,6 +964,14 @@ private actor AppServerLiveRuntimeState {
             continuation.resume(returning: RequestPermissionsResponse(permissions: RequestPermissionProfile()))
         }
         permissionContinuations.removeAll()
+        for continuation in userInputContinuations.values {
+            continuation.resume(returning: nil)
+        }
+        userInputContinuations.removeAll()
+        for pending in dynamicToolContinuations.values {
+            pending.continuation.resume(returning: nil)
+        }
+        dynamicToolContinuations.removeAll()
     }
 
     func emit(threadID: String, turnID: String, event: EventMessage) async {
@@ -887,9 +1015,78 @@ private actor AppServerLiveRuntimeState {
         permissionContinuations.removeValue(forKey: id)?.resume(returning: response)
     }
 
+    func pendingUserInput(
+        id: String,
+        notify: @escaping @Sendable () async -> Void
+    ) async -> RequestUserInputResponse? {
+        await withCheckedContinuation { continuation in
+            userInputContinuations.removeValue(forKey: id)?.resume(returning: nil)
+            userInputContinuations[id] = continuation
+            Task {
+                await notify()
+            }
+        }
+    }
+
+    func resolveUserInput(id: String, response: RequestUserInputResponse) {
+        userInputContinuations.removeValue(forKey: id)?.resume(returning: response)
+    }
+
+    func cancelUserInput(id: String) {
+        userInputContinuations.removeValue(forKey: id)?.resume(returning: nil)
+    }
+
+    func pendingDynamicTool(
+        id: String,
+        turnID: String,
+        notify: @escaping @Sendable () async -> Void
+    ) async -> DynamicToolResponse? {
+        await withCheckedContinuation { continuation in
+            dynamicToolContinuations.removeValue(forKey: id)?.continuation.resume(returning: nil)
+            dynamicToolContinuations[id] = PendingDynamicTool(turnID: turnID, continuation: continuation)
+            Task {
+                await notify()
+            }
+        }
+    }
+
+    func resolveDynamicTool(id: String, response: DynamicToolResponse) {
+        dynamicToolContinuations.removeValue(forKey: id)?.continuation.resume(returning: response)
+    }
+
+    func cancelDynamicTool(id: String) {
+        dynamicToolContinuations.removeValue(forKey: id)?.continuation.resume(returning: nil)
+    }
+
+    func sessionGrantedPermissions(threadID: String) -> RequestPermissionProfile? {
+        sessionGrantedPermissionProfiles[threadID]
+    }
+
+    func recordSessionGrantedPermissions(threadID: String, permissions: RequestPermissionProfile) {
+        sessionGrantedPermissionProfiles[threadID] = RequestPermissionProfile.mergeAdditionalPermissionProfiles(
+            base: sessionGrantedPermissionProfiles[threadID],
+            permissions: permissions
+        )
+    }
+
     private struct RunningTurn {
         let turnID: String
         let task: Task<Void, Never>
+    }
+
+    private struct PendingDynamicTool {
+        let turnID: String
+        let continuation: CheckedContinuation<DynamicToolResponse?, Never>
+    }
+
+    private func cancelPendingContinuations(turnID: String) {
+        userInputContinuations.removeValue(forKey: turnID)?.resume(returning: nil)
+        let dynamicIDs = dynamicToolContinuations.compactMap { id, pending in
+            pending.turnID == turnID ? id : nil
+        }
+        for id in dynamicIDs {
+            dynamicToolContinuations.removeValue(forKey: id)?.continuation.resume(returning: nil)
+        }
     }
 
     private static func abortKey(threadID: String, turnID: String) -> String {
@@ -915,6 +1112,7 @@ private struct PreparedLiveTurn {
     let shell: Shell
     let turnEnvironmentSelections: [TurnEnvironmentSelection]
     let prompt: Prompt
+    let dynamicTools: [DynamicToolSpec]
     let userPromptText: String
     let outputSchema: JSONValue?
     let serviceTier: String?
@@ -933,6 +1131,7 @@ private struct LiveRolloutSummary {
     let cwd: String
     let model: String?
     let modelProvider: String
+    let dynamicTools: [DynamicToolSpec]
 
     init(items: [RolloutRecordItem], defaultProvider: String) throws {
         var sessionMeta: SessionMeta?
@@ -958,6 +1157,7 @@ private struct LiveRolloutSummary {
         self.cwd = latestCwd ?? sessionMeta.cwd
         self.model = latestModel
         self.modelProvider = sessionMeta.modelProvider ?? defaultProvider
+        self.dynamicTools = sessionMeta.dynamicTools ?? []
     }
 }
 

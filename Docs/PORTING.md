@@ -18,10 +18,17 @@ Recent upstream audit checkpoint:
   cwd-relative requested filesystem paths the way Rust's base-path parser does,
   emits live `item/permissions/requestApproval` events, and resumes the model
   with a normalized `RequestPermissionsResponse` after
-  `Op.requestPermissionsResponse`. Applying granted turn/session permissions
-  to subsequent shell-like commands remains a follow-on ThreadManager parity
-  gap alongside MCP tool injection/refresh, in-flight runtime config mutation,
-  and cross-connection runtime event fanout.
+  `Op.requestPermissionsResponse`. Granted turn/session permissions are now
+  accumulated with Rust's merge/intersection rules and applied implicitly to
+  later `shell_command`, `shell`, local shell, and unified `exec_command` calls,
+  including preapproved sandbox widening without a second prompt. Remaining
+  ThreadManager parity gaps are MCP tool injection/refresh, in-flight runtime
+  config mutation, and cross-connection runtime event fanout.
+- 2026-05-17: Swift's live Responses/tool loop now exposes Rust's
+  `request_user_input` tool and thread dynamic-tool specs, routes calls through
+  live app-server pending continuations, and resumes the same turn from
+  `Op.userInputAnswer` / `Op.dynamicToolResponse` instead of treating those
+  continuation ops as no-ops.
 - 2026-05-17: attached a first Swift app-server live runtime manager to the
   normal stdio, websocket, and remote-control executable paths. The manager now
   backs the existing core/live submitter seams with running-turn tasks,
@@ -29,7 +36,7 @@ Recent upstream audit checkpoint:
   persistence, Responses API streaming, local tool execution, and extension
   prompt/tool callbacks. Remaining ThreadManager parity gaps are MCP tool
   injection and refresh inside the live loop, in-flight runtime config mutation,
-  permission-request continuations, and cross-connection runtime event fanout.
+  and cross-connection runtime event fanout.
 - 2026-05-17: rechecked Rust's live `refresh_runtime_config` extension
   callback path from `codex-rs/core/src/session/mod.rs`. Swift now keeps a
   per-loaded-thread runtime config snapshot and emits app-server extension

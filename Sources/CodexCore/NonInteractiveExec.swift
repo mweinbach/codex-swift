@@ -280,6 +280,7 @@ public enum NonInteractiveExec {
             agentJobTools: config.features.isEnabled(.spawnCsv),
             agentJobWorkerTools: config.features.isEnabled(.spawnCsv)
                 && AgentJobRuntime.isAgentJobWorkerSessionSource(sessionSource),
+            requestUserInputAvailableModes: RequestUserInputToolConfig.availableModes(features: config.features),
             requestPermissionsTool: config.features.isEnabled(.requestPermissionsTool)
         ).applyingProviderCapabilities(
             config.selectedModelProvider?.capabilities() ?? ModelProviderCapabilities()
@@ -290,14 +291,18 @@ public enum NonInteractiveExec {
         modelFamily: ModelFamily,
         config: CodexRuntimeConfig,
         sessionSource: SessionSource = .default,
-        environmentMode: ToolEnvironmentMode = .single
+        environmentMode: ToolEnvironmentMode = .single,
+        dynamicTools: [DynamicToolSpec] = []
     ) -> [ConfiguredToolSpec] {
-        ToolSpecFactory.buildSpecs(config: toolsConfig(
-            modelFamily: modelFamily,
-            config: config,
-            sessionSource: sessionSource,
-            environmentMode: environmentMode
-        ))
+        ToolSpecFactory.buildSpecs(
+            config: toolsConfig(
+                modelFamily: modelFamily,
+                config: config,
+                sessionSource: sessionSource,
+                environmentMode: environmentMode
+            ),
+            dynamicTools: dynamicTools
+        )
     }
 
     private static func webSearchMode(for config: CodexRuntimeConfig) -> WebSearchMode? {
@@ -358,20 +363,25 @@ public enum NonInteractiveExec {
     public typealias FunctionCallResultExecutor = (ResponseItem) async -> FunctionCallExecutionResult
     public typealias RegisteredToolExecutor = @Sendable (ResponseItem) async -> FunctionCallExecutionResult?
     public typealias ModelsETagHandler = (String) async -> Void
+    public typealias RequestUserInputHandler = @Sendable (RequestUserInputEvent) async -> RequestUserInputResponse?
+    public typealias DynamicToolCallHandler = @Sendable (DynamicToolCallRequest) async -> DynamicToolResponse?
 
     public struct FunctionCallExecutionResult: Equatable, Sendable {
         public var output: ResponseItem
         public var additionalContextItems: [ResponseItem]
         public var runtimeEvents: [EventMessage]
+        public var requestPermissionsResponse: RequestPermissionsResponse?
 
         public init(
             output: ResponseItem,
             additionalContextItems: [ResponseItem] = [],
-            runtimeEvents: [EventMessage] = []
+            runtimeEvents: [EventMessage] = [],
+            requestPermissionsResponse: RequestPermissionsResponse? = nil
         ) {
             self.output = output
             self.additionalContextItems = additionalContextItems
             self.runtimeEvents = runtimeEvents
+            self.requestPermissionsResponse = requestPermissionsResponse
         }
     }
 
@@ -803,9 +813,13 @@ public enum NonInteractiveExec {
         features: FeatureStates = .withDefaults(),
         execPolicyManager: ExecPolicyManager = ExecPolicyManager(),
         windowsSandboxLevel: WindowsSandboxLevel = .disabled,
+        dynamicTools: [DynamicToolSpec] = [],
         registeredToolExecutor: RegisteredToolExecutor? = nil,
         approvalHandler: FunctionCallApprovalHandler? = nil,
-        requestPermissionsHandler: RequestPermissionsHandler? = nil
+        requestUserInputHandler: RequestUserInputHandler? = nil,
+        requestPermissionsHandler: RequestPermissionsHandler? = nil,
+        dynamicToolHandler: DynamicToolCallHandler? = nil,
+        grantedPermissions: RequestPermissionProfile? = nil
     ) async -> ResponseItem {
         await executeFunctionCallWithApproval(
             item,
@@ -828,9 +842,13 @@ public enum NonInteractiveExec {
             features: features,
             execPolicyManager: execPolicyManager,
             windowsSandboxLevel: windowsSandboxLevel,
+            dynamicTools: dynamicTools,
             registeredToolExecutor: registeredToolExecutor,
             approvalHandler: approvalHandler,
+            requestUserInputHandler: requestUserInputHandler,
             requestPermissionsHandler: requestPermissionsHandler,
+            dynamicToolHandler: dynamicToolHandler,
+            grantedPermissions: grantedPermissions,
             approvalGranted: false
         ).output
     }
@@ -840,19 +858,22 @@ public enum NonInteractiveExec {
         var unifiedExecOutput: UnifiedExecToolOutput?
         var runtimeEvents: [EventMessage] = []
         var additionalContextItems: [ResponseItem] = []
+        var requestPermissionsResponse: RequestPermissionsResponse?
     }
 
     private static func executed(
         _ output: ResponseItem,
         unifiedExecOutput: UnifiedExecToolOutput? = nil,
         runtimeEvents: [EventMessage] = [],
-        additionalContextItems: [ResponseItem] = []
+        additionalContextItems: [ResponseItem] = [],
+        requestPermissionsResponse: RequestPermissionsResponse? = nil
     ) -> ExecutedFunctionCall {
         ExecutedFunctionCall(
             output: output,
             unifiedExecOutput: unifiedExecOutput,
             runtimeEvents: runtimeEvents,
-            additionalContextItems: additionalContextItems
+            additionalContextItems: additionalContextItems,
+            requestPermissionsResponse: requestPermissionsResponse
         )
     }
 
@@ -860,7 +881,8 @@ public enum NonInteractiveExec {
         executed(
             result.output,
             runtimeEvents: result.runtimeEvents,
-            additionalContextItems: result.additionalContextItems
+            additionalContextItems: result.additionalContextItems,
+            requestPermissionsResponse: result.requestPermissionsResponse
         )
     }
 
@@ -885,9 +907,13 @@ public enum NonInteractiveExec {
         features: FeatureStates,
         execPolicyManager: ExecPolicyManager,
         windowsSandboxLevel: WindowsSandboxLevel,
+        dynamicTools: [DynamicToolSpec],
         registeredToolExecutor: RegisteredToolExecutor?,
         approvalHandler: FunctionCallApprovalHandler?,
+        requestUserInputHandler: RequestUserInputHandler?,
         requestPermissionsHandler: RequestPermissionsHandler?,
+        dynamicToolHandler: DynamicToolCallHandler?,
+        grantedPermissions: RequestPermissionProfile?,
         turnID: String = "turn-1",
         approvalGranted: Bool
     ) async -> ExecutedFunctionCall {
@@ -916,10 +942,14 @@ public enum NonInteractiveExec {
                 features: features,
                 execPolicyManager: execPolicyManager,
                 windowsSandboxLevel: windowsSandboxLevel,
+                dynamicTools: dynamicTools,
                 registeredToolExecutor: registeredToolExecutor,
                 turnID: turnID,
                 approvalHandler: approvalHandler,
+                requestUserInputHandler: requestUserInputHandler,
                 requestPermissionsHandler: requestPermissionsHandler,
+                dynamicToolHandler: dynamicToolHandler,
+                grantedPermissions: grantedPermissions,
                 approvalGranted: approvalGranted
             )
 
@@ -974,6 +1004,7 @@ public enum NonInteractiveExec {
                 environment: environment,
                 shellEnvironmentPolicy: shellEnvironmentPolicy,
                 explicitEnvOverrides: explicitEnvOverrides,
+                grantedPermissions: grantedPermissions,
                 responseFormat: .structured
             ))
 
@@ -1029,9 +1060,13 @@ public enum NonInteractiveExec {
         features: FeatureStates = .withDefaults(),
         execPolicyManager: ExecPolicyManager = ExecPolicyManager(),
         windowsSandboxLevel: WindowsSandboxLevel = .disabled,
+        dynamicTools: [DynamicToolSpec] = [],
         registeredToolExecutor: RegisteredToolExecutor? = nil,
         approvalHandler: FunctionCallApprovalHandler? = nil,
-        requestPermissionsHandler: RequestPermissionsHandler? = nil
+        requestUserInputHandler: RequestUserInputHandler? = nil,
+        requestPermissionsHandler: RequestPermissionsHandler? = nil,
+        dynamicToolHandler: DynamicToolCallHandler? = nil,
+        grantedPermissions: RequestPermissionProfile? = nil
     ) async -> FunctionCallExecutionResult {
         let hookPayload = toolHookPayload(for: item)
         var effectiveItem = item
@@ -1123,9 +1158,13 @@ public enum NonInteractiveExec {
             features: features,
             execPolicyManager: execPolicyManager,
             windowsSandboxLevel: windowsSandboxLevel,
+            dynamicTools: dynamicTools,
             registeredToolExecutor: registeredToolExecutor,
             approvalHandler: approvalHandler,
+            requestUserInputHandler: requestUserInputHandler,
             requestPermissionsHandler: requestPermissionsHandler,
+            dynamicToolHandler: dynamicToolHandler,
+            grantedPermissions: grantedPermissions,
             turnID: turnID,
             approvalGranted: approvalGranted
         )
@@ -1137,7 +1176,8 @@ public enum NonInteractiveExec {
             return FunctionCallExecutionResult(
                 output: output,
                 additionalContextItems: additionalItems,
-                runtimeEvents: execution.runtimeEvents
+                runtimeEvents: execution.runtimeEvents,
+                requestPermissionsResponse: execution.requestPermissionsResponse
             )
         }
 
@@ -1154,7 +1194,8 @@ public enum NonInteractiveExec {
         return FunctionCallExecutionResult(
             output: replacingToolOutputIfNeeded(output, with: postOutcome),
             additionalContextItems: additionalItems,
-            runtimeEvents: execution.runtimeEvents
+            runtimeEvents: execution.runtimeEvents,
+            requestPermissionsResponse: execution.requestPermissionsResponse
         )
     }
 
@@ -1706,10 +1747,14 @@ public enum NonInteractiveExec {
         features: FeatureStates,
         execPolicyManager: ExecPolicyManager,
         windowsSandboxLevel: WindowsSandboxLevel,
+        dynamicTools: [DynamicToolSpec],
         registeredToolExecutor: RegisteredToolExecutor?,
         turnID: String,
         approvalHandler: FunctionCallApprovalHandler?,
+        requestUserInputHandler: RequestUserInputHandler?,
         requestPermissionsHandler: RequestPermissionsHandler?,
+        dynamicToolHandler: DynamicToolCallHandler?,
+        grantedPermissions: RequestPermissionProfile?,
         approvalGranted: Bool
     ) async -> ExecutedFunctionCall {
         let decoder = JSONDecoder()
@@ -1746,7 +1791,8 @@ public enum NonInteractiveExec {
                     truncationPolicy: params.maxOutputTokens.map { .tokens($0) } ?? truncationPolicy,
                     environment: environment,
                     shellEnvironmentPolicy: shellEnvironmentPolicy,
-                    explicitEnvOverrides: explicitEnvOverrides
+                    explicitEnvOverrides: explicitEnvOverrides,
+                    grantedPermissions: grantedPermissions
                 )
 
             case "shell_command":
@@ -1778,6 +1824,7 @@ public enum NonInteractiveExec {
                     environment: environment,
                     shellEnvironmentPolicy: shellEnvironmentPolicy,
                     explicitEnvOverrides: explicitEnvOverrides,
+                    grantedPermissions: grantedPermissions,
                     responseFormat: .freeform
                 ))
 
@@ -1808,6 +1855,7 @@ public enum NonInteractiveExec {
                     environment: environment,
                     shellEnvironmentPolicy: shellEnvironmentPolicy,
                     explicitEnvOverrides: explicitEnvOverrides,
+                    grantedPermissions: grantedPermissions,
                     responseFormat: .structured
                 ))
 
@@ -1847,6 +1895,27 @@ public enum NonInteractiveExec {
                     remoteEnvironmentFileSystems: remoteEnvironmentFileSystems
                 ))
 
+            case "request_user_input":
+                guard let requestUserInputHandler else {
+                    return executed(functionOutput(
+                        callID: callID,
+                        content: "unsupported call: \(toolNameDisplay(namespace: namespace, name: name))",
+                        success: false
+                    ))
+                }
+                let params = try decoder.decode(RequestUserInputArgs.self, from: Data(arguments.utf8)).normalized()
+                let event = RequestUserInputEvent(callID: callID, turnID: turnID, questions: params.questions)
+                guard let response = await requestUserInputHandler(event) else {
+                    return executed(functionOutput(
+                        callID: callID,
+                        content: "request_user_input was cancelled before receiving a response",
+                        success: false
+                    ))
+                }
+                let data = try compactJSONEncoder.encode(response)
+                let content = String(decoding: data, as: UTF8.self)
+                return executed(functionOutput(callID: callID, content: content, success: true))
+
             case "request_permissions":
                 guard let requestPermissionsHandler else {
                     return executed(functionOutput(
@@ -1877,9 +1946,17 @@ public enum NonInteractiveExec {
                         success: false
                     ))
                 }
-                let data = try JSONEncoder().encode(response)
+                let normalizedResponse = normalizeRequestPermissionsResponse(
+                    response,
+                    requested: params.permissions,
+                    cwd: cwd.standardizedFileURL.path
+                )
+                let data = try JSONEncoder().encode(normalizedResponse)
                 let content = String(decoding: data, as: UTF8.self)
-                return executed(functionOutput(callID: callID, content: content, success: true))
+                return executed(
+                    functionOutput(callID: callID, content: content, success: true),
+                    requestPermissionsResponse: normalizedResponse
+                )
 
             case "update_plan":
                 let params: UpdatePlanArguments
@@ -1907,6 +1984,23 @@ public enum NonInteractiveExec {
                 ) {
                     return executed(agentJobOutput)
                 }
+                if let dynamicTool = matchingDynamicTool(namespace: namespace, name: name, dynamicTools: dynamicTools) {
+                    guard let dynamicToolHandler else {
+                        return executed(functionOutput(
+                            callID: callID,
+                            content: "unsupported call: \(toolNameDisplay(namespace: namespace, name: name))",
+                            success: false
+                        ))
+                    }
+                    return try await executeDynamicToolCall(
+                        callID: callID,
+                        turnID: turnID,
+                        namespace: dynamicTool.namespace,
+                        tool: dynamicTool.name,
+                        arguments: arguments,
+                        handler: dynamicToolHandler
+                    )
+                }
                 if let registeredResult = await registeredToolExecutor?(.functionCall(
                     name: name,
                     namespace: namespace,
@@ -1929,6 +2023,95 @@ public enum NonInteractiveExec {
                 content: "failed to parse \(name) arguments: \(String(describing: error))",
                 success: false
             ))
+        }
+    }
+
+    private static func matchingDynamicTool(
+        namespace: String?,
+        name: String,
+        dynamicTools: [DynamicToolSpec]
+    ) -> DynamicToolSpec? {
+        dynamicTools.first { tool in
+            tool.namespace == namespace && tool.name == name
+        }
+    }
+
+    private static func executeDynamicToolCall(
+        callID: String,
+        turnID: String,
+        namespace: String?,
+        tool: String,
+        arguments: String,
+        handler: DynamicToolCallHandler
+    ) async throws -> ExecutedFunctionCall {
+        let argumentsValue = try JSONDecoder().decode(JSONValue.self, from: Data(arguments.utf8))
+        let startedAt = Date()
+        let request = DynamicToolCallRequest(
+            callID: callID,
+            turnID: turnID,
+            startedAtMilliseconds: startedAtMilliseconds(startedAt),
+            namespace: namespace,
+            tool: tool,
+            arguments: argumentsValue
+        )
+        let response = await handler(request)
+        let duration = ProtocolDuration(timeInterval: Date().timeIntervalSince(startedAt))
+        let responseEvent = DynamicToolCallResponseEvent(
+            callID: callID,
+            turnID: turnID,
+            completedAtMilliseconds: startedAtMilliseconds(),
+            namespace: namespace,
+            tool: tool,
+            arguments: argumentsValue,
+            contentItems: response?.contentItems ?? [],
+            success: response?.success ?? false,
+            error: response == nil ? "dynamic tool call was cancelled before receiving a response" : nil,
+            duration: duration
+        )
+        guard let response else {
+            return executed(
+                functionOutput(
+                    callID: callID,
+                    content: "dynamic tool call was cancelled before receiving a response",
+                    success: false
+                ),
+                runtimeEvents: [.dynamicToolCallResponse(responseEvent)]
+            )
+        }
+        return executed(
+            dynamicToolFunctionOutput(callID: callID, response: response),
+            runtimeEvents: [.dynamicToolCallResponse(responseEvent)]
+        )
+    }
+
+    private static func dynamicToolFunctionOutput(callID: String, response: DynamicToolResponse) -> ResponseItem {
+        let contentItems = response.contentItems.map(functionOutputContentItem)
+        let data = (try? compactJSONEncoder.encode(contentItems)) ?? Data("[]".utf8)
+        let content = String(data: data, encoding: .utf8) ?? "[]"
+        return .functionCallOutput(
+            callID: callID,
+            output: FunctionCallOutputPayload(
+                content: content,
+                contentItems: contentItems,
+                success: response.success
+            )
+        )
+    }
+
+    private static var compactJSONEncoder: JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return encoder
+    }
+
+    private static func functionOutputContentItem(
+        from item: DynamicToolCallOutputContentItem
+    ) -> FunctionCallOutputContentItem {
+        switch item {
+        case let .text(text):
+            return .inputText(text: text)
+        case let .imageURL(imageURL):
+            return .inputImage(imageURL: imageURL)
         }
     }
 
@@ -2373,6 +2556,28 @@ public enum NonInteractiveExec {
         return URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
     }
 
+    private static func normalizeRequestPermissionsResponse(
+        _ response: RequestPermissionsResponse,
+        requested: RequestPermissionProfile,
+        cwd: String
+    ) -> RequestPermissionsResponse {
+        if response.strictAutoReview && response.scope == .session {
+            return RequestPermissionsResponse(permissions: RequestPermissionProfile())
+        }
+        if response.permissions.isEmpty {
+            return response
+        }
+        return RequestPermissionsResponse(
+            permissions: RequestPermissionProfile.intersectAdditionalPermissionProfiles(
+                requested: requested,
+                granted: response.permissions,
+                cwd: cwd
+            ),
+            scope: response.scope,
+            strictAutoReview: response.strictAutoReview
+        )
+    }
+
     private static func effectiveSandboxPolicy(
         base sandboxPolicy: SandboxPolicy,
         cwd: URL,
@@ -2429,6 +2634,23 @@ public enum NonInteractiveExec {
         return .restricted
     }
 
+    private static func additionalPermissionsArePreapproved(
+        _ additionalPermissions: RequestPermissionProfile?,
+        by grantedPermissions: RequestPermissionProfile?,
+        cwd: String
+    ) -> Bool {
+        guard let additionalPermissions, !additionalPermissions.isEmpty,
+              let grantedPermissions, !grantedPermissions.isEmpty
+        else {
+            return false
+        }
+        return RequestPermissionProfile.additionalPermissionsArePreapproved(
+            effectivePermissions: additionalPermissions,
+            grantedPermissions: grantedPermissions,
+            cwd: cwd
+        )
+    }
+
     private static func executeShellCommand(
         toolName: String,
         command: [String],
@@ -2454,6 +2676,7 @@ public enum NonInteractiveExec {
         environment: [String: String],
         shellEnvironmentPolicy: ShellEnvironmentPolicy,
         explicitEnvOverrides: [String: String],
+        grantedPermissions: RequestPermissionProfile?,
         responseFormat: ShellResponseFormat
     ) async -> ResponseItem {
         guard !command.isEmpty else {
@@ -2463,6 +2686,8 @@ public enum NonInteractiveExec {
         let commandCwd = resolveWorkdir(workdir, relativeTo: cwd)
         let normalizedAdditionalPermissions: RequestPermissionProfile?
         let commandSandboxPolicy: SandboxPolicy
+        let requestedAdditionalPermissionsArePreapproved: Bool
+        let effectiveAdditionalPermissions: RequestPermissionProfile?
         do {
             normalizedAdditionalPermissions = try normalizeAndValidateAdditionalPermissions(
                 features: features,
@@ -2470,10 +2695,19 @@ public enum NonInteractiveExec {
                 sandboxPermissions: sandboxPermissions,
                 additionalPermissions: additionalPermissions
             )
+            requestedAdditionalPermissionsArePreapproved = Self.additionalPermissionsArePreapproved(
+                normalizedAdditionalPermissions,
+                by: grantedPermissions,
+                cwd: commandCwd.path
+            )
+            effectiveAdditionalPermissions = RequestPermissionProfile.mergeAdditionalPermissionProfiles(
+                base: grantedPermissions,
+                permissions: normalizedAdditionalPermissions
+            )
             commandSandboxPolicy = try effectiveSandboxPolicy(
                 base: sandboxPolicy,
                 cwd: commandCwd,
-                additionalPermissions: normalizedAdditionalPermissions
+                additionalPermissions: effectiveAdditionalPermissions
             )
         } catch let error as FunctionCallError {
             return functionOutput(callID: callID, content: error.description, success: false)
@@ -2481,19 +2715,23 @@ public enum NonInteractiveExec {
             return functionOutput(callID: callID, content: String(describing: error), success: false)
         }
 
+        let approvalSandboxPermissions = requestedAdditionalPermissionsArePreapproved
+            ? SandboxPermissions.useDefault
+            : sandboxPermissions
         let approvalRequirement = shellApprovalRequirement(
             command: command,
             approvalPolicy: approvalPolicy,
             sandboxPolicy: sandboxPolicy,
-            sandboxPermissions: sandboxPermissions,
+            sandboxPermissions: approvalSandboxPermissions,
             prefixRule: prefixRule,
             features: features,
             execPolicyManager: execPolicyManager
         )
-        var effectiveApprovalGranted = approvalGranted
+        var effectiveApprovalGranted = approvalGranted || requestedAdditionalPermissionsArePreapproved
+        let approvalAdditionalPermissions = requestedAdditionalPermissionsArePreapproved ? nil : normalizedAdditionalPermissions
         if shellApprovalNeedsInteractiveDecision(
             approvalRequirement: approvalRequirement,
-            sandboxPermissions: sandboxPermissions,
+            sandboxPermissions: approvalSandboxPermissions,
             approvalPolicy: approvalPolicy,
             approvalGranted: effectiveApprovalGranted
         ),
@@ -2509,13 +2747,13 @@ public enum NonInteractiveExec {
                 reason: shellApprovalReason(
                     approvalDescription: approvalDescription,
                     approvalRequirement: approvalRequirement,
-                    sandboxPermissions: sandboxPermissions
+                    sandboxPermissions: approvalSandboxPermissions
                 ),
                 proposedExecPolicyAmendment: approvalRequirement.proposedExecPolicyAmendment,
-                additionalPermissions: normalizedAdditionalPermissions,
+                additionalPermissions: approvalAdditionalPermissions,
                 availableDecisions: execApprovalAvailableDecisions(
                     approvalRequirement: approvalRequirement,
-                    additionalPermissions: normalizedAdditionalPermissions
+                    additionalPermissions: approvalAdditionalPermissions
                 ),
                 parsedCmd: parseCommand(command)
             )))
@@ -2530,7 +2768,7 @@ public enum NonInteractiveExec {
         }
         if let rejection = shellApprovalRejection(
             approvalRequirement: approvalRequirement,
-            sandboxPermissions: sandboxPermissions,
+            sandboxPermissions: approvalSandboxPermissions,
             approvalPolicy: approvalPolicy,
             approvalGranted: effectiveApprovalGranted
         ) {
@@ -2592,7 +2830,7 @@ public enum NonInteractiveExec {
             )
         } ?? command
         let executionSandboxPolicy = shouldBypassSandbox(
-            sandboxPermissions: sandboxPermissions,
+            sandboxPermissions: approvalSandboxPermissions,
             approvalRequirement: approvalRequirement
         ) ? SandboxPolicy.dangerFullAccess : commandSandboxPolicy
         let runtimeCommand = prepareRuntimeCommand(
@@ -2644,7 +2882,8 @@ public enum NonInteractiveExec {
         truncationPolicy: TruncationPolicy,
         environment: [String: String],
         shellEnvironmentPolicy: ShellEnvironmentPolicy,
-        explicitEnvOverrides: [String: String]
+        explicitEnvOverrides: [String: String],
+        grantedPermissions: RequestPermissionProfile?
     ) async -> ExecutedFunctionCall {
         guard !command.isEmpty else {
             return executed(functionOutput(callID: callID, content: "exec_command command is empty", success: false))
@@ -2653,6 +2892,8 @@ public enum NonInteractiveExec {
         let commandCwd = resolveWorkdir(workdir, relativeTo: cwd)
         let normalizedAdditionalPermissions: RequestPermissionProfile?
         let commandSandboxPolicy: SandboxPolicy
+        let requestedAdditionalPermissionsArePreapproved: Bool
+        let effectiveAdditionalPermissions: RequestPermissionProfile?
         do {
             normalizedAdditionalPermissions = try normalizeAndValidateAdditionalPermissions(
                 features: features,
@@ -2660,10 +2901,19 @@ public enum NonInteractiveExec {
                 sandboxPermissions: sandboxPermissions,
                 additionalPermissions: additionalPermissions
             )
+            requestedAdditionalPermissionsArePreapproved = Self.additionalPermissionsArePreapproved(
+                normalizedAdditionalPermissions,
+                by: grantedPermissions,
+                cwd: commandCwd.path
+            )
+            effectiveAdditionalPermissions = RequestPermissionProfile.mergeAdditionalPermissionProfiles(
+                base: grantedPermissions,
+                permissions: normalizedAdditionalPermissions
+            )
             commandSandboxPolicy = try effectiveSandboxPolicy(
                 base: sandboxPolicy,
                 cwd: commandCwd,
-                additionalPermissions: normalizedAdditionalPermissions
+                additionalPermissions: effectiveAdditionalPermissions
             )
         } catch let error as FunctionCallError {
             return executed(functionOutput(callID: callID, content: error.description, success: false))
@@ -2671,19 +2921,23 @@ public enum NonInteractiveExec {
             return executed(functionOutput(callID: callID, content: String(describing: error), success: false))
         }
 
+        let approvalSandboxPermissions = requestedAdditionalPermissionsArePreapproved
+            ? SandboxPermissions.useDefault
+            : sandboxPermissions
         let approvalRequirement = shellApprovalRequirement(
             command: command,
             approvalPolicy: approvalPolicy,
             sandboxPolicy: sandboxPolicy,
-            sandboxPermissions: sandboxPermissions,
+            sandboxPermissions: approvalSandboxPermissions,
             prefixRule: prefixRule,
             features: features,
             execPolicyManager: execPolicyManager
         )
-        var effectiveApprovalGranted = approvalGranted
+        var effectiveApprovalGranted = approvalGranted || requestedAdditionalPermissionsArePreapproved
+        let approvalAdditionalPermissions = requestedAdditionalPermissionsArePreapproved ? nil : normalizedAdditionalPermissions
         if shellApprovalNeedsInteractiveDecision(
             approvalRequirement: approvalRequirement,
-            sandboxPermissions: sandboxPermissions,
+            sandboxPermissions: approvalSandboxPermissions,
             approvalPolicy: approvalPolicy,
             approvalGranted: effectiveApprovalGranted
         ),
@@ -2699,13 +2953,13 @@ public enum NonInteractiveExec {
                 reason: shellApprovalReason(
                     approvalDescription: approvalDescription,
                     approvalRequirement: approvalRequirement,
-                    sandboxPermissions: sandboxPermissions
+                    sandboxPermissions: approvalSandboxPermissions
                 ),
                 proposedExecPolicyAmendment: approvalRequirement.proposedExecPolicyAmendment,
-                additionalPermissions: normalizedAdditionalPermissions,
+                additionalPermissions: approvalAdditionalPermissions,
                 availableDecisions: execApprovalAvailableDecisions(
                     approvalRequirement: approvalRequirement,
-                    additionalPermissions: normalizedAdditionalPermissions
+                    additionalPermissions: approvalAdditionalPermissions
                 ),
                 parsedCmd: parseCommand(command)
             )))
@@ -2720,7 +2974,7 @@ public enum NonInteractiveExec {
         }
         if let rejection = shellApprovalRejection(
             approvalRequirement: approvalRequirement,
-            sandboxPermissions: sandboxPermissions,
+            sandboxPermissions: approvalSandboxPermissions,
             approvalPolicy: approvalPolicy,
             approvalGranted: effectiveApprovalGranted
         ) {
@@ -2742,7 +2996,7 @@ public enum NonInteractiveExec {
             )
         } ?? command
         let executionSandboxPolicy = shouldBypassSandbox(
-            sandboxPermissions: sandboxPermissions,
+            sandboxPermissions: approvalSandboxPermissions,
             approvalRequirement: approvalRequirement
         ) ? SandboxPolicy.dangerFullAccess : commandSandboxPolicy
         let runtimeCommand = prepareRuntimeCommand(

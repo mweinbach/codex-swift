@@ -221,6 +221,215 @@ final class NonInteractiveExecTests: XCTestCase {
         let response = try JSONDecoder().decode(RequestPermissionsResponse.self, from: Data(payload.content.utf8))
         XCTAssertEqual(response.scope, PermissionGrantScope.turn)
         XCTAssertEqual(response.permissions.fileSystem?.legacyReadWriteRoots?.write, [expectedCwdPath])
+        XCTAssertEqual(result.requestPermissionsResponse, response)
+    }
+
+    func testRequestUserInputToolRoundTripResolvesPendingLikeRust() async throws {
+        let item = ResponseItem.functionCall(
+            name: "request_user_input",
+            arguments: #"""
+            {"questions":[{"id":"choice","header":"Choice","question":"Pick one","options":[{"label":"A","description":"Alpha"}]}]}
+            """#,
+            callID: "request-input-call"
+        )
+        let requestCapture = RequestUserInputEventCapture()
+        let answer = RequestUserInputResponse(answers: [
+            "choice": RequestUserInputAnswer(answers: ["A"])
+        ])
+
+        let result = await NonInteractiveExec.executeFunctionCallWithHooks(
+            item,
+            handlers: [],
+            conversationID: ConversationId(),
+            turnID: "turn-1",
+            cwd: FileManager.default.temporaryDirectory,
+            model: "gpt-test",
+            approvalPolicy: .never,
+            sandboxPolicy: .newWorkspaceWritePolicy(),
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            requestUserInputHandler: { request in
+                requestCapture.set(request)
+                return answer
+            }
+        )
+
+        let request = try XCTUnwrap(requestCapture.get())
+        XCTAssertEqual(request.callID, "request-input-call")
+        XCTAssertEqual(request.turnID, "turn-1")
+        XCTAssertEqual(request.questions.count, 1)
+        XCTAssertEqual(request.questions[0].isOther, true)
+        XCTAssertEqual(request.questions[0].options?.map(\.label), ["A"])
+        guard case let .functionCallOutput(callID, payload) = result.output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "request-input-call")
+        XCTAssertEqual(payload.success, true)
+        XCTAssertEqual(try JSONDecoder().decode(RequestUserInputResponse.self, from: Data(payload.content.utf8)), answer)
+    }
+
+    func testDynamicToolCallRoundTripEmitsCompletedEventLikeRust() async throws {
+        let item = ResponseItem.functionCall(
+            name: "lookup",
+            namespace: "codex_app",
+            arguments: #"{"topic":"protocol"}"#,
+            callID: "dynamic-call"
+        )
+        let tool = DynamicToolSpec(
+            namespace: "codex_app",
+            name: "lookup",
+            description: "Lookup dynamic data.",
+            inputSchema: .object(["type": .string("object")])
+        )
+        let requestCapture = DynamicToolCallRequestCapture()
+        let response = DynamicToolResponse(contentItems: [.text("done")], success: true)
+
+        let result = await NonInteractiveExec.executeFunctionCallWithHooks(
+            item,
+            handlers: [],
+            conversationID: ConversationId(),
+            turnID: "turn-1",
+            cwd: FileManager.default.temporaryDirectory,
+            model: "gpt-test",
+            approvalPolicy: .never,
+            sandboxPolicy: .newWorkspaceWritePolicy(),
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            dynamicTools: [tool],
+            dynamicToolHandler: { request in
+                requestCapture.set(request)
+                return response
+            }
+        )
+
+        let request = try XCTUnwrap(requestCapture.get())
+        XCTAssertEqual(request.callID, "dynamic-call")
+        XCTAssertEqual(request.turnID, "turn-1")
+        XCTAssertEqual(request.namespace, "codex_app")
+        XCTAssertEqual(request.tool, "lookup")
+        XCTAssertEqual(request.arguments, .object(["topic": .string("protocol")]))
+        guard case let .functionCallOutput(callID, payload) = result.output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "dynamic-call")
+        XCTAssertEqual(payload.success, true)
+        XCTAssertEqual(payload.contentItems, [.inputText(text: "done")])
+        guard case let .dynamicToolCallResponse(event)? = result.runtimeEvents.first else {
+            return XCTFail("expected dynamic tool completed event")
+        }
+        XCTAssertEqual(event.callID, "dynamic-call")
+        XCTAssertEqual(event.turnID, "turn-1")
+        XCTAssertEqual(event.namespace, "codex_app")
+        XCTAssertEqual(event.tool, "lookup")
+        XCTAssertEqual(event.contentItems, [.text("done")])
+        XCTAssertTrue(event.success)
+    }
+
+    func testGrantedRequestPermissionsApplyToLaterShellCommandLikeRust() async throws {
+        let workspace = try NonInteractiveExecTemporaryDirectory()
+        let outside = try NonInteractiveExecTemporaryDirectory()
+        let grantedFile = outside.url.appendingPathComponent("granted.txt")
+        let outsidePath = outside.url.standardizedFileURL.path
+        let requestItem = ResponseItem.functionCall(
+            name: "request_permissions",
+            arguments: #"{"permissions":{"file_system":{"write":[\#(try Self.jsonString(outsidePath))]}}}"#,
+            callID: "call-permissions"
+        )
+
+        let requestResult = await NonInteractiveExec.executeFunctionCallWithHooks(
+            requestItem,
+            handlers: [],
+            conversationID: ConversationId(),
+            turnID: "turn-1",
+            cwd: workspace.url,
+            model: "gpt-test",
+            approvalPolicy: .onRequest,
+            sandboxPolicy: .workspaceWrite(
+                writableRoots: [],
+                networkAccess: false,
+                excludeTmpdirEnvVar: true,
+                excludeSlashTmp: true
+            ),
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            requestPermissionsHandler: { request in
+                RequestPermissionsResponse(permissions: request.permissions, scope: .turn)
+            }
+        )
+        let grantedPermissions = try XCTUnwrap(requestResult.requestPermissionsResponse?.permissions)
+
+        let commandPath = grantedFile.resolvingSymlinksInPath().standardizedFileURL.path
+        let shellItem = ResponseItem.functionCall(
+            name: "shell_command",
+            arguments: #"{"command":\#(try Self.jsonString("printf granted-ok > '\(commandPath)'")),"login":false}"#,
+            callID: "call-shell"
+        )
+        let shellResult = await NonInteractiveExec.executeFunctionCallWithHooks(
+            shellItem,
+            handlers: [],
+            conversationID: ConversationId(),
+            turnID: "turn-1",
+            cwd: workspace.url,
+            model: "gpt-test",
+            approvalPolicy: .never,
+            sandboxPolicy: .workspaceWrite(
+                writableRoots: [],
+                networkAccess: false,
+                excludeTmpdirEnvVar: true,
+                excludeSlashTmp: true
+            ),
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            grantedPermissions: grantedPermissions
+        )
+
+        guard case let .functionCallOutput(callID, payload) = shellResult.output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-shell")
+        XCTAssertEqual(payload.success, true, payload.content)
+        XCTAssertEqual(try String(contentsOf: grantedFile, encoding: .utf8), "granted-ok")
+    }
+
+    func testGrantedRequestPermissionsApplyToLaterUnifiedExecCommandLikeRust() async throws {
+        let workspace = try NonInteractiveExecTemporaryDirectory()
+        let outside = try NonInteractiveExecTemporaryDirectory()
+        let grantedFile = outside.url.appendingPathComponent("granted-exec.txt")
+        let grantedPermissions = RequestPermissionProfile(
+            fileSystem: FileSystemPermissions(write: [outside.url.standardizedFileURL.path])
+        )
+        let commandPath = grantedFile.resolvingSymlinksInPath().standardizedFileURL.path
+        let item = ResponseItem.functionCall(
+            name: "exec_command",
+            arguments: #"{"cmd":\#(try Self.jsonString("printf granted-exec-ok > '\(commandPath)'")),"login":false,"yield_time_ms":1000}"#,
+            callID: "call-granted-exec"
+        )
+
+        let result = await NonInteractiveExec.executeFunctionCallWithHooks(
+            item,
+            handlers: [],
+            conversationID: ConversationId(),
+            turnID: "turn-1",
+            cwd: workspace.url,
+            model: "gpt-test",
+            approvalPolicy: .never,
+            sandboxPolicy: .workspaceWrite(
+                writableRoots: [],
+                networkAccess: false,
+                excludeTmpdirEnvVar: true,
+                excludeSlashTmp: true
+            ),
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            grantedPermissions: grantedPermissions
+        )
+
+        guard case let .functionCallOutput(callID, payload) = result.output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-granted-exec")
+        XCTAssertEqual(payload.success, true, payload.content)
+        XCTAssertEqual(try String(contentsOf: grantedFile, encoding: .utf8), "granted-exec-ok")
     }
 
     func testRequestPermissionsToolRejectsEmptyPermissionsLikeRust() async throws {
@@ -4786,6 +4995,40 @@ private final class RequestPermissionsToolRequestCapture: @unchecked Sendable {
     }
 
     func get() -> NonInteractiveExec.RequestPermissionsToolRequest? {
+        lock.withLock {
+            request
+        }
+    }
+}
+
+private final class RequestUserInputEventCapture: @unchecked Sendable {
+    private let lock = NSLock()
+    private var request: RequestUserInputEvent?
+
+    func set(_ request: RequestUserInputEvent) {
+        lock.withLock {
+            self.request = request
+        }
+    }
+
+    func get() -> RequestUserInputEvent? {
+        lock.withLock {
+            request
+        }
+    }
+}
+
+private final class DynamicToolCallRequestCapture: @unchecked Sendable {
+    private let lock = NSLock()
+    private var request: DynamicToolCallRequest?
+
+    func set(_ request: DynamicToolCallRequest) {
+        lock.withLock {
+            self.request = request
+        }
+    }
+
+    func get() -> DynamicToolCallRequest? {
         lock.withLock {
             request
         }

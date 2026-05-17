@@ -263,6 +263,49 @@ final class ToolSpecTests: XCTestCase {
         XCTAssertNotNil(permissionProperties["network"])
     }
 
+    func testRequestUserInputToolSpecMatchesRustShape() throws {
+        let specs = ToolSpecFactory.buildSpecs(config: ToolsConfig(
+            shellType: .disabled,
+            toolSearch: false,
+            toolSuggest: false,
+            requestUserInputAvailableModes: [.plan]
+        ))
+
+        let tool = try XCTUnwrap(specs.first { configured in
+            guard case let .function(tool) = configured.spec else {
+                return false
+            }
+            return tool.name == "request_user_input"
+        })
+        XCTAssertFalse(tool.supportsParallelToolCalls)
+        guard case let .function(function) = tool.spec else {
+            return XCTFail("expected function tool")
+        }
+        XCTAssertEqual(function.name, "request_user_input")
+        XCTAssertTrue(function.description.contains("This tool is only available in Plan mode"))
+        guard case let .object(properties, required, additionalProperties) = function.parameters else {
+            return XCTFail("expected object parameters")
+        }
+        XCTAssertEqual(required, ["questions"])
+        XCTAssertEqual(additionalProperties, .boolean(false))
+        guard case let .array(questionSchema, _)? = properties["questions"],
+              case let .object(questionProperties, questionRequired, questionAdditionalProperties) = questionSchema
+        else {
+            return XCTFail("expected questions array")
+        }
+        XCTAssertEqual(questionRequired, ["id", "header", "question", "options"])
+        XCTAssertEqual(questionAdditionalProperties, .boolean(false))
+        guard case let .array(optionSchema, _)? = questionProperties["options"],
+              case let .object(optionProperties, optionRequired, optionAdditionalProperties) = optionSchema
+        else {
+            return XCTFail("expected options array")
+        }
+        XCTAssertEqual(optionRequired, ["label", "description"])
+        XCTAssertEqual(optionAdditionalProperties, .boolean(false))
+        XCTAssertNotNil(optionProperties["label"])
+        XCTAssertNotNil(optionProperties["description"])
+    }
+
     func testBuildSpecsCanExposeAgentJobTools() {
         let specs = ToolSpecFactory.buildSpecs(config: ToolsConfig(
             shellType: .disabled,
@@ -319,6 +362,7 @@ final class ToolSpecTests: XCTestCase {
             "list_mcp_resource_templates",
             "read_mcp_resource",
             "update_plan",
+            "request_user_input",
             "view_image",
             "spawn_agent",
             "send_message",
@@ -802,6 +846,7 @@ final class ToolSpecTests: XCTestCase {
             "list_mcp_resource_templates",
             "read_mcp_resource",
             "update_plan",
+            "request_user_input",
             "apply_patch",
             "test_sync_tool",
             "web_search",
@@ -850,6 +895,7 @@ final class ToolSpecTests: XCTestCase {
             "list_mcp_resource_templates",
             "read_mcp_resource",
             "update_plan",
+            "request_user_input",
             "view_image"
         ])
         XCTAssertFalse(specs.contains { $0.spec.name == "mcp__codex_apps__calendar_create_event" })
@@ -887,6 +933,7 @@ final class ToolSpecTests: XCTestCase {
             "list_mcp_resource_templates",
             "read_mcp_resource",
             "update_plan",
+            "request_user_input",
             "request_plugin_install",
             "view_image"
         ])
@@ -1048,6 +1095,7 @@ final class ToolSpecTests: XCTestCase {
                 "list_mcp_resource_templates",
                 "read_mcp_resource",
                 "update_plan",
+                "request_user_input",
                 "web_search",
                 "image_generation",
                 "view_image"

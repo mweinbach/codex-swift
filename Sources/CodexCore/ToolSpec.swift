@@ -821,6 +821,7 @@ public struct ToolsConfig: Equatable, Sendable {
     public let waitAgentDefaultTimeoutMS: Int64?
     public let agentJobTools: Bool
     public let agentJobWorkerTools: Bool
+    public let requestUserInputAvailableModes: [CollaborationModeKind]
     public let requestPermissionsTool: Bool
 
     public init(
@@ -852,6 +853,9 @@ public struct ToolsConfig: Equatable, Sendable {
         waitAgentDefaultTimeoutMS: Int64? = nil,
         agentJobTools: Bool = false,
         agentJobWorkerTools: Bool = false,
+        requestUserInputAvailableModes: [CollaborationModeKind] = RequestUserInputToolConfig.availableModes(
+            features: .withDefaults()
+        ),
         requestPermissionsTool: Bool = false
     ) {
         self.shellType = shellType
@@ -882,6 +886,7 @@ public struct ToolsConfig: Equatable, Sendable {
         self.waitAgentDefaultTimeoutMS = waitAgentDefaultTimeoutMS
         self.agentJobTools = agentJobTools
         self.agentJobWorkerTools = agentJobWorkerTools
+        self.requestUserInputAvailableModes = requestUserInputAvailableModes
         self.requestPermissionsTool = requestPermissionsTool
     }
 
@@ -915,6 +920,7 @@ public struct ToolsConfig: Equatable, Sendable {
             waitAgentDefaultTimeoutMS: waitAgentDefaultTimeoutMS,
             agentJobTools: agentJobTools,
             agentJobWorkerTools: agentJobWorkerTools,
+            requestUserInputAvailableModes: requestUserInputAvailableModes,
             requestPermissionsTool: requestPermissionsTool
         )
     }
@@ -1117,6 +1123,14 @@ type CallToolResult<TStructured = { [key: string]: unknown }> = {
         specs.append(ConfiguredToolSpec(spec: createListMCPResourceTemplatesTool(), supportsParallelToolCalls: true))
         specs.append(ConfiguredToolSpec(spec: createReadMCPResourceTool(), supportsParallelToolCalls: true))
         specs.append(ConfiguredToolSpec(spec: createPlanTool(), supportsParallelToolCalls: false))
+        specs.append(ConfiguredToolSpec(
+            spec: createRequestUserInputTool(
+                description: RequestUserInputToolConfig.toolDescription(
+                    availableModes: config.requestUserInputAvailableModes
+                )
+            ),
+            supportsParallelToolCalls: false
+        ))
 
         let deferredMcpToolsForSearch = config.namespaceTools ? deferredMcpToolInfos : nil
         let deferredDynamicTools = dynamicTools.filter { tool in
@@ -2058,6 +2072,41 @@ type CallToolResult<TStructured = { [key: string]: unknown }> = {
                 "permissions": requestPermissionProfileSchema()
             ],
             required: ["permissions"]
+        )
+    }
+
+    public static func createRequestUserInputTool(description: String) -> ToolSpec {
+        let optionSchema = JSONSchema.object(
+            properties: [
+                "label": .string(description: "User-facing label (1-5 words)."),
+                "description": .string(description: "One short sentence explaining impact/tradeoff if selected.")
+            ],
+            required: ["label", "description"],
+            additionalProperties: .boolean(false)
+        )
+        let questionSchema = JSONSchema.object(
+            properties: [
+                "id": .string(description: "Stable identifier for mapping answers (snake_case)."),
+                "header": .string(description: "Short header label shown in the UI (12 or fewer chars)."),
+                "question": .string(description: "Single-sentence prompt shown to the user."),
+                "options": .array(
+                    items: optionSchema,
+                    description: "Provide 2-3 mutually exclusive choices. Put the recommended option first and suffix its label with \"(Recommended)\". Do not include an \"Other\" option in this list; the client will add a free-form \"Other\" option automatically."
+                )
+            ],
+            required: ["id", "header", "question", "options"],
+            additionalProperties: .boolean(false)
+        )
+        return functionTool(
+            name: "request_user_input",
+            description: description,
+            properties: [
+                "questions": .array(
+                    items: questionSchema,
+                    description: "Questions to show the user. Prefer 1 and do not exceed 3"
+                )
+            ],
+            required: ["questions"]
         )
     }
 
