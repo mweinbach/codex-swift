@@ -247,6 +247,7 @@ public enum NonInteractiveExec {
             experimentalSupportedTools: modelFamily.experimentalSupportedTools,
             toolSearch: config.features.isEnabled(.toolSearch),
             toolSuggest: config.features.isEnabled(.toolSuggest),
+            codeModeEnabled: config.features.isEnabled(.codeMode),
             allowLoginShell: config.allowLoginShell,
             multiAgentV2Tools: multiAgentV2Enabled,
             availableModels: availableModels,

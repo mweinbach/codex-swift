@@ -779,6 +779,7 @@ public struct ToolsConfig: Equatable, Sendable {
     public let namespaceTools: Bool
     public let toolSearch: Bool
     public let toolSuggest: Bool
+    public let codeModeEnabled: Bool
     public let allowLoginShell: Bool
     public let multiAgentV2Tools: Bool
     public let availableModels: [ModelPreset]
@@ -806,6 +807,7 @@ public struct ToolsConfig: Equatable, Sendable {
         namespaceTools: Bool = true,
         toolSearch: Bool = true,
         toolSuggest: Bool = true,
+        codeModeEnabled: Bool = false,
         allowLoginShell: Bool = true,
         multiAgentV2Tools: Bool = false,
         availableModels: [ModelPreset] = [],
@@ -832,6 +834,7 @@ public struct ToolsConfig: Equatable, Sendable {
         self.namespaceTools = namespaceTools
         self.toolSearch = toolSearch
         self.toolSuggest = toolSuggest
+        self.codeModeEnabled = codeModeEnabled
         self.allowLoginShell = allowLoginShell
         self.multiAgentV2Tools = multiAgentV2Tools
         self.availableModels = availableModels
@@ -861,6 +864,7 @@ public struct ToolsConfig: Equatable, Sendable {
             namespaceTools: namespaceTools && capabilities.namespaceTools,
             toolSearch: toolSearch,
             toolSuggest: toolSuggest,
+            codeModeEnabled: codeModeEnabled,
             allowLoginShell: allowLoginShell,
             multiAgentV2Tools: multiAgentV2Tools,
             availableModels: availableModels,
@@ -1055,16 +1059,21 @@ public enum ToolSpecFactory {
                 specs.append(ConfiguredToolSpec(spec: spec, supportsParallelToolCalls: false))
             }
         }
-        appendExtensionToolSpecs(extensionToolSpecs, to: &specs)
+        appendExtensionToolSpecs(extensionToolSpecs, codeModeEnabled: config.codeModeEnabled, to: &specs)
 
         return specs
     }
 
     private static func appendExtensionToolSpecs(
         _ extensionToolSpecs: [ConfiguredToolSpec],
+        codeModeEnabled: Bool,
         to specs: inout [ConfiguredToolSpec]
     ) {
         var registeredNames = Set(specs.map(\.spec.name))
+        if codeModeEnabled {
+            registeredNames.insert("exec")
+            registeredNames.insert("wait")
+        }
         for extensionToolSpec in extensionToolSpecs
             where registeredNames.insert(extensionToolSpec.spec.name).inserted {
             specs.append(extensionToolSpec)

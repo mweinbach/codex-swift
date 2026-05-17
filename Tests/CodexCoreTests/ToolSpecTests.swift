@@ -1278,6 +1278,68 @@ final class ToolSpecTests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(specs.first { $0.spec.name == "update_plan" }).supportsParallelToolCalls)
     }
 
+    func testExtensionToolSpecsDoNotUseCodeModeReservedExecAndWaitLikeRust() throws {
+        let extensionExec = ConfiguredToolSpec(
+            spec: .function(ResponsesAPITool(
+                name: "exec",
+                description: "Extension replacement that Rust must skip while code mode is enabled.",
+                parameters: .object(properties: [:], required: nil, additionalProperties: .boolean(false))
+            )),
+            supportsParallelToolCalls: true
+        )
+        let extensionWait = ConfiguredToolSpec(
+            spec: .function(ResponsesAPITool(
+                name: "wait",
+                description: "Extension replacement that Rust must skip while code mode is enabled.",
+                parameters: .object(properties: [:], required: nil, additionalProperties: .boolean(false))
+            )),
+            supportsParallelToolCalls: true
+        )
+        let extensionEcho = ConfiguredToolSpec(
+            spec: .function(ResponsesAPITool(
+                name: "extension_echo",
+                description: "Echoes arguments through an extension tool.",
+                parameters: .object(properties: [:], required: nil, additionalProperties: .boolean(false))
+            )),
+            supportsParallelToolCalls: true
+        )
+
+        let specs = ToolSpecFactory.buildSpecs(
+            config: ToolsConfig(shellType: .disabled, codeModeEnabled: true),
+            extensionToolSpecs: [extensionExec, extensionWait, extensionEcho]
+        )
+
+        XCTAssertNil(specs.first { $0.spec.name == "exec" })
+        XCTAssertNil(specs.first { $0.spec.name == "wait" })
+        XCTAssertEqual(specs.last, extensionEcho)
+    }
+
+    func testExtensionToolSpecsMayUseExecAndWaitWhenCodeModeIsDisabledLikeRust() throws {
+        let extensionExec = ConfiguredToolSpec(
+            spec: .function(ResponsesAPITool(
+                name: "exec",
+                description: "Extension exec tool.",
+                parameters: .object(properties: [:], required: nil, additionalProperties: .boolean(false))
+            )),
+            supportsParallelToolCalls: true
+        )
+        let extensionWait = ConfiguredToolSpec(
+            spec: .function(ResponsesAPITool(
+                name: "wait",
+                description: "Extension wait tool.",
+                parameters: .object(properties: [:], required: nil, additionalProperties: .boolean(false))
+            )),
+            supportsParallelToolCalls: true
+        )
+
+        let specs = ToolSpecFactory.buildSpecs(
+            config: ToolsConfig(shellType: .disabled, codeModeEnabled: false),
+            extensionToolSpecs: [extensionExec, extensionWait]
+        )
+
+        XCTAssertEqual(specs.suffix(2), [extensionExec, extensionWait])
+    }
+
     func testModelVisibleSpecsFilterDeferredDynamicToolsLikeRustRouter() throws {
         let dynamicTools = [
             DynamicToolSpec(

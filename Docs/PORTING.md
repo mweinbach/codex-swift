@@ -276,8 +276,9 @@ Recent upstream audit checkpoint:
   rejecting embedded slashes and reserved Responses/MCP namespace names. Swift
   tool planning now also accepts extension-provided configured specs and mirrors
   Rust's extension registration collision rule by skipping extension specs whose
-  flat name is already registered, preserving builtin/dynamic tools and
-  extension parallel-call metadata. The broader live extension executor handle
+  flat name is already registered, including code-mode public `exec`/`wait`
+  reservations, preserving builtin/dynamic tools and extension parallel-call
+  metadata. The broader live extension executor handle
   registry and dispatch path remains pending.
 - 2026-05-17: rechecked Rust commit `4a1f1df8ce` (`[codex] fix plugin CLI
   active user layer compile`). Swift plugin CLI helper surfaces now have
