@@ -5,7 +5,11 @@ final class ConfigLoaderTests: XCTestCase {
     func testDefaultsWhenConfigTomlIsAbsent() throws {
         let dir = try CoreTemporaryDirectory()
 
-        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+        let config = try CodexConfigLoader.load(
+            codexHome: dir.url,
+            systemConfigFile: nil,
+            managedConfigOverrides: .withoutManagedConfigForTests(codexHome: dir.url)
+        )
 
         XCTAssertNil(config.model)
         XCTAssertNil(config.reviewModel)
@@ -98,6 +102,27 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.fileOpener, .vsCode)
         XCTAssertEqual(config.tui, TuiRuntimeConfig())
         XCTAssertEqual(config.terminalResizeReflow, TerminalResizeReflowConfig())
+    }
+
+    func testWithoutManagedConfigForTestsIgnoresAmbientManagedSourcesLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let ambientManagedConfig = dir.url.appendingPathComponent("ambient-managed-config.toml", isDirectory: false)
+        try """
+        model = "ambient-managed"
+        forced_login_method = "api"
+        """.write(to: ambientManagedConfig, atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(
+            codexHome: dir.url,
+            systemConfigFile: nil,
+            managedConfigOverrides: .withoutManagedConfigForTests(codexHome: dir.url),
+            environment: [
+                CodexConfigLayerLoader.managedConfigEnvironmentVariable: ambientManagedConfig.path
+            ]
+        )
+
+        XCTAssertNil(config.model)
+        XCTAssertNil(config.forcedLoginMethod)
     }
 
     func testNoticeConfigLoadsRustNoticeTable() throws {

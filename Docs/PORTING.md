@@ -580,6 +580,12 @@ Recent upstream audit checkpoint:
   legacy `[profiles.<name>]` table in the base config with Rust's hard
   `--profile-v2` error message, and still allows unrelated legacy profile
   tables.
+- 2026-05-17: rechecked Rust commit `e8969d940d` (`test: isolate exec review
+  policy config test`). Swift now has a `ConfigLayerLoaderOverrides`
+  test-isolation helper that disables ambient managed config files, managed
+  preferences, and requirements.toml for temporary-home config loader tests,
+  with coverage that an environment-provided managed config path does not leak
+  into an otherwise empty Codex home.
 - 2026-05-16: rechecked Rust commit `0322ac3df8` (`Use compaction_trigger item
   for remote compaction v2`). Swift response models now round-trip the transient
   `compaction_trigger` item, remote compaction v2 output collection now accepts

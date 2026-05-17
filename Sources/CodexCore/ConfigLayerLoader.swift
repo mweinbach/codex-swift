@@ -29,6 +29,14 @@ public struct ConfigLayerLoaderOverrides: Equatable, Sendable {
         self.ignoreUserAndProjectExecPolicyRules = ignoreUserAndProjectExecPolicyRules
         self.ignoreManagedRequirements = ignoreManagedRequirements
     }
+
+    public static func withoutManagedConfigForTests(codexHome: URL) -> ConfigLayerLoaderOverrides {
+        ConfigLayerLoaderOverrides(
+            managedConfigPath: codexHome.appendingPathComponent("missing-managed-config.toml", isDirectory: false),
+            managedPreferencesBase64: "",
+            requirementsPath: codexHome.appendingPathComponent("missing-requirements.toml", isDirectory: false)
+        )
+    }
 }
 
 public struct ManagedConfigFromFile: Equatable, Sendable {
