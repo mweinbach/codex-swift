@@ -1920,6 +1920,49 @@ final class ToolSpecTests: XCTestCase {
         XCTAssertEqual(namespace["description"], .string("Use this server for durable workspace notes."))
     }
 
+    func testMCPToolSearchTextMatchesRustNameDescriptionNamespaceAndProperties() throws {
+        let index = ToolSearchIndex.deferredToolIndex(
+            mcpTools: [
+                McpToolInfo(
+                    serverName: "calendar",
+                    namespaceDescription: "Plan events across timezone regions.",
+                    tool: makeMcpTool(
+                        name: "timezone_option_99",
+                        description: "Extract reminder details from an uploaded document.",
+                        inputSchema: McpToolInputSchema(rawValue: .object([
+                            "type": .string("object"),
+                            "properties": .object([
+                                "starts_at": .object(["type": .string("string")])
+                            ])
+                        ]))
+                    )
+                )
+            ],
+            dynamicTools: []
+        )
+
+        for query in [
+            "timezone_option_99",
+            "uploaded document",
+            "timezone regions",
+            "starts_at"
+        ] {
+            let tools = try index.search(arguments: .object([
+                "query": .string(query),
+                "limit": .integer(8)
+            ]))
+
+            XCTAssertEqual(tools.count, 1, "expected query \(query) to match the MCP tool")
+            guard case let .object(namespace) = tools[0],
+                  case let .array(children)? = namespace["tools"]
+            else {
+                return XCTFail("expected namespace result for query \(query)")
+            }
+            XCTAssertEqual(namespace["name"], .string("mcp__calendar__"))
+            XCTAssertEqual(children.compactMap(toolName), ["timezone_option_99"])
+        }
+    }
+
     func testToolSearchIndexRejectsEmptyQueryAndZeroLimitLikeRust() throws {
         let index = ToolSearchIndex.mcpIndex(from: [
             "mcp__calendar__create_event": makeMcpTool(name: "create_event")
@@ -2202,8 +2245,12 @@ final class ToolSpecTests: XCTestCase {
         String(data: try JSONEncoder().encode(value), encoding: .utf8)!
     }
 
-    private func makeMcpTool(name: String, description: String? = nil) -> McpTool {
-        McpTool(name: name, inputSchema: McpToolInputSchema(), description: description)
+    private func makeMcpTool(
+        name: String,
+        description: String? = nil,
+        inputSchema: McpToolInputSchema = McpToolInputSchema()
+    ) -> McpTool {
+        McpTool(name: name, inputSchema: inputSchema, description: description)
     }
 
     private func makeToolSearchEntry(name: String, searchText: String) -> ToolSearchEntry {

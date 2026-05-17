@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `f11ad1eacb` (`[codex] Add search term
+  coverage for tool_search`). Swift now has focused coverage that deferred MCP
+  `tool_search` entries match Rust's indexed terms for raw tool names, tool
+  descriptions, namespace descriptions, and top-level input-schema property
+  names.
 - 2026-05-17: rechecked Rust code-mode `image(...)` helper detail
   declarations in `codex-rs/code-mode/src/description.rs`. Swift code-mode
   exec tool descriptions now advertise the same helper detail union
