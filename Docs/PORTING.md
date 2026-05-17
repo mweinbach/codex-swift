@@ -12,6 +12,13 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: extended the live app-server extension runtime bridge from
+  model-visible prompt/tool data to dispatchable extension tools.
+  `AppServerLiveRuntimeSubmission` now carries the thread-scoped registered
+  extension tool executor produced from `ExtensionRuntimeState`, and the live
+  runtime parity test executes the submitted `extension/` tool through that
+  handle. Approval-review contributor use in the live runtime loop remains
+  pending.
 - 2026-05-17: continued the live app-server extension runtime bridge by
   carrying extension prompt fragments and configured extension tool specs into
   `AppServerLiveRuntimeSubmission` for `turn/start`. The submitted Swift live

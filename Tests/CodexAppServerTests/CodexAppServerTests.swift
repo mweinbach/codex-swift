@@ -4458,6 +4458,21 @@ final class CodexAppServerTests: XCTestCase {
         }
         XCTAssertEqual(tool.name, "extension/live_tool")
         XCTAssertEqual(tool.description, "Live tool sees thread-started")
+        let extensionExecutor = try XCTUnwrap(firstSubmission.extensionRegisteredToolExecutor)
+        let maybeExecution = await extensionExecutor(.functionCall(
+            name: "live_tool",
+            namespace: "extension/",
+            arguments: #"{"value":1}"#,
+            callID: "call-live-extension"
+        ))
+        let execution = try XCTUnwrap(maybeExecution)
+        XCTAssertEqual(
+            execution.output,
+            .functionCallOutput(
+                callID: "call-live-extension",
+                output: FunctionCallOutputPayload(content: #""ok""#, success: true)
+            )
+        )
     }
 
     func testTurnStartRejectsUnsupportedImageDetailLikeRust() throws {

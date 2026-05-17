@@ -111,6 +111,7 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
     public let mcpElicitationsAutoDeny: Bool
     public let extensionPromptFragments: [ExtensionPromptFragment]
     public let extensionToolSpecs: [ConfiguredToolSpec]
+    public let extensionRegisteredToolExecutor: NonInteractiveExec.RegisteredToolExecutor?
 
     public init(
         requestID: RequestID,
@@ -120,7 +121,8 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
         turnMetadataHeader: String? = nil,
         mcpElicitationsAutoDeny: Bool = false,
         extensionPromptFragments: [ExtensionPromptFragment] = [],
-        extensionToolSpecs: [ConfiguredToolSpec] = []
+        extensionToolSpecs: [ConfiguredToolSpec] = [],
+        extensionRegisteredToolExecutor: NonInteractiveExec.RegisteredToolExecutor? = nil
     ) {
         self.requestID = requestID
         self.threadID = threadID
@@ -130,6 +132,18 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
         self.mcpElicitationsAutoDeny = mcpElicitationsAutoDeny
         self.extensionPromptFragments = extensionPromptFragments
         self.extensionToolSpecs = extensionToolSpecs
+        self.extensionRegisteredToolExecutor = extensionRegisteredToolExecutor
+    }
+
+    public static func == (lhs: AppServerLiveRuntimeSubmission, rhs: AppServerLiveRuntimeSubmission) -> Bool {
+        lhs.requestID == rhs.requestID
+            && lhs.threadID == rhs.threadID
+            && lhs.turnID == rhs.turnID
+            && lhs.op == rhs.op
+            && lhs.turnMetadataHeader == rhs.turnMetadataHeader
+            && lhs.mcpElicitationsAutoDeny == rhs.mcpElicitationsAutoDeny
+            && lhs.extensionPromptFragments == rhs.extensionPromptFragments
+            && lhs.extensionToolSpecs == rhs.extensionToolSpecs
     }
 }
 
@@ -26932,6 +26946,13 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         return extensionRuntimeState.configuredToolSpecs(threadID: parsedThreadID)
     }
 
+    private func extensionRegisteredToolExecutor(threadID: String) -> NonInteractiveExec.RegisteredToolExecutor? {
+        guard let parsedThreadID = try? ThreadId(string: threadID) else {
+            return nil
+        }
+        return extensionRuntimeState.registeredToolExecutor(threadID: parsedThreadID)
+    }
+
     private func unsubscribeCurrentConnection(fromThreadID threadID: String) -> Bool {
         let manager = threadStateManager
         let connectionID = connectionID
@@ -29126,7 +29147,8 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                     clientVersion: appServerClientVersion
                 ),
                 extensionPromptFragments: try extensionPromptFragments(threadID: threadID),
-                extensionToolSpecs: extensionToolSpecs(threadID: threadID)
+                extensionToolSpecs: extensionToolSpecs(threadID: threadID),
+                extensionRegisteredToolExecutor: extensionRegisteredToolExecutor(threadID: threadID)
             ))
         } catch {
             throw AppServerError.internalError("\(failureMessage): \(error)")
