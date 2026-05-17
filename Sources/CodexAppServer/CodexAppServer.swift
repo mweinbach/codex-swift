@@ -714,6 +714,8 @@ private struct AppServerLiveMcpManagerState: @unchecked Sendable {
 }
 
 private let appServerDefaultExecCommandTimeoutMs = 10_000
+private let appServerIODrainTimeoutSeconds: TimeInterval = 2
+private let appServerOutputReadPollNanoseconds: UInt64 = 10_000_000
 private let appServerStandardBase64Bytes = Set(Array("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=".utf8))
 
 private func decodeAppServerStandardBase64(
@@ -25639,6 +25641,94 @@ private final class AppServerProcessExitSignal: @unchecked Sendable {
             }
         }
     }
+
+    func isSignaled() -> Bool {
+        lock.withLock { exited }
+    }
+}
+
+private typealias AppServerProcessOutputDeltaHandler = @Sendable (
+    _ stream: String,
+    _ data: Data,
+    _ capReached: Bool
+) async -> Void
+
+private func collectAppServerProcessOutput(
+    handle: FileHandle,
+    stream: String,
+    streamOutput: Bool,
+    outputBytesCap: Int?,
+    exitSignal: AppServerProcessExitSignal,
+    sendOutputDelta: AppServerProcessOutputDeltaHandler
+) async -> AppServerProcessOutputCapture {
+    var data = Data()
+    var observedBytes = 0
+    var capReached = false
+    var buffer = [UInt8](repeating: 0, count: 8192)
+    let descriptor = handle.fileDescriptor
+    let originalFlags = setAppServerFileDescriptorNonBlocking(descriptor)
+    defer {
+        restoreAppServerFileDescriptorFlags(descriptor, originalFlags)
+    }
+    var drainDeadline: Date?
+    while true {
+        if drainDeadline == nil, exitSignal.isSignaled() {
+            drainDeadline = Date().addingTimeInterval(appServerIODrainTimeoutSeconds)
+        }
+        if let drainDeadline, Date() >= drainDeadline {
+            break
+        }
+        let count = Darwin.read(descriptor, &buffer, buffer.count)
+        if count > 0 {
+            let allowedCount: Int
+            if let outputBytesCap {
+                allowedCount = min(max(outputBytesCap - observedBytes, 0), count)
+                observedBytes += allowedCount
+                capReached = observedBytes == outputBytesCap
+            } else {
+                allowedCount = count
+            }
+            let chunk = Data(buffer.prefix(allowedCount))
+            if streamOutput {
+                await sendOutputDelta(stream, chunk, capReached)
+            } else {
+                data.append(chunk)
+            }
+            if capReached {
+                break
+            }
+        } else if count == 0 {
+            break
+        } else if errno == EINTR {
+            continue
+        } else if errno == EAGAIN || errno == EWOULDBLOCK {
+            try? await Task.sleep(nanoseconds: appServerOutputReadPollNanoseconds)
+        } else {
+            break
+        }
+    }
+    return AppServerProcessOutputCapture(
+        text: TextEncoding.bytesToStringSmart(data),
+        capReached: capReached
+    )
+}
+
+private func setAppServerFileDescriptorNonBlocking(_ descriptor: Int32) -> Int32? {
+    let flags = fcntl(descriptor, F_GETFL, 0)
+    guard flags >= 0 else {
+        return nil
+    }
+    guard fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) >= 0 else {
+        return nil
+    }
+    return flags
+}
+
+private func restoreAppServerFileDescriptorFlags(_ descriptor: Int32, _ flags: Int32?) {
+    guard let flags else {
+        return
+    }
+    _ = fcntl(descriptor, F_SETFL, flags)
 }
 
 private final class AppServerPseudoTerminal: @unchecked Sendable {
@@ -25992,40 +26082,15 @@ private final class AppServerCommandExecProcess: @unchecked Sendable {
         stream: String,
         streamOutput: Bool
     ) async -> AppServerProcessOutputCapture {
-        var data = Data()
-        var observedBytes = 0
-        var capReached = false
-        var buffer = [UInt8](repeating: 0, count: 8192)
-        while true {
-            let count = Darwin.read(handle.fileDescriptor, &buffer, buffer.count)
-            if count > 0 {
-                let allowedCount: Int
-                if let outputBytesCap = params.outputBytesCap {
-                    allowedCount = min(max(outputBytesCap - observedBytes, 0), count)
-                    observedBytes += allowedCount
-                    capReached = observedBytes == outputBytesCap
-                } else {
-                    allowedCount = count
-                }
-                let chunk = Data(buffer.prefix(allowedCount))
-                if streamOutput {
-                    await sendOutputDelta(stream: stream, data: chunk, capReached: capReached)
-                } else {
-                    data.append(chunk)
-                }
-                if capReached {
-                    break
-                }
-            } else if count == -1 && errno == EINTR {
-                continue
-            } else {
-                break
-            }
+        await collectAppServerProcessOutput(
+            handle: handle,
+            stream: stream,
+            streamOutput: streamOutput,
+            outputBytesCap: params.outputBytesCap,
+            exitSignal: exitSignal
+        ) { [self] stream, data, capReached in
+            await sendOutputDelta(stream: stream, data: data, capReached: capReached)
         }
-        return AppServerProcessOutputCapture(
-            text: TextEncoding.bytesToStringSmart(data),
-            capReached: capReached
-        )
     }
 }
 
@@ -26325,40 +26390,15 @@ private final class AppServerSpawnedProcess: @unchecked Sendable {
         stream: String,
         streamOutput: Bool
     ) async -> AppServerProcessOutputCapture {
-        var data = Data()
-        var observedBytes = 0
-        var capReached = false
-        var buffer = [UInt8](repeating: 0, count: 8192)
-        while true {
-            let count = Darwin.read(handle.fileDescriptor, &buffer, buffer.count)
-            if count > 0 {
-                let allowedCount: Int
-                if let outputBytesCap = params.outputBytesCap {
-                    allowedCount = min(max(outputBytesCap - observedBytes, 0), count)
-                    observedBytes += allowedCount
-                    capReached = observedBytes == outputBytesCap
-                } else {
-                    allowedCount = count
-                }
-                let chunk = Data(buffer.prefix(allowedCount))
-                if streamOutput {
-                    await sendOutputDelta(stream: stream, data: chunk, capReached: capReached)
-                } else {
-                    data.append(chunk)
-                }
-                if capReached {
-                    break
-                }
-            } else if count == -1 && errno == EINTR {
-                continue
-            } else {
-                break
-            }
+        await collectAppServerProcessOutput(
+            handle: handle,
+            stream: stream,
+            streamOutput: streamOutput,
+            outputBytesCap: params.outputBytesCap,
+            exitSignal: exitSignal
+        ) { [self] stream, data, capReached in
+            await sendOutputDelta(stream: stream, data: data, capReached: capReached)
         }
-        return AppServerProcessOutputCapture(
-            text: TextEncoding.bytesToStringSmart(data),
-            capReached: capReached
-        )
     }
 }
 
