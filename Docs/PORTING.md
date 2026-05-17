@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `79c65f816c` (`[codex] Filter legacy
+  warning messages during compaction`). Swift contextual user-fragment
+  detection now recognizes the removed unified-exec process-limit warning,
+  `apply_patch`-via-`exec_command` warning, and high-risk cyber model fallback
+  warning, so old persisted warning records are dropped by the same compaction
+  user-message filter as other injected context.
 - 2026-05-17: rechecked Rust commit `8123bddb16` (`chore(config)
   include_collaboration_mode_instructions`). Swift config/profile parsing now
   accepts `include_collaboration_mode_instructions` with Rust's default-true

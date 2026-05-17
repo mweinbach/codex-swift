@@ -88,10 +88,22 @@ final class InstructionItemsTests: XCTestCase {
         XCTAssertTrue(ContextualUserFragments.isStandardText(
             "  <SUBAGENT_NOTIFICATION>{}</subagent_notification>\n"
         ))
+        XCTAssertTrue(ContextualUserFragments.isStandardText(
+            " Warning: The maximum number of unified exec processes you can keep open is 60 and you currently have 61 processes open. "
+        ))
+        XCTAssertTrue(ContextualUserFragments.isStandardText(
+            " Warning: apply_patch was requested via exec_command. Use the apply_patch tool instead of exec_command. "
+        ))
+        XCTAssertTrue(ContextualUserFragments.isStandardText(
+            " Warning: Your account was flagged for potentially high-risk cyber activity and this request was routed to gpt-5.2 as a fallback. "
+        ))
 
         XCTAssertFalse(ContextualUserFragments.isStandardText("<environment_context>ctx"))
         XCTAssertFalse(ContextualUserFragments.isStandardText("<turn_aborted>interrupted"))
         XCTAssertFalse(ContextualUserFragments.isStandardText("<subagent_notification>{}"))
+        XCTAssertFalse(ContextualUserFragments.isStandardText(
+            "Warning: apply_patch was requested via exec_command."
+        ))
     }
 
     func testDeveloperInstructions() {

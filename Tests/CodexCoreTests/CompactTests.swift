@@ -58,6 +58,23 @@ final class CompactTests: XCTestCase {
         XCTAssertEqual(Compact.collectUserMessages(items), ["real user message"])
     }
 
+    func testCollectUserMessagesFiltersLegacyWarningsLikeRust() {
+        let items: [ResponseItem] = [
+            .message(role: "user", content: [.inputText(
+                text: "Warning: The maximum number of unified exec processes you can keep open is 60 and you currently have 61 processes open. Reuse older processes or close them to prevent automatic pruning of old processes"
+            )]),
+            .message(role: "user", content: [.inputText(
+                text: "Warning: apply_patch was requested via exec_command. Use the apply_patch tool instead of exec_command."
+            )]),
+            .message(role: "user", content: [.inputText(
+                text: "Warning: Your account was flagged for potentially high-risk cyber activity and this request was routed to gpt-5.2 as a fallback. To regain access to gpt-5.3-codex, apply for trusted access: https://chatgpt.com/cyber or learn more: https://developers.openai.com/codex/concepts/cyber-safety"
+            )]),
+            .message(role: "user", content: [.inputText(text: "real user message")])
+        ]
+
+        XCTAssertEqual(Compact.collectUserMessages(items), ["real user message"])
+    }
+
     func testCollectUserMessagesFiltersCompactionSummaryMessages() {
         let summary = "\(Compact.summaryPrefix)\nprevious summary"
         let items: [ResponseItem] = [
