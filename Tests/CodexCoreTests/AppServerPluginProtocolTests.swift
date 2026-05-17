@@ -268,6 +268,7 @@ final class AppServerPluginProtocolTests: XCTestCase {
                     "interface": ["displayName": "Debug"],
                     "plugins": [[
                         "id": "weather@debug",
+                        "localVersion": NSNull(),
                         "name": "weather",
                         "shareContext": NSNull(),
                         "source": [
@@ -422,9 +423,11 @@ final class AppServerPluginProtocolTests: XCTestCase {
     func testPluginDetailAndInstallShapesMatchRustProtocol() throws {
         let summary = PluginSummary(
             id: "plugins~Plugin_weather",
+            localVersion: "1.2.3",
             name: "plugins~Plugin_weather",
             shareContext: PluginShareContext(
                 remotePluginID: "plugins~Plugin_weather",
+                remoteVersion: "1.2.4",
                 shareURL: nil,
                 creatorAccountUserID: "user-1",
                 creatorName: nil,
@@ -475,9 +478,11 @@ final class AppServerPluginProtocolTests: XCTestCase {
                 "marketplacePath": NSNull(),
                 "summary": [
                     "id": "plugins~Plugin_weather",
+                    "localVersion": "1.2.3",
                     "name": "plugins~Plugin_weather",
                     "shareContext": [
                         "remotePluginId": "plugins~Plugin_weather",
+                        "remoteVersion": "1.2.4",
                         "shareUrl": NSNull(),
                         "creatorAccountUserId": "user-1",
                         "creatorName": NSNull(),
@@ -637,6 +642,7 @@ final class AppServerPluginProtocolTests: XCTestCase {
         )
 
         XCTAssertEqual(decoded.availability, .available)
+        XCTAssertNil(decoded.localVersion)
         XCTAssertNil(decoded.shareContext)
         XCTAssertEqual(decoded.keywords, [])
     }
@@ -810,6 +816,7 @@ final class AppServerPluginProtocolTests: XCTestCase {
                 "data": [[
                     "plugin": [
                         "id": "plugins~Plugin_00000000000000000000000000000000",
+                        "localVersion": NSNull(),
                         "name": "gmail",
                         "shareContext": NSNull(),
                         "source": ["type": "remote"],

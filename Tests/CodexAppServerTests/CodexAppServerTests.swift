@@ -13218,7 +13218,8 @@ final class CodexAppServerTests: XCTestCase {
             id: "plugins~Plugin_22222222222222222222222222222222",
             name: "shared-linear",
             displayName: "Shared Linear",
-            discoverability: "PRIVATE"
+            discoverability: "PRIVATE",
+            releaseVersion: "1.2.3"
         )
         let sharedUnlistedBody = workspaceRemotePluginPageBody(
             id: "plugins~Plugin_44444444444444444444444444444444",
@@ -13280,6 +13281,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(plugins[0]["enabled"] as? Bool, true)
         let shareContext = try XCTUnwrap(plugins[0]["shareContext"] as? [String: Any])
         XCTAssertEqual(shareContext["remotePluginId"] as? String, "plugins~Plugin_22222222222222222222222222222222")
+        XCTAssertEqual(shareContext["remoteVersion"] as? String, "1.2.3")
         XCTAssertEqual(shareContext["creatorAccountUserId"] as? String, "user-gavin__account-123")
         XCTAssertEqual(shareContext["creatorName"] as? String, "Gavin")
         XCTAssertEqual(shareContext["shareUrl"] as? String, "https://chatgpt.example/plugins/share/share-key-1")
@@ -13528,6 +13530,13 @@ final class CodexAppServerTests: XCTestCase {
     func testPluginReadUsesMarketplaceProjectConfigLikeRust() throws {
         let temp = try TemporaryDirectory()
         let sourceRoot = try makeLocalMarketplaceRootWithPlugin(named: "debug", pluginName: "weather", in: temp.url)
+        let pluginManifest = sourceRoot.appendingPathComponent("plugins/weather/.codex-plugin/plugin.json", isDirectory: false)
+        try """
+        {
+          "name": "weather",
+          "version": "1.2.3"
+        }
+        """.write(to: pluginManifest, atomically: true, encoding: .utf8)
         try FileManager.default.createDirectory(at: sourceRoot.appendingPathComponent(".git", isDirectory: true), withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: sourceRoot.appendingPathComponent(".codex", isDirectory: true), withIntermediateDirectories: true)
         let marketplacePath = sourceRoot.appendingPathComponent(".agents/plugins/marketplace.json", isDirectory: false).path
@@ -13549,6 +13558,7 @@ final class CodexAppServerTests: XCTestCase {
         let plugin = try XCTUnwrap((response["result"] as? [String: Any])?["plugin"] as? [String: Any])
         let summary = try XCTUnwrap(plugin["summary"] as? [String: Any])
         XCTAssertEqual(summary["enabled"] as? Bool, false)
+        XCTAssertEqual(summary["localVersion"] as? String, "1.2.3")
     }
 
     func testPluginReadAcceptsLegacyStringDefaultPromptLikeRust() throws {
@@ -14312,7 +14322,8 @@ final class CodexAppServerTests: XCTestCase {
             name: "shared-linear",
             displayName: "Shared Linear",
             scope: "WORKSPACE",
-            discoverability: "PRIVATE"
+            discoverability: "PRIVATE",
+            releaseVersion: "2.3.4"
         )
         let installedBody = """
         {
@@ -14355,6 +14366,7 @@ final class CodexAppServerTests: XCTestCase {
             XCTAssertEqual(summary["id"] as? String, "shared-linear@workspace-shared-with-me")
             let shareContext = try XCTUnwrap(summary["shareContext"] as? [String: Any])
             XCTAssertEqual(shareContext["remotePluginId"] as? String, pluginID)
+            XCTAssertEqual(shareContext["remoteVersion"] as? String, "2.3.4")
             XCTAssertEqual(shareContext["creatorAccountUserId"] as? String, "user-gavin__account-123")
             XCTAssertEqual(shareContext["creatorName"] as? String, "Gavin")
             XCTAssertEqual(shareContext["shareUrl"] as? String, "https://chatgpt.example/plugins/share/share-key-1")
@@ -34610,6 +34622,7 @@ private func workspaceRemotePluginPageBody(
     name: String,
     displayName: String,
     discoverability: String = "LISTED",
+    releaseVersion: String? = nil,
     enabled: Bool? = nil
 ) -> String {
     let enabledField = enabled.map { #", "enabled": \#($0), "disabled_skill_names": []"# } ?? ""
@@ -34642,6 +34655,7 @@ private func workspaceRemotePluginPageBody(
             }
           ],
           "release": {
+            \(releaseVersion.map { #""version": "\#($0)","# } ?? "")
             "display_name": "\(displayName)",
             "description": "Track work",
             "app_ids": [],

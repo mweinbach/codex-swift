@@ -478,6 +478,7 @@ extension PluginAvailability: Codable {
 
 public struct PluginSummary: Equatable, Sendable {
     public let id: String
+    public let localVersion: String?
     public let name: String
     public let shareContext: PluginShareContext?
     public let source: PluginSource
@@ -491,6 +492,7 @@ public struct PluginSummary: Equatable, Sendable {
 
     public init(
         id: String,
+        localVersion: String? = nil,
         name: String,
         shareContext: PluginShareContext? = nil,
         source: PluginSource,
@@ -503,6 +505,7 @@ public struct PluginSummary: Equatable, Sendable {
         keywords: [String] = []
     ) {
         self.id = id
+        self.localVersion = localVersion
         self.name = name
         self.shareContext = shareContext
         self.source = source
@@ -519,6 +522,7 @@ public struct PluginSummary: Equatable, Sendable {
 extension PluginSummary: Codable {
     private enum CodingKeys: String, CodingKey {
         case id
+        case localVersion
         case name
         case shareContext
         case source
@@ -534,6 +538,7 @@ extension PluginSummary: Codable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
+        localVersion = try container.decodeIfPresent(String.self, forKey: .localVersion)
         name = try container.decode(String.self, forKey: .name)
         shareContext = try container.decodeIfPresent(PluginShareContext.self, forKey: .shareContext)
         source = try container.decode(PluginSource.self, forKey: .source)
@@ -553,6 +558,7 @@ extension PluginSummary: Codable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
+        try container.encodeNilOrValue(localVersion, forKey: .localVersion)
         try container.encode(name, forKey: .name)
         try container.encodeNilOrValue(shareContext, forKey: .shareContext)
         try container.encode(source, forKey: .source)
@@ -568,6 +574,7 @@ extension PluginSummary: Codable {
 
 public struct PluginShareContext: Equatable, Sendable {
     public let remotePluginID: String
+    public let remoteVersion: String?
     public let shareURL: String?
     public let creatorAccountUserID: String?
     public let creatorName: String?
@@ -575,6 +582,7 @@ public struct PluginShareContext: Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case remotePluginID = "remotePluginId"
+        case remoteVersion
         case shareURL = "shareUrl"
         case creatorAccountUserID = "creatorAccountUserId"
         case creatorName
@@ -583,12 +591,14 @@ public struct PluginShareContext: Equatable, Sendable {
 
     public init(
         remotePluginID: String,
+        remoteVersion: String? = nil,
         shareURL: String? = nil,
         creatorAccountUserID: String? = nil,
         creatorName: String? = nil,
         shareTargets: [PluginSharePrincipal]? = nil
     ) {
         self.remotePluginID = remotePluginID
+        self.remoteVersion = remoteVersion
         self.shareURL = shareURL
         self.creatorAccountUserID = creatorAccountUserID
         self.creatorName = creatorName
@@ -600,6 +610,7 @@ extension PluginShareContext: Codable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         remotePluginID = try container.decode(String.self, forKey: .remotePluginID)
+        remoteVersion = try container.decodeIfPresent(String.self, forKey: .remoteVersion)
         shareURL = try container.decodeIfPresent(String.self, forKey: .shareURL)
         creatorAccountUserID = try container.decodeIfPresent(String.self, forKey: .creatorAccountUserID)
         creatorName = try container.decodeIfPresent(String.self, forKey: .creatorName)
@@ -609,6 +620,7 @@ extension PluginShareContext: Codable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(remotePluginID, forKey: .remotePluginID)
+        try container.encodeNilOrValue(remoteVersion, forKey: .remoteVersion)
         try container.encodeNilOrValue(shareURL, forKey: .shareURL)
         try container.encodeNilOrValue(creatorAccountUserID, forKey: .creatorAccountUserID)
         try container.encodeNilOrValue(creatorName, forKey: .creatorName)

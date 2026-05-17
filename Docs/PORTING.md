@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `d1430fd61e` (`feat: Expose plugin
+  versions and gate plugin sharing`). Swift plugin protocol models now carry
+  Rust's `PluginSummary.localVersion` and `PluginShareContext.remoteVersion`
+  fields, encode missing versions as explicit nulls, and app-server plugin
+  list/read projections hydrate local versions from plugin manifests and remote
+  versions from workspace plugin release metadata.
 - 2026-05-17: rechecked Rust rollout cursor anchor normalization in
   `codex-rs/rollout/src/state_db_tests.rs`. Swift `RolloutListing` now has
   explicit coverage that legacy rollout filename timestamp cursors such as

@@ -5766,6 +5766,7 @@ public enum CodexAppServer {
     ) -> [String: Any] {
         [
             "id": remotePluginSummaryID(plugin, marketplaceName: marketplaceName),
+            "localVersion": nullable(remotePluginLocalVersion(installed)),
             "name": plugin["name"] as? String ?? "",
             "shareContext": remotePluginShareContext(plugin),
             "source": ["type": "remote"],
@@ -5777,6 +5778,12 @@ public enum CodexAppServer {
             "interface": remotePluginInterface(plugin),
             "keywords": (plugin["release"] as? [String: Any])?["keywords"] as? [String] ?? []
         ].nullStripped()
+    }
+
+    private static func remotePluginLocalVersion(_ installed: [String: Any]?) -> String? {
+        let release = installed?["release"] as? [String: Any]
+        let version = (release?["version"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return version?.isEmpty == false ? version : nil
     }
 
     private static func remotePluginSummaryID(_ plugin: [String: Any], marketplaceName: String?) -> String {
@@ -5809,11 +5816,18 @@ public enum CodexAppServer {
         }
         return [
             "remotePluginId": plugin["id"] as? String ?? "",
+            "remoteVersion": remotePluginReleaseVersion(plugin),
             "shareUrl": nullable(plugin["share_url"] as? String),
             "creatorAccountUserId": nullable(plugin["creator_account_user_id"] as? String),
             "creatorName": nullable(plugin["creator_name"] as? String),
             "shareTargets": nullable(remotePluginShareTargets(plugin["share_principals"] as? [[String: Any]]))
         ].nullStripped(keepNulls: true)
+    }
+
+    private static func remotePluginReleaseVersion(_ plugin: [String: Any]) -> Any {
+        let release = plugin["release"] as? [String: Any]
+        let version = (release?["version"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return version?.isEmpty == false ? version as Any : NSNull()
     }
 
     private static func remotePluginShareTargets(_ principals: [[String: Any]]?) -> [[String: Any]]? {
@@ -6799,6 +6813,7 @@ public enum CodexAppServer {
             let policy = plugin["policy"] as? [String: Any] ?? [:]
             return [
                 "id": id,
+                "localVersion": nullable(manifest.version),
                 "name": pluginName,
                 "shareContext": NSNull(),
                 "source": pluginSourceObject(source),
