@@ -30374,6 +30374,44 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(result["stdout"] as? String, "")
     }
 
+    func testCommandExecPermissionProfileProjectsSelectedNetworkProxyEnvironmentLikeRust() throws {
+        let codexHome = try TemporaryDirectory()
+        try writeCommandExecNetworkedPermissionProfileConfig(
+            codexHome: codexHome.url,
+            defaultPermissions: nil
+        )
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: codexHome.url),
+            experimentalAPIEnabled: true
+        )
+
+        let response = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/sh","-c","printf '%s|%s|%s' \"${CODEX_NETWORK_PROXY_ACTIVE-unset}\" \"${HTTP_PROXY-unset}\" \"${ALL_PROXY-unset}\""],"permissionProfile":{"id":"networked"}}}"#.utf8
+        )))
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["exitCode"] as? Int, 0)
+        XCTAssertEqual(result["stdout"] as? String, "1|http://127.0.0.1:43128|http://127.0.0.1:43128")
+    }
+
+    func testCommandExecPermissionProfileDoesNotReuseDefaultNetworkProxyLikeRust() throws {
+        let codexHome = try TemporaryDirectory()
+        try writeCommandExecNetworkedPermissionProfileConfig(
+            codexHome: codexHome.url,
+            defaultPermissions: "networked"
+        )
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: codexHome.url),
+            experimentalAPIEnabled: true
+        )
+
+        let response = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/sh","-c","printf '%s' \"${CODEX_NETWORK_PROXY_ACTIVE-unset}\""],"permissionProfile":{"id":":read-only"}}}"#.utf8
+        )))
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["exitCode"] as? Int, 0)
+        XCTAssertEqual(result["stdout"] as? String, "unset")
+    }
+
     func testCommandExecValidatesRustOptionConflicts() throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()
@@ -32620,6 +32658,27 @@ final class CodexAppServerTests: XCTestCase {
         [mcp_servers.required_broken]
         command = "codex-definitely-not-a-real-binary"
         required = true
+        """.write(to: codexHome.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+    }
+
+    private func writeCommandExecNetworkedPermissionProfileConfig(
+        codexHome: URL,
+        defaultPermissions: String?
+    ) throws {
+        let defaultPermissionsLine = defaultPermissions.map { #"default_permissions = "\#($0)""# } ?? ""
+        try """
+        \(defaultPermissionsLine)
+
+        [features]
+        network_proxy = true
+
+        [permissions.networked.filesystem]
+        ":root" = "read"
+
+        [permissions.networked.network]
+        enabled = true
+        proxy_url = "http://127.0.0.1:43128"
+        enable_socks5 = false
         """.write(to: codexHome.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
     }
 

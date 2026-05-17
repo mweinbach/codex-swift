@@ -560,19 +560,31 @@ private struct AppServerCommandExecSandboxConfiguration {
     let legacyPolicy: SandboxPolicy?
     let permissionProfile: PermissionProfile?
     let cwd: URL
+    let networkProxy: NetworkProxySpec?
 
-    static func legacy(policy: SandboxPolicy, cwd: URL) -> AppServerCommandExecSandboxConfiguration {
-        AppServerCommandExecSandboxConfiguration(legacyPolicy: policy, permissionProfile: nil, cwd: cwd)
+    static func legacy(
+        policy: SandboxPolicy,
+        cwd: URL,
+        networkProxy: NetworkProxySpec? = nil
+    ) -> AppServerCommandExecSandboxConfiguration {
+        AppServerCommandExecSandboxConfiguration(
+            legacyPolicy: policy,
+            permissionProfile: nil,
+            cwd: cwd,
+            networkProxy: networkProxy
+        )
     }
 
     static func direct(
         permissionProfile: PermissionProfile,
-        cwd: URL
+        cwd: URL,
+        networkProxy: NetworkProxySpec? = nil
     ) -> AppServerCommandExecSandboxConfiguration {
         AppServerCommandExecSandboxConfiguration(
             legacyPolicy: nil,
             permissionProfile: permissionProfile,
-            cwd: cwd
+            cwd: cwd,
+            networkProxy: networkProxy
         )
     }
 }
@@ -17765,12 +17777,24 @@ public enum CodexAppServer {
             throw AppServerError.invalidRequest("live command/exec session is not implemented")
         }
         let cwd = commandExecCwd(parsed.cwd, configuration: configuration)
-        let runtimeConfig = try CodexConfigLoader.load(
-            codexHome: configuration.codexHome,
-            cwd: configuration.cwd,
-            managedConfigOverrides: configuration.configLayerOverrides,
-            environment: configuration.environment
-        )
+        let runtimeConfig: CodexRuntimeConfig
+        do {
+            runtimeConfig = try CodexConfigLoader.load(
+                codexHome: configuration.codexHome,
+                cwd: configuration.cwd,
+                managedConfigOverrides: configuration.configLayerOverrides,
+                environment: configuration.environment
+            )
+        } catch {
+            guard let activePermissionProfile = parsed.activePermissionProfile else {
+                throw error
+            }
+            runtimeConfig = try loadRuntimeConfigForCommandExecActivePermissionProfile(
+                activePermissionProfile,
+                commandCwd: cwd,
+                configuration: configuration
+            )
+        }
         let sandbox = try commandExecSandboxConfiguration(
             parsed: parsed,
             runtimeConfig: runtimeConfig,
@@ -17896,14 +17920,23 @@ public enum CodexAppServer {
                 cwd: commandCwd.standardizedFileURL.path
             )
             if permissionProfile.fileSystemSandboxPolicy.hasDeniedReadRestrictions {
-                return .direct(permissionProfile: permissionProfile, cwd: commandCwd)
+                return .direct(
+                    permissionProfile: permissionProfile,
+                    cwd: commandCwd,
+                    networkProxy: selectedRuntimeConfig.networkProxy
+                )
             }
             return .legacy(
                 policy: try legacySandboxPolicy(from: permissionProfile, cwd: commandCwd),
-                cwd: commandCwd
+                cwd: commandCwd,
+                networkProxy: selectedRuntimeConfig.networkProxy
             )
         }
-        return .legacy(policy: parsed.sandboxPolicy ?? runtimeConfig.legacySandboxPolicy(), cwd: configuration.cwd)
+        return .legacy(
+            policy: parsed.sandboxPolicy ?? runtimeConfig.legacySandboxPolicy(),
+            cwd: configuration.cwd,
+            networkProxy: runtimeConfig.networkProxy
+        )
     }
 
     private static func loadRuntimeConfigForCommandExecPermissionProfile(
@@ -17912,28 +17945,17 @@ public enum CodexAppServer {
         commandCwd: URL,
         configuration: CodexAppServerConfiguration
     ) throws -> CodexRuntimeConfig {
-        var overrides = configuration.cliConfigOverrides
-        overrides.rawOverrides.append("default_permissions=\(tomlQuotedString(activePermissionProfile.id))")
-        let loaded: CodexRuntimeConfig
-        do {
-            loaded = try CodexConfigLoader.load(
-                codexHome: configuration.codexHome,
-                cwd: commandCwd,
-                overrides: overrides,
-                threadConfigSources: configuration.threadConfigSources,
-                managedConfigOverrides: configuration.configLayerOverrides,
-                environment: configuration.environment
-            )
-        } catch {
-            throw configLoadError(error)
-        }
+        var selected = try loadRuntimeConfigForCommandExecActivePermissionProfile(
+            activePermissionProfile,
+            commandCwd: commandCwd,
+            configuration: configuration
+        )
 
         let configuredFileSystemPolicy = runtimeConfig.permissionProfile?.fileSystemSandboxPolicy
             ?? FileSystemSandboxPolicy.fromLegacySandboxPolicyForCwd(
                 runtimeConfig.legacySandboxPolicy(),
                 cwd: configuration.cwd.standardizedFileURL.path
             )
-        var selected = loaded
         let selectedProfile = selected.permissionProfile ?? PermissionProfile.fromLegacySandboxPolicyForCwd(
             selected.legacySandboxPolicy(),
             cwd: commandCwd.standardizedFileURL.path
@@ -17946,6 +17968,27 @@ public enum CodexAppServer {
             network: selectedProfile.networkSandboxPolicy
         )
         return selected
+    }
+
+    private static func loadRuntimeConfigForCommandExecActivePermissionProfile(
+        _ activePermissionProfile: ActivePermissionProfile,
+        commandCwd: URL,
+        configuration: CodexAppServerConfiguration
+    ) throws -> CodexRuntimeConfig {
+        var overrides = configuration.cliConfigOverrides
+        overrides.rawOverrides.append("default_permissions=\(tomlQuotedString(activePermissionProfile.id))")
+        do {
+            return try CodexConfigLoader.load(
+                codexHome: configuration.codexHome,
+                cwd: commandCwd,
+                overrides: overrides,
+                threadConfigSources: configuration.threadConfigSources,
+                managedConfigOverrides: configuration.configLayerOverrides,
+                environment: configuration.environment
+            )
+        } catch {
+            throw configLoadError(error)
+        }
     }
 
     private static func legacySandboxPolicy(
@@ -17995,12 +18038,16 @@ public enum CodexAppServer {
         sandboxConfiguration: AppServerCommandExecSandboxConfiguration,
         environment: [String: String]
     ) throws -> AppServerSandboxLaunch {
+        let launchEnvironment = commandExecNetworkProxyEnvironment(
+            environment,
+            networkProxy: sandboxConfiguration.networkProxy
+        )
         if let permissionProfile = sandboxConfiguration.permissionProfile {
             return try sandboxedLaunch(
                 command: command,
                 permissionProfile: permissionProfile,
                 sandboxCwd: sandboxConfiguration.cwd,
-                environment: environment
+                environment: launchEnvironment
             )
         }
         guard let sandboxPolicy = sandboxConfiguration.legacyPolicy else {
@@ -18010,8 +18057,130 @@ public enum CodexAppServer {
             command: command,
             sandboxPolicy: sandboxPolicy,
             sandboxCwd: sandboxConfiguration.cwd,
-            environment: environment
+            environment: launchEnvironment
         )
+    }
+
+    private static func commandExecNetworkProxyEnvironment(
+        _ environment: [String: String],
+        networkProxy: NetworkProxySpec?
+    ) -> [String: String] {
+        guard let networkProxy, networkProxy.enabled else {
+            return environment
+        }
+        let network = networkProxy.config.network
+        let httpProxyURL = network.proxyURL
+        let socksProxyURL = socksProxyEnvironmentValue(from: network.socksURL)
+        let allProxyURL = network.enableSocks5 ? socksProxyURL : httpProxyURL
+
+        var proxyEnvironment = environment
+        proxyEnvironment[ShellSnapshotCommandWrapper.proxyActiveEnvKey] = "1"
+        proxyEnvironment["CODEX_NETWORK_ALLOW_LOCAL_BINDING"] = network.allowLocalBinding ? "1" : "0"
+        proxyEnvironment["ELECTRON_GET_USE_PROXY"] = "true"
+
+        for key in commandExecHTTPProxyEnvironmentKeys {
+            proxyEnvironment[key] = httpProxyURL
+        }
+        for key in commandExecWebSocketProxyEnvironmentKeys {
+            proxyEnvironment[key] = httpProxyURL
+        }
+        for key in commandExecNoProxyEnvironmentKeys {
+            proxyEnvironment[key] = commandExecDefaultNoProxyValue
+        }
+        for key in commandExecAllProxyEnvironmentKeys {
+            proxyEnvironment[key] = allProxyURL
+        }
+        for key in commandExecFTPProxyEnvironmentKeys {
+            proxyEnvironment[key] = allProxyURL
+        }
+
+        #if os(macOS)
+        if network.enableSocks5,
+           let socksAddress = hostPort(from: network.socksURL),
+           proxyEnvironment[ShellSnapshotCommandWrapper.proxyGitSSHCommandEnvKey]?.hasPrefix(
+               ShellSnapshotCommandWrapper.codexProxyGitSSHCommandMarker
+           ) ?? true
+        {
+            proxyEnvironment[ShellSnapshotCommandWrapper.proxyGitSSHCommandEnvKey] =
+                "\(ShellSnapshotCommandWrapper.codexProxyGitSSHCommandMarker)ssh -o ProxyCommand='nc -X 5 -x \(socksAddress) %h %p'"
+        }
+        #endif
+
+        return proxyEnvironment
+    }
+
+    private static let commandExecHTTPProxyEnvironmentKeys = [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "YARN_HTTP_PROXY",
+        "YARN_HTTPS_PROXY",
+        "npm_config_http_proxy",
+        "npm_config_https_proxy",
+        "npm_config_proxy",
+        "NPM_CONFIG_HTTP_PROXY",
+        "NPM_CONFIG_HTTPS_PROXY",
+        "NPM_CONFIG_PROXY",
+        "BUNDLE_HTTP_PROXY",
+        "BUNDLE_HTTPS_PROXY",
+        "PIP_PROXY",
+        "DOCKER_HTTP_PROXY",
+        "DOCKER_HTTPS_PROXY"
+    ]
+
+    private static let commandExecWebSocketProxyEnvironmentKeys = [
+        "WS_PROXY",
+        "WSS_PROXY",
+        "ws_proxy",
+        "wss_proxy"
+    ]
+
+    private static let commandExecNoProxyEnvironmentKeys = [
+        "NO_PROXY",
+        "no_proxy",
+        "npm_config_noproxy",
+        "NPM_CONFIG_NOPROXY",
+        "YARN_NO_PROXY",
+        "BUNDLE_NO_PROXY"
+    ]
+
+    private static let commandExecAllProxyEnvironmentKeys = [
+        "ALL_PROXY",
+        "all_proxy"
+    ]
+
+    private static let commandExecFTPProxyEnvironmentKeys = [
+        "FTP_PROXY",
+        "ftp_proxy"
+    ]
+
+    private static let commandExecDefaultNoProxyValue = [
+        "localhost",
+        "127.0.0.1",
+        "::1",
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16"
+    ].joined(separator: ",")
+
+    private static func socksProxyEnvironmentValue(from configuredURL: String) -> String {
+        guard let address = hostPort(from: configuredURL) else {
+            return configuredURL
+        }
+        return "socks5h://\(address)"
+    }
+
+    private static func hostPort(from configuredURL: String) -> String? {
+        guard let components = URLComponents(string: configuredURL),
+              let host = components.host
+        else {
+            return nil
+        }
+        if let port = components.port {
+            return "\(host):\(port)"
+        }
+        return host
     }
 
     private static func sandboxedLaunch(
