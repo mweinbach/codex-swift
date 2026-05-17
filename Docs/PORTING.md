@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `9025550709` (`app-server-protocol:
+  remove PermissionProfile from API`). Swift `command/exec.permissionProfile`
+  now preserves the post-cleanup app-server API boundary by accepting only the
+  `ActivePermissionProfile` object shape, rejecting the legacy bare string
+  shorthand while keeping `null` as the default-config path.
 - 2026-05-17: rechecked `codex-rs/utils/output-truncation/src/lib.rs` and
   `truncate_tests.rs`. Swift `Truncation` now includes the Rust merged
   function-output content-item formatter that combines text segments with

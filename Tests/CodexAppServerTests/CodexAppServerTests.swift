@@ -30758,6 +30758,22 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(nullPermissionProfileResult["stdout"] as? String, "hi\n")
     }
 
+    func testCommandExecPermissionProfileRejectsLegacyStringLikeRustActiveProfile() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: codexHome.url),
+            experimentalAPIEnabled: true
+        )
+
+        let response = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","permissionProfile":":read-only"}}"#.utf8
+        )))
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(error["message"] as? String, "invalid permission profile")
+    }
+
     func testCommandExecPermissionProfileSelectsActiveWorkspaceProfileLikeRust() throws {
         let codexHome = try TemporaryDirectory()
         let cwd = try TemporaryDirectory()

@@ -18790,9 +18790,6 @@ public enum CodexAppServer {
         guard let value, !(value is NSNull) else {
             return nil
         }
-        if let id = value as? String {
-            return ActivePermissionProfile(id: id)
-        }
         guard let object = value as? [String: Any],
               let id = try rustOptionalStringParam(object["id"])
         else {
