@@ -1292,6 +1292,36 @@ final class ToolSpecTests: XCTestCase {
         )
     }
 
+    func testBuildSpecsPreservesDynamicSlashNamespaceLikeRustExtensions() throws {
+        let specs = ToolSpecFactory.buildSpecs(
+            config: ToolsConfig(
+                shellType: .disabled,
+                applyPatchToolType: nil
+            ),
+            dynamicTools: [
+                DynamicToolSpec(
+                    namespace: "extension/",
+                    name: "echo",
+                    description: "Echoes arguments through an extension tool.",
+                    inputSchema: .object(["type": .string("object"), "properties": .object([:])]),
+                    deferLoading: true
+                )
+            ]
+        )
+
+        let dynamicSpec = try XCTUnwrap(specs.first { $0.spec.name == "extension/" })
+        guard case let .namespace(namespace) = dynamicSpec.spec else {
+            return XCTFail("expected extension namespace")
+        }
+        XCTAssertEqual(namespace.name, "extension/")
+        XCTAssertEqual(namespace.description, "Tools in the extension/ namespace.")
+        XCTAssertEqual(namespace.tools.map(namespaceToolName), ["echo"])
+        XCTAssertEqual(
+            ToolSpecFactory.exposedUnavailableToolNames(from: [dynamicSpec.spec]),
+            [.namespaced("extension/", "echo")]
+        )
+    }
+
     func testModelVisibleSpecsFilterDeferredDynamicToolsLikeRustRouter() throws {
         let dynamicTools = [
             DynamicToolSpec(

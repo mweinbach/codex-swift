@@ -2078,7 +2078,7 @@ final class CodexAppServerTests: XCTestCase {
             ),
             (
                 #"[{"namespace":"codex.app","name":"lookup_ticket","description":"Invalid dynamic tool","inputSchema":\#(inputSchema),"deferLoading":true}]"#,
-                "dynamic tool namespace must match ^[a-zA-Z0-9_-]+$ to match Responses API: codex.app"
+                "dynamic tool namespace must match ^[a-zA-Z0-9_-]+/?$ to match Responses API: codex.app"
             ),
             (
                 #"[{"namespace":"codex_app","name":"lookup","description":"First","inputSchema":\#(inputSchema)},{"namespace":"codex_app","name":"lookup","description":"Second","inputSchema":\#(inputSchema)}]"#,

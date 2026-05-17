@@ -110,9 +110,8 @@ public struct DynamicToolSpec: Codable, Equatable, Sendable {
                         "dynamic tool namespace has leading/trailing whitespace for \(escapedIdentifierForError(trimmedName)): \(escapedIdentifierForError(trimmedNamespace))"
                     )
                 }
-                try validateIdentifier(
+                try validateNamespace(
                     trimmedNamespace,
-                    label: "dynamic tool namespace",
                     maximumLength: namespaceMaximumLength
                 )
                 if trimmedNamespace == "mcp" || trimmedNamespace.hasPrefix("mcp__") {
@@ -155,6 +154,28 @@ public struct DynamicToolSpec: Codable, Equatable, Sendable {
         guard value.count <= maximumLength else {
             throw DynamicToolValidationError(
                 "\(label) must be at most \(maximumLength) characters to match Responses API: \(escapedIdentifierForError(value))"
+            )
+        }
+    }
+
+    private static func validateNamespace(_ value: String, maximumLength: Int) throws {
+        let namespaceBody = value.hasSuffix("/") ? String(value.dropLast()) : value
+        guard !namespaceBody.isEmpty else {
+            throw DynamicToolValidationError(
+                "dynamic tool namespace must match ^[a-zA-Z0-9_-]+/?$ to match Responses API: \(escapedIdentifierForError(value))"
+            )
+        }
+        let matchesResponsesPattern = namespaceBody.utf8.allSatisfy { byte in
+            byte.isASCIIAlphaNumeric || byte == UInt8(ascii: "_") || byte == UInt8(ascii: "-")
+        }
+        guard matchesResponsesPattern else {
+            throw DynamicToolValidationError(
+                "dynamic tool namespace must match ^[a-zA-Z0-9_-]+/?$ to match Responses API: \(escapedIdentifierForError(value))"
+            )
+        }
+        guard value.count <= maximumLength else {
+            throw DynamicToolValidationError(
+                "dynamic tool namespace must be at most \(maximumLength) characters to match Responses API: \(escapedIdentifierForError(value))"
             )
         }
     }

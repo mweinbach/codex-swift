@@ -316,6 +316,12 @@ final class DynamicToolsTests: XCTestCase {
                 deferLoading: true
             ),
             dynamicTool(
+                namespace: "extension/",
+                name: "echo",
+                inputSchema: objectSchema(),
+                deferLoading: true
+            ),
+            dynamicTool(
                 name: "nullable_field",
                 inputSchema: .object([
                     "type": .string("object"),
@@ -378,11 +384,15 @@ final class DynamicToolsTests: XCTestCase {
         )
         assertValidationError(
             dynamicTool(namespace: "codex.app", name: "lookup", inputSchema: objectSchema()),
-            "dynamic tool namespace must match ^[a-zA-Z0-9_-]+$ to match Responses API: codex.app"
+            "dynamic tool namespace must match ^[a-zA-Z0-9_-]+/?$ to match Responses API: codex.app"
+        )
+        assertValidationError(
+            dynamicTool(namespace: "codex/app", name: "lookup", inputSchema: objectSchema()),
+            "dynamic tool namespace must match ^[a-zA-Z0-9_-]+/?$ to match Responses API: codex/app"
         )
         assertValidationError(
             dynamicTool(namespace: "codex\u{7}app", name: "lookup", inputSchema: objectSchema()),
-            "dynamic tool namespace must match ^[a-zA-Z0-9_-]+$ to match Responses API: codex\\u{7}app"
+            "dynamic tool namespace must match ^[a-zA-Z0-9_-]+/?$ to match Responses API: codex\\u{7}app"
         )
         let longNamespace = String(repeating: "a", count: 65)
         assertValidationError(
