@@ -26975,6 +26975,23 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         }
     }
 
+    private func contributeExtensionTurnItem(threadID: String, turnID: String, item: TurnItem) async -> TurnItem {
+        guard let parsedThreadID = try? ThreadId(string: threadID),
+              !extensionRuntimeState.registry.turnItemContributors.isEmpty
+        else {
+            return item
+        }
+        do {
+            return try await extensionRuntimeState.contributeTurnItem(
+                threadID: parsedThreadID,
+                turnID: turnID,
+                item: item
+            )
+        } catch {
+            return item
+        }
+    }
+
     private func unsubscribeCurrentConnection(fromThreadID threadID: String) -> Bool {
         let manager = threadStateManager
         let connectionID = connectionID
@@ -27872,6 +27889,42 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                     threadID: threadID,
                     turnID: turnID,
                     event: event
+                )
+            ]
+        case let .itemStarted(event):
+            let contributedItem = await contributeExtensionTurnItem(
+                threadID: threadID,
+                turnID: turnID,
+                item: event.item
+            )
+            notifications = [
+                CodexAppServer.itemStartedNotification(
+                    threadID: threadID,
+                    turnID: turnID,
+                    event: ItemStartedEvent(
+                        threadID: event.threadID,
+                        turnID: event.turnID,
+                        item: contributedItem,
+                        startedAtMilliseconds: event.startedAtMilliseconds
+                    )
+                )
+            ]
+        case let .itemCompleted(event):
+            let contributedItem = await contributeExtensionTurnItem(
+                threadID: threadID,
+                turnID: turnID,
+                item: event.item
+            )
+            notifications = [
+                CodexAppServer.itemCompletedNotification(
+                    threadID: threadID,
+                    turnID: turnID,
+                    event: ItemCompletedEvent(
+                        threadID: event.threadID,
+                        turnID: event.turnID,
+                        item: contributedItem,
+                        completedAtMilliseconds: event.completedAtMilliseconds
+                    )
                 )
             ]
         case .threadRolledBack:

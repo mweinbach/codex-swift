@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: wired live app-server runtime item emission through extension
+  turn-item contributors before `item/completed` notifications are sent to the
+  client. The app-server parity test now proves a contributor observes the
+  stable thread store from `thread/start` and turn store from `turn/start`,
+  rewrites the emitted agent message in order, and leaves the runtime event
+  timestamp and item identity intact.
 - 2026-05-17: completed the current live app-server extension runtime handoff by
   carrying a thread-scoped approval-review closure into
   `AppServerLiveRuntimeSubmission`. The live runtime parity test now verifies
@@ -94,8 +100,8 @@ Recent upstream audit checkpoint:
   contributions, including first-claim approval-review dispatch and
   executor-backed extension tool contracts. Live app-server submission now
   carries prompt fragments, configured tools, dispatchable extension tool
-  execution, and approval-review dispatch; ordered turn-item emission remains
-  pending with the broader running-thread integration.
+  execution, approval-review dispatch, and ordered turn-item contribution for
+  emitted runtime items.
 - 2026-05-17: rechecked Rust commit `c9edb26755` (`windows-sandbox: fail
   elevated setup when firewall policy is ineffective`). Swift now carries
   Rust's Windows sandbox setup error-code surface, including

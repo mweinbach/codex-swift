@@ -14,6 +14,7 @@ final class CodexAppServerTests: XCTestCase {
         ExtensionContextContributor,
         ExtensionToolContributor,
         ExtensionApprovalReviewContributor,
+        ExtensionTurnItemContributor,
         @unchecked Sendable
     {
         private let lock = NSLock()
@@ -98,6 +99,25 @@ final class CodexAppServerTests: XCTestCase {
                 return nil
             }
             return .approvedForSession
+        }
+
+        func contribute(
+            threadStore: ExtensionData,
+            turnStore: ExtensionData,
+            item: TurnItem
+        ) async throws -> TurnItem {
+            append("turn-item:\(threadStore.get(String.self) ?? "missing"):\(turnStore.get(String.self) ?? "missing")")
+            guard case let .agentMessage(agentMessage) = item else {
+                return item
+            }
+            return .agentMessage(AgentMessageItem(
+                id: agentMessage.id,
+                content: [
+                    .text("contributed:\(threadStore.get(String.self) ?? "missing"):\(turnStore.get(String.self) ?? "missing")")
+                ],
+                phase: agentMessage.phase,
+                memoryCitation: agentMessage.memoryCitation
+            ))
         }
 
         private func append(_ value: String) {
@@ -4493,6 +4513,78 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNil(unclaimedReview)
         let claimedReview = await approvalReviewer("claim this prompt")
         XCTAssertEqual(claimedReview, .approvedForSession)
+    }
+
+    func testLiveRuntimeAppliesExtensionTurnItemContributorsBeforeItemCompletedLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let coreCapture = AppServerCoreOpCapture()
+        let recorder = AppServerExtensionRecorder()
+        var builder = ExtensionRegistryBuilder()
+        builder.threadLifecycleContributor(recorder)
+        builder.turnLifecycleContributor(recorder)
+        builder.turnItemContributor(recorder)
+        let liveRuntime = AppServerLiveRuntimeCapture { submission in
+            let eventThreadID = try ConversationId(string: submission.threadID)
+            return [
+                .taskStarted(TaskStartedEvent(
+                    turnID: submission.turnID,
+                    startedAt: 1_778_700_000,
+                    modelContextWindow: nil
+                )),
+                .itemCompleted(ItemCompletedEvent(
+                    threadID: eventThreadID,
+                    turnID: submission.turnID,
+                    item: .agentMessage(AgentMessageItem(
+                        id: "agent-contributed-1",
+                        content: [.text("original text")],
+                        phase: .finalAnswer
+                    )),
+                    completedAtMilliseconds: 1_778_700_250
+                )),
+                .taskComplete(TaskCompleteEvent(
+                    turnID: submission.turnID,
+                    lastAgentMessage: "original text",
+                    completedAt: 1_778_700_300,
+                    durationMilliseconds: 300
+                ))
+            ]
+        }
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                extensionRegistry: builder.build()
+            ),
+            notificationSink: { data in await notificationCapture.append(data) },
+            coreOpSubmitter: coreCapture.submit,
+            liveRuntimeSubmitter: liveRuntime.submit,
+            experimentalAPIEnabled: true
+        )
+
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        _ = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Live contributed item"}]}}"#.utf8
+        )))
+
+        _ = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        _ = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        let itemCompleted = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(itemCompleted[0]["method"] as? String, "item/completed")
+        let itemParams = try XCTUnwrap(itemCompleted[0]["params"] as? [String: Any])
+        XCTAssertEqual(itemParams["threadId"] as? String, threadID)
+        XCTAssertEqual(itemParams["completedAtMs"] as? Int, 1_778_700_250)
+        let item = try XCTUnwrap(itemParams["item"] as? [String: Any])
+        XCTAssertEqual(item["type"] as? String, "agentMessage")
+        XCTAssertEqual(item["id"] as? String, "agent-contributed-1")
+        XCTAssertEqual(item["text"] as? String, "contributed:thread-started:turn-started")
+        XCTAssertEqual(item["phase"] as? String, "FinalAnswer")
+        XCTAssertTrue(recorder.records.contains("turn-item:thread-started:turn-started"))
     }
 
     func testTurnStartRejectsUnsupportedImageDetailLikeRust() throws {
