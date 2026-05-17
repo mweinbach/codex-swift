@@ -67,6 +67,13 @@ Recent upstream audit checkpoint:
   transports, and app-server runtime submitters; live app-server/session
   tool-handler registration remains tracked with the broader runtime work
   rather than this Rust-only trait refactor.
+- 2026-05-17: rechecked Rust commit `702e6a3c64` (`[rollout-trace] Add a
+  trace ID to MCP calls`). Swift app-server MCP tool calls now have an
+  injectable MCP call trace ID provider and preserve Rust's bridge-private
+  `codex_bridge_mcp_call_id` request metadata key on outgoing configured MCP
+  `tools/call` requests, while keeping caller `_meta` values and injected
+  `threadId` intact. Full rollout-trace bundle reduction remains pending with
+  the broader live runtime trace port.
 - 2026-05-17: rechecked Rust commit `92930a8d40` (`Refactor chatwidget
   state into modules`). Swift now carries the reusable TUI rate-limit warning
   helper from `chatwidget/rate_limits.rs`, including Rust's threshold

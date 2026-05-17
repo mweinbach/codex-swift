@@ -19822,7 +19822,8 @@ final class CodexAppServerTests: XCTestCase {
                         body: Data(#"{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"unexpected method"}}"#.utf8)
                     )
                 }
-            }
+            },
+            mcpCallTraceIDProvider: { "mcp-trace-123" }
         )
         let processor = try initializedProcessor(configuration: configuration)
         let threadID = try startLoadedThread(processor: processor)
@@ -19858,6 +19859,10 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual((params["arguments"] as? [String: Any])?["message"] as? String, "hello from app")
         XCTAssertEqual((params["_meta"] as? [String: Any])?["source"] as? String, "mcp-app")
         XCTAssertEqual((params["_meta"] as? [String: Any])?["threadId"] as? String, threadID)
+        XCTAssertEqual(
+            (params["_meta"] as? [String: Any])?["codex_bridge_mcp_call_id"] as? String,
+            "mcp-trace-123"
+        )
     }
 
     func testMcpServerToolCallUsesHostOwnedCodexAppsServerForMaterializedThread() throws {

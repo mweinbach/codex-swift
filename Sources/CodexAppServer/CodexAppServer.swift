@@ -8,6 +8,7 @@ import Foundation
 public typealias AppServerAuthRefreshTransport = @Sendable (URLRequest) async throws -> AuthRefreshHTTPResponse
 public typealias AppServerNotificationSink = @Sendable (Data) async -> Void
 public typealias AppServerMcpHTTPTransport = @Sendable (URLRequest) async throws -> URLSessionTransportResponse
+public typealias AppServerMcpCallTraceIDProvider = @Sendable () -> String?
 public typealias AppServerPluginHTTPTransport = @Sendable (URLRequest) throws -> URLSessionTransportResponse
 public typealias AppServerCoreOpSubmitter = @Sendable (
     _ requestID: RequestID,
@@ -247,6 +248,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let authLoginTransport: ChatGPTLoginTransport?
     public let authDeviceCodeTransport: ChatGPTDeviceCodeLoginTransport?
     public let mcpHTTPTransport: AppServerMcpHTTPTransport
+    public let mcpCallTraceIDProvider: AppServerMcpCallTraceIDProvider
     public let pluginHTTPTransport: AppServerPluginHTTPTransport
     public let accessibleConnectorProvider: AppServerAccessibleConnectorProvider
     public let mcpOAuthLoginStarter: AppServerMcpOAuthLoginStarter
@@ -285,6 +287,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         authLoginTransport: ChatGPTLoginTransport? = nil,
         authDeviceCodeTransport: ChatGPTDeviceCodeLoginTransport? = nil,
         mcpHTTPTransport: @escaping AppServerMcpHTTPTransport = CodexAppServer.defaultMcpHTTPTransport,
+        mcpCallTraceIDProvider: @escaping AppServerMcpCallTraceIDProvider = { nil },
         pluginHTTPTransport: @escaping AppServerPluginHTTPTransport = CodexAppServer.defaultPluginHTTPTransport,
         accessibleConnectorProvider: @escaping AppServerAccessibleConnectorProvider = CodexAppServer.defaultAccessibleConnectorProvider,
         mcpOAuthLoginStarter: @escaping AppServerMcpOAuthLoginStarter = CodexAppServer.defaultMcpOAuthLoginStarter,
@@ -333,6 +336,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         self.authLoginTransport = authLoginTransport
         self.authDeviceCodeTransport = authDeviceCodeTransport
         self.mcpHTTPTransport = mcpHTTPTransport
+        self.mcpCallTraceIDProvider = mcpCallTraceIDProvider
         self.pluginHTTPTransport = pluginHTTPTransport
         self.accessibleConnectorProvider = accessibleConnectorProvider
         self.mcpOAuthLoginStarter = mcpOAuthLoginStarter
@@ -15159,7 +15163,11 @@ public enum CodexAppServer {
         let server = try rustRequiredStringParam(params?["server"], field: "server")
         let tool = try rustRequiredStringParam(params?["tool"], field: "tool")
         let arguments = params?["arguments"]
-        let meta = mcpToolCallMeta(params?["_meta"], threadID: threadID)
+        let meta = mcpToolCallMeta(
+            params?["_meta"],
+            threadID: threadID,
+            mcpCallTraceID: configuration.mcpCallTraceIDProvider()
+        )
         guard isThreadLoaded(threadID) else {
             throw AppServerError.invalidRequest("thread not found: \(threadID)")
         }
@@ -15260,15 +15268,27 @@ public enum CodexAppServer {
         }
     }
 
-    fileprivate static func mcpToolCallMeta(_ rawMeta: Any?, threadID: String) -> Any {
+    fileprivate static func mcpToolCallMeta(
+        _ rawMeta: Any?,
+        threadID: String,
+        mcpCallTraceID: String? = nil
+    ) -> Any {
+        let traceMetaKey = "codex_bridge_mcp_call_id"
         if var meta = rawMeta as? [String: Any] {
             meta["threadId"] = threadID
+            if let mcpCallTraceID, !mcpCallTraceID.isEmpty {
+                meta[traceMetaKey] = mcpCallTraceID
+            }
             return meta
         }
         if let rawMeta {
             return rawMeta
         }
-        return ["threadId": threadID]
+        var meta = ["threadId": threadID]
+        if let mcpCallTraceID, !mcpCallTraceID.isEmpty {
+            meta[traceMetaKey] = mcpCallTraceID
+        }
+        return meta
     }
 
     private static func mcpThreadCwdFallback(
