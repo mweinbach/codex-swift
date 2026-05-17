@@ -1051,6 +1051,7 @@ final class CodexAppServerTests: XCTestCase {
         root_agent_usage_hint_text = "root usage"
         subagent_usage_hint_text = "subagent usage"
         hide_spawn_agent_metadata = true
+        non_code_mode_only = true
 
         [features.apps_mcp_path_override]
         path = "/tmp/apps-mcp"
@@ -1106,6 +1107,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(multiAgentV2["root_agent_usage_hint_text"], .string("root usage"))
         XCTAssertEqual(multiAgentV2["subagent_usage_hint_text"], .string("subagent usage"))
         XCTAssertEqual(multiAgentV2["hide_spawn_agent_metadata"], .bool(true))
+        XCTAssertEqual(multiAgentV2["non_code_mode_only"], .bool(true))
         guard case let .table(appsMcpPathOverride)? = features["apps_mcp_path_override"] else {
             return XCTFail("expected apps_mcp_path_override table")
         }

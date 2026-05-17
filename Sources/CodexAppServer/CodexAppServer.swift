@@ -1732,7 +1732,8 @@ public enum CodexAppServer {
                     "max_wait_timeout_ms": .integer(runtimeConfig.multiAgentV2.maxWaitTimeoutMS),
                     "default_wait_timeout_ms": .integer(runtimeConfig.multiAgentV2.defaultWaitTimeoutMS),
                     "usage_hint_enabled": .bool(runtimeConfig.multiAgentV2.usageHintEnabled),
-                    "hide_spawn_agent_metadata": .bool(runtimeConfig.multiAgentV2.hideSpawnAgentMetadata)
+                    "hide_spawn_agent_metadata": .bool(runtimeConfig.multiAgentV2.hideSpawnAgentMetadata),
+                    "non_code_mode_only": .bool(runtimeConfig.multiAgentV2.nonCodeModeOnly)
                 ]
                 if let usageHintText = runtimeConfig.multiAgentV2.usageHintText {
                     multiAgentV2["usage_hint_text"] = .string(usageHintText)
