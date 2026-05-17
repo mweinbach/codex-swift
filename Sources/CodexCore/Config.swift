@@ -1322,8 +1322,54 @@ public enum CodexConfigLoader {
             loadedConfigLockfile = lockfile
         }
 
+        return try finalizeResolvedConfig(
+            parsed,
+            codexHome: codexHome,
+            cwd: cwd,
+            runtimeWorkspaceRoots: runtimeWorkspaceRoots,
+            fileManager: fileManager,
+            environment: environment,
+            requirements: requirements,
+            initialConfigLockfile: loadedConfigLockfile == nil ? nil : initialConfigLockfile,
+            loadedConfigLockfile: loadedConfigLockfile
+        )
+    }
+
+    public static func loadEffectiveConfigSnapshot(
+        _ snapshot: ConfigValue,
+        codexHome: URL,
+        cwd: URL? = nil,
+        runtimeWorkspaceRoots: [AbsolutePath]? = nil,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        fileManager: FileManager = .default
+    ) throws -> CodexRuntimeConfig {
+        var parsed = ParsedCodexConfigToml()
+        parsed.agentRoleDiscoveryDirs.append(codexHome.appendingPathComponent("agents", isDirectory: true))
+        try parsed.merge(snapshot)
+        return try finalizeResolvedConfig(
+            parsed,
+            codexHome: codexHome,
+            cwd: cwd,
+            runtimeWorkspaceRoots: runtimeWorkspaceRoots,
+            fileManager: fileManager,
+            environment: environment,
+            requirements: .default
+        )
+    }
+
+    private static func finalizeResolvedConfig(
+        _ parsed: ParsedCodexConfigToml,
+        codexHome: URL,
+        cwd: URL?,
+        runtimeWorkspaceRoots: [AbsolutePath]?,
+        fileManager: FileManager,
+        environment: [String: String],
+        requirements: ConfigRequirements,
+        initialConfigLockfile: ConfigLockfileDebugConfig? = nil,
+        loadedConfigLockfile: ConfigLockfile? = nil
+    ) throws -> CodexRuntimeConfig {
         var config = try parsed.resolvedConfig(environment: environment)
-        if let loadedConfigLockfile {
+        if let initialConfigLockfile, let loadedConfigLockfile {
             config.configLockfile = initialConfigLockfile
             config.configLockToml = loadedConfigLockfile
         }

@@ -12,15 +12,21 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: wired Rust's live `refresh_runtime_config` behavior into the
+  Swift app-server live runtime. `Op.refreshRuntimeConfig` now stores a
+  per-thread user-layer snapshot for subsequent turns, rebuilds hook handlers
+  from that refreshed layer, preserves session-static settings such as
+  `model` and `notify`, and refreshes runtime-refreshable `tool_suggest`
+  config using the same user-layer replacement rule as Rust's
+  `Session::refresh_runtime_config`.
 - 2026-05-17: wired live MCP tool inventory into the Swift app-server
   Responses runtime. `thread/start` live MCP startup now feeds discovered MCP
   tools into each `turn/start` live runtime submission, those tools are exposed
   through the same namespace tool specs used by Rust's turn tool router, and
   model MCP calls dispatch through a typed handler that emits
   `mcp_tool_call_begin` / `mcp_tool_call_end` runtime events before returning
-  Rust-shaped MCP tool results to the model. Remaining ThreadManager parity
-  gaps are in-flight runtime config mutation and cross-connection runtime event
-  fanout.
+  Rust-shaped MCP tool results to the model. Remaining ThreadManager parity gap
+  is cross-connection runtime event fanout.
 - 2026-05-17: wired the Rust `request_permissions` tool into the Swift
   Responses/tool loop and live app-server runtime. Swift now advertises the
   Rust-shaped function tool behind `features.request_permissions_tool`, parses
@@ -31,8 +37,7 @@ Recent upstream audit checkpoint:
   accumulated with Rust's merge/intersection rules and applied implicitly to
   later `shell_command`, `shell`, local shell, and unified `exec_command` calls,
   including preapproved sandbox widening without a second prompt. Remaining
-  ThreadManager parity gaps are in-flight runtime config mutation and
-  cross-connection runtime event fanout.
+  ThreadManager parity gap is cross-connection runtime event fanout.
 - 2026-05-17: Swift's live Responses/tool loop now exposes Rust's
   `request_user_input` tool and thread dynamic-tool specs, routes calls through
   live app-server pending continuations, and resumes the same turn from

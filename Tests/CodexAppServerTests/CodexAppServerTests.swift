@@ -4930,6 +4930,52 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(completeEvent.turnID, turnID)
     }
 
+    func testLiveRuntimeConfigRefreshAppliesRuntimeRefreshableFieldsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        var features = FeatureStates.withDefaults()
+        features.set(.plugins, enabled: false)
+        var settings = CodexRuntimeConfig(
+            model: "gpt-old",
+            modelProvider: "mock_provider",
+            features: features
+        )
+        settings.notify = ["old-notify"]
+        let snapshot: ConfigValue = .table([
+            "model": .string("gpt-new"),
+            "notify": .array([.string("new-notify")]),
+            "features": .table(["plugins": .bool(true)]),
+            "tool_suggest": .table([
+                "disabled_tools": .array([
+                    .table([
+                        "type": .string("connector"),
+                        "id": .string(" calendar ")
+                    ]),
+                    .table([
+                        "type": .string("plugin"),
+                        "id": .string("slack@openai-curated")
+                    ])
+                ])
+            ])
+        ])
+
+        let stack = try AppServerRuntimeConfigRefresh.applyRuntimeRefreshableSnapshot(
+            snapshot,
+            to: &settings,
+            codexHome: temp.url,
+            cwd: temp.url,
+            environment: [:]
+        )
+
+        XCTAssertEqual(settings.model, "gpt-old")
+        XCTAssertEqual(settings.notify, ["old-notify"])
+        XCTAssertFalse(settings.features.isEnabled(.plugins))
+        XCTAssertEqual(settings.toolSuggest.disabledTools, [
+            ToolSuggestDisabledTool(type: .connector, id: "calendar"),
+            ToolSuggestDisabledTool(type: .plugin, id: "slack@openai-curated")
+        ])
+        XCTAssertEqual(stack.effectiveConfig(), snapshot)
+    }
+
     func testQuickstartStyleThreadStartAndRunFlowUsesDefaultsLikeRustPythonSDK() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()

@@ -93,8 +93,13 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             }
             return UUID().uuidString.lowercased()
 
+        case let .refreshRuntimeConfig(config):
+            AppServerLiveRuntimeBlocking.run {
+                await self.state.refreshRuntimeConfig(threadID: threadID, config: config)
+            }
+            return UUID().uuidString.lowercased()
+
         case .refreshMcpServers,
-             .refreshRuntimeConfig,
              .addToHistory,
              .compact,
              .threadRollback,
@@ -317,6 +322,16 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         if let requestedSummary = turnInput.summary {
             settings.modelReasoningSummary = requestedSummary
         }
+        let runtimeRefreshSnapshot = await state.runtimeConfigSnapshot(threadID: submission.threadID)
+        let refreshedConfigStack = try runtimeRefreshSnapshot.map {
+            try AppServerRuntimeConfigRefresh.applyRuntimeRefreshableSnapshot(
+                $0,
+                to: &settings,
+                codexHome: configuration.codexHome,
+                cwd: cwd,
+                environment: configuration.environment
+            )
+        }
 
         try await CodexAuthStorage.enforceLoginRestrictions(
             codexHome: configuration.codexHome,
@@ -406,15 +421,16 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             )),
             .responseItem(userItem)
         ])
+        let hookConfigStack = try refreshedConfigStack ?? CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: configuration.codexHome,
+            cwd: cwd,
+            cliOverrides: configuration.cliConfigOverrides,
+            threadConfigSources: configuration.threadConfigSources,
+            overrides: configuration.configLayerOverrides,
+            environment: configuration.environment
+        )
         let hookHandlers = HookConfig.configuredHandlers(
-            from: try CodexConfigLayerLoader.loadConfigLayerStack(
-                codexHome: configuration.codexHome,
-                cwd: cwd,
-                cliOverrides: configuration.cliConfigOverrides,
-                threadConfigSources: configuration.threadConfigSources,
-                overrides: configuration.configLayerOverrides,
-                environment: configuration.environment
-            ),
+            from: hookConfigStack,
             codexHome: configuration.codexHome,
             environment: configuration.environment
         )
@@ -931,6 +947,7 @@ private actor AppServerLiveRuntimeState {
     private var userInputContinuations: [String: CheckedContinuation<RequestUserInputResponse?, Never>] = [:]
     private var dynamicToolContinuations: [String: PendingDynamicTool] = [:]
     private var sessionGrantedPermissionProfiles: [String: RequestPermissionProfile] = [:]
+    private var runtimeConfigSnapshots: [String: ConfigValue] = [:]
     private var emittedAbortKeys: Set<String> = []
 
     func setEventSink(_ sink: AppServerRuntimeEventSink?) {
@@ -966,12 +983,14 @@ private actor AppServerLiveRuntimeState {
             cancelPendingContinuations(turnID: running.turnID)
         }
         sessionGrantedPermissionProfiles.removeValue(forKey: threadID)
+        runtimeConfigSnapshots.removeValue(forKey: threadID)
     }
 
     func cancelAll() {
         let turns = runningTurns.values
         runningTurns.removeAll()
         sessionGrantedPermissionProfiles.removeAll()
+        runtimeConfigSnapshots.removeAll()
         emittedAbortKeys.removeAll()
         for turn in turns {
             turn.task.cancel()
@@ -1087,6 +1106,14 @@ private actor AppServerLiveRuntimeState {
             base: sessionGrantedPermissionProfiles[threadID],
             permissions: permissions
         )
+    }
+
+    func refreshRuntimeConfig(threadID: String, config: ConfigValue) {
+        runtimeConfigSnapshots[threadID] = config
+    }
+
+    func runtimeConfigSnapshot(threadID: String) -> ConfigValue? {
+        runtimeConfigSnapshots[threadID]
     }
 
     private struct RunningTurn {
