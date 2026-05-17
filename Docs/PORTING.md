@@ -373,6 +373,16 @@ Recent upstream audit checkpoint:
   profile-defined roots plus `--add-dir` roots. The broader symbolic
   permission-state representation and live session retargeting behavior remain
   pending.
+- 2026-05-17: rechecked Rust commit `108234b5eb` (`core: set permission
+  profiles from snapshots`). Swift now has a `PermissionProfileSnapshot`
+  bridge for already-resolved permission state, keeping the concrete
+  `PermissionProfile`, optional `ActivePermissionProfile`, and
+  profile-defined workspace roots together. Runtime config installation and
+  config-loader workspace-root materialization now apply that snapshot instead
+  of leaving the profile identity and concrete profile as loose paired fields,
+  with focused tests covering legacy snapshots, active snapshots with profile
+  roots, and atomic runtime-config replacement. The broader live session
+  retargeting path remains pending with the symbolic permission-state work.
 - 2026-05-16: rechecked Rust commit `5d30764fe9` (`Run compact hooks for
   remote compaction v2`). Swift core remote-v2 compaction orchestration now
   runs trusted `PreCompact` hooks before collecting the v2 compaction stream,

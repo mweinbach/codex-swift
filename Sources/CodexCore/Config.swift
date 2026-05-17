@@ -423,6 +423,12 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         return roots
     }
 
+    public mutating func applyPermissionProfileSnapshot(_ snapshot: PermissionProfileSnapshot) {
+        permissionProfile = snapshot.permissionProfile
+        activePermissionProfile = snapshot.activePermissionProfile
+        profileWorkspaceRoots = snapshot.profileWorkspaceRoots
+    }
+
     public var usesDeprecatedLegacyNotify: Bool {
         guard let notify, let command = notify.first else {
             return false
@@ -1289,13 +1295,16 @@ public enum CodexConfigLoader {
             sandboxMode: config.sandboxMode
         )
         if let defaultPermissions = config.defaultPermissions {
-            config.permissionProfile = try parsed.permissionProfile(
+            let permissionProfile = try parsed.permissionProfile(
                 named: defaultPermissions,
                 codexHome: codexHome,
                 cwd: cwd ?? codexHome,
                 fileManager: fileManager
             )
-            config.activePermissionProfile = ActivePermissionProfile(id: defaultPermissions)
+            config.applyPermissionProfileSnapshot(.active(
+                permissionProfile,
+                activePermissionProfile: ActivePermissionProfile(id: defaultPermissions)
+            ))
             try applyEffectiveWorkspaceRoots(
                 from: parsed,
                 profileName: defaultPermissions,
@@ -1339,13 +1348,14 @@ public enum CodexConfigLoader {
         let materializationRoots = runtimeWorkspaceRoots.map { roots in
             deduplicatedAbsolutePaths(roots + profileWorkspaceRoots)
         } ?? deduplicatedAbsolutePaths(workspaceRoots + profileWorkspaceRoots)
-        config.profileWorkspaceRoots = profileWorkspaceRoots
         config.workspaceRoots = workspaceRoots
         config.workspaceRootsExplicit = runtimeWorkspaceRoots != nil
 
         guard let profile = config.permissionProfile else {
+            config.profileWorkspaceRoots = profileWorkspaceRoots
             return
         }
+        let activePermissionProfile = config.activePermissionProfile
         let fileSystemPolicy = profile.fileSystemSandboxPolicy.materializeProjectRoots(
             withWorkspaceRoots: materializationRoots
         )
@@ -1354,7 +1364,11 @@ public enum CodexConfigLoader {
             fileSystem: fileSystemPolicy,
             network: profile.networkSandboxPolicy
         )
-        config.permissionProfile = effectiveProfile
+        config.applyPermissionProfileSnapshot(.fromSessionSnapshot(
+            permissionProfile: effectiveProfile,
+            activePermissionProfile: activePermissionProfile,
+            profileWorkspaceRoots: profileWorkspaceRoots
+        ))
         if let legacyPolicy = try? fileSystemPolicy.toLegacySandboxPolicy(
             networkPolicy: effectiveProfile.networkSandboxPolicy,
             cwd: cwdRoot.path

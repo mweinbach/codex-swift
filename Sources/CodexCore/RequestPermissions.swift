@@ -445,6 +445,71 @@ public struct ActivePermissionProfile: Codable, Equatable, Sendable {
     }
 }
 
+/// Trusted snapshot of an already-resolved permission profile.
+///
+/// This keeps the concrete profile, optional active profile id, and profile-defined
+/// workspace roots together so session/config bridges can install them as one value.
+public struct PermissionProfileSnapshot: Equatable, Sendable {
+    public let permissionProfile: PermissionProfile
+    public let activePermissionProfile: ActivePermissionProfile?
+    public let profileWorkspaceRoots: [AbsolutePath]
+
+    /// Create a snapshot with no active profile identity.
+    public static func legacy(_ permissionProfile: PermissionProfile) -> Self {
+        Self(permissionProfile: permissionProfile)
+    }
+
+    /// Create a snapshot for a resolved active profile id.
+    public static func active(
+        _ permissionProfile: PermissionProfile,
+        activePermissionProfile: ActivePermissionProfile
+    ) -> Self {
+        activeWithProfileWorkspaceRoots(
+            permissionProfile,
+            activePermissionProfile: activePermissionProfile
+        )
+    }
+
+    /// Create a snapshot for a resolved active profile id with profile workspace roots.
+    public static func activeWithProfileWorkspaceRoots(
+        _ permissionProfile: PermissionProfile,
+        activePermissionProfile: ActivePermissionProfile,
+        profileWorkspaceRoots: [AbsolutePath] = []
+    ) -> Self {
+        Self(
+            permissionProfile: permissionProfile,
+            activePermissionProfile: activePermissionProfile,
+            profileWorkspaceRoots: profileWorkspaceRoots
+        )
+    }
+
+    /// Reconstruct a trusted snapshot from session/config state captured together.
+    public static func fromSessionSnapshot(
+        permissionProfile: PermissionProfile,
+        activePermissionProfile: ActivePermissionProfile?,
+        profileWorkspaceRoots: [AbsolutePath] = []
+    ) -> Self {
+        guard let activePermissionProfile else {
+            return legacy(permissionProfile)
+        }
+        return activeWithProfileWorkspaceRoots(
+            permissionProfile,
+            activePermissionProfile: activePermissionProfile,
+            profileWorkspaceRoots: profileWorkspaceRoots
+        )
+    }
+
+    private init(
+        permissionProfile: PermissionProfile,
+        activePermissionProfile: ActivePermissionProfile? = nil,
+        profileWorkspaceRoots: [AbsolutePath] = []
+    ) {
+        self.permissionProfile = permissionProfile
+        self.activePermissionProfile = activePermissionProfile
+        self.profileWorkspaceRoots = profileWorkspaceRoots
+    }
+}
+
 public enum NetworkSandboxPolicy: String, Codable, Equatable, Sendable {
     case restricted
     case enabled
