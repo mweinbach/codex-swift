@@ -96,4 +96,93 @@ final class PathUtilsTests: XCTestCase {
         let path = #"\\?\D:\c\x\worktrees\2508\swift-base"#
         XCTAssertEqual(PathUtils.normalizeForNativeWorkdir(path, isWindows: false), path)
     }
+
+    func testResolveSymlinkWritePathsReturnsNonSymlinkPath() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-path-write-\(UUID().uuidString)", isDirectory: true)
+        let file = root.appendingPathComponent("config.toml", isDirectory: false)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try "model = \"old\"\n".write(to: file, atomically: true, encoding: .utf8)
+        defer {
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        XCTAssertEqual(
+            PathUtils.resolveSymlinkWritePaths(file.path),
+            .init(readPath: file.standardizedFileURL.path, writePath: file.standardizedFileURL.path)
+        )
+    }
+
+    func testResolveSymlinkWritePathsFollowsRelativeSymlinkChain() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-path-symlink-chain-\(UUID().uuidString)", isDirectory: true)
+        let actualDirectory = root.appendingPathComponent("actual", isDirectory: true)
+        let target = actualDirectory.appendingPathComponent("config.toml", isDirectory: false)
+        let middle = root.appendingPathComponent("middle.toml", isDirectory: false)
+        let link = root.appendingPathComponent("config.toml", isDirectory: false)
+        try FileManager.default.createDirectory(at: actualDirectory, withIntermediateDirectories: true)
+        try "model = \"old\"\n".write(to: target, atomically: true, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(atPath: middle.path, withDestinationPath: "actual/config.toml")
+        try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: "middle.toml")
+        defer {
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        XCTAssertEqual(
+            PathUtils.resolveSymlinkWritePaths(link.path),
+            .init(readPath: target.standardizedFileURL.path, writePath: target.standardizedFileURL.path)
+        )
+    }
+
+    func testResolveSymlinkWritePathsMissingTargetUsesFinalPath() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-path-missing-link-\(UUID().uuidString)", isDirectory: true)
+        let link = root.appendingPathComponent("config.toml", isDirectory: false)
+        let target = root.appendingPathComponent("missing.toml", isDirectory: false)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: "missing.toml")
+        defer {
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        XCTAssertEqual(
+            PathUtils.resolveSymlinkWritePaths(link.path),
+            .init(readPath: target.standardizedFileURL.path, writePath: target.standardizedFileURL.path)
+        )
+    }
+
+    func testResolveSymlinkWritePathsCyclesFallBackToRootWritePath() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-path-cycle-\(UUID().uuidString)", isDirectory: true)
+        let first = root.appendingPathComponent("a", isDirectory: false)
+        let second = root.appendingPathComponent("b", isDirectory: false)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: first, withDestinationURL: second)
+        try FileManager.default.createSymbolicLink(at: second, withDestinationURL: first)
+        defer {
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        XCTAssertEqual(
+            PathUtils.resolveSymlinkWritePaths(first.path),
+            .init(readPath: nil, writePath: first.standardizedFileURL.path)
+        )
+    }
+
+    func testWriteAtomicallyCreatesParentDirectoriesAndReplacesContents() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-path-atomic-\(UUID().uuidString)", isDirectory: true)
+        let file = root
+            .appendingPathComponent("nested", isDirectory: true)
+            .appendingPathComponent("config.toml", isDirectory: false)
+        defer {
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        try PathUtils.writeAtomically("first", to: file.path)
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "first")
+
+        try PathUtils.writeAtomically("second", to: file.path)
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "second")
+    }
 }

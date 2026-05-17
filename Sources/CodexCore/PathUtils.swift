@@ -1,6 +1,16 @@
 import Foundation
 
 public enum PathUtils {
+    public struct SymlinkWritePaths: Equatable, Sendable {
+        public var readPath: String?
+        public var writePath: String
+
+        public init(readPath: String?, writePath: String) {
+            self.readPath = readPath
+            self.writePath = writePath
+        }
+    }
+
     public static func normalizeForPathComparison(
         _ path: String,
         isWSL: Bool = WSLPath.isWSL()
@@ -39,6 +49,41 @@ public enum PathUtils {
             return String(path.dropFirst(verbatimPrefix.count))
         }
         return path
+    }
+
+    public static func resolveSymlinkWritePaths(_ path: String) -> SymlinkWritePaths {
+        let root = standardizedPath(path)
+        var current = root
+        var visited: Set<String> = []
+
+        while true {
+            do {
+                let attributes = try FileManager.default.attributesOfItem(atPath: current)
+                guard attributes[.type] as? FileAttributeType == .typeSymbolicLink else {
+                    return SymlinkWritePaths(readPath: current, writePath: current)
+                }
+
+                guard visited.insert(current).inserted else {
+                    return SymlinkWritePaths(readPath: nil, writePath: root)
+                }
+
+                let target = try FileManager.default.destinationOfSymbolicLink(atPath: current)
+                current = resolveSymlinkTarget(target, relativeTo: current)
+            } catch let error as NSError where error.domain == NSCocoaErrorDomain
+                && error.code == NSFileReadNoSuchFileError
+            {
+                return SymlinkWritePaths(readPath: current, writePath: current)
+            } catch {
+                return SymlinkWritePaths(readPath: nil, writePath: root)
+            }
+        }
+    }
+
+    public static func writeAtomically(_ contents: String, to path: String) throws {
+        let url = URL(fileURLWithPath: path, isDirectory: false)
+        let parent = url.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        try contents.write(to: url, atomically: true, encoding: .utf8)
     }
 
     public static func normalizeForWSLComparisonPath(_ path: String, isWSL: Bool = WSLPath.isWSL()) -> String {
@@ -87,6 +132,19 @@ public enum PathUtils {
     private static func isASCIIAlphabetic(_ byte: UInt8) -> Bool {
         (Character("A").asciiValue!...Character("Z").asciiValue!).contains(byte)
             || (Character("a").asciiValue!...Character("z").asciiValue!).contains(byte)
+    }
+
+    private static func standardizedPath(_ path: String) -> String {
+        URL(fileURLWithPath: path, isDirectory: false).standardizedFileURL.path
+    }
+
+    private static func resolveSymlinkTarget(_ target: String, relativeTo current: String) -> String {
+        if target.hasPrefix("/") {
+            return standardizedPath(target)
+        }
+
+        let parent = URL(fileURLWithPath: current, isDirectory: false).deletingLastPathComponent()
+        return parent.appendingPathComponent(target, isDirectory: false).standardizedFileURL.path
     }
 
     private static func currentPlatformIsWindows() -> Bool {
