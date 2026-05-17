@@ -68,4 +68,32 @@ final class PathUtilsTests: XCTestCase {
 
         XCTAssertThrowsError(try PathUtils.normalizeForPathComparison(missing, isWSL: false))
     }
+
+    func testPathsMatchAfterNormalizationMatchesIdenticalExistingPaths() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-path-match-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        XCTAssertTrue(PathUtils.pathsMatchAfterNormalization(root.path, root.path, isWSL: false))
+    }
+
+    func testPathsMatchAfterNormalizationFallsBackToRawEqualityWhenMissing() {
+        XCTAssertTrue(PathUtils.pathsMatchAfterNormalization("missing", "missing", isWSL: false))
+        XCTAssertFalse(PathUtils.pathsMatchAfterNormalization("missing-a", "missing-b", isWSL: false))
+    }
+
+    func testNormalizeForNativeWorkdirSimplifiesWindowsVerbatimPrefix() {
+        XCTAssertEqual(
+            PathUtils.normalizeForNativeWorkdir(#"\\?\D:\c\x\worktrees\2508\swift-base"#, isWindows: true),
+            #"D:\c\x\worktrees\2508\swift-base"#
+        )
+    }
+
+    func testNormalizeForNativeWorkdirLeavesNonWindowsPathsUnchanged() {
+        let path = #"\\?\D:\c\x\worktrees\2508\swift-base"#
+        XCTAssertEqual(PathUtils.normalizeForNativeWorkdir(path, isWindows: false), path)
+    }
 }

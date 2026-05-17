@@ -12,6 +12,35 @@ public enum PathUtils {
         return normalizeForWSLComparisonPath(canonical, isWSL: isWSL)
     }
 
+    public static func pathsMatchAfterNormalization(
+        _ left: String,
+        _ right: String,
+        isWSL: Bool = WSLPath.isWSL()
+    ) -> Bool {
+        if let normalizedLeft = try? normalizeForPathComparison(left, isWSL: isWSL),
+           let normalizedRight = try? normalizeForPathComparison(right, isWSL: isWSL)
+        {
+            return normalizedLeft == normalizedRight
+        }
+        return left == right
+    }
+
+    public static func normalizeForNativeWorkdir(_ path: String) -> String {
+        normalizeForNativeWorkdir(path, isWindows: currentPlatformIsWindows())
+    }
+
+    public static func normalizeForNativeWorkdir(_ path: String, isWindows: Bool) -> String {
+        guard isWindows else {
+            return path
+        }
+
+        let verbatimPrefix = #"\\?\"#
+        if path.hasPrefix(verbatimPrefix) {
+            return String(path.dropFirst(verbatimPrefix.count))
+        }
+        return path
+    }
+
     public static func normalizeForWSLComparisonPath(_ path: String, isWSL: Bool = WSLPath.isWSL()) -> String {
         guard isWSL, isWSLCaseInsensitivePath(path) else {
             return path
@@ -58,5 +87,13 @@ public enum PathUtils {
     private static func isASCIIAlphabetic(_ byte: UInt8) -> Bool {
         (Character("A").asciiValue!...Character("Z").asciiValue!).contains(byte)
             || (Character("a").asciiValue!...Character("z").asciiValue!).contains(byte)
+    }
+
+    private static func currentPlatformIsWindows() -> Bool {
+        #if os(Windows)
+            true
+        #else
+            false
+        #endif
     }
 }

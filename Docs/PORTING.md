@@ -1801,6 +1801,11 @@ Recent upstream audit checkpoint:
   has focused parity coverage for the remaining Rust `TERM_PROGRAM` aliases
   and user-agent tokens, including kitty, Alacritty, Konsole, GNOME Terminal,
   VTE, and Windows Terminal.
+- 2026-05-17: rechecked Rust's path comparison and native workdir helpers in
+  `codex-rs/utils/path-utils/src/lib.rs` and `path_utils_tests.rs`. Swift now
+  exposes `pathsMatchAfterNormalization` with Rust's canonicalize-or-raw-equal
+  fallback behavior and `normalizeForNativeWorkdir` with Rust's Windows
+  verbatim-prefix simplification coverage.
 - 2026-05-15: rechecked Rust's `ConfigRequirementsReadResponse` in
   `codex-rs/app-server-protocol/src/protocol/v2/config.rs`. Swift's shared
   app-server config protocol now carries the typed `configRequirements/read`
@@ -2233,7 +2238,7 @@ Recent upstream audit checkpoint:
 - `codex-rs/core/src/truncate.rs`
   - byte/token truncation policies, middle truncation with UTF-8 scalar boundaries, formatted output line counts, approximate token budgets, and function-call output item truncation with omitted-text summaries
 - `codex-rs/core/src/path_utils.rs`
-  - path canonicalization for comparison and WSL `/mnt/<drive>` case-insensitive path normalization
+  - symlink-aware write-path resolution and atomic writes
 - `codex-rs/terminal-detection/src/lib.rs`
   - remaining terminal metadata detection from environment variables, Rust's `TERM=dumb` / WezTerm fallback classification, and user-agent token sanitization
 - `codex-rs/core/src/user_shell_command.rs` and exec-output formatting dependency from `codex-rs/core/src/tools/mod.rs`
