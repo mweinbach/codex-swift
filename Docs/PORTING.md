@@ -271,6 +271,20 @@ Recent upstream audit checkpoint:
   workflows, and `7fa0007ea8` (`tui: split remaining composer draft and footer
   state`) is an internal Rust TUI refactor with no intended behavior change and
   no Swift TUI counterpart in this package.
+- 2026-05-17: rechecked the shared CLI helper portion of Rust commit
+  `3dc278b68e` (`Trim TUI legacy core helper usage`). Swift exit-message
+  rendering now uses a Rust-shaped resume-command helper that prefers a
+  non-empty thread name over the thread id, shell-quotes the resume target,
+  inserts `--` before dash-prefixed targets, and still prints the resume hint
+  when token usage is zero. The remaining Rust changes in this commit are
+  mechanical TUI dependency cleanup with no Swift TUI surface.
+- 2026-05-17: rechecked additional recent Rust commits with no Swift runtime
+  surface: `302149d979` and `db51df0f44` only change upstream signed macOS
+  release-promotion workflows/assets, `e6a7368810` is a mechanical Rust TUI
+  history-cell module split, `d1235a0a78` changes Rust TUI `/side` Escape-key
+  handling, `66af217865` changes Rust TUI MCP-startup status-header
+  restoration during `/review`, and `06bb508547` only stabilizes a Rust core
+  compact-rollback mocked stream fixture by adding `response.created`.
 - 2026-05-16: rechecked the reusable core portion of Rust commit `8543e39885`
   (`Preserve image detail in app-server inputs`). Swift now matches Rust's
   current `ImageDetail` domain (`high` / `original`), accepts explicit
