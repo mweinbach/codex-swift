@@ -285,6 +285,35 @@ final class ContextUpdateBuilderTests: XCTestCase {
         XCTAssertEqual(developerTexts(in: items), [])
     }
 
+    func testBuildSettingsUpdateItemsOmitsCollaborationModeInstructionsWhenDisabledLikeRust() {
+        let previous = contextItem(
+            cwd: "/repo",
+            collaborationMode: CollaborationMode(
+                mode: .defaultMode,
+                settings: CollaborationModeSettings(model: "gpt-5.4")
+            )
+        )
+        let current = contextItem(
+            cwd: "/repo",
+            collaborationMode: CollaborationMode(
+                mode: .plan,
+                settings: CollaborationModeSettings(
+                    model: "gpt-5.4",
+                    developerInstructions: "Plan before editing."
+                )
+            )
+        )
+
+        let items = ContextUpdateBuilder.buildSettingsUpdateItems(
+            previous: previous,
+            current: current,
+            shell: shell(),
+            includeCollaborationModeInstructions: false
+        )
+
+        XCTAssertEqual(developerTexts(in: items), [])
+    }
+
     func testBuildSettingsUpdateItemsEmitsRealtimeStartAndEndLikeRust() {
         let inactive = contextItem(cwd: "/repo", realtimeActive: false)
         let active = contextItem(cwd: "/repo", realtimeActive: true)

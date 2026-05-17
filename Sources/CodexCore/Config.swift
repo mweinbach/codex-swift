@@ -364,6 +364,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
     public var commitAttribution: String?
     public var includePermissionsInstructions: Bool
     public var includeAppsInstructions: Bool
+    public var includeCollaborationModeInstructions: Bool
     public var includeSkillInstructions: Bool
     public var includeEnvironmentContext: Bool
     public var experimentalUseUnifiedExecTool: Bool?
@@ -490,6 +491,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         commitAttribution: String? = nil,
         includePermissionsInstructions: Bool = true,
         includeAppsInstructions: Bool = true,
+        includeCollaborationModeInstructions: Bool = true,
         includeSkillInstructions: Bool = true,
         includeEnvironmentContext: Bool = true,
         experimentalUseUnifiedExecTool: Bool? = nil,
@@ -568,6 +570,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         self.commitAttribution = commitAttribution
         self.includePermissionsInstructions = includePermissionsInstructions
         self.includeAppsInstructions = includeAppsInstructions
+        self.includeCollaborationModeInstructions = includeCollaborationModeInstructions
         self.includeSkillInstructions = includeSkillInstructions
         self.includeEnvironmentContext = includeEnvironmentContext
         self.experimentalUseUnifiedExecTool = experimentalUseUnifiedExecTool
@@ -651,6 +654,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
         compactPrompt: String? = nil,
         includePermissionsInstructions: Bool = true,
         includeAppsInstructions: Bool = true,
+        includeCollaborationModeInstructions: Bool = true,
         includeSkillInstructions: Bool = true,
         includeEnvironmentContext: Bool = true,
         experimentalUseUnifiedExecTool: Bool? = nil,
@@ -711,6 +715,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
             compactPrompt: compactPrompt,
             includePermissionsInstructions: includePermissionsInstructions,
             includeAppsInstructions: includeAppsInstructions,
+            includeCollaborationModeInstructions: includeCollaborationModeInstructions,
             includeSkillInstructions: includeSkillInstructions,
             includeEnvironmentContext: includeEnvironmentContext,
             experimentalUseUnifiedExecTool: experimentalUseUnifiedExecTool,
@@ -815,6 +820,7 @@ public struct CodexRuntimeConfig: Equatable, Sendable {
             compactPrompt: compactPrompt,
             includePermissionsInstructions: true,
             includeAppsInstructions: true,
+            includeCollaborationModeInstructions: true,
             includeSkillInstructions: true,
             includeEnvironmentContext: true,
             experimentalUseUnifiedExecTool: experimentalUseUnifiedExecTool,
@@ -4382,6 +4388,12 @@ private struct ParsedCodexConfigToml {
                 key: "\(keyPrefix)include_apps_instructions"
             )
         }
+        if let includeCollaborationModeInstructions = values["include_collaboration_mode_instructions"] {
+            config.includeCollaborationModeInstructions = try boolValue(
+                includeCollaborationModeInstructions,
+                key: "\(keyPrefix)include_collaboration_mode_instructions"
+            )
+        }
         if let includeEnvironmentContext = values["include_environment_context"] {
             config.includeEnvironmentContext = try boolValue(
                 includeEnvironmentContext,
@@ -4527,6 +4539,7 @@ private struct ParsedCodexConfigToml {
             || key == "experimental_compact_prompt_file"
             || key == "include_permissions_instructions"
             || key == "include_apps_instructions"
+            || key == "include_collaboration_mode_instructions"
             || key == "include_environment_context"
             || key == "experimental_use_unified_exec_tool"
             || key == "experimental_realtime_ws_base_url"
@@ -4576,6 +4589,7 @@ private struct ParsedCodexConfigToml {
             || key == "experimental_compact_prompt_file"
             || key == "include_permissions_instructions"
             || key == "include_apps_instructions"
+            || key == "include_collaboration_mode_instructions"
             || key == "include_environment_context"
             || key == "experimental_use_unified_exec_tool"
             || key == "web_search"

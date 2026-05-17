@@ -1554,6 +1554,9 @@ public enum CodexAppServer {
         }
         table["include_permissions_instructions"] = .bool(runtimeConfig.includePermissionsInstructions)
         table["include_apps_instructions"] = .bool(runtimeConfig.includeAppsInstructions)
+        table["include_collaboration_mode_instructions"] = .bool(
+            runtimeConfig.includeCollaborationModeInstructions
+        )
         table["include_environment_context"] = .bool(runtimeConfig.includeEnvironmentContext)
         table["background_terminal_max_timeout"] = .integer(Int64(runtimeConfig.backgroundTerminalMaxTimeoutMS))
         table["features"] = configLockFeaturesTable(baseTable: table["features"], runtimeConfig: runtimeConfig)

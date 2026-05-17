@@ -7,6 +7,7 @@ public enum ContextUpdateBuilder {
         shell: Shell,
         includeEnvironmentContext: Bool = true,
         includePermissionsInstructions: Bool = true,
+        includeCollaborationModeInstructions: Bool = true,
         approvalsReviewer: ApprovalsReviewer = .user,
         execPolicy: ExecPolicy = .empty(),
         execPermissionApprovalsEnabled: Bool = false,
@@ -33,7 +34,11 @@ public enum ContextUpdateBuilder {
                 execPermissionApprovalsEnabled: execPermissionApprovalsEnabled,
                 requestPermissionsToolEnabled: requestPermissionsToolEnabled
             ),
-            buildCollaborationModeUpdateText(previous: previous, current: current),
+            buildCollaborationModeUpdateText(
+                previous: previous,
+                current: current,
+                includeCollaborationModeInstructions: includeCollaborationModeInstructions
+            ),
             buildRealtimeUpdateText(
                 previous: previous,
                 previousRealtimeActive: previousRealtimeActive,
@@ -128,9 +133,11 @@ public enum ContextUpdateBuilder {
 
     public static func buildCollaborationModeUpdateText(
         previous: TurnContextItem?,
-        current: TurnContextItem
+        current: TurnContextItem,
+        includeCollaborationModeInstructions: Bool = true
     ) -> String? {
-        guard let previous,
+        guard includeCollaborationModeInstructions,
+              let previous,
               previous.collaborationMode != current.collaborationMode,
               let developerInstructions = current.collaborationMode?.settings.developerInstructions,
               !developerInstructions.isEmpty

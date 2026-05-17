@@ -194,6 +194,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
     public var experimentalCompactPromptFile: String?
     public var includePermissionsInstructions: Bool?
     public var includeAppsInstructions: Bool?
+    public var includeCollaborationModeInstructions: Bool?
     public var includeEnvironmentContext: Bool?
     public var experimentalUseUnifiedExecTool: Bool?
     public var webSearchMode: WebSearchMode?
@@ -226,6 +227,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         case experimentalCompactPromptFile = "experimental_compact_prompt_file"
         case includePermissionsInstructions = "include_permissions_instructions"
         case includeAppsInstructions = "include_apps_instructions"
+        case includeCollaborationModeInstructions = "include_collaboration_mode_instructions"
         case includeEnvironmentContext = "include_environment_context"
         case experimentalUseUnifiedExecTool = "experimental_use_unified_exec_tool"
         case webSearchMode = "web_search"
@@ -259,6 +261,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         experimentalCompactPromptFile: String? = nil,
         includePermissionsInstructions: Bool? = nil,
         includeAppsInstructions: Bool? = nil,
+        includeCollaborationModeInstructions: Bool? = nil,
         includeEnvironmentContext: Bool? = nil,
         experimentalUseUnifiedExecTool: Bool? = nil,
         webSearchMode: WebSearchMode? = nil,
@@ -290,6 +293,7 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         self.experimentalCompactPromptFile = experimentalCompactPromptFile
         self.includePermissionsInstructions = includePermissionsInstructions
         self.includeAppsInstructions = includeAppsInstructions
+        self.includeCollaborationModeInstructions = includeCollaborationModeInstructions
         self.includeEnvironmentContext = includeEnvironmentContext
         self.experimentalUseUnifiedExecTool = experimentalUseUnifiedExecTool
         self.webSearchMode = webSearchMode
@@ -325,6 +329,10 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         self.experimentalCompactPromptFile = try container.decodeIfPresent(String.self, forKey: .experimentalCompactPromptFile)
         self.includePermissionsInstructions = try container.decodeIfPresent(Bool.self, forKey: .includePermissionsInstructions)
         self.includeAppsInstructions = try container.decodeIfPresent(Bool.self, forKey: .includeAppsInstructions)
+        self.includeCollaborationModeInstructions = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .includeCollaborationModeInstructions
+        )
         self.includeEnvironmentContext = try container.decodeIfPresent(Bool.self, forKey: .includeEnvironmentContext)
         self.experimentalUseUnifiedExecTool = try container.decodeIfPresent(Bool.self, forKey: .experimentalUseUnifiedExecTool)
         self.webSearchMode = try container.decodeIfPresent(WebSearchMode.self, forKey: .webSearchMode)
@@ -366,6 +374,11 @@ public struct ConfigProfile: Codable, Equatable, Sendable {
         try encodeOptional(experimentalCompactPromptFile, into: &container, forKey: .experimentalCompactPromptFile)
         try encodeOptional(includePermissionsInstructions, into: &container, forKey: .includePermissionsInstructions)
         try encodeOptional(includeAppsInstructions, into: &container, forKey: .includeAppsInstructions)
+        try encodeOptional(
+            includeCollaborationModeInstructions,
+            into: &container,
+            forKey: .includeCollaborationModeInstructions
+        )
         try encodeOptional(includeEnvironmentContext, into: &container, forKey: .includeEnvironmentContext)
         try encodeOptional(experimentalUseUnifiedExecTool, into: &container, forKey: .experimentalUseUnifiedExecTool)
         try encodeOptional(webSearchMode, into: &container, forKey: .webSearchMode)

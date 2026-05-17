@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `8123bddb16` (`chore(config)
+  include_collaboration_mode_instructions`). Swift config/profile parsing now
+  accepts `include_collaboration_mode_instructions` with Rust's default-true
+  behavior, projects the resolved value through the config lock surface, and
+  suppresses collaboration-mode developer update blocks when the setting is
+  false.
 - 2026-05-17: rechecked Rust commit `14473c216f` (`Enable plugin hooks by
   default`). Swift already had the Rust feature registry stage/default for
   `plugin_hooks`; runtime hook discovery, `hooks/list`, and `plugin/read` now

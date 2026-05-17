@@ -56,6 +56,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertNil(config.compactPrompt)
         XCTAssertTrue(config.includePermissionsInstructions)
         XCTAssertTrue(config.includeAppsInstructions)
+        XCTAssertTrue(config.includeCollaborationModeInstructions)
         XCTAssertTrue(config.includeSkillInstructions)
         XCTAssertTrue(config.includeEnvironmentContext)
         XCTAssertNil(config.experimentalUseUnifiedExecTool)
@@ -1012,6 +1013,7 @@ final class ConfigLoaderTests: XCTestCase {
         experimental_compact_prompt_file = "compact.md"
         include_permissions_instructions = false
         include_apps_instructions = false
+        include_collaboration_mode_instructions = false
         include_environment_context = false
         experimental_use_unified_exec_tool = true
         experimental_realtime_ws_base_url = "http://127.0.0.1:8011"
@@ -1132,6 +1134,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(config.baseInstructions, "file instructions")
         XCTAssertFalse(config.includePermissionsInstructions)
         XCTAssertFalse(config.includeAppsInstructions)
+        XCTAssertFalse(config.includeCollaborationModeInstructions)
         XCTAssertFalse(config.includeSkillInstructions)
         XCTAssertFalse(config.includeEnvironmentContext)
         XCTAssertEqual(config.experimentalUseUnifiedExecTool, true)
@@ -1896,6 +1899,7 @@ final class ConfigLoaderTests: XCTestCase {
         try """
         include_permissions_instructions = false
         include_apps_instructions = false
+        include_collaboration_mode_instructions = false
         include_environment_context = false
         profile = "chatty"
 
@@ -1904,6 +1908,7 @@ final class ConfigLoaderTests: XCTestCase {
 
         [profiles.chatty]
         include_permissions_instructions = true
+        include_collaboration_mode_instructions = true
         include_environment_context = true
         """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
 
@@ -1911,6 +1916,7 @@ final class ConfigLoaderTests: XCTestCase {
 
         XCTAssertTrue(config.includePermissionsInstructions)
         XCTAssertFalse(config.includeAppsInstructions)
+        XCTAssertTrue(config.includeCollaborationModeInstructions)
         XCTAssertFalse(config.includeSkillInstructions)
         XCTAssertTrue(config.includeEnvironmentContext)
     }
