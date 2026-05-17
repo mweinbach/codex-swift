@@ -20,6 +20,14 @@ Recent upstream audit checkpoint:
   notifications when the setup runner reports a structured native setup
   failure. Native Windows firewall `LocalPolicyModifyState` probing remains
   pending with the broader native Windows setup runtime.
+- 2026-05-17: rechecked Rust commit `3d2a0b5517` (`Scope Windows sandbox
+  write-root capability SIDs`). Swift now carries the portable capability-SID
+  store and active-root selection rules: legacy single-SID files migrate to
+  the Rust JSON shape, per-cwd and per-writable-root capability SIDs are keyed
+  by canonical lowercased paths, active root lists omit stale writable roots,
+  and deny-write path SID selection is limited to overlapping roots when any
+  overlap exists. Native Windows token/ACL application remains pending with
+  the broader Windows sandbox runtime.
 - 2026-05-17: tightened Rust commit `941e7f825e` (`Improve goal completion
   usage reporting`) coverage. Swift now directly pins the Rust
   `completionBudgetReport` boundary where a completed goal with no
