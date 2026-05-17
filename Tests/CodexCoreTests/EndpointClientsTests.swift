@@ -662,11 +662,11 @@ final class EndpointClientsTests: XCTestCase {
         )
 
         let headers = try XCTUnwrap(transport.streamRequests.first?.headers)
-        XCTAssertEqual(headers["session_id"], "thread-123")
+        XCTAssertNil(headers["session_id"])
         XCTAssertEqual(headers["session-id"], "thread-123")
-        XCTAssertEqual(headers["thread_id"], "thread-123")
+        XCTAssertNil(headers["thread_id"])
         XCTAssertEqual(headers["thread-id"], "thread-123")
-        XCTAssertEqual(headers["conversation_id"], "thread-123")
+        XCTAssertNil(headers["conversation_id"])
     }
 
     func testResponsesClientForwardsTurnMetadataHeaderAndClientMetadata() async throws {
@@ -866,9 +866,9 @@ final class EndpointClientsTests: XCTestCase {
         )
 
         XCTAssertEqual(headers["x-client-request-id"], "thread-123")
-        XCTAssertEqual(headers["session_id"], "session-123")
+        XCTAssertNil(headers["session_id"])
         XCTAssertEqual(headers["session-id"], "session-123")
-        XCTAssertEqual(headers["thread_id"], "thread-123")
+        XCTAssertNil(headers["thread_id"])
         XCTAssertEqual(headers["thread-id"], "thread-123")
         XCTAssertEqual(headers["x-codex-turn-metadata"], #"{"turn_id":"turn-123"}"#)
         XCTAssertEqual(headers["x-codex-turn-state"], "state-123")

@@ -16,10 +16,10 @@ final class ChatAPITests: XCTestCase {
         .sessionSource(.subagent(.review))
         .build(provider: provider())
 
-        XCTAssertEqual(request.headers["conversation_id"], "conv-1")
-        XCTAssertEqual(request.headers["thread_id"], "conv-1")
+        XCTAssertNil(request.headers["conversation_id"])
+        XCTAssertNil(request.headers["thread_id"])
         XCTAssertEqual(request.headers["thread-id"], "conv-1")
-        XCTAssertEqual(request.headers["session_id"], "conv-1")
+        XCTAssertNil(request.headers["session_id"])
         XCTAssertEqual(request.headers["session-id"], "conv-1")
         XCTAssertEqual(request.headers["x-openai-subagent"], "review")
     }

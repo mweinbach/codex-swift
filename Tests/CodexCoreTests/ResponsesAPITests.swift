@@ -552,10 +552,10 @@ final class ResponsesAPITests: XCTestCase {
         XCTAssertEqual(items[0]["id"] as? String, "m1")
         XCTAssertNil(items[1]["id"])
 
-        XCTAssertEqual(request.headers["conversation_id"], "conv-1")
-        XCTAssertEqual(request.headers["thread_id"], "conv-1")
+        XCTAssertNil(request.headers["conversation_id"])
+        XCTAssertNil(request.headers["thread_id"])
         XCTAssertEqual(request.headers["thread-id"], "conv-1")
-        XCTAssertEqual(request.headers["session_id"], "conv-1")
+        XCTAssertNil(request.headers["session_id"])
         XCTAssertEqual(request.headers["session-id"], "conv-1")
         XCTAssertEqual(request.headers["x-openai-subagent"], "review")
     }

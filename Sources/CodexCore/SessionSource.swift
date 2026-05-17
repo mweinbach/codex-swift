@@ -440,22 +440,16 @@ public enum CodexRequestHeaders {
     public static func sessionHeaders(sessionID: String?, threadID: String?) -> [String: String] {
         var headers: [String: String] = [:]
         if let sessionID {
-            headers["session_id"] = sessionID
             headers["session-id"] = sessionID
         }
         if let threadID {
-            headers["thread_id"] = threadID
             headers["thread-id"] = threadID
         }
         return headers
     }
 
     public static func conversationHeaders(conversationID: String?) -> [String: String] {
-        var headers = sessionHeaders(sessionID: conversationID, threadID: conversationID)
-        if let conversationID {
-            headers["conversation_id"] = conversationID
-        }
-        return headers
+        sessionHeaders(sessionID: conversationID, threadID: conversationID)
     }
 
     public static func filterForProvider(_ headers: [String: String], provider: APIProvider) -> [String: String] {

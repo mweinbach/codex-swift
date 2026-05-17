@@ -12,6 +12,15 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-16: rechecked Rust commit `7c7b4861d8` (`fix: drop
+  underscored id headers`) against
+  `codex-rs/codex-api/src/requests/headers.rs`, the core client request
+  header tests, websocket handshake tests, and compact remote tests. Swift
+  outbound Chat, Responses, endpoint, and websocket request builders now
+  auto-emit only Rust's hyphenated `session-id`/`thread-id` headers, dropping
+  the older automatic `session_id`/`thread_id`/`conversation_id` aliases while
+  retaining legacy extra-header extraction for callers that still supply those
+  names explicitly.
 - 2026-05-16: rechecked the `view_image` tool schema portion of Rust commit
   `8543e39885` (`Preserve image detail in app-server inputs`). Swift now
   advertises Rust's narrowed `detail` input enum (`high`, `original`) and
