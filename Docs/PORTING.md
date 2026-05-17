@@ -200,6 +200,11 @@ Recent upstream audit checkpoint:
   runtime smoke coverage for thread/start and turn/start, and direct
   permission-profile tests that cover the behavior those Python examples and
   Rust tests exercise through other language layers.
+- 2026-05-17: rechecked Rust commit `32b45a43e2` (`tests: isolate codex
+  home for live cli`) and `codex-rs/utils/home-dir/src/lib.rs`. Swift
+  `CodexHome.find` now rejects a `CODEX_HOME` override that points at an
+  existing file instead of accepting it as a directory, preserving Rust's
+  fatal file-vs-directory boundary for isolated CLI/test homes.
 - 2026-05-17: rechecked Rust commit `b200dd1b6f` (`exec-server:
   support auth-backed remote executor registration`). Swift remote
   `exec-server` registration now matches Rust's current registry wire shape:

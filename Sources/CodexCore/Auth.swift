@@ -438,6 +438,7 @@ private enum SystemAuthKeyringError: Error, CustomStringConvertible {
 public enum CodexHomeError: Error, Equatable, CustomStringConvertible, Sendable {
     case homeDirectoryNotFound
     case codexHomeDoesNotExist(String)
+    case codexHomeNotDirectory(String)
 
     public var description: String {
         switch self {
@@ -445,6 +446,8 @@ public enum CodexHomeError: Error, Equatable, CustomStringConvertible, Sendable 
             return "Could not find home directory"
         case let .codexHomeDoesNotExist(path):
             return "CODEX_HOME path does not exist: \(path)"
+        case let .codexHomeNotDirectory(path):
+            return "CODEX_HOME path is not a directory: \(path)"
         }
     }
 }
@@ -452,8 +455,12 @@ public enum CodexHomeError: Error, Equatable, CustomStringConvertible, Sendable 
 public enum CodexHome {
     public static func find(environment: [String: String] = ProcessInfo.processInfo.environment) throws -> URL {
         if let raw = environment["CODEX_HOME"], !raw.isEmpty {
-            guard FileManager.default.fileExists(atPath: raw) else {
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: raw, isDirectory: &isDirectory) else {
                 throw CodexHomeError.codexHomeDoesNotExist(raw)
+            }
+            guard isDirectory.boolValue else {
+                throw CodexHomeError.codexHomeNotDirectory(raw)
             }
             return URL(fileURLWithPath: raw, isDirectory: true).resolvingSymlinksInPath()
         }

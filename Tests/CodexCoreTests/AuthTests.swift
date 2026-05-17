@@ -650,6 +650,16 @@ final class AuthTests: XCTestCase {
         }
     }
 
+    func testCodexHomeRejectsFileEnvironmentPathLikeRust() throws {
+        let dir = try AuthTemporaryDirectory()
+        let file = dir.url.appendingPathComponent("codex-home.txt")
+        try "not a directory".write(to: file, atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexHome.find(environment: ["CODEX_HOME": file.path])) { error in
+            XCTAssertEqual(error as? CodexHomeError, .codexHomeNotDirectory(file.path))
+        }
+    }
+
     private static func writeAuth(
         to codexHome: URL,
         accessToken: String,
