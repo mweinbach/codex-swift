@@ -12,6 +12,13 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust branch commit `acdb0c3a07` (`Remove
+  personality feature switch`). Swift now treats `features.personality` as a
+  removed compatibility key that stays enabled by default and is ignored when
+  config attempts to toggle it, defaults missing runtime personality to
+  `pragmatic`, and removes the stale personality-feature gate from
+  settings-update prompt construction while keeping explicit `personality = ...`
+  config and turn overrides intact.
 - 2026-05-16: ported the reusable stream-output portion of Rust commit
   `17cd321c32` (`Wire turn item contributors into stream output`). Swift
   `StreamEventUtils` now exposes a documented turn-item contributor hook for

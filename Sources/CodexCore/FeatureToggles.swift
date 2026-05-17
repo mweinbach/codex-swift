@@ -161,7 +161,8 @@ public struct FeatureStates: Equatable, Sendable {
         "js_repl_tools_only",
         "remote_control",
         "apply_patch_freeform",
-        "image_detail_original"
+        "image_detail_original",
+        "personality"
     ]
 
     public init(enabled: Set<FeatureKey> = [], legacyUsages: [FeatureLegacyUsage] = []) {
@@ -182,6 +183,10 @@ public struct FeatureStates: Equatable, Sendable {
         legacyUsages
     }
 
+    public static func ignoresConfigKey(_ key: String) -> Bool {
+        removedNoOpConfigKeys.contains(key)
+    }
+
     public func isEnabled(_ feature: FeatureKey) -> Bool {
         enabled.contains(feature)
     }
@@ -196,7 +201,7 @@ public struct FeatureStates: Equatable, Sendable {
 
     public mutating func apply(featureValues: [String: Bool]) {
         for (key, isEnabled) in featureValues {
-            if Self.removedNoOpConfigKeys.contains(key) {
+            if Self.ignoresConfigKey(key) {
                 continue
             }
             guard let feature = FeatureRegistry.feature(forKey: key) else { continue }
@@ -364,7 +369,7 @@ public enum FeatureRegistry {
         FeatureSpec(id: .collaborationModes, key: "collaboration_modes", stage: .removed, defaultEnabled: true),
         FeatureSpec(id: .toolCallMcpElicitation, key: "tool_call_mcp_elicitation", stage: .stable, defaultEnabled: true),
         FeatureSpec(id: .authElicitation, key: "auth_elicitation", stage: .underDevelopment, defaultEnabled: false),
-        FeatureSpec(id: .personality, key: "personality", stage: .stable, defaultEnabled: true),
+        FeatureSpec(id: .personality, key: "personality", stage: .removed, defaultEnabled: true),
         FeatureSpec(id: .artifact, key: "artifact", stage: .underDevelopment, defaultEnabled: false),
         FeatureSpec(id: .fastMode, key: "fast_mode", stage: .stable, defaultEnabled: true),
         FeatureSpec(id: .realtimeConversation, key: "realtime_conversation", stage: .underDevelopment, defaultEnabled: false),

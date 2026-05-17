@@ -43,7 +43,7 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertNil(config.zshPath)
         XCTAssertNil(config.modelCatalogJSON)
         XCTAssertNil(config.modelCatalog)
-        XCTAssertNil(config.personality)
+        XCTAssertEqual(config.personality, .pragmatic)
         XCTAssertEqual(config.realtimeAudio, RealtimeAudioConfig())
         XCTAssertEqual(config.realtime, RealtimeConfig())
         XCTAssertEqual(config.cliAuthCredentialsStoreMode, .file)

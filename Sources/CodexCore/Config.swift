@@ -1278,6 +1278,7 @@ public enum CodexConfigLoader {
             .standardizedFileURL
             .path
         config.modelCatalog = try loadModelCatalog(from: config.modelCatalogJSON)
+        config.personality = config.personality ?? .pragmatic
         try applyRequirements(requirements, to: &config)
         config.sandboxPolicy = try parsed.resolvedSandboxPolicy(
             codexHome: codexHome,

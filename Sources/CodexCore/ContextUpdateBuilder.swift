@@ -13,7 +13,6 @@ public enum ContextUpdateBuilder {
         requestPermissionsToolEnabled: Bool = false,
         previousModel: String? = nil,
         currentModelInfo: ModelInfo? = nil,
-        personalityFeatureEnabled: Bool = true,
         previousRealtimeActive: Bool? = nil,
         realtimeStartInstructions: String? = nil
     ) -> [ResponseItem] {
@@ -44,8 +43,7 @@ public enum ContextUpdateBuilder {
             buildPersonalityUpdateText(
                 previous: previous,
                 current: current,
-                currentModelInfo: currentModelInfo,
-                personalityFeatureEnabled: personalityFeatureEnabled
+                currentModelInfo: currentModelInfo
             )
         ].compactMap(\.self)
 
@@ -167,11 +165,9 @@ public enum ContextUpdateBuilder {
     public static func buildPersonalityUpdateText(
         previous: TurnContextItem?,
         current: TurnContextItem,
-        currentModelInfo: ModelInfo?,
-        personalityFeatureEnabled: Bool
+        currentModelInfo: ModelInfo?
     ) -> String? {
-        guard personalityFeatureEnabled,
-              let previous,
+        guard let previous,
               current.model == previous.model,
               let personality = current.personality,
               current.personality != previous.personality,

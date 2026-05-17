@@ -29420,7 +29420,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: configFile, encoding: .utf8), #"model = "user""#)
     }
 
-    func testConfigValueWriteRejectsManagedFeatureRequirementConflictLikeRust() throws {
+    func testConfigValueWriteIgnoresRemovedFeatureRequirementConflictLikeRust() throws {
         let temp = try TemporaryDirectory()
         let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
         let requirementsPath = temp.url.appendingPathComponent("requirements.toml", isDirectory: false)
@@ -29438,15 +29438,17 @@ final class CodexAppServerTests: XCTestCase {
             )
         )
 
-        let error = try XCTUnwrap(response["error"] as? [String: Any])
-        XCTAssertEqual(error["code"] as? Int, -32600)
-        XCTAssertTrue((error["message"] as? String)?.contains("Invalid configuration: invalid value for `features`: `features.personality=false`") == true)
-        let data = try XCTUnwrap(error["data"] as? [String: Any])
-        XCTAssertEqual(data["config_write_error_code"] as? String, "configValidationError")
-        XCTAssertEqual(try String(contentsOf: configFile, encoding: .utf8), "")
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["status"] as? String, "ok")
+        XCTAssertEqual(try String(contentsOf: configFile, encoding: .utf8), """
+
+        [features]
+        personality = false
+
+        """)
     }
 
-    func testConfigValueWriteRejectsManagedProfileFeatureRequirementConflictLikeRust() throws {
+    func testConfigValueWriteIgnoresRemovedProfileFeatureRequirementConflictLikeRust() throws {
         let temp = try TemporaryDirectory()
         let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
         let requirementsPath = temp.url.appendingPathComponent("requirements.toml", isDirectory: false)
@@ -29464,12 +29466,14 @@ final class CodexAppServerTests: XCTestCase {
             )
         )
 
-        let error = try XCTUnwrap(response["error"] as? [String: Any])
-        XCTAssertEqual(error["code"] as? Int, -32600)
-        XCTAssertTrue((error["message"] as? String)?.contains("Invalid configuration: invalid value for `features`: `profiles.enterprise.features.personality=false`") == true)
-        let data = try XCTUnwrap(error["data"] as? [String: Any])
-        XCTAssertEqual(data["config_write_error_code"] as? String, "configValidationError")
-        XCTAssertEqual(try String(contentsOf: configFile, encoding: .utf8), "")
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["status"] as? String, "ok")
+        XCTAssertEqual(try String(contentsOf: configFile, encoding: .utf8), """
+
+        [profiles.enterprise.features]
+        personality = false
+
+        """)
     }
 
     func testConfigValueWriteReportsManagedOverrideLikeRust() throws {

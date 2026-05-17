@@ -375,7 +375,7 @@ final class ContextUpdateBuilderTests: XCTestCase {
         ])
     }
 
-    func testBuildSettingsUpdateItemsOmitsPersonalitySpecWhenFeatureDisabledOrModelChangedLikeRust() {
+    func testBuildSettingsUpdateItemsOmitsPersonalitySpecWhenModelChangedLikeRust() {
         let previous = contextItem(cwd: "/repo", model: "old-model", personality: .friendly)
         let current = contextItem(cwd: "/repo", model: "new-model", personality: .pragmatic)
         let modelInfo = modelInfo(
@@ -391,13 +391,6 @@ final class ContextUpdateBuilderTests: XCTestCase {
             )
         )
 
-        let disabledItems = ContextUpdateBuilder.buildSettingsUpdateItems(
-            previous: previous,
-            current: contextItem(cwd: "/repo", model: "old-model", personality: .pragmatic),
-            shell: shell(),
-            currentModelInfo: modelInfo,
-            personalityFeatureEnabled: false
-        )
         let changedModelItems = ContextUpdateBuilder.buildSettingsUpdateItems(
             previous: previous,
             current: current,
@@ -405,7 +398,6 @@ final class ContextUpdateBuilderTests: XCTestCase {
             currentModelInfo: modelInfo
         )
 
-        XCTAssertEqual(developerTexts(in: disabledItems), [])
         XCTAssertEqual(developerTexts(in: changedModelItems), [])
     }
 }

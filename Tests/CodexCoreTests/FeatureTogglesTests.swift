@@ -37,7 +37,7 @@ final class FeatureTogglesTests: XCTestCase {
             "stable", "stable", "stable", "stable", "stable", "under development", "stable",
             "experimental", "stable", "stable", "under development", "experimental", "removed",
             "under development", "stable", "experimental", "removed", "stable", "under development",
-            "stable", "under development", "stable", "under development", "removed", "removed",
+            "removed", "under development", "stable", "under development", "removed", "removed",
             "removed", "experimental", "removed", "removed", "removed", "under development",
             "under development", "stable"
         ])
@@ -99,7 +99,8 @@ final class FeatureTogglesTests: XCTestCase {
             "js_repl_tools_only": true,
             "remote_control": true,
             "apply_patch_freeform": true,
-            "image_detail_original": true
+            "image_detail_original": true,
+            "personality": false
         ])
 
         XCTAssertTrue(states.isEnabled(.tuiAppServer))
@@ -109,6 +110,14 @@ final class FeatureTogglesTests: XCTestCase {
         XCTAssertFalse(states.isEnabled(.remoteControl))
         XCTAssertFalse(states.isEnabled(.applyPatchFreeform))
         XCTAssertFalse(states.isEnabled(.imageDetailOriginal))
+        XCTAssertTrue(states.isEnabled(.personality))
+    }
+
+    func testPersonalityIsRemovedAndEnabledByDefaultLikeRust() {
+        let spec = FeatureRegistry.specs.first { $0.id == .personality }
+        XCTAssertEqual(spec?.stage, .removed)
+        XCTAssertEqual(spec?.defaultEnabled, true)
+        XCTAssertTrue(FeatureStates.withDefaults().isEnabled(.personality))
     }
 
     func testUnknownFeatureThrows() {

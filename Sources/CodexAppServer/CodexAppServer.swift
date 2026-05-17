@@ -23775,6 +23775,9 @@ public enum CodexAppServer {
             return
         }
         for feature in features.keys.sorted() {
+            guard !FeatureStates.ignoresConfigKey(feature) else {
+                continue
+            }
             guard let required = featureRequirements[feature],
                   case let .bool(enabled)? = features[feature],
                   required != enabled
