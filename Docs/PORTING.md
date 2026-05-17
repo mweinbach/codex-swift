@@ -17,6 +17,12 @@ Recent upstream audit checkpoint:
   `OAI-Product-Sku: codex` header alongside bearer auth, ChatGPT account id,
   and JSON content type, so task/detail fetches identify the Codex product the
   same way as the Rust `chatgpt_get_request` helper.
+- 2026-05-17: rechecked Rust commit `6a331a66eb` (`feat(app-server):
+  update remote control APIs for better UX`). Swift `remoteControl/status/read`
+  preserves Rust's unit-option request boundary by accepting omitted or
+  explicit `null` params while rejecting object params, and returns the
+  Rust-shaped status payload with `serverName`, `installationId`, and explicit
+  `environmentId: null`.
 - 2026-05-17: rechecked Rust commit `79c65f816c` (`[codex] Filter legacy
   warning messages during compaction`). Swift contextual user-fragment
   detection now recognizes the removed unified-exec process-limit warning,

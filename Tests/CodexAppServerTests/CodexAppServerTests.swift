@@ -22068,6 +22068,29 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(result["environmentId"] is NSNull)
     }
 
+    func testRemoteControlStatusReadAcceptsExplicitNullParamsLikeRustUnitOption() throws {
+        let temp = try TemporaryDirectory()
+        let response = try appServerResponse(
+            #"{"id":1,"method":"remoteControl/status/read","params":null}"#,
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                remoteControlStatusSnapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot(
+                    status: .disabled,
+                    serverName: "server-123",
+                    installationID: "install-123",
+                    environmentID: nil
+                )
+            ),
+            experimentalAPIEnabled: true
+        )
+
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["status"] as? String, "disabled")
+        XCTAssertEqual(result["serverName"] as? String, "server-123")
+        XCTAssertEqual(result["installationId"] as? String, "install-123")
+        XCTAssertTrue(result["environmentId"] is NSNull)
+    }
+
     func testRemoteControlEnableAndDisableReturnRustStatusPayloads() throws {
         let temp = try TemporaryDirectory()
         let stateStore = try createAppServerStateStore(codexHome: temp.url)
