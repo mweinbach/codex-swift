@@ -1936,6 +1936,10 @@ public enum AppServerProtocol {
             )
         }
 
+        public var networkApprovalHistoryTarget: String? {
+            networkApprovalContext?.approvalHistoryTarget(command: command)
+        }
+
         private enum CodingKeys: String, CodingKey {
             case threadID = "threadId"
             case turnID = "turnId"

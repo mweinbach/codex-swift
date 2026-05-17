@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `5a02962519` (`fix(tui): render network
+  approval history by target`). Swift does not have the Rust TUI history-cell
+  layer, but the shared approval protocol now carries the same reusable target
+  derivation rule: preserve generated `network-access <target>` command
+  targets, including non-default ports, and fall back to Rust's
+  `protocol://host` spelling for network approval contexts.
 - 2026-05-17: rechecked upstream Rust commit `061a614d85`
   (`multiagent: trim model-visible description, cap to 5 models`). Swift
   `spawn_agent` tool specs now expose Rust's `service_tier` override field and

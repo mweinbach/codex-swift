@@ -224,6 +224,50 @@ final class ApprovalsTests: XCTestCase {
         ).networkApprovalContext)
     }
 
+    func testNetworkApprovalHistoryTargetPreservesRustNetworkAccessCommandTarget() {
+        let context = NetworkApprovalContext(host: "example.com", protocol: .https)
+
+        XCTAssertEqual(
+            context.approvalHistoryTarget(command: ["network-access", "https://example.com:8443"]),
+            "https://example.com:8443"
+        )
+        XCTAssertEqual(
+            context.approvalHistoryTarget(command: ["network-access https://example.com:8443"]),
+            "https://example.com:8443"
+        )
+    }
+
+    func testNetworkApprovalHistoryTargetFallsBackToProtocolHostLikeRust() {
+        XCTAssertEqual(
+            NetworkApprovalContext(host: "example.com", protocol: .http)
+                .approvalHistoryTarget(command: nil as String?),
+            "http://example.com"
+        )
+        XCTAssertEqual(
+            NetworkApprovalContext(host: "example.com", protocol: .socks5Tcp)
+                .approvalHistoryTarget(command: ["network-access", ""]),
+            "socks5-tcp://example.com"
+        )
+        XCTAssertEqual(
+            NetworkApprovalContext(host: "example.com", protocol: .socks5Udp)
+                .approvalHistoryTarget(command: ["curl", "https://example.com"]),
+            "socks5-udp://example.com"
+        )
+    }
+
+    func testExecApprovalRequestEventExposesNetworkApprovalHistoryTargetLikeRust() {
+        let event = ExecApprovalRequestEvent(
+            callID: "call-1",
+            startedAtMilliseconds: 42,
+            command: ["network-access", "socks5-tcp://example.com:1080"],
+            cwd: "/tmp",
+            networkApprovalContext: NetworkApprovalContext(host: "example.com", protocol: .socks5Tcp),
+            parsedCmd: []
+        )
+
+        XCTAssertEqual(event.networkApprovalHistoryTarget, "socks5-tcp://example.com:1080")
+    }
+
     func testNetworkPolicyAmendmentMapsExecPolicyRuleLikeRust() {
         let amendment = NetworkPolicyAmendment(host: "example.com", action: .deny)
         let mapped = amendment.execPolicyNetworkRuleAmendment(

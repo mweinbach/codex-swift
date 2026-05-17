@@ -105,6 +105,41 @@ public struct NetworkApprovalContext: Equatable, Codable, Sendable {
         self.host = host
         self.protocol = `protocol`
     }
+
+    public var defaultApprovalTarget: String {
+        "\(`protocol`.approvalTargetScheme)://\(host)"
+    }
+
+    public func approvalHistoryTarget(command: [String]) -> String {
+        Self.networkAccessCommandTarget(command) ?? defaultApprovalTarget
+    }
+
+    public func approvalHistoryTarget(command: String?) -> String {
+        Self.networkAccessCommandTarget(command) ?? defaultApprovalTarget
+    }
+
+    public static func networkAccessCommandTarget(_ command: [String]) -> String? {
+        if command.count == 2,
+           command[0] == "network-access",
+           !command[1].isEmpty {
+            return command[1]
+        }
+        if command.count == 1 {
+            return networkAccessCommandTarget(command[0])
+        }
+        return nil
+    }
+
+    public static func networkAccessCommandTarget(_ command: String?) -> String? {
+        guard let command,
+              command.hasPrefix("network-access ")
+        else {
+            return nil
+        }
+
+        let target = String(command.dropFirst("network-access ".count))
+        return target.isEmpty ? nil : target
+    }
 }
 
 public struct NetworkPolicyDecisionPayload: Equatable, Codable, Sendable {
@@ -268,6 +303,19 @@ private extension NetworkRuleProtocol {
 }
 
 private extension NetworkApprovalProtocol {
+    var approvalTargetScheme: String {
+        switch self {
+        case .http:
+            return "http"
+        case .https:
+            return "https"
+        case .socks5Tcp:
+            return "socks5-tcp"
+        case .socks5Udp:
+            return "socks5-udp"
+        }
+    }
+
     var execPolicyJustificationLabel: String {
         switch self {
         case .http:
@@ -425,6 +473,10 @@ public struct ExecApprovalRequestEvent: Equatable, Codable, Sendable {
 
     public var effectiveApprovalID: String {
         approvalID ?? callID
+    }
+
+    public var networkApprovalHistoryTarget: String? {
+        networkApprovalContext?.approvalHistoryTarget(command: command)
     }
 
     public var effectiveAvailableDecisions: [ReviewDecision] {

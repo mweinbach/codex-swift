@@ -406,6 +406,7 @@ final class AppServerProtocolTests: XCTestCase {
                 .cancel
             ]
         )
+        XCTAssertEqual(params.networkApprovalHistoryTarget, "https://example.com")
         let request = AppServerProtocol.ServerRequest.commandExecutionRequestApproval(
             requestID: .integer(4),
             params: params
