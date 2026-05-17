@@ -240,6 +240,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let activeProfile: String?
     public let feedback: CodexFeedback
     public let feedbackUploadTransport: any FeedbackUploadTransport
+    public let doctorFeedbackReportProvider: AppServerDoctorFeedbackReportProvider
     public let acceptedLineAnalyticsUploader: any AcceptedLineAnalyticsUploading
     public let codexAnalyticsUploader: any CodexAnalyticsUploading
     public let accountRateLimitsFetcher: any AccountRateLimitsFetching
@@ -280,6 +281,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         activeProfile: String? = nil,
         feedback: CodexFeedback = CodexFeedback(),
         feedbackUploadTransport: any FeedbackUploadTransport = URLSessionFeedbackUploadTransport(),
+        doctorFeedbackReportProvider: @escaping AppServerDoctorFeedbackReportProvider = liveAppServerDoctorFeedbackReport,
         acceptedLineAnalyticsUploader: (any AcceptedLineAnalyticsUploading)? = nil,
         codexAnalyticsUploader: (any CodexAnalyticsUploading)? = nil,
         accountRateLimitsFetcher: any AccountRateLimitsFetching = URLSessionAccountRateLimitsFetcher(),
@@ -318,6 +320,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         self.activeProfile = activeProfile
         self.feedback = feedback
         self.feedbackUploadTransport = feedbackUploadTransport
+        self.doctorFeedbackReportProvider = doctorFeedbackReportProvider
         self.acceptedLineAnalyticsUploader = acceptedLineAnalyticsUploader ?? URLSessionAcceptedLineAnalyticsUploader(
             codexHome: codexHome,
             authCredentialsStoreMode: authCredentialsStoreMode,
@@ -19403,7 +19406,7 @@ public enum CodexAppServer {
         let threadID = try rustOptionalStringParam(params?["threadId"])
         let includeLogs = try rustRequiredBoolParam(params?["includeLogs"], field: "includeLogs")
         let extraLogFiles = try rustStringArrayParam(params?["extraLogFiles"]) ?? []
-        let tags = try rustStringMapParam(params?["tags"])
+        var uploadTags = try rustStringMapParam(params?["tags"]) ?? [:]
         let conversationID: ConversationId?
         if let threadID {
             do {
@@ -19428,13 +19431,26 @@ public enum CodexAppServer {
             rolloutPath = nil
         }
 
+        var extraAttachments: [FeedbackAttachment] = []
+        if includeLogs,
+           let doctorReport = try runAsyncBlocking({ await configuration.doctorFeedbackReportProvider() })
+        {
+            extraAttachments.append(doctorReport.attachment)
+            for (key, value) in doctorReport.tags where uploadTags[key] == nil {
+                uploadTags[key] = value
+            }
+        }
+        let finalUploadTags = uploadTags.isEmpty ? nil : uploadTags
+        let finalExtraAttachments = extraAttachments
+
         try runAsyncBlocking {
             try await snapshot.uploadFeedback(
                 classification: classification,
                 reason: reason,
-                tags: tags,
+                tags: finalUploadTags,
                 includeLogs: includeLogs,
                 rolloutPath: rolloutPath,
+                extraAttachments: finalExtraAttachments,
                 extraAttachmentPaths: extraLogFiles.map { URL(fileURLWithPath: $0, isDirectory: false) },
                 sessionSource: configuration.sessionSource,
                 accountID: try currentAuth(configuration: configuration)?.accountID,

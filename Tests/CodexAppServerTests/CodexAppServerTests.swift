@@ -24124,6 +24124,137 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(envelope.contains("extra diagnostic log"))
     }
 
+    func testFeedbackUploadIncludesDoctorReportWhenLogsAreIncludedLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let feedback = CodexFeedback()
+        feedback.makeWriter().write(Data("captured logs".utf8))
+        let transport = AppServerRecordingFeedbackUploadTransport()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            feedback: feedback,
+            feedbackUploadTransport: transport,
+            doctorFeedbackReportProvider: {
+                AppServerDoctorFeedbackReport(
+                    attachment: FeedbackAttachment(
+                        filename: "codex-doctor-report.json",
+                        contentType: "application/json",
+                        data: Data(#"{"overallStatus":"fail"}"#.utf8)
+                    ),
+                    tags: [
+                        "doctor_overall_status": "fail",
+                        "doctor_fail_count": "1",
+                        "surface": "doctor"
+                    ]
+                )
+            }
+        )
+
+        _ = try appServerResponse(
+            #"{"id":1,"method":"feedback/upload","params":{"classification":"bug","includeLogs":true,"tags":{"surface":"client"}}}"#,
+            configuration: configuration
+        )
+
+        let requests = await transport.requests
+        XCTAssertEqual(requests.count, 1)
+        let envelope = String(decoding: requests[0].envelope, as: UTF8.self)
+        XCTAssertTrue(envelope.contains(#""filename":"codex-doctor-report.json""#))
+        XCTAssertTrue(envelope.contains(#""content_type":"application\/json""#))
+        XCTAssertTrue(envelope.contains(#""doctor_fail_count":"1""#))
+        XCTAssertTrue(envelope.contains(#""doctor_overall_status":"fail""#))
+        XCTAssertTrue(envelope.contains(#""surface":"client""#))
+        XCTAssertFalse(envelope.contains(#""surface":"doctor""#))
+    }
+
+    func testFeedbackUploadSkipsDoctorReportWhenLogsAreExcludedLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let transport = AppServerRecordingFeedbackUploadTransport()
+        let configuration = testConfiguration(
+            codexHome: temp.url,
+            feedbackUploadTransport: transport,
+            doctorFeedbackReportProvider: {
+                AppServerDoctorFeedbackReport(
+                    attachment: FeedbackAttachment(
+                        filename: "codex-doctor-report.json",
+                        contentType: "application/json",
+                        data: Data(#"{"overallStatus":"fail"}"#.utf8)
+                    ),
+                    tags: ["doctor_overall_status": "fail"]
+                )
+            }
+        )
+
+        _ = try appServerResponse(
+            #"{"id":1,"method":"feedback/upload","params":{"classification":"bug","includeLogs":false}}"#,
+            configuration: configuration
+        )
+
+        let requests = await transport.requests
+        XCTAssertEqual(requests.count, 1)
+        let envelope = String(decoding: requests[0].envelope, as: UTF8.self)
+        XCTAssertFalse(envelope.contains("codex-doctor-report.json"))
+        XCTAssertFalse(envelope.contains("doctor_overall_status"))
+    }
+
+    func testDoctorFeedbackReportParsesJsonAndDerivesTagsLikeRust() throws {
+        let output = AppServerDoctorProcessOutput(
+            stdout: """
+            status line
+            {"overallStatus":"fail","checks":{"runtime.provenance":{"id":"runtime.provenance","status":"ok"},"websocket.reachability":{"id":"websocket.reachability","status":"warning"},"auth.credentials":{"id":"auth.credentials","status":"fail"}}}
+            """,
+            stderr: "",
+            exitCode: 0
+        )
+
+        let report = try XCTUnwrap(appServerDoctorFeedbackReport(
+            executable: URL(fileURLWithPath: "/bin/codex"),
+            runProcess: { _, _, _ in output }
+        ))
+
+        XCTAssertEqual(report.attachment.filename, "codex-doctor-report.json")
+        XCTAssertEqual(report.attachment.contentType, "application/json")
+        XCTAssertEqual(report.tags["doctor_overall_status"], "fail")
+        XCTAssertEqual(report.tags["doctor_ok_count"], "1")
+        XCTAssertEqual(report.tags["doctor_warning_count"], "1")
+        XCTAssertEqual(report.tags["doctor_fail_count"], "1")
+        XCTAssertEqual(report.tags["doctor_warning_checks"], "websocket.reachability")
+        XCTAssertEqual(report.tags["doctor_failed_checks"], "auth.credentials")
+    }
+
+    func testDoctorFeedbackReportSupportsLegacyArrayChecksAndTruncatesTagsLikeRust() throws {
+        let longStatus = String(repeating: "x", count: 300)
+        let output = AppServerDoctorProcessOutput(
+            stdout: """
+            {"overallStatus":"\(longStatus)","checks":[{"status":"warning"},{"id":"auth.credentials","status":"fail"},{"id":"ignored","status":"skipped"}]}
+            """,
+            stderr: "",
+            exitCode: 0
+        )
+
+        let report = try XCTUnwrap(appServerDoctorFeedbackReport(
+            executable: URL(fileURLWithPath: "/bin/codex"),
+            runProcess: { _, _, _ in output }
+        ))
+
+        XCTAssertEqual(report.tags["doctor_warning_checks"], "unknown")
+        XCTAssertEqual(report.tags["doctor_failed_checks"], "auth.credentials")
+        XCTAssertEqual(report.tags["doctor_ok_count"], "0")
+        XCTAssertEqual(report.tags["doctor_warning_count"], "1")
+        XCTAssertEqual(report.tags["doctor_fail_count"], "1")
+        XCTAssertEqual(report.tags["doctor_overall_status"]?.count, 256)
+        XCTAssertTrue(report.tags["doctor_overall_status"]?.hasSuffix("...") == true)
+    }
+
+    func testDoctorFeedbackReportSkipsMissingOrInvalidJsonLikeRust() {
+        XCTAssertNil(appServerDoctorFeedbackReport(
+            executable: URL(fileURLWithPath: "/bin/codex"),
+            runProcess: { _, _, _ in AppServerDoctorProcessOutput(stdout: "no json", stderr: "boom", exitCode: 1) }
+        ))
+        XCTAssertNil(appServerDoctorFeedbackReport(
+            executable: URL(fileURLWithPath: "/bin/codex"),
+            runProcess: { _, _, _ in AppServerDoctorProcessOutput(stdout: "{broken", stderr: "", exitCode: 0) }
+        ))
+    }
+
     func testFeedbackUploadRejectsInvalidThreadID() throws {
         let temp = try TemporaryDirectory()
         let transport = AppServerRecordingFeedbackUploadTransport()
@@ -33467,6 +33598,7 @@ final class CodexAppServerTests: XCTestCase {
         sessionSource: SessionSource = .mcp,
         feedback: CodexFeedback = CodexFeedback(),
         feedbackUploadTransport: any FeedbackUploadTransport = URLSessionFeedbackUploadTransport(),
+        doctorFeedbackReportProvider: @escaping AppServerDoctorFeedbackReportProvider = { nil },
         acceptedLineAnalyticsUploader: any AcceptedLineAnalyticsUploading = DisabledAcceptedLineAnalyticsUploader(),
         codexAnalyticsUploader: any CodexAnalyticsUploading = DisabledCodexAnalyticsUploader(),
         accountRateLimitsFetcher: any AccountRateLimitsFetching = URLSessionAccountRateLimitsFetcher(),
@@ -33507,6 +33639,7 @@ final class CodexAppServerTests: XCTestCase {
             activeProfile: activeProfile,
             feedback: feedback,
             feedbackUploadTransport: feedbackUploadTransport,
+            doctorFeedbackReportProvider: doctorFeedbackReportProvider,
             acceptedLineAnalyticsUploader: acceptedLineAnalyticsUploader,
             codexAnalyticsUploader: codexAnalyticsUploader,
             accountRateLimitsFetcher: accountRateLimitsFetcher,

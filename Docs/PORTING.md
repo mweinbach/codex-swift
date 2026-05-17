@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `9798eb377a` (`feat(cli): add codex
+  doctor diagnostics`) for the app-server feedback path. Swift feedback uploads
+  can now carry in-memory attachments, and `feedback/upload` includes the
+  best-effort `codex doctor --json` report plus Rust-compatible
+  `doctor_*` tags only when logs are included, without overriding
+  client-provided tags.
 - 2026-05-17: tightened Rust commit `9025550709`
   (`app-server-protocol: remove PermissionProfile from API`) against the
   shared core permission sidecar. Swift `ActivePermissionProfile` now preserves

@@ -122,6 +122,7 @@ public struct CodexLogSnapshot: Equatable, Sendable {
         tags clientTags: [String: String]? = nil,
         includeLogs: Bool,
         rolloutPath: URL? = nil,
+        extraAttachments: [FeedbackAttachment] = [],
         extraAttachmentPaths: [URL] = [],
         sessionSource: SessionSource? = nil,
         accountID: String? = nil,
@@ -195,6 +196,15 @@ public struct CodexLogSnapshot: Equatable, Sendable {
                 to: &envelope
             )
         }
+        for attachment in extraAttachments {
+            try appendItem(
+                payload: attachment.data,
+                type: "attachment",
+                filename: attachment.filename,
+                contentType: attachment.contentType,
+                to: &envelope
+            )
+        }
         for path in extraAttachmentPaths {
             guard let data = try? Data(contentsOf: path) else {
                 continue
@@ -223,6 +233,7 @@ public struct CodexLogSnapshot: Equatable, Sendable {
         tags: [String: String]? = nil,
         includeLogs: Bool,
         rolloutPath: URL? = nil,
+        extraAttachments: [FeedbackAttachment] = [],
         extraAttachmentPaths: [URL] = [],
         sessionSource: SessionSource? = nil,
         accountID: String? = nil,
@@ -235,6 +246,7 @@ public struct CodexLogSnapshot: Equatable, Sendable {
             tags: tags,
             includeLogs: includeLogs,
             rolloutPath: rolloutPath,
+            extraAttachments: extraAttachments,
             extraAttachmentPaths: extraAttachmentPaths,
             sessionSource: sessionSource,
             accountID: accountID,
@@ -296,6 +308,18 @@ public struct CodexLogSnapshot: Equatable, Sendable {
 
     private func jsonData(_ object: [String: Any]) throws -> Data {
         try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+    }
+}
+
+public struct FeedbackAttachment: Equatable, Sendable {
+    public let filename: String
+    public let contentType: String?
+    public let data: Data
+
+    public init(filename: String, contentType: String? = nil, data: Data) {
+        self.filename = filename
+        self.contentType = contentType
+        self.data = data
     }
 }
 

@@ -110,6 +110,27 @@ final class FeedbackTests: XCTestCase {
         XCTAssertTrue(envelope.contains("\nrollout\n"))
     }
 
+    func testUploadRequestAddsInMemoryAttachmentsLikeRustFeedback() throws {
+        let snapshot = CodexLogSnapshot(bytes: Array("logs".utf8), threadID: "thread-attachment")
+        let request = try snapshot.makeUploadRequest(
+            classification: "bug",
+            includeLogs: true,
+            extraAttachments: [
+                FeedbackAttachment(
+                    filename: "codex-doctor-report.json",
+                    contentType: "application/json",
+                    data: Data(#"{"overallStatus":"ok"}"#.utf8)
+                )
+            ],
+            eventID: "0123456789abcdef0123456789abcdef"
+        )
+
+        let envelope = String(decoding: request.envelope, as: UTF8.self)
+        XCTAssertTrue(envelope.contains(#""filename":"codex-doctor-report.json""#))
+        XCTAssertTrue(envelope.contains(#""content_type":"application\/json""#))
+        XCTAssertTrue(envelope.contains(#"{"overallStatus":"ok"}"#))
+    }
+
     func testUploadRequestOmitsLogsAndUsesInfoLevelForOtherClassifications() throws {
         let snapshot = CodexLogSnapshot(bytes: Array("logs".utf8), threadID: "thread-2")
         let request = try snapshot.makeUploadRequest(
