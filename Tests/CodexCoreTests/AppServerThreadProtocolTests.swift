@@ -3116,6 +3116,35 @@ final class AppServerThreadProtocolTests: XCTestCase {
                 "completionBudgetReport": ThreadGoalToolResponse.completionBudgetReportMessage
             ]
         )
+
+        let timeOnlyGoal = ThreadGoal(
+            threadID: threadID,
+            objective: "Keep polishing",
+            status: .complete,
+            tokenBudget: nil,
+            tokensUsed: 3_250,
+            timeUsedSeconds: 75,
+            createdAt: 1,
+            updatedAt: 2
+        )
+
+        try XCTAssertJSONObjectEqual(
+            ThreadGoalToolResponse(goal: timeOnlyGoal, completionReportMode: .include),
+            [
+                "goal": [
+                    "threadId": threadID.description,
+                    "objective": "Keep polishing",
+                    "status": "complete",
+                    "tokenBudget": NSNull(),
+                    "tokensUsed": 3_250,
+                    "timeUsedSeconds": 75,
+                    "createdAt": 1,
+                    "updatedAt": 2
+                ],
+                "remainingTokens": NSNull(),
+                "completionBudgetReport": ThreadGoalToolResponse.completionBudgetReportMessage
+            ]
+        )
     }
 
     func testThreadGoalToolResponseOmitsCompletionUsageWhenRustDoes() throws {

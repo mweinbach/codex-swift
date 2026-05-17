@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: tightened Rust commit `941e7f825e` (`Improve goal completion
+  usage reporting`) coverage. Swift now directly pins the Rust
+  `completionBudgetReport` boundary where a completed goal with no
+  `tokenBudget` but nonzero `timeUsedSeconds` still emits the structured
+  follow-up guidance, while `remainingTokens` stays null.
 - 2026-05-17: rechecked Rust commit `d08906a944` (`Support PreToolUse
   updatedInput rewrites`). Swift `PreToolUse` hook parsing now accepts
   `updatedInput` only with `permissionDecision: "allow"`, carries the latest
