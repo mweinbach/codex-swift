@@ -17,7 +17,10 @@ Recent upstream audit checkpoint:
   entrypoint now passes an `InteractiveCommandRunner`, starts one CLI-sourced
   thread/rollout, accepts an initial prompt plus subsequent `codex>` prompts,
   streams assistant text, reuses the non-interactive Responses/tool loop, and
-  asks terminal approvals for shell/unified-exec/apply-patch requests.
+  asks terminal approvals for shell/unified-exec/apply-patch requests. Normal
+  `/quit` and EOF exits now preserve the latest successful turn's thread id so
+  the CLI result keeps the persisted session target available for resume
+  messaging.
 - 2026-05-17: rechecked Rust's shell, unified-exec, and apply-patch approval
   request flow in `codex-rs/core/src/session/mod.rs`,
   `codex-rs/core/src/tools/runtimes/shell.rs`,

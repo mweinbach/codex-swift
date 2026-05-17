@@ -59,18 +59,20 @@ public struct LineModeInteractiveRuntime: Sendable {
         io.writeStderr("codex-swift: starting line-mode interactive fallback. Type /quit or /exit to leave.")
 
         var turnIndex = 0
+        var lastThreadID: String?
         if let prompt = request.prompt, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             turnIndex += 1
             let result = await runTurn(prompt: prompt, turnIndex: turnIndex)
             guard result.exitCode == 0 else {
                 return result
             }
+            lastThreadID = result.threadID ?? lastThreadID
         }
 
         while true {
             io.writePrompt("codex> ")
             guard let line = io.readLine() else {
-                return CodexCLI.CommandExecutionResult(exitCode: 0)
+                return CodexCLI.CommandExecutionResult(exitCode: 0, threadID: lastThreadID)
             }
 
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -78,7 +80,7 @@ public struct LineModeInteractiveRuntime: Sendable {
                 continue
             }
             if trimmed == "/quit" || trimmed == "/exit" {
-                return CodexCLI.CommandExecutionResult(exitCode: 0)
+                return CodexCLI.CommandExecutionResult(exitCode: 0, threadID: lastThreadID)
             }
 
             turnIndex += 1
@@ -86,6 +88,7 @@ public struct LineModeInteractiveRuntime: Sendable {
             guard result.exitCode == 0 else {
                 return result
             }
+            lastThreadID = result.threadID ?? lastThreadID
         }
     }
 

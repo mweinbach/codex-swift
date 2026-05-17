@@ -299,6 +299,36 @@ final class CodexCLITests: XCTestCase {
         XCTAssertEqual(harness.prompts(), ["codex> ", "codex> "])
     }
 
+    func testLineModeInteractiveRuntimePreservesLastThreadIDOnQuit() async {
+        let harness = LineModeIOHarness(inputs: ["second prompt", "/quit"])
+        let runtime = LineModeInteractiveRuntime(
+            request: CodexCLI.InteractiveCommandRequest(prompt: "first prompt"),
+            io: harness.io()
+        ) { turn in
+            CodexCLI.CommandExecutionResult(exitCode: 0, threadID: "thread-\(turn.turnIndex)")
+        }
+
+        let result = await runtime.run()
+
+        XCTAssertEqual(result.exitCode, 0)
+        XCTAssertEqual(result.threadID, "thread-2")
+    }
+
+    func testLineModeInteractiveRuntimePreservesLastThreadIDOnEOF() async {
+        let harness = LineModeIOHarness(inputs: [])
+        let runtime = LineModeInteractiveRuntime(
+            request: CodexCLI.InteractiveCommandRequest(prompt: "first prompt"),
+            io: harness.io()
+        ) { _ in
+            CodexCLI.CommandExecutionResult(exitCode: 0, threadID: "thread-after-initial-prompt")
+        }
+
+        let result = await runtime.run()
+
+        XCTAssertEqual(result.exitCode, 0)
+        XCTAssertEqual(result.threadID, "thread-after-initial-prompt")
+    }
+
     func testLineModeInteractiveRuntimePropagatesTurnFailure() async {
         let harness = LineModeIOHarness(inputs: ["ignored"])
         let runtime = LineModeInteractiveRuntime(
