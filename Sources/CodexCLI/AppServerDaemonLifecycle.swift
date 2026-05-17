@@ -329,7 +329,7 @@ public struct AppServerDaemonUpdateLoopClient: Sendable {
                 try AppServerDaemonLifecycle.currentUpdaterIdentity()
             },
             installLatestStandalone: {
-                try await AppServerDaemonLifecycle.installLatestStandalone()
+                try await AppServerDaemonLifecycle.installLatestStandalone(client: .live)
             },
             resolvedManagedCodexBin: { codexBin in
                 try AppServerDaemonLifecycle.resolvedManagedCodexBin(codexBin)
@@ -361,6 +361,28 @@ public struct AppServerDaemonUpdateLoopClient: Sendable {
             }
         )
     }
+}
+
+public struct AppServerDaemonStandaloneInstallerClient: Sendable {
+    public var fetchScript: @Sendable () async throws -> Data
+    public var runScript: @Sendable (Data) async throws -> Void
+
+    public init(
+        fetchScript: @escaping @Sendable () async throws -> Data,
+        runScript: @escaping @Sendable (Data) async throws -> Void
+    ) {
+        self.fetchScript = fetchScript
+        self.runScript = runScript
+    }
+
+    public static let live = AppServerDaemonStandaloneInstallerClient(
+        fetchScript: {
+            try await AppServerDaemonLifecycle.fetchStandaloneUpdaterScript()
+        },
+        runScript: { script in
+            try AppServerDaemonLifecycle.runStandaloneUpdaterScript(script)
+        }
+    )
 }
 
 public enum AppServerDaemonLifecycle {
@@ -597,22 +619,46 @@ public enum AppServerDaemonLifecycle {
     public static func installLatestStandalone(
         scriptURL: URL = URL(string: "https://chatgpt.com/codex/install.sh")!
     ) async throws {
+        try await installLatestStandalone(
+            client: AppServerDaemonStandaloneInstallerClient(
+                fetchScript: {
+                    try await fetchStandaloneUpdaterScript(scriptURL: scriptURL)
+                },
+                runScript: { script in
+                    try runStandaloneUpdaterScript(script)
+                }
+            )
+        )
+    }
+
+    public static func installLatestStandalone(
+        client: AppServerDaemonStandaloneInstallerClient = .live
+    ) async throws {
+        let script = try await client.fetchScript()
+        try await client.runScript(script)
+    }
+
+    public static func fetchStandaloneUpdaterScript(
+        scriptURL: URL = URL(string: "https://chatgpt.com/codex/install.sh")!
+    ) async throws -> Data {
         let script: Data
         do {
             let (data, response) = try await URLSession.shared.data(from: scriptURL)
-            guard let httpResponse = response as? HTTPURLResponse else {
-                throw AppServerDaemonLifecycleError("standalone Codex updater request failed")
-            }
-            guard (200..<300).contains(httpResponse.statusCode) else {
-                throw AppServerDaemonLifecycleError("standalone Codex updater request failed")
-            }
+            try validateStandaloneUpdaterResponse(response)
             script = data
         } catch let error as AppServerDaemonLifecycleError {
             throw error
         } catch {
             throw AppServerDaemonLifecycleError("failed to fetch standalone Codex updater: \(error)")
         }
-        try runStandaloneUpdaterScript(script)
+        return script
+    }
+
+    public static func validateStandaloneUpdaterResponse(_ response: URLResponse) throws {
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200..<300).contains(httpResponse.statusCode) else {
+            throw AppServerDaemonLifecycleError("standalone Codex updater request failed")
+        }
     }
 
     public static func currentUpdaterIdentity() throws -> AppServerDaemonExecutableIdentity {

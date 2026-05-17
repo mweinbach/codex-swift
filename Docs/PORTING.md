@@ -40,9 +40,13 @@ Recent upstream audit checkpoint:
   Rust updater loop's installer/update-once control flow: initial-delay stop,
   standalone installer invocation hook, managed-binary canonicalization,
   identity-based mode selection, busy restart retry, per-iteration error
-  swallowing, and termination-aware retry/interval sleeps. Remaining daemon
-  updater gaps are live installer/network edge-case parity and broader
-  long-running process hardening.
+  swallowing, and termination-aware retry/interval sleeps. Swift also pins the
+  Rust standalone installer sequencing and request-validation boundary: fetch
+  the script before invoking the shell, skip shell execution after fetch
+  failures, and reject non-HTTP/non-2xx updater responses with Rust's
+  `standalone Codex updater request failed` context. Remaining daemon updater
+  gaps are lower-level live shell I/O edge cases and broader long-running
+  process hardening.
 - 2026-05-17: rechecked Rust commit `e6939e3969` (`feat: namespace in ext`).
   Swift does not yet have the Rust extension executor registry, but the shared
   Responses tool-spec surface now has explicit parity coverage that namespace

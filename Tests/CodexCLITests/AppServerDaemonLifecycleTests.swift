@@ -314,6 +314,70 @@ final class AppServerDaemonLifecycleTests: XCTestCase {
         ])
     }
 
+    func testInstallLatestStandaloneFetchesScriptBeforeRunningShellLikeRust() async throws {
+        let installer = AppServerDaemonFakeStandaloneInstaller(script: Data("echo ok\n".utf8))
+
+        try await AppServerDaemonLifecycle.installLatestStandalone(client: installer.client())
+
+        let events = await installer.eventsSnapshot()
+        XCTAssertEqual(events, [
+            .fetchScript,
+            .runScript(Data("echo ok\n".utf8))
+        ])
+    }
+
+    func testInstallLatestStandaloneStopsBeforeShellWhenFetchFailsLikeRust() async throws {
+        let installer = AppServerDaemonFakeStandaloneInstaller(
+            fetchError: AppServerDaemonLifecycleError("failed to fetch standalone Codex updater")
+        )
+
+        do {
+            try await AppServerDaemonLifecycle.installLatestStandalone(client: installer.client())
+            XCTFail("Expected standalone installer fetch failure")
+        } catch let error as AppServerDaemonLifecycleError {
+            XCTAssertEqual(error.description, "failed to fetch standalone Codex updater")
+        }
+
+        let events = await installer.eventsSnapshot()
+        XCTAssertEqual(events, [.fetchScript])
+    }
+
+    func testValidateStandaloneUpdaterResponseRejectsNonHTTPSuccessLikeRust() throws {
+        let ok = HTTPURLResponse(
+            url: URL(string: "https://chatgpt.com/codex/install.sh")!,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: nil
+        )!
+        XCTAssertNoThrow(try AppServerDaemonLifecycle.validateStandaloneUpdaterResponse(ok))
+
+        let missingHTTP = URLResponse(
+            url: URL(string: "https://chatgpt.com/codex/install.sh")!,
+            mimeType: nil,
+            expectedContentLength: 0,
+            textEncodingName: nil
+        )
+        XCTAssertThrowsError(try AppServerDaemonLifecycle.validateStandaloneUpdaterResponse(missingHTTP)) { error in
+            XCTAssertEqual(
+                (error as? AppServerDaemonLifecycleError)?.description,
+                "standalone Codex updater request failed"
+            )
+        }
+
+        let notFound = HTTPURLResponse(
+            url: URL(string: "https://chatgpt.com/codex/install.sh")!,
+            statusCode: 404,
+            httpVersion: nil,
+            headerFields: nil
+        )!
+        XCTAssertThrowsError(try AppServerDaemonLifecycle.validateStandaloneUpdaterResponse(notFound)) { error in
+            XCTAssertEqual(
+                (error as? AppServerDaemonLifecycleError)?.description,
+                "standalone Codex updater request failed"
+            )
+        }
+    }
+
     func testRemoteControlStartFailsWithRustManagedInstallGuidanceWhenMissing() async throws {
         let temp = try AppServerDaemonTemporaryDirectory()
 
@@ -931,6 +995,59 @@ private actor AppServerDaemonFakeUpdateLoop {
 
     private func terminationRequested() -> Bool {
         terminated
+    }
+}
+
+private enum AppServerDaemonStandaloneInstallerEvent: Equatable {
+    case fetchScript
+    case runScript(Data)
+}
+
+private actor AppServerDaemonFakeStandaloneInstaller {
+    private let script: Data
+    private let fetchError: Error?
+    private let runError: Error?
+    private var events: [AppServerDaemonStandaloneInstallerEvent] = []
+
+    init(
+        script: Data = Data(),
+        fetchError: Error? = nil,
+        runError: Error? = nil
+    ) {
+        self.script = script
+        self.fetchError = fetchError
+        self.runError = runError
+    }
+
+    func client() -> AppServerDaemonStandaloneInstallerClient {
+        AppServerDaemonStandaloneInstallerClient(
+            fetchScript: { [weak self] in
+                guard let self else { return Data() }
+                return try await self.fetchScript()
+            },
+            runScript: { [weak self] script in
+                try await self?.runScript(script)
+            }
+        )
+    }
+
+    func eventsSnapshot() -> [AppServerDaemonStandaloneInstallerEvent] {
+        events
+    }
+
+    private func fetchScript() throws -> Data {
+        events.append(.fetchScript)
+        if let fetchError {
+            throw fetchError
+        }
+        return script
+    }
+
+    private func runScript(_ script: Data) throws {
+        events.append(.runScript(script))
+        if let runError {
+            throw runError
+        }
     }
 }
 
