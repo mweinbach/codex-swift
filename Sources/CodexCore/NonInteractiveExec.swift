@@ -346,10 +346,16 @@ public enum NonInteractiveExec {
     public struct FunctionCallExecutionResult: Equatable, Sendable {
         public var output: ResponseItem
         public var additionalContextItems: [ResponseItem]
+        public var runtimeEvents: [EventMessage]
 
-        public init(output: ResponseItem, additionalContextItems: [ResponseItem] = []) {
+        public init(
+            output: ResponseItem,
+            additionalContextItems: [ResponseItem] = [],
+            runtimeEvents: [EventMessage] = []
+        ) {
             self.output = output
             self.additionalContextItems = additionalContextItems
+            self.runtimeEvents = runtimeEvents
         }
     }
 
@@ -496,6 +502,8 @@ public enum NonInteractiveExec {
                 let result = await executeFunctionCall(call)
                 prompt.input.append(result.output)
                 transcriptItems.append(result.output)
+                runtimeEvents.append(contentsOf: result.runtimeEvents)
+                allEvents.append(contentsOf: result.runtimeEvents.map { .success(.runtimeEvent($0)) })
                 if !result.additionalContextItems.isEmpty {
                     prompt.input.append(contentsOf: result.additionalContextItems)
                     transcriptItems.append(contentsOf: result.additionalContextItems)
@@ -793,13 +801,15 @@ public enum NonInteractiveExec {
     private struct ExecutedFunctionCall: Sendable {
         var output: ResponseItem
         var unifiedExecOutput: UnifiedExecToolOutput?
+        var runtimeEvents: [EventMessage] = []
     }
 
     private static func executed(
         _ output: ResponseItem,
-        unifiedExecOutput: UnifiedExecToolOutput? = nil
+        unifiedExecOutput: UnifiedExecToolOutput? = nil,
+        runtimeEvents: [EventMessage] = []
     ) -> ExecutedFunctionCall {
-        ExecutedFunctionCall(output: output, unifiedExecOutput: unifiedExecOutput)
+        ExecutedFunctionCall(output: output, unifiedExecOutput: unifiedExecOutput, runtimeEvents: runtimeEvents)
     }
 
     private static func executeFunctionCallWithApproval(
@@ -1032,7 +1042,11 @@ public enum NonInteractiveExec {
         guard toolOutputSucceeded(output),
               let postPayload = postToolHookPayload(for: item, execution: execution, prePayload: hookPayload)
         else {
-            return FunctionCallExecutionResult(output: output, additionalContextItems: additionalItems)
+            return FunctionCallExecutionResult(
+                output: output,
+                additionalContextItems: additionalItems,
+                runtimeEvents: execution.runtimeEvents
+            )
         }
 
         let postOutcome = await runPostToolUseHooks(
@@ -1047,7 +1061,8 @@ public enum NonInteractiveExec {
         additionalItems.append(contentsOf: hookAdditionalContextItems(postOutcome.additionalContexts))
         return FunctionCallExecutionResult(
             output: replacingToolOutputIfNeeded(output, with: postOutcome),
-            additionalContextItems: additionalItems
+            additionalContextItems: additionalItems,
+            runtimeEvents: execution.runtimeEvents
         )
     }
 
@@ -1066,6 +1081,7 @@ public enum NonInteractiveExec {
         let jsonEncoder = JSONEncoder()
         jsonEncoder.outputFormatting = [.withoutEscapingSlashes]
         var jsonLines: [String] = []
+        var runningTodoList: RunningExecJSONTodoList?
 
         if outputMode == .jsonLines {
             jsonLines.append(encodeJSONLine(ThreadStartedEvent(threadID: conversationID.description), using: jsonEncoder))
@@ -1084,6 +1100,17 @@ public enum NonInteractiveExec {
 
             case let .success(event):
                 switch event {
+                case let .runtimeEvent(runtimeEvent):
+                    if outputMode == .jsonLines {
+                        appendExecJSONRuntimeEvents(
+                            runtimeEvent,
+                            jsonLines: &jsonLines,
+                            itemIDs: &itemIDs,
+                            runningTodoList: &runningTodoList,
+                            encoder: jsonEncoder
+                        )
+                    }
+
                 case let .outputItemAdded(item):
                     if outputMode == .jsonLines,
                        let startedItem = execJSONStartedItem(from: item, itemIDs: &itemIDs)
@@ -1143,6 +1170,13 @@ public enum NonInteractiveExec {
 
         if outputMode == .jsonLines {
             if errors.isEmpty {
+                if let todoList = runningTodoList {
+                    runningTodoList = nil
+                    jsonLines.append(encodeJSONLine(
+                        ExecJSONItemCompletedEvent(item: todoList.item),
+                        using: jsonEncoder
+                    ))
+                }
                 jsonLines.append(encodeJSONLine(TurnCompletedEvent(usage: JSONUsage(tokenUsage)), using: jsonEncoder))
             } else {
                 jsonLines.append(encodeJSONLine(
@@ -1205,6 +1239,32 @@ public enum NonInteractiveExec {
             )
         }
         return nil
+    }
+
+    private static func appendExecJSONRuntimeEvents(
+        _ event: EventMessage,
+        jsonLines: inout [String],
+        itemIDs: inout ExecJSONItemIDMapper,
+        runningTodoList: inout RunningExecJSONTodoList?,
+        encoder: JSONEncoder
+    ) {
+        guard case let .planUpdate(planUpdate) = event else {
+            return
+        }
+        let todoItems = planUpdate.plan.map { item in
+            ExecJSONTodoItem(text: item.step, completed: item.status == .completed)
+        }
+        let todoListItem: CompletedItem
+        if let running = runningTodoList {
+            todoListItem = CompletedItem(id: running.id, type: "todo_list", items: todoItems)
+            runningTodoList = RunningExecJSONTodoList(id: running.id, items: todoItems)
+            jsonLines.append(encodeJSONLine(ExecJSONItemUpdatedEvent(item: todoListItem), using: encoder))
+        } else {
+            let itemID = itemIDs.nextID()
+            todoListItem = CompletedItem(id: itemID, type: "todo_list", items: todoItems)
+            runningTodoList = RunningExecJSONTodoList(id: itemID, items: todoItems)
+            jsonLines.append(encodeJSONLine(ExecJSONItemStartedEvent(item: todoListItem), using: encoder))
+        }
     }
 
     private enum ShellResponseFormat {
@@ -1517,6 +1577,22 @@ public enum NonInteractiveExec {
                     configuredEnvironmentSnapshot: configuredEnvironmentSnapshot,
                     remoteEnvironmentFileSystems: remoteEnvironmentFileSystems
                 ))
+
+            case "update_plan":
+                let params: UpdatePlanArguments
+                do {
+                    params = try decoder.decode(UpdatePlanArguments.self, from: Data(arguments.utf8))
+                } catch {
+                    return executed(functionOutput(
+                        callID: callID,
+                        content: "failed to parse function arguments: \(error)",
+                        success: false
+                    ))
+                }
+                return executed(
+                    functionOutput(callID: callID, content: "Plan updated", success: true),
+                    runtimeEvents: [.planUpdate(params)]
+                )
 
             default:
                 if let agentJobOutput = await AgentJobToolExecutor.execute(
@@ -2480,7 +2556,7 @@ public enum NonInteractiveExec {
                     approvalDescription: params.justification
                 )
 
-            case "apply_patch", "write_stdin":
+            case "apply_patch", "write_stdin", "update_plan":
                 return nil
 
             default:
@@ -3442,13 +3518,36 @@ private struct CompletedItem: Encodable {
     let text: String?
     let query: String?
     let action: WebSearchAction?
+    let items: [ExecJSONTodoItem]?
 
-    init(id: String, type: String, text: String? = nil, query: String? = nil, action: WebSearchAction? = nil) {
+    init(
+        id: String,
+        type: String,
+        text: String? = nil,
+        query: String? = nil,
+        action: WebSearchAction? = nil,
+        items: [ExecJSONTodoItem]? = nil
+    ) {
         self.id = id
         self.type = type
         self.text = text
         self.query = query
         self.action = action
+        self.items = items
+    }
+}
+
+private struct ExecJSONTodoItem: Encodable, Equatable, Sendable {
+    let text: String
+    let completed: Bool
+}
+
+private struct RunningExecJSONTodoList: Equatable, Sendable {
+    let id: String
+    let items: [ExecJSONTodoItem]
+
+    var item: CompletedItem {
+        CompletedItem(id: id, type: "todo_list", items: items)
     }
 }
 
@@ -3489,6 +3588,11 @@ private struct ExecJSONItemStartedEvent: Encodable {
 
 private struct ExecJSONItemCompletedEvent: Encodable {
     let type = "item.completed"
+    let item: CompletedItem
+}
+
+private struct ExecJSONItemUpdatedEvent: Encodable {
+    let type = "item.updated"
     let item: CompletedItem
 }
 

@@ -15,6 +15,7 @@ public enum ResponseEvent: Equatable, Sendable {
     case reasoningContentDelta(delta: String, contentIndex: Int64)
     case reasoningSummaryPartAdded(summaryIndex: Int64)
     case rateLimits(RateLimitSnapshot)
+    case runtimeEvent(EventMessage)
 }
 
 public struct ResponsesSSEParser: Sendable {

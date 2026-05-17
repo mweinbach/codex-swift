@@ -48,6 +48,9 @@ public struct ResponseEventAggregator: Sendable {
         case let .rateLimits(snapshot):
             return [.success(.rateLimits(snapshot))]
 
+        case let .runtimeEvent(event):
+            return [.success(.runtimeEvent(event))]
+
         case let .serverModel(model):
             return [.success(.serverModel(model))]
 

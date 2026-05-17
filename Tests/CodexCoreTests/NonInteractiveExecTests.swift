@@ -3965,6 +3965,170 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(completedItem["action"]?["pattern"], .string("needle"))
     }
 
+    func testUpdatePlanToolEmitsRuntimeEventAndJSONTodoListLikeRust() async throws {
+        let id = try ConversationId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
+        let toolCall = ResponseItem.functionCall(
+            name: "update_plan",
+            arguments: """
+            {"explanation":"Tool harness check","plan":[{"step":"Inspect workspace","status":"in_progress"},{"step":"Report results","status":"pending"}]}
+            """,
+            callID: "plan-tool-call"
+        )
+        let updatedToolCall = ResponseItem.functionCall(
+            name: "update_plan",
+            arguments: """
+            {"explanation":"Tool harness check","plan":[{"step":"Inspect workspace","status":"completed"},{"step":"Report results","status":"in_progress"}]}
+            """,
+            callID: "plan-tool-call-2"
+        )
+        let finalMessage = ResponseItem.message(role: "assistant", content: [.outputText(text: "plan acknowledged")])
+        let script = DoubleToolLoopScript(firstToolCall: toolCall, secondToolCall: updatedToolCall, finalMessage: finalMessage)
+
+        let loopResult = await NonInteractiveExec.runResponsesLoopWithTranscript(
+            initialPrompt: Prompt(input: [
+                .message(role: "user", content: [.inputText(text: "use the plan tool")])
+            ]),
+            streamPrompt: { prompt in
+                .success(await script.next(prompt))
+            },
+            executeFunctionCall: { item in
+                await NonInteractiveExec.executeFunctionCallWithHooks(
+                    item,
+                    handlers: [],
+                    conversationID: id,
+                    turnID: "turn-1",
+                    cwd: URL(fileURLWithPath: "/tmp/project", isDirectory: true),
+                    model: "gpt-test",
+                    approvalPolicy: .never,
+                    sandboxPolicy: .dangerFullAccess,
+                    shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+                    truncationPolicy: .bytes(10_000)
+                )
+            }
+        )
+
+        XCTAssertEqual(loopResult.runtimeEvents, [
+            .planUpdate(UpdatePlanArguments(
+                explanation: "Tool harness check",
+                plan: [
+                    PlanItemArgument(step: "Inspect workspace", status: .inProgress),
+                    PlanItemArgument(step: "Report results", status: .pending)
+                ]
+            )),
+            .planUpdate(UpdatePlanArguments(
+                explanation: "Tool harness check",
+                plan: [
+                    PlanItemArgument(step: "Inspect workspace", status: .completed),
+                    PlanItemArgument(step: "Report results", status: .inProgress)
+                ]
+            ))
+        ])
+        XCTAssertTrue(loopResult.transcriptItems.contains(.functionCallOutput(
+            callID: "plan-tool-call",
+            output: FunctionCallOutputPayload(content: "Plan updated", success: true)
+        )))
+        XCTAssertTrue(loopResult.transcriptItems.contains(.functionCallOutput(
+            callID: "plan-tool-call-2",
+            output: FunctionCallOutputPayload(content: "Plan updated", success: true)
+        )))
+
+        let result = NonInteractiveExec.finish(
+            responseEvents: loopResult.events,
+            outputMode: .jsonLines,
+            conversationID: id,
+            lastMessageFile: nil
+        )
+
+        XCTAssertEqual(result.exitCode, 0)
+        let lines = try XCTUnwrap(result.stdoutMessage?.split(separator: "\n").map(String.init))
+        let objects = try lines.map(jsonObject)
+        XCTAssertEqual(objects.map { $0["type"] }, [
+            .string("thread.started"),
+            .string("turn.started"),
+            .string("item.started"),
+            .string("item.updated"),
+            .string("item.completed"),
+            .string("item.completed"),
+            .string("turn.completed")
+        ])
+        guard case let .object(startedTodo)? = objects[2]["item"],
+              case let .array(startedItems)? = startedTodo["items"],
+              case let .object(updatedTodo)? = objects[3]["item"],
+              case let .array(updatedItems)? = updatedTodo["items"],
+              case let .object(completedTodo)? = objects[5]["item"],
+              case let .array(completedItems)? = completedTodo["items"]
+        else {
+            return XCTFail("expected todo list item")
+        }
+        XCTAssertEqual(startedTodo["id"], .string("item_0"))
+        XCTAssertEqual(startedTodo["type"], .string("todo_list"))
+        XCTAssertEqual(startedItems, [
+            .object(["text": .string("Inspect workspace"), "completed": .bool(false)]),
+            .object(["text": .string("Report results"), "completed": .bool(false)])
+        ])
+        XCTAssertEqual(updatedTodo["id"], .string("item_0"))
+        XCTAssertEqual(updatedTodo["type"], .string("todo_list"))
+        XCTAssertEqual(updatedItems, [
+            .object(["text": .string("Inspect workspace"), "completed": .bool(true)]),
+            .object(["text": .string("Report results"), "completed": .bool(false)])
+        ])
+        XCTAssertEqual(objects[4]["item"]?["type"], .string("agent_message"))
+        XCTAssertEqual(completedTodo["id"], .string("item_0"))
+        XCTAssertEqual(completedTodo["type"], .string("todo_list"))
+        XCTAssertEqual(completedItems, updatedItems)
+    }
+
+    func testUpdatePlanToolDoesNotRunHooksLikeRust() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let hookLog = temp.url.appendingPathComponent("plan-hook-ran")
+        let item = ResponseItem.functionCall(
+            name: "update_plan",
+            arguments: #"{"plan":[{"step":"Inspect workspace","status":"in_progress"}]}"#,
+            callID: "plan-tool-call"
+        )
+
+        let result = await NonInteractiveExec.executeFunctionCallWithHooks(
+            item,
+            handlers: [
+                ConfiguredHookHandler(
+                    eventName: .preToolUse,
+                    matcher: "update_plan",
+                    command: "touch '\(hookLog.path)'",
+                    timeoutSec: 5,
+                    sourcePath: try AbsolutePath(absolutePath: "/tmp/hooks.json"),
+                    displayOrder: 0
+                ),
+                ConfiguredHookHandler(
+                    eventName: .postToolUse,
+                    matcher: "update_plan",
+                    command: "touch '\(hookLog.path)'",
+                    timeoutSec: 5,
+                    sourcePath: try AbsolutePath(absolutePath: "/tmp/hooks.json"),
+                    displayOrder: 1
+                )
+            ],
+            conversationID: ConversationId(),
+            turnID: "turn-1",
+            cwd: temp.url,
+            model: "gpt-test",
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000)
+        )
+
+        XCTAssertEqual(result.output, .functionCallOutput(
+            callID: "plan-tool-call",
+            output: FunctionCallOutputPayload(content: "Plan updated", success: true)
+        ))
+        XCTAssertEqual(result.runtimeEvents, [
+            .planUpdate(UpdatePlanArguments(plan: [
+                PlanItemArgument(step: "Inspect workspace", status: .inProgress)
+            ]))
+        ])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: hookLog.path))
+    }
+
     func testFailureOutputReturnsExitOneAndWritesEmptyLastMessage() throws {
         let id = try ConversationId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
         let writes = WriteSink()
@@ -4253,6 +4417,46 @@ private actor RegisteredToolLoopScript {
         return [
             .success(.outputItemDone(finalMessage)),
             .success(.completed(responseID: "resp-registered-2", tokenUsage: nil))
+        ]
+    }
+
+    func prompts() -> [Prompt] {
+        recordedPrompts
+    }
+}
+
+private actor DoubleToolLoopScript {
+    private var calls = 0
+    private var recordedPrompts: [Prompt] = []
+    private let firstToolCall: ResponseItem
+    private let secondToolCall: ResponseItem
+    private let finalMessage: ResponseItem
+
+    init(firstToolCall: ResponseItem, secondToolCall: ResponseItem, finalMessage: ResponseItem) {
+        self.firstToolCall = firstToolCall
+        self.secondToolCall = secondToolCall
+        self.finalMessage = finalMessage
+    }
+
+    func next(_ prompt: Prompt) -> ResponseEventResults {
+        calls += 1
+        recordedPrompts.append(prompt)
+
+        if calls == 1 {
+            return [
+                .success(.outputItemDone(firstToolCall)),
+                .success(.completed(responseID: "resp-double-1", tokenUsage: nil))
+            ]
+        }
+        if calls == 2 {
+            return [
+                .success(.outputItemDone(secondToolCall)),
+                .success(.completed(responseID: "resp-double-2", tokenUsage: nil))
+            ]
+        }
+        return [
+            .success(.outputItemDone(finalMessage)),
+            .success(.completed(responseID: "resp-double-3", tokenUsage: nil))
         ]
     }
 

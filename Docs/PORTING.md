@@ -29,6 +29,15 @@ Recent upstream audit checkpoint:
   decodes the Rust response payload containing only `executor_id` and `url`,
   and logs the Rust-shaped remote registration message before connecting to
   the rendezvous websocket.
+- 2026-05-17: rechecked Rust's `update_plan` handler and exec JSONL todo
+  projection in `codex-rs/core/src/tools/handlers/plan.rs`,
+  `codex-rs/exec/src/event_processor_with_jsonl_output.rs`, and
+  `codex-rs/exec/src/exec_events.rs`. Swift non-interactive execution now
+  handles `update_plan` locally with the Rust `Plan updated` tool response,
+  suppresses pre/post hooks for the checklist tool, records runtime
+  `plan_update` events, and emits Rust-shaped `todo_list` JSONL
+  `item.started`, `item.updated`, and turn-ending `item.completed` events
+  with completed booleans derived only from `completed` plan steps.
 - 2026-05-17: rechecked Rust commit `0445b290fe` (`[1 of 4] tui:
   route primary settings writes through app server`). Swift app-server
   `config/value/write` and `config/batchWrite` now parse config `keyPath`
