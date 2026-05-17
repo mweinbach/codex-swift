@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `14473c216f` (`Enable plugin hooks by
+  default`). Swift already had the Rust feature registry stage/default for
+  `plugin_hooks`; runtime hook discovery, `hooks/list`, and `plugin/read` now
+  consult that default-enabled behavior while preserving explicit
+  `[features] plugin_hooks = false` as the opt-out.
 - 2026-05-17: rechecked Rust commit `1ae9867296` (`Remove tool search bucket
   limit override`). Swift `tool_search` now uses the single Rust default
   result limit for omitted `limit` values, removes the old per-server

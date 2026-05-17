@@ -13379,9 +13379,6 @@ final class CodexAppServerTests: XCTestCase {
         let sourceRoot = try makeLocalMarketplaceRootWithPlugin(named: "debug", pluginName: "weather", in: temp.url)
         let marketplacePath = sourceRoot.appendingPathComponent(".agents/plugins/marketplace.json", isDirectory: false).path
         try """
-        [features]
-        plugin_hooks = true
-
         [plugins."weather@debug"]
         enabled = true
         """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
@@ -13434,6 +13431,27 @@ final class CodexAppServerTests: XCTestCase {
             missingError["message"] as? String,
             "plugin `missing` was not found in marketplace `debug`"
         )
+    }
+
+    func testPluginReadMarksPluginHooksDisabledWhenFeatureDisabled() throws {
+        let temp = try TemporaryDirectory()
+        let sourceRoot = try makeLocalMarketplaceRootWithPlugin(named: "debug", pluginName: "weather", in: temp.url)
+        let marketplacePath = sourceRoot.appendingPathComponent(".agents/plugins/marketplace.json", isDirectory: false).path
+        try """
+        [features]
+        plugin_hooks = false
+
+        [plugins."weather@debug"]
+        enabled = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"plugin/read","params":{"marketplacePath":\#(jsonString(marketplacePath)),"pluginName":"weather"}}"#,
+            codexHome: temp.url
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let plugin = try XCTUnwrap(result["plugin"] as? [String: Any])
+        XCTAssertEqual((plugin["hooks"] as? [[String: Any]])?.count, 0)
     }
 
     func testPluginReadAcceptsTopLevelMcpServerMapLikeRust() throws {
@@ -28047,7 +28065,6 @@ final class CodexAppServerTests: XCTestCase {
         try """
         [features]
         plugins = true
-        plugin_hooks = true
         hooks = true
 
         [plugins."demo@test"]
@@ -28100,7 +28117,6 @@ final class CodexAppServerTests: XCTestCase {
         try """
         [features]
         plugins = true
-        plugin_hooks = true
         hooks = true
 
         [plugins."demo@test"]

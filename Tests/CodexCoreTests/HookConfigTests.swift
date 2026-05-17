@@ -315,8 +315,7 @@ final class HookConfigTests: XCTestCase {
             ConfigLayerEntry(name: .user(file: try path(codexHome.url.appendingPathComponent("config.toml").path)), config: .table([
                 "features": .table([
                     "hooks": .bool(true),
-                    "plugins": .bool(true),
-                    "plugin_hooks": .bool(true)
+                    "plugins": .bool(true)
                 ]),
                 "plugins": .table([
                     "demo@test": .table(["enabled": .bool(true)])
@@ -347,6 +346,39 @@ final class HookConfigTests: XCTestCase {
                 displayOrder: 0
             )
         ])
+    }
+
+    func testConfiguredHandlersSkipPluginHooksWhenFeatureExplicitlyDisabled() throws {
+        let codexHome = try HookConfigTemporaryDirectory()
+        let pluginRoot = codexHome.url.appendingPathComponent("plugins/cache/test/demo/local", isDirectory: true)
+        let hooksRoot = pluginRoot.appendingPathComponent("hooks", isDirectory: true)
+        try FileManager.default.createDirectory(at: hooksRoot, withIntermediateDirectories: true)
+        try """
+        {
+          "hooks": {
+            "PreToolUse": [
+              {
+                "matcher": "Bash",
+                "hooks": [{"type": "command", "command": "echo disabled"}]
+              }
+            ]
+          }
+        }
+        """.write(to: hooksRoot.appendingPathComponent("hooks.json", isDirectory: false), atomically: true, encoding: .utf8)
+        let stack = try ConfigLayerStack(layers: [
+            ConfigLayerEntry(name: .user(file: try path(codexHome.url.appendingPathComponent("config.toml").path)), config: .table([
+                "features": .table([
+                    "hooks": .bool(true),
+                    "plugins": .bool(true),
+                    "plugin_hooks": .bool(false)
+                ]),
+                "plugins": .table([
+                    "demo@test": .table(["enabled": .bool(true)])
+                ])
+            ]))
+        ])
+
+        XCTAssertEqual(HookConfig.configuredHandlers(from: stack, codexHome: codexHome.url), [])
     }
 
     func testConfiguredHandlersSkipUntrustedPluginHooks() throws {

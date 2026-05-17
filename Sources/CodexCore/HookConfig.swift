@@ -53,7 +53,7 @@ public enum HookConfig {
         if let codexHome,
            !allowManagedHooksOnly,
            configFeatureEnabled("plugins", in: effectiveConfig, defaultValue: false),
-           configFeatureEnabled("plugin_hooks", in: effectiveConfig, defaultValue: false) {
+           configFeatureEnabled("plugin_hooks", in: effectiveConfig, defaultValue: true) {
             for pluginID in enabledLocalPluginIDs(config: effectiveConfig) {
                 guard let root = activeLocalPluginRoot(id: pluginID, codexHome: codexHome) else {
                     continue

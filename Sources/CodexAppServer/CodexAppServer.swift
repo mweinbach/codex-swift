@@ -6860,7 +6860,7 @@ public enum CodexAppServer {
             localPluginHooks(
                 root: $0,
                 pluginID: pluginID,
-                enabled: configFeatureEnabled("plugin_hooks", in: config, defaultValue: false),
+                enabled: configFeatureEnabled("plugin_hooks", in: config, defaultValue: true),
                 manifest: manifest
             )
         } ?? []
@@ -17476,7 +17476,7 @@ public enum CodexAppServer {
         }
         guard !allowManagedHooksOnly,
               configFeatureEnabled("plugins", in: effectiveConfig, defaultValue: false),
-              configFeatureEnabled("plugin_hooks", in: effectiveConfig, defaultValue: false)
+              configFeatureEnabled("plugin_hooks", in: effectiveConfig, defaultValue: true)
         else {
             return projection
         }
