@@ -65,6 +65,32 @@ final class CommandSurfaceCLITests: XCTestCase {
         ))
     }
 
+    func testRunAsyncExecParsesStrictConfigAtRootAndSubcommandLikeRust() async {
+        var receivedRequests: [CodexCLI.ExecCommandRequest] = []
+
+        for arguments in [
+            ["--strict-config", "exec", "ship it"],
+            ["exec", "--strict-config", "ship it"]
+        ] {
+            let exitCode = await CodexCLI().runAsync(
+                arguments: arguments,
+                stderr: { _ in XCTFail("stderr should not be written for \(arguments)") },
+                execRunner: { request in
+                    receivedRequests.append(request)
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                }
+            )
+
+            XCTAssertEqual(exitCode, 0, "\(arguments)")
+        }
+
+        XCTAssertEqual(receivedRequests.map(\.options.strictConfig), [true, true])
+        XCTAssertEqual(receivedRequests.map(\.action), [
+            .run(prompt: "ship it"),
+            .run(prompt: "ship it")
+        ])
+    }
+
     func testRunAsyncExecFullAutoReportsRustMigrationWarning() async {
         var stderr: [String] = []
         var receivedRequest: CodexCLI.ExecCommandRequest?
@@ -531,6 +557,23 @@ final class CommandSurfaceCLITests: XCTestCase {
 
         XCTAssertEqual(exitCode, 0)
         XCTAssertEqual(receivedRequest?.target, .customFromStdin)
+    }
+
+    func testRunAsyncReviewParsesStrictConfigLikeRust() async {
+        var receivedRequest: CodexCLI.ReviewCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["review", "--strict-config", "--uncommitted"],
+            stderr: { _ in XCTFail("stderr should not be written") },
+            reviewRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(receivedRequest?.target, .uncommittedChanges)
+        XCTAssertEqual(receivedRequest?.strictConfig, true)
     }
 
     func testRunAsyncReviewRejectsConflictingTargetsBeforeRunner() async {
@@ -1035,7 +1078,7 @@ final class CommandSurfaceCLITests: XCTestCase {
         var receivedRequest: CodexCLI.McpServerCommandRequest?
 
         let exitCode = await CodexCLI().runAsync(
-            arguments: ["-c", "approval_policy=\"never\"", "mcp-server"],
+            arguments: ["-c", "approval_policy=\"never\"", "mcp-server", "--strict-config"],
             stderr: { _ in XCTFail("stderr should not be written") },
             mcpServerRunner: { request in
                 receivedRequest = request
@@ -1047,7 +1090,8 @@ final class CommandSurfaceCLITests: XCTestCase {
         XCTAssertEqual(
             receivedRequest,
             CodexCLI.McpServerCommandRequest(
-                configOverrides: CliConfigOverrides(rawOverrides: ["approval_policy=\"never\""])
+                configOverrides: CliConfigOverrides(rawOverrides: ["approval_policy=\"never\""]),
+                strictConfig: true
             )
         )
     }
@@ -1163,6 +1207,7 @@ final class CommandSurfaceCLITests: XCTestCase {
 
         let exitCode = await CodexCLI().runAsync(
             arguments: [
+                "--strict-config",
                 "app-server",
                 "--listen",
                 "ws://127.0.0.1:4500",
@@ -1191,6 +1236,7 @@ final class CommandSurfaceCLITests: XCTestCase {
         XCTAssertEqual(request?.sessionSource, .custom("atlas"))
         XCTAssertEqual(request?.analyticsDefaultEnabled, true)
         XCTAssertEqual(request?.remoteControlEnabled, false)
+        XCTAssertEqual(request?.strictConfig, true)
         XCTAssertEqual(request?.websocketAuth, AppServerWebsocketAuthArguments(
             mode: .signedBearerToken,
             sharedSecretFile: "/tmp/secret",
@@ -1198,6 +1244,39 @@ final class CommandSurfaceCLITests: XCTestCase {
             audience: "audience",
             maxClockSkewSeconds: 30
         ))
+    }
+
+    func testRunAsyncRejectsStrictConfigOnUnsupportedSubcommandsLikeRust() async {
+        let cases: [([String], String)] = [
+            (
+                ["--strict-config", "mcp", "list"],
+                "`--strict-config` is not supported for `codex mcp`"
+            ),
+            (
+                ["app-server", "--strict-config", "proxy"],
+                "`--strict-config` is not supported for `codex app-server proxy`"
+            )
+        ]
+
+        for (arguments, expectedMessage) in cases {
+            var stderr: [String] = []
+            let exitCode = await CodexCLI().runAsync(
+                arguments: arguments,
+                stdout: { _ in XCTFail("stdout should not be written for \(arguments)") },
+                stderr: { stderr.append($0) },
+                appServerRunner: { _ in
+                    XCTFail("app-server runner should not be called for \(arguments)")
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                },
+                mcpRunner: { _ in
+                    XCTFail("mcp runner should not be called for \(arguments)")
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                }
+            )
+
+            XCTAssertEqual(exitCode, 64, "\(arguments)")
+            XCTAssertEqual(stderr, [expectedMessage], "\(arguments)")
+        }
     }
 
     func testRunAsyncAppServerDefaultsSessionSourceToVSCodeLikeRust() async {

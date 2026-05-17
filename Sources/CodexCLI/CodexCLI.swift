@@ -192,6 +192,7 @@ public struct CodexCLI: Sendable {
         public let ignoreRules: Bool
         public let configProfileV2: String?
         public let removedFullAuto: Bool
+        public let strictConfig: Bool
 
         public init(
             json: Bool = false,
@@ -203,7 +204,8 @@ public struct CodexCLI: Sendable {
             ignoreUserConfig: Bool = false,
             ignoreRules: Bool = false,
             configProfileV2: String? = nil,
-            removedFullAuto: Bool = false
+            removedFullAuto: Bool = false,
+            strictConfig: Bool = false
         ) {
             self.json = json
             self.imagePaths = imagePaths
@@ -215,6 +217,7 @@ public struct CodexCLI: Sendable {
             self.ignoreRules = ignoreRules
             self.configProfileV2 = configProfileV2
             self.removedFullAuto = removedFullAuto
+            self.strictConfig = strictConfig
         }
 
         public var removedFullAutoWarning: String? {
@@ -292,15 +295,18 @@ public struct CodexCLI: Sendable {
         public let target: ReviewCommandTarget
         public let configProfileV2: String?
         public let configOverrides: CliConfigOverrides
+        public let strictConfig: Bool
 
         public init(
             target: ReviewCommandTarget,
             configProfileV2: String? = nil,
-            configOverrides: CliConfigOverrides = CliConfigOverrides()
+            configOverrides: CliConfigOverrides = CliConfigOverrides(),
+            strictConfig: Bool = false
         ) {
             self.target = target
             self.configProfileV2 = configProfileV2
             self.configOverrides = configOverrides
+            self.strictConfig = strictConfig
         }
     }
 
@@ -356,19 +362,22 @@ public struct CodexCLI: Sendable {
         public let remoteAuthTokenEnv: String?
         public let interactiveOptions: InteractiveCommandOptions
         public let configOverrides: CliConfigOverrides
+        public let strictConfig: Bool
 
         public init(
             prompt: String? = nil,
             remote: String? = nil,
             remoteAuthTokenEnv: String? = nil,
             interactiveOptions: InteractiveCommandOptions = InteractiveCommandOptions(),
-            configOverrides: CliConfigOverrides = CliConfigOverrides()
+            configOverrides: CliConfigOverrides = CliConfigOverrides(),
+            strictConfig: Bool = false
         ) {
             self.prompt = prompt
             self.remote = remote
             self.remoteAuthTokenEnv = remoteAuthTokenEnv
             self.interactiveOptions = interactiveOptions
             self.configOverrides = configOverrides
+            self.strictConfig = strictConfig
         }
     }
 
@@ -381,6 +390,7 @@ public struct CodexCLI: Sendable {
         public let remoteAuthTokenEnv: String?
         public let interactiveOptions: InteractiveCommandOptions
         public let configOverrides: CliConfigOverrides
+        public let strictConfig: Bool
 
         public init(
             sessionID: String?,
@@ -390,7 +400,8 @@ public struct CodexCLI: Sendable {
             remote: String? = nil,
             remoteAuthTokenEnv: String? = nil,
             interactiveOptions: InteractiveCommandOptions = InteractiveCommandOptions(),
-            configOverrides: CliConfigOverrides = CliConfigOverrides()
+            configOverrides: CliConfigOverrides = CliConfigOverrides(),
+            strictConfig: Bool = false
         ) {
             self.sessionID = sessionID
             self.last = last
@@ -400,6 +411,7 @@ public struct CodexCLI: Sendable {
             self.remoteAuthTokenEnv = remoteAuthTokenEnv
             self.interactiveOptions = interactiveOptions
             self.configOverrides = configOverrides
+            self.strictConfig = strictConfig
         }
     }
 
@@ -411,6 +423,7 @@ public struct CodexCLI: Sendable {
         public let remoteAuthTokenEnv: String?
         public let interactiveOptions: InteractiveCommandOptions
         public let configOverrides: CliConfigOverrides
+        public let strictConfig: Bool
 
         public init(
             sessionID: String?,
@@ -419,7 +432,8 @@ public struct CodexCLI: Sendable {
             remote: String? = nil,
             remoteAuthTokenEnv: String? = nil,
             interactiveOptions: InteractiveCommandOptions = InteractiveCommandOptions(),
-            configOverrides: CliConfigOverrides = CliConfigOverrides()
+            configOverrides: CliConfigOverrides = CliConfigOverrides(),
+            strictConfig: Bool = false
         ) {
             self.sessionID = sessionID
             self.last = last
@@ -428,6 +442,7 @@ public struct CodexCLI: Sendable {
             self.remoteAuthTokenEnv = remoteAuthTokenEnv
             self.interactiveOptions = interactiveOptions
             self.configOverrides = configOverrides
+            self.strictConfig = strictConfig
         }
     }
 
@@ -446,9 +461,14 @@ public struct CodexCLI: Sendable {
 
     public struct McpServerCommandRequest: Equatable, Sendable {
         public let configOverrides: CliConfigOverrides
+        public let strictConfig: Bool
 
-        public init(configOverrides: CliConfigOverrides = CliConfigOverrides()) {
+        public init(
+            configOverrides: CliConfigOverrides = CliConfigOverrides(),
+            strictConfig: Bool = false
+        ) {
             self.configOverrides = configOverrides
+            self.strictConfig = strictConfig
         }
     }
 
@@ -478,6 +498,7 @@ public struct CodexCLI: Sendable {
         public let remoteControlEnabled: Bool
         public let websocketAuth: AppServerWebsocketAuthArguments
         public let configOverrides: CliConfigOverrides
+        public let strictConfig: Bool
 
         public init(
             action: AppServerCommandAction,
@@ -486,7 +507,8 @@ public struct CodexCLI: Sendable {
             analyticsDefaultEnabled: Bool = false,
             remoteControlEnabled: Bool = false,
             websocketAuth: AppServerWebsocketAuthArguments = AppServerWebsocketAuthArguments(),
-            configOverrides: CliConfigOverrides = CliConfigOverrides()
+            configOverrides: CliConfigOverrides = CliConfigOverrides(),
+            strictConfig: Bool = false
         ) {
             self.action = action
             self.listenTransport = listenTransport
@@ -495,6 +517,7 @@ public struct CodexCLI: Sendable {
             self.remoteControlEnabled = remoteControlEnabled
             self.websocketAuth = websocketAuth
             self.configOverrides = configOverrides
+            self.strictConfig = strictConfig
         }
     }
 
@@ -825,6 +848,7 @@ public struct CodexCLI: Sendable {
           --ephemeral                       Run without persisting session files.
           --ignore-user-config              Do not load $CODEX_HOME/config.toml.
           --ignore-rules                    Do not load user or project rules files.
+          --strict-config                   Fail when config files contain unknown fields.
           -h, --help                        Print help.
           -V, --version                     Print version.
 
@@ -922,6 +946,14 @@ public struct CodexCLI: Sendable {
            ) {
             stderr(message)
             return 1
+        }
+        if case let .command(spec, _) = invocation,
+           let message = strictConfigRejectionMessage(
+               spec: spec,
+               arguments: arguments
+           ) {
+            stderr(message)
+            return 64
         }
 
         switch invocation {
@@ -1558,6 +1590,33 @@ public struct CodexCLI: Sendable {
         ].contains(argument)
     }
 
+    private func strictConfigEnabled(in arguments: [String]) -> Bool {
+        arguments.contains("--strict-config")
+    }
+
+    private func strictConfigRejectionMessage(
+        spec: CommandSpec,
+        arguments: [String]
+    ) -> String? {
+        guard strictConfigEnabled(in: arguments) else {
+            return nil
+        }
+        if spec.name == "app-server" {
+            let rawArguments = rawCommandArguments(after: spec, in: arguments)
+            guard case let .success((_, remainingArguments)) = parseAppServerOptions(rawArguments),
+                  let subcommand = remainingArguments.first,
+                  !subcommand.hasPrefix("-")
+            else {
+                return nil
+            }
+            return "`--strict-config` is not supported for `codex app-server \(subcommand)`"
+        }
+        if ["exec", "review", "resume", "fork", "mcp-server"].contains(spec.name) {
+            return nil
+        }
+        return "`--strict-config` is not supported for `codex \(spec.name)`"
+    }
+
     private func rawCommandArguments(after spec: CommandSpec, in arguments: [String]) -> [String] {
         var index = 0
         while index < arguments.count {
@@ -1883,6 +1942,7 @@ public struct CodexCLI: Sendable {
         var searchEnabled = false
         var noAltScreen = false
         var dangerouslyBypassOption: String?
+        var strictConfig = false
     }
 
     private func parseRootInteractiveOptions(
@@ -2086,6 +2146,9 @@ public struct CodexCLI: Sendable {
         case "--no-alt-screen":
             parsed.noAltScreen = true
             return .success(index + 1)
+        case "--strict-config":
+            parsed.strictConfig = true
+            return .success(index + 1)
         default:
             break
         }
@@ -2270,7 +2333,8 @@ public struct CodexCLI: Sendable {
                     root: parsedOptions,
                     subcommand: ParsedInteractiveCommandOptions()
                 ),
-                configOverrides: configOverrides
+                configOverrides: configOverrides,
+                strictConfig: parsedOptions.strictConfig
             ))
         case let .failure(message, exitCode):
             return .failure(message, exitCode)
@@ -2297,6 +2361,7 @@ public struct CodexCLI: Sendable {
         var ignoreRules = false
         var configProfileV2: String?
         var removedFullAuto = false
+        var strictConfig = strictConfigEnabled(in: rootArguments)
         var dangerouslyBypassApprovalsAndSandbox = rootDangerouslyBypassBeforeExec(in: rootArguments)
         var actionTokens: [String] = []
         var index = 0
@@ -2352,6 +2417,10 @@ public struct CodexCLI: Sendable {
                 }
             case "--full-auto":
                 removedFullAuto = true
+                index += 1
+                continue
+            case "--strict-config":
+                strictConfig = true
                 index += 1
                 continue
             case "--dangerously-bypass-approvals-and-sandbox", "--yolo":
@@ -2518,7 +2587,8 @@ public struct CodexCLI: Sendable {
                     ignoreUserConfig: ignoreUserConfig,
                     ignoreRules: ignoreRules,
                     configProfileV2: configProfileV2 ?? rootProfileV2(beforeCommands: ["exec", "e"], in: rootArguments),
-                    removedFullAuto: removedFullAuto
+                    removedFullAuto: removedFullAuto,
+                    strictConfig: strictConfig
                 ),
                 configOverrides: configOverrides
             ))
@@ -2753,7 +2823,8 @@ public struct CodexCLI: Sendable {
             "--ignore-rules",
             "--skip-git-repo-check",
             "--json",
-            "--experimental-json"
+            "--experimental-json",
+            "--strict-config"
         ].contains(argument)
     }
 
@@ -2819,6 +2890,7 @@ public struct CodexCLI: Sendable {
     ) -> ParseResult<ReviewCommandRequest> {
         var target: ReviewCommandTarget?
         var commitTitle: String?
+        var strictConfig = strictConfigEnabled(in: rootArguments)
         var index = 0
 
         func setTarget(_ next: ReviewCommandTarget, option: String) -> ParseResult<Void> {
@@ -2838,6 +2910,11 @@ public struct CodexCLI: Sendable {
 
         while index < arguments.count {
             let argument = arguments[index]
+            if argument == "--strict-config" {
+                strictConfig = true
+                index += 1
+                continue
+            }
             if argument == "--uncommitted" {
                 switch setTarget(.uncommittedChanges, option: argument) {
                 case .success:
@@ -2949,7 +3026,8 @@ public struct CodexCLI: Sendable {
             return .success(ReviewCommandRequest(
                 target: parsedTarget,
                 configProfileV2: rootProfileV2(beforeCommand: "review", in: rootArguments),
-                configOverrides: configOverrides
+                configOverrides: configOverrides,
+                strictConfig: strictConfig
             ))
         case let .failure(message, exitCode):
             return .failure(message, exitCode)
@@ -3058,7 +3136,8 @@ public struct CodexCLI: Sendable {
                     in: rootArguments
                 ),
                 interactiveOptions: mergeInteractiveOptions(root: rootOptions, subcommand: subcommandOptions),
-                configOverrides: configOverrides
+                configOverrides: configOverrides,
+                strictConfig: rootOptions.strictConfig || subcommandOptions.strictConfig
             ))
         case let .failure(message, exitCode):
             return .failure(message, exitCode)
@@ -3160,7 +3239,8 @@ public struct CodexCLI: Sendable {
                     in: rootArguments
                 ),
                 interactiveOptions: mergeInteractiveOptions(root: rootOptions, subcommand: subcommandOptions),
-                configOverrides: configOverrides
+                configOverrides: configOverrides,
+                strictConfig: rootOptions.strictConfig || subcommandOptions.strictConfig
             ))
         case let .failure(message, exitCode):
             return .failure(message, exitCode)
@@ -3314,7 +3394,12 @@ public struct CodexCLI: Sendable {
         _ arguments: [String],
         rootArguments: [String]
     ) -> ParseResult<McpServerCommandRequest> {
+        var strictConfig = strictConfigEnabled(in: rootArguments)
         for argument in arguments {
+            if argument == "--strict-config" {
+                strictConfig = true
+                continue
+            }
             if argument.hasPrefix("-") {
                 return .failure("codex-swift: unsupported option for command 'mcp-server': \(argument)", 64)
             }
@@ -3323,7 +3408,10 @@ public struct CodexCLI: Sendable {
 
         switch parseConfigOverrides(from: rootArguments) {
         case let .success(configOverrides):
-            return .success(McpServerCommandRequest(configOverrides: configOverrides))
+            return .success(McpServerCommandRequest(
+                configOverrides: configOverrides,
+                strictConfig: strictConfig
+            ))
         case let .failure(message, exitCode):
             return .failure(message, exitCode)
         }
@@ -3950,7 +4038,8 @@ public struct CodexCLI: Sendable {
                 analyticsDefaultEnabled: options.analyticsDefaultEnabled,
                 remoteControlEnabled: options.remoteControlEnabled,
                 websocketAuth: options.websocketAuth,
-                configOverrides: configOverrides
+                configOverrides: configOverrides,
+                strictConfig: options.strictConfig || strictConfigEnabled(in: rootArguments)
             ))
         case let .failure(message, exitCode):
             return .failure(message, exitCode)
@@ -3963,6 +4052,7 @@ public struct CodexCLI: Sendable {
         var analyticsDefaultEnabled = false
         var remoteControlEnabled = false
         var websocketAuth = AppServerWebsocketAuthArguments()
+        var strictConfig = false
     }
 
     private func parseAppServerOptions(
@@ -4002,6 +4092,11 @@ public struct CodexCLI: Sendable {
             }
             if argument == "--remote-control" {
                 options.remoteControlEnabled = true
+                index += 1
+                continue
+            }
+            if argument == "--strict-config" {
+                options.strictConfig = true
                 index += 1
                 continue
             }
@@ -4209,7 +4304,8 @@ public struct CodexCLI: Sendable {
                         issuer: issuer,
                         audience: audience,
                         maxClockSkewSeconds: maxClockSkewSeconds
-                    )
+                    ),
+                    strictConfig: options.strictConfig
                 ),
                 remainingArguments: Array(arguments[index...])
             ))

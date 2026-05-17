@@ -490,7 +490,10 @@ private func runReviewCommand(_ request: CodexCLI.ReviewCommandRequest) async th
     return try await runNonInteractiveExec(
         promptResolution: NonInteractivePromptResolution(prompt: resolved.prompt),
         outputSchema: nil,
-        options: CodexCLI.ExecCommandOptions(configProfileV2: request.configProfileV2),
+        options: CodexCLI.ExecCommandOptions(
+            configProfileV2: request.configProfileV2,
+            strictConfig: request.strictConfig
+        ),
         arguments: [],
         configOverrides: request.configOverrides,
         cwd: cwd
@@ -531,7 +534,7 @@ private func runMcpServerCommand(_ request: CodexCLI.McpServerCommandRequest) as
             let execRequest = CodexCLI.ExecCommandRequest(
                 arguments: mcpExecArguments(for: toolCall),
                 action: .run(prompt: toolCall.prompt),
-                options: CodexCLI.ExecCommandOptions(),
+                options: CodexCLI.ExecCommandOptions(strictConfig: request.strictConfig),
                 configOverrides: mcpConfigOverrides(for: toolCall, rootOverrides: request.configOverrides)
             )
             let result = try await runExecCommand(execRequest, baseInstructionsOverride: toolCall.baseInstructions)
@@ -549,7 +552,7 @@ private func runMcpServerCommand(_ request: CodexCLI.McpServerCommandRequest) as
                     last: false,
                     prompt: reply.prompt
                 )),
-                options: CodexCLI.ExecCommandOptions(),
+                options: CodexCLI.ExecCommandOptions(strictConfig: request.strictConfig),
                 configOverrides: request.configOverrides
             )
             let result = try await runExecCommand(execRequest, baseInstructionsOverride: nil)
@@ -570,7 +573,8 @@ private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) as
         let codexHome = try CodexHome.find()
         let settings = try CodexConfigLoader.load(
             codexHome: codexHome,
-            overrides: request.configOverrides
+            overrides: request.configOverrides,
+            strictConfig: request.strictConfig
         )
         let logEnabled = settings.otel.exporter.isEnabled
         let traceEnabled = settings.otel.traceExporter.isEnabled
@@ -1062,7 +1066,8 @@ private func runNonInteractiveExec(
         codexHome: codexHome,
         cwd: cwd,
         overrides: configOverrides,
-        managedConfigOverrides: loaderOverrides
+        managedConfigOverrides: loaderOverrides,
+        strictConfig: options.strictConfig
     )
     let configStack = try CodexConfigLayerLoader.loadConfigLayerStack(
         codexHome: codexHome,
