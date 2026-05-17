@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: tightened app-server `command/exec` sandbox override parity
+  against Rust `CommandExecRequestProcessor`. Swift now rechecks explicit
+  per-request `sandboxPolicy` values against managed sandbox requirements
+  before launching, preserving Rust's invalid-request path when a request
+  tries to widen beyond an allowed sandbox set.
 - 2026-05-17: rechecked Rust commit `934a40c7d9` (`Use root repo hooks in
   linked worktrees`). Swift project config layers now preserve ordinary
   linked-worktree `.codex/config.toml` settings while replacing only project

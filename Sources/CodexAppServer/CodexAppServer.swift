@@ -18488,10 +18488,40 @@ public enum CodexAppServer {
             )
         }
         return .legacy(
-            policy: parsed.sandboxPolicy ?? runtimeConfig.legacySandboxPolicy(),
+            policy: try commandExecLegacySandboxPolicy(
+                requestedPolicy: parsed.sandboxPolicy,
+                runtimeConfig: runtimeConfig,
+                configuration: configuration
+            ),
             cwd: configuration.cwd,
             networkProxy: runtimeConfig.networkProxy
         )
+    }
+
+    private static func commandExecLegacySandboxPolicy(
+        requestedPolicy: SandboxPolicy?,
+        runtimeConfig: CodexRuntimeConfig,
+        configuration: CodexAppServerConfiguration
+    ) throws -> SandboxPolicy {
+        guard let requestedPolicy else {
+            return runtimeConfig.legacySandboxPolicy()
+        }
+        do {
+            let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+                codexHome: configuration.codexHome,
+                cwd: configuration.cwd,
+                cliOverrides: configuration.cliConfigOverrides,
+                threadConfigSources: configuration.threadConfigSources,
+                overrides: configuration.configLayerOverrides,
+                environment: configuration.environment
+            )
+            try stack.requirements.sandboxPolicy.canSet(requestedPolicy).get()
+            return requestedPolicy
+        } catch let error as ConstraintError {
+            throw AppServerError.invalidRequest("invalid sandbox policy: \(error)")
+        } catch {
+            throw error
+        }
     }
 
     private static func loadRuntimeConfigForCommandExecPermissionProfile(

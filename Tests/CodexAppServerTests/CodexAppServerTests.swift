@@ -31617,6 +31617,31 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(invalidNetworkAccessError["message"] as? String, "invalid sandbox policy")
     }
 
+    func testCommandExecSandboxPolicyHonorsManagedRequirementsLikeRust() throws {
+        let codexHome = try TemporaryDirectory()
+        let cwd = try TemporaryDirectory()
+        let requirementsPath = codexHome.url.appendingPathComponent("requirements.toml", isDirectory: false)
+        try """
+        allowed_sandbox_modes = ["read-only"]
+        """.write(to: requirementsPath, atomically: true, encoding: .utf8)
+        let configuration = testConfiguration(
+            codexHome: codexHome.url,
+            configLayerOverrides: ConfigLayerLoaderOverrides(requirementsPath: requirementsPath)
+        )
+
+        let response = try appServerResponse(
+            #"{"id":1,"method":"command/exec","params":{"command":["/bin/echo","hi"],"cwd":"\#(cwd.url.path)","sandboxPolicy":{"type":"dangerFullAccess"}}}"#,
+            configuration: configuration
+        )
+
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32600)
+        XCTAssertEqual(
+            error["message"] as? String,
+            "invalid sandbox policy: value `DangerFullAccess` is not in the allowed set [ReadOnly]"
+        )
+    }
+
     func testExecOneOffCommandResolvesExecutableThroughEnvironmentPath() throws {
         let codexHome = try TemporaryDirectory()
         let configuration = CodexAppServerConfiguration(
