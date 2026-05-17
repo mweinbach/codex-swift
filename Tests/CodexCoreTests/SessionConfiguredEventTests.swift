@@ -217,6 +217,49 @@ final class SessionConfiguredEventTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(SessionConfiguredEvent.self, from: data), event)
     }
 
+    func testSessionConfiguredActivePermissionProfileOmitsRemovedModificationsLikeRust() throws {
+        let sessionID = try ConversationId(string: "67e55044-10b1-426f-9247-bb680e5fe0c8")
+        let event = SessionConfiguredEvent(
+            sessionID: sessionID,
+            model: "gpt-5.4",
+            modelProviderID: "openai",
+            approvalPolicy: .onRequest,
+            activePermissionProfile: ActivePermissionProfile(
+                id: ":workspace",
+                modifications: [.additionalWritableRoot(path: "/tmp/extra")]
+            ),
+            sandboxPolicy: .readOnly,
+            cwd: "/tmp/work",
+            historyLogID: 0,
+            historyEntryCount: 0,
+            rolloutPath: "/tmp/rollout.jsonl"
+        )
+
+        try XCTAssertJSONObjectEqual(event, [
+            "session_id": "67e55044-10b1-426f-9247-bb680e5fe0c8",
+            "thread_id": "67e55044-10b1-426f-9247-bb680e5fe0c8",
+            "model": "gpt-5.4",
+            "model_provider_id": "openai",
+            "approval_policy": "on-request",
+            "approvals_reviewer": "user",
+            "permission_profile": [
+                "type": "managed",
+                "file_system": [
+                    "type": "restricted",
+                    "entries": [
+                        rootReadEntry
+                    ]
+                ],
+                "network": "restricted"
+            ],
+            "active_permission_profile": [
+                "id": ":workspace"
+            ],
+            "cwd": "/tmp/work",
+            "rollout_path": "/tmp/rollout.jsonl"
+        ])
+    }
+
     func testSessionConfiguredIsEventMessage() throws {
         let sessionID = try ConversationId(string: "67e55044-10b1-426f-9247-bb680e5fe0c8")
         let message = EventMessage.sessionConfigured(SessionConfiguredEvent(

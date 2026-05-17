@@ -439,9 +439,6 @@ public struct ActivePermissionProfile: Codable, Equatable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
         try container.encodeIfPresent(extends, forKey: .extends)
-        if !modifications.isEmpty {
-            try container.encode(modifications, forKey: .modifications)
-        }
     }
 }
 

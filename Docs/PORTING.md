@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: tightened Rust commit `9025550709`
+  (`app-server-protocol: remove PermissionProfile from API`) against the
+  shared core permission sidecar. Swift `ActivePermissionProfile` now preserves
+  legacy `modifications` decoding for compatibility but no longer emits the
+  removed `modifications` array in core/session wire shapes, matching Rust's
+  current `id` plus optional `extends` model.
 - 2026-05-17: rechecked Rust commit `83decfa300` (`[codex] Remove unused
   legacy shell tools`). Swift tool-spec construction now normalizes
   `ConfigShellToolType.default`, `.local`, and `.shellCommand` to

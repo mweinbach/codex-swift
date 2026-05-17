@@ -326,8 +326,7 @@ final class SubmissionTests: XCTestCase {
                 network: .restricted
             ),
             activePermissionProfile: ActivePermissionProfile(
-                id: ":workspace",
-                modifications: [.additionalWritableRoot(path: "/repo/tmp")]
+                id: ":workspace"
             ),
             windowsSandboxLevel: .string("read_only"),
             model: "gpt-5.4",
@@ -374,13 +373,7 @@ final class SubmissionTests: XCTestCase {
                 "network": "restricted"
             ],
             "active_permission_profile": [
-                "id": ":workspace",
-                "modifications": [
-                    [
-                        "type": "additional_writable_root",
-                        "path": "/repo/tmp"
-                    ]
-                ]
+                "id": ":workspace"
             ],
             "workspace_roots": [
                 "/repo",
@@ -410,6 +403,19 @@ final class SubmissionTests: XCTestCase {
         XCTAssertTrue(profile.modifications.isEmpty)
         try XCTAssertJSONObjectEqual(profile, [
             "id": ":workspace"
+        ])
+    }
+
+    func testActivePermissionProfileOmitsRemovedModificationsLikeRust() throws {
+        let profile = ActivePermissionProfile(
+            id: ":workspace",
+            extends: ":read-only",
+            modifications: [.additionalWritableRoot(path: "/repo/tmp")]
+        )
+
+        try XCTAssertJSONObjectEqual(profile, [
+            "id": ":workspace",
+            "extends": ":read-only"
         ])
     }
 
@@ -1567,8 +1573,7 @@ final class SubmissionTests: XCTestCase {
             sandboxPolicy: .readOnly,
             permissionProfile: .external(network: .restricted),
             activePermissionProfile: ActivePermissionProfile(
-                id: ":workspace",
-                modifications: [.additionalWritableRoot(path: "/repo/tmp")]
+                id: ":workspace"
             ),
             windowsSandboxLevel: .string("read_only"),
             model: "gpt-5.4",
@@ -1591,13 +1596,7 @@ final class SubmissionTests: XCTestCase {
                 "network": "restricted"
             ],
             "active_permission_profile": [
-                "id": ":workspace",
-                "modifications": [
-                    [
-                        "type": "additional_writable_root",
-                        "path": "/repo/tmp"
-                    ]
-                ]
+                "id": ":workspace"
             ],
             "windows_sandbox_level": "read_only",
             "model": "gpt-5.4",
