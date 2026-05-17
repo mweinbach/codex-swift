@@ -2261,7 +2261,11 @@ Recent upstream audit checkpoint:
 - `codex-rs/core/src/truncate.rs`
   - byte/token truncation policies, middle truncation with UTF-8 scalar boundaries, formatted output line counts, approximate token budgets, and function-call output item truncation with omitted-text summaries
 - `codex-rs/terminal-detection/src/lib.rs`
-  - remaining terminal metadata detection from environment variables, Rust's `TERM=dumb` / WezTerm fallback classification, and user-agent token sanitization
+  - terminal metadata detection from environment variables now covers Rust's
+    `TERM_PROGRAM` precedence, tmux/Zellij multiplexer metadata, WezTerm /
+    kitty / Alacritty / Konsole / GNOME Terminal / VTE / Windows Terminal
+    probes, Rust's `TERM=dumb` and WezTerm fallback classification, Zellij
+    version parsing, and user-agent token sanitization.
 - `codex-rs/core/src/user_shell_command.rs` and exec-output formatting dependency from `codex-rs/core/src/tools/mod.rs`
   - user shell command start/end tag detection, duration formatting, aggregated-output records, timeout prefixes, truncation-policy integration, and message response-item wire shape
 - `codex-rs/core/src/client_common.rs` tool models and `codex-rs/core/src/tools/spec.rs`

@@ -1,4 +1,4 @@
-import CodexCore
+@testable import CodexCore
 import XCTest
 
 final class TerminalTests: XCTestCase {
@@ -285,6 +285,15 @@ final class TerminalTests: XCTestCase {
 
         let terminal = info(.unknown, termProgram: "Bad Term", version: "1.0(beta)")
         XCTAssertEqual(terminal.userAgentToken, "Bad_Term/1.0_beta_")
+
+        let unicode = info(.unknown, termProgram: "Term/Name", version: "1.0 β")
+        XCTAssertEqual(unicode.userAgentToken, "Term/Name/1.0__")
+    }
+
+    func testParsesZellijVersionOutputLikeRust() {
+        XCTAssertEqual(Terminal.parseZellijVersion("zellij 0.44.1"), "0.44.1")
+        XCTAssertEqual(Terminal.parseZellijVersion("0.45.0"), "0.45.0")
+        XCTAssertNil(Terminal.parseZellijVersion(""))
     }
 
     private func detect(
