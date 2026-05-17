@@ -513,8 +513,18 @@ Recent upstream audit checkpoint:
   WebSocket planning row before emitting the failed `config.load` row. The
   report emits the redacted `--json` support map keyed by check id, renders
   compact grouped human summary output, and exits nonzero when config loading
-  fails. Live WebSocket handshake probing and full diagnostic report generation
-  beyond those local checks remain broader `codex doctor` runtime gaps.
+  fails.
+- 2026-05-17: rechecked Rust's `codex doctor` Responses WebSocket probe in
+  `codex-rs/cli/src/doctor.rs`. Swift now resolves the active provider/auth
+  into a Rust-shaped WebSocket handshake probe request, preserving provider
+  headers, bearer/account auth headers, `OpenAI-Beta:
+  responses_websockets=2026-02-06`, query parameters, configured connect
+  timeout, endpoint/auth failure rows, and injectable live-probe outcomes before
+  rendering the existing Rust-shaped success, immediate-close, timeout, and
+  transport-warning rows. The default Swift runtime now performs a bounded
+  URLSession WebSocket handshake probe; full diagnostic report generation beyond
+  the current executable report slice remains a broader `codex doctor` runtime
+  gap.
 - 2026-05-17: rechecked the CLI/runtime-option portion of Rust commit
   `deedf3b2c4` (`feat: add layered --profile-v2 config files`). Swift's CLI
   now treats `--profile-v2 <name>` as a shared root option, validates Rust's

@@ -1193,6 +1193,50 @@ final class DoctorCommandRuntimeTests: XCTestCase {
         XCTAssertEqual(check.details.last, "auth resolution failed: Missing environment variable \(missingEnvKey)")
     }
 
+    func testWebsocketRuntimeInvokesLiveProbeWithRustHandshakeHeaders() throws {
+        let temporaryHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let captured = CapturedDoctorWebsocketProbeRequest()
+        let settings = CodexRuntimeConfig(
+            modelProvider: "custom",
+            modelProviders: [
+                "custom": ModelProviderInfo(
+                    name: "Custom",
+                    baseURL: "https://api.example/v1",
+                    experimentalBearerToken: "test-token",
+                    wireAPI: .responses,
+                    queryParams: ["api-version": "2026-02-06"],
+                    httpHeaders: ["X-Static": "static"],
+                    websocketConnectTimeoutMilliseconds: 1234,
+                    supportsWebsockets: true
+                )
+            ]
+        )
+
+        let check = DoctorCommandRuntime.websocketReachabilityCheck(
+            codexHome: temporaryHome,
+            settings: settings,
+            probe: { request in
+                captured.value = request
+                return .handshakeSucceeded(DoctorWebsocketHandshakeResult(
+                    httpStatus: 101,
+                    reasoningHeaderPresent: false,
+                    modelsETagPresent: false,
+                    serverModelPresent: false
+                ))
+            }
+        )
+
+        let request = try XCTUnwrap(captured.value)
+        XCTAssertEqual(request.endpoint, "wss://api.example/v1/responses?api-version=2026-02-06")
+        XCTAssertEqual(request.connectTimeoutMilliseconds, 1234)
+        XCTAssertEqual(request.headers["X-Static"], "static")
+        XCTAssertEqual(request.headers["authorization"], "Bearer test-token")
+        XCTAssertEqual(request.headers["OpenAI-Beta"], "responses_websockets=2026-02-06")
+        XCTAssertEqual(check.status, .ok)
+        XCTAssertEqual(check.summary, "Responses WebSocket handshake succeeded")
+    }
+
     func testWebsocketReachabilityCheckReportsEndpointBuildFailureLikeRustDoctor() {
         let check = DoctorCommandRuntime.websocketReachabilityCheck(inputs: DoctorWebsocketReachabilityInputs(
             providerID: "custom",
@@ -1560,5 +1604,23 @@ final class DoctorCommandRuntimeTests: XCTestCase {
         --all expand truncated lists       --json redacted report
 
         """)
+    }
+}
+
+private final class CapturedDoctorWebsocketProbeRequest: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: DoctorWebsocketProbeRequest?
+
+    var value: DoctorWebsocketProbeRequest? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return stored
+        }
+        set {
+            lock.lock()
+            stored = newValue
+            lock.unlock()
+        }
     }
 }

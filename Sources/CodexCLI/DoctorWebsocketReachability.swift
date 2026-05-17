@@ -43,6 +43,20 @@ public enum DoctorWebsocketProbeOutcome: Equatable, Sendable {
     case timedOut
 }
 
+public struct DoctorWebsocketProbeRequest: Equatable, Sendable {
+    public let endpoint: String
+    public let headers: [String: String]
+    public let connectTimeoutMilliseconds: UInt64
+
+    public init(endpoint: String, headers: [String: String], connectTimeoutMilliseconds: UInt64) {
+        self.endpoint = endpoint
+        self.headers = headers
+        self.connectTimeoutMilliseconds = connectTimeoutMilliseconds
+    }
+}
+
+public typealias DoctorWebsocketProbe = @Sendable (DoctorWebsocketProbeRequest) -> DoctorWebsocketProbeOutcome
+
 public struct DoctorWebsocketReachabilityInputs: Equatable, Sendable {
     public let providerID: String
     public let providerName: String
@@ -83,7 +97,8 @@ public struct DoctorWebsocketReachabilityInputs: Equatable, Sendable {
 extension DoctorCommandRuntime {
     public static func websocketReachabilityCheck(
         codexHome: URL,
-        settings: CodexRuntimeConfig
+        settings: CodexRuntimeConfig,
+        probe: DoctorWebsocketProbe = liveWebsocketProbe
     ) -> DoctorCheck {
         let storedAuth = try? CodexAuthStorage.loadAuthDotJSON(
             codexHome: codexHome,
@@ -104,11 +119,19 @@ extension DoctorCommandRuntime {
         let dnsDetails = endpoint.flatMap(websocketDNSDetailsForEndpoint)
         let outcome: DoctorWebsocketProbeOutcome
         if endpoint == nil {
-            outcome = .notAttempted("handshake probe is not implemented in Swift doctor yet")
+            outcome = .notAttempted("endpoint not built")
         } else {
             do {
-                _ = try APIAuthResolver.authProvider(auth: storedAuth ?? nil, provider: provider, environment: environment)
-                outcome = .notAttempted("handshake probe is not implemented in Swift doctor yet")
+                let apiAuth = try APIAuthResolver.authProvider(
+                    auth: storedAuth ?? nil,
+                    provider: provider,
+                    environment: environment
+                )
+                outcome = probe(DoctorWebsocketProbeRequest(
+                    endpoint: endpoint ?? "",
+                    headers: websocketProbeHeaders(apiProvider: apiProvider, auth: apiAuth),
+                    connectTimeoutMilliseconds: provider.websocketConnectTimeoutMS()
+                ))
             } catch {
                 outcome = .authResolutionFailed(String(describing: error))
             }
@@ -309,6 +332,43 @@ extension DoctorCommandRuntime {
         return components.string
     }
 
+    public static func liveWebsocketProbe(request: DoctorWebsocketProbeRequest) -> DoctorWebsocketProbeOutcome {
+        guard let url = URL(string: request.endpoint) else {
+            return .providerSetupFailed("invalid URL")
+        }
+        var urlRequest = URLRequest(url: url)
+        urlRequest.timeoutInterval = Double(request.connectTimeoutMilliseconds) / 1_000
+        for (name, value) in request.headers {
+            urlRequest.setValue(value, forHTTPHeaderField: name)
+        }
+
+        let socket = URLSession.shared.webSocketTask(with: urlRequest)
+        let outcome = LockedWebsocketProbeOutcome()
+        let completed = DispatchSemaphore(value: 0)
+        socket.resume()
+        socket.sendPing { error in
+            if let error {
+                outcome.set(.transportError(error.localizedDescription))
+                completed.signal()
+                return
+            }
+            Self.observeImmediateWebsocketClose(socket: socket, outcome: outcome, completed: completed)
+        }
+
+        let timeout = DispatchTime.now() + .milliseconds(Int(request.connectTimeoutMilliseconds))
+        if completed.wait(timeout: timeout) == .timedOut {
+            socket.cancel(with: .goingAway, reason: nil)
+            return .timedOut
+        }
+        socket.cancel(with: .goingAway, reason: nil)
+        return outcome.value ?? .handshakeSucceeded(DoctorWebsocketHandshakeResult(
+            httpStatus: 101,
+            reasoningHeaderPresent: false,
+            modelsETagPresent: false,
+            serverModelPresent: false
+        ))
+    }
+
     public static func websocketDNSDetails(addressFamilies: [DoctorWebsocketAddressFamily]) -> String {
         let ipv4Count = addressFamilies.filter { $0 == .ipv4 }.count
         let ipv6Count = addressFamilies.filter { $0 == .ipv6 }.count
@@ -322,6 +382,50 @@ extension DoctorCommandRuntime {
 
     private static let websocketReachabilityRemediation =
         "Check proxy, VPN, firewall, DNS, custom CA, and WebSocket policy support."
+
+    private static func websocketProbeHeaders(apiProvider: APIProvider, auth: StaticAPIAuthProvider) -> [String: String] {
+        var headers = apiProvider.headers
+        if let bearerToken = auth.bearerToken {
+            headers["authorization"] = "Bearer \(bearerToken)"
+        }
+        if let accountID = auth.accountID {
+            headers["ChatGPT-Account-ID"] = accountID
+        }
+        headers["OpenAI-Beta"] = "responses_websockets=2026-02-06"
+        return headers
+    }
+
+    private static func observeImmediateWebsocketClose(
+        socket: URLSessionWebSocketTask,
+        outcome: LockedWebsocketProbeOutcome,
+        completed: DispatchSemaphore
+    ) {
+        let closeWindow = DispatchSemaphore(value: 0)
+        socket.receive { result in
+            switch result {
+            case .success:
+                break
+            case let .failure(error):
+                if socket.closeCode != .invalid {
+                    outcome.set(.closedImmediately(
+                        DoctorWebsocketHandshakeResult(
+                            httpStatus: 101,
+                            reasoningHeaderPresent: false,
+                            modelsETagPresent: false,
+                            serverModelPresent: false
+                        ),
+                        code: UInt16(socket.closeCode.rawValue),
+                        reason: socket.closeReason.map { String(decoding: $0, as: UTF8.self) } ?? ""
+                    ))
+                } else {
+                    outcome.set(.transportError(error.localizedDescription))
+                }
+            }
+            closeWindow.signal()
+        }
+        _ = closeWindow.wait(timeout: .now() + .milliseconds(250))
+        completed.signal()
+    }
 
     private static func websocketAuthMode(
         providerRequiresOpenAIAuth: Bool,
@@ -474,4 +578,21 @@ extension DoctorCommandRuntime {
         value ? "true" : "false"
     }
 
+}
+
+private final class LockedWebsocketProbeOutcome: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: DoctorWebsocketProbeOutcome?
+
+    var value: DoctorWebsocketProbeOutcome? {
+        lock.lock()
+        defer { lock.unlock() }
+        return stored
+    }
+
+    func set(_ value: DoctorWebsocketProbeOutcome) {
+        lock.lock()
+        stored = value
+        lock.unlock()
+    }
 }
