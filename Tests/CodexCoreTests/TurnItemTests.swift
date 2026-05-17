@@ -414,6 +414,29 @@ final class TurnItemTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(TurnItem.self, from: data), item)
     }
 
+    func testReviewModeTurnItemWireShapeUsesRustTags() throws {
+        let entered = TurnItem.enteredReviewMode(ReviewModeItem(id: "review-entered", review: "current changes"))
+        let exited = TurnItem.exitedReviewMode(ReviewModeItem(id: "review-exited", review: "Looks good"))
+
+        try XCTAssertJSONObjectEqual(entered, [
+            "type": "EnteredReviewMode",
+            "id": "review-entered",
+            "review": "current changes"
+        ])
+        try XCTAssertJSONObjectEqual(exited, [
+            "type": "ExitedReviewMode",
+            "id": "review-exited",
+            "review": "Looks good"
+        ])
+        XCTAssertEqual(entered.id, "review-entered")
+        XCTAssertEqual(exited.id, "review-exited")
+        XCTAssertEqual(entered.asLegacyEvents(showRawAgentReasoning: false), [])
+        XCTAssertEqual(exited.asLegacyEvents(showRawAgentReasoning: false), [])
+
+        XCTAssertEqual(try JSONDecoder().decode(TurnItem.self, from: try JSONEncoder().encode(entered)), entered)
+        XCTAssertEqual(try JSONDecoder().decode(TurnItem.self, from: try JSONEncoder().encode(exited)), exited)
+    }
+
     func testFileChangeTurnItemWireShapeUsesRustTags() throws {
         let item = TurnItem.fileChange(FileChangeItem(
             id: "patch-1",

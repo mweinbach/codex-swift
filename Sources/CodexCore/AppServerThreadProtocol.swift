@@ -928,6 +928,10 @@ extension AppServerThreadItem {
                 result: item.result,
                 savedPath: item.savedPath
             )
+        case let .enteredReviewMode(item):
+            return .enteredReviewMode(id: item.id, review: item.review)
+        case let .exitedReviewMode(item):
+            return .exitedReviewMode(id: item.id, review: item.review)
         case let .contextCompaction(item):
             return .contextCompaction(id: item.id)
         }

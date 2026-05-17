@@ -16523,6 +16523,18 @@ public enum CodexAppServer {
                 "type": "contextCompaction",
                 "id": item.id
             ]
+        case let .enteredReviewMode(item):
+            return [
+                "type": "enteredReviewMode",
+                "id": item.id,
+                "review": item.review
+            ]
+        case let .exitedReviewMode(item):
+            return [
+                "type": "exitedReviewMode",
+                "id": item.id,
+                "review": item.review
+            ]
         }
     }
 

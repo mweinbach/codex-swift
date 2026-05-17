@@ -12,6 +12,8 @@ public enum TurnItem: Equatable, Codable, Sendable {
     case fileChange(FileChangeItem)
     case mcpToolCall(McpToolCallItem)
     case contextCompaction(ContextCompactionItem)
+    case enteredReviewMode(ReviewModeItem)
+    case exitedReviewMode(ReviewModeItem)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -29,6 +31,8 @@ public enum TurnItem: Equatable, Codable, Sendable {
         case fileChange = "FileChange"
         case mcpToolCall = "McpToolCall"
         case contextCompaction = "ContextCompaction"
+        case enteredReviewMode = "EnteredReviewMode"
+        case exitedReviewMode = "ExitedReviewMode"
     }
 
     public var id: String {
@@ -54,6 +58,10 @@ public enum TurnItem: Equatable, Codable, Sendable {
         case let .mcpToolCall(item):
             return item.id
         case let .contextCompaction(item):
+            return item.id
+        case let .enteredReviewMode(item):
+            return item.id
+        case let .exitedReviewMode(item):
             return item.id
         }
     }
@@ -83,6 +91,10 @@ public enum TurnItem: Equatable, Codable, Sendable {
             self = .mcpToolCall(try McpToolCallItem(from: decoder))
         case .contextCompaction:
             self = .contextCompaction(try ContextCompactionItem(from: decoder))
+        case .enteredReviewMode:
+            self = .enteredReviewMode(try ReviewModeItem(from: decoder))
+        case .exitedReviewMode:
+            self = .exitedReviewMode(try ReviewModeItem(from: decoder))
         }
     }
 
@@ -122,6 +134,12 @@ public enum TurnItem: Equatable, Codable, Sendable {
         case let .contextCompaction(item):
             try container.encode(ItemType.contextCompaction, forKey: .type)
             try item.encode(to: encoder)
+        case let .enteredReviewMode(item):
+            try container.encode(ItemType.enteredReviewMode, forKey: .type)
+            try item.encode(to: encoder)
+        case let .exitedReviewMode(item):
+            try container.encode(ItemType.exitedReviewMode, forKey: .type)
+            try item.encode(to: encoder)
         }
     }
 
@@ -149,6 +167,8 @@ public enum TurnItem: Equatable, Codable, Sendable {
             return item.asLegacyEndEvent().map { [$0] } ?? []
         case let .contextCompaction(item):
             return [item.asLegacyEvent()]
+        case .enteredReviewMode, .exitedReviewMode:
+            return []
         }
     }
 
@@ -678,6 +698,16 @@ public struct ContextCompactionItem: Equatable, Codable, Sendable {
 
     public func asLegacyEvent() -> LegacyEventMessage {
         .contextCompacted(ContextCompactedEvent())
+    }
+}
+
+public struct ReviewModeItem: Equatable, Codable, Sendable {
+    public let id: String
+    public let review: String
+
+    public init(id: String = UUID().uuidString.lowercased(), review: String) {
+        self.id = id
+        self.review = review
     }
 }
 
