@@ -57,6 +57,9 @@ public struct ChatGPTTaskClient {
     public typealias Transport = (URLRequest) async throws -> ChatGPTHTTPResponse
     public typealias TokenLoader = () async throws -> AuthTokenData?
 
+    private static let productSKUHeader = "OAI-Product-Sku"
+    private static let codexProductSKU = "codex"
+
     public let configuration: ChatGPTClientConfiguration
     private let transport: Transport
     private let tokenLoader: TokenLoader
@@ -102,6 +105,7 @@ public struct ChatGPTTaskClient {
         request.httpMethod = "GET"
         request.setValue("Bearer \(token.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue(accountID, forHTTPHeaderField: "chatgpt-account-id")
+        request.setValue(Self.codexProductSKU, forHTTPHeaderField: Self.productSKUHeader)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         let response = try await transport(request)

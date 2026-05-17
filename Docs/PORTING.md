@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `610b86fefb` (`Pass Codex product SKU to
+  ChatGPT backend`). Swift direct ChatGPT backend GET requests now send Rust's
+  `OAI-Product-Sku: codex` header alongside bearer auth, ChatGPT account id,
+  and JSON content type, so task/detail fetches identify the Codex product the
+  same way as the Rust `chatgpt_get_request` helper.
 - 2026-05-17: rechecked Rust commit `79c65f816c` (`[codex] Filter legacy
   warning messages during compaction`). Swift contextual user-fragment
   detection now recognizes the removed unified-exec process-limit warning,

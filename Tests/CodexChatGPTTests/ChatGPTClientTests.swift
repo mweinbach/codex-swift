@@ -31,6 +31,7 @@ final class ChatGPTClientTests: XCTestCase {
         XCTAssertEqual(capturedRequest?.url?.absoluteString, "https://chatgpt.com/backend-api//wham/tasks/task_123")
         XCTAssertEqual(capturedRequest?.value(forHTTPHeaderField: "Authorization"), "Bearer access-token")
         XCTAssertEqual(capturedRequest?.value(forHTTPHeaderField: "chatgpt-account-id"), "account-id")
+        XCTAssertEqual(capturedRequest?.value(forHTTPHeaderField: "OAI-Product-Sku"), "codex")
         XCTAssertEqual(capturedRequest?.value(forHTTPHeaderField: "Content-Type"), "application/json")
     }
 
