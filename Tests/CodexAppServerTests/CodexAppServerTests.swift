@@ -30486,6 +30486,31 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(catalogServer["command"] as? String, "echo")
     }
 
+    func testConfigBatchWriteRejectsMalformedQuotedKeyPathsLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        try "".write(to: configFile, atomically: true, encoding: .utf8)
+
+        let cases: [(String, String)] = [
+            (#""#, "keyPath must not be empty"),
+            (#"profiles."#, "keyPath segments must not be empty"),
+            (#"profiles.\"team.prod.model"#, "unterminated quoted keyPath segment"),
+            (#"profiles.\"team.prod\\"#, "unterminated escape in keyPath"),
+            (#"profiles.team\"prod.model"#, "invalid quoted keyPath segment")
+        ]
+
+        for (keyPath, expectedMessage) in cases {
+            let response = try appServerResponse(
+                #"{"id":1,"method":"config/batchWrite","params":{"filePath":"\#(configFile.path)","edits":[{"keyPath":"\#(keyPath)","value":"gpt-5.5","mergeStrategy":"replace"}]}}"#,
+                codexHome: temp.url
+            )
+            let error = try XCTUnwrap(response["error"] as? [String: Any], "keyPath: \(keyPath)")
+            XCTAssertEqual(error["message"] as? String, expectedMessage, "keyPath: \(keyPath)")
+            let data = try XCTUnwrap(error["data"] as? [String: Any], "keyPath: \(keyPath)")
+            XCTAssertEqual(data["config_write_error_code"] as? String, "configValidationError")
+        }
+    }
+
     func testConfigBatchWriteUpdatesPrimaryProfileSettingsLikeRustTui() throws {
         let temp = try TemporaryDirectory()
         let configFile = temp.url.appendingPathComponent("config.toml", isDirectory: false)
