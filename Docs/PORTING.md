@@ -1790,6 +1790,12 @@ Recent upstream audit checkpoint:
   `client_termname` through the same `TERM` fallback path, so values like
   `wezterm-mux` preserve the WezTerm terminal category instead of being
   reported as unknown.
+- 2026-05-17: rechecked Rust's Zellij terminal multiplexer metadata in
+  `codex-rs/terminal-detection/src/lib.rs`. Swift now preserves
+  `ZELLIJ_VERSION` and best-effort `zellij --version` fallback values in
+  `TerminalMultiplexer.zellij(version:)`, exposes the Rust-shaped
+  `isZellij` helper on `TerminalInfo`, and keeps doctor output compatible by
+  rendering `zellij <version>` only when a version is known.
 - 2026-05-15: rechecked Rust's `ConfigRequirementsReadResponse` in
   `codex-rs/app-server-protocol/src/protocol/v2/config.rs`. Swift's shared
   app-server config protocol now carries the typed `configRequirements/read`
@@ -2223,8 +2229,8 @@ Recent upstream audit checkpoint:
   - byte/token truncation policies, middle truncation with UTF-8 scalar boundaries, formatted output line counts, approximate token budgets, and function-call output item truncation with omitted-text summaries
 - `codex-rs/core/src/path_utils.rs`
   - path canonicalization for comparison and WSL `/mnt/<drive>` case-insensitive path normalization
-- `codex-rs/core/src/terminal.rs`
-  - terminal metadata detection from environment variables, tmux/zellij multiplexer metadata, tmux client fallbacks, terminal-name normalization, Rust's `TERM=dumb` / WezTerm fallback classification, and user-agent token sanitization
+- `codex-rs/terminal-detection/src/lib.rs`
+  - remaining terminal metadata detection from environment variables, terminal-name normalization, Rust's `TERM=dumb` / WezTerm fallback classification, and user-agent token sanitization
 - `codex-rs/core/src/user_shell_command.rs` and exec-output formatting dependency from `codex-rs/core/src/tools/mod.rs`
   - user shell command start/end tag detection, duration formatting, aggregated-output records, timeout prefixes, truncation-policy integration, and message response-item wire shape
 - `codex-rs/core/src/client_common.rs` tool models and `codex-rs/core/src/tools/spec.rs`

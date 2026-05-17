@@ -305,7 +305,10 @@ extension DoctorCommandRuntime {
                 return "tmux \(version)"
             }
             return "tmux"
-        case .zellij:
+        case let .zellij(version):
+            if let version {
+                return "zellij \(version)"
+            }
             return "zellij"
         }
     }

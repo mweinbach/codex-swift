@@ -62,6 +62,13 @@ public struct TerminalInfo: Equatable, Sendable {
 
         return Terminal.sanitizeHeaderValue(raw)
     }
+
+    public var isZellij: Bool {
+        if case .zellij? = multiplexer {
+            return true
+        }
+        return false
+    }
 }
 
 public enum TerminalName: Equatable, Sendable {
@@ -83,7 +90,7 @@ public enum TerminalName: Equatable, Sendable {
 
 public enum TerminalMultiplexer: Equatable, Sendable {
     case tmux(version: String?)
-    case zellij
+    case zellij(version: String?)
 }
 
 public struct TmuxClientInfo: Equatable, Sendable {
@@ -109,17 +116,25 @@ public enum Terminal {
         let tmuxClientInfo = shouldReadProcessTmuxClientInfo(environment: environment)
             ? processTmuxClientInfo()
             : TmuxClientInfo()
+        let zellijCommandVersion = shouldReadProcessZellijVersion(environment: environment)
+            ? processZellijVersion()
+            : nil
         return detectTerminalInfo(
             environment: environment,
-            tmuxClientInfo: tmuxClientInfo
+            tmuxClientInfo: tmuxClientInfo,
+            zellijCommandVersion: zellijCommandVersion
         )
     }
 
     public static func detectTerminalInfo(
         environment: [String: String],
-        tmuxClientInfo: TmuxClientInfo = TmuxClientInfo()
+        tmuxClientInfo: TmuxClientInfo = TmuxClientInfo(),
+        zellijCommandVersion: String? = nil
     ) -> TerminalInfo {
-        let multiplexer = detectMultiplexer(environment: environment)
+        let multiplexer = detectMultiplexer(
+            environment: environment,
+            zellijCommandVersion: zellijCommandVersion
+        )
 
         if let termProgram = nonWhitespace(environment["TERM_PROGRAM"]) {
             if isTmuxTermProgram(termProgram),
@@ -271,7 +286,8 @@ public enum Terminal {
     }
 
     private static func detectMultiplexer(
-        environment: [String: String]
+        environment: [String: String],
+        zellijCommandVersion: String?
     ) -> TerminalMultiplexer? {
         if nonWhitespace(environment["TMUX"]) != nil
             || nonWhitespace(environment["TMUX_PANE"]) != nil
@@ -283,7 +299,7 @@ public enum Terminal {
             || nonWhitespace(environment["ZELLIJ_SESSION_NAME"]) != nil
             || nonWhitespace(environment["ZELLIJ_VERSION"]) != nil
         {
-            return .zellij
+            return .zellij(version: zellijVersion(environment: environment, commandVersion: zellijCommandVersion))
         }
 
         return nil
@@ -329,6 +345,11 @@ public enum Terminal {
         return nonWhitespace(environment["TERM_PROGRAM_VERSION"])
     }
 
+    private static func zellijVersion(environment: [String: String], commandVersion: String?) -> String? {
+        nonWhitespace(environment["ZELLIJ_VERSION"])
+            ?? parseZellijVersion(commandVersion)
+    }
+
     private static func isTmuxTermProgram(_ value: String) -> Bool {
         value.caseInsensitiveCompare("tmux") == .orderedSame
     }
@@ -346,6 +367,15 @@ public enum Terminal {
             || nonWhitespace(environment["TMUX_PANE"]) != nil
     }
 
+    private static func shouldReadProcessZellijVersion(environment: [String: String]) -> Bool {
+        guard nonWhitespace(environment["ZELLIJ_VERSION"]) == nil else {
+            return false
+        }
+
+        return nonWhitespace(environment["ZELLIJ"]) != nil
+            || nonWhitespace(environment["ZELLIJ_SESSION_NAME"]) != nil
+    }
+
     private static func splitTermProgramAndVersion(_ value: String) -> (program: String, version: String?) {
         let parts = value.split(whereSeparator: \.isWhitespace)
         let program = parts.first.map(String.init) ?? ""
@@ -358,6 +388,20 @@ public enum Terminal {
             termtype: tmuxDisplayMessage("#{client_termtype}"),
             termname: tmuxDisplayMessage("#{client_termname}")
         )
+    }
+
+    static func parseZellijVersion(_ value: String?) -> String? {
+        guard let value = nonWhitespace(value) else {
+            return nil
+        }
+
+        let parts = value.split(whereSeparator: \.isWhitespace)
+        if parts.count >= 2,
+           parts[0].lowercased() == "zellij" {
+            return String(parts[1])
+        }
+
+        return value
     }
 
     private static func tmuxDisplayMessage(_ format: String) -> String? {
@@ -385,6 +429,33 @@ public enum Terminal {
         }
 
         return nonWhitespace(value.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private static func processZellijVersion() -> String? {
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["zellij", "--version"]
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return nil
+        }
+
+        guard process.terminationStatus == 0 else {
+            return nil
+        }
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        guard let value = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+
+        return parseZellijVersion(value.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     private static func nonWhitespace(_ value: String?) -> String? {

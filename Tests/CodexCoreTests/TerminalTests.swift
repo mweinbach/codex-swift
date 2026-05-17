@@ -141,7 +141,22 @@ final class TerminalTests: XCTestCase {
         XCTAssertEqual(terminal.userAgentToken, "ghostty/1.2.3")
 
         terminal = detect(["ZELLIJ": "1"])
-        XCTAssertEqual(terminal, info(.unknown, multiplexer: .zellij))
+        XCTAssertEqual(terminal, info(.unknown, multiplexer: .zellij(version: nil)))
+        XCTAssertTrue(terminal.isZellij)
+
+        terminal = detect(["ZELLIJ_VERSION": "0.43.1"])
+        XCTAssertEqual(terminal, info(.unknown, multiplexer: .zellij(version: "0.43.1")))
+
+        terminal = detect(["ZELLIJ": "1"], zellijCommandVersion: "zellij 0.44.1")
+        XCTAssertEqual(terminal, info(.unknown, multiplexer: .zellij(version: "0.44.1")))
+
+        terminal = detect(["ZELLIJ": "1"], zellijCommandVersion: "0.45.0")
+        XCTAssertEqual(terminal, info(.unknown, multiplexer: .zellij(version: "0.45.0")))
+
+        terminal = detect(["ZELLIJ": "1"], zellijCommandVersion: "")
+        XCTAssertEqual(terminal, info(.unknown, multiplexer: .zellij(version: nil)))
+
+        XCTAssertFalse(info(.unknown, multiplexer: .tmux(version: nil)).isZellij)
     }
 
     func testDetectsWezTermKittyAndAlacritty() {
@@ -231,9 +246,14 @@ final class TerminalTests: XCTestCase {
 
     private func detect(
         _ environment: [String: String],
-        tmuxClientInfo: TmuxClientInfo = TmuxClientInfo()
+        tmuxClientInfo: TmuxClientInfo = TmuxClientInfo(),
+        zellijCommandVersion: String? = nil
     ) -> TerminalInfo {
-        Terminal.detectTerminalInfo(environment: environment, tmuxClientInfo: tmuxClientInfo)
+        Terminal.detectTerminalInfo(
+            environment: environment,
+            tmuxClientInfo: tmuxClientInfo,
+            zellijCommandVersion: zellijCommandVersion
+        )
     }
 
     private func info(
