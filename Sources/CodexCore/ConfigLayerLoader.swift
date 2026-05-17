@@ -226,10 +226,14 @@ public enum CodexConfigLayerLoader {
                 projectRootMarkers: projectRootMarkers,
                 fileManager: fileManager
             )
+            let checkoutRoot = findGitCheckoutRoot(cwd: cwdURL, fileManager: fileManager)
+            let repoRoot = GitInfoCollector.resolveRootGitProjectForTrust(cwd: cwdURL, fileManager: fileManager)
             let projectLayers = try loadProjectLayers(
                 codexHome: codexHome,
                 cwd: cwdURL,
                 projectRoot: projectRoot,
+                checkoutRoot: checkoutRoot,
+                repoRoot: repoRoot,
                 fileManager: fileManager
             )
             layers.append(contentsOf: projectLayers.layers)
@@ -559,6 +563,8 @@ public enum CodexConfigLayerLoader {
         codexHome: URL,
         cwd: URL,
         projectRoot: URL,
+        checkoutRoot: URL?,
+        repoRoot: URL?,
         fileManager: FileManager
     ) throws -> LoadedProjectLayers {
         guard let cwdIndex = ancestorDirectories(from: cwd).firstIndex(of: projectRoot) else {
@@ -581,10 +587,20 @@ public enum CodexConfigLayerLoader {
                 continue
             }
 
+            let hooksConfigFolderOverride = try rootCheckoutHooksFolder(
+                directory: directory,
+                checkoutRoot: checkoutRoot,
+                repoRoot: repoRoot
+            )
             let dotCodexPath = try AbsolutePath(absolutePath: dotCodex.standardizedFileURL.path)
             let configFile = dotCodex.appendingPathComponent("config.toml", isDirectory: false)
             let rawConfig = try readConfig(from: configFile, fileManager: fileManager) ?? .table([:])
             let (config, ignoredKeys) = sanitizeProjectConfig(rawConfig)
+            let mergedConfig = try mergeRootCheckoutProjectHooks(
+                into: config,
+                hooksConfigFolderOverride: hooksConfigFolderOverride,
+                fileManager: fileManager
+            )
             if !ignoredKeys.isEmpty {
                 startupWarnings.append(projectIgnoredConfigKeysWarning(
                     dotCodexFolder: dotCodexPath,
@@ -593,10 +609,88 @@ public enum CodexConfigLayerLoader {
             }
             layers.append(ConfigLayerEntry(
                 name: .project(dotCodexFolder: dotCodexPath),
-                config: config
+                config: mergedConfig,
+                hooksConfigFolderOverride: hooksConfigFolderOverride
             ))
         }
         return LoadedProjectLayers(layers: layers, startupWarnings: startupWarnings)
+    }
+
+    private static func findGitCheckoutRoot(cwd: URL, fileManager: FileManager) -> URL? {
+        let base = directoryForLookup(cwd, fileManager: fileManager)
+        for ancestor in ancestorDirectories(from: base) {
+            if fileManager.fileExists(atPath: ancestor.appendingPathComponent(".git").path) {
+                return ancestor.resolvingSymlinksInPath().standardizedFileURL
+            }
+        }
+        return nil
+    }
+
+    private static func directoryForLookup(_ url: URL, fileManager: FileManager) -> URL {
+        var isDirectory: ObjCBool = false
+        if fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue {
+            return url
+        }
+        return url.deletingLastPathComponent()
+    }
+
+    private static func rootCheckoutHooksFolder(
+        directory: URL,
+        checkoutRoot: URL?,
+        repoRoot: URL?
+    ) throws -> AbsolutePath? {
+        guard let checkoutRoot,
+              let repoRoot
+        else {
+            return nil
+        }
+        let normalizedCheckoutRoot = normalizedPath(checkoutRoot.resolvingSymlinksInPath())
+        let normalizedRepoRoot = normalizedPath(repoRoot.resolvingSymlinksInPath())
+        guard normalizedCheckoutRoot != normalizedRepoRoot,
+              let relativeDirectory = relativePath(directory, from: URL(fileURLWithPath: normalizedCheckoutRoot, isDirectory: true))
+        else {
+            return nil
+        }
+
+        let hooksFolder = URL(fileURLWithPath: normalizedRepoRoot, isDirectory: true)
+            .appendingPathComponent(relativeDirectory, isDirectory: true)
+            .appendingPathComponent(".codex", isDirectory: true)
+        return try AbsolutePath(absolutePath: hooksFolder.standardizedFileURL.path)
+    }
+
+    private static func relativePath(_ url: URL, from root: URL) -> String? {
+        let path = normalizedPath(url)
+        let rootPath = normalizedPath(root)
+        if path == rootPath {
+            return ""
+        }
+        let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
+        guard path.hasPrefix(prefix) else {
+            return nil
+        }
+        return String(path.dropFirst(prefix.count))
+    }
+
+    private static func mergeRootCheckoutProjectHooks(
+        into config: ConfigValue,
+        hooksConfigFolderOverride: AbsolutePath?,
+        fileManager: FileManager
+    ) throws -> ConfigValue {
+        guard let hooksConfigFolderOverride else {
+            return config
+        }
+        let rootConfigFile = URL(fileURLWithPath: hooksConfigFolderOverride.path, isDirectory: true)
+            .appendingPathComponent("config.toml", isDirectory: false)
+        let rootConfig = try readConfig(from: rootConfigFile, fileManager: fileManager) ?? .table([:])
+        guard case var .table(table) = config else {
+            return config
+        }
+        table.removeValue(forKey: "hooks")
+        if case let .table(rootTable) = rootConfig,
+           let hooks = rootTable["hooks"] {
+            table["hooks"] = hooks
+        }
+        return .table(table)
     }
 
     private static let projectLocalConfigDenylist: [String] = [

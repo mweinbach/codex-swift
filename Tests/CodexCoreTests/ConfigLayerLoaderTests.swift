@@ -668,6 +668,119 @@ final class ConfigLayerLoaderTests: XCTestCase {
         ])
     }
 
+    func testLinkedWorktreeProjectLayersKeepWorktreeConfigButUseRootRepoHooks() throws {
+        let dir = try ConfigLayerTemporaryDirectory()
+        let home = dir.url.appendingPathComponent("home", isDirectory: true)
+        let repo = dir.url.appendingPathComponent("repo", isDirectory: true)
+        let worktree = dir.url.appendingPathComponent("worktree", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try createGitRepository(at: repo)
+        try runGit(["worktree", "add", worktree.path, "-b", "feature/x"], cwd: repo)
+
+        let repoChild = repo.appendingPathComponent("child", isDirectory: true)
+        let worktreeChild = worktree.appendingPathComponent("child", isDirectory: true)
+        try writeProjectHookConfig(
+            dotCodex: repo.appendingPathComponent(".codex", isDirectory: true),
+            foo: "repo-root",
+            command: "echo repo root hook"
+        )
+        try writeProjectHookConfig(
+            dotCodex: repoChild.appendingPathComponent(".codex", isDirectory: true),
+            foo: "repo-child",
+            command: "echo repo child hook"
+        )
+        try writeProjectHookConfig(
+            dotCodex: worktree.appendingPathComponent(".codex", isDirectory: true),
+            foo: "worktree-root",
+            command: "echo worktree root hook"
+        )
+        try writeProjectHookConfig(
+            dotCodex: worktreeChild.appendingPathComponent(".codex", isDirectory: true),
+            foo: "worktree-child",
+            command: "echo worktree child hook"
+        )
+
+        let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: home,
+            cwd: worktreeChild,
+            overrides: ConfigLayerLoaderOverrides(
+                managedConfigPath: dir.url.appendingPathComponent("missing-managed.toml")
+            ),
+            systemConfigFile: nil
+        )
+
+        let projectLayers = stack.layersHighToLow().filter {
+            if case .project = $0.name {
+                return true
+            }
+            return false
+        }
+        XCTAssertEqual(projectLayers.count, 2)
+        XCTAssertEqual(projectLayers[0].hooksConfigFolder(), try AbsolutePath(
+            absolutePath: repoChild.appendingPathComponent(".codex").path
+        ))
+        XCTAssertEqual(projectLayers[1].hooksConfigFolder(), try AbsolutePath(
+            absolutePath: repo.appendingPathComponent(".codex").path
+        ))
+        XCTAssertEqual(projectLayers[0].config.configString(at: ["foo"]), "worktree-child")
+        XCTAssertEqual(projectLayers[0].config.projectHookCommand(), "echo repo child hook")
+        XCTAssertEqual(projectLayers[1].config.configString(at: ["foo"]), "worktree-root")
+        XCTAssertEqual(projectLayers[1].config.projectHookCommand(), "echo repo root hook")
+
+        let handlers = HookConfig.configuredHandlers(from: stack, bypassHookTrust: true)
+        XCTAssertEqual(handlers.map(\.command), ["echo repo root hook", "echo repo child hook"])
+        XCTAssertEqual(
+            handlers.map(\.sourcePath.path),
+            [
+                repo.appendingPathComponent(".codex/config.toml").path,
+                repoChild.appendingPathComponent(".codex/config.toml").path
+            ]
+        )
+    }
+
+    func testLinkedWorktreeProjectLayersUseRootRepoHooksWithoutWorktreeConfigToml() throws {
+        let dir = try ConfigLayerTemporaryDirectory()
+        let home = dir.url.appendingPathComponent("home", isDirectory: true)
+        let repo = dir.url.appendingPathComponent("repo", isDirectory: true)
+        let worktree = dir.url.appendingPathComponent("worktree", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try createGitRepository(at: repo)
+        try runGit(["worktree", "add", worktree.path, "-b", "feature/x"], cwd: repo)
+        try FileManager.default.createDirectory(
+            at: worktree.appendingPathComponent(".codex", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try writeProjectHookConfig(
+            dotCodex: repo.appendingPathComponent(".codex", isDirectory: true),
+            foo: nil,
+            command: "echo repo root hook"
+        )
+
+        let stack = try CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: home,
+            cwd: worktree,
+            overrides: ConfigLayerLoaderOverrides(
+                managedConfigPath: dir.url.appendingPathComponent("missing-managed.toml")
+            ),
+            systemConfigFile: nil
+        )
+
+        let projectLayer = try XCTUnwrap(stack.layersHighToLow().first {
+            if case .project = $0.name {
+                return true
+            }
+            return false
+        })
+        XCTAssertEqual(projectLayer.hooksConfigFolder(), try AbsolutePath(
+            absolutePath: repo.appendingPathComponent(".codex").path
+        ))
+        XCTAssertEqual(projectLayer.config.projectHookCommand(), "echo repo root hook")
+        XCTAssertEqual(
+            HookConfig.configuredHandlers(from: stack, bypassHookTrust: true).map(\.sourcePath.path),
+            [repo.appendingPathComponent(".codex/config.toml").path]
+        )
+    }
+
     func testProjectLayersIgnoreRustDenylistedLocalKeysAndWarn() throws {
         let dir = try ConfigLayerTemporaryDirectory()
         let home = dir.url.appendingPathComponent("home", isDirectory: true)
@@ -814,6 +927,88 @@ private final class ConfigLayerTemporaryDirectory {
 
     deinit {
         try? FileManager.default.removeItem(at: url)
+    }
+}
+
+private extension ConfigLayerLoaderTests {
+    func createGitRepository(at repo: URL) throws {
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        try runGit(["init"], cwd: repo)
+        try runGit(["config", "user.name", "Test User"], cwd: repo)
+        try runGit(["config", "user.email", "test@example.com"], cwd: repo)
+        try "initial\n".write(to: repo.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+        try runGit(["add", "README.md"], cwd: repo)
+        try runGit(["commit", "-m", "initial"], cwd: repo)
+    }
+
+    func writeProjectHookConfig(dotCodex: URL, foo: String?, command: String) throws {
+        try FileManager.default.createDirectory(at: dotCodex, withIntermediateDirectories: true)
+        let fooLine = foo.map { #"foo = "\#($0)""# + "\n\n" } ?? ""
+        try """
+        \(fooLine)[hooks]
+
+        [[hooks.PreToolUse]]
+        matcher = "Bash"
+
+        [[hooks.PreToolUse.hooks]]
+        type = "command"
+        command = "\(command)"
+        timeout = 5
+        """.write(
+            to: dotCodex.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+    }
+
+    func runGit(_ arguments: [String], cwd: URL) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = arguments
+        process.currentDirectoryURL = cwd
+        let stderr = Pipe()
+        process.standardError = stderr
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            let errorText = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            throw NSError(
+                domain: "ConfigLayerLoaderTests.git",
+                code: Int(process.terminationStatus),
+                userInfo: [NSLocalizedDescriptionKey: errorText]
+            )
+        }
+    }
+}
+
+private extension ConfigValue {
+    func configString(at path: [String]) -> String? {
+        guard let first = path.first else {
+            if case let .string(value) = self {
+                return value
+            }
+            return nil
+        }
+        guard case let .table(table) = self,
+              let child = table[first]
+        else {
+            return nil
+        }
+        return child.configString(at: Array(path.dropFirst()))
+    }
+
+    func projectHookCommand() -> String? {
+        guard case let .table(root) = self,
+              case let .table(hooks)? = root["hooks"],
+              case let .array(groups)? = hooks["PreToolUse"],
+              case let .table(group)? = groups.first,
+              case let .array(handlers)? = group["hooks"],
+              case let .table(handler)? = handlers.first,
+              case let .string(command)? = handler["command"]
+        else {
+            return nil
+        }
+        return command
     }
 }
 

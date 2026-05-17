@@ -12,6 +12,13 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `934a40c7d9` (`Use root repo hooks in
+  linked worktrees`). Swift project config layers now preserve ordinary
+  linked-worktree `.codex/config.toml` settings while replacing only project
+  hook declarations with the matching root-checkout `.codex` layer. Hook
+  discovery also uses that root-checkout hook folder for project hook source
+  paths and trust keys, including linked worktree layers that have a `.codex`
+  folder but no local `config.toml`.
 - 2026-05-17: continued Rust commit `cccde930ce` (`Move memory prompt
   injection to app-server extension`). Swift now has the concrete memories
   extension contributor that owns Rust-shaped thread-start memory settings,

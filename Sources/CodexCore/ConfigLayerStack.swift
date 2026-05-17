@@ -149,12 +149,14 @@ public struct ConfigLayerEntry: Equatable, Sendable {
     public var config: ConfigValue
     public var rawToml: String?
     public var version: String
+    public var hooksConfigFolderOverride: AbsolutePath?
 
     public init(name: ConfigLayerSource, config: ConfigValue) {
         self.name = name
         self.config = config
         rawToml = nil
         version = ConfigFingerprint.version(for: config)
+        hooksConfigFolderOverride = nil
     }
 
     public init(name: ConfigLayerSource, config: ConfigValue, version: String) {
@@ -162,6 +164,7 @@ public struct ConfigLayerEntry: Equatable, Sendable {
         self.config = config
         rawToml = nil
         self.version = version
+        hooksConfigFolderOverride = nil
     }
 
     public init(name: ConfigLayerSource, config: ConfigValue, rawToml: String) {
@@ -169,6 +172,19 @@ public struct ConfigLayerEntry: Equatable, Sendable {
         self.config = config
         self.rawToml = rawToml
         version = ConfigFingerprint.version(for: config)
+        hooksConfigFolderOverride = nil
+    }
+
+    public init(
+        name: ConfigLayerSource,
+        config: ConfigValue,
+        hooksConfigFolderOverride: AbsolutePath?
+    ) {
+        self.name = name
+        self.config = config
+        rawToml = nil
+        version = ConfigFingerprint.version(for: config)
+        self.hooksConfigFolderOverride = hooksConfigFolderOverride
     }
 
     public func metadata() -> ConfigLayerMetadata {
@@ -196,6 +212,10 @@ public struct ConfigLayerEntry: Equatable, Sendable {
         case .legacyManagedConfigTomlFromMdm:
             return nil
         }
+    }
+
+    public func hooksConfigFolder() -> AbsolutePath? {
+        hooksConfigFolderOverride ?? configFolder()
     }
 }
 

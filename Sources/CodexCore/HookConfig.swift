@@ -37,7 +37,7 @@ public enum HookConfig {
         }
 
         for layer in stack.getLayers(ordering: .lowestPrecedenceFirst) {
-            let metadata = hookLayerMetadata(for: layer.name)
+            let metadata = hookLayerMetadata(for: layer)
             if allowManagedHooksOnly && !metadata.isManaged {
                 continue
             }
@@ -190,9 +190,9 @@ public enum HookConfig {
     }
 
     private static func hookLayerMetadata(
-        for source: ConfigLayerSource
+        for layer: ConfigLayerEntry
     ) -> (sourcePath: URL, source: HookSource, isManaged: Bool) {
-        switch source {
+        switch layer.name {
         case let .mdm(domain, key):
             return (
                 syntheticLayerPath("<mdm:\(domain):\(key)>/config.toml"),
@@ -204,8 +204,9 @@ public enum HookConfig {
         case let .user(file):
             return (URL(fileURLWithPath: file.path, isDirectory: false), .user, false)
         case let .project(dotCodexFolder):
+            let hooksFolder = layer.hooksConfigFolder() ?? dotCodexFolder
             return (
-                URL(fileURLWithPath: dotCodexFolder.path, isDirectory: true)
+                URL(fileURLWithPath: hooksFolder.path, isDirectory: true)
                     .appendingPathComponent("config.toml", isDirectory: false),
                 .project,
                 false
