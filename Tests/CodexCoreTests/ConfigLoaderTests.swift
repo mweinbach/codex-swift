@@ -2964,6 +2964,51 @@ final class ConfigLoaderTests: XCTestCase {
         }
     }
 
+    func testStrictConfigRejectsUnknownLegacyManagedConfigFileFieldLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let managedPath = dir.url.appendingPathComponent("managed_config.toml", isDirectory: false)
+        try """
+        model = "gpt-test"
+        approval_polic = "on-request"
+        """.write(to: managedPath, atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(
+            codexHome: dir.url,
+            systemConfigFile: nil,
+            managedConfigOverrides: ConfigLayerLoaderOverrides(managedConfigPath: managedPath),
+            strictConfig: true
+        )) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "unknown configuration field `approval_polic` in \(managedPath.standardizedFileURL.path)"
+            )
+        }
+    }
+
+    func testStrictConfigRejectsUnknownManagedPreferencesFieldWithRustSourceName() throws {
+        let dir = try CoreTemporaryDirectory()
+        let managedPreferences = Data("""
+        model = "gpt-test"
+        approval_polic = "on-request"
+        """.utf8)
+            .base64EncodedString()
+
+        XCTAssertThrowsError(try CodexConfigLoader.load(
+            codexHome: dir.url,
+            systemConfigFile: nil,
+            managedConfigOverrides: ConfigLayerLoaderOverrides(
+                managedConfigPath: dir.url.appendingPathComponent("missing-managed-config.toml", isDirectory: false),
+                managedPreferencesBase64: managedPreferences
+            ),
+            strictConfig: true
+        )) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                "unknown configuration field `approval_polic` in \(CodexConfigLayerLoader.managedPreferencesConfigSourceName)"
+            )
+        }
+    }
+
     func testRuntimeMcpConfigIncludesBuiltinMemoriesWhenMemoriesFeatureEnablesIt() throws {
         let dir = try CoreTemporaryDirectory()
         try """

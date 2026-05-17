@@ -21,7 +21,10 @@ Recent upstream audit checkpoint:
   surfaces now expose `--strict-config` for interactive, `exec`, `review`,
   `resume`, `fork`, `mcp-server`, and bare `app-server`, propagate it into the
   matching config-loading runtimes, and reject unsupported subcommands with
-  Rust-shaped errors. Managed-preferences source names and source-range
+  Rust-shaped errors. Strict validation also now covers legacy admin config
+  layers: `/etc/codex/managed_config.toml` / `CODEX_MANAGED_CONFIG_PATH` and
+  macOS `com.openai.codex:config_toml_base64` managed preferences reject
+  ignored fields before merging with Rust-shaped source names. Source-range
   diagnostics remain pending.
 - 2026-05-17: rechecked Rust commit `fdda59c00b` (`Introduce tool exposure
   for deferred registration`). Swift tool-spec construction now treats

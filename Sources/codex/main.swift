@@ -1074,7 +1074,8 @@ private func runNonInteractiveExec(
         cwd: cwd,
         cliOverrides: configOverrides,
         overrides: loaderOverrides,
-        environment: environment
+        environment: environment,
+        strictConfig: options.strictConfig
     )
     let execPolicyManager = try ExecPolicyManager.load(features: settings.features, configStack: configStack)
     let hookHandlers = HookConfig.configuredHandlers(from: configStack, codexHome: codexHome, environment: environment)

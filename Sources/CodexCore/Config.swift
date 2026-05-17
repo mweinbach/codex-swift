@@ -1176,6 +1176,10 @@ public enum CodexConfigLoader {
         URL(fileURLWithPath: "/etc/codex/config.toml", isDirectory: false)
     }
 
+    static func validateStrictConfigValue(_ value: ConfigValue, source: String) throws {
+        try ParsedCodexConfigToml.validateStrictConfig(value, source: source)
+    }
+
     public static func load(
         codexHome: URL,
         cwd: URL? = nil,
@@ -1256,7 +1260,8 @@ public enum CodexConfigLoader {
             codexHome: codexHome,
             overrides: managedConfigOverrides,
             environment: environment,
-            fileManager: fileManager
+            fileManager: fileManager,
+            strictConfig: strictConfig
         )
         try parsed.merge(managedConfigLayers)
 

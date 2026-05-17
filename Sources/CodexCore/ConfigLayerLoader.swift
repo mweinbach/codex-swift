@@ -98,6 +98,8 @@ public enum CodexConfigLayerLoader {
     public static let managedConfigEnvironmentVariable = "CODEX_MANAGED_CONFIG_PATH"
     public static let managedPreferencesApplicationID = "com.openai.codex"
     public static let managedPreferencesConfigKey = "config_toml_base64"
+    public static let managedPreferencesConfigSourceName =
+        "\(managedPreferencesApplicationID):\(managedPreferencesConfigKey)"
 
     public static func defaultRequirementsTomlFile() -> URL? {
         #if os(Windows)
@@ -126,17 +128,23 @@ public enum CodexConfigLayerLoader {
         codexHome: URL,
         overrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides(),
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        strictConfig: Bool = false
     ) throws -> LoadedConfigLayers {
         let managedConfigURL = overrides.managedConfigPath
             ?? managedConfigDefaultPath(codexHome: codexHome, environment: environment)
         let managedConfigPath = try AbsolutePath(absolutePath: managedConfigURL.standardizedFileURL.path)
-        let managedConfig = try readConfig(from: managedConfigURL, fileManager: fileManager).map {
+        let managedConfig = try readConfig(
+            from: managedConfigURL,
+            fileManager: fileManager,
+            strictConfig: strictConfig
+        ).map {
             ManagedConfigFromFile(managedConfig: $0, file: managedConfigPath)
         }
 
         let managedPreferences = try loadManagedAdminConfig(
-            overrideBase64: overrides.managedPreferencesBase64
+            overrideBase64: overrides.managedPreferencesBase64,
+            strictConfig: strictConfig
         )
 
         return LoadedConfigLayers(
@@ -153,13 +161,15 @@ public enum CodexConfigLayerLoader {
         overrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides(),
         environment: [String: String] = ProcessInfo.processInfo.environment,
         fileManager: FileManager = .default,
-        systemConfigFile: URL? = CodexConfigLoader.defaultSystemConfigFile()
+        systemConfigFile: URL? = CodexConfigLoader.defaultSystemConfigFile(),
+        strictConfig: Bool = false
     ) throws -> ConfigLayerStack {
         let loadedConfigLayers = try loadConfigLayers(
             codexHome: codexHome,
             overrides: overrides,
             environment: environment,
-            fileManager: fileManager
+            fileManager: fileManager,
+            strictConfig: strictConfig
         )
         var requirementsToml = ConfigRequirementsToml()
         if !overrides.ignoreManagedRequirements {
@@ -278,7 +288,8 @@ public enum CodexConfigLayerLoader {
     public static func readConfig(
         from url: URL,
         logMissingAsInfo _: Bool = false,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        strictConfig: Bool = false
     ) throws -> ConfigValue? {
         guard fileManager.fileExists(atPath: url.path) else {
             return nil
@@ -291,22 +302,41 @@ public enum CodexConfigLayerLoader {
             throw ConfigLayerLoadError.readFailed(path: url.path, message: String(describing: error))
         }
 
+        let parsed: ConfigValue
         do {
-            let parsed = try ConfigTomlParser.parse(contents)
-            return try resolveRelativePaths(in: parsed, baseDirectory: url.deletingLastPathComponent())
+            parsed = try ConfigTomlParser.parse(contents)
         } catch {
             throw ConfigLayerLoadError.parseFailed(path: url.path, message: String(describing: error))
         }
+        if strictConfig {
+            try CodexConfigLoader.validateStrictConfigValue(
+                parsed,
+                source: url.standardizedFileURL.path
+            )
+        }
+        return try resolveRelativePaths(in: parsed, baseDirectory: url.deletingLastPathComponent())
     }
 
-    public static func loadManagedAdminConfigLayer(overrideBase64: String?) throws -> ConfigValue? {
-        try loadManagedAdminConfig(overrideBase64: overrideBase64)?.managedConfig
+    public static func loadManagedAdminConfigLayer(
+        overrideBase64: String?,
+        strictConfig: Bool = false
+    ) throws -> ConfigValue? {
+        try loadManagedAdminConfig(
+            overrideBase64: overrideBase64,
+            strictConfig: strictConfig
+        )?.managedConfig
     }
 
-    public static func loadManagedAdminConfig(overrideBase64: String?) throws -> ManagedConfigFromMDM? {
+    public static func loadManagedAdminConfig(
+        overrideBase64: String?,
+        strictConfig: Bool = false
+    ) throws -> ManagedConfigFromMDM? {
         if let overrideBase64 {
             let trimmed = overrideBase64.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? nil : try parseManagedPreferencesBase64Layer(trimmed)
+            return trimmed.isEmpty ? nil : try parseManagedPreferencesBase64Layer(
+                trimmed,
+                strictConfig: strictConfig
+            )
         }
 
         guard let encoded = UserDefaults(suiteName: managedPreferencesApplicationID)?
@@ -316,14 +346,17 @@ public enum CodexConfigLayerLoader {
         else {
             return nil
         }
-        return try parseManagedPreferencesBase64Layer(encoded)
+        return try parseManagedPreferencesBase64Layer(encoded, strictConfig: strictConfig)
     }
 
     public static func parseManagedPreferencesBase64(_ encoded: String) throws -> ConfigValue {
         try parseManagedPreferencesBase64Layer(encoded).managedConfig
     }
 
-    public static func parseManagedPreferencesBase64Layer(_ encoded: String) throws -> ManagedConfigFromMDM {
+    public static func parseManagedPreferencesBase64Layer(
+        _ encoded: String,
+        strictConfig: Bool = false
+    ) throws -> ManagedConfigFromMDM {
         guard let decoded = Data(base64Encoded: encoded) else {
             throw ConfigLayerLoadError.invalidData("Failed to decode managed preferences as base64")
         }
@@ -336,6 +369,12 @@ public enum CodexConfigLayerLoader {
             value = try ConfigTomlParser.parse(decodedString)
         } catch {
             throw ConfigLayerLoadError.parseFailed(path: nil, message: String(describing: error))
+        }
+        if strictConfig {
+            try CodexConfigLoader.validateStrictConfigValue(
+                value,
+                source: managedPreferencesConfigSourceName
+            )
         }
 
         guard case .table = value else {
