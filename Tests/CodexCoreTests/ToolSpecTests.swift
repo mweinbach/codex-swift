@@ -1553,7 +1553,6 @@ final class ToolSpecTests: XCTestCase {
         XCTAssertTrue(entries[0].searchText.contains("automation update"))
         XCTAssertTrue(entries[0].searchText.contains("codex_app"))
         XCTAssertTrue(entries[0].searchText.contains("target_id"))
-        XCTAssertNil(entries[0].limitBucket)
     }
 
     func testDynamicToolSearchEntriesUseRustToolNameOrdering() {
@@ -1736,12 +1735,11 @@ final class ToolSpecTests: XCTestCase {
         }
     }
 
-    func testToolSearchComputerUseDefaultLimitExpandsLikeRust() throws {
+    func testToolSearchOmittedLimitUsesDefaultResultLimitLikeRust() throws {
         let entries = (0..<20).map { index in
             makeToolSearchEntry(
                 name: "computer_action_\(index)",
-                searchText: "computer use action",
-                limitBucket: "computer-use"
+                searchText: "computer use action"
             )
         }
         let index = ToolSearchIndex(entries: entries)
@@ -1750,17 +1748,16 @@ final class ToolSpecTests: XCTestCase {
             "query": .string("computer use")
         ]))
 
-        XCTAssertEqual(tools.compactMap(toolName).count, 20)
+        XCTAssertEqual(tools.compactMap(toolName).count, ToolSearchIndex.defaultLimit)
         XCTAssertEqual(tools.compactMap(toolName).first, "computer_action_0")
-        XCTAssertEqual(tools.compactMap(toolName).last, "computer_action_19")
+        XCTAssertEqual(tools.compactMap(toolName).last, "computer_action_7")
     }
 
-    func testToolSearchExplicitLimitBypassesBucketCapsLikeRust() throws {
+    func testToolSearchExplicitLimitControlsResultCountLikeRust() throws {
         let entries = (0..<12).map { index in
             makeToolSearchEntry(
                 name: "docs_tool_\(index)",
-                searchText: "calendar docs tool",
-                limitBucket: "docs"
+                searchText: "calendar docs tool"
             )
         }
         let index = ToolSearchIndex(entries: entries)
@@ -2008,15 +2005,14 @@ final class ToolSpecTests: XCTestCase {
         McpTool(name: name, inputSchema: McpToolInputSchema(), description: description)
     }
 
-    private func makeToolSearchEntry(name: String, searchText: String, limitBucket: String?) -> ToolSearchEntry {
+    private func makeToolSearchEntry(name: String, searchText: String) -> ToolSearchEntry {
         ToolSearchEntry(
             searchText: searchText,
             output: .function(ResponsesAPITool(
                 name: name,
                 description: "Deferred \(name)",
                 parameters: .object(properties: [:], required: nil, additionalProperties: .boolean(false))
-            )),
-            limitBucket: limitBucket
+            ))
         )
     }
 

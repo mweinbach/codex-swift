@@ -30,19 +30,15 @@ public struct ToolSearchSourceInfo: Equatable, Sendable {
 public struct ToolSearchEntry: Equatable, Sendable {
     public let searchText: String
     public let output: ToolSpec
-    public let limitBucket: String?
 
-    public init(searchText: String, output: ToolSpec, limitBucket: String? = nil) {
+    public init(searchText: String, output: ToolSpec) {
         self.searchText = searchText
         self.output = output
-        self.limitBucket = limitBucket
     }
 }
 
 public struct ToolSearchIndex: Equatable, Sendable {
     public static let defaultLimit = 8
-    private static let computerUseServerName = "computer-use"
-    private static let computerUseDefaultLimit = 20
 
     public let entries: [ToolSearchEntry]
     public let sourceInfos: [ToolSearchSourceInfo]
@@ -122,8 +118,7 @@ public struct ToolSearchIndex: Equatable, Sendable {
                         namespaceDescription: toolInfo.namespaceDescription,
                         tool: toolInfo.tool
                     ),
-                    output: output,
-                    limitBucket: toolInfo.serverName
+                    output: output
                 )
             }
     }
@@ -145,8 +140,7 @@ public struct ToolSearchIndex: Equatable, Sendable {
             }
             return ToolSearchEntry(
                 searchText: buildDynamicSearchText(tool: tool),
-                output: output,
-                limitBucket: nil
+                output: output
             )
         }
     }
@@ -252,8 +246,7 @@ public struct ToolSearchIndex: Equatable, Sendable {
         guard !query.isEmpty else {
             throw ToolSearchError.emptyQuery
         }
-        let requestedLimit = arguments.limit
-        let limit = requestedLimit ?? Self.defaultLimit
+        let limit = arguments.limit ?? Self.defaultLimit
         guard limit > 0 else {
             throw ToolSearchError.invalidLimit
         }
@@ -261,8 +254,7 @@ public struct ToolSearchIndex: Equatable, Sendable {
             return []
         }
 
-        let useDefaultLimit = requestedLimit == nil
-        let resultEntries = searchResultEntries(query: query, limit: limit, useDefaultLimit: useDefaultLimit)
+        let resultEntries = rankedEntries(query: query, limit: limit)
         return Self.coalesce(resultEntries.map(\.output)).map(Self.jsonValue)
     }
 
@@ -301,22 +293,6 @@ public struct ToolSearchIndex: Equatable, Sendable {
         \(sourceDescriptions)
         Some of the tools may not have been provided to you upfront, and you should use this tool (`tool_search`) to search for the required tools. For MCP tool discovery, always use `tool_search` instead of `list_mcp_resources` or `list_mcp_resource_templates`.
         """
-    }
-
-    private func searchResultEntries(
-        query: String,
-        limit: Int,
-        useDefaultLimit: Bool
-    ) -> [ToolSearchEntry] {
-        var results = rankedEntries(query: query, limit: limit)
-        guard useDefaultLimit else {
-            return results
-        }
-
-        if results.contains(where: { $0.limitBucket == Self.computerUseServerName }) {
-            results = rankedEntries(query: query, limit: Self.computerUseDefaultLimit)
-        }
-        return limitResultsByBucket(results)
     }
 
     private func rankedEntries(query: String, limit: Int) -> [ToolSearchEntry] {
@@ -358,22 +334,6 @@ public struct ToolSearchIndex: Equatable, Sendable {
         }
         .prefix(limit)
         .map(\.entry)
-    }
-
-    private func limitResultsByBucket(_ results: [ToolSearchEntry]) -> [ToolSearchEntry] {
-        var counts: [String: Int] = [:]
-        return results.filter { result in
-            guard let bucket = result.limitBucket else {
-                return true
-            }
-            let limit = bucket == Self.computerUseServerName ? Self.computerUseDefaultLimit : Self.defaultLimit
-            let count = counts[bucket, default: 0]
-            guard count < limit else {
-                return false
-            }
-            counts[bucket] = count + 1
-            return true
-        }
     }
 
     private static func coalesce(_ specs: [ToolSpec]) -> [ToolSpec] {

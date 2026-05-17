@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `1ae9867296` (`Remove tool search bucket
+  limit override`). Swift `tool_search` now uses the single Rust default
+  result limit for omitted `limit` values, removes the old per-server
+  `computer-use` expansion/bucket-cap path, drops bucket metadata from
+  deferred search entries, and keeps explicit `limit` as the sole result-count
+  override.
 - 2026-05-17: rechecked Rust commit `a98b57d065` (`Reuse Apps MCP path
   override for plugin-service rollout`). Swift config loading now mirrors
   Rust's enabled-boolean default for `[features] apps_mcp_path_override = true`
