@@ -12,6 +12,13 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: wired the Swift app-server processor into the first-class
+  extension runtime state for loaded threads. `CodexAppServerConfiguration`
+  now accepts an `ExtensionRegistry`, and live `thread/start`,
+  `thread/resume`, `thread/fork`, `turn/start`, token-usage, turn-stop,
+  turn-abort, and runtime-shutdown paths dispatch through stable
+  `ExtensionRuntimeState` stores. Broader prompt/tool/approval contributor
+  use inside the live running-thread loop remains pending.
 - 2026-05-17: added the Swift host-owned extension runtime state bridge toward
   live app-server / ThreadManager integration. `ExtensionRuntimeState` now
   shares one Rust-shaped session `ExtensionData` store across threads, creates

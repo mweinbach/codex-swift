@@ -7,6 +7,63 @@ import SQLite3
 import XCTest
 
 final class CodexAppServerTests: XCTestCase {
+    private final class AppServerExtensionRecorder:
+        ExtensionThreadLifecycleContributor,
+        ExtensionTurnLifecycleContributor,
+        ExtensionTokenUsageContributor,
+        @unchecked Sendable
+    {
+        private let lock = NSLock()
+        private var values: [String] = []
+
+        var records: [String] {
+            lock.withLock { values }
+        }
+
+        func onThreadStart(_ input: ExtensionThreadStartInput) {
+            input.threadStore.insert("thread-started")
+            append("thread-start:\(input.threadID):\(input.config.model ?? "nil")")
+        }
+
+        func onThreadResume(_ input: ExtensionThreadResumeInput) {
+            append("thread-resume:\(input.threadID):\(input.threadStore.get(String.self) ?? "missing")")
+        }
+
+        func onThreadStop(_ input: ExtensionThreadStopInput) {
+            append("thread-stop:\(input.threadID):\(input.threadStore.get(String.self) ?? "missing")")
+        }
+
+        func onTurnStart(_ input: ExtensionTurnStartInput) {
+            input.turnStore.insert("turn-started")
+            append("turn-start:\(input.turnID):\(input.threadStore.get(String.self) ?? "missing")")
+        }
+
+        func onTurnStop(_ input: ExtensionTurnStopInput) {
+            append("turn-stop:\(input.turnID):\(input.turnStore.get(String.self) ?? "missing")")
+        }
+
+        func onTurnAbort(_ input: ExtensionTurnAbortInput) {
+            append("turn-abort:\(input.turnID):\(input.reason.rawValue)")
+        }
+
+        func onTokenUsage(
+            sessionStore: ExtensionData,
+            threadStore: ExtensionData,
+            turnStore: ExtensionData,
+            threadID: ThreadId,
+            turnID: String,
+            tokenUsage: TokenUsageInfo
+        ) {
+            append("tokens:\(turnID):\(tokenUsage.totalTokenUsage.totalTokens):\(turnStore.get(String.self) ?? "missing")")
+        }
+
+        private func append(_ value: String) {
+            lock.withLock {
+                values.append(value)
+            }
+        }
+    }
+
     private var retainedTemporaryDirectories: [TemporaryDirectory] = []
     private static let rateLimitsUsageJSON = """
     {
@@ -4283,6 +4340,82 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(headerObject["fiber_run_id"] as? String, "fiber-live-123")
         XCTAssertNotNil(headerObject["sandbox"] as? String)
         XCTAssertNil(headerObject["turn_started_at_unix_ms"])
+    }
+
+    func testLiveRuntimeDispatchesExtensionLifecycleCallbacksWithStableStoresLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let coreCapture = AppServerCoreOpCapture()
+        let recorder = AppServerExtensionRecorder()
+        var builder = ExtensionRegistryBuilder()
+        builder.threadLifecycleContributor(recorder)
+        builder.turnLifecycleContributor(recorder)
+        builder.tokenUsageContributor(recorder)
+        let liveRuntime = AppServerLiveRuntimeCapture { submission in
+            guard submission.turnID == "turn-3" else {
+                return []
+            }
+            return [
+                EventMessage.tokenCount(TokenCountEvent(
+                    info: TokenUsageInfo(
+                        totalTokenUsage: TokenUsage(totalTokens: 23),
+                        lastTokenUsage: TokenUsage(totalTokens: 5)
+                    ),
+                    rateLimits: nil
+                )),
+                EventMessage.taskComplete(TaskCompleteEvent(
+                    turnID: submission.turnID,
+                    lastAgentMessage: "done"
+                ))
+            ]
+        }
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                extensionRegistry: builder.build()
+            ),
+            coreOpSubmitter: coreCapture.submit,
+            liveRuntimeSubmitter: liveRuntime.submit,
+            experimentalAPIEnabled: true
+        )
+
+        let startMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/start","params":{"model":"gpt-extension","modelProvider":"mock_provider"}}"#.utf8
+        )))
+        let startResult = try XCTUnwrap(startMessages[0]["result"] as? [String: Any])
+        let thread = try XCTUnwrap(startResult["thread"] as? [String: Any])
+        let threadID = try XCTUnwrap(thread["id"] as? String)
+
+        _ = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"thread/resume","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        _ = try decodeMessages(processor.processLine(Data(
+            #"{"id":3,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Run extension callbacks"}]}}"#.utf8
+        )))
+        _ = try decodeMessages(processor.processLine(Data(
+            #"{"id":4,"method":"turn/start","params":{"threadId":"\#(threadID)","input":[{"type":"text","text":"Abort extension callbacks"}]}}"#.utf8
+        )))
+        await processor.handleRuntimeEvent(
+            threadID: threadID,
+            turnID: "turn-4",
+            event: EventMessage.turnAborted(TurnAbortedEvent(turnID: "turn-4", reason: .interrupted))
+        )
+
+        await processor.handleRuntimeEvent(
+            threadID: threadID,
+            turnID: "turn-3",
+            event: EventMessage.shutdownComplete
+        )
+
+        XCTAssertEqual(recorder.records, [
+            "thread-start:\(threadID):nil",
+            "thread-resume:\(threadID):thread-started",
+            "turn-start:turn-3:thread-started",
+            "tokens:turn-3:23:turn-started",
+            "turn-stop:turn-3:turn-started",
+            "turn-start:turn-4:thread-started",
+            "turn-abort:turn-4:interrupted",
+            "thread-stop:\(threadID):thread-started"
+        ])
     }
 
     func testTurnStartRejectsUnsupportedImageDetailLikeRust() throws {
@@ -33741,6 +33874,7 @@ final class CodexAppServerTests: XCTestCase {
         pluginStartupTasksEnabled: Bool = false,
         curatedPluginStartupSyncEnabled: Bool = false,
         memoryStartupTaskStarter: AppServerMemoryStartupTaskStarter? = nil,
+        extensionRegistry: ExtensionRegistry = .empty,
         windowsSandboxSetupRunner: @escaping AppServerWindowsSandboxSetupRunner = runWindowsSandboxSetup
     ) -> CodexAppServerConfiguration {
         var mergedEnvironment = [
@@ -33780,6 +33914,7 @@ final class CodexAppServerTests: XCTestCase {
             pluginStartupTasksEnabled: pluginStartupTasksEnabled,
             curatedPluginStartupSyncEnabled: curatedPluginStartupSyncEnabled,
             memoryStartupTaskStarter: memoryStartupTaskStarter,
+            extensionRegistry: extensionRegistry,
             windowsSandboxSetupRunner: windowsSandboxSetupRunner
         )
     }

@@ -266,6 +266,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let pluginStartupTasksEnabled: Bool
     public let curatedPluginStartupSyncEnabled: Bool
     public let memoryStartupTaskStarter: AppServerMemoryStartupTaskStarter?
+    public let extensionRegistry: ExtensionRegistry
     public let windowsSandboxSetupRunner: AppServerWindowsSandboxSetupRunner
 
     public init(
@@ -306,6 +307,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         pluginStartupTasksEnabled: Bool = true,
         curatedPluginStartupSyncEnabled: Bool = true,
         memoryStartupTaskStarter: AppServerMemoryStartupTaskStarter? = nil,
+        extensionRegistry: ExtensionRegistry = .empty,
         windowsSandboxSetupRunner: @escaping AppServerWindowsSandboxSetupRunner = runWindowsSandboxSetup
     ) {
         self.codexHome = codexHome
@@ -359,6 +361,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         self.pluginStartupTasksEnabled = pluginStartupTasksEnabled
         self.curatedPluginStartupSyncEnabled = curatedPluginStartupSyncEnabled
         self.memoryStartupTaskStarter = memoryStartupTaskStarter
+        self.extensionRegistry = extensionRegistry
         self.windowsSandboxSetupRunner = windowsSandboxSetupRunner
     }
 
@@ -26476,6 +26479,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
     private var optOutNotificationMethods: Set<String> = []
     private let activeCommandExecs = AppServerCommandExecRegistry()
     private let activeProcesses = AppServerProcessRegistry()
+    private let extensionRuntimeState: ExtensionRuntimeState
 
     init(
         configuration: CodexAppServerConfiguration,
@@ -26499,6 +26503,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         )
         self.threadStateManager = threadStateManager
         self.outgoingRequestBroker = outgoingRequestBroker ?? AppServerOutgoingRequestBroker(notificationSink: notificationSink)
+        self.extensionRuntimeState = ExtensionRuntimeState(registry: configuration.extensionRegistry)
         self.userAgent = CodexAppServer.buildUserAgent(configuration: configuration, params: nil)
         if let snapshot = Self.remoteControlStatusSnapshot(configuration: configuration) {
             self.currentRemoteControlStatusSnapshot = snapshot
@@ -26842,6 +26847,58 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         _ = try? CodexAppServer.runAsyncBlocking {
             await manager.tryAddConnectionToThread(threadID: threadID, connectionID: connectionID)
         }
+    }
+
+    private func emitExtensionThreadStart(threadID: String, config: CodexRuntimeConfig) {
+        guard let parsedThreadID = try? ThreadId(string: threadID) else {
+            return
+        }
+        extensionRuntimeState.emitThreadStart(threadID: parsedThreadID, config: config)
+    }
+
+    private func emitExtensionThreadResume(threadID: String) {
+        guard let parsedThreadID = try? ThreadId(string: threadID) else {
+            return
+        }
+        extensionRuntimeState.emitThreadResume(threadID: parsedThreadID)
+    }
+
+    private func emitExtensionThreadStop(threadID: String) {
+        guard let parsedThreadID = try? ThreadId(string: threadID) else {
+            return
+        }
+        guard extensionRuntimeState.existingThreadStore(for: parsedThreadID) != nil else {
+            return
+        }
+        extensionRuntimeState.emitThreadStop(threadID: parsedThreadID)
+    }
+
+    private func emitExtensionTurnStart(threadID: String, turnID: String) {
+        guard let parsedThreadID = try? ThreadId(string: threadID) else {
+            return
+        }
+        extensionRuntimeState.emitTurnStart(threadID: parsedThreadID, turnID: turnID)
+    }
+
+    private func emitExtensionTurnStop(threadID: String, turnID: String) {
+        guard let parsedThreadID = try? ThreadId(string: threadID) else {
+            return
+        }
+        extensionRuntimeState.emitTurnStop(threadID: parsedThreadID, turnID: turnID)
+    }
+
+    private func emitExtensionTurnAbort(threadID: String, turnID: String, reason: TurnAbortReason) {
+        guard let parsedThreadID = try? ThreadId(string: threadID) else {
+            return
+        }
+        extensionRuntimeState.emitTurnAbort(threadID: parsedThreadID, turnID: turnID, reason: reason)
+    }
+
+    private func emitExtensionTokenUsage(threadID: String, turnID: String, tokenUsage: TokenUsageInfo) {
+        guard let parsedThreadID = try? ThreadId(string: threadID) else {
+            return
+        }
+        extensionRuntimeState.emitTokenUsage(threadID: parsedThreadID, turnID: turnID, tokenUsage: tokenUsage)
     }
 
     private func unsubscribeCurrentConnection(fromThreadID threadID: String) -> Bool {
@@ -27445,6 +27502,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             let error = runtimeTurnErrors[threadID]?[runtimeTurnID]
             let errorInfo = runtimeTurnErrorInfos[threadID]?[runtimeTurnID]
             let inputMessages = runtimeTurnInputMessages[threadID]?[runtimeTurnID] ?? []
+            emitExtensionTurnStop(threadID: threadID, turnID: runtimeTurnID)
             runtimeTurnStartedAt[threadID]?[runtimeTurnID] = nil
             runtimeTurnErrors[threadID]?[runtimeTurnID] = nil
             runtimeTurnInputMessages[threadID]?[runtimeTurnID] = nil
@@ -27488,6 +27546,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         case let .turnAborted(event):
             let runtimeTurnID = event.turnID ?? turnID
             let startedAt = runtimeTurnStartedAt[threadID]?[runtimeTurnID]
+            emitExtensionTurnAbort(threadID: threadID, turnID: runtimeTurnID, reason: event.reason)
             runtimeTurnStartedAt[threadID]?[runtimeTurnID] = nil
             runtimeTurnErrors[threadID]?[runtimeTurnID] = nil
             runtimeTurnErrorInfos[threadID]?[runtimeTurnID] = nil
@@ -27549,6 +27608,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         case let .tokenCount(event):
             if let info = event.info {
                 runtimeTurnTokenUsage[threadID, default: [:]][turnID] = info.lastTokenUsage
+                emitExtensionTokenUsage(threadID: threadID, turnID: turnID, tokenUsage: info)
             }
             notifications = CodexAppServer.runtimeEventNotifications(
                 threadID: threadID,
@@ -28114,6 +28174,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             || runtimeTurnTokenUsage[threadID] != nil
             || runtimeTurnAnalyticsSeeds[threadID] != nil
             || pendingRollbackRequests[threadID] != nil
+        emitExtensionThreadStop(threadID: threadID)
         let manager = threadStateManager
         let wasLoaded = (try? CodexAppServer.runAsyncBlocking {
             await manager.markThreadUnloaded(threadID)
@@ -29182,6 +29243,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                     let result = outcome.result
                     if let thread = result["thread"] as? [String: Any],
                        let threadID = thread["id"] as? String {
+                        emitExtensionThreadStart(threadID: threadID, config: outcome.runtimeConfig)
                         notifications.append(contentsOf: try startLiveMcpManager(
                             threadID: threadID,
                             runtimeConfig: outcome.runtimeConfig
@@ -29295,6 +29357,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                     let result = resumeOutcome.result
                     if let thread = result["thread"] as? [String: Any],
                        let threadID = thread["id"] as? String {
+                        emitExtensionThreadResume(threadID: threadID)
                         notifications.append(contentsOf: try startLiveMcpManager(
                             threadID: threadID,
                             runtimeConfig: resumeOutcome.runtimeConfig
@@ -29334,6 +29397,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                     let result = forkOutcome.result
                     if let thread = result["thread"] as? [String: Any],
                        let threadID = thread["id"] as? String {
+                        emitExtensionThreadStart(threadID: threadID, config: forkOutcome.runtimeConfig)
                         notifications.append(contentsOf: try startLiveMcpManager(
                             threadID: threadID,
                             runtimeConfig: forkOutcome.runtimeConfig
@@ -29387,6 +29451,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                         if activeTurnIDs[coreOp.threadID] == nil {
                             activeTurnIDs[coreOp.threadID] = turnID
                         }
+                        emitExtensionTurnStart(threadID: coreOp.threadID, turnID: turnID)
                         recordTurnStartForAnalytics(threadID: coreOp.threadID, turnID: turnID, params: params)
                         maybeStartMemoryStartupTask(threadID: coreOp.threadID, hasInput: coreOp.hasInput)
                         let turn = CodexAppServer.inProgressTurnObject(id: turnID)
@@ -29416,6 +29481,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                         pendingSessionStartSources.removeValue(forKey: threadID)
                         if let turnID = turn["id"] as? String {
                             activeTurnIDs[threadID] = turnID
+                            emitExtensionTurnStart(threadID: threadID, turnID: turnID)
                             recordTurnStartForAnalytics(threadID: threadID, turnID: turnID, params: params)
                         }
                         maybeStartMemoryStartupTask(threadID: threadID, hasInput: outcome.hasInput)
