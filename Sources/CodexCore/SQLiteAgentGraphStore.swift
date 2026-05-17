@@ -211,7 +211,7 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
                     thread_id TEXT PRIMARY KEY NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
                     goal_id TEXT NOT NULL,
                     objective TEXT NOT NULL,
-                    status TEXT NOT NULL CHECK(status IN ('active', 'paused', 'budget_limited', 'complete')),
+                    status TEXT NOT NULL CHECK(status IN ('active', 'paused', 'blocked', 'usage_limited', 'budget_limited', 'complete')),
                     token_budget INTEGER,
                     tokens_used INTEGER NOT NULL DEFAULT 0,
                     time_used_seconds INTEGER NOT NULL DEFAULT 0,
@@ -221,6 +221,7 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
                 """,
                 database: openedDatabase
             )
+            try Self.migrateThreadGoalsStoppedStatusesIfNeeded(database: openedDatabase)
             try Self.execute(
                 """
                 CREATE TABLE IF NOT EXISTS remote_control_enrollments (
@@ -2758,6 +2759,10 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
             return "active"
         case .paused:
             return "paused"
+        case .blocked:
+            return "blocked"
+        case .usageLimited:
+            return "usage_limited"
         case .budgetLimited:
             return "budget_limited"
         case .complete:
@@ -2771,6 +2776,10 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
             return .active
         case "paused":
             return .paused
+        case "blocked":
+            return .blocked
+        case "usage_limited":
+            return .usageLimited
         case "budget_limited":
             return .budgetLimited
         case "complete":
@@ -2789,6 +2798,87 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
             return .budgetLimited
         }
         return status
+    }
+
+    private static func migrateThreadGoalsStoppedStatusesIfNeeded(database: OpaquePointer) throws {
+        let createSQL: String? = try withStatement(
+            query: "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'thread_goals'",
+            bindings: [],
+            database: database
+        ) { statement in
+            let result = sqlite3_step(statement)
+            if result == SQLITE_DONE {
+                return nil
+            }
+            guard result == SQLITE_ROW else {
+                throw sqliteError(database: database)
+            }
+            return optionalTextColumn(statement, index: 0)
+        }
+
+        guard let createSQL,
+              !createSQL.contains("'blocked'") || !createSQL.contains("'usage_limited'")
+        else {
+            return
+        }
+
+        try execute("PRAGMA foreign_keys=OFF", database: database)
+        do {
+            try execute("BEGIN IMMEDIATE", database: database)
+            try execute("DROP TABLE IF EXISTS thread_goals_new", database: database)
+            try execute(
+                """
+                CREATE TABLE thread_goals_new (
+                    thread_id TEXT PRIMARY KEY NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+                    goal_id TEXT NOT NULL,
+                    objective TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('active', 'paused', 'blocked', 'usage_limited', 'budget_limited', 'complete')),
+                    token_budget INTEGER,
+                    tokens_used INTEGER NOT NULL DEFAULT 0,
+                    time_used_seconds INTEGER NOT NULL DEFAULT 0,
+                    created_at_ms INTEGER NOT NULL,
+                    updated_at_ms INTEGER NOT NULL
+                )
+                """,
+                database: database
+            )
+            try execute(
+                """
+                INSERT INTO thread_goals_new (
+                    thread_id,
+                    goal_id,
+                    objective,
+                    status,
+                    token_budget,
+                    tokens_used,
+                    time_used_seconds,
+                    created_at_ms,
+                    updated_at_ms
+                )
+                SELECT
+                    thread_id,
+                    goal_id,
+                    objective,
+                    status,
+                    token_budget,
+                    tokens_used,
+                    time_used_seconds,
+                    created_at_ms,
+                    updated_at_ms
+                FROM thread_goals
+                """,
+                database: database
+            )
+            try execute("DROP TABLE thread_goals", database: database)
+            try execute("ALTER TABLE thread_goals_new RENAME TO thread_goals", database: database)
+            try execute("COMMIT", database: database)
+            try execute("PRAGMA foreign_keys=ON", database: database)
+        } catch {
+            try? execute("ROLLBACK", database: database)
+            try? execute("DROP TABLE IF EXISTS thread_goals_new", database: database)
+            try? execute("PRAGMA foreign_keys=ON", database: database)
+            throw error
+        }
     }
 
     private static func epochMillisecondsDate(_ value: Int64) -> Date {

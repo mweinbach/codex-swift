@@ -4557,13 +4557,17 @@ public enum CodexAppServer {
             return .active
         case "paused":
             return .paused
+        case "blocked":
+            return .blocked
+        case "usageLimited":
+            return .usageLimited
         case "budgetLimited":
             return .budgetLimited
         case "complete":
             return .complete
         default:
             throw AppServerError.invalidRequest(
-                "Invalid request: unknown variant `\(status)`, expected one of `active`, `paused`, `budgetLimited`, `complete`"
+                "Invalid request: unknown variant `\(status)`, expected one of `active`, `paused`, `blocked`, `usageLimited`, `budgetLimited`, `complete`"
             )
         }
     }

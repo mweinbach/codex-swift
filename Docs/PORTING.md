@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: rechecked Rust commit `e590f74515` (`goal: pause
+  continuations on usage limits and blockers`). Swift now carries Rust's
+  expanded thread-goal stopped statuses across the shared protocol, app-server
+  `thread/goal/set` parsing, JSON notifications/responses, and SQLite
+  persistence, including migration of the older `thread_goals` status check to
+  accept `blocked` and `usage_limited`.
 - 2026-05-17: rechecked Rust commit `941e7f825e` (`Improve goal completion
   usage reporting`). Swift now has the shared goal-tool response shape that
   mirrors Rust's `remainingTokens` calculation, explicit-null optional fields,

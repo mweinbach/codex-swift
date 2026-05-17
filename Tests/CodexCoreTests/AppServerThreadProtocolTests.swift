@@ -2927,14 +2927,38 @@ final class AppServerThreadProtocolTests: XCTestCase {
             ThreadGoalSetParams(
                 threadID: threadID.description,
                 objective: "ship parity",
-                status: .budgetLimited,
+                status: .blocked,
                 tokenBudget: .set(1_024)
             ),
             [
                 "threadId": threadID.description,
                 "objective": "ship parity",
-                "status": "budgetLimited",
+                "status": "blocked",
                 "tokenBudget": 1_024
+            ]
+        )
+        try XCTAssertJSONObjectEqual(
+            ThreadGoalSetResponse(goal: ThreadGoal(
+                threadID: threadID,
+                objective: "ship parity",
+                status: .usageLimited,
+                tokenBudget: nil,
+                tokensUsed: 12,
+                timeUsedSeconds: 34,
+                createdAt: 100,
+                updatedAt: 200
+            )),
+            [
+                "goal": [
+                    "threadId": threadID.description,
+                    "objective": "ship parity",
+                    "status": "usageLimited",
+                    "tokenBudget": NSNull(),
+                    "tokensUsed": 12,
+                    "timeUsedSeconds": 34,
+                    "createdAt": 100,
+                    "updatedAt": 200
+                ]
             ]
         )
         try XCTAssertJSONObjectEqual(ThreadGoalSetParams(threadID: threadID.description), [
@@ -3018,6 +3042,18 @@ final class AppServerThreadProtocolTests: XCTestCase {
             from: Data(#"{"threadId":"\#(threadID.description)","tokenBudget":99}"#.utf8)
         )
         XCTAssertEqual(set.tokenBudget, .set(99))
+
+        let blocked = try JSONDecoder().decode(
+            ThreadGoalSetParams.self,
+            from: Data(#"{"threadId":"\#(threadID.description)","status":"blocked"}"#.utf8)
+        )
+        XCTAssertEqual(blocked.status, .blocked)
+
+        let usageLimited = try JSONDecoder().decode(
+            ThreadGoalSetParams.self,
+            from: Data(#"{"threadId":"\#(threadID.description)","status":"usageLimited"}"#.utf8)
+        )
+        XCTAssertEqual(usageLimited.status, .usageLimited)
     }
 
     func testThreadGoalToolResponseReportsCompletionUsageLikeRust() throws {

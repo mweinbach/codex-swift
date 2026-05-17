@@ -10563,6 +10563,46 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNil(persistedGoal?.tokenBudget)
     }
 
+    func testThreadGoalSetAcceptsStoppedStatusesLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        try """
+        [features]
+        goals = true
+        """.write(to: temp.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T07-36-00",
+            timestamp: "2025-01-06T07:36:00Z",
+            preview: "stopped goal thread",
+            provider: "mock_provider"
+        )
+        let stateStore = try await createAppServerGoalStateStore(
+            codexHome: temp.url,
+            threadID: threadID,
+            title: "stopped goal thread"
+        )
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url, stateStore: stateStore),
+            experimentalAPIEnabled: true
+        )
+
+        let blockedMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":1,"method":"thread/goal/set","params":{"threadId":"\#(threadID)","objective":"keep polishing","status":"blocked"}}"#.utf8
+        )))
+        let blockedGoal = try XCTUnwrap((blockedMessages[0]["result"] as? [String: Any])?["goal"] as? [String: Any])
+        XCTAssertEqual(blockedGoal["status"] as? String, "blocked")
+        XCTAssertEqual(blockedMessages[1]["method"] as? String, "thread/goal/updated")
+
+        let usageLimitedMessages = try decodeMessages(processor.processLine(Data(
+            #"{"id":2,"method":"thread/goal/set","params":{"threadId":"\#(threadID)","status":"usageLimited"}}"#.utf8
+        )))
+        let usageLimitedGoal = try XCTUnwrap((usageLimitedMessages[0]["result"] as? [String: Any])?["goal"] as? [String: Any])
+        XCTAssertEqual(usageLimitedGoal["status"] as? String, "usageLimited")
+
+        let persistedGoal = try await stateStore.getThreadGoal(threadID: try ThreadId(string: threadID))
+        XCTAssertEqual(persistedGoal?.status, .usageLimited)
+    }
+
     func testThreadResumeKeepsPausedGoalPausedLikeRust() async throws {
         let temp = try TemporaryDirectory()
         try """
@@ -10681,7 +10721,7 @@ final class CodexAppServerTests: XCTestCase {
             ),
             (
                 #"{"threadId":"\#(threadID)","objective":"keep polishing","status":"done"}"#,
-                "Invalid request: unknown variant `done`, expected one of `active`, `paused`, `budgetLimited`, `complete`"
+                "Invalid request: unknown variant `done`, expected one of `active`, `paused`, `blocked`, `usageLimited`, `budgetLimited`, `complete`"
             ),
             (
                 #"{"threadId":"\#(threadID)","objective":"keep polishing","tokenBudget":true}"#,

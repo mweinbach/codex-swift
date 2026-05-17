@@ -3,6 +3,8 @@ import Foundation
 public enum ThreadGoalStatus: String, Codable, Equatable, Sendable {
     case active
     case paused
+    case blocked
+    case usageLimited
     case budgetLimited
     case complete
 }

@@ -309,6 +309,83 @@ final class AgentGraphStoreTests: XCTestCase {
         XCTAssertEqual(closedSecondParentChildren, [childThreadID])
     }
 
+    func testSQLiteStoreMigratesThreadGoalStoppedStatusesLikeRust() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
+        let threadID = try threadID(48)
+
+        do {
+            let store = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+            try await store.upsertThread(try threadMetadata(
+                id: threadID,
+                rolloutPath: "/tmp/goal-statuses.jsonl",
+                updatedAt: date(milliseconds: 1_700_000_000_000),
+                title: "Goal statuses"
+            ))
+        }
+
+        try withRawSQLiteDatabase(databaseURL: databaseURL) { database in
+            XCTAssertEqual(sqlite3_exec(database, "DROP TABLE thread_goals", nil, nil, nil), SQLITE_OK)
+            XCTAssertEqual(sqlite3_exec(database, """
+            CREATE TABLE thread_goals (
+                thread_id TEXT PRIMARY KEY NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+                goal_id TEXT NOT NULL,
+                objective TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('active', 'paused', 'budget_limited', 'complete')),
+                token_budget INTEGER,
+                tokens_used INTEGER NOT NULL DEFAULT 0,
+                time_used_seconds INTEGER NOT NULL DEFAULT 0,
+                created_at_ms INTEGER NOT NULL,
+                updated_at_ms INTEGER NOT NULL
+            )
+            """, nil, nil, nil), SQLITE_OK)
+            XCTAssertEqual(sqlite3_exec(database, """
+            INSERT INTO thread_goals (
+                thread_id,
+                goal_id,
+                objective,
+                status,
+                token_budget,
+                tokens_used,
+                time_used_seconds,
+                created_at_ms,
+                updated_at_ms
+            ) VALUES (
+                '\(threadID.description)',
+                'goal-1',
+                'Keep going',
+                'active',
+                NULL,
+                10,
+                20,
+                1700000000000,
+                1700000000000
+            )
+            """, nil, nil, nil), SQLITE_OK)
+        }
+
+        let reopenedStore = try SQLiteAgentGraphStore(databaseURL: databaseURL)
+        let activeGoal = try await reopenedStore.getThreadGoal(threadID: threadID)
+        XCTAssertEqual(activeGoal?.status, .active)
+
+        let blocked = try await reopenedStore.updateThreadGoal(
+            threadID: threadID,
+            status: .blocked,
+            tokenBudget: .preserve
+        )
+        XCTAssertEqual(blocked?.status, .blocked)
+
+        let usageLimited = try await reopenedStore.updateThreadGoal(
+            threadID: threadID,
+            status: .usageLimited,
+            tokenBudget: .preserve
+        )
+        XCTAssertEqual(usageLimited?.status, .usageLimited)
+
+        let persistedGoal = try await reopenedStore.getThreadGoal(threadID: threadID)
+        XCTAssertEqual(persistedGoal?.status, .usageLimited)
+    }
+
     func testSQLiteStoreInsertsThreadSpawnEdgeFromSourceOnlyWhenAbsent() async throws {
         let temp = try AgentGraphStoreTemporaryDirectory()
         let store = try SQLiteAgentGraphStore(databaseURL: temp.url.appendingPathComponent("state.sqlite3"))
