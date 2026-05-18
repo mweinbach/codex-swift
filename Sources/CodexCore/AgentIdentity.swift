@@ -46,7 +46,7 @@ public enum AgentIdentity {
 
     public static func buildABOM(
         sessionSource: SessionSource,
-        agentVersion: String = "0.0.0",
+        agentVersion: String = CodexBuildMetadata.version,
         operatingSystem: String = currentOperatingSystemName
     ) -> AgentBillOfMaterials {
         AgentBillOfMaterials(

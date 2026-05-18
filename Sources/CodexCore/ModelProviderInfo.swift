@@ -520,7 +520,7 @@ More info: https://github.com/openai/codex/discussions/7782
     public static func createOpenAIProvider(
         openAIBaseURL: String? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        packageVersion: String = "0.0.0"
+        packageVersion: String = CodexBuildMetadata.version
     ) -> ModelProviderInfo {
         let environmentBaseURL = environment["OPENAI_BASE_URL"]?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             ? environment["OPENAI_BASE_URL"]
@@ -544,7 +544,7 @@ More info: https://github.com/openai/codex/discussions/7782
     public static func builtInModelProviders(
         openAIBaseURL: String? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        packageVersion: String = "0.0.0"
+        packageVersion: String = CodexBuildMetadata.version
     ) -> [String: ModelProviderInfo] {
         [
             "openai": createOpenAIProvider(

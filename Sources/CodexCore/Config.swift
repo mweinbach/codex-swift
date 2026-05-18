@@ -2167,7 +2167,7 @@ private struct ParsedPermissionProfileToml: Equatable, Sendable {
 
 private struct ParsedCodexConfigToml {
     private static let localDevBuildVersion = "0.0.0"
-    private static let packageVersion = "0.0.0"
+    private static let packageVersion = CodexBuildMetadata.version
     private static let webSearchToolConfigKey = "__tools_web_search_config"
     private static let projectLocalConfigDenylist: [String] = [
         "openai_base_url",
@@ -4117,7 +4117,7 @@ private struct ParsedCodexConfigToml {
         _ mode: AuthCredentialsStoreMode,
         packageVersion: String = packageVersion
     ) -> AuthCredentialsStoreMode {
-        guard packageVersion == localDevBuildVersion else {
+        guard Self.isLocalDevBuildVersion(packageVersion) else {
             return mode
         }
         switch mode {
@@ -4132,7 +4132,7 @@ private struct ParsedCodexConfigToml {
         _ mode: OAuthCredentialsStoreMode,
         packageVersion: String = packageVersion
     ) -> OAuthCredentialsStoreMode {
-        guard packageVersion == localDevBuildVersion else {
+        guard Self.isLocalDevBuildVersion(packageVersion) else {
             return mode
         }
         switch mode {
@@ -4631,6 +4631,10 @@ private struct ParsedCodexConfigToml {
             providers[name] = provider
         }
         return providers
+    }
+
+    private static func isLocalDevBuildVersion(_ packageVersion: String) -> Bool {
+        packageVersion == localDevBuildVersion || packageVersion.hasPrefix("\(localDevBuildVersion)-dev")
     }
 
     private static func mergeAmazonBedrockAWSOverride(

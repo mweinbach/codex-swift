@@ -1,4 +1,5 @@
 @testable import CodexMCPServer
+import CodexCore
 import Foundation
 import XCTest
 
@@ -17,9 +18,9 @@ final class CodexMCPServerTests: XCTestCase {
         let serverInfo = try XCTUnwrap(initializeResult["serverInfo"] as? [String: Any])
         XCTAssertEqual(serverInfo["name"] as? String, "codex-mcp-server")
         XCTAssertEqual(serverInfo["title"] as? String, "Codex")
-        XCTAssertEqual(serverInfo["version"] as? String, "0.0.0")
+        XCTAssertEqual(serverInfo["version"] as? String, CodexBuildMetadata.version)
         let userAgent = try XCTUnwrap(serverInfo["userAgent"] as? String)
-        XCTAssertTrue(userAgent.hasPrefix("codex_swift/0.0.0 "))
+        XCTAssertTrue(userAgent.hasPrefix("codex_swift/\(CodexBuildMetadata.version) "))
         XCTAssertTrue(userAgent.hasSuffix(" (test; 0)"))
         let capabilities = try XCTUnwrap(initializeResult["capabilities"] as? [String: Any])
         let toolsCapability = try XCTUnwrap(capabilities["tools"] as? [String: Any])

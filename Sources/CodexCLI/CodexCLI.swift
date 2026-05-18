@@ -3,7 +3,7 @@ import Darwin
 import Foundation
 
 public struct CodexCLI: Sendable {
-    public static let version = "0.0.0"
+    public static let version = CodexBuildMetadata.version
     private static let approvalPolicyOptionDisplay = "--ask-for-approval <APPROVAL_POLICY>"
     private static let dangerouslyBypassOptionDisplay = "--dangerously-bypass-approvals-and-sandbox"
 

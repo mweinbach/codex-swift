@@ -126,7 +126,7 @@ public struct CodexLogSnapshot: Equatable, Sendable {
         extraAttachmentPaths: [URL] = [],
         sessionSource: SessionSource? = nil,
         accountID: String? = nil,
-        cliVersion: String = "0.0.0",
+        cliVersion: String = CodexBuildMetadata.version,
         eventID: String = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
     ) throws -> FeedbackUploadRequest {
         let dsn = try SentryFeedbackDSN.parse(sentryFeedbackDSN)
@@ -237,7 +237,7 @@ public struct CodexLogSnapshot: Equatable, Sendable {
         extraAttachmentPaths: [URL] = [],
         sessionSource: SessionSource? = nil,
         accountID: String? = nil,
-        cliVersion: String = "0.0.0",
+        cliVersion: String = CodexBuildMetadata.version,
         transport: FeedbackUploadTransport = URLSessionFeedbackUploadTransport()
     ) async throws {
         let request = try makeUploadRequest(

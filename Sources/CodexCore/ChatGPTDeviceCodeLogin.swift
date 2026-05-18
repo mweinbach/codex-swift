@@ -20,7 +20,7 @@ public struct ChatGPTDeviceCodeLoginOptions: Sendable {
         forcedChatGPTWorkspaceID: String? = nil,
         forcedChatGPTWorkspaceIDs: [String]? = nil,
         authCredentialsStoreMode: AuthCredentialsStoreMode = .file,
-        cliVersion: String = "0.0.0"
+        cliVersion: String = CodexBuildMetadata.version
     ) {
         self.codexHome = codexHome
         self.issuer = issuer

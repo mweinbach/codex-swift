@@ -1,4 +1,5 @@
 import CodexCLI
+import CodexCore
 import XCTest
 
 final class CodexCLITests: XCTestCase {
@@ -51,7 +52,7 @@ final class CodexCLITests: XCTestCase {
     }
 
     func testVersionMatchesWorkspaceVersion() {
-        XCTAssertEqual(CodexCLI().renderVersion(), "codex 0.0.0")
+        XCTAssertEqual(CodexCLI().renderVersion(), "codex \(CodexBuildMetadata.version)")
     }
 
     func testRunAsyncCompletionDefaultsToBash() async {

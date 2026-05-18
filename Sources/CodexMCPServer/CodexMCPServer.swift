@@ -210,7 +210,7 @@ public enum CodexMCPServer {
             "serverInfo": [
                 "name": "codex-mcp-server",
                 "title": "Codex",
-                "version": "0.0.0",
+                "version": CodexBuildMetadata.version,
                 "userAgent": userAgent
             ]
         ])
@@ -223,7 +223,7 @@ public enum CodexMCPServer {
         let clientName = (clientInfo?["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let clientVersion = (clientInfo?["version"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let suffix = clientName.isEmpty && clientVersion.isEmpty ? "" : " (\(clientName); \(clientVersion))"
-        return sanitizeHeaderValue("codex_swift/0.0.0 \(Terminal.userAgent(environment: environment))\(suffix)")
+        return sanitizeHeaderValue("codex_swift/\(CodexBuildMetadata.version) \(Terminal.userAgent(environment: environment))\(suffix)")
     }
 
     private static func sanitizeHeaderValue(_ value: String) -> String {

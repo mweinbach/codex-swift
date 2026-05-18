@@ -21,7 +21,10 @@ public struct ConfigLockfile: Equatable, Sendable {
         self.config = config
     }
 
-    public static func current(config: ConfigValue, codexVersion: String = "0.0.0") -> ConfigLockfile {
+    public static func current(
+        config: ConfigValue,
+        codexVersion: String = CodexBuildMetadata.version
+    ) -> ConfigLockfile {
         ConfigLockfile(
             version: configLockfileVersion,
             codexVersion: codexVersion,

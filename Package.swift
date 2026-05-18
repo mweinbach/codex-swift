@@ -23,6 +23,10 @@ let package = Package(
         .executable(name: "codex-stdio-to-uds", targets: ["codex-stdio-to-uds"])
     ],
     targets: [
+        .plugin(
+            name: "CodexBuildMetadataPlugin",
+            capability: .buildTool()
+        ),
         .target(
             name: "CodexCore",
             dependencies: ["CodexApplyPatch"],
@@ -31,7 +35,8 @@ let package = Package(
                 .linkedFramework("CryptoKit"),
                 .linkedFramework("Security"),
                 .linkedLibrary("sqlite3")
-            ]
+            ],
+            plugins: [.plugin(name: "CodexBuildMetadataPlugin")]
         ),
         .target(
             name: "CodexApplyPatch",

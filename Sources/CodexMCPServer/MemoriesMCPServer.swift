@@ -121,7 +121,7 @@ public enum MemoriesMCPServer {
             "serverInfo": [
                 "name": "codex-memories-mcp-server",
                 "title": "Codex Memories",
-                "version": "0.0.0"
+                "version": CodexBuildMetadata.version
             ]
         ])
     }

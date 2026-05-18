@@ -1007,7 +1007,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(thread["preview"] as? String, "")
         XCTAssertEqual(thread["modelProvider"] as? String, "mock_provider")
         XCTAssertEqual(thread["cwd"] as? String, cwd.url.path)
-        XCTAssertEqual(thread["cliVersion"] as? String, "0.0.0")
+        XCTAssertEqual(thread["cliVersion"] as? String, CodexBuildMetadata.version)
         XCTAssertEqual(thread["source"] as? String, "appServer")
         XCTAssertEqual((thread["turns"] as? [Any])?.count, 0)
 
@@ -1081,7 +1081,7 @@ final class CodexAppServerTests: XCTestCase {
         let lockPath = exportDir.appendingPathComponent("\(threadID).config.lock.toml", isDirectory: false)
         let lockfile = try ConfigLockfileStore.readConfigLockfile(from: lockPath.path)
         XCTAssertEqual(lockfile.version, configLockfileVersion)
-        XCTAssertEqual(lockfile.codexVersion, "0.0.0")
+        XCTAssertEqual(lockfile.codexVersion, CodexBuildMetadata.version)
         guard case let .table(config) = lockfile.config else {
             return XCTFail("expected config table")
         }
@@ -22916,7 +22916,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNil(response["jsonrpc"])
         let result = try XCTUnwrap(response["result"] as? [String: Any])
         let userAgent = try XCTUnwrap(result["userAgent"] as? String)
-        XCTAssertTrue(userAgent.hasPrefix("test/0.0.0 "))
+        XCTAssertTrue(userAgent.hasPrefix("test/\(CodexBuildMetadata.version) "))
         XCTAssertTrue(userAgent.hasSuffix(" (test; 0)"))
         XCTAssertEqual(result["codexHome"] as? String, temp.url.standardizedFileURL.path)
         XCTAssertEqual(result["platformFamily"] as? String, "unix")

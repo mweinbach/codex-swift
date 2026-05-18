@@ -382,6 +382,14 @@ Recent upstream audit checkpoint:
   fields, encode missing versions as explicit nulls, and app-server plugin
   list/read projections hydrate local versions from plugin manifests and remote
   versions from workspace plugin release metadata.
+- 2026-05-17: rechecked Rust's package-version usage through
+  `env!("CARGO_PKG_VERSION")`, including CLI version output, app-server
+  thread metadata, MCP server info, login prompts, feedback tags, config
+  lockfiles, OpenAI provider headers, and models-cache `client_version`
+  freshness. Swift now generates shared `CodexBuildMetadata` during SwiftPM
+  builds, accepts release versions from `CODEX_SWIFT_VERSION` / `CODEX_VERSION`
+  or `v*` Git tags, and falls back to a commit-derived `0.0.0-dev+<sha>`
+  local build version instead of leaking bare `0.0.0` runtime metadata.
 - 2026-05-17: rechecked Rust rollout cursor anchor normalization in
   `codex-rs/rollout/src/state_db_tests.rs`. Swift `RolloutListing` now has
   explicit coverage that legacy rollout filename timestamp cursors such as

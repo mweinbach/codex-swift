@@ -23,6 +23,15 @@ platform parity.
 swift build
 ```
 
+### Build Metadata
+
+SwiftPM generates `CodexBuildMetadata` during the build and all runtime version
+surfaces read from that shared source. Release packaging should pass
+`CODEX_SWIFT_VERSION` (or `CODEX_VERSION`) as a SemVer value such as `0.64.0`;
+tagged builds can also derive the version from a `v*` Git tag. Untagged local
+builds use a `0.0.0-dev+<commit>` version so the package never falls back to an
+unqualified `0.0.0` runtime version.
+
 Run the main executable:
 
 ```shell
