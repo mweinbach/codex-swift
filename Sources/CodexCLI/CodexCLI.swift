@@ -11,6 +11,7 @@ public struct CodexCLI: Sendable {
 
     public enum Invocation: Equatable, Sendable {
         case help
+        case commandHelp(CommandSpec, arguments: [String])
         case version
         case interactive(prompt: String?)
         case command(CommandSpec, arguments: [String])
@@ -809,12 +810,27 @@ public struct CodexCLI: Sendable {
     public typealias UpdateCommandRunner = (UpdateCommandRequest) async throws -> CommandExecutionResult
     public typealias DoctorCommandRunner = (DoctorCommandRequest) async throws -> CommandExecutionResult
 
+    private enum ExplicitFlagTarget {
+        case root
+        case command(CommandSpec, arguments: [String])
+    }
+
     public func parseInvocation(arguments: [String]) -> Invocation {
-        if arguments.contains("--version") || arguments.contains("-V") {
-            return .version
+        if let helpTarget = explicitHelpTarget(arguments) {
+            switch helpTarget {
+            case .root:
+                return .help
+            case let .command(spec, arguments):
+                return .commandHelp(spec, arguments: arguments)
+            }
         }
-        if arguments.contains("--help") || arguments.contains("-h") {
-            return .help
+        if let versionTarget = explicitVersionTarget(arguments) {
+            switch versionTarget {
+            case .root:
+                return .version
+            case let .command(spec, arguments):
+                return .command(spec, arguments: arguments)
+            }
         }
 
         let positionals = positionalTokens(arguments)
@@ -831,11 +847,72 @@ public struct CodexCLI: Sendable {
         return .interactive(prompt: nil)
     }
 
+    private func explicitHelpTarget(_ arguments: [String]) -> ExplicitFlagTarget? {
+        if arguments.first == "help" {
+            let targetArguments = Array(arguments.dropFirst())
+            if let commandToken = targetArguments.first,
+               let spec = CodexCommandRegistry.command(matching: commandToken) {
+                return .command(spec, arguments: Array(targetArguments.dropFirst()))
+            }
+            return .root
+        }
+
+        guard let helpIndex = arguments.firstIndex(where: { $0 == "--help" || $0 == "-h" }) else {
+            return nil
+        }
+        guard let commandMatch = commandMatch(in: arguments), commandMatch.index < helpIndex else {
+            return .root
+        }
+        return .command(commandMatch.spec, arguments: Array(arguments.dropFirst(commandMatch.index + 1)))
+    }
+
+    private func explicitVersionTarget(_ arguments: [String]) -> ExplicitFlagTarget? {
+        guard let versionIndex = arguments.firstIndex(where: { $0 == "--version" || $0 == "-V" }) else {
+            return nil
+        }
+        guard let commandMatch = commandMatch(in: arguments), commandMatch.index < versionIndex else {
+            return .root
+        }
+        return .command(commandMatch.spec, arguments: Array(arguments.dropFirst(commandMatch.index + 1)))
+    }
+
+    private func commandMatch(in arguments: [String]) -> (index: Int, spec: CommandSpec)? {
+        var index = 0
+        while index < arguments.count {
+            let argument = arguments[index]
+            if argument == "--" {
+                return nil
+            }
+            if optionConsumesValue(argument) {
+                index += 2
+                continue
+            }
+            if argument.hasPrefix("-") {
+                index += 1
+                continue
+            }
+            if let spec = CodexCommandRegistry.command(matching: argument) {
+                return (index, spec)
+            }
+            return nil
+        }
+        return nil
+    }
+
     public func command(for arguments: [String]) -> CommandSpec? {
         if case let .command(spec, _) = parseInvocation(arguments: arguments) {
             return spec
         }
         return nil
+    }
+
+    public func renderHelp(for spec: CommandSpec) -> String {
+        switch spec.name {
+        case "exec":
+            return renderExecHelp()
+        default:
+            return renderHelp()
+        }
     }
 
     public func renderHelp(includeHidden: Bool = false) -> String {
@@ -1022,6 +1099,116 @@ public struct CodexCLI: Sendable {
         "codex \(Self.version)"
     }
 
+    private func renderExecHelp() -> String {
+        """
+        Run Codex non-interactively
+
+        Usage: codex exec [OPTIONS] [PROMPT]
+               codex exec [OPTIONS] <COMMAND> [ARGS]
+
+        Commands:
+          resume  Resume a previous session by id or pick the most recent with --last
+          review  Run a code review against the current repository
+          help    Print this message or the help of the given subcommand(s)
+
+        Arguments:
+          [PROMPT]
+                  Initial instructions for the agent. If not provided as an argument (or if `-` is used),
+                  instructions are read from stdin. If stdin is piped and a prompt is also provided, stdin
+                  is appended as a `<stdin>` block
+
+        Options:
+          -c, --config <key=value>
+                  Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                  Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                  as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                  Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                  shell_environment_policy.inherit=all`
+
+              --enable <FEATURE>
+                  Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+              --disable <FEATURE>
+                  Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              --strict-config
+                  Error out when config.toml contains fields that are not recognized by this version of
+                  Codex
+
+          -i, --image <FILE>...
+                  Optional image(s) to attach to the initial prompt
+
+          -m, --model <MODEL>
+                  Model the agent should use
+
+              --oss
+                  Use open-source provider
+
+              --local-provider <OSS_PROVIDER>
+                  Specify which local provider to use (lmstudio or ollama). If not specified with --oss,
+                  will use config default or show selection
+
+          -p, --profile <CONFIG_PROFILE>
+                  Configuration profile from config.toml to specify default options
+
+              --profile-v2 <CONFIG_PROFILE_V2>
+                  Layer $CODEX_HOME/<name>.config.toml on top of the base user config
+
+          -s, --sandbox <SANDBOX_MODE>
+                  Select the sandbox policy to use when executing model-generated shell commands
+
+                  [possible values: read-only, workspace-write, danger-full-access]
+
+              --dangerously-bypass-approvals-and-sandbox
+                  Skip all confirmation prompts and execute commands without sandboxing. EXTREMELY
+                  DANGEROUS. Intended solely for running in environments that are externally sandboxed
+
+              --dangerously-bypass-hook-trust
+                  Run enabled hooks without requiring persisted hook trust for this invocation. DANGEROUS.
+                  Intended only for automation that already vets hook sources
+
+          -C, --cd <DIR>
+                  Tell the agent to use the specified directory as its working root
+
+              --add-dir <DIR>
+                  Additional directories that should be writable alongside the primary workspace
+
+              --skip-git-repo-check
+                  Allow running Codex outside a Git repository
+
+              --ephemeral
+                  Run without persisting session files to disk
+
+              --ignore-user-config
+                  Do not load `$CODEX_HOME/config.toml`; auth still uses `CODEX_HOME`
+
+              --ignore-rules
+                  Do not load user or project execpolicy `.rules` files
+
+              --output-schema <FILE>
+                  Path to a JSON Schema file describing the model's final response shape
+
+              --color <COLOR>
+                  Specifies color settings for use in the output
+
+                  [default: auto]
+                  [possible values: always, never, auto]
+
+              --json
+                  Print events to stdout as JSONL
+
+          -o, --output-last-message <FILE>
+                  Specifies file where the last message from the agent should be written
+
+          -h, --help
+                  Print help (see a summary with '-h')
+
+          -V, --version
+                  Print version
+        """
+    }
+
     public func run(arguments: [String], stdout: (String) -> Void = { print($0) }, stderr: (String) -> Void = { fputs($0 + "\n", Darwin.stderr) }) -> Int32 {
         switch parseInvocation(arguments: arguments) {
         case .version:
@@ -1029,6 +1216,9 @@ public struct CodexCLI: Sendable {
             return 0
         case .help:
             stdout(renderHelp())
+            return 0
+        case let .commandHelp(spec, _):
+            stdout(renderHelp(for: spec))
             return 0
         case let .command(spec, commandArguments) where spec.name == "completion":
             do {
@@ -1123,6 +1313,9 @@ public struct CodexCLI: Sendable {
             return 0
         case .help:
             stdout(renderHelp())
+            return 0
+        case let .commandHelp(spec, _):
+            stdout(renderHelp(for: spec))
             return 0
         case let .command(spec, commandArguments) where spec.name == "completion":
             do {
@@ -3896,7 +4089,7 @@ public struct CodexCLI: Sendable {
 
     private func rootRemovedFullAutoRejectionMessage(invocation: Invocation, arguments: [String]) -> String? {
         switch invocation {
-        case let .command(spec, _):
+        case let .command(spec, _), let .commandHelp(spec, _):
             if rootFlagPresent(named: "--full-auto", beforeCommands: [spec.name] + spec.aliases, in: arguments) {
                 return "codex-swift: unsupported option at top level: --full-auto"
             }
@@ -3912,7 +4105,7 @@ public struct CodexCLI: Sendable {
 
     private func rootProfileV2RejectionMessage(invocation: Invocation, arguments: [String]) -> String? {
         let commandNames: [String] = switch invocation {
-        case let .command(spec, _):
+        case let .command(spec, _), let .commandHelp(spec, _):
             [spec.name] + spec.aliases
         case .version, .help, .interactive, .unknown:
             []
@@ -3927,7 +4120,7 @@ public struct CodexCLI: Sendable {
         switch invocation {
         case .interactive:
             return nil
-        case let .command(spec, commandArguments):
+        case let .command(spec, commandArguments), let .commandHelp(spec, commandArguments):
             switch spec.name {
             case "exec", "review", "resume", "fork", "exec-server":
                 return nil
@@ -3982,7 +4175,7 @@ public struct CodexCLI: Sendable {
 
     private func rootDuplicateSharedOptionRejectionMessage(invocation: Invocation, arguments: [String]) -> String? {
         let commandNames: [String] = switch invocation {
-        case let .command(spec, _):
+        case let .command(spec, _), let .commandHelp(spec, _):
             [spec.name] + spec.aliases
         case .version, .help, .interactive, .unknown:
             []
@@ -4022,7 +4215,7 @@ public struct CodexCLI: Sendable {
         switch invocation {
         case .version, .help:
             return nil
-        case let .command(spec, _):
+        case let .command(spec, _), let .commandHelp(spec, _):
             return rootInteractivePermissionConflictMessage(
                 beforeCommands: [spec.name] + spec.aliases,
                 in: arguments

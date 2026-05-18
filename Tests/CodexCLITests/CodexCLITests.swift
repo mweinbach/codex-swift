@@ -169,6 +169,30 @@ final class CodexCLITests: XCTestCase {
         )
     }
 
+    func testCommandHelpTargetsSubcommandLikeRust() async throws {
+        XCTAssertEqual(
+            CodexCLI().parseInvocation(arguments: ["exec", "--help"]),
+            .commandHelp(CommandSpec(name: "exec", aliases: ["e"], summary: "Run Codex non-interactively."), arguments: ["--help"])
+        )
+        XCTAssertEqual(
+            CodexCLI().parseInvocation(arguments: ["help", "exec"]),
+            .commandHelp(CommandSpec(name: "exec", aliases: ["e"], summary: "Run Codex non-interactively."), arguments: [])
+        )
+
+        var stdout: [String] = []
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["exec", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        let help = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(help.hasPrefix("Run Codex non-interactively\n\nUsage: codex exec [OPTIONS] [PROMPT]"))
+        XCTAssertTrue(help.contains("  resume  Resume a previous session by id or pick the most recent with --last"))
+        XCTAssertTrue(help.contains("      --output-schema <FILE>"))
+    }
+
     func testPromptWithoutSubcommandIsInteractiveInvocation() {
         XCTAssertEqual(CodexCLI().parseInvocation(arguments: ["hello codex"]), .interactive(prompt: "hello codex"))
     }

@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: extended the Rust runtime oracle harness to cover subcommand
+  help dispatch. Swift now treats `codex exec --help` and `codex help exec`
+  as Rust-shaped `exec` subcommand help instead of falling back to root help,
+  preserving the current long `codex exec [OPTIONS] [PROMPT]` output.
 - 2026-05-18: closed the expected-failing top-level CLI help runtime oracle.
   Swift `codex --help` now renders Rust's Clap-shaped root help output,
   including command ordering, aliases, wrapped descriptions, prompt arguments,
