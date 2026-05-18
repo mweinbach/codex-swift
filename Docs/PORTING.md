@@ -839,6 +839,11 @@ Recent upstream audit checkpoint:
   thread-spawn edges are excluded from the live agent list, while legacy
   agent-path metadata without a persisted edge remains visible for tolerant
   migration.
+- 2026-05-18: Swift live app-server MultiAgentV2 `list_agents` now also mirrors
+  Rust's child-session root/self projection: a spawned child listing agents
+  reports `/root` using the root thread status rather than the caller's status,
+  and includes the current spawned agent instead of filtering it out of the live
+  agent list.
 - 2026-05-18: Swift live app-server MultiAgentV2 `wait_agent` now mirrors
   Rust's configured timeout bounds, default timeout selection, immediate
   completion when mailbox items are already pending for the current thread,

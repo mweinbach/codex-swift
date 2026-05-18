@@ -490,17 +490,17 @@ struct AppServerLiveMultiAgentToolExecutor {
             let rootPath = AgentPath.root
             var agents: [ListedLiveAgent] = []
             if Self.agentPath(rootPath, matchesPrefix: prefix) {
+                let rootThreadID = try await rootThreadID()
                 agents.append(ListedLiveAgent(
                     agentName: rootPath.description,
-                    agentStatus: await status(for: currentThreadID),
+                    agentStatus: await status(for: rootThreadID),
                     lastTaskMessage: "Main thread"
                 ))
             }
             if let stateStore {
                 let threadMetadata = try await stateStore.listThreadsWithAgentPaths()
                 for metadata in threadMetadata {
-                    guard metadata.id != currentThreadID,
-                          let rawPath = metadata.agentPath,
+                    guard let rawPath = metadata.agentPath,
                           let agentPath = try? AgentPath(validating: rawPath),
                           !agentPath.isRoot,
                           Self.agentPath(agentPath, matchesPrefix: prefix)

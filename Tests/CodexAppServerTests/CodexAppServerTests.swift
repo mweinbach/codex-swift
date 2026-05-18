@@ -13146,6 +13146,108 @@ final class CodexAppServerTests: XCTestCase {
         ])
     }
 
+    func testLiveListAgentsFromChildIncludesSelfAndActualRootLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let stateStore = try SQLiteAgentGraphStore(databaseURL: temp.url.appendingPathComponent("state.sqlite3"))
+        let rootThreadID = ThreadId()
+        let workerThreadID = ThreadId()
+        let nestedThreadID = ThreadId()
+        let workerPath = try AgentPath.root.join("worker")
+        let nestedPath = try workerPath.join("nested")
+        for (threadID, path, nickname) in [
+            (workerThreadID, workerPath, "Bernoulli"),
+            (nestedThreadID, nestedPath, "Curie"),
+        ] {
+            try await stateStore.upsertThread(ThreadMetadata(
+                id: threadID,
+                rolloutPath: temp.url.appendingPathComponent("\(path.name).jsonl").path,
+                createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+                updatedAt: Date(timeIntervalSince1970: 1_700_000_001),
+                source: "vscode",
+                agentNickname: nickname,
+                agentRole: "explorer",
+                agentPath: path.description,
+                modelProvider: "openai",
+                cwd: temp.url.path,
+                cliVersion: "0.0.0-test",
+                title: path.name,
+                sandboxPolicy: "danger-full-access",
+                approvalMode: "never",
+                tokensUsed: 0
+            ))
+        }
+        try await stateStore.upsertThreadSpawnEdge(
+            parentThreadID: rootThreadID,
+            childThreadID: workerThreadID,
+            status: .open
+        )
+        try await stateStore.upsertThreadSpawnEdge(
+            parentThreadID: workerThreadID,
+            childThreadID: nestedThreadID,
+            status: .open
+        )
+        let capture = LiveMultiAgentToolCapture(runningThreadIDs: [nestedThreadID.description])
+        await capture.setStatus(threadID: rootThreadID.description, status: .completed("root done"))
+        let executor = AppServerLiveMultiAgentToolExecutor(
+            currentThreadID: nestedThreadID,
+            currentSessionSource: .subagent(.threadSpawn(
+                parentThreadID: workerThreadID,
+                depth: 2,
+                agentPath: nestedPath,
+                agentNickname: "Curie",
+                agentRole: "explorer"
+            )),
+            stateStore: stateStore,
+            waitTimeouts: MultiAgentV2WaitTimeouts(config: MultiAgentV2Config()),
+            isTurnRunning: { threadID in
+                await capture.isRunning(threadID: threadID)
+            },
+            agentStatus: { threadID in
+                await capture.status(threadID: threadID)
+            },
+            agentLastTaskMessage: { threadID in
+                await capture.lastTaskMessage(threadID: threadID)
+            },
+            hasPendingMailboxItems: { _ in false },
+            waitForMailboxChange: { _, _ in false },
+            queueMailboxCommunications: { _, _ in },
+            recordAgentLastTaskMessage: { _, _ in },
+            submitPendingWorkTurnIfIdle: { _ in false },
+            closeAgentThreads: { _ in }
+        )
+
+        let listAll = await executor.execute(.functionCall(
+            name: "list_agents",
+            arguments: #"{}"#,
+            callID: "call-child-list"
+        ))
+        let payload = try Self.functionOutputPayload(listAll, callID: "call-child-list")
+        XCTAssertEqual(payload.success, true)
+        let result = try JSONDecoder().decode(
+            ListAgentsToolResultFixture.self,
+            from: Data(payload.content.utf8)
+        )
+        XCTAssertEqual(result.agents.map(\.agentName), [
+            "/root",
+            "/root/worker",
+            "/root/worker/nested",
+        ])
+        XCTAssertEqual(result.agents[0].agentStatus, .completed("root done"))
+        XCTAssertEqual(result.agents[2].agentStatus, .running)
+
+        let nestedOnly = await executor.execute(.functionCall(
+            name: "list_agents",
+            arguments: #"{"path_prefix":"/root/worker/nested"}"#,
+            callID: "call-child-list-nested"
+        ))
+        let nestedPayload = try Self.functionOutputPayload(nestedOnly, callID: "call-child-list-nested")
+        let nestedResult = try JSONDecoder().decode(
+            ListAgentsToolResultFixture.self,
+            from: Data(nestedPayload.content.utf8)
+        )
+        XCTAssertEqual(nestedResult.agents.map(\.agentName), ["/root/worker/nested"])
+    }
+
     func testLiveWaitAgentUsesRustTimeoutsMailboxAndEvents() async throws {
         let rootThreadID = ThreadId()
         let capture = LiveMultiAgentToolCapture()
