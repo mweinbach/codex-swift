@@ -12259,6 +12259,156 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(updatedRequests.last?.agentType, nil)
     }
 
+    func testLiveSpawnAgentValidatesRustRoleModelReasoningAndServiceTierOverrides() async throws {
+        let priorityTier = ModelServiceTier(
+            id: ServiceTier.fast.requestValue,
+            name: "fast",
+            description: "Fastest inference with increased plan usage"
+        )
+        let gpt54 = ModelPreset(
+            id: "gpt-5.4",
+            model: "gpt-5.4",
+            displayName: "GPT 5.4",
+            description: "Strong model",
+            defaultReasoningEffort: .medium,
+            supportedReasoningEfforts: [
+                ReasoningEffortPreset(effort: .medium, description: "Medium"),
+                ReasoningEffortPreset(effort: .high, description: "High")
+            ],
+            serviceTiers: [priorityTier],
+            isDefault: true,
+            showInPicker: true,
+            supportedInAPI: true
+        )
+        let codex53 = ModelPreset(
+            id: "gpt-5.3-codex",
+            model: "gpt-5.3-codex",
+            displayName: "GPT 5.3 Codex",
+            description: "Coding model",
+            defaultReasoningEffort: .low,
+            supportedReasoningEfforts: [
+                ReasoningEffortPreset(effort: .low, description: "Low"),
+                ReasoningEffortPreset(effort: .medium, description: "Medium")
+            ],
+            isDefault: false,
+            showInPicker: true,
+            supportedInAPI: true
+        )
+        let resolver = LiveSpawnAgentOverrideResolver(
+            availableModels: [gpt54, codex53],
+            currentModel: "gpt-5.4",
+            currentModelDefaultReasoningEffort: .medium,
+            parentServiceTier: ServiceTier.fast.requestValue,
+            configuredAgentRoles: ["custom-role"]
+        )
+
+        XCTAssertThrowsError(try resolver.resolve(LiveSpawnAgentOverrideRequest(
+            agentType: "missing-role",
+            model: nil,
+            reasoningEffort: nil,
+            serviceTier: nil,
+            forkMode: .none
+        ))) { error in
+            XCTAssertEqual((error as? AppServerLiveMultiAgentToolError)?.message, "unknown agent_type 'missing-role'")
+        }
+        XCTAssertThrowsError(try resolver.resolve(LiveSpawnAgentOverrideRequest(
+            agentType: nil,
+            model: "unknown-model",
+            reasoningEffort: nil,
+            serviceTier: nil,
+            forkMode: .none
+        ))) { error in
+            XCTAssertEqual(
+                (error as? AppServerLiveMultiAgentToolError)?.message,
+                "Unknown model `unknown-model` for spawn_agent. Available models: gpt-5.4, gpt-5.3-codex"
+            )
+        }
+        XCTAssertThrowsError(try resolver.resolve(LiveSpawnAgentOverrideRequest(
+            agentType: nil,
+            model: "gpt-5.4",
+            reasoningEffort: .xhigh,
+            serviceTier: nil,
+            forkMode: .none
+        ))) { error in
+            XCTAssertEqual(
+                (error as? AppServerLiveMultiAgentToolError)?.message,
+                "Reasoning effort `xhigh` is not supported for model `gpt-5.4`. Supported reasoning efforts: medium, high"
+            )
+        }
+        XCTAssertThrowsError(try resolver.resolve(LiveSpawnAgentOverrideRequest(
+            agentType: nil,
+            model: "gpt-5.4",
+            reasoningEffort: nil,
+            serviceTier: "turbo",
+            forkMode: .none
+        ))) { error in
+            XCTAssertEqual(
+                (error as? AppServerLiveMultiAgentToolError)?.message,
+                "Service tier `turbo` is not supported for model `gpt-5.4`. Supported service tiers: priority"
+            )
+        }
+
+        let modelDefault = try resolver.resolve(LiveSpawnAgentOverrideRequest(
+            agentType: "custom-role",
+            model: "gpt-5.3-codex",
+            reasoningEffort: nil,
+            serviceTier: nil,
+            forkMode: .none
+        ))
+        XCTAssertEqual(modelDefault, LiveSpawnAgentResolvedOverrides(
+            agentType: "custom-role",
+            model: "gpt-5.3-codex",
+            reasoningEffort: .low,
+            serviceTier: nil
+        ))
+    }
+
+    func testLiveSpawnAgentValidationFailureEmitsBeginWithoutSpawnEndLikeRust() async throws {
+        let rootThreadID = ThreadId()
+        let executor = AppServerLiveMultiAgentToolExecutor(
+            currentThreadID: rootThreadID,
+            currentSessionSource: .vscode,
+            stateStore: nil,
+            waitTimeouts: MultiAgentV2WaitTimeouts(config: MultiAgentV2Config()),
+            resolveSpawnAgentOverrides: { _ in
+                throw AppServerLiveMultiAgentToolError(
+                    message: "Service tier `turbo` is not supported for model `gpt-5.4`. Supported service tiers: priority"
+                )
+            },
+            spawnAgent: { _ in
+                XCTFail("spawn_agent validation failure should not attempt a child spawn")
+                throw AppServerLiveMultiAgentToolError(message: "unexpected spawn")
+            },
+            isTurnRunning: { _ in false },
+            agentStatus: { _ in .completed(nil) },
+            agentLastTaskMessage: { _ in nil },
+            hasPendingMailboxItems: { _ in false },
+            waitForMailboxChange: { _, _ in false },
+            queueMailboxCommunications: { _, _ in },
+            recordAgentLastTaskMessage: { _, _ in },
+            submitPendingWorkTurnIfIdle: { _ in false },
+            closeAgentThreads: { _ in }
+        )
+        let spawn = await executor.execute(.functionCall(
+            name: "spawn_agent",
+            arguments: #"{"message":"inspect this repo","task_name":"worker","service_tier":"turbo","fork_turns":"none"}"#,
+            callID: "call-invalid-tier"
+        ))
+        let payload = try Self.functionOutputPayload(spawn, callID: "call-invalid-tier")
+        XCTAssertEqual(
+            payload.content,
+            "Service tier `turbo` is not supported for model `gpt-5.4`. Supported service tiers: priority"
+        )
+        XCTAssertEqual(payload.success, false)
+        let runtimeEvents = try XCTUnwrap(spawn?.runtimeEvents)
+        XCTAssertEqual(runtimeEvents.count, 1)
+        guard case let .collabAgentSpawnBegin(begin) = runtimeEvents[0] else {
+            return XCTFail("expected validation failure to emit spawn begin only")
+        }
+        XCTAssertEqual(begin.senderThreadID, rootThreadID)
+        XCTAssertEqual(begin.prompt, "inspect this repo")
+    }
+
     func testLiveSpawnLastNTurnsSelectsRecentForkTurnsLikeRust() throws {
         let sourceID = try ConversationId(string: "77e55044-10b1-426f-9247-bb680e5fe0c8")
         let workerPath = try AgentPath.root.join("worker")

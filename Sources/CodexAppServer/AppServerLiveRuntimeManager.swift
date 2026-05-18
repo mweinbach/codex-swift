@@ -717,6 +717,18 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         )
     }
 
+    private static func liveSpawnAgentAvailableModels(
+        settings: CodexRuntimeConfig,
+        authMode: AuthMode?
+    ) -> [ModelPreset] {
+        if let modelCatalog = settings.modelCatalog {
+            return modelCatalog.models
+                .sorted { $0.priority < $1.priority }
+                .map(\.preset)
+        }
+        return ModelsManager.builtinModelPresets(authMode: authMode)
+    }
+
     private func spawnLiveAgent(
         _ request: LiveSpawnAgentRequest,
         parentThreadID: ThreadId,
@@ -909,6 +921,19 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                     stateStore: configuration.stateStore,
                     waitTimeouts: multiAgentV2WaitTimeouts,
                     hideSpawnAgentMetadata: setup.settings.multiAgentV2.hideSpawnAgentMetadata,
+                    resolveSpawnAgentOverrides: { request in
+                        let resolver = LiveSpawnAgentOverrideResolver(
+                            availableModels: Self.liveSpawnAgentAvailableModels(
+                                settings: setup.settings,
+                                authMode: setup.authMode
+                            ),
+                            currentModel: setup.model,
+                            currentModelDefaultReasoningEffort: setup.modelFamily.defaultReasoningEffort,
+                            parentServiceTier: setup.serviceTier,
+                            configuredAgentRoles: Set(setup.settings.agentRoles.keys)
+                        )
+                        return try resolver.resolve(request)
+                    },
                     spawnAgent: { request in
                         try await self.spawnLiveAgent(
                             request,

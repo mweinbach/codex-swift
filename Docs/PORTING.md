@@ -866,8 +866,15 @@ Recent upstream audit checkpoint:
   "<n>"` now applies Rust's `LastNTurns` rollout truncation before writing the
   child fork, child forks drop stale parent MultiAgentV2 usage hints, blank
   `agent_type` is treated as absent, and full-history forks reject
-  `agent_type`/`model`/`reasoning_effort` overrides like Rust. Full Rust
-  `AgentControl` parity and complete role/model/service-tier validation remain
+  `agent_type`/`model`/`reasoning_effort` overrides like Rust.
+- 2026-05-18: Swift live app-server MultiAgentV2 `spawn_agent` now validates
+  Rust's non-full-fork role/model/reasoning/service-tier override boundary
+  before attempting a child spawn: unknown `agent_type`, unknown child models,
+  unsupported reasoning efforts, and unsupported explicit service tiers return
+  Rust-shaped model-visible errors after `collabAgentSpawnBegin` without a
+  spawn-end event, while requested models inherit their catalog default
+  reasoning effort and unsupported inherited parent service tiers are cleared.
+  Full Rust `AgentControl` parity and role config-file layer application remain
   pending.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool

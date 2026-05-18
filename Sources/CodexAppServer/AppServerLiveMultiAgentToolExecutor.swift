@@ -7,6 +7,7 @@ struct AppServerLiveMultiAgentToolExecutor {
     let stateStore: SQLiteAgentGraphStore?
     let waitTimeouts: MultiAgentV2WaitTimeouts
     let hideSpawnAgentMetadata: Bool
+    let resolveSpawnAgentOverrides: @Sendable (LiveSpawnAgentOverrideRequest) async throws -> LiveSpawnAgentResolvedOverrides
     let spawnAgent: @Sendable (LiveSpawnAgentRequest) async throws -> LiveSpawnAgentResult
     let isTurnRunning: @Sendable (String) async -> Bool
     let agentStatus: @Sendable (String) async -> AgentStatus
@@ -24,6 +25,14 @@ struct AppServerLiveMultiAgentToolExecutor {
         stateStore: SQLiteAgentGraphStore?,
         waitTimeouts: MultiAgentV2WaitTimeouts,
         hideSpawnAgentMetadata: Bool = false,
+        resolveSpawnAgentOverrides: @escaping @Sendable (LiveSpawnAgentOverrideRequest) async throws -> LiveSpawnAgentResolvedOverrides = {
+            LiveSpawnAgentResolvedOverrides(
+                agentType: $0.agentType,
+                model: $0.model,
+                reasoningEffort: $0.reasoningEffort,
+                serviceTier: $0.serviceTier
+            )
+        },
         spawnAgent: @escaping @Sendable (LiveSpawnAgentRequest) async throws -> LiveSpawnAgentResult = { _ in
             throw AppServerLiveMultiAgentToolError(message: "spawn_agent is not available in this runtime")
         },
@@ -42,6 +51,7 @@ struct AppServerLiveMultiAgentToolExecutor {
         self.stateStore = stateStore
         self.waitTimeouts = waitTimeouts
         self.hideSpawnAgentMetadata = hideSpawnAgentMetadata
+        self.resolveSpawnAgentOverrides = resolveSpawnAgentOverrides
         self.spawnAgent = spawnAgent
         self.isTurnRunning = isTurnRunning
         self.agentStatus = agentStatus
@@ -141,15 +151,40 @@ struct AppServerLiveMultiAgentToolExecutor {
             )
         }
 
+        let resolvedOverrides: LiveSpawnAgentResolvedOverrides
+        do {
+            resolvedOverrides = try await resolveSpawnAgentOverrides(LiveSpawnAgentOverrideRequest(
+                agentType: agentType,
+                model: args.model,
+                reasoningEffort: args.reasoningEffort,
+                serviceTier: args.serviceTier,
+                forkMode: forkMode
+            ))
+        } catch let error as AppServerLiveMultiAgentToolError {
+            return Self.output(
+                callID: callID,
+                content: error.message,
+                success: false,
+                runtimeEvents: runtimeEvents
+            )
+        } catch {
+            return Self.output(
+                callID: callID,
+                content: String(describing: error),
+                success: false,
+                runtimeEvents: runtimeEvents
+            )
+        }
+
         do {
             let result = try await spawnAgent(LiveSpawnAgentRequest(
                 callID: callID,
                 message: prompt,
                 taskName: args.taskName,
-                agentType: agentType,
-                model: args.model,
-                reasoningEffort: args.reasoningEffort,
-                serviceTier: args.serviceTier,
+                agentType: resolvedOverrides.agentType,
+                model: resolvedOverrides.model,
+                reasoningEffort: resolvedOverrides.reasoningEffort,
+                serviceTier: resolvedOverrides.serviceTier,
                 forkMode: forkMode,
                 childAgentPath: childAgentPath
             ))
@@ -556,6 +591,122 @@ struct LiveSpawnAgentRequest: Equatable, Sendable {
     let serviceTier: String?
     let forkMode: LiveSpawnAgentForkMode
     let childAgentPath: AgentPath
+}
+
+struct LiveSpawnAgentOverrideRequest: Equatable, Sendable {
+    let agentType: String?
+    let model: String?
+    let reasoningEffort: ReasoningEffort?
+    let serviceTier: String?
+    let forkMode: LiveSpawnAgentForkMode
+}
+
+struct LiveSpawnAgentResolvedOverrides: Equatable, Sendable {
+    let agentType: String?
+    let model: String?
+    let reasoningEffort: ReasoningEffort?
+    let serviceTier: String?
+}
+
+struct LiveSpawnAgentOverrideResolver: Sendable {
+    let availableModels: [ModelPreset]
+    let currentModel: String
+    let currentModelDefaultReasoningEffort: ReasoningEffort?
+    let parentServiceTier: String?
+    let configuredAgentRoles: Set<String>
+
+    func resolve(_ request: LiveSpawnAgentOverrideRequest) throws -> LiveSpawnAgentResolvedOverrides {
+        if let agentType = request.agentType {
+            let builtinRoles: Set<String> = ["default", "explorer", "worker"]
+            guard configuredAgentRoles.contains(agentType) || builtinRoles.contains(agentType) else {
+                throw AppServerLiveMultiAgentToolError(message: "unknown agent_type '\(agentType)'")
+            }
+        }
+
+        let selectedModel: ModelPreset
+        let resolvedModel: String?
+        let resolvedReasoningEffort: ReasoningEffort?
+        if let requestedModel = request.model {
+            guard let model = availableModels.first(where: { $0.model == requestedModel }) else {
+                let available = availableModels.map(\.model).joined(separator: ", ")
+                throw AppServerLiveMultiAgentToolError(
+                    message: "Unknown model `\(requestedModel)` for spawn_agent. Available models: \(available)"
+                )
+            }
+            try Self.validateReasoningEffort(request.reasoningEffort, model: model)
+            selectedModel = model
+            resolvedModel = requestedModel
+            resolvedReasoningEffort = request.reasoningEffort ?? model.defaultReasoningEffort
+        } else {
+            selectedModel = availableModels.first(where: { $0.model == currentModel })
+                ?? ModelPreset(
+                    id: currentModel,
+                    model: currentModel,
+                    displayName: currentModel,
+                    description: currentModel,
+                    defaultReasoningEffort: currentModelDefaultReasoningEffort ?? .medium,
+                    supportedReasoningEfforts: ReasoningEffort.allCases.map {
+                        ReasoningEffortPreset(effort: $0, description: "")
+                    },
+                    isDefault: false,
+                    showInPicker: false,
+                    supportedInAPI: true
+                )
+            try Self.validateReasoningEffort(request.reasoningEffort, model: selectedModel)
+            resolvedModel = nil
+            resolvedReasoningEffort = request.reasoningEffort
+        }
+
+        let resolvedServiceTier = try resolveServiceTier(
+            requestedServiceTier: request.serviceTier,
+            model: selectedModel
+        )
+        return LiveSpawnAgentResolvedOverrides(
+            agentType: request.agentType,
+            model: resolvedModel,
+            reasoningEffort: resolvedReasoningEffort,
+            serviceTier: resolvedServiceTier
+        )
+    }
+
+    private static func validateReasoningEffort(
+        _ reasoningEffort: ReasoningEffort?,
+        model: ModelPreset
+    ) throws {
+        guard let reasoningEffort else {
+            return
+        }
+        if model.supportedReasoningEfforts.contains(where: { $0.effort == reasoningEffort }) {
+            return
+        }
+        let supported = model.supportedReasoningEfforts
+            .map { $0.effort.rawValue }
+            .joined(separator: ", ")
+        throw AppServerLiveMultiAgentToolError(
+            message: "Reasoning effort `\(reasoningEffort.rawValue)` is not supported for model `\(model.model)`. Supported reasoning efforts: \(supported)"
+        )
+    }
+
+    private func resolveServiceTier(
+        requestedServiceTier: String?,
+        model: ModelPreset
+    ) throws -> String? {
+        guard let candidateServiceTier = requestedServiceTier ?? parentServiceTier else {
+            return nil
+        }
+        if model.serviceTiers.contains(where: { $0.id == candidateServiceTier }) {
+            return candidateServiceTier
+        }
+        guard requestedServiceTier != nil else {
+            return nil
+        }
+        let supportedServiceTiers = model.serviceTiers.isEmpty
+            ? "none"
+            : model.serviceTiers.map(\.id).joined(separator: ", ")
+        throw AppServerLiveMultiAgentToolError(
+            message: "Service tier `\(candidateServiceTier)` is not supported for model `\(model.model)`. Supported service tiers: \(supportedServiceTiers)"
+        )
+    }
 }
 
 struct LiveSpawnAgentResult: Equatable, Sendable {
