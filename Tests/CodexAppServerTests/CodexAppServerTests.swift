@@ -13174,6 +13174,32 @@ final class CodexAppServerTests: XCTestCase {
         let closeRootPayload = try Self.functionOutputPayload(closeRoot, callID: "call-close-root")
         XCTAssertEqual(closeRootPayload.content, "root is not a spawned agent")
         XCTAssertEqual(closeRootPayload.success, false)
+
+        let missingThreadID = ThreadId()
+        await capture.setStatus(threadID: missingThreadID.description, status: .notFound)
+        let closeMissing = await executor.execute(.functionCall(
+            name: "close_agent",
+            arguments: #"{"target":"\#(missingThreadID.description)"}"#,
+            callID: "call-close-missing"
+        ))
+        let closeMissingPayload = try Self.functionOutputPayload(closeMissing, callID: "call-close-missing")
+        XCTAssertEqual(closeMissingPayload.content, "agent with id \(missingThreadID) not found")
+        XCTAssertEqual(closeMissingPayload.success, false)
+        let missingEvents = try XCTUnwrap(closeMissing?.runtimeEvents)
+        XCTAssertEqual(missingEvents.count, 2)
+        guard case let .collabCloseBegin(missingBegin) = missingEvents[0] else {
+            return XCTFail("expected missing close begin event")
+        }
+        XCTAssertEqual(missingBegin.senderThreadID, rootThreadID)
+        XCTAssertEqual(missingBegin.receiverThreadID, missingThreadID)
+        guard case let .collabCloseEnd(missingEnd) = missingEvents[1] else {
+            return XCTFail("expected missing close end event")
+        }
+        XCTAssertEqual(missingEnd.senderThreadID, rootThreadID)
+        XCTAssertEqual(missingEnd.receiverThreadID, missingThreadID)
+        XCTAssertNil(missingEnd.receiverAgentNickname)
+        XCTAssertNil(missingEnd.receiverAgentRole)
+        XCTAssertEqual(missingEnd.status, .notFound)
     }
 
     func testLiveRuntimeInterAgentCommunicationOpQueuesAndTriggersPendingWorkLikeRust() async throws {

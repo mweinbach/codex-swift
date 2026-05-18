@@ -853,6 +853,10 @@ Recent upstream audit checkpoint:
   persisted thread-spawn subtree closed, and cancels the target plus live
   descendants in runtime state. `spawn_agent`, richer final-status tracking,
   and full ThreadManager-backed `AgentControl` remain pending.
+- 2026-05-18: Swift live app-server MultiAgentV2 `close_agent` now also
+  mirrors Rust's missing thread-id target path by emitting close begin/end
+  events with `AgentStatus::NotFound` before returning `agent with id <id> not
+  found`, instead of short-circuiting with a Swift-only missing-thread error.
 - 2026-05-18: Swift live app-server runtime state now tracks Rust-shaped
   `AgentStatus` transitions from turn lifecycle events instead of flattening
   live multi-agent tool status to `running`/`completed(null)`. MultiAgentV2

@@ -401,14 +401,6 @@ struct AppServerLiveMultiAgentToolExecutor {
             if target.threadID == currentThreadID || target.agentPath?.isRoot == true {
                 return Self.output(callID: callID, content: "root is not a spawned agent", success: false)
             }
-            guard target.metadata != nil else {
-                return Self.output(
-                    callID: callID,
-                    content: "live agent thread `\(target.threadID)` not found",
-                    success: false
-                )
-            }
-
             let previousStatus = await status(for: target.threadID)
             var runtimeEvents: [EventMessage] = [
                 .collabCloseBegin(CollabCloseBeginEvent(
@@ -418,6 +410,21 @@ struct AppServerLiveMultiAgentToolExecutor {
                     receiverThreadID: target.threadID
                 ))
             ]
+            if target.metadata == nil, previousStatus == .notFound {
+                runtimeEvents.append(.collabCloseEnd(CollabCloseEndEvent(
+                    callID: callID,
+                    completedAtMilliseconds: AppServerLiveMultiAgentToolClock.millisecondsSinceEpoch(),
+                    senderThreadID: currentThreadID,
+                    receiverThreadID: target.threadID,
+                    status: previousStatus
+                )))
+                return Self.output(
+                    callID: callID,
+                    content: "agent with id \(target.threadID) not found",
+                    success: false,
+                    runtimeEvents: runtimeEvents
+                )
+            }
             let threadIDsToClose = try await closeThreadIDs(target.threadID)
             await closeAgentThreads(threadIDsToClose.map(\.description))
             runtimeEvents.append(.collabCloseEnd(CollabCloseEndEvent(
