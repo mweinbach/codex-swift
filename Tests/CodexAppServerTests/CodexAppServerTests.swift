@@ -11972,6 +11972,51 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(canStartContinuationAfterDrain)
     }
 
+    func testLiveRuntimeInterAgentCommunicationOpQueuesAndTriggersPendingWorkLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let threadID = ConversationId().description
+        let manager = AppServerLiveRuntimeManager(
+            configuration: testConfiguration(codexHome: temp.url, requiresOpenAIAuth: false)
+        )
+        defer {
+            manager.shutdown()
+        }
+
+        let queueOnlyMail = InterAgentCommunication(
+            author: try AgentPath.root.join("researcher"),
+            recipient: .root,
+            content: "queued only",
+            triggerTurn: false
+        )
+        let queueOnlyEvents = try manager.submitLiveRuntime(AppServerLiveRuntimeSubmission(
+            requestID: .string("queue-only-mail"),
+            threadID: threadID,
+            turnID: "mail-op-queue-only",
+            op: .interAgentCommunication(communication: queueOnlyMail)
+        ))
+        XCTAssertEqual(queueOnlyEvents, [])
+        let queueOnlyStartedTurn = await manager.isTurnRunning(threadID: threadID)
+        XCTAssertFalse(queueOnlyStartedTurn)
+        let drainedQueueOnlyMail = await manager.takeMailboxCommunications(threadID: threadID)
+        XCTAssertEqual(drainedQueueOnlyMail, [queueOnlyMail])
+
+        let triggerTurnMail = InterAgentCommunication(
+            author: try AgentPath.root.join("worker"),
+            recipient: .root,
+            content: "wake parent",
+            triggerTurn: true
+        )
+        let triggerEvents = try manager.submitLiveRuntime(AppServerLiveRuntimeSubmission(
+            requestID: .string("trigger-mail"),
+            threadID: threadID,
+            turnID: "mail-op-trigger",
+            op: .interAgentCommunication(communication: triggerTurnMail)
+        ))
+        XCTAssertEqual(triggerEvents, [])
+        let triggerStartedTurn = await manager.isTurnRunning(threadID: threadID)
+        XCTAssertTrue(triggerStartedTurn)
+    }
+
     func testLiveRuntimeGoalAccountingIgnoresGoalCreatedAfterTurnStartLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(

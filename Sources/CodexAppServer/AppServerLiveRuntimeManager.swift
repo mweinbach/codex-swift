@@ -150,6 +150,21 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             }
             return []
 
+        case let .interAgentCommunication(communication):
+            AppServerLiveRuntimeBlocking.run {
+                await self.state.queueMailboxCommunications(
+                    threadID: submission.threadID,
+                    communications: [communication]
+                )
+                if communication.triggerTurn {
+                    _ = await self.submitPendingWorkTurnIfIdle(
+                        threadID: submission.threadID,
+                        prototype: submission
+                    )
+                }
+            }
+            return []
+
         default:
             return []
         }
@@ -177,6 +192,10 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
 
     func takeMailboxCommunications(threadID: String) async -> [InterAgentCommunication] {
         await state.takeMailboxCommunications(threadID: threadID)
+    }
+
+    func isTurnRunning(threadID: String) async -> Bool {
+        await state.isTurnRunning(threadID: threadID)
     }
 
     private func submitGoalContinuation(
@@ -1516,6 +1535,10 @@ private actor AppServerLiveRuntimeState {
         }
         runningTurns[threadID] = RunningTurn(turnID: turnID, task: task)
         return true
+    }
+
+    func isTurnRunning(threadID: String) -> Bool {
+        runningTurns[threadID] != nil
     }
 
     func finishTurn(threadID: String, turnID: String) {

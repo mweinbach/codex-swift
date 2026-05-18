@@ -791,6 +791,12 @@ Recent upstream audit checkpoint:
   mailbox communication has `trigger_turn: true`. Full mailbox delivery phase
   and live multi-agent routing remain pending with the broader ThreadManager
   lifecycle.
+- 2026-05-18: Swift live runtime submission now handles Rust's
+  `Op::InterAgentCommunication` handoff: queue-only mail is buffered for the
+  next natural turn, while `trigger_turn` mail invokes the existing
+  pending-work launcher to wake an idle live thread. Full `AgentControl` routing
+  and in-turn mailbox delivery phase transitions remain pending with the broader
+  ThreadManager lifecycle.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through
