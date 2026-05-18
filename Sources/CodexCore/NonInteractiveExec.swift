@@ -265,6 +265,7 @@ public enum NonInteractiveExec {
             spawnAgentUsageHint: config.multiAgentV2.usageHintEnabled,
             spawnAgentUsageHintText: config.multiAgentV2.usageHintText,
             hideSpawnAgentMetadata: config.multiAgentV2.hideSpawnAgentMetadata,
+            goalTools: config.features.isEnabled(.goals),
             maxConcurrentThreadsPerSession: multiAgentV2Enabled
                 ? config.multiAgentV2.maxConcurrentThreadsPerSession
                 : nil,

@@ -1061,6 +1061,31 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertTrue(workerNames.contains("report_agent_job_result"))
     }
 
+    func testToolSpecsExposeGoalToolsOnlyWhenGoalsFeatureEnabledLikeRust() {
+        let modelFamily = ModelFamily(
+            slug: "test-model",
+            family: "test",
+            shellType: .disabled
+        )
+        let disabledNames = NonInteractiveExec.toolSpecs(
+            modelFamily: modelFamily,
+            config: CodexRuntimeConfig(features: .withDefaults())
+        ).map(\.spec.name)
+        XCTAssertFalse(disabledNames.contains("get_goal"))
+        XCTAssertFalse(disabledNames.contains("create_goal"))
+        XCTAssertFalse(disabledNames.contains("update_goal"))
+
+        var features = FeatureStates.withDefaults()
+        features.set(.goals, enabled: true)
+        let enabledNames = NonInteractiveExec.toolSpecs(
+            modelFamily: modelFamily,
+            config: CodexRuntimeConfig(features: features)
+        ).map(\.spec.name)
+        XCTAssertTrue(enabledNames.contains("get_goal"))
+        XCTAssertTrue(enabledNames.contains("create_goal"))
+        XCTAssertTrue(enabledNames.contains("update_goal"))
+    }
+
     func testToolSpecsHonorDisabledEnvironmentModeLikeRust() {
         var features = FeatureStates.withDefaults()
         features.set(.unifiedExec, enabled: true)

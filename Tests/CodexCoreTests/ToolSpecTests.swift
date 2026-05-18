@@ -263,6 +263,85 @@ final class ToolSpecTests: XCTestCase {
         XCTAssertNotNil(permissionProperties["network"])
     }
 
+    func testGoalToolSpecsRequireGoalToolsFlagLikeRust() {
+        let disabledNames = ToolSpecFactory.buildSpecs(config: ToolsConfig(
+            shellType: .disabled,
+            toolSearch: false,
+            toolSuggest: false
+        )).map(\.spec.name)
+        XCTAssertFalse(disabledNames.contains("get_goal"))
+        XCTAssertFalse(disabledNames.contains("create_goal"))
+        XCTAssertFalse(disabledNames.contains("update_goal"))
+
+        let enabledNames = ToolSpecFactory.buildSpecs(config: ToolsConfig(
+            shellType: .disabled,
+            toolSearch: false,
+            toolSuggest: false,
+            goalTools: true
+        )).map(\.spec.name)
+        XCTAssertTrue(enabledNames.contains("get_goal"))
+        XCTAssertTrue(enabledNames.contains("create_goal"))
+        XCTAssertTrue(enabledNames.contains("update_goal"))
+    }
+
+    func testGoalToolSpecsMatchRustShapes() {
+        XCTAssertEqual(
+            ToolSpecFactory.createGetGoalTool(),
+            .function(ResponsesAPITool(
+                name: "get_goal",
+                description: "Get the current goal for this thread, including status, budgets, token and elapsed-time usage, and remaining token budget.",
+                strict: false,
+                parameters: .object(properties: [:], required: [], additionalProperties: .boolean(false))
+            ))
+        )
+
+        XCTAssertEqual(
+            ToolSpecFactory.createCreateGoalTool(),
+            .function(ResponsesAPITool(
+                name: "create_goal",
+                description: """
+                Create a goal only when explicitly requested by the user or system/developer instructions; do not infer goals from ordinary tasks.
+                Set token_budget only when an explicit token budget is requested. Fails if a goal exists; use update_goal only for status.
+                """,
+                strict: false,
+                parameters: .object(
+                    properties: [
+                        "objective": .string(description: "Required. The concrete objective to start pursuing. This starts a new active goal only when no goal is currently defined; if a goal already exists, this tool fails."),
+                        "token_budget": .integer(description: "Optional positive token budget for the new active goal.")
+                    ],
+                    required: ["objective"],
+                    additionalProperties: .boolean(false)
+                )
+            ))
+        )
+
+        XCTAssertEqual(
+            ToolSpecFactory.createUpdateGoalTool(),
+            .function(ResponsesAPITool(
+                name: "update_goal",
+                description: """
+                Update the existing goal.
+                Use this tool only to mark the goal achieved.
+                Set status to `complete` only when the objective has actually been achieved and no required work remains.
+                Do not mark a goal complete merely because its budget is nearly exhausted or because you are stopping work.
+                You cannot use this tool to pause, resume, or budget-limit a goal; those status changes are controlled by the user or system.
+                When marking a budgeted goal achieved with status `complete`, report the final token usage from the tool result to the user.
+                """,
+                strict: false,
+                parameters: .object(
+                    properties: [
+                        "status": .stringEnum(
+                            values: [.string("complete")],
+                            description: "Required. Set to complete only when the objective is achieved and no required work remains."
+                        )
+                    ],
+                    required: ["status"],
+                    additionalProperties: .boolean(false)
+                )
+            ))
+        )
+    }
+
     func testRequestUserInputToolSpecMatchesRustShape() throws {
         let specs = ToolSpecFactory.buildSpecs(config: ToolsConfig(
             shellType: .disabled,

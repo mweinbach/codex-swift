@@ -815,6 +815,7 @@ public struct ToolsConfig: Equatable, Sendable {
     public let spawnAgentUsageHint: Bool
     public let spawnAgentUsageHintText: String?
     public let hideSpawnAgentMetadata: Bool
+    public let goalTools: Bool
     public let maxConcurrentThreadsPerSession: Int?
     public let waitAgentMinTimeoutMS: Int64?
     public let waitAgentMaxTimeoutMS: Int64?
@@ -847,6 +848,7 @@ public struct ToolsConfig: Equatable, Sendable {
         spawnAgentUsageHint: Bool = true,
         spawnAgentUsageHintText: String? = nil,
         hideSpawnAgentMetadata: Bool = false,
+        goalTools: Bool = false,
         maxConcurrentThreadsPerSession: Int? = nil,
         waitAgentMinTimeoutMS: Int64? = nil,
         waitAgentMaxTimeoutMS: Int64? = nil,
@@ -880,6 +882,7 @@ public struct ToolsConfig: Equatable, Sendable {
         self.spawnAgentUsageHint = spawnAgentUsageHint
         self.spawnAgentUsageHintText = spawnAgentUsageHintText
         self.hideSpawnAgentMetadata = hideSpawnAgentMetadata
+        self.goalTools = goalTools
         self.maxConcurrentThreadsPerSession = maxConcurrentThreadsPerSession
         self.waitAgentMinTimeoutMS = waitAgentMinTimeoutMS
         self.waitAgentMaxTimeoutMS = waitAgentMaxTimeoutMS
@@ -914,6 +917,7 @@ public struct ToolsConfig: Equatable, Sendable {
             spawnAgentUsageHint: spawnAgentUsageHint,
             spawnAgentUsageHintText: spawnAgentUsageHintText,
             hideSpawnAgentMetadata: hideSpawnAgentMetadata,
+            goalTools: goalTools,
             maxConcurrentThreadsPerSession: maxConcurrentThreadsPerSession,
             waitAgentMinTimeoutMS: waitAgentMinTimeoutMS,
             waitAgentMaxTimeoutMS: waitAgentMaxTimeoutMS,
@@ -1123,6 +1127,11 @@ type CallToolResult<TStructured = { [key: string]: unknown }> = {
         specs.append(ConfiguredToolSpec(spec: createListMCPResourceTemplatesTool(), supportsParallelToolCalls: true))
         specs.append(ConfiguredToolSpec(spec: createReadMCPResourceTool(), supportsParallelToolCalls: true))
         specs.append(ConfiguredToolSpec(spec: createPlanTool(), supportsParallelToolCalls: false))
+        if config.goalTools {
+            specs.append(ConfiguredToolSpec(spec: createGetGoalTool(), supportsParallelToolCalls: false))
+            specs.append(ConfiguredToolSpec(spec: createCreateGoalTool(), supportsParallelToolCalls: false))
+            specs.append(ConfiguredToolSpec(spec: createUpdateGoalTool(), supportsParallelToolCalls: false))
+        }
         specs.append(ConfiguredToolSpec(
             spec: createRequestUserInputTool(
                 description: RequestUserInputToolConfig.toolDescription(
@@ -2072,6 +2081,51 @@ type CallToolResult<TStructured = { [key: string]: unknown }> = {
                 "permissions": requestPermissionProfileSchema()
             ],
             required: ["permissions"]
+        )
+    }
+
+    public static func createGetGoalTool() -> ToolSpec {
+        functionTool(
+            name: "get_goal",
+            description: "Get the current goal for this thread, including status, budgets, token and elapsed-time usage, and remaining token budget.",
+            properties: [:],
+            required: []
+        )
+    }
+
+    public static func createCreateGoalTool() -> ToolSpec {
+        functionTool(
+            name: "create_goal",
+            description: """
+            Create a goal only when explicitly requested by the user or system/developer instructions; do not infer goals from ordinary tasks.
+            Set token_budget only when an explicit token budget is requested. Fails if a goal exists; use update_goal only for status.
+            """,
+            properties: [
+                "objective": .string(description: "Required. The concrete objective to start pursuing. This starts a new active goal only when no goal is currently defined; if a goal already exists, this tool fails."),
+                "token_budget": .integer(description: "Optional positive token budget for the new active goal.")
+            ],
+            required: ["objective"]
+        )
+    }
+
+    public static func createUpdateGoalTool() -> ToolSpec {
+        functionTool(
+            name: "update_goal",
+            description: """
+            Update the existing goal.
+            Use this tool only to mark the goal achieved.
+            Set status to `complete` only when the objective has actually been achieved and no required work remains.
+            Do not mark a goal complete merely because its budget is nearly exhausted or because you are stopping work.
+            You cannot use this tool to pause, resume, or budget-limit a goal; those status changes are controlled by the user or system.
+            When marking a budgeted goal achieved with status `complete`, report the final token usage from the tool result to the user.
+            """,
+            properties: [
+                "status": .stringEnum(
+                    values: [.string("complete")],
+                    description: "Required. Set to complete only when the objective is achieved and no required work remains."
+                )
+            ],
+            required: ["status"]
         )
     }
 

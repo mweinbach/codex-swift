@@ -691,6 +691,14 @@ Recent upstream audit checkpoint:
   registered extension tools, request-permissions, request-user-input, and
   dynamic-tool calls. Broader every-tool-family parity is still tracked as
   concrete handler coverage on this shared router surface.
+- 2026-05-18: Swift `ToolSpecFactory` now mirrors Rust's model-visible
+  persisted goal tools behind the `goals` feature gate. `get_goal`,
+  `create_goal`, and `update_goal` now carry Rust's names, descriptions,
+  object schemas, required fields, `additionalProperties: false`, and
+  `update_goal.status == complete` enum constraint through both direct
+  spec-building and `NonInteractiveExec.toolsConfig`; live runtime execution
+  and automatic goal accounting remain tracked with the broader
+  tool-handler/ThreadManager parity work below.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through
