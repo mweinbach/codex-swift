@@ -697,7 +697,13 @@ final class RuntimeOracleParityTests: XCTestCase {
             ["remote-control", "start", "extra"],
             ["remote-control", "start", "--listen"],
             ["remote-control", "stop", "extra"],
-            ["remote-control", "stop", "--listen"]
+            ["remote-control", "stop", "--listen"],
+            ["sandbox", "freebsd"],
+            ["sandbox", "linux", "--log-denials"],
+            ["sandbox", "linux", "--full-auto"],
+            ["sandbox", "linux", "--allow-unix-socket=/tmp"],
+            ["sandbox", "macos", "--full-auto"],
+            ["sandbox", "windows", "--foo=bar"]
         ]
 
         for arguments in commands {

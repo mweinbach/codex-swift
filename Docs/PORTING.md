@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: extended CLI ordinary parse-failure parity for sandbox command
+  forms that Rust/Clap rejects before platform runtime execution. Swift now
+  emits Rust/Clap exit-2 diagnostics for unknown `codex sandbox` child names
+  and dash-prefixed trailing command arguments on sandbox child commands,
+  including the `-- --flag` value tip and compact `--flag=value` display.
 - 2026-05-18: extended CLI ordinary parse-failure parity for app-server daemon
   and remote-control management commands. Swift now emits Rust/Clap exit-2
   diagnostics for unknown daemon/remote-control child commands plus unexpected

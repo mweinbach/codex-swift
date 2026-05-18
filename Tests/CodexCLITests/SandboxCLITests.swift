@@ -479,7 +479,13 @@ final class SandboxCLITests: XCTestCase {
         let cases: [([String], String)] = [
             (
                 ["sandbox", "freebsd", "echo", "ok"],
-                "codex-swift: unsupported sandbox subcommand: freebsd"
+                """
+                error: unrecognized subcommand 'freebsd'
+
+                Usage: codex sandbox [OPTIONS] <COMMAND>
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["sandbox", "macos"],
@@ -487,11 +493,27 @@ final class SandboxCLITests: XCTestCase {
             ),
             (
                 ["sandbox", "linux", "--log-denials", "echo", "ok"],
-                "codex-swift: unsupported option for command 'sandbox linux': --log-denials"
+                """
+                error: unexpected argument '--log-denials' found
+
+                  tip: to pass '--log-denials' as a value, use '-- --log-denials'
+
+                Usage: codex sandbox linux [OPTIONS] [COMMAND]...
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["sandbox", "linux", "--full-auto", "echo", "ok"],
-                "codex-swift: unsupported option for command 'sandbox linux': --full-auto"
+                """
+                error: unexpected argument '--full-auto' found
+
+                  tip: to pass '--full-auto' as a value, use '-- --full-auto'
+
+                Usage: codex sandbox linux [OPTIONS] [COMMAND]...
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["sandbox", "macos", "-C", "/tmp", "echo", "ok"],
@@ -499,7 +521,27 @@ final class SandboxCLITests: XCTestCase {
             ),
             (
                 ["sandbox", "linux", "--allow-unix-socket", "/tmp/socket", "echo", "ok"],
-                "codex-swift: unsupported option for command 'sandbox linux': --allow-unix-socket"
+                """
+                error: unexpected argument '--allow-unix-socket' found
+
+                  tip: to pass '--allow-unix-socket' as a value, use '-- --allow-unix-socket'
+
+                Usage: codex sandbox linux [OPTIONS] [COMMAND]...
+
+                For more information, try '--help'.
+                """
+            ),
+            (
+                ["sandbox", "windows", "--foo=bar"],
+                """
+                error: unexpected argument '--foo' found
+
+                  tip: to pass '--foo' as a value, use '-- --foo'
+
+                Usage: codex sandbox windows [OPTIONS] [COMMAND]...
+
+                For more information, try '--help'.
+                """
             )
         ]
 
@@ -515,7 +557,8 @@ final class SandboxCLITests: XCTestCase {
                 }
             )
 
-            XCTAssertEqual(exitCode, 64, "\(arguments)")
+            let expectedExitCode: Int32 = expectedMessage.hasPrefix("error: ") ? 2 : 64
+            XCTAssertEqual(exitCode, expectedExitCode, "\(arguments)")
             XCTAssertEqual(stderr, [expectedMessage], "\(arguments)")
         }
     }

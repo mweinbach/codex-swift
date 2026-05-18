@@ -8383,7 +8383,13 @@ public struct CodexCLI: Sendable {
                 return .failure(message, exitCode)
             }
         default:
-            return .failure("codex-swift: unsupported sandbox subcommand: \(subcommand)", 64)
+            if subcommand.hasPrefix("-") {
+                return clapUnexpectedArgument(
+                    clapUnexpectedFlagDisplay(subcommand),
+                    usage: "codex sandbox [OPTIONS] <COMMAND>"
+                )
+            }
+            return clapUnrecognizedSubcommand(subcommand, usage: "codex sandbox [OPTIONS] <COMMAND>")
         }
     }
 
@@ -8415,7 +8421,11 @@ public struct CodexCLI: Sendable {
             }
             if argument == "--log-denials" {
                 guard supportsLogDenials else {
-                    return .failure("codex-swift: unsupported option for command 'sandbox \(commandName)': --log-denials", 64)
+                    return clapUnexpectedArgument(
+                        argument,
+                        usage: "codex sandbox \(commandName) [OPTIONS] [COMMAND]...",
+                        asValueTip: true
+                    )
                 }
                 logDenials = true
                 index += 1
@@ -8454,7 +8464,11 @@ public struct CodexCLI: Sendable {
             }
             if argument == "--allow-unix-socket" {
                 guard supportsLogDenials else {
-                    return .failure("codex-swift: unsupported option for command 'sandbox \(commandName)': --allow-unix-socket", 64)
+                    return clapUnexpectedArgument(
+                        argument,
+                        usage: "codex sandbox \(commandName) [OPTIONS] [COMMAND]...",
+                        asValueTip: true
+                    )
                 }
                 guard index + 1 < arguments.count else {
                     return .failure("codex-swift: missing value for option '--allow-unix-socket'", 64)
@@ -8465,14 +8479,23 @@ public struct CodexCLI: Sendable {
             }
             if argument.hasPrefix("--allow-unix-socket=") {
                 guard supportsLogDenials else {
-                    return .failure("codex-swift: unsupported option for command 'sandbox \(commandName)': --allow-unix-socket", 64)
+                    return clapUnexpectedArgument(
+                        "--allow-unix-socket",
+                        usage: "codex sandbox \(commandName) [OPTIONS] [COMMAND]...",
+                        asValueTip: true
+                    )
                 }
                 allowUnixSockets.append(String(argument.dropFirst("--allow-unix-socket=".count)))
                 index += 1
                 continue
             }
             if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'sandbox \(commandName)': \(argument)", 64)
+                let unexpectedArgument = clapUnexpectedFlagDisplay(argument)
+                return clapUnexpectedArgument(
+                    unexpectedArgument,
+                    usage: "codex sandbox \(commandName) [OPTIONS] [COMMAND]...",
+                    asValueTip: true
+                )
             }
 
             command.append(argument)
@@ -8708,10 +8731,15 @@ public struct CodexCLI: Sendable {
         )
     }
 
-    private func clapUnexpectedArgument<Success>(_ argument: String, usage: String) -> ParseResult<Success> {
-        .failure(
+    private func clapUnexpectedArgument<Success>(
+        _ argument: String,
+        usage: String,
+        asValueTip: Bool = false
+    ) -> ParseResult<Success> {
+        let tip = asValueTip ? "\n\n  tip: to pass '\(argument)' as a value, use '-- \(argument)'" : ""
+        return .failure(
             """
-            error: unexpected argument '\(argument)' found
+            error: unexpected argument '\(argument)' found\(tip)
 
             Usage: \(usage)
 
@@ -8719,6 +8747,13 @@ public struct CodexCLI: Sendable {
             """,
             2
         )
+    }
+
+    private func clapUnexpectedFlagDisplay(_ argument: String) -> String {
+        if let equalsIndex = argument.firstIndex(of: "=") {
+            return String(argument[..<equalsIndex])
+        }
+        return argument
     }
 
     private func clapUnrecognizedSubcommand<Success>(_ subcommand: String, usage: String) -> ParseResult<Success> {
