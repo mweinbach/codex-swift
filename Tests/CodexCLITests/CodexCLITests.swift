@@ -180,7 +180,17 @@ final class CodexCLITests: XCTestCase {
         )
         XCTAssertEqual(
             CodexCLI().parseInvocation(arguments: ["help", "unknown"]),
-            .unrecognizedSubcommand("unknown")
+            .unrecognizedSubcommand(
+                "unknown",
+                usage: """
+                codex [OPTIONS] [PROMPT]
+                       codex [OPTIONS] <COMMAND> [ARGS]
+                """
+            )
+        )
+        XCTAssertEqual(
+            CodexCLI().parseInvocation(arguments: ["mcp", "unknown", "--help"]),
+            .unrecognizedSubcommand("unknown", usage: "codex mcp [OPTIONS] <COMMAND>")
         )
 
         var stdout: [String] = []
@@ -675,6 +685,28 @@ final class CodexCLITests: XCTestCase {
 
                 Usage: codex [OPTIONS] [PROMPT]
                        codex [OPTIONS] <COMMAND> [ARGS]
+
+                For more information, try '--help'.
+                """
+            ]
+        )
+
+        stderr.removeAll()
+        let unknownMcpHelpExitCode = await CodexCLI().runAsync(
+            arguments: ["mcp", "unknown", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { stderr.append($0) }
+        )
+
+        XCTAssertEqual(unknownMcpHelpExitCode, 2)
+        XCTAssertTrue(stdout.isEmpty)
+        XCTAssertEqual(
+            stderr,
+            [
+                """
+                error: unrecognized subcommand 'unknown'
+
+                Usage: codex mcp [OPTIONS] <COMMAND>
 
                 For more information, try '--help'.
                 """

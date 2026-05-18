@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: tightened CLI child-help error parity for strict subcommand
+  groups. Swift now rejects unknown child help targets such as
+  `codex mcp unknown --help`, `codex plugin marketplace unknown --help`,
+  `codex app-server daemon unknown --help`, and sibling command groups with
+  Rust's parent-specific unrecognized-subcommand usage instead of rendering
+  the parent help surface.
 - 2026-05-18: tightened CLI explicit-help error parity for unknown help
   targets. Swift now rejects `codex help <unknown>` with Rust's
   unrecognized-subcommand error, root usage, empty stdout, and exit code 2

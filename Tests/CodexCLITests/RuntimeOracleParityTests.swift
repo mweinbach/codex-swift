@@ -568,6 +568,40 @@ final class RuntimeOracleParityTests: XCTestCase {
         XCTAssertEqual(normalizedCommandError(swift.stderr), normalizedCommandError(rust.stderr))
     }
 
+    func testUnknownChildHelpSubcommandsMatchRustOracle() throws {
+        let oracle = try RuntimeOracle.required()
+        let commands = [
+            ["help", "mcp", "unknown"],
+            ["mcp", "unknown", "--help"],
+            ["plugin", "unknown", "--help"],
+            ["plugin", "marketplace", "unknown", "--help"],
+            ["app-server", "unknown", "--help"],
+            ["app-server", "daemon", "unknown", "--help"],
+            ["remote-control", "unknown", "--help"],
+            ["sandbox", "unknown", "--help"],
+            ["debug", "unknown", "--help"],
+            ["debug", "app-server", "unknown", "--help"],
+            ["execpolicy", "unknown", "--help"],
+            ["cloud", "unknown", "--help"],
+            ["features", "unknown", "--help"],
+            ["login", "unknown", "--help"]
+        ]
+
+        for arguments in commands {
+            let rust = try oracle.run(.rust, arguments: arguments)
+            let swift = try oracle.run(.swift, arguments: arguments)
+
+            XCTAssertEqual(rust.exitCode, 2, rust.stderr)
+            XCTAssertEqual(swift.exitCode, 2, swift.stderr)
+            XCTAssertEqual(swift.stdout, rust.stdout, arguments.joined(separator: " "))
+            XCTAssertEqual(
+                normalizedCommandError(swift.stderr),
+                normalizedCommandError(rust.stderr),
+                arguments.joined(separator: " ")
+            )
+        }
+    }
+
     func testSubcommandVersionRejectionsMatchRustOracle() throws {
         let oracle = try RuntimeOracle.required()
         let commands = [

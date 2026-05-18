@@ -17,7 +17,7 @@ public struct CodexCLI: Sendable {
         case commandUnsupportedVersion(CommandSpec, flag: String)
         case interactive(prompt: String?)
         case command(CommandSpec, arguments: [String])
-        case unrecognizedSubcommand(String)
+        case unrecognizedSubcommand(String, usage: String)
         case unknown(String)
     }
 
@@ -816,7 +816,12 @@ public struct CodexCLI: Sendable {
     private enum ExplicitFlagTarget {
         case root
         case command(CommandSpec, arguments: [String])
-        case unrecognizedSubcommand(String)
+        case unrecognizedSubcommand(String, usage: String)
+    }
+
+    private struct UnrecognizedHelpSubcommand {
+        let name: String
+        let usage: String
     }
 
     public func parseInvocation(arguments: [String]) -> Invocation {
@@ -826,8 +831,8 @@ public struct CodexCLI: Sendable {
                 return .help
             case let .command(spec, arguments):
                 return .commandHelp(spec, arguments: arguments)
-            case let .unrecognizedSubcommand(subcommand):
-                return .unrecognizedSubcommand(subcommand)
+            case let .unrecognizedSubcommand(subcommand, usage):
+                return .unrecognizedSubcommand(subcommand, usage: usage)
             }
         }
         if let versionTarget = explicitVersionTarget(arguments) {
@@ -843,8 +848,8 @@ public struct CodexCLI: Sendable {
                 }
                 let flag = arguments.first(where: { $0 == "--version" || $0 == "-V" }) ?? "--version"
                 return .commandUnsupportedVersion(spec, flag: flag)
-            case let .unrecognizedSubcommand(subcommand):
-                return .unrecognizedSubcommand(subcommand)
+            case let .unrecognizedSubcommand(subcommand, usage):
+                return .unrecognizedSubcommand(subcommand, usage: usage)
             }
         }
 
@@ -867,10 +872,14 @@ public struct CodexCLI: Sendable {
             let targetArguments = Array(arguments.dropFirst())
             if let commandToken = targetArguments.first,
                let spec = CodexCommandRegistry.command(matching: commandToken) {
-                return .command(spec, arguments: Array(targetArguments.dropFirst()))
+                let commandArguments = Array(targetArguments.dropFirst())
+                if let unrecognized = unrecognizedHelpSubcommand(in: commandArguments, under: spec) {
+                    return .unrecognizedSubcommand(unrecognized.name, usage: unrecognized.usage)
+                }
+                return .command(spec, arguments: commandArguments)
             }
             if let commandToken = targetArguments.first {
-                return .unrecognizedSubcommand(commandToken)
+                return .unrecognizedSubcommand(commandToken, usage: rootUsage)
             }
             return .root
         }
@@ -881,7 +890,11 @@ public struct CodexCLI: Sendable {
         guard let commandMatch = commandMatch(in: arguments), commandMatch.index < helpIndex else {
             return .root
         }
-        return .command(commandMatch.spec, arguments: Array(arguments.dropFirst(commandMatch.index + 1)))
+        let commandArguments = Array(arguments.dropFirst(commandMatch.index + 1))
+        if let unrecognized = unrecognizedHelpSubcommand(in: commandArguments, under: commandMatch.spec) {
+            return .unrecognizedSubcommand(unrecognized.name, usage: unrecognized.usage)
+        }
+        return .command(commandMatch.spec, arguments: commandArguments)
     }
 
     private func explicitVersionTarget(_ arguments: [String]) -> ExplicitFlagTarget? {
@@ -892,6 +905,131 @@ public struct CodexCLI: Sendable {
             return .root
         }
         return .command(commandMatch.spec, arguments: Array(arguments.dropFirst(commandMatch.index + 1)))
+    }
+
+    private func unrecognizedHelpSubcommand(in arguments: [String], under spec: CommandSpec) -> UnrecognizedHelpSubcommand? {
+        let positionals = positionalTokens(arguments).filter { $0 != "help" }
+        guard let child = positionals.first else {
+            return nil
+        }
+
+        switch spec.name {
+        case "login":
+            return unrecognizedHelpSubcommand(
+                child,
+                allowed: ["status"],
+                usage: "codex login [OPTIONS] [COMMAND]"
+            )
+        case "mcp":
+            return unrecognizedHelpSubcommand(
+                child,
+                allowed: ["list", "get", "add", "remove", "login", "logout"],
+                usage: "codex mcp [OPTIONS] <COMMAND>"
+            )
+        case "plugin":
+            if child == "marketplace" {
+                guard positionals.count > 1 else {
+                    return nil
+                }
+                return unrecognizedHelpSubcommand(
+                    positionals[1],
+                    allowed: ["add", "list", "remove", "upgrade"],
+                    usage: "codex plugin marketplace [OPTIONS] <COMMAND>"
+                )
+            }
+            return unrecognizedHelpSubcommand(
+                child,
+                allowed: ["add", "list", "marketplace", "remove"],
+                usage: "codex plugin [OPTIONS] <COMMAND>"
+            )
+        case "app-server":
+            if child == "daemon" {
+                guard positionals.count > 1 else {
+                    return nil
+                }
+                return unrecognizedHelpSubcommand(
+                    positionals[1],
+                    allowed: [
+                        "start",
+                        "bootstrap",
+                        "stop",
+                        "restart",
+                        "enable-remote-control",
+                        "disable-remote-control",
+                        "version",
+                        "pid-update-loop"
+                    ],
+                    usage: "codex app-server daemon [OPTIONS] <COMMAND>"
+                )
+            }
+            return unrecognizedHelpSubcommand(
+                child,
+                allowed: [
+                    "daemon",
+                    "proxy",
+                    "generate-ts",
+                    "generate-json-schema",
+                    "generate-internal-json-schema"
+                ],
+                usage: "codex app-server [OPTIONS] [COMMAND]"
+            )
+        case "remote-control":
+            return unrecognizedHelpSubcommand(
+                child,
+                allowed: ["start", "stop"],
+                usage: "codex remote-control [OPTIONS] [COMMAND]"
+            )
+        case "sandbox":
+            return unrecognizedHelpSubcommand(
+                child,
+                allowed: ["macos", "seatbelt", "linux", "windows"],
+                usage: "codex sandbox [OPTIONS] <COMMAND>"
+            )
+        case "debug":
+            if child == "app-server" {
+                guard positionals.count > 1 else {
+                    return nil
+                }
+                return unrecognizedHelpSubcommand(
+                    positionals[1],
+                    allowed: ["send-message-v2"],
+                    usage: "codex debug app-server [OPTIONS] <COMMAND>"
+                )
+            }
+            return unrecognizedHelpSubcommand(
+                child,
+                allowed: ["models", "app-server", "prompt-input", "trace-reduce", "clear-memories"],
+                usage: "codex debug [OPTIONS] <COMMAND>"
+            )
+        case "execpolicy":
+            return unrecognizedHelpSubcommand(
+                child,
+                allowed: ["check"],
+                usage: "codex execpolicy [OPTIONS] <COMMAND>"
+            )
+        case "cloud":
+            return unrecognizedHelpSubcommand(
+                child,
+                allowed: ["exec", "status", "list", "apply", "diff"],
+                usage: "codex cloud [OPTIONS] [COMMAND]"
+            )
+        case "features":
+            return unrecognizedHelpSubcommand(
+                child,
+                allowed: ["list", "enable", "disable"],
+                usage: "codex features [OPTIONS] <COMMAND>"
+            )
+        default:
+            return nil
+        }
+    }
+
+    private func unrecognizedHelpSubcommand(
+        _ child: String,
+        allowed: Set<String>,
+        usage: String
+    ) -> UnrecognizedHelpSubcommand? {
+        allowed.contains(child) ? nil : UnrecognizedHelpSubcommand(name: child, usage: usage)
     }
 
     private func commandMatch(in arguments: [String]) -> (index: Int, spec: CommandSpec)? {
@@ -1226,12 +1364,18 @@ public struct CodexCLI: Sendable {
         """
     }
 
-    public func renderUnrecognizedSubcommandError(_ subcommand: String) -> String {
+    private var rootUsage: String {
+        """
+        codex [OPTIONS] [PROMPT]
+               codex [OPTIONS] <COMMAND> [ARGS]
+        """
+    }
+
+    public func renderUnrecognizedSubcommandError(_ subcommand: String, usage: String) -> String {
         """
         error: unrecognized subcommand '\(subcommand)'
 
-        Usage: codex [OPTIONS] [PROMPT]
-               codex [OPTIONS] <COMMAND> [ARGS]
+        Usage: \(usage)
 
         For more information, try '--help'.
         """
@@ -3837,8 +3981,8 @@ public struct CodexCLI: Sendable {
         case let .commandHelp(spec, arguments):
             stdout(renderHelp(for: spec, arguments: arguments))
             return 0
-        case let .unrecognizedSubcommand(subcommand):
-            stderr(renderUnrecognizedSubcommandError(subcommand))
+        case let .unrecognizedSubcommand(subcommand, usage):
+            stderr(renderUnrecognizedSubcommandError(subcommand, usage: usage))
             return 2
         case let .command(spec, commandArguments) where spec.name == "completion":
             do {
@@ -3943,8 +4087,8 @@ public struct CodexCLI: Sendable {
         case let .commandHelp(spec, arguments):
             stdout(renderHelp(for: spec, arguments: arguments))
             return 0
-        case let .unrecognizedSubcommand(subcommand):
-            stderr(renderUnrecognizedSubcommandError(subcommand))
+        case let .unrecognizedSubcommand(subcommand, usage):
+            stderr(renderUnrecognizedSubcommandError(subcommand, usage: usage))
             return 2
         case let .command(spec, commandArguments) where spec.name == "completion":
             do {
