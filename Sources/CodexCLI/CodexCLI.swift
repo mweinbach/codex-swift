@@ -922,8 +922,20 @@ public struct CodexCLI: Sendable {
             return renderLoginHelp()
         case "logout":
             return renderLogoutHelp()
+        case "mcp":
+            return renderMcpHelp()
+        case "plugin":
+            return renderPluginHelp()
         case "completion":
             return renderCompletionHelp()
+        case "update":
+            return renderUpdateHelp()
+        case "doctor":
+            return renderDoctorHelp()
+        case "sandbox":
+            return renderSandboxHelp()
+        case "apply":
+            return renderApplyHelp()
         default:
             return renderHelp()
         }
@@ -1395,6 +1407,203 @@ public struct CodexCLI: Sendable {
         Remove stored authentication credentials
 
         Usage: codex logout [OPTIONS]
+
+        Options:
+          -c, --config <key=value>
+                  Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                  Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                  as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                  Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                  shell_environment_policy.inherit=all`
+
+              --enable <FEATURE>
+                  Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+              --disable <FEATURE>
+                  Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+          -h, --help
+                  Print help (see a summary with '-h')
+        """
+    }
+
+    private func renderMcpHelp() -> String {
+        """
+        Manage external MCP servers for Codex
+
+        Usage: codex mcp [OPTIONS] <COMMAND>
+
+        Commands:
+          list
+          get
+          add
+          remove
+          login
+          logout
+          help    Print this message or the help of the given subcommand(s)
+
+        Options:
+          -c, --config <key=value>
+                  Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                  Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                  as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                  Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                  shell_environment_policy.inherit=all`
+
+              --enable <FEATURE>
+                  Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+              --disable <FEATURE>
+                  Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+          -h, --help
+                  Print help (see a summary with '-h')
+        """
+    }
+
+    private func renderPluginHelp() -> String {
+        """
+        Manage Codex plugins
+
+        Usage: codex plugin [OPTIONS] <COMMAND>
+
+        Commands:
+          add          Install a plugin from a configured marketplace snapshot
+          list         List plugins available from configured marketplace snapshots
+          marketplace  Add, list, upgrade, or remove configured plugin marketplaces
+          remove       Remove an installed plugin from local config and cache
+          help         Print this message or the help of the given subcommand(s)
+
+        Options:
+          -c, --config <key=value>
+                  Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                  Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                  as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                  Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                  shell_environment_policy.inherit=all`
+
+              --enable <FEATURE>
+                  Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+              --disable <FEATURE>
+                  Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+          -h, --help
+                  Print help (see a summary with '-h')
+        """
+    }
+
+    private func renderUpdateHelp() -> String {
+        """
+        Update Codex to the latest version
+
+        Usage: codex update [OPTIONS]
+
+        Options:
+          -c, --config <key=value>
+                  Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                  Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                  as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                  Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                  shell_environment_policy.inherit=all`
+
+              --enable <FEATURE>
+                  Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+              --disable <FEATURE>
+                  Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+          -h, --help
+                  Print help (see a summary with '-h')
+        """
+    }
+
+    private func renderDoctorHelp() -> String {
+        """
+        Diagnose local Codex installation, config, auth, and runtime health
+
+        Usage: codex doctor [OPTIONS]
+
+        Options:
+          -c, --config <key=value>
+                  Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                  Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                  as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                  Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                  shell_environment_policy.inherit=all`
+
+              --json
+                  Emit a redacted machine-readable report
+
+              --enable <FEATURE>
+                  Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+              --summary
+                  Only show grouped check rows and the final count summary
+
+              --all
+                  Expand long lists in detailed human output
+
+              --disable <FEATURE>
+                  Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              --no-color
+                  Disable ANSI color in human output
+
+              --ascii
+                  Use ASCII status labels and separators in human output
+
+          -h, --help
+                  Print help (see a summary with '-h')
+        """
+    }
+
+    private func renderSandboxHelp() -> String {
+        """
+        Run commands within a Codex-provided sandbox
+
+        Usage: codex sandbox [OPTIONS] <COMMAND>
+
+        Commands:
+          macos    Run a command under Seatbelt (macOS only) [aliases: seatbelt]
+          linux    Run a command under the Linux sandbox (bubblewrap by default) [aliases: landlock]
+          windows  Run a command under Windows restricted token (Windows only)
+          help     Print this message or the help of the given subcommand(s)
+
+        Options:
+          -c, --config <key=value>
+                  Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                  Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                  as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                  Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                  shell_environment_policy.inherit=all`
+
+              --enable <FEATURE>
+                  Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+              --disable <FEATURE>
+                  Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+          -h, --help
+                  Print help (see a summary with '-h')
+        """
+    }
+
+    private func renderApplyHelp() -> String {
+        """
+        Apply the latest diff produced by Codex agent as a `git apply` to your local working tree
+
+        Usage: codex apply [OPTIONS] <TASK_ID>
+
+        Arguments:
+          <TASK_ID>
+
 
         Options:
           -c, --config <key=value>

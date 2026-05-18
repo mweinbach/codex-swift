@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: extended the Rust runtime oracle harness around another CLI
+  help-dispatch batch. Swift now renders Rust-shaped `codex mcp --help`,
+  `codex plugin --help`, `codex update --help`, `codex doctor --help`,
+  `codex sandbox --help`, and `codex apply --help` output instead of falling
+  back to root CLI help, preserving Rust's command lists and command-local
+  option ordering.
 - 2026-05-18: extended the Rust runtime oracle harness around auth command
   help dispatch. Swift now renders Rust-shaped `codex login --help` and
   `codex logout --help` output instead of falling back to root CLI help,

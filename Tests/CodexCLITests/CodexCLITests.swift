@@ -241,6 +241,78 @@ final class CodexCLITests: XCTestCase {
         let logoutHelp = try XCTUnwrap(stdout.first)
         XCTAssertTrue(logoutHelp.hasPrefix("Remove stored authentication credentials\n\nUsage: codex logout [OPTIONS]"))
         XCTAssertTrue(logoutHelp.contains("      --disable <FEATURE>"))
+
+        stdout.removeAll()
+        let mcpExitCode = await CodexCLI().runAsync(
+            arguments: ["mcp", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(mcpExitCode, 0)
+        let mcpHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(mcpHelp.hasPrefix("Manage external MCP servers for Codex\n\nUsage: codex mcp [OPTIONS] <COMMAND>"))
+        XCTAssertTrue(mcpHelp.contains("  remove"))
+
+        stdout.removeAll()
+        let pluginExitCode = await CodexCLI().runAsync(
+            arguments: ["plugin", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(pluginExitCode, 0)
+        let pluginHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(pluginHelp.hasPrefix("Manage Codex plugins\n\nUsage: codex plugin [OPTIONS] <COMMAND>"))
+        XCTAssertTrue(pluginHelp.contains("  marketplace  Add, list, upgrade, or remove configured plugin marketplaces"))
+
+        stdout.removeAll()
+        let updateExitCode = await CodexCLI().runAsync(
+            arguments: ["update", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(updateExitCode, 0)
+        let updateHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(updateHelp.hasPrefix("Update Codex to the latest version\n\nUsage: codex update [OPTIONS]"))
+
+        stdout.removeAll()
+        let doctorExitCode = await CodexCLI().runAsync(
+            arguments: ["doctor", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(doctorExitCode, 0)
+        let doctorHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(doctorHelp.hasPrefix("Diagnose local Codex installation, config, auth, and runtime health\n\nUsage: codex doctor [OPTIONS]"))
+        XCTAssertTrue(doctorHelp.contains("      --json"))
+        XCTAssertTrue(doctorHelp.contains("      --ascii"))
+
+        stdout.removeAll()
+        let sandboxExitCode = await CodexCLI().runAsync(
+            arguments: ["sandbox", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(sandboxExitCode, 0)
+        let sandboxHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(sandboxHelp.hasPrefix("Run commands within a Codex-provided sandbox\n\nUsage: codex sandbox [OPTIONS] <COMMAND>"))
+        XCTAssertTrue(sandboxHelp.contains("  windows  Run a command under Windows restricted token (Windows only)"))
+
+        stdout.removeAll()
+        let applyExitCode = await CodexCLI().runAsync(
+            arguments: ["apply", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(applyExitCode, 0)
+        let applyHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(applyHelp.hasPrefix("Apply the latest diff produced by Codex agent as a `git apply` to your local working tree\n\nUsage: codex apply [OPTIONS] <TASK_ID>"))
+        XCTAssertTrue(applyHelp.contains("Arguments:\n  <TASK_ID>"))
     }
 
     func testCommandVersionTargetsSubcommandLikeRust() async {
