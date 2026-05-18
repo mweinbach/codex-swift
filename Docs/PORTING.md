@@ -233,6 +233,12 @@ Recent upstream audit checkpoint:
   arguments as omitted arguments, preserving the no-argument invocation shape
   through the handler request and lifecycle events instead of failing JSON
   decoding before the call can run.
+- 2026-05-18: matched Rust's malformed MCP argument short-circuit from
+  `codex-rs/core/src/mcp_tool_call.rs`. Nonblank MCP tool-call arguments now
+  parse before dispatch; malformed JSON returns a `CallToolResult`-shaped
+  `isError: true` output with `err: ...`, does not call the MCP handler, and
+  emits no begin/end lifecycle events. Explicit JSON `null` remains a present
+  argument value, matching Rust's `Some(Value::Null)` path.
 - 2026-05-17: matched Rust's live app-server pending request status release
   from `codex-rs/app-server/src/thread_status.rs` and
   `codex-rs/app-server/src/bespoke_event_handling.rs`. Swift now drops

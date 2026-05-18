@@ -2569,7 +2569,18 @@ public enum NonInteractiveExec {
         if arguments.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             argumentsValue = nil
         } else {
-            argumentsValue = try JSONDecoder().decode(JSONValue.self, from: Data(arguments.utf8))
+            do {
+                argumentsValue = try JSONDecoder().decode(JSONValue.self, from: Data(arguments.utf8))
+            } catch {
+                let result = McpCallToolResult(
+                    content: [.text(McpTextContent(text: "err: \(error)"))],
+                    isError: true
+                )
+                return executed(.functionCallOutput(
+                    callID: callID,
+                    output: FunctionCallOutputPayload(callToolResult: result)
+                ))
+            }
         }
         let invocation = McpInvocation(
             server: toolInfo.serverName,
