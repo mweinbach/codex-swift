@@ -2959,6 +2959,32 @@ final class NonInteractiveExecTests: XCTestCase {
         )
     }
 
+    func testClientToolSearchMalformedArgumentsReturnRustBuildErrorOutput() async throws {
+        let output = await NonInteractiveExec.executeFunctionCall(
+            .toolSearchCall(
+                callID: "search-bad",
+                execution: "client",
+                arguments: .object(["query": .integer(1)])
+            ),
+            cwd: URL(fileURLWithPath: "/tmp", isDirectory: true),
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .zsh, shellPath: "/bin/zsh"),
+            truncationPolicy: .bytes(10_000),
+            toolSearchIndex: Self.makeToolSearchIndex()
+        )
+
+        guard case let .functionCallOutput(callID, payload) = output else {
+            return XCTFail("expected malformed tool_search arguments to be projected as function_call_output")
+        }
+        XCTAssertEqual(callID, "")
+        XCTAssertNil(payload.success)
+        XCTAssertTrue(
+            payload.content.hasPrefix("failed to parse tool_search arguments:"),
+            payload.content
+        )
+    }
+
     func testResponsesLoopRunsToolPreExecutionHandlerBeforeExecutorWithCurrentTokenUsageLikeRustGoalRuntime() async throws {
         let initial = Prompt(input: [
             .message(role: "user", content: [.inputText(text: "run echo")])

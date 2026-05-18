@@ -1546,6 +1546,11 @@ public enum NonInteractiveExec {
                     execution: "client",
                     tools: []
                 ))
+            } catch let error as ToolSearchError {
+                return executed(.functionCallOutput(
+                    callID: "",
+                    output: FunctionCallOutputPayload(content: error.description)
+                ))
             } catch {
                 return executed(functionOutput(callID: callID, content: String(describing: error), success: false))
             }
