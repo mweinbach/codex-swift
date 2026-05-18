@@ -2702,9 +2702,14 @@ public enum CodexAppServer {
             turns: includeTurns ? buildTurnsFromRolloutEvents(at: rolloutPath) : [],
             metadataOverlay: metadataOverlay
         )
-        if let status = loadedThreadStatus(conversationID.description) {
-            thread["status"] = status
+        let status = loadedThreadStatus(conversationID.description) ?? notLoadedThreadStatus()
+        if includeTurns {
+            thread["turns"] = interruptStaleInProgressTurns(
+                thread["turns"] as? [[String: Any]] ?? [],
+                threadStatus: status
+            )
         }
+        thread["status"] = status
         return ["thread": thread]
     }
 
@@ -2713,7 +2718,8 @@ public enum CodexAppServer {
         configuration: CodexAppServerConfiguration,
         experimentalAPIEnabled: Bool,
         loadedEphemeralThread: (String) -> [String: Any]? = { _ in nil },
-        isThreadLoaded: (String) -> Bool = { _ in false }
+        isThreadLoaded: (String) -> Bool = { _ in false },
+        loadedThreadStatus: (String) -> [String: Any]? = { _ in nil }
     ) throws -> [String: Any] {
         try requireExperimentalAPI(method: "thread/turns/list", experimentalAPIEnabled: experimentalAPIEnabled)
         let threadID = try rustRequiredStringParam(params?["threadId"], field: "threadId")
@@ -2742,7 +2748,11 @@ public enum CodexAppServer {
         }
 
         let itemsView = try turnItemsView(params?["itemsView"])
-        let turns = try buildTurnsFromRolloutEvents(at: rolloutPath).map { turn in
+        let status = loadedThreadStatus(conversationID.description) ?? notLoadedThreadStatus()
+        let turns = try interruptStaleInProgressTurns(
+            buildTurnsFromRolloutEvents(at: rolloutPath),
+            threadStatus: status
+        ).map { turn in
             turnWithItemsView(turn, itemsView: itemsView)
         }
         let page = try paginateThreadTurns(
@@ -2756,6 +2766,23 @@ public enum CodexAppServer {
             "nextCursor": page.nextCursor ?? NSNull(),
             "backwardsCursor": page.backwardsCursor ?? NSNull()
         ].nullStripped(keepNulls: true)
+    }
+
+    private static func interruptStaleInProgressTurns(
+        _ turns: [[String: Any]],
+        threadStatus: [String: Any]
+    ) -> [[String: Any]] {
+        guard threadStatus["type"] as? String != "active" else {
+            return turns
+        }
+        return turns.map { turn in
+            guard turn["status"] as? String == "inProgress" else {
+                return turn
+            }
+            var interrupted = turn
+            interrupted["status"] = "interrupted"
+            return interrupted
+        }
     }
 
     fileprivate static func validateThreadTurnsItemsListParams(_ params: [String: Any]?) throws {
@@ -29811,7 +29838,8 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                             configuration: configuration,
                             experimentalAPIEnabled: experimentalAPIEnabled,
                             loadedEphemeralThread: { self.loadedEphemeralThreadSnapshot(threadID: $0) },
-                            isThreadLoaded: { self.isThreadLoaded($0) }
+                            isThreadLoaded: { self.isThreadLoaded($0) },
+                            loadedThreadStatus: { self.loadedThreadStatus(threadID: $0) }
                         )
                     )
                 case "thread/turns/items/list":
