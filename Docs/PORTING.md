@@ -957,7 +957,9 @@ Recent upstream audit checkpoint:
   live child agent paths in the runtime registry before creating the child,
   rejecting duplicate open task paths with Rust's model-visible
   `agent path \`/root/name\` already exists` message and releasing failed
-  reservations on spawn errors or shutdown.
+  reservations on spawn errors or shutdown. The reservation check also consults
+  the persisted thread-spawn graph so open agent paths restored from SQLite
+  remain occupied, while explicitly closed spawn edges can be reused.
 - 2026-05-18: Swift live app-server MultiAgentV2 `spawn_agent` now rejects
   whitespace-only prompts with Rust's `Empty message can't be sent to an agent`
   tool output before emitting spawn begin/end events or attempting child thread

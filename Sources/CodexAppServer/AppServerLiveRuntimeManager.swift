@@ -342,6 +342,11 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
     }
 
     func reserveLiveAgentPath(threadID: String, agentPath: AgentPath) async throws {
+        if let stateStore = configuration.stateStore,
+           let existingThreadID = try await stateStore.findOpenThreadByAgentPath(agentPath: agentPath),
+           existingThreadID.description != threadID {
+            throw AppServerLiveMultiAgentToolError(message: "agent path `\(agentPath)` already exists")
+        }
         do {
             try await state.reserveAgentPath(threadID: threadID, agentPath: agentPath)
         } catch AppServerLiveRuntimeState.AgentPathReservationError.alreadyExists {

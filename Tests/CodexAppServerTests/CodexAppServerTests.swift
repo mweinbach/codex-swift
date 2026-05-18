@@ -13653,8 +13653,9 @@ final class CodexAppServerTests: XCTestCase {
 
     func testLiveRuntimeReservesRustSpawnAgentPathsUntilReleased() async throws {
         let temp = try TemporaryDirectory()
+        let stateStore = try SQLiteAgentGraphStore(databaseURL: temp.url.appendingPathComponent("state.sqlite3"))
         let manager = AppServerLiveRuntimeManager(
-            configuration: testConfiguration(codexHome: temp.url, requiresOpenAIAuth: false)
+            configuration: testConfiguration(codexHome: temp.url, requiresOpenAIAuth: false, stateStore: stateStore)
         )
         defer {
             manager.shutdown()
@@ -13674,6 +13675,42 @@ final class CodexAppServerTests: XCTestCase {
 
         await manager.releaseLiveAgentPaths(threadIDs: [firstThreadID])
         try await manager.reserveLiveAgentPath(threadID: duplicateThreadID, agentPath: workerPath)
+
+        await manager.releaseLiveAgentPaths(threadIDs: [duplicateThreadID])
+        let rootThreadID = ThreadId()
+        let persistedThreadID = ThreadId()
+        try await stateStore.upsertThread(ThreadMetadata(
+            id: persistedThreadID,
+            rolloutPath: temp.url.appendingPathComponent("persisted-worker.jsonl").path,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_001),
+            source: "vscode",
+            agentNickname: "Bernoulli",
+            agentRole: "worker",
+            agentPath: workerPath.description,
+            modelProvider: "mock_provider",
+            model: "gpt-5.4",
+            cwd: temp.url.path,
+            cliVersion: "test-version",
+            title: "worker",
+            sandboxPolicy: "danger-full-access",
+            approvalMode: "never",
+            tokensUsed: 0
+        ))
+        try await stateStore.upsertThreadSpawnEdge(
+            parentThreadID: rootThreadID,
+            childThreadID: persistedThreadID,
+            status: .open
+        )
+        do {
+            try await manager.reserveLiveAgentPath(threadID: ThreadId().description, agentPath: workerPath)
+            XCTFail("expected persisted open agent path to fail reservation")
+        } catch let error as AppServerLiveMultiAgentToolError {
+            XCTAssertEqual(error.message, "agent path `/root/worker` already exists")
+        }
+
+        try await stateStore.setThreadSpawnEdgeStatus(childThreadID: persistedThreadID, status: .closed)
+        try await manager.reserveLiveAgentPath(threadID: ThreadId().description, agentPath: workerPath)
     }
 
     func testLiveRuntimeTerminalSubagentTurnQueuesDirectParentNotificationLikeRust() async throws {
