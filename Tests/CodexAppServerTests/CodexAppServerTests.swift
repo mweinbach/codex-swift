@@ -12361,6 +12361,67 @@ final class CodexAppServerTests: XCTestCase {
             reasoningEffort: .low,
             serviceTier: nil
         ))
+
+        let temp = try TemporaryDirectory()
+        let roleFile = temp.url.appendingPathComponent("reviewer.toml", isDirectory: false)
+        try """
+        name = "reviewer"
+        description = "Review code"
+        developer_instructions = "Review carefully"
+        model = "gpt-5.4"
+        model_reasoning_effort = "high"
+        service_tier = "priority"
+        """.write(to: roleFile, atomically: true, encoding: .utf8)
+        let roleConfigOverrides = try LiveSpawnAgentOverrideResolver.roleConfigOverrides(
+            configuredAgentRoles: [
+                "reviewer": AgentRoleConfig(
+                    description: "Review code",
+                    configFile: roleFile.path
+                )
+            ]
+        )
+        let roleResolver = LiveSpawnAgentOverrideResolver(
+            availableModels: [gpt54, codex53],
+            currentModel: "gpt-5.3-codex",
+            currentModelDefaultReasoningEffort: .low,
+            parentServiceTier: nil,
+            configuredAgentRoles: ["reviewer"],
+            roleConfigOverrides: roleConfigOverrides
+        )
+        let roleResolved = try roleResolver.resolve(LiveSpawnAgentOverrideRequest(
+            agentType: "reviewer",
+            model: "gpt-5.3-codex",
+            reasoningEffort: nil,
+            serviceTier: nil,
+            forkMode: .none
+        ))
+        XCTAssertEqual(roleResolved, LiveSpawnAgentResolvedOverrides(
+            agentType: "reviewer",
+            model: "gpt-5.4",
+            reasoningEffort: .high,
+            serviceTier: "priority"
+        ))
+
+        let badRoleFile = temp.url.appendingPathComponent("bad-reviewer.toml", isDirectory: false)
+        try """
+        name = "bad-reviewer"
+        description = "Bad reviewer"
+        developer_instructions = "Review carefully"
+        model_reasoning_effort = "maximum"
+        """.write(to: badRoleFile, atomically: true, encoding: .utf8)
+        XCTAssertThrowsError(try LiveSpawnAgentOverrideResolver.roleConfigOverrides(
+            configuredAgentRoles: [
+                "bad-reviewer": AgentRoleConfig(
+                    description: "Bad reviewer",
+                    configFile: badRoleFile.path
+                )
+            ]
+        )) { error in
+            XCTAssertEqual(
+                (error as? AppServerLiveMultiAgentToolError)?.message,
+                "agent type is currently not available"
+            )
+        }
     }
 
     func testLiveSpawnAgentValidationFailureEmitsBeginWithoutSpawnEndLikeRust() async throws {

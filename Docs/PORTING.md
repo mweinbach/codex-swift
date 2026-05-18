@@ -874,8 +874,11 @@ Recent upstream audit checkpoint:
   Rust-shaped model-visible errors after `collabAgentSpawnBegin` without a
   spawn-end event, while requested models inherit their catalog default
   reasoning effort and unsupported inherited parent service tiers are cleared.
-  Full Rust `AgentControl` parity and role config-file layer application remain
-  pending.
+  Configured role `config_file` values are now read through the config-layer
+  TOML reader for live spawns and apply Rust's post-argument role layer for the
+  child model, reasoning effort, and service tier, with malformed role files
+  mapped to Rust's `agent type is currently not available` error. Full Rust
+  `AgentControl` parity and broader child config application remain pending.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through

@@ -922,6 +922,16 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                     waitTimeouts: multiAgentV2WaitTimeouts,
                     hideSpawnAgentMetadata: setup.settings.multiAgentV2.hideSpawnAgentMetadata,
                     resolveSpawnAgentOverrides: { request in
+                        let selectedAgentRoles: [String: AgentRoleConfig]
+                        if let agentType = request.agentType,
+                           let agentRoleConfig = setup.settings.agentRoles[agentType] {
+                            selectedAgentRoles = [agentType: agentRoleConfig]
+                        } else {
+                            selectedAgentRoles = [:]
+                        }
+                        let roleConfigOverrides = try LiveSpawnAgentOverrideResolver.roleConfigOverrides(
+                            configuredAgentRoles: selectedAgentRoles
+                        )
                         let resolver = LiveSpawnAgentOverrideResolver(
                             availableModels: Self.liveSpawnAgentAvailableModels(
                                 settings: setup.settings,
@@ -930,7 +940,8 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                             currentModel: setup.model,
                             currentModelDefaultReasoningEffort: setup.modelFamily.defaultReasoningEffort,
                             parentServiceTier: setup.serviceTier,
-                            configuredAgentRoles: Set(setup.settings.agentRoles.keys)
+                            configuredAgentRoles: Set(setup.settings.agentRoles.keys),
+                            roleConfigOverrides: roleConfigOverrides
                         )
                         return try resolver.resolve(request)
                     },

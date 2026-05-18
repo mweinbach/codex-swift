@@ -608,12 +608,35 @@ struct LiveSpawnAgentResolvedOverrides: Equatable, Sendable {
     let serviceTier: String?
 }
 
+struct LiveSpawnAgentRoleConfigOverrides: Equatable, Sendable {
+    let model: String?
+    let reasoningEffort: ReasoningEffort?
+    let serviceTier: String?
+}
+
 struct LiveSpawnAgentOverrideResolver: Sendable {
     let availableModels: [ModelPreset]
     let currentModel: String
     let currentModelDefaultReasoningEffort: ReasoningEffort?
     let parentServiceTier: String?
     let configuredAgentRoles: Set<String>
+    let roleConfigOverrides: [String: LiveSpawnAgentRoleConfigOverrides]
+
+    init(
+        availableModels: [ModelPreset],
+        currentModel: String,
+        currentModelDefaultReasoningEffort: ReasoningEffort?,
+        parentServiceTier: String?,
+        configuredAgentRoles: Set<String>,
+        roleConfigOverrides: [String: LiveSpawnAgentRoleConfigOverrides] = [:]
+    ) {
+        self.availableModels = availableModels
+        self.currentModel = currentModel
+        self.currentModelDefaultReasoningEffort = currentModelDefaultReasoningEffort
+        self.parentServiceTier = parentServiceTier
+        self.configuredAgentRoles = configuredAgentRoles
+        self.roleConfigOverrides = roleConfigOverrides
+    }
 
     func resolve(_ request: LiveSpawnAgentOverrideRequest) throws -> LiveSpawnAgentResolvedOverrides {
         if let agentType = request.agentType {
@@ -623,9 +646,9 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
             }
         }
 
-        let selectedModel: ModelPreset
+        var selectedModel: ModelPreset
         let resolvedModel: String?
-        let resolvedReasoningEffort: ReasoningEffort?
+        var resolvedReasoningEffort: ReasoningEffort?
         if let requestedModel = request.model {
             guard let model = availableModels.first(where: { $0.model == requestedModel }) else {
                 let available = availableModels.map(\.model).joined(separator: ", ")
@@ -657,16 +680,98 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
             resolvedReasoningEffort = request.reasoningEffort
         }
 
+        var roleResolvedModel = resolvedModel
+        var roleServiceTier: String?
+        if let agentType = request.agentType,
+           let overrides = roleConfigOverrides[agentType] {
+            if let roleModel = overrides.model {
+                guard let model = availableModels.first(where: { $0.model == roleModel }) else {
+                    throw Self.roleUnavailableError()
+                }
+                selectedModel = model
+                roleResolvedModel = roleModel == currentModel ? nil : roleModel
+            }
+            if let roleReasoningEffort = overrides.reasoningEffort {
+                resolvedReasoningEffort = roleReasoningEffort
+            }
+            roleServiceTier = overrides.serviceTier
+            try Self.validateReasoningEffort(resolvedReasoningEffort, model: selectedModel)
+        }
+
         let resolvedServiceTier = try resolveServiceTier(
             requestedServiceTier: request.serviceTier,
+            roleServiceTier: roleServiceTier,
             model: selectedModel
         )
         return LiveSpawnAgentResolvedOverrides(
             agentType: request.agentType,
-            model: resolvedModel,
+            model: roleResolvedModel,
             reasoningEffort: resolvedReasoningEffort,
             serviceTier: resolvedServiceTier
         )
+    }
+
+    static func roleConfigOverrides(
+        configuredAgentRoles: [String: AgentRoleConfig],
+        fileManager: FileManager = .default
+    ) throws -> [String: LiveSpawnAgentRoleConfigOverrides] {
+        var overrides: [String: LiveSpawnAgentRoleConfigOverrides] = [:]
+        for (roleName, roleConfig) in configuredAgentRoles {
+            guard let configFile = roleConfig.configFile else {
+                continue
+            }
+            let configValue: ConfigValue
+            do {
+                configValue = try CodexConfigLayerLoader.readConfig(
+                    from: URL(fileURLWithPath: configFile, isDirectory: false),
+                    fileManager: fileManager
+                ) ?? .table([:])
+            } catch {
+                throw roleUnavailableError()
+            }
+            guard case let .table(table) = configValue else {
+                throw roleUnavailableError()
+            }
+            overrides[roleName] = try roleConfigOverrides(from: table)
+        }
+        return overrides
+    }
+
+    private static func roleConfigOverrides(from table: [String: ConfigValue]) throws -> LiveSpawnAgentRoleConfigOverrides {
+        do {
+            return LiveSpawnAgentRoleConfigOverrides(
+                model: try optionalString(table["model"]),
+                reasoningEffort: try optionalReasoningEffort(table["model_reasoning_effort"]),
+                serviceTier: try optionalString(table["service_tier"])
+            )
+        } catch {
+            throw roleUnavailableError()
+        }
+    }
+
+    private static func optionalString(_ value: ConfigValue?) throws -> String? {
+        guard let value else {
+            return nil
+        }
+        guard case let .string(string) = value else {
+            throw roleUnavailableError()
+        }
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func optionalReasoningEffort(_ value: ConfigValue?) throws -> ReasoningEffort? {
+        guard let rawValue = try optionalString(value) else {
+            return nil
+        }
+        guard let effort = ReasoningEffort(rawValue: rawValue) else {
+            throw roleUnavailableError()
+        }
+        return effort
+    }
+
+    private static func roleUnavailableError() -> AppServerLiveMultiAgentToolError {
+        AppServerLiveMultiAgentToolError(message: "agent type is currently not available")
     }
 
     private static func validateReasoningEffort(
@@ -689,10 +794,11 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
 
     private func resolveServiceTier(
         requestedServiceTier: String?,
+        roleServiceTier: String?,
         model: ModelPreset
     ) throws -> String? {
         guard let candidateServiceTier = requestedServiceTier ?? parentServiceTier else {
-            return nil
+            return roleServiceTier
         }
         if model.serviceTiers.contains(where: { $0.id == candidateServiceTier }) {
             return candidateServiceTier
