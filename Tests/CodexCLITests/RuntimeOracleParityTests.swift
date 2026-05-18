@@ -147,6 +147,78 @@ final class RuntimeOracleParityTests: XCTestCase {
         XCTAssertEqual(normalizedHelp(swift.stdout), normalizedHelp(rust.stdout))
     }
 
+    func testAppServerHelpMatchesRustOracleModuloWhitespace() throws {
+        let oracle = try RuntimeOracle.required()
+
+        let rust = try oracle.run(.rust, arguments: ["app-server", "--help"])
+        let swift = try oracle.run(.swift, arguments: ["app-server", "--help"])
+
+        XCTAssertEqual(rust.exitCode, 0, rust.stderr)
+        XCTAssertEqual(swift.exitCode, 0, swift.stderr)
+
+        XCTAssertEqual(normalizedHelp(swift.stdout), normalizedHelp(rust.stdout))
+    }
+
+    func testRemoteControlHelpMatchesRustOracleModuloWhitespace() throws {
+        let oracle = try RuntimeOracle.required()
+
+        let rust = try oracle.run(.rust, arguments: ["remote-control", "--help"])
+        let swift = try oracle.run(.swift, arguments: ["remote-control", "--help"])
+
+        XCTAssertEqual(rust.exitCode, 0, rust.stderr)
+        XCTAssertEqual(swift.exitCode, 0, swift.stderr)
+
+        XCTAssertEqual(normalizedHelp(swift.stdout), normalizedHelp(rust.stdout))
+    }
+
+    func testFeaturesHelpMatchesRustOracleModuloWhitespace() throws {
+        let oracle = try RuntimeOracle.required()
+
+        let rust = try oracle.run(.rust, arguments: ["features", "--help"])
+        let swift = try oracle.run(.swift, arguments: ["features", "--help"])
+
+        XCTAssertEqual(rust.exitCode, 0, rust.stderr)
+        XCTAssertEqual(swift.exitCode, 0, swift.stderr)
+
+        XCTAssertEqual(normalizedHelp(swift.stdout), normalizedHelp(rust.stdout))
+    }
+
+    func testMcpServerHelpMatchesRustOracleModuloWhitespace() throws {
+        let oracle = try RuntimeOracle.required()
+
+        let rust = try oracle.run(.rust, arguments: ["mcp-server", "--help"])
+        let swift = try oracle.run(.swift, arguments: ["mcp-server", "--help"])
+
+        XCTAssertEqual(rust.exitCode, 0, rust.stderr)
+        XCTAssertEqual(swift.exitCode, 0, swift.stderr)
+
+        XCTAssertEqual(normalizedHelp(swift.stdout), normalizedHelp(rust.stdout))
+    }
+
+    func testAppHelpMatchesRustOracleModuloWhitespace() throws {
+        let oracle = try RuntimeOracle.required()
+
+        let rust = try oracle.run(.rust, arguments: ["app", "--help"])
+        let swift = try oracle.run(.swift, arguments: ["app", "--help"])
+
+        XCTAssertEqual(rust.exitCode, 0, rust.stderr)
+        XCTAssertEqual(swift.exitCode, 0, swift.stderr)
+
+        XCTAssertEqual(normalizedHelp(swift.stdout), normalizedHelp(rust.stdout))
+    }
+
+    func testExecServerHelpMatchesRustOracleModuloWhitespace() throws {
+        let oracle = try RuntimeOracle.required()
+
+        let rust = try oracle.run(.rust, arguments: ["exec-server", "--help"])
+        let swift = try oracle.run(.swift, arguments: ["exec-server", "--help"])
+
+        XCTAssertEqual(rust.exitCode, 0, rust.stderr)
+        XCTAssertEqual(swift.exitCode, 0, swift.stderr)
+
+        XCTAssertEqual(normalizedHelp(swift.stdout), normalizedHelp(rust.stdout))
+    }
+
     func testExecVersionMatchesRustOracleModuloVersionNumber() throws {
         let oracle = try RuntimeOracle.required()
 

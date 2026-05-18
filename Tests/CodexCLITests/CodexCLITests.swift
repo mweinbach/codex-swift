@@ -313,6 +313,79 @@ final class CodexCLITests: XCTestCase {
         let applyHelp = try XCTUnwrap(stdout.first)
         XCTAssertTrue(applyHelp.hasPrefix("Apply the latest diff produced by Codex agent as a `git apply` to your local working tree\n\nUsage: codex apply [OPTIONS] <TASK_ID>"))
         XCTAssertTrue(applyHelp.contains("Arguments:\n  <TASK_ID>"))
+
+        stdout.removeAll()
+        let appServerExitCode = await CodexCLI().runAsync(
+            arguments: ["app-server", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(appServerExitCode, 0)
+        let appServerHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(appServerHelp.hasPrefix("[experimental] Run the app server or related tooling\n\nUsage: codex app-server [OPTIONS] [COMMAND]"))
+        XCTAssertTrue(appServerHelp.contains("  generate-json-schema  [experimental] Generate JSON Schema for the app server protocol"))
+        XCTAssertTrue(appServerHelp.contains("      --ws-max-clock-skew-seconds <SECONDS>"))
+
+        stdout.removeAll()
+        let remoteControlExitCode = await CodexCLI().runAsync(
+            arguments: ["remote-control", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(remoteControlExitCode, 0)
+        let remoteControlHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(remoteControlHelp.hasPrefix("[experimental] Manage the app-server daemon with remote control enabled\n\nUsage: codex remote-control [OPTIONS] [COMMAND]"))
+        XCTAssertTrue(remoteControlHelp.contains("  start  Start the app-server daemon with remote control enabled"))
+
+        stdout.removeAll()
+        let featuresExitCode = await CodexCLI().runAsync(
+            arguments: ["features", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(featuresExitCode, 0)
+        let featuresHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(featuresHelp.hasPrefix("Inspect feature flags\n\nUsage: codex features [OPTIONS] <COMMAND>"))
+        XCTAssertTrue(featuresHelp.contains("  disable  Disable a feature in config.toml"))
+
+        stdout.removeAll()
+        let mcpServerExitCode = await CodexCLI().runAsync(
+            arguments: ["mcp-server", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(mcpServerExitCode, 0)
+        let mcpServerHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(mcpServerHelp.hasPrefix("Start Codex as an MCP server (stdio)\n\nUsage: codex mcp-server [OPTIONS]"))
+        XCTAssertTrue(mcpServerHelp.contains("      --strict-config"))
+
+        stdout.removeAll()
+        let appExitCode = await CodexCLI().runAsync(
+            arguments: ["app", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(appExitCode, 0)
+        let appHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(appHelp.hasPrefix("Launch the Codex desktop app (opens the app installer if missing)\n\nUsage: codex app [OPTIONS] [PATH]"))
+        XCTAssertTrue(appHelp.contains("      --download-url <DOWNLOAD_URL_OVERRIDE>"))
+
+        stdout.removeAll()
+        let execServerExitCode = await CodexCLI().runAsync(
+            arguments: ["exec-server", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(execServerExitCode, 0)
+        let execServerHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(execServerHelp.hasPrefix("[EXPERIMENTAL] Run the standalone exec-server service\n\nUsage: codex exec-server [OPTIONS]"))
+        XCTAssertTrue(execServerHelp.contains("      --use-agent-identity-auth"))
     }
 
     func testCommandVersionTargetsSubcommandLikeRust() async {

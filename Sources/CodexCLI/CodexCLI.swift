@@ -926,6 +926,14 @@ public struct CodexCLI: Sendable {
             return renderMcpHelp()
         case "plugin":
             return renderPluginHelp()
+        case "mcp-server":
+            return renderMcpServerHelp()
+        case "app-server":
+            return renderAppServerHelp()
+        case "remote-control":
+            return renderRemoteControlHelp()
+        case "app":
+            return renderAppHelp()
         case "completion":
             return renderCompletionHelp()
         case "update":
@@ -936,6 +944,10 @@ public struct CodexCLI: Sendable {
             return renderSandboxHelp()
         case "apply":
             return renderApplyHelp()
+        case "exec-server":
+            return renderExecServerHelp()
+        case "features":
+            return renderFeaturesHelp()
         default:
             return renderHelp()
         }
@@ -1496,6 +1508,182 @@ public struct CodexCLI: Sendable {
         """
     }
 
+    private func renderMcpServerHelp() -> String {
+        """
+        Start Codex as an MCP server (stdio)
+
+        Usage: codex mcp-server [OPTIONS]
+
+        Options:
+          -c, --config <key=value>
+                  Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                  Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                  as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                  Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                  shell_environment_policy.inherit=all`
+
+              --strict-config
+                  Error out when config.toml contains fields that are not recognized by this version of
+                  Codex
+
+              --enable <FEATURE>
+                  Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+              --disable <FEATURE>
+                  Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+          -h, --help
+                  Print help (see a summary with '-h')
+        """
+    }
+
+    private func renderAppServerHelp() -> String {
+        """
+        [experimental] Run the app server or related tooling
+
+        Usage: codex app-server [OPTIONS] [COMMAND]
+
+        Commands:
+          daemon                Manage the local app-server daemon
+          proxy                 Proxy stdio bytes to the running app-server control socket
+          generate-ts           [experimental] Generate TypeScript bindings for the app server protocol
+          generate-json-schema  [experimental] Generate JSON Schema for the app server protocol
+          help                  Print this message or the help of the given subcommand(s)
+
+        Options:
+          -c, --config <key=value>
+                  Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                  Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                  as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                  Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                  shell_environment_policy.inherit=all`
+
+              --enable <FEATURE>
+                  Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+              --disable <FEATURE>
+                  Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              --strict-config
+                  Error out when config.toml contains fields that are not recognized by this version of
+                  Codex
+
+              --listen <URL>
+                  Transport endpoint URL. Supported values: `stdio://` (default), `unix://`, `unix://PATH`,
+                  `ws://IP:PORT`, `off`
+
+                  [default: stdio://]
+
+              --analytics-default-enabled
+                  Controls whether analytics are enabled by default.
+
+                  Analytics are disabled by default for app-server. Users have to explicitly opt in via the
+                  `analytics` section in the config.toml file.
+
+                  However, for first-party use cases like the VSCode IDE extension, we default analytics to
+                  be enabled by default by setting this flag. Users can still opt out by setting this in
+                  their config.toml:
+
+                  ```toml [analytics] enabled = false ```
+
+                  See https://developers.openai.com/codex/config-advanced/#metrics for more details.
+
+              --ws-auth <MODE>
+                  Websocket auth mode for non-loopback listeners
+
+                  [possible values: capability-token, signed-bearer-token]
+
+              --ws-token-file <PATH>
+                  Absolute path to the capability-token file
+
+              --ws-token-sha256 <HEX>
+                  Hex-encoded SHA-256 digest of the capability token
+
+              --ws-shared-secret-file <PATH>
+                  Absolute path to the shared secret file for signed JWT bearer tokens
+
+              --ws-issuer <ISSUER>
+                  Expected issuer for signed JWT bearer tokens
+
+              --ws-audience <AUDIENCE>
+                  Expected audience for signed JWT bearer tokens
+
+              --ws-max-clock-skew-seconds <SECONDS>
+                  Maximum clock skew when validating signed JWT bearer tokens
+
+          -h, --help
+                  Print help (see a summary with '-h')
+        """
+    }
+
+    private func renderRemoteControlHelp() -> String {
+        """
+        [experimental] Manage the app-server daemon with remote control enabled
+
+        Usage: codex remote-control [OPTIONS] [COMMAND]
+
+        Commands:
+          start  Start the app-server daemon with remote control enabled
+          stop   Stop the app-server daemon
+          help   Print this message or the help of the given subcommand(s)
+
+        Options:
+          -c, --config <key=value>
+                  Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                  Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                  as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                  Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                  shell_environment_policy.inherit=all`
+
+              --enable <FEATURE>
+                  Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+              --disable <FEATURE>
+                  Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+          -h, --help
+                  Print help (see a summary with '-h')
+        """
+    }
+
+    private func renderAppHelp() -> String {
+        """
+        Launch the Codex desktop app (opens the app installer if missing)
+
+        Usage: codex app [OPTIONS] [PATH]
+
+        Arguments:
+          [PATH]
+                  Workspace path to open in Codex Desktop
+
+                  [default: .]
+
+        Options:
+          -c, --config <key=value>
+                  Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                  Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                  as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                  Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                  shell_environment_policy.inherit=all`
+
+              --download-url <DOWNLOAD_URL_OVERRIDE>
+                  Override the app installer download URL (advanced)
+
+              --enable <FEATURE>
+                  Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+              --disable <FEATURE>
+                  Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+          -h, --help
+                  Print help (see a summary with '-h')
+        """
+    }
+
     private func renderUpdateHelp() -> String {
         """
         Update Codex to the latest version
@@ -1604,6 +1792,79 @@ public struct CodexCLI: Sendable {
         Arguments:
           <TASK_ID>
 
+
+        Options:
+          -c, --config <key=value>
+                  Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                  Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                  as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                  Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                  shell_environment_policy.inherit=all`
+
+              --enable <FEATURE>
+                  Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+              --disable <FEATURE>
+                  Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+          -h, --help
+                  Print help (see a summary with '-h')
+        """
+    }
+
+    private func renderExecServerHelp() -> String {
+        """
+        [EXPERIMENTAL] Run the standalone exec-server service
+
+        Usage: codex exec-server [OPTIONS]
+
+        Options:
+          -c, --config <key=value>
+                  Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                  Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                  as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                  Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                  shell_environment_policy.inherit=all`
+
+              --listen <URL>
+                  Transport endpoint URL. Supported values: `ws://IP:PORT` (default), `stdio`, `stdio://`
+
+              --enable <FEATURE>
+                  Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+              --remote <URL>
+                  Register this exec-server as a remote executor using the given base URL
+
+              --disable <FEATURE>
+                  Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              --executor-id <ID>
+                  Executor id to attach to when registering remotely
+
+              --name <NAME>
+                  Human-readable executor name
+
+              --use-agent-identity-auth
+                  Use Agent Identity auth from CODEX_ACCESS_TOKEN for remote registration
+
+          -h, --help
+                  Print help (see a summary with '-h')
+        """
+    }
+
+    private func renderFeaturesHelp() -> String {
+        """
+        Inspect feature flags
+
+        Usage: codex features [OPTIONS] <COMMAND>
+
+        Commands:
+          list     List known features with their stage and effective state
+          enable   Enable a feature in config.toml
+          disable  Disable a feature in config.toml
+          help     Print this message or the help of the given subcommand(s)
 
         Options:
           -c, --config <key=value>

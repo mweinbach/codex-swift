@@ -12,6 +12,13 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: extended CLI help runtime-oracle parity across the remaining
+  service/control command surfaces. Swift now renders Rust-shaped
+  `codex app-server --help`, `codex remote-control --help`,
+  `codex features --help`, `codex mcp-server --help`, `codex app --help`, and
+  `codex exec-server --help` output instead of falling back to root help,
+  including command-specific transport, websocket-auth, desktop-app, feature,
+  and remote-executor options.
 - 2026-05-18: extended the Rust runtime oracle harness around another CLI
   help-dispatch batch. Swift now renders Rust-shaped `codex mcp --help`,
   `codex plugin --help`, `codex update --help`, `codex doctor --help`,
