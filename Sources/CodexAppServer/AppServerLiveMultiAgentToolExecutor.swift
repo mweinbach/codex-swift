@@ -117,6 +117,11 @@ struct AppServerLiveMultiAgentToolExecutor {
             return Self.output(callID: callID, content: String(describing: error), success: false)
         }
 
+        let prompt = args.message
+        guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return Self.output(callID: callID, content: "Empty message can't be sent to an agent", success: false)
+        }
+
         let currentAgentPath = currentSessionSource.agentPath ?? .root
         let childAgentPath: AgentPath
         do {
@@ -125,7 +130,6 @@ struct AppServerLiveMultiAgentToolExecutor {
             return Self.output(callID: callID, content: String(describing: error), success: false)
         }
 
-        let prompt = args.message
         let requestedModel = args.model ?? ""
         let requestedReasoningEffort = args.reasoningEffort ?? .medium
         var runtimeEvents: [EventMessage] = [

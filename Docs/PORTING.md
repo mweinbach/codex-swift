@@ -910,6 +910,10 @@ Recent upstream audit checkpoint:
   spawn slots are released when a spawned thread is explicitly shut down or
   closed, while completed-but-not-closed agents remain counted like Rust's
   active registry entries.
+- 2026-05-18: Swift live app-server MultiAgentV2 `spawn_agent` now rejects
+  whitespace-only prompts with Rust's `Empty message can't be sent to an agent`
+  tool output before emitting spawn begin/end events or attempting child thread
+  creation.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through

@@ -12385,6 +12385,39 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(updatedRequests.last?.agentType, nil)
     }
 
+    func testLiveSpawnAgentRejectsEmptyMessageBeforeSpawnLikeRust() async throws {
+        let rootThreadID = ThreadId()
+        let executor = AppServerLiveMultiAgentToolExecutor(
+            currentThreadID: rootThreadID,
+            currentSessionSource: .vscode,
+            stateStore: nil,
+            waitTimeouts: MultiAgentV2WaitTimeouts(config: MultiAgentV2Config()),
+            spawnAgent: { _ in
+                XCTFail("empty spawn_agent message should not attempt a child spawn")
+                throw AppServerLiveMultiAgentToolError(message: "unexpected spawn")
+            },
+            isTurnRunning: { _ in false },
+            agentStatus: { _ in .completed(nil) },
+            agentLastTaskMessage: { _ in nil },
+            hasPendingMailboxItems: { _ in false },
+            waitForMailboxChange: { _, _ in false },
+            queueMailboxCommunications: { _, _ in },
+            recordAgentLastTaskMessage: { _, _ in },
+            submitPendingWorkTurnIfIdle: { _ in false },
+            closeAgentThreads: { _ in }
+        )
+
+        let spawn = await executor.execute(.functionCall(
+            name: "spawn_agent",
+            arguments: #"{"message":"   ","task_name":"worker","fork_turns":"none"}"#,
+            callID: "call-empty-spawn"
+        ))
+        let payload = try Self.functionOutputPayload(spawn, callID: "call-empty-spawn")
+        XCTAssertEqual(payload.content, "Empty message can't be sent to an agent")
+        XCTAssertEqual(payload.success, false)
+        XCTAssertEqual(spawn?.runtimeEvents, [])
+    }
+
     func testLiveSpawnAgentValidatesRustRoleModelReasoningServiceTierAndDeveloperOverrides() async throws {
         let priorityTier = ModelServiceTier(
             id: ServiceTier.fast.requestValue,
