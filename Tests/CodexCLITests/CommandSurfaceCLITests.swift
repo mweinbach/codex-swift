@@ -1674,15 +1674,34 @@ final class CommandSurfaceCLITests: XCTestCase {
         let cases: [([String], String)] = [
             (
                 ["app-server", "generate-ts"],
-                "codex-swift: missing required option for command 'app-server generate-ts': --out <DIR>"
+                """
+                error: the following required arguments were not provided:
+                  --out <DIR>
+
+                Usage: codex app-server generate-ts --out <DIR>
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["app-server", "generate-json-schema", "--prettier", "prettier", "--out", "/tmp/schema"],
-                "codex-swift: unsupported option for command 'app-server generate-json-schema': --prettier"
+                """
+                error: unexpected argument '--prettier' found
+
+                Usage: codex app-server generate-json-schema [OPTIONS] --out <DIR>
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["app-server", "proxy", "extra"],
-                "codex-swift: unexpected argument for command 'app-server proxy': extra"
+                """
+                error: unexpected argument 'extra' found
+
+                Usage: codex app-server proxy [OPTIONS]
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["app-server", "--listen"],
@@ -1726,27 +1745,64 @@ final class CommandSurfaceCLITests: XCTestCase {
             ),
             (
                 ["app-server", "proxy", "--sock", "/tmp/a.sock", "--sock=/tmp/b.sock"],
-                "codex-swift: duplicate option for command 'app-server proxy': --sock"
+                """
+                error: the argument '--sock <SOCKET_PATH>' cannot be used multiple times
+
+                Usage: codex app-server proxy [OPTIONS]
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["app-server", "generate-ts", "--out", "/tmp/ts-a", "-o/tmp/ts-b"],
-                "codex-swift: duplicate option for command 'app-server generate-ts': --out"
+                """
+                error: the argument '--out <DIR>' cannot be used multiple times
+
+                Usage: codex app-server generate-ts [OPTIONS] --out <DIR>
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["app-server", "generate-ts", "--out", "/tmp/ts", "--prettier", "prettier-a", "-pprettier-b"],
-                "codex-swift: duplicate option for command 'app-server generate-ts': --prettier"
+                """
+                error: the argument '--prettier <PRETTIER_BIN>' cannot be used multiple times
+
+                Usage: codex app-server generate-ts [OPTIONS] --out <DIR>
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["app-server", "generate-json-schema", "-o", "/tmp/schema-a", "--out=/tmp/schema-b"],
-                "codex-swift: duplicate option for command 'app-server generate-json-schema': --out"
+                """
+                error: the argument '--out <DIR>' cannot be used multiple times
+
+                Usage: codex app-server generate-json-schema [OPTIONS] --out <DIR>
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["app-server", "generate-internal-json-schema", "-o/tmp/schema-a", "--out", "/tmp/schema-b"],
-                "codex-swift: duplicate option for command 'app-server generate-internal-json-schema': --out"
+                """
+                error: the argument '--out <DIR>' cannot be used multiple times
+
+                Usage: codex app-server generate-internal-json-schema [OPTIONS] --out <DIR>
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["app-server", "generate-internal-json-schema"],
-                "codex-swift: missing required option for command 'app-server generate-internal-json-schema': --out <DIR>"
+                """
+                error: the following required arguments were not provided:
+                  --out <DIR>
+
+                Usage: codex app-server generate-internal-json-schema --out <DIR>
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["app-server", "daemon", "bogus"],
@@ -1820,7 +1876,13 @@ final class CommandSurfaceCLITests: XCTestCase {
             ),
             (
                 ["app-server", "bogus"],
-                "codex-swift: unsupported app-server subcommand: bogus"
+                """
+                error: unrecognized subcommand 'bogus'
+
+                Usage: codex app-server [OPTIONS] [COMMAND]
+
+                For more information, try '--help'.
+                """
             )
         ]
 

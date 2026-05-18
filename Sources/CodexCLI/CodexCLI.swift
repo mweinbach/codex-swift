@@ -7041,9 +7041,9 @@ public struct CodexCLI: Sendable {
             }
         default:
             if subcommand.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'app-server': \(subcommand)", 64)
+                return clapUnexpectedArgument(subcommand, usage: "codex app-server [OPTIONS] [COMMAND]")
             }
-            return .failure("codex-swift: unsupported app-server subcommand: \(subcommand)", 64)
+            return clapUnrecognizedSubcommand(subcommand, usage: "codex app-server [OPTIONS] [COMMAND]")
         }
 
         return appServerRequest(action: action, options: parsedOptions, rootArguments: rootArguments)
@@ -7987,11 +7987,14 @@ public struct CodexCLI: Sendable {
             let argument = arguments[index]
             if argument == "--sock" {
                 guard !seenSocketPath else {
-                    return .failure("codex-swift: duplicate option for command 'app-server proxy': --sock", 64)
+                    return clapDuplicateArgument(
+                        "--sock <SOCKET_PATH>",
+                        usage: "codex app-server proxy [OPTIONS]"
+                    )
                 }
                 seenSocketPath = true
                 guard index + 1 < arguments.count else {
-                    return .failure("codex-swift: missing value for \(argument)", 64)
+                    return clapMissingValue(option: "--sock", valueDisplay: "<SOCKET_PATH>")
                 }
                 socketPath = normalizeAppServerProxySocketPath(arguments[index + 1])
                 index += 2
@@ -7999,17 +8002,17 @@ public struct CodexCLI: Sendable {
             }
             if argument.hasPrefix("--sock=") {
                 guard !seenSocketPath else {
-                    return .failure("codex-swift: duplicate option for command 'app-server proxy': --sock", 64)
+                    return clapDuplicateArgument(
+                        "--sock <SOCKET_PATH>",
+                        usage: "codex app-server proxy [OPTIONS]"
+                    )
                 }
                 seenSocketPath = true
                 socketPath = normalizeAppServerProxySocketPath(String(argument.dropFirst("--sock=".count)))
                 index += 1
                 continue
             }
-            if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'app-server proxy': \(argument)", 64)
-            }
-            return .failure("codex-swift: unexpected argument for command 'app-server proxy': \(argument)", 64)
+            return clapUnexpectedArgument(argument, usage: "codex app-server proxy [OPTIONS]")
         }
 
         return .success(socketPath)
@@ -8040,11 +8043,14 @@ public struct CodexCLI: Sendable {
             let argument = arguments[index]
             if argument == "--out" || argument == "-o" {
                 guard !seenOutDir else {
-                    return .failure("codex-swift: duplicate option for command 'app-server generate-ts': --out", 64)
+                    return clapDuplicateArgument(
+                        "--out <DIR>",
+                        usage: "codex app-server generate-ts [OPTIONS] --out <DIR>"
+                    )
                 }
                 seenOutDir = true
                 guard index + 1 < arguments.count else {
-                    return .failure("codex-swift: missing value for \(argument)", 64)
+                    return clapMissingValue(option: argument, valueDisplay: "<DIR>")
                 }
                 outDir = arguments[index + 1]
                 index += 2
@@ -8052,7 +8058,10 @@ public struct CodexCLI: Sendable {
             }
             if argument.hasPrefix("--out=") {
                 guard !seenOutDir else {
-                    return .failure("codex-swift: duplicate option for command 'app-server generate-ts': --out", 64)
+                    return clapDuplicateArgument(
+                        "--out <DIR>",
+                        usage: "codex app-server generate-ts [OPTIONS] --out <DIR>"
+                    )
                 }
                 seenOutDir = true
                 outDir = String(argument.dropFirst("--out=".count))
@@ -8061,7 +8070,10 @@ public struct CodexCLI: Sendable {
             }
             if argument.hasPrefix("-o"), argument.count > 2, !argument.hasPrefix("--") {
                 guard !seenOutDir else {
-                    return .failure("codex-swift: duplicate option for command 'app-server generate-ts': --out", 64)
+                    return clapDuplicateArgument(
+                        "--out <DIR>",
+                        usage: "codex app-server generate-ts [OPTIONS] --out <DIR>"
+                    )
                 }
                 seenOutDir = true
                 outDir = String(argument.dropFirst(2))
@@ -8070,11 +8082,14 @@ public struct CodexCLI: Sendable {
             }
             if argument == "--prettier" || argument == "-p" {
                 guard !seenPrettier else {
-                    return .failure("codex-swift: duplicate option for command 'app-server generate-ts': --prettier", 64)
+                    return clapDuplicateArgument(
+                        "--prettier <PRETTIER_BIN>",
+                        usage: "codex app-server generate-ts [OPTIONS] --out <DIR>"
+                    )
                 }
                 seenPrettier = true
                 guard index + 1 < arguments.count else {
-                    return .failure("codex-swift: missing value for \(argument)", 64)
+                    return clapMissingValue(option: argument, valueDisplay: "<PRETTIER_BIN>")
                 }
                 prettier = arguments[index + 1]
                 index += 2
@@ -8082,7 +8097,10 @@ public struct CodexCLI: Sendable {
             }
             if argument.hasPrefix("--prettier=") {
                 guard !seenPrettier else {
-                    return .failure("codex-swift: duplicate option for command 'app-server generate-ts': --prettier", 64)
+                    return clapDuplicateArgument(
+                        "--prettier <PRETTIER_BIN>",
+                        usage: "codex app-server generate-ts [OPTIONS] --out <DIR>"
+                    )
                 }
                 seenPrettier = true
                 prettier = String(argument.dropFirst("--prettier=".count))
@@ -8091,7 +8109,10 @@ public struct CodexCLI: Sendable {
             }
             if argument.hasPrefix("-p"), argument.count > 2, !argument.hasPrefix("--") {
                 guard !seenPrettier else {
-                    return .failure("codex-swift: duplicate option for command 'app-server generate-ts': --prettier", 64)
+                    return clapDuplicateArgument(
+                        "--prettier <PRETTIER_BIN>",
+                        usage: "codex app-server generate-ts [OPTIONS] --out <DIR>"
+                    )
                 }
                 seenPrettier = true
                 prettier = String(argument.dropFirst(2))
@@ -8103,14 +8124,11 @@ public struct CodexCLI: Sendable {
                 index += 1
                 continue
             }
-            if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'app-server generate-ts': \(argument)", 64)
-            }
-            return .failure("codex-swift: unexpected argument for command 'app-server generate-ts': \(argument)", 64)
+            return clapUnexpectedArgument(argument, usage: "codex app-server generate-ts [OPTIONS] --out <DIR>")
         }
 
         guard let outDir else {
-            return .failure("codex-swift: missing required option for command 'app-server generate-ts': --out <DIR>", 64)
+            return clapMissingRequired(["--out <DIR>"], usage: "codex app-server generate-ts --out <DIR>")
         }
         return .success((outDir: outDir, prettier: prettier, experimental: experimental))
     }
@@ -8125,11 +8143,14 @@ public struct CodexCLI: Sendable {
             let argument = arguments[index]
             if argument == "--out" || argument == "-o" {
                 guard !seenOutDir else {
-                    return .failure("codex-swift: duplicate option for command 'app-server generate-json-schema': --out", 64)
+                    return clapDuplicateArgument(
+                        "--out <DIR>",
+                        usage: "codex app-server generate-json-schema [OPTIONS] --out <DIR>"
+                    )
                 }
                 seenOutDir = true
                 guard index + 1 < arguments.count else {
-                    return .failure("codex-swift: missing value for \(argument)", 64)
+                    return clapMissingValue(option: argument, valueDisplay: "<DIR>")
                 }
                 outDir = arguments[index + 1]
                 index += 2
@@ -8137,7 +8158,10 @@ public struct CodexCLI: Sendable {
             }
             if argument.hasPrefix("--out=") {
                 guard !seenOutDir else {
-                    return .failure("codex-swift: duplicate option for command 'app-server generate-json-schema': --out", 64)
+                    return clapDuplicateArgument(
+                        "--out <DIR>",
+                        usage: "codex app-server generate-json-schema [OPTIONS] --out <DIR>"
+                    )
                 }
                 seenOutDir = true
                 outDir = String(argument.dropFirst("--out=".count))
@@ -8146,7 +8170,10 @@ public struct CodexCLI: Sendable {
             }
             if argument.hasPrefix("-o"), argument.count > 2, !argument.hasPrefix("--") {
                 guard !seenOutDir else {
-                    return .failure("codex-swift: duplicate option for command 'app-server generate-json-schema': --out", 64)
+                    return clapDuplicateArgument(
+                        "--out <DIR>",
+                        usage: "codex app-server generate-json-schema [OPTIONS] --out <DIR>"
+                    )
                 }
                 seenOutDir = true
                 outDir = String(argument.dropFirst(2))
@@ -8158,14 +8185,14 @@ public struct CodexCLI: Sendable {
                 index += 1
                 continue
             }
-            if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'app-server generate-json-schema': \(argument)", 64)
-            }
-            return .failure("codex-swift: unexpected argument for command 'app-server generate-json-schema': \(argument)", 64)
+            return clapUnexpectedArgument(
+                argument,
+                usage: "codex app-server generate-json-schema [OPTIONS] --out <DIR>"
+            )
         }
 
         guard let outDir else {
-            return .failure("codex-swift: missing required option for command 'app-server generate-json-schema': --out <DIR>", 64)
+            return clapMissingRequired(["--out <DIR>"], usage: "codex app-server generate-json-schema --out <DIR>")
         }
         return .success((outDir: outDir, experimental: experimental))
     }
@@ -8179,11 +8206,14 @@ public struct CodexCLI: Sendable {
             let argument = arguments[index]
             if argument == "--out" || argument == "-o" {
                 guard !seenOutDir else {
-                    return .failure("codex-swift: duplicate option for command 'app-server generate-internal-json-schema': --out", 64)
+                    return clapDuplicateArgument(
+                        "--out <DIR>",
+                        usage: "codex app-server generate-internal-json-schema [OPTIONS] --out <DIR>"
+                    )
                 }
                 seenOutDir = true
                 guard index + 1 < arguments.count else {
-                    return .failure("codex-swift: missing value for \(argument)", 64)
+                    return clapMissingValue(option: argument, valueDisplay: "<DIR>")
                 }
                 outDir = arguments[index + 1]
                 index += 2
@@ -8191,7 +8221,10 @@ public struct CodexCLI: Sendable {
             }
             if argument.hasPrefix("--out=") {
                 guard !seenOutDir else {
-                    return .failure("codex-swift: duplicate option for command 'app-server generate-internal-json-schema': --out", 64)
+                    return clapDuplicateArgument(
+                        "--out <DIR>",
+                        usage: "codex app-server generate-internal-json-schema [OPTIONS] --out <DIR>"
+                    )
                 }
                 seenOutDir = true
                 outDir = String(argument.dropFirst("--out=".count))
@@ -8200,21 +8233,27 @@ public struct CodexCLI: Sendable {
             }
             if argument.hasPrefix("-o"), argument.count > 2, !argument.hasPrefix("--") {
                 guard !seenOutDir else {
-                    return .failure("codex-swift: duplicate option for command 'app-server generate-internal-json-schema': --out", 64)
+                    return clapDuplicateArgument(
+                        "--out <DIR>",
+                        usage: "codex app-server generate-internal-json-schema [OPTIONS] --out <DIR>"
+                    )
                 }
                 seenOutDir = true
                 outDir = String(argument.dropFirst(2))
                 index += 1
                 continue
             }
-            if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'app-server generate-internal-json-schema': \(argument)", 64)
-            }
-            return .failure("codex-swift: unexpected argument for command 'app-server generate-internal-json-schema': \(argument)", 64)
+            return clapUnexpectedArgument(
+                argument,
+                usage: "codex app-server generate-internal-json-schema [OPTIONS] --out <DIR>"
+            )
         }
 
         guard let outDir else {
-            return .failure("codex-swift: missing required option for command 'app-server generate-internal-json-schema': --out <DIR>", 64)
+            return clapMissingRequired(
+                ["--out <DIR>"],
+                usage: "codex app-server generate-internal-json-schema --out <DIR>"
+            )
         }
         return .success(outDir)
     }
@@ -8752,6 +8791,22 @@ public struct CodexCLI: Sendable {
             error: the argument '\(argument)' cannot be used multiple times
 
             Usage: \(usage)
+
+            For more information, try '--help'.
+            """,
+            2
+        )
+    }
+
+    private func clapInvalidValue<Success>(
+        _ value: String,
+        option: String,
+        valueDisplay: String,
+        reason: String
+    ) -> ParseResult<Success> {
+        .failure(
+            """
+            error: invalid value '\(value)' for '\(option) \(valueDisplay)': \(reason)
 
             For more information, try '--help'.
             """,
@@ -9604,7 +9659,7 @@ public struct CodexCLI: Sendable {
         while let argument = iterator.next() {
             if argument == "--port" {
                 guard let value = iterator.next() else {
-                    return .failure("codex-swift: missing value for --port", 64)
+                    return clapMissingValue(option: "--port", valueDisplay: "<PORT>")
                 }
                 switch parseProxyPort(value) {
                 case let .success(parsed):
@@ -9626,7 +9681,7 @@ public struct CodexCLI: Sendable {
             }
             if argument == "--server-info" {
                 guard let value = iterator.next() else {
-                    return .failure("codex-swift: missing value for --server-info", 64)
+                    return clapMissingValue(option: "--server-info", valueDisplay: "<FILE>")
                 }
                 serverInfoPath = value
                 continue
@@ -9641,7 +9696,7 @@ public struct CodexCLI: Sendable {
             }
             if argument == "--upstream-url" {
                 guard let value = iterator.next() else {
-                    return .failure("codex-swift: missing value for --upstream-url", 64)
+                    return clapMissingValue(option: "--upstream-url", valueDisplay: "<UPSTREAM_URL>")
                 }
                 upstreamURL = value
                 continue
@@ -9652,7 +9707,7 @@ public struct CodexCLI: Sendable {
             }
             if argument == "--dump-dir" {
                 guard let value = iterator.next() else {
-                    return .failure("codex-swift: missing value for --dump-dir", 64)
+                    return clapMissingValue(option: "--dump-dir", valueDisplay: "<DIR>")
                 }
                 dumpDir = value
                 continue
@@ -9661,10 +9716,7 @@ public struct CodexCLI: Sendable {
                 dumpDir = String(argument.dropFirst("--dump-dir=".count))
                 continue
             }
-            if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'responses-api-proxy': \(argument)", 64)
-            }
-            return .failure("codex-swift: unexpected argument for command 'responses-api-proxy': \(argument)", 64)
+            return clapUnexpectedArgument(argument, usage: "codex responses-api-proxy [OPTIONS]")
         }
 
         return .success(ResponsesAPIProxyCommandRequest(
@@ -9678,7 +9730,10 @@ public struct CodexCLI: Sendable {
 
     private func parseProxyPort(_ value: String) -> ParseResult<UInt16> {
         guard let parsed = UInt16(value) else {
-            return .failure("codex-swift: invalid value for --port: \(value)", 64)
+            let reason = (UInt(value) ?? 0) > UInt(UInt16.max)
+                ? "\(value) is not in 0..=65535"
+                : "invalid digit found in string"
+            return clapInvalidValue(value, option: "--port", valueDisplay: "<PORT>", reason: reason)
         }
         return .success(parsed)
     }

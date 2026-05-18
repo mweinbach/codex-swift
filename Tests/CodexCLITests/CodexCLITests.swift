@@ -2073,19 +2073,39 @@ final class CodexCLITests: XCTestCase {
         let cases: [([String], String)] = [
             (
                 ["responses-api-proxy", "--port"],
-                "codex-swift: missing value for --port"
+                """
+                error: a value is required for '--port <PORT>' but none was supplied
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["responses-api-proxy", "--port", "70000"],
-                "codex-swift: invalid value for --port: 70000"
+                """
+                error: invalid value '70000' for '--port <PORT>': 70000 is not in 0..=65535
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["responses-api-proxy", "--bogus"],
-                "codex-swift: unsupported option for command 'responses-api-proxy': --bogus"
+                """
+                error: unexpected argument '--bogus' found
+
+                Usage: codex responses-api-proxy [OPTIONS]
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["responses-api-proxy", "extra"],
-                "codex-swift: unexpected argument for command 'responses-api-proxy': extra"
+                """
+                error: unexpected argument 'extra' found
+
+                Usage: codex responses-api-proxy [OPTIONS]
+
+                For more information, try '--help'.
+                """
             )
         ]
 
@@ -2101,7 +2121,7 @@ final class CodexCLITests: XCTestCase {
                 }
             )
 
-            XCTAssertEqual(exitCode, 64, "\(arguments)")
+            XCTAssertEqual(exitCode, 2, "\(arguments)")
             XCTAssertEqual(stderr, [expectedMessage], "\(arguments)")
         }
     }
