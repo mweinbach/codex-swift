@@ -836,6 +836,14 @@ Recent upstream audit checkpoint:
   with `timed_out`). `spawn_agent`, `close_agent`, final-status mailbox
   notifications, richer final-status tracking, and full ThreadManager-backed
   `AgentControl` remain pending.
+- 2026-05-18: Swift live app-server MultiAgentV2 `close_agent` now resolves
+  Rust-style targets through thread ids or agent paths, rejects the root thread
+  with Rust's `root is not a spawned agent` response, emits
+  `collab_close_begin`/`collab_close_end`, returns `previous_status`, marks the
+  persisted thread-spawn subtree closed, and cancels the target plus live
+  descendants in runtime state. `spawn_agent`, final-status mailbox
+  notifications, richer final-status tracking, and full ThreadManager-backed
+  `AgentControl` remain pending.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through

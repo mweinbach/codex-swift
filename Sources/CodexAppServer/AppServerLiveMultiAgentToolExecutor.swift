@@ -13,6 +13,7 @@ struct AppServerLiveMultiAgentToolExecutor {
     let queueMailboxCommunications: @Sendable (String, [InterAgentCommunication]) async -> Void
     let recordAgentLastTaskMessage: @Sendable (String, String) async -> Void
     let submitPendingWorkTurnIfIdle: @Sendable (String) async -> Bool
+    let closeAgentThreads: @Sendable ([String]) async -> Void
 
     func execute(_ item: ResponseItem) async -> NonInteractiveExec.FunctionCallExecutionResult? {
         guard case let .functionCall(_, name, _, arguments, callID) = item else {
@@ -37,6 +38,8 @@ struct AppServerLiveMultiAgentToolExecutor {
             return await executeListAgents(arguments: arguments, callID: callID)
         case "wait_agent":
             return await executeWaitAgent(arguments: arguments, callID: callID)
+        case "close_agent":
+            return await executeCloseAgent(arguments: arguments, callID: callID)
         default:
             return nil
         }
@@ -169,6 +172,78 @@ struct AppServerLiveMultiAgentToolExecutor {
             statuses: [:]
         )))
         return Self.jsonOutput(callID: callID, value: result, success: nil, runtimeEvents: runtimeEvents)
+    }
+
+    private func executeCloseAgent(
+        arguments: String,
+        callID: String
+    ) async -> NonInteractiveExec.FunctionCallExecutionResult {
+        let args: CloseAgentToolArguments
+        do {
+            args = try JSONDecoder().decode(CloseAgentToolArguments.self, from: Data(arguments.utf8))
+        } catch {
+            return Self.output(callID: callID, content: "failed to parse close_agent arguments: \(error)", success: false)
+        }
+
+        do {
+            let target = try await resolveAgentTarget(args.target)
+            if target.threadID == currentThreadID || target.agentPath?.isRoot == true {
+                return Self.output(callID: callID, content: "root is not a spawned agent", success: false)
+            }
+            guard target.metadata != nil else {
+                return Self.output(
+                    callID: callID,
+                    content: "live agent thread `\(target.threadID)` not found",
+                    success: false
+                )
+            }
+
+            let previousStatus = await status(for: target.threadID)
+            var runtimeEvents: [EventMessage] = [
+                .collabCloseBegin(CollabCloseBeginEvent(
+                    callID: callID,
+                    startedAtMilliseconds: AppServerLiveMultiAgentToolClock.millisecondsSinceEpoch(),
+                    senderThreadID: currentThreadID,
+                    receiverThreadID: target.threadID
+                ))
+            ]
+            let threadIDsToClose = try await closeThreadIDs(target.threadID)
+            await closeAgentThreads(threadIDsToClose.map(\.description))
+            runtimeEvents.append(.collabCloseEnd(CollabCloseEndEvent(
+                callID: callID,
+                completedAtMilliseconds: AppServerLiveMultiAgentToolClock.millisecondsSinceEpoch(),
+                senderThreadID: currentThreadID,
+                receiverThreadID: target.threadID,
+                receiverAgentNickname: target.metadata?.agentNickname,
+                receiverAgentRole: target.metadata?.agentRole,
+                status: previousStatus
+            )))
+            return Self.jsonOutput(
+                callID: callID,
+                value: CloseAgentToolResult(previousStatus: previousStatus),
+                success: true,
+                runtimeEvents: runtimeEvents
+            )
+        } catch let error as AppServerLiveMultiAgentToolError {
+            return Self.output(callID: callID, content: error.message, success: false)
+        } catch {
+            return Self.output(callID: callID, content: String(describing: error), success: false)
+        }
+    }
+
+    private func closeThreadIDs(_ targetThreadID: ThreadId) async throws -> [ThreadId] {
+        var threadIDs = [targetThreadID]
+        if let stateStore {
+            let descendants = try await stateStore.listThreadSpawnDescendants(
+                rootThreadID: targetThreadID,
+                statusFilter: .open
+            )
+            threadIDs.append(contentsOf: descendants)
+            for threadID in threadIDs {
+                try await stateStore.setThreadSpawnEdgeStatus(childThreadID: threadID, status: .closed)
+            }
+        }
+        return threadIDs
     }
 
     private func executeListAgents(
@@ -341,6 +416,10 @@ private struct WaitAgentToolArguments: Decodable {
     }
 }
 
+private struct CloseAgentToolArguments: Decodable {
+    let target: String
+}
+
 private struct WaitAgentToolResult: Encodable, Equatable {
     let message: String
     let timedOut: Bool
@@ -353,6 +432,14 @@ private struct WaitAgentToolResult: Encodable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case message
         case timedOut = "timed_out"
+    }
+}
+
+private struct CloseAgentToolResult: Encodable, Equatable {
+    let previousStatus: AgentStatus
+
+    private enum CodingKeys: String, CodingKey {
+        case previousStatus = "previous_status"
     }
 }
 

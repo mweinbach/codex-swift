@@ -11996,7 +11996,13 @@ final class CodexAppServerTests: XCTestCase {
         await manager.deferMailboxDeliveryToNextTurn(threadID: threadID)
         await manager.acceptMailboxDeliveryForCurrentTurn(threadID: threadID)
         let reopenedInput = await manager.takePendingInputForCurrentTurn(threadID: threadID)
-        XCTAssertEqual(reopenedInput, [mail.toResponseInputItem()])
+        XCTAssertEqual(reopenedInput.count, 1)
+        guard case let .message(role, content, phase) = reopenedInput[0] else {
+            return XCTFail("expected mailbox response message")
+        }
+        XCTAssertEqual(role, "assistant")
+        XCTAssertEqual(phase, MessagePhase.commentary)
+        XCTAssertEqual(InterAgentCommunication.fromMessageContent(content), mail)
     }
 
     func testLiveMultiAgentMessageToolsQueueMailboxLikeRustAgentControl() async throws {
@@ -12047,6 +12053,9 @@ final class CodexAppServerTests: XCTestCase {
             submitPendingWorkTurnIfIdle: { threadID in
                 await capture.submitPendingWork(threadID: threadID)
                 return true
+            },
+            closeAgentThreads: { threadIDs in
+                await capture.close(threadIDs: threadIDs)
             }
         )
 
@@ -12164,7 +12173,10 @@ final class CodexAppServerTests: XCTestCase {
             recordAgentLastTaskMessage: { threadID, message in
                 await capture.recordLastTaskMessage(threadID: threadID, message: message)
             },
-            submitPendingWorkTurnIfIdle: { _ in true }
+            submitPendingWorkTurnIfIdle: { _ in true },
+            closeAgentThreads: { threadIDs in
+                await capture.close(threadIDs: threadIDs)
+            }
         )
 
         _ = await executor.execute(.functionCall(
@@ -12235,7 +12247,10 @@ final class CodexAppServerTests: XCTestCase {
             },
             queueMailboxCommunications: { _, _ in },
             recordAgentLastTaskMessage: { _, _ in },
-            submitPendingWorkTurnIfIdle: { _ in false }
+            submitPendingWorkTurnIfIdle: { _ in false },
+            closeAgentThreads: { threadIDs in
+                await capture.close(threadIDs: threadIDs)
+            }
         )
 
         let completed = await executor.execute(.functionCall(
@@ -12297,6 +12312,114 @@ final class CodexAppServerTests: XCTestCase {
         let tooLargePayload = try Self.functionOutputPayload(tooLarge, callID: "call-too-large")
         XCTAssertEqual(tooLargePayload.content, "timeout_ms must be at most 10")
         XCTAssertEqual(tooLargePayload.success, false)
+    }
+
+    func testLiveCloseAgentMarksSpawnSubtreeClosedAndReturnsPreviousStatus() async throws {
+        let temp = try TemporaryDirectory()
+        let stateStore = try SQLiteAgentGraphStore(databaseURL: temp.url.appendingPathComponent("state.sqlite3"))
+        let rootThreadID = ThreadId()
+        let workerThreadID = ThreadId()
+        let nestedThreadID = ThreadId()
+        let workerPath = try AgentPath.root.join("worker")
+        let nestedPath = try workerPath.join("nested")
+        for (threadID, path, nickname) in [
+            (workerThreadID, workerPath, "Bernoulli"),
+            (nestedThreadID, nestedPath, "Curie"),
+        ] {
+            try await stateStore.upsertThread(ThreadMetadata(
+                id: threadID,
+                rolloutPath: temp.url.appendingPathComponent("\(path.name).jsonl").path,
+                createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+                updatedAt: Date(timeIntervalSince1970: 1_700_000_001),
+                source: "vscode",
+                agentNickname: nickname,
+                agentRole: "explorer",
+                agentPath: path.description,
+                modelProvider: "openai",
+                cwd: temp.url.path,
+                cliVersion: "0.0.0-test",
+                title: path.name,
+                sandboxPolicy: "danger-full-access",
+                approvalMode: "never",
+                tokensUsed: 0
+            ))
+        }
+        try await stateStore.upsertThreadSpawnEdge(
+            parentThreadID: rootThreadID,
+            childThreadID: workerThreadID,
+            status: .open
+        )
+        try await stateStore.upsertThreadSpawnEdge(
+            parentThreadID: workerThreadID,
+            childThreadID: nestedThreadID,
+            status: .open
+        )
+        let capture = LiveMultiAgentToolCapture(runningThreadIDs: [workerThreadID.description, nestedThreadID.description])
+        let executor = AppServerLiveMultiAgentToolExecutor(
+            currentThreadID: rootThreadID,
+            currentSessionSource: .vscode,
+            stateStore: stateStore,
+            waitTimeouts: MultiAgentV2WaitTimeouts(config: MultiAgentV2Config()),
+            isTurnRunning: { threadID in
+                await capture.isRunning(threadID: threadID)
+            },
+            agentLastTaskMessage: { _ in nil },
+            hasPendingMailboxItems: { _ in false },
+            waitForMailboxChange: { _, _ in false },
+            queueMailboxCommunications: { _, _ in },
+            recordAgentLastTaskMessage: { _, _ in },
+            submitPendingWorkTurnIfIdle: { _ in false },
+            closeAgentThreads: { threadIDs in
+                await capture.close(threadIDs: threadIDs)
+            }
+        )
+
+        let close = await executor.execute(.functionCall(
+            name: "close_agent",
+            arguments: #"{"target":"worker"}"#,
+            callID: "call-close"
+        ))
+        let closePayload = try Self.functionOutputPayload(close, callID: "call-close")
+        XCTAssertEqual(closePayload.success, true)
+        let closeResult = try JSONDecoder().decode(
+            CloseAgentToolResultFixture.self,
+            from: Data(closePayload.content.utf8)
+        )
+        XCTAssertEqual(closeResult.previousStatus, .running)
+        let closedThreadIDs = await capture.closedThreadIDs()
+        XCTAssertEqual(closedThreadIDs, [workerThreadID.description, nestedThreadID.description])
+        let openChildren = try await stateStore.listThreadSpawnChildren(parentThreadID: rootThreadID, statusFilter: .open)
+        XCTAssertEqual(openChildren, [])
+        let closedChildren = try await stateStore.listThreadSpawnChildren(parentThreadID: rootThreadID, statusFilter: .closed)
+        XCTAssertEqual(closedChildren, [workerThreadID])
+        let closedDescendants = try await stateStore.listThreadSpawnDescendants(rootThreadID: workerThreadID, statusFilter: .closed)
+        XCTAssertEqual(closedDescendants, [nestedThreadID])
+
+        let runtimeEvents = try XCTUnwrap(close?.runtimeEvents)
+        XCTAssertEqual(runtimeEvents.count, 2)
+        guard case let .collabCloseBegin(begin) = runtimeEvents[0] else {
+            return XCTFail("expected close begin event")
+        }
+        XCTAssertEqual(begin.senderThreadID, rootThreadID)
+        XCTAssertEqual(begin.receiverThreadID, workerThreadID)
+        XCTAssertEqual(begin.callID, "call-close")
+        guard case let .collabCloseEnd(end) = runtimeEvents[1] else {
+            return XCTFail("expected close end event")
+        }
+        XCTAssertEqual(end.senderThreadID, rootThreadID)
+        XCTAssertEqual(end.receiverThreadID, workerThreadID)
+        XCTAssertEqual(end.receiverAgentNickname, "Bernoulli")
+        XCTAssertEqual(end.receiverAgentRole, "explorer")
+        XCTAssertEqual(end.status, .running)
+
+        let closeRoot = await executor.execute(.functionCall(
+            name: "close_agent",
+            arguments: #"{"target":"\#(rootThreadID.description)"}"#,
+            callID: "call-close-root"
+        ))
+        let closeRootPayload = try Self.functionOutputPayload(closeRoot, callID: "call-close-root")
+        XCTAssertEqual(closeRootPayload.content, "root is not a spawned agent")
+        XCTAssertEqual(closeRootPayload.success, false)
     }
 
     func testLiveRuntimeInterAgentCommunicationOpQueuesAndTriggersPendingWorkLikeRust() async throws {
@@ -37562,6 +37685,7 @@ private actor LiveMultiAgentToolCapture {
     private var runningThreadIDs: Set<String>
     private var lastTaskMessages: [String: String] = [:]
     private var pendingMailboxThreadIDs: Set<String> = []
+    private var closed: [String] = []
 
     init(runningThreadIDs: Set<String> = []) {
         self.runningThreadIDs = runningThreadIDs
@@ -37616,6 +37740,15 @@ private actor LiveMultiAgentToolCapture {
         }
         return pendingMailboxThreadIDs.contains(threadID)
     }
+
+    func close(threadIDs: [String]) {
+        closed.append(contentsOf: threadIDs)
+        runningThreadIDs.subtract(threadIDs)
+    }
+
+    func closedThreadIDs() -> [String] {
+        closed
+    }
 }
 
 private struct ListAgentsToolResultFixture: Decodable {
@@ -37629,6 +37762,14 @@ private struct WaitAgentToolResultFixture: Decodable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case message
         case timedOut = "timed_out"
+    }
+}
+
+private struct CloseAgentToolResultFixture: Decodable, Equatable {
+    let previousStatus: AgentStatus
+
+    private enum CodingKeys: String, CodingKey {
+        case previousStatus = "previous_status"
     }
 }
 

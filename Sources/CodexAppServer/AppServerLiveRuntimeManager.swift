@@ -793,6 +793,9 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                             threadID: threadID,
                             prototype: submission
                         )
+                    },
+                    closeAgentThreads: { threadIDs in
+                        await state.cancelThreads(threadIDs: threadIDs)
                     }
                 )
                 if let result = await multiAgentExecutor.execute(item) {
@@ -1837,6 +1840,12 @@ private actor AppServerLiveRuntimeState {
         mailboxDeliveryPhases.removeValue(forKey: threadID)
         finishMailboxWaiters(threadID: threadID, result: true)
         agentLastTaskMessages.removeValue(forKey: threadID)
+    }
+
+    func cancelThreads(threadIDs: [String]) {
+        for threadID in threadIDs {
+            cancelThread(threadID: threadID)
+        }
     }
 
     func cancelAll() {
