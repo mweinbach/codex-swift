@@ -12158,6 +12158,7 @@ final class CodexAppServerTests: XCTestCase {
             tokensUsed: 0
         ))
         let capture = LiveMultiAgentToolCapture()
+        await capture.setStatus(threadID: workerThreadID.description, status: .errored("worker failed"))
         let executor = AppServerLiveMultiAgentToolExecutor(
             currentThreadID: rootThreadID,
             currentSessionSource: .vscode,
@@ -12245,7 +12246,7 @@ final class CodexAppServerTests: XCTestCase {
         }
         XCTAssertEqual(end.receiverAgentNickname, "Bernoulli")
         XCTAssertEqual(end.receiverAgentRole, "explorer")
-        XCTAssertEqual(end.status, .completed(nil))
+        XCTAssertEqual(end.status, .errored("worker failed"))
     }
 
     func testLiveSpawnAgentRoutesRustV2ArgumentsAndEvents() async throws {

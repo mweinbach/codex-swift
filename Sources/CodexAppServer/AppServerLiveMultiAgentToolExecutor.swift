@@ -299,9 +299,7 @@ struct AppServerLiveMultiAgentToolExecutor {
                 _ = await submitPendingWorkTurnIfIdle(target.threadID.description)
             }
 
-            let status: AgentStatus = await isTurnRunning(target.threadID.description)
-                ? .running
-                : .completed(nil)
+            let status = await status(for: target.threadID)
             runtimeEvents.append(.collabAgentInteractionEnd(CollabAgentInteractionEndEvent(
                 callID: callID,
                 completedAtMilliseconds: AppServerLiveMultiAgentToolClock.millisecondsSinceEpoch(),

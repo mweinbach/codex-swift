@@ -860,6 +860,11 @@ Recent upstream audit checkpoint:
   tracked live status, preserving completed-message and not-found shutdown
   states when the runtime has observed them. `spawn_agent` and full
   ThreadManager-backed `AgentControl` remain pending.
+- 2026-05-18: Swift live app-server MultiAgentV2 `send_message` and
+  `followup_task` interaction-end events now mirror Rust's post-delivery
+  `AgentControl::get_status` projection instead of deriving status only from
+  whether a turn is currently running, so errored and completed-message receiver
+  statuses survive in `collab_agent_interaction_end`.
 - 2026-05-18: Swift live app-server runtime now mirrors Rust's terminal
   MultiAgentV2 child-turn notification for loaded thread-spawn subagents:
   completed child turns enqueue the standard `<subagent_notification>` envelope
