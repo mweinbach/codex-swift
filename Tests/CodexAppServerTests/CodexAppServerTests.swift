@@ -12581,10 +12581,13 @@ final class CodexAppServerTests: XCTestCase {
         let workerThreadID = ThreadId()
         let nestedThreadID = ThreadId()
         let siblingThreadID = ThreadId()
+        let closedThreadID = ThreadId()
         let workerPath = try AgentPath.root.join("worker")
         let nestedPath = try workerPath.join("nested")
         let siblingPath = try AgentPath.root.join("sibling")
+        let closedPath = try AgentPath.root.join("closed")
         for (threadID, path, nickname) in [
+            (closedThreadID, closedPath, "Euler"),
             (workerThreadID, workerPath, "Bernoulli"),
             (nestedThreadID, nestedPath, "Curie"),
             (siblingThreadID, siblingPath, "Dirac"),
@@ -12607,6 +12610,11 @@ final class CodexAppServerTests: XCTestCase {
                 tokensUsed: 0
             ))
         }
+        try await stateStore.upsertThreadSpawnEdge(
+            parentThreadID: rootThreadID,
+            childThreadID: closedThreadID,
+            status: .closed
+        )
         let capture = LiveMultiAgentToolCapture(runningThreadIDs: [rootThreadID.description, nestedThreadID.description])
         await capture.setStatus(threadID: workerThreadID.description, status: .completed("done"))
         let executor = AppServerLiveMultiAgentToolExecutor(

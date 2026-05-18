@@ -536,8 +536,14 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
             """
             \(Self.threadSelectColumns)
             FROM threads
+            LEFT JOIN thread_spawn_edges AS incoming_spawn_edge
+              ON incoming_spawn_edge.child_thread_id = threads.id
             WHERE threads.archived = 0
               AND threads.agent_path IS NOT NULL
+              AND (
+                incoming_spawn_edge.status IS NULL
+                OR incoming_spawn_edge.status = 'open'
+              )
             ORDER BY threads.agent_path ASC, threads.id ASC
             """
         let database = handle.database

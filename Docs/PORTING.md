@@ -834,6 +834,11 @@ Recent upstream audit checkpoint:
   `send_message`/`followup_task`. `spawn_agent`, `wait_agent`, `close_agent`,
   richer final-status tracking, and full ThreadManager-backed `AgentControl`
   remain pending.
+- 2026-05-18: Swift live app-server MultiAgentV2 `list_agents` now also mirrors
+  Rust's closed-agent omission: persisted threads with closed incoming
+  thread-spawn edges are excluded from the live agent list, while legacy
+  agent-path metadata without a persisted edge remains visible for tolerant
+  migration.
 - 2026-05-18: Swift live app-server MultiAgentV2 `wait_agent` now mirrors
   Rust's configured timeout bounds, default timeout selection, immediate
   completion when mailbox items are already pending for the current thread,
