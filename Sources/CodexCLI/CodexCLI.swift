@@ -8803,6 +8803,21 @@ public struct CodexCLI: Sendable {
         )
     }
 
+    private func clapArgumentConflict<Success>(_ argument: String, conflictingArgument: String, usage: String)
+        -> ParseResult<Success>
+    {
+        .failure(
+            """
+            error: the argument '\(argument)' cannot be used with '\(conflictingArgument)'
+
+            Usage: \(usage)
+
+            For more information, try '--help'.
+            """,
+            2
+        )
+    }
+
     private func clapInvalidValue<Success>(
         _ value: String,
         option: String,
@@ -8889,9 +8904,6 @@ public struct CodexCLI: Sendable {
                 json = true
                 continue
             }
-            if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'mcp list': \(argument)", 64)
-            }
             return clapUnexpectedArgument(argument, usage: "codex mcp list [OPTIONS]")
         }
         return .success(.list(json: json))
@@ -8906,10 +8918,10 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'mcp get': \(argument)", 64)
+                return clapUnexpectedArgument(argument, usage: "codex mcp get [OPTIONS] <NAME>", asValueTip: true)
             }
             if name != nil {
-                return .failure("codex-swift: unexpected argument for command 'mcp get': \(argument)", 64)
+                return clapUnexpectedArgument(argument, usage: "codex mcp get [OPTIONS] <NAME>")
             }
             name = argument
         }
@@ -8920,10 +8932,25 @@ public struct CodexCLI: Sendable {
     }
 
     private func parseMcpAdd(_ arguments: [String]) -> ParseResult<McpCommandAction> {
-        guard let name = arguments.first, !name.hasPrefix("-") else {
+        guard let name = arguments.first else {
             return clapMissingRequired(
                 ["<COMMAND|--url <URL>>", "<NAME>"],
                 usage: "codex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)"
+            )
+        }
+        if name.hasPrefix("-") {
+            if name == "--url" || name.hasPrefix("--url=") || name == "--bearer-token-env-var"
+                || name.hasPrefix("--bearer-token-env-var=")
+            {
+                return clapMissingRequired(
+                    ["<NAME>"],
+                    usage: "codex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)"
+                )
+            }
+            return clapUnexpectedArgument(
+                name,
+                usage: "codex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)",
+                asValueTip: true
             )
         }
 
@@ -8964,7 +8991,10 @@ public struct CodexCLI: Sendable {
             }
             if argument == "--url" {
                 guard url == nil else {
-                    return .failure("codex-swift: duplicate option for command 'mcp add': --url", 64)
+                    return clapDuplicateArgument(
+                        "--url <URL>",
+                        usage: "codex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)"
+                    )
                 }
                 guard index + 1 < arguments.count else {
                     return clapMissingValue(option: "--url", valueDisplay: "<URL>")
@@ -8975,7 +9005,10 @@ public struct CodexCLI: Sendable {
             }
             if argument.hasPrefix("--url=") {
                 guard url == nil else {
-                    return .failure("codex-swift: duplicate option for command 'mcp add': --url", 64)
+                    return clapDuplicateArgument(
+                        "--url <URL>",
+                        usage: "codex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)"
+                    )
                 }
                 url = String(argument.dropFirst("--url=".count))
                 index += 1
@@ -8983,13 +9016,13 @@ public struct CodexCLI: Sendable {
             }
             if argument == "--bearer-token-env-var" {
                 guard bearerTokenEnvVar == nil else {
-                    return .failure(
-                        "codex-swift: duplicate option for command 'mcp add': --bearer-token-env-var",
-                        64
+                    return clapDuplicateArgument(
+                        "--bearer-token-env-var <ENV_VAR>",
+                        usage: "codex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)"
                     )
                 }
                 guard index + 1 < arguments.count else {
-                    return .failure("codex-swift: missing value for --bearer-token-env-var", 64)
+                    return clapMissingValue(option: "--bearer-token-env-var", valueDisplay: "<ENV_VAR>")
                 }
                 bearerTokenEnvVar = arguments[index + 1]
                 index += 2
@@ -8997,9 +9030,9 @@ public struct CodexCLI: Sendable {
             }
             if argument.hasPrefix("--bearer-token-env-var=") {
                 guard bearerTokenEnvVar == nil else {
-                    return .failure(
-                        "codex-swift: duplicate option for command 'mcp add': --bearer-token-env-var",
-                        64
+                    return clapDuplicateArgument(
+                        "--bearer-token-env-var <ENV_VAR>",
+                        usage: "codex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)"
                     )
                 }
                 bearerTokenEnvVar = String(argument.dropFirst("--bearer-token-env-var=".count))
@@ -9007,7 +9040,11 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'mcp add': \(argument)", 64)
+                return clapUnexpectedArgument(
+                    argument,
+                    usage: "codex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)",
+                    asValueTip: true
+                )
             }
 
             command.append(argument)
@@ -9017,7 +9054,11 @@ public struct CodexCLI: Sendable {
 
         if let url {
             guard command.isEmpty else {
-                return .failure("codex-swift: exactly one of command or --url must be provided", 64)
+                return clapArgumentConflict(
+                    "--url <URL>",
+                    conflictingArgument: "[COMMAND]...",
+                    usage: "codex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)"
+                )
             }
             guard env.isEmpty else {
                 return .failure("codex-swift: --env is only valid with stdio MCP servers", 64)
@@ -9029,7 +9070,10 @@ public struct CodexCLI: Sendable {
         }
 
         guard bearerTokenEnvVar == nil else {
-            return .failure("codex-swift: --bearer-token-env-var requires --url", 64)
+            return clapMissingRequired(
+                ["<COMMAND|--url <URL>>"],
+                usage: "codex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)"
+            )
         }
         guard !command.isEmpty else {
             return clapMissingRequired(
@@ -9059,10 +9103,10 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'mcp login': \(argument)", 64)
+                return clapUnexpectedArgument(argument, usage: "codex mcp login [OPTIONS] <NAME>", asValueTip: true)
             }
             if name != nil {
-                return .failure("codex-swift: unexpected argument for command 'mcp login': \(argument)", 64)
+                return clapUnexpectedArgument(argument, usage: "codex mcp login [OPTIONS] <NAME>")
             }
             name = argument
         }
@@ -9077,10 +9121,14 @@ public struct CodexCLI: Sendable {
         var name: String?
         for argument in arguments {
             if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'mcp \(subcommand)': \(argument)", 64)
+                return clapUnexpectedArgument(
+                    argument,
+                    usage: "codex mcp \(subcommand) [OPTIONS] <NAME>",
+                    asValueTip: true
+                )
             }
             if name != nil {
-                return .failure("codex-swift: unexpected argument for command 'mcp \(subcommand)': \(argument)", 64)
+                return clapUnexpectedArgument(argument, usage: "codex mcp \(subcommand) [OPTIONS] <NAME>")
             }
             name = argument
         }
@@ -9092,11 +9140,21 @@ public struct CodexCLI: Sendable {
 
     private func parseMcpEnvPair(_ value: String) -> ParseResult<McpEnvPair> {
         guard let equalsIndex = value.firstIndex(of: "=") else {
-            return .failure("environment entries must be in KEY=VALUE form", 64)
+            return clapInvalidValue(
+                value,
+                option: "--env",
+                valueDisplay: "<KEY=VALUE>",
+                reason: "environment entries must be in KEY=VALUE form"
+            )
         }
         let key = value[..<equalsIndex].trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else {
-            return .failure("environment entries must be in KEY=VALUE form", 64)
+            return clapInvalidValue(
+                value,
+                option: "--env",
+                valueDisplay: "<KEY=VALUE>",
+                reason: "environment entries must be in KEY=VALUE form"
+            )
         }
         let rawValue = value[value.index(after: equalsIndex)...]
         return .success(McpEnvPair(key: String(key), value: String(rawValue)))

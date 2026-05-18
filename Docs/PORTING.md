@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: tightened MCP CLI parse-failure parity for additional `codex mcp`
+  invalid forms. Swift now emits Rust/Clap exit-2 diagnostics for invalid
+  `mcp get/remove/login/logout` trailing or flag-looking arguments and
+  conflicting/duplicate/invalid `mcp add` transport options.
 - 2026-05-18: extended CLI ordinary parse-failure parity for desktop-app and
   utility command forms. Swift now emits Rust/Clap exit-2 diagnostics for
   invalid `codex app`, `codex update`, `codex doctor`, and `codex mcp-server`

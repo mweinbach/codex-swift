@@ -144,18 +144,34 @@ final class McpCLITests: XCTestCase {
             ),
             (
                 ["mcp", "add", "docs", "--url", "https://example.com/mcp", "--", "echo"],
-                64,
-                "codex-swift: exactly one of command or --url must be provided"
+                2,
+                """
+                error: the argument '--url <URL>' cannot be used with '[COMMAND]...'
+
+                Usage: codex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["mcp", "add", "docs", "--env", "BROKEN"],
-                64,
-                "environment entries must be in KEY=VALUE form"
+                2,
+                """
+                error: invalid value 'BROKEN' for '--env <KEY=VALUE>': environment entries must be in KEY=VALUE form
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["mcp", "add", "docs", "--url", "https://one.example/mcp", "--url=https://two.example/mcp"],
-                64,
-                "codex-swift: duplicate option for command 'mcp add': --url"
+                2,
+                """
+                error: the argument '--url <URL>' cannot be used multiple times
+
+                Usage: codex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)
+
+                For more information, try '--help'.
+                """
             ),
             (
                 [
@@ -168,8 +184,50 @@ final class McpCLITests: XCTestCase {
                     "TOKEN_A",
                     "--bearer-token-env-var=TOKEN_B"
                 ],
-                64,
-                "codex-swift: duplicate option for command 'mcp add': --bearer-token-env-var"
+                2,
+                """
+                error: the argument '--bearer-token-env-var <ENV_VAR>' cannot be used multiple times
+
+                Usage: codex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)
+
+                For more information, try '--help'.
+                """
+            ),
+            (
+                ["mcp", "add", "docs", "--bearer-token-env-var", "TOKEN"],
+                2,
+                """
+                error: the following required arguments were not provided:
+                  <COMMAND|--url <URL>>
+
+                Usage: codex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)
+
+                For more information, try '--help'.
+                """
+            ),
+            (
+                ["mcp", "get", "docs", "extra"],
+                2,
+                """
+                error: unexpected argument 'extra' found
+
+                Usage: codex mcp get [OPTIONS] <NAME>
+
+                For more information, try '--help'.
+                """
+            ),
+            (
+                ["mcp", "remove", "--bad"],
+                2,
+                """
+                error: unexpected argument '--bad' found
+
+                  tip: to pass '--bad' as a value, use '-- --bad'
+
+                Usage: codex mcp remove [OPTIONS] <NAME>
+
+                For more information, try '--help'.
+                """
             )
         ]
 
