@@ -884,6 +884,16 @@ public struct CodexCLI: Sendable {
             return .root
         }
 
+        if let helpIndex = arguments.firstIndex(of: "help"),
+           let commandMatch = commandMatch(in: arguments),
+           commandMatch.index < helpIndex {
+            let commandArguments = Array(arguments.dropFirst(commandMatch.index + 1))
+            if let unrecognized = unrecognizedHelpSubcommand(in: commandArguments, under: commandMatch.spec) {
+                return .unrecognizedSubcommand(unrecognized.name, usage: unrecognized.usage)
+            }
+            return .command(commandMatch.spec, arguments: commandArguments)
+        }
+
         guard let helpIndex = arguments.firstIndex(where: { $0 == "--help" || $0 == "-h" }) else {
             return nil
         }
@@ -1065,6 +1075,9 @@ public struct CodexCLI: Sendable {
     public func renderHelp(for spec: CommandSpec, arguments: [String] = []) -> String {
         switch spec.name {
         case "exec":
+            if let childHelp = renderExecChildHelp(arguments: arguments) {
+                return childHelp
+            }
             return renderExecHelp()
         case "review":
             return renderReviewHelp()
@@ -1525,6 +1538,173 @@ public struct CodexCLI: Sendable {
 
           -V, --version
                   Print version
+        """
+    }
+
+    private func renderExecChildHelp(arguments: [String]) -> String? {
+        let positionals = positionalTokens(arguments).filter { $0 != "help" }
+        guard let child = positionals.first else {
+            return nil
+        }
+
+        switch child {
+        case "resume":
+            return renderExecResumeHelp()
+        case "review":
+            return renderExecReviewHelp()
+        default:
+            return nil
+        }
+    }
+
+    private func renderExecResumeHelp() -> String {
+        """
+        Resume a previous session by id or pick the most recent with --last
+
+        Usage: codex exec resume [OPTIONS] [SESSION_ID] [PROMPT]
+
+        Arguments:
+          [SESSION_ID]
+                  Conversation/session id (UUID) or thread name. UUIDs take precedence if it parses. If
+                  omitted, use --last to pick the most recent recorded session
+
+          [PROMPT]
+                  Prompt to send after resuming the session. If `-` is used, read from stdin
+
+        Options:
+          -c, --config <key=value>
+                  Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                  Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                  as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                  Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                  shell_environment_policy.inherit=all`
+
+              --last
+                  Resume the most recent recorded session (newest) without specifying an id
+
+              --all
+                  Show all sessions (disables cwd filtering)
+
+              --enable <FEATURE>
+                  Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+              --disable <FEATURE>
+                  Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+          -i, --image <FILE>
+                  Optional image(s) to attach to the prompt sent after resuming
+
+              --strict-config
+                  Error out when config.toml contains fields that are not recognized by this version of
+                  Codex
+
+          -m, --model <MODEL>
+                  Model the agent should use
+
+              --dangerously-bypass-approvals-and-sandbox
+                  Skip all confirmation prompts and execute commands without sandboxing. EXTREMELY
+                  DANGEROUS. Intended solely for running in environments that are externally sandboxed
+
+              --dangerously-bypass-hook-trust
+                  Run enabled hooks without requiring persisted hook trust for this invocation. DANGEROUS.
+                  Intended only for automation that already vets hook sources
+
+              --skip-git-repo-check
+                  Allow running Codex outside a Git repository
+
+              --ephemeral
+                  Run without persisting session files to disk
+
+              --ignore-user-config
+                  Do not load `$CODEX_HOME/config.toml`; auth still uses `CODEX_HOME`
+
+              --ignore-rules
+                  Do not load user or project execpolicy `.rules` files
+
+              --json
+                  Print events to stdout as JSONL
+
+          -o, --output-last-message <FILE>
+                  Specifies file where the last message from the agent should be written
+
+          -h, --help
+                  Print help (see a summary with '-h')
+        """
+    }
+
+    private func renderExecReviewHelp() -> String {
+        """
+        Run a code review against the current repository
+
+        Usage: codex exec review [OPTIONS] [PROMPT]
+
+        Arguments:
+          [PROMPT]
+                  Custom review instructions. If `-` is used, read from stdin
+
+        Options:
+          -c, --config <key=value>
+                  Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                  Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                  as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                  Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                  shell_environment_policy.inherit=all`
+
+              --uncommitted
+                  Review staged, unstaged, and untracked changes
+
+              --base <BRANCH>
+                  Review changes against the given base branch
+
+              --enable <FEATURE>
+                  Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+              --commit <SHA>
+                  Review the changes introduced by a commit
+
+              --disable <FEATURE>
+                  Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              --strict-config
+                  Error out when config.toml contains fields that are not recognized by this version of
+                  Codex
+
+              --title <TITLE>
+                  Optional commit title to display in the review summary
+
+          -m, --model <MODEL>
+                  Model the agent should use
+
+              --dangerously-bypass-approvals-and-sandbox
+                  Skip all confirmation prompts and execute commands without sandboxing. EXTREMELY
+                  DANGEROUS. Intended solely for running in environments that are externally sandboxed
+
+              --dangerously-bypass-hook-trust
+                  Run enabled hooks without requiring persisted hook trust for this invocation. DANGEROUS.
+                  Intended only for automation that already vets hook sources
+
+              --skip-git-repo-check
+                  Allow running Codex outside a Git repository
+
+              --ephemeral
+                  Run without persisting session files to disk
+
+              --ignore-user-config
+                  Do not load `$CODEX_HOME/config.toml`; auth still uses `CODEX_HOME`
+
+              --ignore-rules
+                  Do not load user or project execpolicy `.rules` files
+
+              --json
+                  Print events to stdout as JSONL
+
+          -o, --output-last-message <FILE>
+                  Specifies file where the last message from the agent should be written
+
+          -h, --help
+                  Print help (see a summary with '-h')
         """
     }
 

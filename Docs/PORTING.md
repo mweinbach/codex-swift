@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: extended CLI help runtime-oracle parity into `exec` nested
+  child help. Swift now renders Rust-shaped `codex exec resume --help` /
+  `codex exec help resume` and `codex exec review --help` /
+  `codex exec help review` surfaces, preserving the non-interactive resume
+  and review option sets instead of falling back to parent `exec` help.
 - 2026-05-18: tightened CLI child-help error parity for strict subcommand
   groups. Swift now rejects unknown child help targets such as
   `codex mcp unknown --help`, `codex plugin marketplace unknown --help`,

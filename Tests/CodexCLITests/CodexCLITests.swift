@@ -207,6 +207,32 @@ final class CodexCLITests: XCTestCase {
         XCTAssertTrue(help.contains("      --output-schema <FILE>"))
 
         stdout.removeAll()
+        let execResumeExitCode = await CodexCLI().runAsync(
+            arguments: ["exec", "resume", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(execResumeExitCode, 0)
+        let execResumeHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(execResumeHelp.hasPrefix("Resume a previous session by id or pick the most recent with --last\n\nUsage: codex exec resume [OPTIONS] [SESSION_ID] [PROMPT]"))
+        XCTAssertTrue(execResumeHelp.contains("      --last"))
+        XCTAssertTrue(execResumeHelp.contains("      --json"))
+
+        stdout.removeAll()
+        let execReviewExitCode = await CodexCLI().runAsync(
+            arguments: ["help", "exec", "review"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(execReviewExitCode, 0)
+        let execReviewHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(execReviewHelp.hasPrefix("Run a code review against the current repository\n\nUsage: codex exec review [OPTIONS] [PROMPT]"))
+        XCTAssertTrue(execReviewHelp.contains("      --uncommitted"))
+        XCTAssertTrue(execReviewHelp.contains("  -m, --model <MODEL>"))
+
+        stdout.removeAll()
         let reviewExitCode = await CodexCLI().runAsync(
             arguments: ["review", "--help"],
             stdout: { stdout.append($0) },
