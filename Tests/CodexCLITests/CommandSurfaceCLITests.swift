@@ -1713,10 +1713,6 @@ final class CommandSurfaceCLITests: XCTestCase {
                 "codex-swift: missing required option for command 'app-server generate-internal-json-schema': --out <DIR>"
             ),
             (
-                ["app-server", "daemon"],
-                "codex-swift: missing app-server daemon subcommand"
-            ),
-            (
                 ["app-server", "daemon", "bogus"],
                 "codex-swift: unsupported app-server daemon subcommand: bogus"
             ),
@@ -1967,16 +1963,8 @@ final class CommandSurfaceCLITests: XCTestCase {
     func testRunAsyncDebugRejectsInvalidFormsBeforeRunner() async {
         let cases: [([String], String)] = [
             (
-                ["debug"],
-                "codex-swift: missing required subcommand for command 'debug': models|app-server|prompt-input|trace-reduce|clear-memories"
-            ),
-            (
                 ["debug", "models", "extra"],
                 "codex-swift: unexpected argument for command 'debug models': extra"
-            ),
-            (
-                ["debug", "app-server"],
-                "codex-swift: missing required subcommand for command 'debug app-server': send-message-v2"
             ),
             (
                 ["debug", "app-server", "send-message-v2"],
@@ -2054,10 +2042,8 @@ final class CommandSurfaceCLITests: XCTestCase {
             "exec",
             "computer-use",
             "review",
-            "plugin",
             "mcp-server",
             "app-server",
-            "debug",
             "resume",
             "doctor"
         ] {

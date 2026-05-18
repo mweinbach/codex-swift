@@ -4164,6 +4164,9 @@ public struct CodexCLI: Sendable {
         case let .unrecognizedSubcommand(subcommand, usage):
             stderr(renderUnrecognizedSubcommandError(subcommand, usage: usage))
             return 2
+        case let .command(spec, commandArguments) where missingSubcommandHelpText(for: spec, arguments: commandArguments) != nil:
+            stderr(missingSubcommandHelpText(for: spec, arguments: commandArguments)!)
+            return 2
         case let .command(spec, commandArguments) where spec.name == "completion":
             do {
                 stdout(try CompletionGenerator.render(arguments: commandArguments))
@@ -4269,6 +4272,9 @@ public struct CodexCLI: Sendable {
             return 0
         case let .unrecognizedSubcommand(subcommand, usage):
             stderr(renderUnrecognizedSubcommandError(subcommand, usage: usage))
+            return 2
+        case let .command(spec, commandArguments) where missingSubcommandHelpText(for: spec, arguments: commandArguments) != nil:
+            stderr(missingSubcommandHelpText(for: spec, arguments: commandArguments)!)
             return 2
         case let .command(spec, commandArguments) where spec.name == "completion":
             do {
@@ -5073,6 +5079,209 @@ public struct CodexCLI: Sendable {
             }
         }
         return nil
+    }
+
+    private func missingSubcommandHelpText(for spec: CommandSpec, arguments: [String]) -> String? {
+        switch (spec.name, arguments) {
+        case ("mcp", []):
+            return """
+            Manage external MCP servers for Codex
+
+            Usage: codex mcp [OPTIONS] <COMMAND>
+
+            Commands:
+              list
+              get
+              add
+              remove
+              login
+              logout
+              help    Print this message or the help of the given subcommand(s)
+
+            Options:
+              -c, --config <key=value>  Override a configuration value that would otherwise be loaded from
+                                        `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override
+                                        nested values. The `value` portion is parsed as TOML. If it fails to
+                                        parse as TOML, the raw string is used as a literal
+                  --enable <FEATURE>    Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+                  --disable <FEATURE>   Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+              -h, --help                Print help (see more with '--help')
+            """
+        case ("plugin", []):
+            return """
+            Manage Codex plugins
+
+            Usage: codex plugin [OPTIONS] <COMMAND>
+
+            Commands:
+              add          Install a plugin from a configured marketplace snapshot
+              list         List plugins available from configured marketplace snapshots
+              marketplace  Add, list, upgrade, or remove configured plugin marketplaces
+              remove       Remove an installed plugin from local config and cache
+              help         Print this message or the help of the given subcommand(s)
+
+            Options:
+              -c, --config <key=value>  Override a configuration value that would otherwise be loaded from
+                                        `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override
+                                        nested values. The `value` portion is parsed as TOML. If it fails to
+                                        parse as TOML, the raw string is used as a literal
+                  --enable <FEATURE>    Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+                  --disable <FEATURE>   Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+              -h, --help                Print help (see more with '--help')
+            """
+        case ("plugin", ["marketplace"]):
+            return """
+            Add, list, upgrade, or remove configured plugin marketplaces
+
+            Usage: codex plugin marketplace [OPTIONS] <COMMAND>
+
+            Commands:
+              add      Add a local or Git marketplace to the configured marketplace sources
+              list     List configured marketplace names and their local snapshot roots
+              upgrade  Refresh configured Git marketplace snapshots
+              remove   Remove a configured marketplace source by name
+              help     Print this message or the help of the given subcommand(s)
+
+            Options:
+              -c, --config <key=value>  Override a configuration value that would otherwise be loaded from
+                                        `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override
+                                        nested values. The `value` portion is parsed as TOML. If it fails to
+                                        parse as TOML, the raw string is used as a literal
+                  --enable <FEATURE>    Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+                  --disable <FEATURE>   Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+              -h, --help                Print help (see more with '--help')
+            """
+        case ("sandbox", []):
+            return """
+            Run commands within a Codex-provided sandbox
+
+            Usage: codex sandbox [OPTIONS] <COMMAND>
+
+            Commands:
+              macos    Run a command under Seatbelt (macOS only) [aliases: seatbelt]
+              linux    Run a command under the Linux sandbox (bubblewrap by default) [aliases: landlock]
+              windows  Run a command under Windows restricted token (Windows only)
+              help     Print this message or the help of the given subcommand(s)
+
+            Options:
+              -c, --config <key=value>  Override a configuration value that would otherwise be loaded from
+                                        `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override
+                                        nested values. The `value` portion is parsed as TOML. If it fails to
+                                        parse as TOML, the raw string is used as a literal
+                  --enable <FEATURE>    Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+                  --disable <FEATURE>   Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+              -h, --help                Print help (see more with '--help')
+            """
+        case ("debug", []):
+            return """
+            Debugging tools
+
+            Usage: codex debug [OPTIONS] <COMMAND>
+
+            Commands:
+              models        Render the raw model catalog as JSON
+              app-server    Tooling: helps debug the app server
+              prompt-input  Render the model-visible prompt input list as JSON
+              help          Print this message or the help of the given subcommand(s)
+
+            Options:
+              -c, --config <key=value>  Override a configuration value that would otherwise be loaded from
+                                        `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override
+                                        nested values. The `value` portion is parsed as TOML. If it fails to
+                                        parse as TOML, the raw string is used as a literal
+                  --enable <FEATURE>    Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+                  --disable <FEATURE>   Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+              -h, --help                Print help (see more with '--help')
+            """
+        case ("debug", ["app-server"]):
+            return """
+            Tooling: helps debug the app server
+
+            Usage: codex debug app-server [OPTIONS] <COMMAND>
+
+            Commands:
+              send-message-v2
+              help             Print this message or the help of the given subcommand(s)
+
+            Options:
+              -c, --config <key=value>  Override a configuration value that would otherwise be loaded from
+                                        `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override
+                                        nested values. The `value` portion is parsed as TOML. If it fails to
+                                        parse as TOML, the raw string is used as a literal
+                  --enable <FEATURE>    Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+                  --disable <FEATURE>   Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+              -h, --help                Print help (see more with '--help')
+            """
+        case ("features", []):
+            return """
+            Inspect feature flags
+
+            Usage: codex features [OPTIONS] <COMMAND>
+
+            Commands:
+              list     List known features with their stage and effective state
+              enable   Enable a feature in config.toml
+              disable  Disable a feature in config.toml
+              help     Print this message or the help of the given subcommand(s)
+
+            Options:
+              -c, --config <key=value>  Override a configuration value that would otherwise be loaded from
+                                        `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override
+                                        nested values. The `value` portion is parsed as TOML. If it fails to
+                                        parse as TOML, the raw string is used as a literal
+                  --enable <FEATURE>    Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+                  --disable <FEATURE>   Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+              -h, --help                Print help (see more with '--help')
+            """
+        case ("execpolicy", []):
+            return """
+            Execpolicy tooling
+
+            Usage: codex execpolicy [OPTIONS] <COMMAND>
+
+            Commands:
+              check  Check execpolicy files against a command
+              help   Print this message or the help of the given subcommand(s)
+
+            Options:
+              -c, --config <key=value>  Override a configuration value that would otherwise be loaded from
+                                        `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override
+                                        nested values. The `value` portion is parsed as TOML. If it fails to
+                                        parse as TOML, the raw string is used as a literal
+                  --enable <FEATURE>    Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+                  --disable <FEATURE>   Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+              -h, --help                Print help (see more with '--help')
+            """
+        case ("app-server", ["daemon"]):
+            return """
+            Manage the local app-server daemon
+
+            Usage: codex app-server daemon [OPTIONS] <COMMAND>
+
+            Commands:
+              bootstrap               Install durable local app-server management for SSH-driven use
+              start                   Start the local app server daemon if it is not already running
+              restart                 Restart the local app server daemon
+              enable-remote-control   Enable remote control for future starts and a currently running managed
+                                      daemon
+              disable-remote-control  Disable remote control for future starts and a currently running managed
+                                      daemon
+              stop                    Stop the local app server daemon
+              version                 Print local CLI and running app-server versions as JSON
+              help                    Print this message or the help of the given subcommand(s)
+
+            Options:
+              -c, --config <key=value>  Override a configuration value that would otherwise be loaded from
+                                        `~/.codex/config.toml`. Use a dotted path (`foo.bar.baz`) to override
+                                        nested values. The `value` portion is parsed as TOML. If it fails to
+                                        parse as TOML, the raw string is used as a literal
+                  --enable <FEATURE>    Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+                  --disable <FEATURE>   Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+              -h, --help                Print help (see more with '--help')
+            """
+        default:
+            return nil
+        }
     }
 
     private func parseDoctorCommand(

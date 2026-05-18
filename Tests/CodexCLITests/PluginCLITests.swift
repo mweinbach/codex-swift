@@ -117,10 +117,6 @@ final class PluginCLITests: XCTestCase {
     func testRunAsyncPluginMarketplaceRejectsInvalidFormsBeforeRunner() async {
         let cases: [([String], String)] = [
             (
-                ["plugin"],
-                "codex-swift: missing required subcommand for command 'plugin': add|list|marketplace|remove"
-            ),
-            (
                 ["plugin", "install"],
                 "codex-swift: unsupported plugin subcommand: install"
             ),
@@ -147,10 +143,6 @@ final class PluginCLITests: XCTestCase {
             (
                 ["plugin", "remove"],
                 "codex-swift: missing required argument for command 'plugin remove': <PLUGIN[@MARKETPLACE]>"
-            ),
-            (
-                ["plugin", "marketplace"],
-                "codex-swift: missing required subcommand for command 'plugin marketplace': add|list|upgrade|remove"
             ),
             (
                 ["plugin", "marketplace", "add"],

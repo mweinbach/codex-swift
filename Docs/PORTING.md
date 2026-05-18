@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: tightened CLI missing-child subcommand parity at the Clap
+  boundary. Swift now exits 2 and prints Rust's short parent-command help to
+  stderr for command groups invoked without a required child, including `mcp`,
+  `plugin`, `plugin marketplace`, `sandbox`, `debug`, `debug app-server`,
+  `features`, `execpolicy`, and `app-server daemon`, instead of returning
+  Swift-only missing-subcommand strings with exit 64.
 - 2026-05-18: tightened CLI help runtime-oracle parity for sandbox child
   aliases. Swift now accepts Rust's visible `codex sandbox landlock --help`
   alias for the Linux sandbox help surface, matching the already-supported

@@ -1418,8 +1418,10 @@ final class CodexCLITests: XCTestCase {
             }
         )
 
-        XCTAssertEqual(exitCode, 64)
-        XCTAssertEqual(stderr, ["codex-swift: missing required subcommand for command 'features': list, enable, or disable"])
+        XCTAssertEqual(exitCode, 2)
+        XCTAssertEqual(stderr.count, 1)
+        XCTAssertTrue(stderr[0].hasPrefix("Inspect feature flags\n\nUsage: codex features [OPTIONS] <COMMAND>"))
+        XCTAssertTrue(stderr[0].contains("  list     List known features with their stage and effective state"))
     }
 
     func testRunAsyncFeaturesRejectsInvalidFormsBeforeRunner() async {

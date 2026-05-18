@@ -478,10 +478,6 @@ final class SandboxCLITests: XCTestCase {
     func testRunAsyncSandboxRejectsInvalidFormsBeforeRunner() async {
         let cases: [([String], String)] = [
             (
-                ["sandbox"],
-                "codex-swift: missing required subcommand for command 'sandbox': macos|linux|windows"
-            ),
-            (
                 ["sandbox", "freebsd", "echo", "ok"],
                 "codex-swift: unsupported sandbox subcommand: freebsd"
             ),

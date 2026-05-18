@@ -114,10 +114,6 @@ final class McpCLITests: XCTestCase {
     func testRunAsyncMcpRejectsInvalidFormsBeforeRunner() async {
         let cases: [([String], String)] = [
             (
-                ["mcp"],
-                "codex-swift: missing required subcommand for command 'mcp': list|get|add|remove|login|logout"
-            ),
-            (
                 ["mcp", "bogus"],
                 "codex-swift: unsupported mcp subcommand: bogus"
             ),
