@@ -19,6 +19,7 @@ public protocol AppServerRuntimeManaging: AnyObject, Sendable {
     func submitCoreOp(requestID: RequestID, threadID: String, op: Op) throws -> String
     func submitLiveRuntime(_ submission: AppServerLiveRuntimeSubmission) throws -> [EventMessage]
     func queueResponseItemsForNextTurn(threadID: String, items: [ResponseInputItem])
+    func queueMailboxCommunications(threadID: String, communications: [InterAgentCommunication])
     func shutdown()
 }
 
@@ -160,12 +161,22 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         }
     }
 
+    public func queueMailboxCommunications(threadID: String, communications: [InterAgentCommunication]) {
+        AppServerLiveRuntimeBlocking.run {
+            await self.state.queueMailboxCommunications(threadID: threadID, communications: communications)
+        }
+    }
+
     func canStartGoalContinuation(threadID: String) async -> Bool {
         await state.canStartGoalContinuation(threadID: threadID)
     }
 
     func takeQueuedResponseItemsForNextTurn(threadID: String) async -> [ResponseInputItem] {
         await state.takeQueuedResponseItemsForNextTurn(threadID: threadID)
+    }
+
+    func takeMailboxCommunications(threadID: String) async -> [InterAgentCommunication] {
+        await state.takeMailboxCommunications(threadID: threadID)
     }
 
     private func submitGoalContinuation(
@@ -578,7 +589,9 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         )
         input.append(contentsOf: responseHistory)
         let queuedInputItems = await state.takeQueuedResponseItemsForNextTurn(threadID: submission.threadID)
-        var newInputItems: [ResponseItem] = queuedInputItems.map { $0.responseItem() }
+        let mailboxInputItems = await state.takeMailboxCommunications(threadID: submission.threadID)
+            .map { $0.toResponseInputItem() }
+        var newInputItems: [ResponseItem] = (queuedInputItems + mailboxInputItems).map { $0.responseItem() }
         if !turnInput.items.isEmpty {
             newInputItems.append(ResponseInputItem(userInputs: turnInput.items).responseItem())
         }
@@ -1470,6 +1483,7 @@ private actor AppServerLiveRuntimeState {
     private var sessionGrantedPermissionProfiles: [String: RequestPermissionProfile] = [:]
     private var runtimeConfigSnapshots: [String: ConfigValue] = [:]
     private var idlePendingInput: [String: [ResponseInputItem]] = [:]
+    private var mailboxCommunications: [String: [InterAgentCommunication]] = [:]
     private var emittedAbortKeys: Set<String> = []
 
     func setEventSink(_ sink: AppServerRuntimeEventSink?) {
@@ -1493,7 +1507,7 @@ private actor AppServerLiveRuntimeState {
     }
 
     func startPendingWorkTurnIfIdle(threadID: String, turnID: String, task: Task<Void, Never>) -> Bool {
-        guard hasQueuedResponseItemsForNextTurn(threadID: threadID),
+        guard hasPendingWorkForNextTurn(threadID: threadID),
               runningTurns[threadID] == nil,
               userInputContinuations.isEmpty,
               dynamicToolContinuations.isEmpty
@@ -1534,6 +1548,7 @@ private actor AppServerLiveRuntimeState {
     func canStartGoalContinuation(threadID: String) -> Bool {
         runningTurns[threadID] == nil
             && !hasQueuedResponseItemsForNextTurn(threadID: threadID)
+            && !hasTriggerTurnMailboxCommunications(threadID: threadID)
             && userInputContinuations.isEmpty
             && dynamicToolContinuations.isEmpty
     }
@@ -1552,8 +1567,31 @@ private actor AppServerLiveRuntimeState {
         return items
     }
 
+    func queueMailboxCommunications(threadID: String, communications: [InterAgentCommunication]) {
+        guard !communications.isEmpty else {
+            return
+        }
+        mailboxCommunications[threadID, default: []].append(contentsOf: communications)
+    }
+
+    func takeMailboxCommunications(threadID: String) -> [InterAgentCommunication] {
+        guard let communications = mailboxCommunications.removeValue(forKey: threadID) else {
+            return []
+        }
+        return communications
+    }
+
+    private func hasPendingWorkForNextTurn(threadID: String) -> Bool {
+        hasQueuedResponseItemsForNextTurn(threadID: threadID)
+            || hasTriggerTurnMailboxCommunications(threadID: threadID)
+    }
+
     private func hasQueuedResponseItemsForNextTurn(threadID: String) -> Bool {
         idlePendingInput[threadID]?.isEmpty == false
+    }
+
+    private func hasTriggerTurnMailboxCommunications(threadID: String) -> Bool {
+        mailboxCommunications[threadID]?.contains { $0.triggerTurn } == true
     }
 
     func cancelThread(threadID: String) {
@@ -1564,6 +1602,7 @@ private actor AppServerLiveRuntimeState {
         sessionGrantedPermissionProfiles.removeValue(forKey: threadID)
         runtimeConfigSnapshots.removeValue(forKey: threadID)
         idlePendingInput.removeValue(forKey: threadID)
+        mailboxCommunications.removeValue(forKey: threadID)
     }
 
     func cancelAll() {
@@ -1572,6 +1611,7 @@ private actor AppServerLiveRuntimeState {
         sessionGrantedPermissionProfiles.removeAll()
         runtimeConfigSnapshots.removeAll()
         idlePendingInput.removeAll()
+        mailboxCommunications.removeAll()
         emittedAbortKeys.removeAll()
         for turn in turns {
             turn.task.cancel()

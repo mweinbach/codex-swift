@@ -11938,6 +11938,40 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(canStartContinuationAfterDrain)
     }
 
+    func testLiveRuntimeTriggerTurnMailboxBlocksGoalContinuationLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let threadID = ConversationId().description
+        let manager = AppServerLiveRuntimeManager(
+            configuration: testConfiguration(codexHome: temp.url)
+        )
+        let queueOnlyMail = InterAgentCommunication(
+            author: try AgentPath.root.join("researcher"),
+            recipient: .root,
+            content: "queued for the next natural turn",
+            triggerTurn: false
+        )
+        manager.queueMailboxCommunications(threadID: threadID, communications: [queueOnlyMail])
+        let canStartContinuationWithQueueOnlyMail = await manager.canStartGoalContinuation(threadID: threadID)
+        XCTAssertTrue(canStartContinuationWithQueueOnlyMail)
+        let drainedQueueOnlyMail = await manager.takeMailboxCommunications(threadID: threadID)
+        XCTAssertEqual(drainedQueueOnlyMail, [queueOnlyMail])
+
+        let triggerTurnMail = InterAgentCommunication(
+            author: try AgentPath.root.join("worker"),
+            recipient: .root,
+            content: "wake the idle parent",
+            triggerTurn: true
+        )
+        manager.queueMailboxCommunications(threadID: threadID, communications: [queueOnlyMail, triggerTurnMail])
+        let canStartContinuationWithTriggerTurnMail = await manager.canStartGoalContinuation(threadID: threadID)
+        XCTAssertFalse(canStartContinuationWithTriggerTurnMail)
+
+        let drainedMail = await manager.takeMailboxCommunications(threadID: threadID)
+        XCTAssertEqual(drainedMail, [queueOnlyMail, triggerTurnMail])
+        let canStartContinuationAfterDrain = await manager.canStartGoalContinuation(threadID: threadID)
+        XCTAssertTrue(canStartContinuationAfterDrain)
+    }
+
     func testLiveRuntimeGoalAccountingIgnoresGoalCreatedAfterTurnStartLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(

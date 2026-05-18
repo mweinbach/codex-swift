@@ -784,6 +784,13 @@ Recent upstream audit checkpoint:
   continuation guard refuses to launch hidden `<goal_context>` work while
   queued input exists. Trigger-turn mailbox pending-work checks remain pending
   with the full ThreadManager lifecycle.
+- 2026-05-18: Swift live runtime state now also tracks Rust's trigger-turn
+  mailbox pending-work guard for `MaybeContinueIfIdle`. Pending inter-agent
+  mailbox communications drain into the next live turn after queued response
+  items, and active-goal continuation refuses to launch while any pending
+  mailbox communication has `trigger_turn: true`. Full mailbox delivery phase
+  and live multi-agent routing remain pending with the broader ThreadManager
+  lifecycle.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through
