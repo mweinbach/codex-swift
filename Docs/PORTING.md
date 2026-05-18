@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: tightened CLI subcommand version runtime-oracle parity beyond
+  `exec`. Swift now treats `codex cloud --version` and `codex cloud-tasks -V`
+  as Rust-shaped `codex-cli-cloud <version>` output, while preserving Rust's
+  command-specific unsupported `--version` errors, usage lines, and tips for
+  the remaining non-versioned subcommands.
 - 2026-05-18: extended CLI help runtime-oracle parity into hidden child
   command help surfaces that Rust still answers explicitly. Swift now renders
   Rust-shaped help for `app-server daemon pid-update-loop`,

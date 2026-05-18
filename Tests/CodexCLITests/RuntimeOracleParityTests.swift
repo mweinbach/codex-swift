@@ -505,6 +505,18 @@ final class RuntimeOracleParityTests: XCTestCase {
         XCTAssertEqual(normalizedVersionLine(swift.stdout), normalizedVersionLine(rust.stdout))
     }
 
+    func testCloudVersionMatchesRustOracleModuloVersionNumber() throws {
+        let oracle = try RuntimeOracle.required()
+
+        let rust = try oracle.run(.rust, arguments: ["cloud", "--version"])
+        let swift = try oracle.run(.swift, arguments: ["cloud", "--version"])
+
+        XCTAssertEqual(rust.exitCode, 0, rust.stderr)
+        XCTAssertEqual(swift.exitCode, 0, swift.stderr)
+
+        XCTAssertEqual(normalizedVersionLine(swift.stdout), normalizedVersionLine(rust.stdout))
+    }
+
     func testReviewVersionRejectionMatchesRustOracle() throws {
         let oracle = try RuntimeOracle.required()
         let codexHome = try RuntimeOracleTemporaryDirectory(prefix: "codex-runtime-oracle-home")
@@ -521,6 +533,42 @@ final class RuntimeOracleParityTests: XCTestCase {
         XCTAssertEqual(swift.exitCode, 2, swift.stderr)
         XCTAssertEqual(swift.stdout, rust.stdout)
         XCTAssertEqual(normalizedCommandError(swift.stderr), normalizedCommandError(rust.stderr))
+    }
+
+    func testSubcommandVersionRejectionsMatchRustOracle() throws {
+        let oracle = try RuntimeOracle.required()
+        let commands = [
+            ["app-server", "--version"],
+            ["remote-control", "--version"],
+            ["apply", "--version"],
+            ["debug", "--version"],
+            ["sandbox", "--version"],
+            ["app", "--version"],
+            ["login", "--version"],
+            ["execpolicy", "--version"],
+            ["responses-api-proxy", "--version"],
+            ["stdio-to-uds", "--version"]
+        ]
+        let codexHome = try RuntimeOracleTemporaryDirectory(prefix: "codex-runtime-oracle-home")
+        let environment = [
+            "CODEX_HOME": codexHome.url.path,
+            "NO_COLOR": "1",
+            "TERM": "dumb"
+        ]
+
+        for arguments in commands {
+            let rust = try oracle.run(.rust, arguments: arguments, environment: environment)
+            let swift = try oracle.run(.swift, arguments: arguments, environment: environment)
+
+            XCTAssertEqual(rust.exitCode, 2, rust.stderr)
+            XCTAssertEqual(swift.exitCode, 2, swift.stderr)
+            XCTAssertEqual(swift.stdout, rust.stdout, arguments.joined(separator: " "))
+            XCTAssertEqual(
+                normalizedCommandError(swift.stderr),
+                normalizedCommandError(rust.stderr),
+                arguments.joined(separator: " ")
+            )
+        }
     }
 
     func testAppServerInitializeMatchesRustOracle() throws {

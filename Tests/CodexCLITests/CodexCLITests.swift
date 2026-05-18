@@ -664,6 +664,19 @@ final class CodexCLITests: XCTestCase {
             CodexCLI().parseInvocation(arguments: ["exec", "-V"]),
             .commandVersion(execSpec)
         )
+        let cloudSpec = CommandSpec(
+            name: "cloud",
+            aliases: ["cloud-tasks"],
+            summary: "[EXPERIMENTAL] Browse tasks from Codex Cloud and apply changes locally."
+        )
+        XCTAssertEqual(
+            CodexCLI().parseInvocation(arguments: ["cloud", "--version"]),
+            .commandVersion(cloudSpec)
+        )
+        XCTAssertEqual(
+            CodexCLI().parseInvocation(arguments: ["cloud-tasks", "-V"]),
+            .commandVersion(cloudSpec)
+        )
         XCTAssertEqual(
             CodexCLI().parseInvocation(arguments: ["--version", "exec"]),
             .version
@@ -684,6 +697,16 @@ final class CodexCLITests: XCTestCase {
         XCTAssertEqual(exitCode, 0)
         XCTAssertEqual(stdout, ["codex-cli-exec \(CodexBuildMetadata.version)"])
 
+        stdout.removeAll()
+        let cloudExitCode = await CodexCLI().runAsync(
+            arguments: ["cloud", "--version"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(cloudExitCode, 0)
+        XCTAssertEqual(stdout, ["codex-cli-cloud \(CodexBuildMetadata.version)"])
+
         var stderr: [String] = []
         let unsupportedExitCode = await CodexCLI().runAsync(
             arguments: ["review", "-V"],
@@ -701,6 +724,27 @@ final class CodexCLITests: XCTestCase {
                   tip: to pass '-V' as a value, use '-- -V'
 
                 Usage: codex review [OPTIONS] [PROMPT]
+
+                For more information, try '--help'.
+                """
+            ]
+        )
+
+        stderr.removeAll()
+        let appServerUnsupportedExitCode = await CodexCLI().runAsync(
+            arguments: ["app-server", "--version"],
+            stdout: { _ in XCTFail("stdout should not be written") },
+            stderr: { stderr.append($0) }
+        )
+
+        XCTAssertEqual(appServerUnsupportedExitCode, 2)
+        XCTAssertEqual(
+            stderr,
+            [
+                """
+                error: unexpected argument '--version' found
+
+                Usage: codex app-server [OPTIONS] [COMMAND]
 
                 For more information, try '--help'.
                 """

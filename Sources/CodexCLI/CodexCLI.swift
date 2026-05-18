@@ -831,7 +831,7 @@ public struct CodexCLI: Sendable {
             case .root:
                 return .version
             case let .command(spec, arguments):
-                if spec.name == "exec" {
+                if spec.name == "exec" || spec.name == "cloud" {
                     return .commandVersion(spec)
                 }
                 let flag = arguments.first(where: { $0 == "--version" || $0 == "-V" }) ?? "--version"
@@ -1185,6 +1185,8 @@ public struct CodexCLI: Sendable {
         switch spec.name {
         case "exec":
             return "codex-cli-exec \(Self.version)"
+        case "cloud":
+            return "codex-cli-cloud \(Self.version)"
         default:
             return "\(spec.name) \(Self.version)"
         }
@@ -1192,8 +1194,10 @@ public struct CodexCLI: Sendable {
 
     public func renderUnsupportedVersionError(for spec: CommandSpec, flag: String) -> String {
         let tip = switch spec.name {
-        case "review", "completion", "apply", "exec":
+        case "review", "completion", "apply", "app", "stdio-to-uds", "exec":
             "\n\n  tip: to pass '\(flag)' as a value, use '-- \(flag)'"
+        case "responses-api-proxy":
+            "\n\n  tip: a similar argument exists: '--server-info'"
         default:
             ""
         }
@@ -1217,13 +1221,27 @@ public struct CodexCLI: Sendable {
         case "plugin":
             return "codex plugin [OPTIONS] <COMMAND>"
         case "app-server":
-            return "codex app-server [OPTIONS] <COMMAND>"
+            return "codex app-server [OPTIONS] [COMMAND]"
         case "remote-control":
-            return "codex remote-control [OPTIONS] <COMMAND>"
+            return "codex remote-control [OPTIONS] [COMMAND]"
         case "features":
             return "codex features [OPTIONS] <COMMAND>"
         case "apply":
-            return "codex apply [OPTIONS] [TASK_ID]"
+            return "codex apply [OPTIONS] <TASK_ID>"
+        case "debug":
+            return "codex debug [OPTIONS] <COMMAND>"
+        case "sandbox":
+            return "codex sandbox [OPTIONS] <COMMAND>"
+        case "app":
+            return "codex app [OPTIONS] [PATH]"
+        case "login":
+            return "codex login [OPTIONS] [COMMAND]"
+        case "execpolicy":
+            return "codex execpolicy [OPTIONS] <COMMAND>"
+        case "responses-api-proxy":
+            return "codex responses-api-proxy --server-info <FILE>"
+        case "stdio-to-uds":
+            return "codex stdio-to-uds [OPTIONS] <SOCKET_PATH>"
         default:
             return "codex \(spec.name) [OPTIONS]"
         }
