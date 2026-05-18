@@ -25,7 +25,9 @@ Recent upstream audit checkpoint:
   `mcp_tool_call_begin` and `mcp_tool_call_end` events now emit
   `item/started` and `item/completed` notifications with Rust's
   `mcpToolCall` item shape, including failed `Ok(isError: true)` results,
-  transport errors, durations, arguments, and MCP app resource URIs.
+  transport errors, durations, arguments, and MCP app resource URIs. The
+  app-server item result follows Rust's v2 projection by omitting the lower-level
+  MCP `isError` field and carrying failure through `status`.
 - 2026-05-17: matched Rust's live app-server pending request status release
   from `codex-rs/app-server/src/thread_status.rs` and
   `codex-rs/app-server/src/bespoke_event_handling.rs`. Swift now drops
@@ -3367,7 +3369,9 @@ Recent upstream audit checkpoint:
   `mcp_tool_call_end` runtime events into Rust-shaped `item/started` and
   `item/completed` notifications for `mcpToolCall` items, including
   in-progress state, completion/failure state, `Ok(isError: true)` failures,
-  transport error messages, durations, arguments, and MCP app resource URIs.
+  transport error messages, durations, arguments, and MCP app resource URIs; the
+  v2 item result intentionally omits the lower-level MCP `isError` field like
+  Rust.
 - `codex-rs/app-server/src/request_processors/mcp_processor.rs` MCP server status listing
 - `mcpServerStatus/list` now preserves Rust `detail` enum validation for `full` and `toolsAndAuthOnly` including malformed non-string enum values, typed optional-string cursor decoding, `Option<u32>` limit decoding, effective MCP server pagination including product-owned built-in `memories`, auth-status projection including disabled-server `unsupported` short-circuiting, best-effort configured MCP server snapshots, raw tool-name keys, `full` resource/resource-template inventory with Rust-style resource/resource-template cursor walking, and `toolsAndAuthOnly` skipping resource inventory calls. For already-loaded Swift app-server threads, `toolsAndAuthOnly` and `full` now reuse the live MCP manager's discovered tool inventory; `full` still preserves configured resource/template inventory and the live snapshot path carries cached resources/templates when the broader running MCP manager port provides them. Live resource/template discovery remains pending with that broader manager port.
 - `codex-rs/app-server/src/request_processors/catalog_processor.rs` experimental feature listing
