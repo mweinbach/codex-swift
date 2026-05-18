@@ -665,6 +665,8 @@ final class RuntimeOracleParityTests: XCTestCase {
             ["plugin", "add"],
             ["plugin", "marketplace", "list", "extra"],
             ["plugin", "marketplace", "remove"],
+            ["apply"],
+            ["stdio-to-uds"],
             ["cloud", "exec"],
             ["cloud", "list", "extra"],
             ["cloud", "list", "--limit"],

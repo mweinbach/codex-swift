@@ -4285,13 +4285,16 @@ public struct CodexCLI: Sendable {
                 return 64
             }
         case let .command(spec, commandArguments) where spec.name == "apply":
+            guard commandArguments.count == 1, let taskID = commandArguments.first else {
+                let missingTaskID: ParseResult<Void> = clapMissingRequired(
+                    ["<TASK_ID>"],
+                    usage: "codex apply <TASK_ID>"
+                )
+                return emitParseFailure(missingTaskID, stderr: stderr)
+            }
             guard let applyRunner else {
                 stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
                 return 78
-            }
-            guard commandArguments.count == 1, let taskID = commandArguments.first else {
-                stderr("codex-swift: missing required argument for command 'apply': <TASK_ID>")
-                return 64
             }
             do {
                 if let message = try await applyRunner(ApplyCommandRequest(
@@ -4668,13 +4671,16 @@ public struct CodexCLI: Sendable {
                 return exitCode
             }
         case let .command(spec, commandArguments) where spec.name == "stdio-to-uds":
+            guard commandArguments.count == 1, let socketPath = commandArguments.first else {
+                let missingSocketPath: ParseResult<Void> = clapMissingRequired(
+                    ["<SOCKET_PATH>"],
+                    usage: "codex stdio-to-uds <SOCKET_PATH>"
+                )
+                return emitParseFailure(missingSocketPath, stderr: stderr)
+            }
             guard let stdioToUDSRunner else {
                 stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
                 return 78
-            }
-            guard commandArguments.count == 1, let socketPath = commandArguments.first else {
-                stderr("codex-swift: missing required argument for command 'stdio-to-uds': <SOCKET_PATH>")
-                return 64
             }
             do {
                 let result = try await stdioToUDSRunner(StdioToUDSCommandRequest(socketPath: socketPath))
@@ -8673,6 +8679,16 @@ public struct CodexCLI: Sendable {
             """,
             2
         )
+    }
+
+    private func emitParseFailure<Success>(_ result: ParseResult<Success>, stderr: (String) -> Void) -> Int32 {
+        switch result {
+        case .success:
+            preconditionFailure("expected parse failure")
+        case let .failure(message, exitCode):
+            stderr(message)
+            return exitCode
+        }
     }
 
     private func parseMcpCommandAction(_ arguments: [String]) -> ParseResult<McpCommandAction> {

@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: extended CLI ordinary parse-failure parity to the remaining
+  visible single-argument utility commands covered by the Rust runtime oracle.
+  Swift now emits Rust/Clap exit-2 required-argument diagnostics for
+  `codex apply` and `codex stdio-to-uds` before consulting command runtimes,
+  replacing the earlier Swift-local exit-64 messages.
 - 2026-05-18: tightened CLI ordinary parse-failure parity for representative
   MCP, plugin, and Codex Cloud paths. Swift now exits 2 and emits Rust/Clap
   diagnostics for missing required arguments, missing option values, and

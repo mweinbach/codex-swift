@@ -1128,8 +1128,20 @@ final class CodexCLITests: XCTestCase {
             }
         )
 
-        XCTAssertEqual(exitCode, 64)
-        XCTAssertEqual(stderr, ["codex-swift: missing required argument for command 'apply': <TASK_ID>"])
+        XCTAssertEqual(exitCode, 2)
+        XCTAssertEqual(
+            stderr,
+            [
+                """
+                error: the following required arguments were not provided:
+                  <TASK_ID>
+
+                Usage: codex apply <TASK_ID>
+
+                For more information, try '--help'.
+                """
+            ]
+        )
     }
 
     func testRunAsyncApplyReportsRunnerError() async {
@@ -1643,8 +1655,20 @@ final class CodexCLITests: XCTestCase {
             }
         )
 
-        XCTAssertEqual(exitCode, 64)
-        XCTAssertEqual(stderr, ["codex-swift: missing required argument for command 'stdio-to-uds': <SOCKET_PATH>"])
+        XCTAssertEqual(exitCode, 2)
+        XCTAssertEqual(
+            stderr,
+            [
+                """
+                error: the following required arguments were not provided:
+                  <SOCKET_PATH>
+
+                Usage: codex stdio-to-uds <SOCKET_PATH>
+
+                For more information, try '--help'.
+                """
+            ]
+        )
     }
 
     func testRunAsyncCloudStatusDelegatesToRunnerAndPrintsOutput() async {
