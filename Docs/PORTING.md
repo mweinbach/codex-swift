@@ -900,6 +900,13 @@ Recent upstream audit checkpoint:
   returns it through the v2 spawn result/collab spawn-end event. The allocator
   preserves Rust's pool-reset ordinal shape (`Atlas the 2nd`) while full shared
   `AgentControl` registry ownership remains pending.
+- 2026-05-18: Swift live app-server MultiAgentV2 `spawn_agent` now enforces the
+  Rust `AgentControl` spawned-thread cap from `[agents].max_threads`, including
+  the MultiAgentV2-derived root-counting cap and Rust's model-visible
+  `collab spawn failed: agent thread limit reached` rejection. Reserved live
+  spawn slots are released when a spawned thread is explicitly shut down or
+  closed, while completed-but-not-closed agents remain counted like Rust's
+  active registry entries.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through

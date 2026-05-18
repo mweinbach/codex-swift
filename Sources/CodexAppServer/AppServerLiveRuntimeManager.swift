@@ -278,6 +278,12 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             }
             return []
 
+        case .shutdown:
+            AppServerLiveRuntimeBlocking.run {
+                await self.state.cancelThread(threadID: submission.threadID)
+            }
+            return []
+
         default:
             return []
         }
@@ -325,6 +331,18 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
 
     func agentStatus(threadID: String) async -> AgentStatus {
         await state.agentStatus(threadID: threadID)
+    }
+
+    func reserveLiveSpawnSlot(threadID: String, maxThreads: Int?) async throws {
+        do {
+            try await state.reserveSpawnSlot(threadID: threadID, maxThreads: maxThreads)
+        } catch AppServerLiveRuntimeState.SpawnSlotError.limitReached {
+            throw AppServerLiveMultiAgentToolError(message: "collab spawn failed: agent thread limit reached")
+        }
+    }
+
+    func releaseLiveSpawnSlots(threadIDs: [String]) async {
+        await state.releaseSpawnSlots(threadIDs: threadIDs)
     }
 
     func reserveLiveAgentNickname(settings: CodexRuntimeConfig, agentRole: String?) async -> String? {
@@ -863,6 +881,35 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
     ) async throws -> LiveSpawnAgentResult {
         let childConversationID = ConversationId()
         let childThreadID = try ThreadId(string: childConversationID.description)
+        try await reserveLiveSpawnSlot(
+            threadID: childThreadID.description,
+            maxThreads: setup.settings.agents.maxThreads
+        )
+        do {
+            return try await spawnLiveAgentAfterSlotReservation(
+                request,
+                parentThreadID: parentThreadID,
+                parentSessionSource: parentSessionSource,
+                setup: setup,
+                prototype: prototype,
+                childConversationID: childConversationID,
+                childThreadID: childThreadID
+            )
+        } catch {
+            await releaseLiveSpawnSlots(threadIDs: [childThreadID.description])
+            throw error
+        }
+    }
+
+    private func spawnLiveAgentAfterSlotReservation(
+        _ request: LiveSpawnAgentRequest,
+        parentThreadID: ThreadId,
+        parentSessionSource: SessionSource,
+        setup: PreparedLiveTurn,
+        prototype: AppServerLiveRuntimeSubmission,
+        childConversationID: ConversationId,
+        childThreadID: ThreadId
+    ) async throws -> LiveSpawnAgentResult {
         let childDepth = Self.nextThreadSpawnDepth(parentSessionSource)
         let childNickname = await reserveLiveAgentNickname(settings: setup.settings, agentRole: request.agentType)
         let childSource = SessionSource.subagent(.threadSpawn(
@@ -2144,6 +2191,10 @@ private actor AppServerLiveRuntimePermissionGrantState {
 }
 
 private actor AppServerLiveRuntimeState {
+    enum SpawnSlotError: Error {
+        case limitReached
+    }
+
     private var eventSink: AppServerRuntimeEventSink?
     private var runningTurns: [String: RunningTurn] = [:]
     private var approvalContinuations: [String: CheckedContinuation<ReviewDecision, Never>] = [:]
@@ -2160,6 +2211,7 @@ private actor AppServerLiveRuntimeState {
     private var agentLastTaskMessages: [String: String] = [:]
     private var agentStatuses: [String: AgentStatus] = [:]
     private var sessionSources: [String: SessionSource] = [:]
+    private var reservedSpawnThreadIDs: Set<String> = []
     private var usedAgentNicknames: Set<String> = []
     private var nicknameResetCount: Int = 0
     private var emittedAbortKeys: Set<String> = []
@@ -2214,6 +2266,19 @@ private actor AppServerLiveRuntimeState {
             return status
         }
         return runningTurns[threadID] == nil ? .completed(nil) : .running
+    }
+
+    func reserveSpawnSlot(threadID: String, maxThreads: Int?) throws {
+        if let maxThreads, reservedSpawnThreadIDs.count >= maxThreads {
+            throw SpawnSlotError.limitReached
+        }
+        reservedSpawnThreadIDs.insert(threadID)
+    }
+
+    func releaseSpawnSlots(threadIDs: [String]) {
+        for threadID in threadIDs {
+            reservedSpawnThreadIDs.remove(threadID)
+        }
     }
 
     func recordSessionSource(threadID: String, source: SessionSource) {
@@ -2408,6 +2473,7 @@ private actor AppServerLiveRuntimeState {
         let status = AgentStatus.notFound
         agentStatuses[threadID] = status
         maybeNotifyParentOfFinalStatus(threadID: threadID, status: status)
+        reservedSpawnThreadIDs.remove(threadID)
         sessionSources.removeValue(forKey: threadID)
         idlePendingInput.removeValue(forKey: threadID)
         activePendingInput.removeValue(forKey: threadID)
@@ -2430,6 +2496,7 @@ private actor AppServerLiveRuntimeState {
         runtimeConfigSnapshots.removeAll()
         agentStatuses.removeAll()
         sessionSources.removeAll()
+        reservedSpawnThreadIDs.removeAll()
         idlePendingInput.removeAll()
         activePendingInput.removeAll()
         mailboxCommunications.removeAll()

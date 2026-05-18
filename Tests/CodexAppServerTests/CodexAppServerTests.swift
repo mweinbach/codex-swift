@@ -12968,6 +12968,37 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(reusedRoleNickname, "Atlas the 2nd")
     }
 
+    func testLiveRuntimeRespectsRustSpawnAgentMaxThreadsLimit() async throws {
+        let temp = try TemporaryDirectory()
+        let manager = AppServerLiveRuntimeManager(
+            configuration: testConfiguration(codexHome: temp.url, requiresOpenAIAuth: false)
+        )
+        defer {
+            manager.shutdown()
+        }
+
+        let firstThreadID = ThreadId().description
+        let blockedThreadID = ThreadId().description
+        try await manager.reserveLiveSpawnSlot(threadID: firstThreadID, maxThreads: 1)
+        do {
+            try await manager.reserveLiveSpawnSlot(threadID: blockedThreadID, maxThreads: 1)
+            XCTFail("expected max_threads=1 to reject a second live spawn")
+        } catch let error as AppServerLiveMultiAgentToolError {
+            XCTAssertEqual(error.message, "collab spawn failed: agent thread limit reached")
+        }
+
+        _ = try manager.submitLiveRuntime(AppServerLiveRuntimeSubmission(
+            requestID: .string("shutdown-first-spawn"),
+            threadID: firstThreadID,
+            turnID: "shutdown-first-spawn-turn",
+            op: .shutdown
+        ))
+        try await manager.reserveLiveSpawnSlot(threadID: blockedThreadID, maxThreads: 1)
+
+        let unboundedThreadID = ThreadId().description
+        try await manager.reserveLiveSpawnSlot(threadID: unboundedThreadID, maxThreads: nil)
+    }
+
     func testLiveRuntimeTerminalSubagentTurnQueuesDirectParentNotificationLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let parentThreadID = ThreadId()
