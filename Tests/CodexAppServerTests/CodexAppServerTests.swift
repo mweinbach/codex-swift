@@ -11906,6 +11906,38 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertNil(disabledItems)
     }
 
+    func testLiveRuntimeQueuedResponseItemsMoveIntoNextTurnBeforeGoalContinuationLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let threadID = ConversationId().description
+        let stateStore = try await createAppServerGoalStateStore(
+            codexHome: temp.url,
+            threadID: threadID,
+            title: "live queued pending work"
+        )
+        _ = try await stateStore.replaceThreadGoal(
+            threadID: try ThreadId(string: threadID),
+            objective: "keep improving the benchmark",
+            status: .active,
+            tokenBudget: nil
+        )
+        let manager = AppServerLiveRuntimeManager(
+            configuration: testConfiguration(codexHome: temp.url, stateStore: stateStore)
+        )
+        let queuedItem = ResponseInputItem.message(
+            role: "assistant",
+            content: [.outputText(text: "queued before continuation")],
+            phase: nil
+        )
+        manager.queueResponseItemsForNextTurn(threadID: threadID, items: [queuedItem])
+        let canStartContinuationWithQueuedInput = await manager.canStartGoalContinuation(threadID: threadID)
+        XCTAssertFalse(canStartContinuationWithQueuedInput)
+
+        let drainedItems = await manager.takeQueuedResponseItemsForNextTurn(threadID: threadID)
+        XCTAssertEqual(drainedItems, [queuedItem])
+        let canStartContinuationAfterDrain = await manager.canStartGoalContinuation(threadID: threadID)
+        XCTAssertTrue(canStartContinuationAfterDrain)
+    }
+
     func testLiveRuntimeGoalAccountingIgnoresGoalCreatedAfterTurnStartLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(

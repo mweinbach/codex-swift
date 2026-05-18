@@ -778,6 +778,12 @@ Recent upstream audit checkpoint:
   active-goal continuation input while the thread is in plan mode. Rust's
   queued next-turn and trigger-turn mailbox pending-work checks remain pending
   with the full ThreadManager lifecycle.
+- 2026-05-18: Swift live runtime state now has Rust's queued next-turn pending
+  input lane for the `MaybeContinueIfIdle` path. Queued `ResponseInputItem`s
+  drain into the next live turn before normal user input, and the active-goal
+  continuation guard refuses to launch hidden `<goal_context>` work while
+  queued input exists. Trigger-turn mailbox pending-work checks remain pending
+  with the full ThreadManager lifecycle.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through

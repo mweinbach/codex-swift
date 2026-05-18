@@ -18,6 +18,7 @@ public protocol AppServerRuntimeManaging: AnyObject, Sendable {
     func setEventSink(_ sink: AppServerRuntimeEventSink?)
     func submitCoreOp(requestID: RequestID, threadID: String, op: Op) throws -> String
     func submitLiveRuntime(_ submission: AppServerLiveRuntimeSubmission) throws -> [EventMessage]
+    func queueResponseItemsForNextTurn(threadID: String, items: [ResponseInputItem])
     func shutdown()
 }
 
@@ -151,6 +152,20 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         default:
             return []
         }
+    }
+
+    public func queueResponseItemsForNextTurn(threadID: String, items: [ResponseInputItem]) {
+        AppServerLiveRuntimeBlocking.run {
+            await self.state.queueResponseItemsForNextTurn(threadID: threadID, items: items)
+        }
+    }
+
+    func canStartGoalContinuation(threadID: String) async -> Bool {
+        await state.canStartGoalContinuation(threadID: threadID)
+    }
+
+    func takeQueuedResponseItemsForNextTurn(threadID: String) async -> [ResponseInputItem] {
+        await state.takeQueuedResponseItemsForNextTurn(threadID: threadID)
     }
 
     private func submitGoalContinuation(
@@ -397,6 +412,9 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             )
         }
         await state.finishTurn(threadID: submission.threadID, turnID: submission.turnID)
+        if await submitPendingWorkTurnIfIdle(threadID: submission.threadID, prototype: submission) {
+            return
+        }
         if let goalContinuationFeatures {
             await submitGoalContinuation(
                 threadID: submission.threadID,
@@ -405,6 +423,45 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 prototype: submission
             )
         }
+    }
+
+    private func submitPendingWorkTurnIfIdle(
+        threadID: String,
+        prototype: AppServerLiveRuntimeSubmission
+    ) async -> Bool {
+        let turnID = UUID().uuidString.lowercased()
+        let startGate = AppServerLiveRuntimeStartGate()
+        let submission = AppServerLiveRuntimeSubmission(
+            requestID: .string("pending-work-\(turnID)"),
+            threadID: threadID,
+            turnID: turnID,
+            op: Op.userInput(items: []),
+            turnMetadataHeader: nil,
+            mcpElicitationsAutoDeny: prototype.mcpElicitationsAutoDeny,
+            mcpTools: prototype.mcpTools,
+            mcpToolCallHandler: prototype.mcpToolCallHandler,
+            extensionPromptFragments: prototype.extensionPromptFragments,
+            extensionToolSpecs: prototype.extensionToolSpecs,
+            extensionRegisteredToolExecutor: prototype.extensionRegisteredToolExecutor,
+            extensionApprovalReviewer: prototype.extensionApprovalReviewer
+        )
+        let task = Task { [weak self, startGate] in
+            await startGate.wait()
+            guard !Task.isCancelled else {
+                return
+            }
+            guard let self else {
+                return
+            }
+            await self.runTurn(submission)
+        }
+        guard await state.startPendingWorkTurnIfIdle(threadID: threadID, turnID: turnID, task: task) else {
+            task.cancel()
+            await startGate.open()
+            return false
+        }
+        await startGate.open()
+        return true
     }
 
     private func prepareTurn(_ submission: AppServerLiveRuntimeSubmission) async throws -> PreparedLiveTurn {
@@ -520,7 +577,8 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             )
         )
         input.append(contentsOf: responseHistory)
-        var newInputItems: [ResponseItem] = []
+        let queuedInputItems = await state.takeQueuedResponseItemsForNextTurn(threadID: submission.threadID)
+        var newInputItems: [ResponseItem] = queuedInputItems.map { $0.responseItem() }
         if !turnInput.items.isEmpty {
             newInputItems.append(ResponseInputItem(userInputs: turnInput.items).responseItem())
         }
@@ -1411,6 +1469,7 @@ private actor AppServerLiveRuntimeState {
     private var dynamicToolContinuations: [String: PendingDynamicTool] = [:]
     private var sessionGrantedPermissionProfiles: [String: RequestPermissionProfile] = [:]
     private var runtimeConfigSnapshots: [String: ConfigValue] = [:]
+    private var idlePendingInput: [String: [ResponseInputItem]] = [:]
     private var emittedAbortKeys: Set<String> = []
 
     func setEventSink(_ sink: AppServerRuntimeEventSink?) {
@@ -1424,6 +1483,18 @@ private actor AppServerLiveRuntimeState {
 
     func startTurnIfIdle(threadID: String, turnID: String, task: Task<Void, Never>) -> Bool {
         guard runningTurns[threadID] == nil,
+              userInputContinuations.isEmpty,
+              dynamicToolContinuations.isEmpty
+        else {
+            return false
+        }
+        runningTurns[threadID] = RunningTurn(turnID: turnID, task: task)
+        return true
+    }
+
+    func startPendingWorkTurnIfIdle(threadID: String, turnID: String, task: Task<Void, Never>) -> Bool {
+        guard hasQueuedResponseItemsForNextTurn(threadID: threadID),
+              runningTurns[threadID] == nil,
               userInputContinuations.isEmpty,
               dynamicToolContinuations.isEmpty
         else {
@@ -1462,8 +1533,27 @@ private actor AppServerLiveRuntimeState {
 
     func canStartGoalContinuation(threadID: String) -> Bool {
         runningTurns[threadID] == nil
+            && !hasQueuedResponseItemsForNextTurn(threadID: threadID)
             && userInputContinuations.isEmpty
             && dynamicToolContinuations.isEmpty
+    }
+
+    func queueResponseItemsForNextTurn(threadID: String, items: [ResponseInputItem]) {
+        guard !items.isEmpty else {
+            return
+        }
+        idlePendingInput[threadID, default: []].append(contentsOf: items)
+    }
+
+    func takeQueuedResponseItemsForNextTurn(threadID: String) -> [ResponseInputItem] {
+        guard let items = idlePendingInput.removeValue(forKey: threadID) else {
+            return []
+        }
+        return items
+    }
+
+    private func hasQueuedResponseItemsForNextTurn(threadID: String) -> Bool {
+        idlePendingInput[threadID]?.isEmpty == false
     }
 
     func cancelThread(threadID: String) {
@@ -1473,6 +1563,7 @@ private actor AppServerLiveRuntimeState {
         }
         sessionGrantedPermissionProfiles.removeValue(forKey: threadID)
         runtimeConfigSnapshots.removeValue(forKey: threadID)
+        idlePendingInput.removeValue(forKey: threadID)
     }
 
     func cancelAll() {
@@ -1480,6 +1571,7 @@ private actor AppServerLiveRuntimeState {
         runningTurns.removeAll()
         sessionGrantedPermissionProfiles.removeAll()
         runtimeConfigSnapshots.removeAll()
+        idlePendingInput.removeAll()
         emittedAbortKeys.removeAll()
         for turn in turns {
             turn.task.cancel()
