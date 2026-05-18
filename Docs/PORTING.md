@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: extended the Rust runtime oracle harness around auth command
+  help dispatch. Swift now renders Rust-shaped `codex login --help` and
+  `codex logout --help` output instead of falling back to root CLI help,
+  preserving login's `status` child command and auth-option list.
 - 2026-05-18: extended the Rust runtime oracle harness around subcommand
   help dispatch. Swift now renders Rust-shaped `codex review --help` and
   `codex completion --help` output instead of falling back to root CLI help,

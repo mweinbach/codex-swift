@@ -216,6 +216,31 @@ final class CodexCLITests: XCTestCase {
         let completionHelp = try XCTUnwrap(stdout.first)
         XCTAssertTrue(completionHelp.hasPrefix("Generate shell completion scripts\n\nUsage: codex completion [OPTIONS] [SHELL]"))
         XCTAssertTrue(completionHelp.contains("[possible values: bash, elvish, fish, powershell, zsh]"))
+
+        stdout.removeAll()
+        let loginExitCode = await CodexCLI().runAsync(
+            arguments: ["login", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(loginExitCode, 0)
+        let loginHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(loginHelp.hasPrefix("Manage login\n\nUsage: codex login [OPTIONS] [COMMAND]"))
+        XCTAssertTrue(loginHelp.contains("  status  Show login status"))
+        XCTAssertTrue(loginHelp.contains("      --with-access-token"))
+
+        stdout.removeAll()
+        let logoutExitCode = await CodexCLI().runAsync(
+            arguments: ["logout", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(logoutExitCode, 0)
+        let logoutHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(logoutHelp.hasPrefix("Remove stored authentication credentials\n\nUsage: codex logout [OPTIONS]"))
+        XCTAssertTrue(logoutHelp.contains("      --disable <FEATURE>"))
     }
 
     func testCommandVersionTargetsSubcommandLikeRust() async {
