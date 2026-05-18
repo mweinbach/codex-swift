@@ -866,6 +866,11 @@ Recent upstream audit checkpoint:
   child-session attempts to close the root via either `/root` or the root thread
   id with Rust's `root is not a spawned agent` response, preserving the live
   thread-spawn edge and avoiding close events for the protected root.
+- 2026-05-18: Swift live app-server MultiAgentV2 path resolution now mirrors
+  Rust's live `AgentControl` registry after `close_agent`: explicitly closed
+  thread-spawn paths are no longer resolvable by task name for follow-on
+  `send_message` / `followup_task` / `close_agent` calls, while legacy
+  agent-path metadata without a persisted spawn edge remains visible.
 - 2026-05-18: Swift live app-server runtime state now tracks Rust-shaped
   `AgentStatus` transitions from turn lifecycle events instead of flattening
   live multi-agent tool status to `running`/`completed(null)`. MultiAgentV2

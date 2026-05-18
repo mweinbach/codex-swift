@@ -531,6 +531,27 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         )
     }
 
+    public func findOpenThreadByAgentPath(agentPath: AgentPath) async throws -> ThreadId? {
+        try oneThreadID(
+            query:
+            """
+            SELECT threads.id
+            FROM threads
+            LEFT JOIN thread_spawn_edges AS incoming_spawn_edge
+              ON incoming_spawn_edge.child_thread_id = threads.id
+            WHERE threads.agent_path = ?
+              AND (
+                incoming_spawn_edge.status IS NULL
+                OR incoming_spawn_edge.status = 'open'
+              )
+            ORDER BY threads.id
+            LIMIT 2
+            """,
+            bindings: [agentPath.description],
+            agentPath: agentPath
+        )
+    }
+
     public func findThreadSpawnRootAncestor(childThreadID: ThreadId) async throws -> ThreadId? {
         let ids = try threadIDs(
             query:

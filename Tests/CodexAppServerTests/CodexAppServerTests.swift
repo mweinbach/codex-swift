@@ -13323,6 +13323,18 @@ final class CodexAppServerTests: XCTestCase {
         let closedDescendants = try await stateStore.listThreadSpawnDescendants(rootThreadID: workerThreadID, statusFilter: .closed)
         XCTAssertEqual(closedDescendants, [nestedThreadID])
 
+        let sendToClosedPath = await executor.execute(.functionCall(
+            name: "send_message",
+            arguments: #"{"target":"worker","message":"stale path"}"#,
+            callID: "call-send-closed-path"
+        ))
+        let sendToClosedPayload = try Self.functionOutputPayload(sendToClosedPath, callID: "call-send-closed-path")
+        XCTAssertEqual(sendToClosedPayload.content, "live agent path `/root/worker` not found")
+        XCTAssertEqual(sendToClosedPayload.success, false)
+        XCTAssertEqual(sendToClosedPath?.runtimeEvents ?? [], [])
+        let queuedAfterClosedPath = await capture.queuedCommunications(threadID: workerThreadID.description)
+        XCTAssertEqual(queuedAfterClosedPath, [])
+
         let runtimeEvents = try XCTUnwrap(close?.runtimeEvents)
         XCTAssertEqual(runtimeEvents.count, 2)
         guard case let .collabCloseBegin(begin) = runtimeEvents[0] else {

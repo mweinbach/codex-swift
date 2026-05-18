@@ -555,7 +555,7 @@ struct AppServerLiveMultiAgentToolExecutor {
             let metadata = try await stateStore.getThread(threadID: threadID)
             return ResolvedLiveAgentTarget(threadID: threadID, metadata: metadata, agentPathOverride: .root)
         }
-        guard let threadID = try await stateStore.findThreadByAgentPath(agentPath: agentPath) else {
+        guard let threadID = try await stateStore.findOpenThreadByAgentPath(agentPath: agentPath) else {
             throw AppServerLiveMultiAgentToolError(message: "live agent path `\(agentPath)` not found")
         }
         let metadata = try await stateStore.getThread(threadID: threadID)
