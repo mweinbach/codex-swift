@@ -63,6 +63,18 @@ final class RuntimeOracleParityTests: XCTestCase {
         XCTAssertEqual(normalizedHelp(swift.stdout), normalizedHelp(rust.stdout))
     }
 
+    func testLoginChildHelpMatchesRustOracleModuloWhitespace() throws {
+        let oracle = try RuntimeOracle.required()
+
+        let rust = try oracle.run(.rust, arguments: ["login", "status", "--help"])
+        let swift = try oracle.run(.swift, arguments: ["login", "status", "--help"])
+
+        XCTAssertEqual(rust.exitCode, 0, rust.stderr)
+        XCTAssertEqual(swift.exitCode, 0, swift.stderr)
+
+        XCTAssertEqual(normalizedHelp(swift.stdout), normalizedHelp(rust.stdout))
+    }
+
     func testLogoutHelpMatchesRustOracleModuloWhitespace() throws {
         let oracle = try RuntimeOracle.required()
 
@@ -376,6 +388,26 @@ final class RuntimeOracleParityTests: XCTestCase {
         XCTAssertEqual(swift.exitCode, 0, swift.stderr)
 
         XCTAssertEqual(normalizedHelp(swift.stdout), normalizedHelp(rust.stdout))
+    }
+
+    func testCloudChildHelpMatchesRustOracleModuloWhitespace() throws {
+        let oracle = try RuntimeOracle.required()
+        let commands = [
+            ["cloud", "exec", "--help"],
+            ["cloud", "status", "--help"],
+            ["cloud", "list", "--help"],
+            ["cloud", "apply", "--help"],
+            ["cloud", "diff", "--help"]
+        ]
+
+        for arguments in commands {
+            let rust = try oracle.run(.rust, arguments: arguments)
+            let swift = try oracle.run(.swift, arguments: arguments)
+
+            XCTAssertEqual(rust.exitCode, 0, rust.stderr)
+            XCTAssertEqual(swift.exitCode, 0, swift.stderr)
+            XCTAssertEqual(normalizedHelp(swift.stdout), normalizedHelp(rust.stdout), arguments.joined(separator: " "))
+        }
     }
 
     func testResponsesAPIProxyHelpMatchesRustOracleModuloWhitespace() throws {

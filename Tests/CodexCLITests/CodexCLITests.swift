@@ -231,6 +231,18 @@ final class CodexCLITests: XCTestCase {
         XCTAssertTrue(loginHelp.contains("      --with-access-token"))
 
         stdout.removeAll()
+        let loginStatusExitCode = await CodexCLI().runAsync(
+            arguments: ["login", "status", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(loginStatusExitCode, 0)
+        let loginStatusHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(loginStatusHelp.hasPrefix("Show login status\n\nUsage: codex login status [OPTIONS]"))
+        XCTAssertTrue(loginStatusHelp.contains("      --disable <FEATURE>"))
+
+        stdout.removeAll()
         let logoutExitCode = await CodexCLI().runAsync(
             arguments: ["logout", "--help"],
             stdout: { stdout.append($0) },
@@ -508,6 +520,18 @@ final class CodexCLITests: XCTestCase {
         let cloudHelp = try XCTUnwrap(stdout.first)
         XCTAssertTrue(cloudHelp.hasPrefix("[EXPERIMENTAL] Browse tasks from Codex Cloud and apply changes locally\n\nUsage: codex cloud [OPTIONS] [COMMAND]"))
         XCTAssertTrue(cloudHelp.contains("  diff    Show the unified diff for a Codex Cloud task"))
+
+        stdout.removeAll()
+        let cloudExecExitCode = await CodexCLI().runAsync(
+            arguments: ["cloud", "exec", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(cloudExecExitCode, 0)
+        let cloudExecHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(cloudExecHelp.hasPrefix("Submit a new Codex Cloud task without launching the TUI\n\nUsage: codex cloud exec [OPTIONS] --env <ENV_ID> [QUERY]"))
+        XCTAssertTrue(cloudExecHelp.contains("      --attempts <ATTEMPTS>"))
 
         stdout.removeAll()
         let responsesAPIProxyExitCode = await CodexCLI().runAsync(

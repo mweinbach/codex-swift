@@ -919,6 +919,9 @@ public struct CodexCLI: Sendable {
         case "review":
             return renderReviewHelp()
         case "login":
+            if let childHelp = renderLoginChildHelp(arguments: arguments) {
+                return childHelp
+            }
             return renderLoginHelp()
         case "logout":
             return renderLogoutHelp()
@@ -965,6 +968,9 @@ public struct CodexCLI: Sendable {
         case "fork":
             return renderForkHelp()
         case "cloud":
+            if let childHelp = renderCloudChildHelp(arguments: arguments) {
+                return childHelp
+            }
             return renderCloudHelp()
         case "responses-api-proxy":
             return renderResponsesAPIProxyHelp()
@@ -1437,6 +1443,36 @@ public struct CodexCLI: Sendable {
 
               --device-auth
 
+
+          -h, --help
+                  Print help (see a summary with '-h')
+        """
+    }
+
+    private func renderLoginChildHelp(arguments: [String]) -> String? {
+        guard arguments.first == "status" else {
+            return nil
+        }
+
+        return """
+        Show login status
+
+        Usage: codex login status [OPTIONS]
+
+        Options:
+          -c, --config <key=value>
+                  Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                  Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                  as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                  Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                  shell_environment_policy.inherit=all`
+
+              --enable <FEATURE>
+                  Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+              --disable <FEATURE>
+                  Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
 
           -h, --help
                   Print help (see a summary with '-h')
@@ -2904,6 +2940,184 @@ public struct CodexCLI: Sendable {
           -V, --version
                   Print version
         """
+    }
+
+    private func renderCloudChildHelp(arguments: [String]) -> String? {
+        guard let child = arguments.first, child != "--help", child != "-h" else {
+            return nil
+        }
+
+        switch child {
+        case "exec":
+            return """
+            Submit a new Codex Cloud task without launching the TUI
+
+            Usage: codex cloud exec [OPTIONS] --env <ENV_ID> [QUERY]
+
+            Arguments:
+              [QUERY]
+                      Task prompt to run in Codex Cloud
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+                  --env <ENV_ID>
+                      Target environment identifier (see `codex cloud` to browse)
+
+                  --attempts <ATTEMPTS>
+                      Number of assistant attempts (best-of-N)
+
+                      [default: 1]
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --branch <BRANCH>
+                      Git branch to run in Codex Cloud (defaults to current branch)
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              -h, --help
+                      Print help (see a summary with '-h')
+            """
+        case "status":
+            return """
+            Show the status of a Codex Cloud task
+
+            Usage: codex cloud status [OPTIONS] <TASK_ID>
+
+            Arguments:
+              <TASK_ID>
+                      Codex Cloud task identifier to inspect
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              -h, --help
+                      Print help (see a summary with '-h')
+            """
+        case "list":
+            return """
+            List Codex Cloud tasks
+
+            Usage: codex cloud list [OPTIONS]
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+                  --env <ENV_ID>
+                      Filter tasks by environment identifier
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --limit <N>
+                      Maximum number of tasks to return (1-20)
+
+                      [default: 20]
+
+                  --cursor <CURSOR>
+                      Pagination cursor returned by a previous call
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+                  --json
+                      Emit JSON instead of plain text
+
+              -h, --help
+                      Print help (see a summary with '-h')
+            """
+        case "apply":
+            return """
+            Apply the diff for a Codex Cloud task locally
+
+            Usage: codex cloud apply [OPTIONS] <TASK_ID>
+
+            Arguments:
+              <TASK_ID>
+                      Codex Cloud task identifier to apply
+
+            Options:
+                  --attempt <N>
+                      Attempt number to apply (1-based)
+
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              -h, --help
+                      Print help (see a summary with '-h')
+            """
+        case "diff":
+            return """
+            Show the unified diff for a Codex Cloud task
+
+            Usage: codex cloud diff [OPTIONS] <TASK_ID>
+
+            Arguments:
+              <TASK_ID>
+                      Codex Cloud task identifier to display
+
+            Options:
+                  --attempt <N>
+                      Attempt number to display (1-based)
+
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              -h, --help
+                      Print help (see a summary with '-h')
+            """
+        default:
+            return nil
+        }
     }
 
     private func renderResponsesAPIProxyHelp() -> String {
