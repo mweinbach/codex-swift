@@ -704,6 +704,12 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             environment: configuration.environment
         )
         settings.modelProvider = summary.modelProvider
+        if let latestEffort = summary.effort {
+            settings.modelReasoningEffort = latestEffort
+        }
+        if let latestReasoningSummary = summary.reasoningSummary {
+            settings.modelReasoningSummary = latestReasoningSummary
+        }
         if let requestedModel = turnInput.model {
             settings.model = requestedModel
         }
@@ -3013,6 +3019,8 @@ private struct LiveRolloutSummary {
     let approvalPolicy: AskForApproval?
     let sandboxPolicy: SandboxPolicy?
     let permissionProfile: PermissionProfile?
+    let effort: ReasoningEffort?
+    let reasoningSummary: ReasoningSummary?
 
     init(items: [RolloutRecordItem], defaultProvider: String) throws {
         var sessionMeta: SessionMeta?
@@ -3022,6 +3030,8 @@ private struct LiveRolloutSummary {
         var latestApprovalPolicy: AskForApproval?
         var latestSandboxPolicy: SandboxPolicy?
         var latestPermissionProfile: PermissionProfile?
+        var latestEffort: ReasoningEffort?
+        var latestReasoningSummary: ReasoningSummary?
         for item in items {
             switch item {
             case let .sessionMeta(line):
@@ -3035,6 +3045,8 @@ private struct LiveRolloutSummary {
                 latestApprovalPolicy = context.approvalPolicy
                 latestSandboxPolicy = context.sandboxPolicy
                 latestPermissionProfile = context.permissionProfile
+                latestEffort = context.effort
+                latestReasoningSummary = context.summary
             case .responseItem, .compacted, .eventMsg:
                 continue
             }
@@ -3052,6 +3064,8 @@ private struct LiveRolloutSummary {
         self.approvalPolicy = latestApprovalPolicy
         self.sandboxPolicy = latestSandboxPolicy
         self.permissionProfile = latestPermissionProfile
+        self.effort = latestEffort
+        self.reasoningSummary = latestReasoningSummary
     }
 }
 

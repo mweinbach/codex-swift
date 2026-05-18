@@ -5003,6 +5003,87 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(turnContext.effort, .high)
     }
 
+    func testLiveRuntimeTurnPreparationReusesRolloutReasoningSettingsLikeRustSpawnAgents() async throws {
+        let temp = try TemporaryDirectory()
+        try """
+        model = "gpt-test"
+        model_provider = "mock_provider"
+        model_reasoning_effort = "low"
+        model_reasoning_summary = "auto"
+
+        [model_providers.mock_provider]
+        name = "mock_provider"
+        base_url = "http://127.0.0.1:1/api/codex"
+        wire_api = "responses"
+        requires_openai_auth = false
+        """.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T13-15-00",
+            timestamp: "2025-01-05T13:15:00Z",
+            preview: "Saved child turn",
+            provider: "mock_provider",
+            cwd: temp.url.path
+        )
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        try appendRolloutItems(
+            to: rolloutPath,
+            timestamp: "2025-01-05T13:15:01Z",
+            items: [
+                .turnContext(TurnContextItem(
+                    cwd: temp.url.path,
+                    approvalPolicy: .unlessTrusted,
+                    sandboxPolicy: .dangerFullAccess,
+                    model: "gpt-test",
+                    effort: .high,
+                    summary: .detailed
+                )),
+            ]
+        )
+        let manager = AppServerLiveRuntimeManager(configuration: testConfiguration(
+            codexHome: temp.url,
+            requiresOpenAIAuth: false
+        ))
+        let capture = AppServerRuntimeEventCapture()
+        manager.setEventSink { threadID, turnID, event in
+            await capture.append(threadID: threadID, turnID: turnID, event: event)
+        }
+        defer {
+            manager.shutdown()
+        }
+        let op = Op.userInput(items: [.text("Continue with saved reasoning settings")])
+
+        let turnID = try manager.submitCoreOp(requestID: .integer(8), threadID: threadID, op: op)
+        _ = try manager.submitLiveRuntime(AppServerLiveRuntimeSubmission(
+            requestID: .integer(8),
+            threadID: threadID,
+            turnID: turnID,
+            op: op
+        ))
+        _ = try await capture.waitForEvents(count: 2)
+
+        guard case let .resumed(history) = try RolloutRecorder.getRolloutHistory(
+            path: URL(fileURLWithPath: rolloutPath)
+        ) else {
+            return XCTFail("expected resumed rollout history")
+        }
+        let turnContext = try XCTUnwrap(history.history.compactMap { item -> TurnContextItem? in
+            if case let .turnContext(context) = item {
+                return context
+            }
+            return nil
+        }.last)
+        XCTAssertEqual(turnContext.effort, .high)
+        XCTAssertEqual(turnContext.summary, .detailed)
+    }
+
     func testLiveRuntimeTurnPreparationReusesRolloutRuntimePermissionsLikeRustSpawnAgents() async throws {
         let temp = try TemporaryDirectory()
         try """
