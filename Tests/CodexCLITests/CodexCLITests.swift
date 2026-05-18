@@ -178,6 +178,10 @@ final class CodexCLITests: XCTestCase {
             CodexCLI().parseInvocation(arguments: ["help", "exec"]),
             .commandHelp(CommandSpec(name: "exec", aliases: ["e"], summary: "Run Codex non-interactively."), arguments: [])
         )
+        XCTAssertEqual(
+            CodexCLI().parseInvocation(arguments: ["help", "unknown"]),
+            .unrecognizedSubcommand("unknown")
+        )
 
         var stdout: [String] = []
         let exitCode = await CodexCLI().runAsync(
@@ -652,6 +656,30 @@ final class CodexCLITests: XCTestCase {
         let stdioToUDSHelp = try XCTUnwrap(stdout.first)
         XCTAssertTrue(stdioToUDSHelp.hasPrefix("Internal: relay stdio to a Unix domain socket\n\nUsage: codex stdio-to-uds [OPTIONS] <SOCKET_PATH>"))
         XCTAssertTrue(stdioToUDSHelp.contains("Path to the Unix domain socket to connect to"))
+
+        stdout.removeAll()
+        var stderr: [String] = []
+        let unknownHelpExitCode = await CodexCLI().runAsync(
+            arguments: ["help", "unknown"],
+            stdout: { stdout.append($0) },
+            stderr: { stderr.append($0) }
+        )
+
+        XCTAssertEqual(unknownHelpExitCode, 2)
+        XCTAssertTrue(stdout.isEmpty)
+        XCTAssertEqual(
+            stderr,
+            [
+                """
+                error: unrecognized subcommand 'unknown'
+
+                Usage: codex [OPTIONS] [PROMPT]
+                       codex [OPTIONS] <COMMAND> [ARGS]
+
+                For more information, try '--help'.
+                """
+            ]
+        )
     }
 
     func testCommandVersionTargetsSubcommandLikeRust() async {

@@ -556,6 +556,18 @@ final class RuntimeOracleParityTests: XCTestCase {
         XCTAssertEqual(normalizedCommandError(swift.stderr), normalizedCommandError(rust.stderr))
     }
 
+    func testUnknownHelpSubcommandMatchesRustOracle() throws {
+        let oracle = try RuntimeOracle.required()
+
+        let rust = try oracle.run(.rust, arguments: ["help", "unknown"])
+        let swift = try oracle.run(.swift, arguments: ["help", "unknown"])
+
+        XCTAssertEqual(rust.exitCode, 2, rust.stderr)
+        XCTAssertEqual(swift.exitCode, 2, swift.stderr)
+        XCTAssertEqual(swift.stdout, rust.stdout)
+        XCTAssertEqual(normalizedCommandError(swift.stderr), normalizedCommandError(rust.stderr))
+    }
+
     func testSubcommandVersionRejectionsMatchRustOracle() throws {
         let oracle = try RuntimeOracle.required()
         let commands = [

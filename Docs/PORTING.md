@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: tightened CLI explicit-help error parity for unknown help
+  targets. Swift now rejects `codex help <unknown>` with Rust's
+  unrecognized-subcommand error, root usage, empty stdout, and exit code 2
+  instead of rendering the root help surface.
 - 2026-05-18: tightened CLI subcommand version runtime-oracle parity for the
   interactive session picker commands. Swift now treats
   `codex resume --version` and `codex fork -V` as Rust-shaped
