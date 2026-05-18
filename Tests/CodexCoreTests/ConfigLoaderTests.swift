@@ -1743,6 +1743,79 @@ final class ConfigLoaderTests: XCTestCase {
         ])
     }
 
+    func testDeclaredAgentRoleConfigFileAllowsMissingDeveloperInstructionsLikeRust() throws {
+        let dir = try CoreTemporaryDirectory()
+        let agentsDir = dir.url.appendingPathComponent("agents", isDirectory: true)
+        try FileManager.default.createDirectory(at: agentsDir, withIntermediateDirectories: true)
+        let roleFile = agentsDir.appendingPathComponent("researcher.toml")
+        try """
+        model = "gpt-5.2"
+        model_reasoning_effort = "high"
+        """.write(to: roleFile, atomically: true, encoding: .utf8)
+        try """
+        [agents.researcher]
+        description = "Research role from config"
+        config_file = "./agents/researcher.toml"
+        """.write(to: dir.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(codexHome: dir.url, systemConfigFile: nil)
+
+        XCTAssertEqual(config.agentRoles, [
+            "researcher": AgentRoleConfig(
+                description: "Research role from config",
+                configFile: roleFile.path
+            )
+        ])
+    }
+
+    func testHigherPrecedenceStandaloneAgentRoleInheritsLowerDescriptionLikeRust() throws {
+        let codexHome = try CoreTemporaryDirectory()
+        let homeAgentsDir = codexHome.url.appendingPathComponent("agents", isDirectory: true)
+        try FileManager.default.createDirectory(at: homeAgentsDir, withIntermediateDirectories: true)
+        let homeRoleFile = homeAgentsDir.appendingPathComponent("researcher.toml")
+        try """
+        developer_instructions = "Research carefully"
+        model = "gpt-5.2"
+        """.write(to: homeRoleFile, atomically: true, encoding: .utf8)
+        try """
+        [agents.researcher]
+        description = "Research role from config"
+        config_file = "./agents/researcher.toml"
+        """.write(to: codexHome.url.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+        let repo = try CoreTemporaryDirectory()
+        try FileManager.default.createDirectory(at: repo.url.appendingPathComponent(".git"), withIntermediateDirectories: true)
+        let nestedCwd = repo.url
+            .appendingPathComponent("packages", isDirectory: true)
+            .appendingPathComponent("app", isDirectory: true)
+        try FileManager.default.createDirectory(at: nestedCwd, withIntermediateDirectories: true)
+        let standaloneAgentsDir = repo.url
+            .appendingPathComponent(".codex", isDirectory: true)
+            .appendingPathComponent("agents", isDirectory: true)
+        try FileManager.default.createDirectory(at: standaloneAgentsDir, withIntermediateDirectories: true)
+        let standaloneRoleFile = standaloneAgentsDir.appendingPathComponent("researcher.toml")
+        try """
+        name = "researcher"
+        nickname_candidates = ["Hypatia"]
+        developer_instructions = "Research from file"
+        model = "gpt-5-mini"
+        """.write(to: standaloneRoleFile, atomically: true, encoding: .utf8)
+
+        let config = try CodexConfigLoader.load(
+            codexHome: codexHome.url,
+            cwd: nestedCwd,
+            systemConfigFile: nil
+        )
+
+        XCTAssertEqual(config.agentRoles, [
+            "researcher": AgentRoleConfig(
+                description: "Research role from config",
+                configFile: standaloneRoleFile.path,
+                nicknameCandidates: ["Hypatia"]
+            )
+        ])
+    }
+
     func testAgentRoleConfigRejectsMissingFileLikeRust() throws {
         let dir = try CoreTemporaryDirectory()
         let missing = dir.url.appendingPathComponent("missing.toml")

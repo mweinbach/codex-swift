@@ -1245,6 +1245,13 @@ public enum CodexConfigLoader {
 
         if let cwd {
             let projectRootMarkers = try parsed.projectRootMarkersForDiscovery()
+            for dotCodex in projectDotCodexDirectories(
+                cwd: cwd,
+                projectRootMarkers: projectRootMarkers,
+                fileManager: fileManager
+            ) {
+                parsed.agentRoleDiscoveryDirs.append(dotCodex.appendingPathComponent("agents", isDirectory: true))
+            }
             for configFile in projectConfigFiles(
                 cwd: cwd,
                 projectRootMarkers: projectRootMarkers,
@@ -1697,6 +1704,20 @@ public enum CodexConfigLoader {
         projectRootMarkers: [String],
         fileManager: FileManager
     ) -> [URL] {
+        projectDotCodexDirectories(
+            cwd: cwd,
+            projectRootMarkers: projectRootMarkers,
+            fileManager: fileManager
+        ).map { dotCodex in
+            dotCodex.appendingPathComponent("config.toml", isDirectory: false)
+        }
+    }
+
+    private static func projectDotCodexDirectories(
+        cwd: URL,
+        projectRootMarkers: [String],
+        fileManager: FileManager
+    ) -> [URL] {
         let cwdPath = cwd.standardizedFileURL.path
         let cwdURL = URL(fileURLWithPath: cwdPath, isDirectory: true)
         let ancestors = ancestorDirectories(from: cwdURL)
@@ -1726,7 +1747,7 @@ public enum CodexConfigLoader {
             else {
                 return nil
             }
-            return dotCodex.appendingPathComponent("config.toml", isDirectory: false)
+            return dotCodex
         }
     }
 
@@ -5952,6 +5973,7 @@ private struct ParsedCodexConfigToml {
             configs[roleName] = config
         }
 
+        var discoveredRoleAgentsDirByName: [String: String] = [:]
         for roleFile in discoveredAgentRoleFiles(in: discoveryDirs) where !declaredConfigFiles.contains(roleFile.url.path) {
             let fileMetadata: (name: String?, config: AgentRoleConfig)
             do {
@@ -5961,16 +5983,33 @@ private struct ParsedCodexConfigToml {
                 continue
             }
             guard let roleName = fileMetadata.name else { continue }
-            guard configs[roleName] == nil else {
+            let agentsDirPath = roleFile.agentsDir.path
+            if discoveredRoleAgentsDirByName[roleName] == agentsDirPath {
                 appendAgentRoleWarning(
                     CodexConfigLoadError.invalidConfig(
-                        "duplicate agent role name `\(roleName)` discovered in \(roleFile.agentsDir.path)"
+                        "duplicate agent role name `\(roleName)` discovered in \(agentsDirPath)"
                     ),
                     to: &startupWarnings
                 )
                 continue
             }
-            guard fileMetadata.config.description != nil else {
+
+            let roleConfig: AgentRoleConfig
+            if let existingConfig = configs[roleName] {
+                roleConfig = agentRoleConfig(
+                    fileMetadata.config,
+                    overridingMissingFieldsWith: existingConfig,
+                    configFile: roleFile.url.path
+                )
+            } else {
+                roleConfig = AgentRoleConfig(
+                    description: fileMetadata.config.description,
+                    configFile: roleFile.url.path,
+                    nicknameCandidates: fileMetadata.config.nicknameCandidates
+                )
+            }
+
+            guard roleConfig.description != nil else {
                 appendAgentRoleWarning(
                     CodexConfigLoadError.invalidConfig(
                         "agent role `\(roleName)` must define a description"
@@ -5979,13 +6018,22 @@ private struct ParsedCodexConfigToml {
                 )
                 continue
             }
-            configs[roleName] = AgentRoleConfig(
-                description: fileMetadata.config.description,
-                configFile: roleFile.url.path,
-                nicknameCandidates: fileMetadata.config.nicknameCandidates
-            )
+            configs[roleName] = roleConfig
+            discoveredRoleAgentsDirByName[roleName] = agentsDirPath
         }
         return configs
+    }
+
+    private static func agentRoleConfig(
+        _ config: AgentRoleConfig,
+        overridingMissingFieldsWith fallback: AgentRoleConfig,
+        configFile: String
+    ) -> AgentRoleConfig {
+        AgentRoleConfig(
+            description: config.description ?? fallback.description,
+            configFile: configFile,
+            nicknameCandidates: config.nicknameCandidates ?? fallback.nicknameCandidates
+        )
     }
 
     private static func appendAgentRoleWarning(_ error: Error, to startupWarnings: inout [String]) {
