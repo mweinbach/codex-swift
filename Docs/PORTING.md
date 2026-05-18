@@ -227,6 +227,12 @@ Recent upstream audit checkpoint:
   transport errors, durations, arguments, and MCP app resource URIs. The
   app-server item result follows Rust's v2 projection by omitting the lower-level
   MCP `isError` field and carrying failure through `status`.
+- 2026-05-18: matched Rust's blank-argument MCP tool-call parsing from
+  `codex-rs/core/src/mcp_tool_call.rs`. Swift's shared
+  `NonInteractiveExec.ToolRouter` now treats whitespace-only MCP function-call
+  arguments as omitted arguments, preserving the no-argument invocation shape
+  through the handler request and lifecycle events instead of failing JSON
+  decoding before the call can run.
 - 2026-05-17: matched Rust's live app-server pending request status release
   from `codex-rs/app-server/src/thread_status.rs` and
   `codex-rs/app-server/src/bespoke_event_handling.rs`. Swift now drops

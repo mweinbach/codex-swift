@@ -27312,15 +27312,18 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             return nil
         }
         return { [configuration] request in
-            let argumentsObject = CodexAppServer.jsonObject(from: request.arguments)
+            let argumentsObject = request.arguments.map(CodexAppServer.jsonObject(from:))
             do {
+                var params: [String: Any] = [
+                    "threadId": threadID,
+                    "server": request.server,
+                    "tool": request.tool
+                ]
+                if let argumentsObject {
+                    params["arguments"] = argumentsObject
+                }
                 let result = try CodexAppServer.mcpServerToolCallResult(
-                    params: [
-                        "threadId": threadID,
-                        "server": request.server,
-                        "tool": request.tool,
-                        "arguments": argumentsObject
-                    ],
+                    params: params,
                     configuration: configuration
                 )
                 let data = try JSONSerialization.data(withJSONObject: result)

@@ -428,6 +428,60 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(end.result, .ok(response))
     }
 
+    func testMcpToolCallTreatsBlankArgumentsAsNoArgumentsLikeRust() async throws {
+        let item = ResponseItem.functionCall(
+            name: "lookup",
+            namespace: "mcp__docs__",
+            arguments: " \n\t ",
+            callID: "mcp-call"
+        )
+        let toolInfo = McpToolInfo(
+            serverName: "docs",
+            tool: McpTool(
+                name: "lookup",
+                inputSchema: McpToolInputSchema(rawValue: .object(["type": .string("object")]))
+            )
+        )
+        let requestCapture = McpToolCallRequestCapture()
+        let response = McpCallToolResult(content: [.text(McpTextContent(text: "found"))])
+
+        let result = await NonInteractiveExec.executeFunctionCallWithHooks(
+            item,
+            handlers: [],
+            conversationID: ConversationId(),
+            turnID: "turn-1",
+            cwd: FileManager.default.temporaryDirectory,
+            model: "gpt-test",
+            approvalPolicy: .never,
+            sandboxPolicy: .newWorkspaceWritePolicy(),
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            mcpToolInfos: [toolInfo],
+            mcpToolCallHandler: { request in
+                requestCapture.set(request)
+                return .success(response)
+            }
+        )
+
+        let request = try XCTUnwrap(requestCapture.get())
+        XCTAssertNil(request.arguments)
+        guard case let .functionCallOutput(callID, payload) = result.output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "mcp-call")
+        XCTAssertEqual(payload.success, true)
+        XCTAssertEqual(result.runtimeEvents.count, 2)
+        guard case let .mcpToolCallBegin(begin) = result.runtimeEvents[0] else {
+            return XCTFail("expected MCP begin event")
+        }
+        XCTAssertNil(begin.invocation.arguments)
+        guard case let .mcpToolCallEnd(end) = result.runtimeEvents[1] else {
+            return XCTFail("expected MCP end event")
+        }
+        XCTAssertNil(end.invocation.arguments)
+        XCTAssertEqual(end.result, .ok(response))
+    }
+
     func testGrantedRequestPermissionsApplyToLaterShellCommandLikeRust() async throws {
         let workspace = try NonInteractiveExecTemporaryDirectory()
         let outside = try NonInteractiveExecTemporaryDirectory()

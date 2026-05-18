@@ -432,14 +432,14 @@ public enum NonInteractiveExec {
         public let turnID: String
         public let server: String
         public let tool: String
-        public let arguments: JSONValue
+        public let arguments: JSONValue?
 
         public init(
             callID: String,
             turnID: String,
             server: String,
             tool: String,
-            arguments: JSONValue
+            arguments: JSONValue?
         ) {
             self.callID = callID
             self.turnID = turnID
@@ -2565,11 +2565,16 @@ public enum NonInteractiveExec {
         arguments: String,
         handler: McpToolCallHandler
     ) async throws -> ExecutedFunctionCall {
-        let argumentsValue = try JSONDecoder().decode(JSONValue.self, from: Data(arguments.utf8))
+        let argumentsValue: JSONValue?
+        if arguments.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            argumentsValue = nil
+        } else {
+            argumentsValue = try JSONDecoder().decode(JSONValue.self, from: Data(arguments.utf8))
+        }
         let invocation = McpInvocation(
             server: toolInfo.serverName,
             tool: toolInfo.tool.name,
-            arguments: argumentsValue == .null ? nil : argumentsValue
+            arguments: argumentsValue
         )
         let startedAt = Date()
         let begin = EventMessage.mcpToolCallBegin(McpToolCallBeginEvent(
