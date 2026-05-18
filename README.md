@@ -87,6 +87,8 @@ scripts/check-runtime-oracle-parity.sh
 Set `CODEX_RUST_BINARY` or `SWIFT_CODEX_BINARY` to override either executable.
 The ordinary `swift test` path skips these tests unless
 `CODEX_RUN_RUST_ORACLE_TESTS=1` is set.
+Current scenarios cover top-level CLI help drift, app-server `initialize`, and
+an offline no-tools `codex exec --json` prompt using a local Responses fixture.
 
 ## Docs
 

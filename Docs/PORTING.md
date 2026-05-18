@@ -20,6 +20,11 @@ Recent upstream audit checkpoint:
   normalizing dynamic home/user-agent fields; top-level CLI help is wired into
   the same harness as an expected-failing oracle until Swift help is ported to
   the Rust Clap-shaped output.
+- 2026-05-18: extended the runtime oracle harness to cover a full
+  non-interactive no-tools Responses turn. The test now runs Rust and Swift
+  `codex exec --json` against the same local Responses fixture server, uses
+  isolated home/cwd directories, normalizes the dynamic thread id, and asserts
+  matching JSONL thread/turn/item completion output.
 - 2026-05-18: matched Rust's live MCP tool-call item lifecycle projection from
   `codex-rs/core/src/mcp_tool_call.rs`. Swift app-server runtime
   `mcp_tool_call_begin` and `mcp_tool_call_end` events now emit
