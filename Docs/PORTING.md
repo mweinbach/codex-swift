@@ -239,6 +239,11 @@ Recent upstream audit checkpoint:
   `isError: true` output with `err: ...`, does not call the MCP handler, and
   emits no begin/end lifecycle events. Explicit JSON `null` remains a present
   argument value, matching Rust's `Some(Value::Null)` path.
+- 2026-05-18: verified live app-server Responses request metadata forwarding
+  against the Rust turn metadata path. Swift live runtime submissions now have
+  test coverage proving `x-codex-turn-metadata` reaches the outgoing Responses
+  HTTP headers and the request `client_metadata` map while preserving
+  per-turn `responsesapiClientMetadata` entries in the request body.
 - 2026-05-17: matched Rust's live app-server pending request status release
   from `codex-rs/app-server/src/thread_status.rs` and
   `codex-rs/app-server/src/bespoke_event_handling.rs`. Swift now drops
@@ -3238,7 +3243,7 @@ Recent upstream audit checkpoint:
 - Pure request models from `codex-rs/codex-api/src/common.rs` and `codex-rs/codex-api/src/requests/responses.rs`
   - Responses API reasoning/text controls, output-schema text formatting, request body serialization including Rust's empty-instructions omission, client metadata serialization, trace-context client-metadata merging, conversation/subagent/turn-metadata headers, and Azure store/id request assembly
 - `codex-rs/core/src/turn_metadata.rs`
-  - turn metadata header state now preserves Rust's base session/thread/turn/source/sandbox JSON shape, derives the sandbox tag from permission profiles/platform sandbox availability/Windows level/managed-network enforcement like Rust, preserves explicit subagent thread sources without adding the removed `session_source`, ASCII-only header serialization, authoritative turn-start timestamp insertion, Responses API client-metadata merging without replacing reserved fields, MCP request metadata enrichment with model and optional reasoning effort, and async per-turn git enrichment without replacing the base turn fields. The one-shot `buildTurnMetadataHeader` path now mirrors Rust workspace git metadata for sandbox/memory-style requests, including repo-root workspace keys, remote URL maps, latest commit hash, clean/dirty state, and nil outside non-git directories without sandbox metadata. `buildTurnMetadataHeaderWithIdentity` also preserves supplied session/thread/source/turn IDs outside git workspaces like Rust's standalone identity helper. Live app-server request/header forwarding remains pending with the broader running-thread runtime.
+  - turn metadata header state now preserves Rust's base session/thread/turn/source/sandbox JSON shape, derives the sandbox tag from permission profiles/platform sandbox availability/Windows level/managed-network enforcement like Rust, preserves explicit subagent thread sources without adding the removed `session_source`, ASCII-only header serialization, authoritative turn-start timestamp insertion, Responses API client-metadata merging without replacing reserved fields, MCP request metadata enrichment with model and optional reasoning effort, and async per-turn git enrichment without replacing the base turn fields. The one-shot `buildTurnMetadataHeader` path now mirrors Rust workspace git metadata for sandbox/memory-style requests, including repo-root workspace keys, remote URL maps, latest commit hash, clean/dirty state, and nil outside non-git directories without sandbox metadata. `buildTurnMetadataHeaderWithIdentity` also preserves supplied session/thread/source/turn IDs outside git workspaces like Rust's standalone identity helper. Live app-server Responses request/header forwarding is now covered by runtime-level request capture; broader running-thread error/retry lifecycle remains pending.
 - `codex-rs/codex-api/src/requests/chat.rs`
   - Chat Completions request body/header assembly, response-item to chat-message conversion, image/tool output mapping, assistant reasoning attachment, and duplicate assistant text suppression
 - Pure compaction endpoint helpers from `codex-rs/codex-api/src/common.rs` and `codex-rs/codex-api/src/endpoint/compact.rs`

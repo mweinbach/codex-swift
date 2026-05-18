@@ -5247,6 +5247,67 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(text["verbosity"] as? String, "high")
     }
 
+    func testLiveRuntimeForwardsTurnMetadataToResponsesRequestLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let server = try AppServerResponsesRequestCaptureServer()
+        defer {
+            server.stop()
+        }
+        try """
+        model = "gpt-5.5"
+        model_provider = "mock_provider"
+
+        [model_providers.mock_provider]
+        name = "mock_provider"
+        base_url = "\(server.baseURL)"
+        wire_api = "responses"
+        requires_openai_auth = false
+        """.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T13-32-00",
+            timestamp: "2025-01-05T13:32:00Z",
+            preview: "Saved user message",
+            provider: "mock_provider",
+            cwd: temp.url.path
+        )
+        let manager = AppServerLiveRuntimeManager(configuration: testConfiguration(
+            codexHome: temp.url,
+            requiresOpenAIAuth: false
+        ))
+        defer {
+            manager.shutdown()
+        }
+        let turnMetadata = #"{"session_id":"\#(threadID)","thread_id":"\#(threadID)","turn_id":"turn-live","fiber_run_id":"fiber-header","sandbox":"workspace-write"}"#
+        let op = Op.userInput(
+            items: [.text("Forward metadata")],
+            responsesAPIClientMetadata: [
+                "fiber_run_id": "fiber-body",
+                "extra": "kept"
+            ]
+        )
+
+        _ = try manager.submitLiveRuntime(AppServerLiveRuntimeSubmission(
+            requestID: .integer(9),
+            threadID: threadID,
+            turnID: "turn-live",
+            op: op,
+            turnMetadataHeader: turnMetadata
+        ))
+
+        let captured = try server.waitForRequest()
+        let request = try XCTUnwrap(JSONSerialization.jsonObject(with: captured.body) as? [String: Any])
+        let metadata = try XCTUnwrap(request["client_metadata"] as? [String: String])
+        XCTAssertEqual(captured.headers[CodexRequestHeaders.turnMetadataHeaderName], turnMetadata)
+        XCTAssertEqual(metadata[CodexRequestHeaders.turnMetadataHeaderName], turnMetadata)
+        XCTAssertEqual(metadata["fiber_run_id"], "fiber-body")
+        XCTAssertEqual(metadata["extra"], "kept")
+    }
+
     func testLiveRuntimeEnvironmentContextIncludesOpenSubagentsLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let server = try AppServerResponsesRequestCaptureServer()
@@ -40165,7 +40226,7 @@ private final class AppServerResponsesRequestCaptureServer: @unchecked Sendable 
     private let responseSemaphore: DispatchSemaphore?
     private let lock = NSLock()
     private var stopped = false
-    private var requestBody: Data?
+    private var request: CapturedHTTPRequest?
 
     init(blockResponseUntilReleased: Bool = false) throws {
         let listener = try Self.makeListeningSocket()
@@ -40178,14 +40239,18 @@ private final class AppServerResponsesRequestCaptureServer: @unchecked Sendable 
     }
 
     func waitForRequestBody() throws -> Data {
+        try waitForRequest().body
+    }
+
+    func waitForRequest() throws -> CapturedHTTPRequest {
         guard bodySemaphore.wait(timeout: .now() + 5) == .success else {
             throw AppServerResponsesRequestCaptureServerError.timeout
         }
         return try lock.withLock {
-            guard let requestBody else {
+            guard let request else {
                 throw AppServerResponsesRequestCaptureServerError.missingBody
             }
-            return requestBody
+            return request
         }
     }
 
@@ -40221,7 +40286,7 @@ private final class AppServerResponsesRequestCaptureServer: @unchecked Sendable 
         do {
             let request = try Self.readHTTPRequest(fd: clientFD)
             lock.withLock {
-                requestBody = request.body
+                self.request = request
             }
             bodySemaphore.signal()
             responseSemaphore?.wait()
@@ -40286,9 +40351,18 @@ private final class AppServerResponsesRequestCaptureServer: @unchecked Sendable 
             throw AppServerResponsesRequestCaptureServerError.invalidRequest
         }
         let headerEnd = range.upperBound
-        let headers = String(decoding: data[..<range.lowerBound], as: UTF8.self)
-        let contentLength = headers
-            .components(separatedBy: "\r\n")
+        let rawHeaders = String(decoding: data[..<range.lowerBound], as: UTF8.self)
+        let headerLines = rawHeaders.components(separatedBy: "\r\n")
+        var headers: [String: String] = [:]
+        for line in headerLines.dropFirst() {
+            guard let separator = line.firstIndex(of: ":") else {
+                continue
+            }
+            let name = String(line[..<separator]).lowercased()
+            let value = line[line.index(after: separator)...].trimmingCharacters(in: .whitespacesAndNewlines)
+            headers[name] = value
+        }
+        let contentLength = headerLines
             .first { $0.lowercased().hasPrefix("content-length:") }
             .flatMap { line -> Int? in
                 guard let value = line.split(separator: ":", maxSplits: 1).last else {
@@ -40299,7 +40373,10 @@ private final class AppServerResponsesRequestCaptureServer: @unchecked Sendable 
         while data.count < headerEnd + contentLength {
             data.append(try readChunk(fd: fd))
         }
-        return CapturedHTTPRequest(body: Data(data[headerEnd..<headerEnd + contentLength]))
+        return CapturedHTTPRequest(
+            headers: headers,
+            body: Data(data[headerEnd..<headerEnd + contentLength])
+        )
     }
 
     private static func readUntil(fd: Int32, contains marker: Data) throws -> Data {
@@ -40364,7 +40441,8 @@ private final class AppServerResponsesRequestCaptureServer: @unchecked Sendable 
         return response
     }
 
-    private struct CapturedHTTPRequest {
+    struct CapturedHTTPRequest {
+        let headers: [String: String]
         let body: Data
     }
 }
