@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: tightened `exec-server` CLI parse-failure parity for command-local
+  invalid forms. Swift now emits Rust/Clap exit-2 diagnostics for missing
+  exec-server option values, duplicate single-value options, `--listen` /
+  `--remote` conflicts, missing remote executor requirements, and unexpected
+  arguments before invoking the executable runtime.
 - 2026-05-18: tightened Codex Cloud CLI parse-failure parity for additional
   invalid forms. Swift now emits Rust/Clap exit-2 diagnostics for unknown cloud
   subcommands, duplicate cloud options, invalid `--attempt` / `--attempts` /

@@ -6828,7 +6828,10 @@ public struct CodexCLI: Sendable {
 
         func markSingleValueOption(_ option: String) -> ParseResult<Void> {
             guard seenSingleValueOptions.insert(option).inserted else {
-                return .failure("codex-swift: duplicate option for command 'exec-server': \(option)", 64)
+                return clapDuplicateArgument(
+                    execServerOptionDisplayName(option),
+                    usage: "codex exec-server [OPTIONS]"
+                )
             }
             return .success(())
         }
@@ -6844,18 +6847,29 @@ public struct CodexCLI: Sendable {
                     return .failure(message, exitCode)
                 }
                 guard index + 1 < arguments.count else {
-                    return .failure("codex-swift: missing value for \(argument)", 64)
+                    return clapMissingValue(
+                        option: argument,
+                        valueDisplay: execServerOptionValueDisplay(argument)
+                    )
                 }
                 let value = arguments[index + 1]
                 switch argument {
                 case "--listen":
                     guard remote == nil else {
-                        return .failure("codex-swift: argument conflict for command 'exec-server': --listen conflicts with --remote", 64)
+                        return clapArgumentConflict(
+                            "--listen <URL>",
+                            conflictingArgument: "--remote <URL>",
+                            usage: "codex exec-server --listen <URL>"
+                        )
                     }
                     listen = value
                 case "--remote":
                     guard listen == nil else {
-                        return .failure("codex-swift: argument conflict for command 'exec-server': --remote conflicts with --listen", 64)
+                        return clapArgumentConflict(
+                            "--listen <URL>",
+                            conflictingArgument: "--remote <URL>",
+                            usage: "codex exec-server --listen <URL>"
+                        )
                     }
                     remote = value
                 case "--executor-id":
@@ -6875,7 +6889,11 @@ public struct CodexCLI: Sendable {
                         return .failure(message, exitCode)
                     }
                     guard remote == nil else {
-                        return .failure("codex-swift: argument conflict for command 'exec-server': --listen conflicts with --remote", 64)
+                        return clapArgumentConflict(
+                            "--listen <URL>",
+                            conflictingArgument: "--remote <URL>",
+                            usage: "codex exec-server --listen <URL>"
+                        )
                     }
                     listen = String(argument.dropFirst("--listen=".count))
                     index += 1
@@ -6887,7 +6905,11 @@ public struct CodexCLI: Sendable {
                         return .failure(message, exitCode)
                     }
                     guard listen == nil else {
-                        return .failure("codex-swift: argument conflict for command 'exec-server': --remote conflicts with --listen", 64)
+                        return clapArgumentConflict(
+                            "--listen <URL>",
+                            conflictingArgument: "--remote <URL>",
+                            usage: "codex exec-server --listen <URL>"
+                        )
                     }
                     remote = String(argument.dropFirst("--remote=".count))
                     index += 1
@@ -6913,16 +6935,19 @@ public struct CodexCLI: Sendable {
                     useAgentIdentityAuth = true
                     index += 1
                 } else if argument.hasPrefix("-") {
-                    return .failure("codex-swift: unsupported option for command 'exec-server': \(argument)", 64)
+                    return clapUnexpectedArgument(argument, usage: "codex exec-server [OPTIONS]")
                 } else {
-                    return .failure("codex-swift: unexpected argument for command 'exec-server': \(argument)", 64)
+                    return clapUnexpectedArgument(argument, usage: "codex exec-server [OPTIONS]")
                 }
             }
         }
 
         if let remote {
             guard let executorID else {
-                return .failure("codex-swift: --executor-id is required when --remote is set", 64)
+                return clapMissingRequired(
+                    ["--executor-id <ID>"],
+                    usage: "codex exec-server --executor-id <ID> --remote <URL>"
+                )
             }
             let configOverrides: CliConfigOverrides
             switch parseConfigOverrides(from: rootArguments) {
@@ -6944,13 +6969,30 @@ public struct CodexCLI: Sendable {
         }
 
         if useAgentIdentityAuth {
-            return .failure(
-                "codex-swift: --use-agent-identity-auth requires --remote",
-                64
+            return clapMissingRequired(
+                ["--executor-id <ID>", "--remote <URL>"],
+                usage: "codex exec-server --executor-id <ID> --remote <URL> --use-agent-identity-auth"
             )
         }
 
         return .success(ExecServerCommandRequest(action: .listen(url: listen ?? defaultExecServerListenURL)))
+    }
+
+    private func execServerOptionDisplayName(_ option: String) -> String {
+        "\(option) \(execServerOptionValueDisplay(option))"
+    }
+
+    private func execServerOptionValueDisplay(_ option: String) -> String {
+        switch option {
+        case "--listen", "--remote":
+            return "<URL>"
+        case "--executor-id":
+            return "<ID>"
+        case "--name":
+            return "<NAME>"
+        default:
+            return "<VALUE>"
+        }
     }
 
     private func parseMcpServerCommand(

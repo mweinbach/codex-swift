@@ -1049,53 +1049,114 @@ final class CommandSurfaceCLITests: XCTestCase {
             ),
             (
                 ["exec-server", "--listen"],
-                "codex-swift: missing value for --listen",
-                64
+                """
+                error: a value is required for '--listen <URL>' but none was supplied
+
+                For more information, try '--help'.
+                """,
+                2
             ),
             (
                 ["exec-server", "--remote", "https://registry.example.test"],
-                "codex-swift: --executor-id is required when --remote is set",
-                64
+                """
+                error: the following required arguments were not provided:
+                  --executor-id <ID>
+
+                Usage: codex exec-server --executor-id <ID> --remote <URL>
+
+                For more information, try '--help'.
+                """,
+                2
             ),
             (
                 ["exec-server", "--listen", "stdio", "--remote", "https://registry.example.test"],
-                "codex-swift: argument conflict for command 'exec-server': --remote conflicts with --listen",
-                64
+                """
+                error: the argument '--listen <URL>' cannot be used with '--remote <URL>'
+
+                Usage: codex exec-server --listen <URL>
+
+                For more information, try '--help'.
+                """,
+                2
             ),
             (
                 ["exec-server", "--listen", "stdio", "--listen=ws://127.0.0.1:4500"],
-                "codex-swift: duplicate option for command 'exec-server': --listen",
-                64
+                """
+                error: the argument '--listen <URL>' cannot be used multiple times
+
+                Usage: codex exec-server [OPTIONS]
+
+                For more information, try '--help'.
+                """,
+                2
             ),
             (
                 ["exec-server", "--remote", "https://registry.example.test", "--remote=https://other.example.test"],
-                "codex-swift: duplicate option for command 'exec-server': --remote",
-                64
+                """
+                error: the argument '--remote <URL>' cannot be used multiple times
+
+                Usage: codex exec-server [OPTIONS]
+
+                For more information, try '--help'.
+                """,
+                2
             ),
             (
                 ["exec-server", "--remote", "https://registry.example.test", "--executor-id", "exec-1", "--executor-id=exec-2"],
-                "codex-swift: duplicate option for command 'exec-server': --executor-id",
-                64
+                """
+                error: the argument '--executor-id <ID>' cannot be used multiple times
+
+                Usage: codex exec-server [OPTIONS]
+
+                For more information, try '--help'.
+                """,
+                2
             ),
             (
                 ["exec-server", "--remote", "https://registry.example.test", "--executor-id", "exec-1", "--name", "a", "--name=b"],
-                "codex-swift: duplicate option for command 'exec-server': --name",
-                64
+                """
+                error: the argument '--name <NAME>' cannot be used multiple times
+
+                Usage: codex exec-server [OPTIONS]
+
+                For more information, try '--help'.
+                """,
+                2
             ),
             (
                 ["exec-server", "--use-agent-identity-auth"],
-                "codex-swift: --use-agent-identity-auth requires --remote",
-                64
+                """
+                error: the following required arguments were not provided:
+                  --executor-id <ID>
+                  --remote <URL>
+
+                Usage: codex exec-server --executor-id <ID> --remote <URL> --use-agent-identity-auth
+
+                For more information, try '--help'.
+                """,
+                2
             ),
             (
                 ["exec-server", "--bogus"],
-                "codex-swift: unsupported option for command 'exec-server': --bogus",
-                64
+                """
+                error: unexpected argument '--bogus' found
+
+                Usage: codex exec-server [OPTIONS]
+
+                For more information, try '--help'.
+                """,
+                2
             ),
             (
                 ["exec-server", "extra"],
-                "codex-swift: unexpected argument for command 'exec-server': extra",
-                64
+                """
+                error: unexpected argument 'extra' found
+
+                Usage: codex exec-server [OPTIONS]
+
+                For more information, try '--help'.
+                """,
+                2
             )
         ]
 
