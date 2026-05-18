@@ -5173,8 +5173,10 @@ final class CodexAppServerTests: XCTestCase {
     func testLiveRuntimeSubmissionServiceTierOverrideReachesResponsesRequestLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let server = try AppServerResponsesRequestCaptureServer()
+        let roleProviderServer = try AppServerResponsesRequestCaptureServer()
         defer {
             server.stop()
+            roleProviderServer.stop()
         }
         try """
         model = "gpt-5.5"
@@ -5183,6 +5185,12 @@ final class CodexAppServerTests: XCTestCase {
         [model_providers.mock_provider]
         name = "mock_provider"
         base_url = "\(server.baseURL)"
+        wire_api = "responses"
+        requires_openai_auth = false
+
+        [model_providers.role_provider]
+        name = "role_provider"
+        base_url = "\(roleProviderServer.baseURL)"
         wire_api = "responses"
         requires_openai_auth = false
         """.write(
@@ -5219,6 +5227,7 @@ final class CodexAppServerTests: XCTestCase {
             op: op,
             serviceTierOverride: "priority",
             verbosityOverride: .high,
+            modelProviderOverride: "role_provider",
             modelContextWindowOverride: 123_456,
             modelAutoCompactTokenLimitOverride: 120_000,
             toolOutputTokenLimitOverride: 12_000
@@ -5229,7 +5238,7 @@ final class CodexAppServerTests: XCTestCase {
         }
         XCTAssertEqual(startedEvent.modelContextWindow, 123_456)
 
-        let body = try server.waitForRequestBody()
+        let body = try roleProviderServer.waitForRequestBody()
         let request = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
         XCTAssertEqual(request["service_tier"] as? String, "priority")
         let text = try XCTUnwrap(request["text"] as? [String: Any])
@@ -13006,6 +13015,7 @@ final class CodexAppServerTests: XCTestCase {
                 reasoningSummary: nil,
                 verbosity: nil,
                 compactPrompt: nil,
+                modelProvider: nil,
                 modelContextWindow: nil,
                 modelAutoCompactTokenLimit: nil,
                 toolOutputTokenLimit: nil,
@@ -13097,6 +13107,7 @@ final class CodexAppServerTests: XCTestCase {
             reasoningSummary: nil,
             verbosity: nil,
             compactPrompt: nil,
+            modelProvider: nil,
             modelContextWindow: nil,
             modelAutoCompactTokenLimit: nil,
             toolOutputTokenLimit: nil,
@@ -13359,6 +13370,7 @@ final class CodexAppServerTests: XCTestCase {
             reasoningSummary: nil,
             verbosity: nil,
             compactPrompt: nil,
+            modelProvider: nil,
             modelContextWindow: nil,
             modelAutoCompactTokenLimit: nil,
             toolOutputTokenLimit: nil
@@ -13375,6 +13387,7 @@ final class CodexAppServerTests: XCTestCase {
         model_reasoning_summary = "detailed"
         model_verbosity = "high"
         compact_prompt = "Role compact instructions"
+        model_provider = "role-provider"
         model_context_window = 123456
         model_auto_compact_token_limit = 120000
         tool_output_token_limit = 12000
@@ -13412,6 +13425,7 @@ final class CodexAppServerTests: XCTestCase {
             reasoningSummary: .detailed,
             verbosity: .high,
             compactPrompt: "Role compact instructions",
+            modelProvider: "role-provider",
             modelContextWindow: 123_456,
             modelAutoCompactTokenLimit: 120_000,
             toolOutputTokenLimit: 12_000

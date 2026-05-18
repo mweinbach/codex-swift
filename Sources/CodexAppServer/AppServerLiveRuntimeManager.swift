@@ -750,6 +750,9 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         if let compactPromptOverride = submission.compactPromptOverride {
             settings.compactPrompt = compactPromptOverride
         }
+        if let modelProviderOverride = submission.modelProviderOverride {
+            settings.modelProvider = modelProviderOverride
+        }
         if let modelContextWindowOverride = submission.modelContextWindowOverride {
             settings.modelContextWindow = modelContextWindowOverride
         }
@@ -1011,6 +1014,9 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
     ) async throws -> LiveSpawnAgentResult {
         let childDepth = Self.nextThreadSpawnDepth(parentSessionSource)
         let childNickname = await reserveLiveAgentNickname(settings: setup.settings, agentRole: request.agentType)
+        let childModelProvider = request.modelProvider
+            ?? setup.settings.modelProvider
+            ?? configuration.defaultModelProvider
         let childSource = SessionSource.subagent(.threadSpawn(
             parentThreadID: parentThreadID,
             depth: childDepth,
@@ -1031,7 +1037,7 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 threadSource: .subagent,
                 originator: configuration.originator,
                 cliVersion: configuration.version,
-                modelProvider: setup.settings.modelProvider ?? configuration.defaultModelProvider,
+                modelProvider: childModelProvider,
                 dynamicTools: setup.dynamicTools
             )
 
@@ -1048,7 +1054,7 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 threadSource: .subagent,
                 originator: configuration.originator,
                 cliVersion: configuration.version,
-                modelProvider: setup.settings.modelProvider ?? configuration.defaultModelProvider,
+                modelProvider: childModelProvider,
                 dynamicTools: setup.dynamicTools,
                 usageHintTextsToFilter: Self.configuredMultiAgentV2UsageHintTexts(settings: setup.settings)
             )
@@ -1083,7 +1089,7 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 agentNickname: childNickname,
                 agentRole: childSource.agentRole,
                 agentPath: request.childAgentPath.description,
-                modelProvider: setup.settings.modelProvider ?? configuration.defaultModelProvider,
+                modelProvider: childModelProvider,
                 model: request.model ?? setup.model,
                 reasoningEffort: request.reasoningEffort ?? setup.settings.modelReasoningEffort,
                 cwd: setup.cwd.path,
@@ -1121,6 +1127,7 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             serviceTierOverride: request.serviceTier,
             verbosityOverride: request.verbosity,
             compactPromptOverride: request.compactPrompt,
+            modelProviderOverride: request.modelProvider,
             modelContextWindowOverride: request.modelContextWindow,
             modelAutoCompactTokenLimitOverride: request.modelAutoCompactTokenLimit,
             toolOutputTokenLimitOverride: request.toolOutputTokenLimit

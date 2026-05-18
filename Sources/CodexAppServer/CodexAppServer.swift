@@ -121,6 +121,7 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
     public let serviceTierOverride: String?
     public let verbosityOverride: Verbosity?
     public let compactPromptOverride: String?
+    public let modelProviderOverride: String?
     public let modelContextWindowOverride: Int64?
     public let modelAutoCompactTokenLimitOverride: Int64?
     public let toolOutputTokenLimitOverride: Int?
@@ -143,6 +144,7 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
         serviceTierOverride: String? = nil,
         verbosityOverride: Verbosity? = nil,
         compactPromptOverride: String? = nil,
+        modelProviderOverride: String? = nil,
         modelContextWindowOverride: Int64? = nil,
         modelAutoCompactTokenLimitOverride: Int64? = nil,
         toolOutputTokenLimitOverride: Int? = nil
@@ -164,6 +166,7 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
         self.serviceTierOverride = serviceTierOverride
         self.verbosityOverride = verbosityOverride
         self.compactPromptOverride = compactPromptOverride
+        self.modelProviderOverride = modelProviderOverride
         self.modelContextWindowOverride = modelContextWindowOverride
         self.modelAutoCompactTokenLimitOverride = modelAutoCompactTokenLimitOverride
         self.toolOutputTokenLimitOverride = toolOutputTokenLimitOverride
@@ -184,6 +187,7 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
             && lhs.serviceTierOverride == rhs.serviceTierOverride
             && lhs.verbosityOverride == rhs.verbosityOverride
             && lhs.compactPromptOverride == rhs.compactPromptOverride
+            && lhs.modelProviderOverride == rhs.modelProviderOverride
             && lhs.modelContextWindowOverride == rhs.modelContextWindowOverride
             && lhs.modelAutoCompactTokenLimitOverride == rhs.modelAutoCompactTokenLimitOverride
             && lhs.toolOutputTokenLimitOverride == rhs.toolOutputTokenLimitOverride

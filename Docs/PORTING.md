@@ -971,6 +971,8 @@ Recent upstream audit checkpoint:
   `model_verbosity` overrides through the resolved child spawn request and
   initial child `turn_context`; role `compact_prompt` is also parsed from the
   config layer and applied to the child runtime's compact prompt, and role
+  `model_provider` now selects the child live runtime provider when the role
+  points at an already-loaded provider, while role
   `model_context_window`, `model_auto_compact_token_limit`, and
   `tool_output_token_limit` now feed the child model-family construction,
   matching Rust's post-argument role config layering for context-window and

@@ -35,6 +35,7 @@ struct AppServerLiveMultiAgentToolExecutor {
                 reasoningSummary: nil,
                 verbosity: nil,
                 compactPrompt: nil,
+                modelProvider: nil,
                 modelContextWindow: nil,
                 modelAutoCompactTokenLimit: nil,
                 toolOutputTokenLimit: nil
@@ -209,6 +210,7 @@ struct AppServerLiveMultiAgentToolExecutor {
                 reasoningSummary: resolvedOverrides.reasoningSummary,
                 verbosity: resolvedOverrides.verbosity,
                 compactPrompt: resolvedOverrides.compactPrompt,
+                modelProvider: resolvedOverrides.modelProvider,
                 modelContextWindow: resolvedOverrides.modelContextWindow,
                 modelAutoCompactTokenLimit: resolvedOverrides.modelAutoCompactTokenLimit,
                 toolOutputTokenLimit: resolvedOverrides.toolOutputTokenLimit,
@@ -705,6 +707,7 @@ struct LiveSpawnAgentRequest: Equatable, Sendable {
     let reasoningSummary: ReasoningSummary?
     let verbosity: Verbosity?
     let compactPrompt: String?
+    let modelProvider: String?
     let modelContextWindow: Int64?
     let modelAutoCompactTokenLimit: Int64?
     let toolOutputTokenLimit: Int?
@@ -729,6 +732,7 @@ struct LiveSpawnAgentResolvedOverrides: Equatable, Sendable {
     let reasoningSummary: ReasoningSummary?
     let verbosity: Verbosity?
     let compactPrompt: String?
+    let modelProvider: String?
     let modelContextWindow: Int64?
     let modelAutoCompactTokenLimit: Int64?
     let toolOutputTokenLimit: Int?
@@ -742,6 +746,7 @@ struct LiveSpawnAgentRoleConfigOverrides: Equatable, Sendable {
     let reasoningSummary: ReasoningSummary?
     let verbosity: Verbosity?
     let compactPrompt: String?
+    let modelProvider: String?
     let modelContextWindow: Int64?
     let modelAutoCompactTokenLimit: Int64?
     let toolOutputTokenLimit: Int?
@@ -819,6 +824,7 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
         var roleReasoningSummary: ReasoningSummary?
         var roleVerbosity: Verbosity?
         var roleCompactPrompt: String?
+        var roleModelProvider: String?
         var roleModelContextWindow: Int64?
         var roleModelAutoCompactTokenLimit: Int64?
         var roleToolOutputTokenLimit: Int?
@@ -839,6 +845,7 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
             roleReasoningSummary = overrides.reasoningSummary
             roleVerbosity = overrides.verbosity
             roleCompactPrompt = overrides.compactPrompt
+            roleModelProvider = overrides.modelProvider
             roleModelContextWindow = overrides.modelContextWindow
             roleModelAutoCompactTokenLimit = overrides.modelAutoCompactTokenLimit
             roleToolOutputTokenLimit = overrides.toolOutputTokenLimit
@@ -859,6 +866,7 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
             reasoningSummary: roleReasoningSummary,
             verbosity: roleVerbosity,
             compactPrompt: roleCompactPrompt,
+            modelProvider: roleModelProvider,
             modelContextWindow: roleModelContextWindow,
             modelAutoCompactTokenLimit: roleModelAutoCompactTokenLimit,
             toolOutputTokenLimit: roleToolOutputTokenLimit
@@ -901,6 +909,7 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
                 reasoningSummary: try optionalReasoningSummary(table["model_reasoning_summary"]),
                 verbosity: try optionalVerbosity(table["model_verbosity"]),
                 compactPrompt: try optionalString(table["compact_prompt"]),
+                modelProvider: try optionalString(table["model_provider"]),
                 modelContextWindow: try optionalInt64(table["model_context_window"]),
                 modelAutoCompactTokenLimit: try optionalInt64(table["model_auto_compact_token_limit"]),
                 toolOutputTokenLimit: try optionalNonNegativeInt(table["tool_output_token_limit"])
