@@ -4737,14 +4737,18 @@ public struct CodexCLI: Sendable {
                 stderr(message)
                 return exitCode
             }
-        case let .command(spec, commandArguments) where spec.name == "update":
+        case let .command(spec, _) where spec.name == "update":
             guard let updateRunner else {
                 stderr("codex-swift: command '\(spec.name)' is registered but its runtime port is not complete yet.")
                 return 78
             }
+            let commandArguments = rawCommandArguments(after: spec, in: arguments)
             guard commandArguments.isEmpty else {
-                stderr("codex-swift: unexpected argument for command 'update': \(commandArguments[0])")
-                return 64
+                let parseFailure: ParseResult<Void> = clapUnexpectedArgument(
+                    commandArguments[0],
+                    usage: "codex update [OPTIONS]"
+                )
+                return emitParseFailure(parseFailure, stderr: stderr)
             }
             do {
                 let result = try await updateRunner(UpdateCommandRequest())
@@ -5313,10 +5317,7 @@ public struct CodexCLI: Sendable {
             case "--ascii":
                 ascii = true
             default:
-                if argument.hasPrefix("-") {
-                    return .failure("codex-swift: unexpected option for command 'doctor': \(argument)", 64)
-                }
-                return .failure("codex-swift: unexpected argument for command 'doctor': \(argument)", 64)
+                return clapUnexpectedArgument(argument, usage: "codex doctor [OPTIONS]")
             }
         }
 
@@ -6962,10 +6963,7 @@ public struct CodexCLI: Sendable {
                 strictConfig = true
                 continue
             }
-            if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'mcp-server': \(argument)", 64)
-            }
-            return .failure("codex-swift: unexpected argument for command 'mcp-server': \(argument)", 64)
+            return clapUnexpectedArgument(argument, usage: "codex mcp-server [OPTIONS]")
         }
 
         switch parseConfigOverrides(from: rootArguments) {
@@ -8266,7 +8264,10 @@ public struct CodexCLI: Sendable {
 
         func markDownloadURLOption() -> ParseResult<Void> {
             guard !sawDownloadURL else {
-                return .failure("codex-swift: duplicate option for command 'app': --download-url", 64)
+                return clapDuplicateArgument(
+                    "--download-url <DOWNLOAD_URL_OVERRIDE>",
+                    usage: "codex app [OPTIONS] [PATH]"
+                )
             }
             sawDownloadURL = true
             return .success(())
@@ -8274,13 +8275,17 @@ public struct CodexCLI: Sendable {
 
         func value(after option: String, at index: Int) -> ParseResult<String> {
             guard index + 1 < arguments.count else {
-                return .failure("codex-swift: missing value for \(option)", 64)
+                return clapMissingValue(option: option, valueDisplay: "<DOWNLOAD_URL_OVERRIDE>")
             }
             return .success(arguments[index + 1])
         }
 
         while index < arguments.count {
             let argument = arguments[index]
+            if argument == "--" {
+                positionals.append(contentsOf: arguments[(index + 1)...])
+                break
+            }
             if argument == "--download-url" {
                 switch markDownloadURLOption() {
                 case .success:
@@ -8309,14 +8314,14 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'app': \(argument)", 64)
+                return clapUnexpectedArgument(argument, usage: "codex app [OPTIONS] [PATH]", asValueTip: true)
             }
             positionals.append(argument)
             index += 1
         }
 
         guard positionals.count <= 1 else {
-            return .failure("codex-swift: unexpected argument for command 'app': \(positionals[1])", 64)
+            return clapUnexpectedArgument(positionals[1], usage: "codex app [OPTIONS] [PATH]")
         }
         return .success(AppCommandRequest(
             path: positionals.first ?? ".",

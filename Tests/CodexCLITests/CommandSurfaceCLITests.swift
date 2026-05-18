@@ -1141,18 +1141,44 @@ final class CommandSurfaceCLITests: XCTestCase {
     func testRunAsyncMcpServerRejectsArgumentsBeforeRunner() async {
         var stderr: [String] = []
 
-        let exitCode = await CodexCLI().runAsync(
-            arguments: ["mcp-server", "extra"],
-            stdout: { _ in XCTFail("stdout should not be written") },
-            stderr: { stderr.append($0) },
-            mcpServerRunner: { _ in
-                XCTFail("runner should not be called with mcp-server arguments")
-                return CodexCLI.CommandExecutionResult(exitCode: 0)
-            }
-        )
+        let cases: [([String], String)] = [
+            (
+                ["mcp-server", "extra"],
+                """
+                error: unexpected argument 'extra' found
 
-        XCTAssertEqual(exitCode, 64)
-        XCTAssertEqual(stderr, ["codex-swift: unexpected argument for command 'mcp-server': extra"])
+                Usage: codex mcp-server [OPTIONS]
+
+                For more information, try '--help'.
+                """
+            ),
+            (
+                ["mcp-server", "--bad"],
+                """
+                error: unexpected argument '--bad' found
+
+                Usage: codex mcp-server [OPTIONS]
+
+                For more information, try '--help'.
+                """
+            )
+        ]
+
+        for (arguments, expectedMessage) in cases {
+            stderr = []
+            let exitCode = await CodexCLI().runAsync(
+                arguments: arguments,
+                stdout: { _ in XCTFail("stdout should not be written for \(arguments)") },
+                stderr: { stderr.append($0) },
+                mcpServerRunner: { _ in
+                    XCTFail("runner should not be called with mcp-server arguments")
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                }
+            )
+
+            XCTAssertEqual(exitCode, 2, "\(arguments)")
+            XCTAssertEqual(stderr, [expectedMessage], "\(arguments)")
+        }
     }
 
     func testRunAsyncAppServerParsesRunAndGenerators() async {
@@ -1911,7 +1937,8 @@ final class CommandSurfaceCLITests: XCTestCase {
             ["app"],
             ["app", "/repo"],
             ["app", "--download-url", "https://example.test/Codex.dmg", "/repo"],
-            ["app", "--download-url=https://example.test/Codex.dmg"]
+            ["app", "--download-url=https://example.test/Codex.dmg"],
+            ["app", "--", "--flag"]
         ] {
             let exitCode = await CodexCLI().runAsync(
                 arguments: arguments,
@@ -1928,7 +1955,8 @@ final class CommandSurfaceCLITests: XCTestCase {
             CodexCLI.AppCommandRequest(path: ".", downloadURLOverride: nil),
             CodexCLI.AppCommandRequest(path: "/repo", downloadURLOverride: nil),
             CodexCLI.AppCommandRequest(path: "/repo", downloadURLOverride: "https://example.test/Codex.dmg"),
-            CodexCLI.AppCommandRequest(path: ".", downloadURLOverride: "https://example.test/Codex.dmg")
+            CodexCLI.AppCommandRequest(path: ".", downloadURLOverride: "https://example.test/Codex.dmg"),
+            CodexCLI.AppCommandRequest(path: "--flag", downloadURLOverride: nil)
         ])
     }
 
@@ -1936,19 +1964,43 @@ final class CommandSurfaceCLITests: XCTestCase {
         let cases: [([String], String)] = [
             (
                 ["app", "--download-url"],
-                "codex-swift: missing value for --download-url"
+                """
+                error: a value is required for '--download-url <DOWNLOAD_URL_OVERRIDE>' but none was supplied
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["app", "--download-url", "https://example.test/a.dmg", "--download-url=https://example.test/b.dmg"],
-                "codex-swift: duplicate option for command 'app': --download-url"
+                """
+                error: the argument '--download-url <DOWNLOAD_URL_OVERRIDE>' cannot be used multiple times
+
+                Usage: codex app [OPTIONS] [PATH]
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["app", "--verbose"],
-                "codex-swift: unsupported option for command 'app': --verbose"
+                """
+                error: unexpected argument '--verbose' found
+
+                  tip: to pass '--verbose' as a value, use '-- --verbose'
+
+                Usage: codex app [OPTIONS] [PATH]
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["app", "/repo", "extra"],
-                "codex-swift: unexpected argument for command 'app': extra"
+                """
+                error: unexpected argument 'extra' found
+
+                Usage: codex app [OPTIONS] [PATH]
+
+                For more information, try '--help'.
+                """
             )
         ]
 
@@ -1964,7 +2016,7 @@ final class CommandSurfaceCLITests: XCTestCase {
                 }
             )
 
-            XCTAssertEqual(exitCode, 64, "\(arguments)")
+            XCTAssertEqual(exitCode, 2, "\(arguments)")
             XCTAssertEqual(stderr, [expectedMessage], "\(arguments)")
         }
     }
@@ -2324,20 +2376,32 @@ final class CommandSurfaceCLITests: XCTestCase {
     }
 
     func testRunAsyncUpdateRejectsArguments() async {
-        var stderr: [String] = []
+        let cases = ["now", "--bad"]
 
-        let exitCode = await CodexCLI().runAsync(
-            arguments: ["update", "now"],
-            stdout: { _ in XCTFail("stdout should not be written") },
-            stderr: { stderr.append($0) },
-            updateRunner: { _ in
-                XCTFail("runner should not be called")
-                return CodexCLI.CommandExecutionResult(exitCode: 0)
-            }
-        )
+        for argument in cases {
+            var stderr: [String] = []
 
-        XCTAssertEqual(exitCode, 64)
-        XCTAssertEqual(stderr, ["codex-swift: unexpected argument for command 'update': now"])
+            let exitCode = await CodexCLI().runAsync(
+                arguments: ["update", argument],
+                stdout: { _ in XCTFail("stdout should not be written for \(argument)") },
+                stderr: { stderr.append($0) },
+                updateRunner: { _ in
+                    XCTFail("runner should not be called")
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                }
+            )
+
+            XCTAssertEqual(exitCode, 2, argument)
+            XCTAssertEqual(stderr, [
+                """
+                error: unexpected argument '\(argument)' found
+
+                Usage: codex update [OPTIONS]
+
+                For more information, try '--help'.
+                """
+            ], argument)
+        }
     }
 
     func testRunAsyncDoctorDelegatesRustFlagsAndOverrides() async {
@@ -2375,20 +2439,32 @@ final class CommandSurfaceCLITests: XCTestCase {
     }
 
     func testRunAsyncDoctorRejectsUnexpectedArguments() async {
-        var stderr: [String] = []
+        let cases = ["repair", "--bad"]
 
-        let exitCode = await CodexCLI().runAsync(
-            arguments: ["doctor", "repair"],
-            stdout: { _ in XCTFail("stdout should not be written") },
-            stderr: { stderr.append($0) },
-            doctorRunner: { _ in
-                XCTFail("runner should not be called")
-                return CodexCLI.CommandExecutionResult(exitCode: 0)
-            }
-        )
+        for argument in cases {
+            var stderr: [String] = []
 
-        XCTAssertEqual(exitCode, 64)
-        XCTAssertEqual(stderr, ["codex-swift: unexpected argument for command 'doctor': repair"])
+            let exitCode = await CodexCLI().runAsync(
+                arguments: ["doctor", argument],
+                stdout: { _ in XCTFail("stdout should not be written for \(argument)") },
+                stderr: { stderr.append($0) },
+                doctorRunner: { _ in
+                    XCTFail("runner should not be called")
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                }
+            )
+
+            XCTAssertEqual(exitCode, 2, argument)
+            XCTAssertEqual(stderr, [
+                """
+                error: unexpected argument '\(argument)' found
+
+                Usage: codex doctor [OPTIONS]
+
+                For more information, try '--help'.
+                """
+            ], argument)
+        }
     }
 
     private struct TestError: Error, Equatable, CustomStringConvertible, Sendable {

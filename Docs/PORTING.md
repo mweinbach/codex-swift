@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: extended CLI ordinary parse-failure parity for desktop-app and
+  utility command forms. Swift now emits Rust/Clap exit-2 diagnostics for
+  invalid `codex app`, `codex update`, `codex doctor`, and `codex mcp-server`
+  arguments, while preserving `codex app -- --flag` as a flag-looking path.
 - 2026-05-18: extended CLI ordinary parse-failure parity for app-server
   protocol generator/proxy forms and the hidden Responses API proxy. Swift now
   emits Rust/Clap exit-2 diagnostics for app-server unknown children,
