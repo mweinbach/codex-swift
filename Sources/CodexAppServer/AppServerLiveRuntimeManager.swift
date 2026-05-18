@@ -2249,7 +2249,9 @@ private actor AppServerLiveRuntimeState {
         }
         sessionGrantedPermissionProfiles.removeValue(forKey: threadID)
         runtimeConfigSnapshots.removeValue(forKey: threadID)
-        agentStatuses[threadID] = .notFound
+        let status = AgentStatus.notFound
+        agentStatuses[threadID] = status
+        maybeNotifyParentOfFinalStatus(threadID: threadID, status: status)
         sessionSources.removeValue(forKey: threadID)
         idlePendingInput.removeValue(forKey: threadID)
         activePendingInput.removeValue(forKey: threadID)
@@ -2301,11 +2303,14 @@ private actor AppServerLiveRuntimeState {
     }
 
     func emit(threadID: String, turnID: String, event: EventMessage) async {
-        if let status = AgentStatus.from(eventMessage: event) {
+        let status = AgentStatus.from(eventMessage: event)
+        if let status {
             agentStatuses[threadID] = status
         }
         await eventSink?(threadID, turnID, event)
-        maybeNotifyParentOfTerminalTurn(threadID: threadID, event: event)
+        if let status {
+            maybeNotifyParentOfFinalStatus(threadID: threadID, status: status)
+        }
     }
 
     func markAbortEmitted(threadID: String, turnID: String) -> Bool {
@@ -2441,18 +2446,8 @@ private actor AppServerLiveRuntimeState {
         }
     }
 
-    private func maybeNotifyParentOfTerminalTurn(threadID: String, event: EventMessage) {
-        let status: AgentStatus?
-        if case let .taskComplete(complete) = event {
-            status = .completed(complete.lastAgentMessage)
-        } else if case let .turnAborted(aborted) = event {
-            status = AgentStatus.from(eventMessage: .turnAborted(aborted))
-        } else {
-            return
-        }
-
-        guard let status,
-              status.isFinal,
+    private func maybeNotifyParentOfFinalStatus(threadID: String, status: AgentStatus) {
+        guard status.isFinal,
               case let .subagent(.threadSpawn(parentThreadID, _, childAgentPath, _, _)) = sessionSources[threadID],
               let childAgentPath,
               let parentAgentPath = Self.parentAgentPath(of: childAgentPath)

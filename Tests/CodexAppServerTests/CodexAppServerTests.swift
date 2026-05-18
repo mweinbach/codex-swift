@@ -12914,6 +12914,103 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(rootMailbox, [])
     }
 
+    func testLiveRuntimeFinalSubagentStatusesQueueParentNotificationsLikeRustAgentControl() async throws {
+        let temp = try TemporaryDirectory()
+        let parentThreadID = ThreadId()
+        let manager = AppServerLiveRuntimeManager(
+            configuration: testConfiguration(codexHome: temp.url, requiresOpenAIAuth: false)
+        )
+        defer {
+            manager.shutdown()
+        }
+        let parentPath = try AgentPath.root.join("worker")
+
+        let erroredThreadID = ThreadId()
+        let erroredPath = try parentPath.join("errored")
+        await manager.recordSessionSource(
+            threadID: erroredThreadID.description,
+            source: .subagent(.threadSpawn(
+                parentThreadID: parentThreadID,
+                depth: 2,
+                agentPath: erroredPath,
+                agentRole: "explorer"
+            ))
+        )
+        await manager.emitRuntimeEvent(
+            threadID: erroredThreadID.description,
+            turnID: "turn-error",
+            event: .error(ErrorEvent(message: "boom"))
+        )
+
+        let shutdownThreadID = ThreadId()
+        let shutdownPath = try parentPath.join("shutdown")
+        await manager.recordSessionSource(
+            threadID: shutdownThreadID.description,
+            source: .subagent(.threadSpawn(
+                parentThreadID: parentThreadID,
+                depth: 2,
+                agentPath: shutdownPath,
+                agentRole: "explorer"
+            ))
+        )
+        await manager.emitRuntimeEvent(
+            threadID: shutdownThreadID.description,
+            turnID: "turn-shutdown",
+            event: .shutdownComplete
+        )
+
+        let missingThreadID = ThreadId()
+        let missingPath = try parentPath.join("missing")
+        await manager.recordSessionSource(
+            threadID: missingThreadID.description,
+            source: .subagent(.threadSpawn(
+                parentThreadID: parentThreadID,
+                depth: 2,
+                agentPath: missingPath,
+                agentRole: "explorer"
+            ))
+        )
+        _ = try manager.submitCoreOp(
+            requestID: .string("shutdown-missing"),
+            threadID: missingThreadID.description,
+            op: .shutdown
+        )
+
+        let parentMailbox = await manager.takeMailboxCommunications(threadID: parentThreadID.description)
+        XCTAssertEqual(parentMailbox, [
+            InterAgentCommunication(
+                author: erroredPath,
+                recipient: parentPath,
+                content: """
+                <subagent_notification>
+                {"agent_path":"/root/worker/errored","status":{"errored":"boom"}}
+                </subagent_notification>
+                """,
+                triggerTurn: false
+            ),
+            InterAgentCommunication(
+                author: shutdownPath,
+                recipient: parentPath,
+                content: """
+                <subagent_notification>
+                {"agent_path":"/root/worker/shutdown","status":"shutdown"}
+                </subagent_notification>
+                """,
+                triggerTurn: false
+            ),
+            InterAgentCommunication(
+                author: missingPath,
+                recipient: parentPath,
+                content: """
+                <subagent_notification>
+                {"agent_path":"/root/worker/missing","status":"not_found"}
+                </subagent_notification>
+                """,
+                triggerTurn: false
+            )
+        ])
+    }
+
     func testLiveRuntimeInterruptedSubagentTurnDoesNotQueueParentNotificationLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let parentThreadID = ThreadId()

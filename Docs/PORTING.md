@@ -833,31 +833,34 @@ Recent upstream audit checkpoint:
   completion when mailbox items are already pending for the current thread,
   mailbox-change waiting, `collab_waiting_begin`/`collab_waiting_end` runtime
   events, and Rust's JSON result shape (`Wait completed.` / `Wait timed out.`
-  with `timed_out`). `spawn_agent`, `close_agent`, final-status mailbox
-  notifications, richer final-status tracking, and full ThreadManager-backed
-  `AgentControl` remain pending.
+  with `timed_out`). `spawn_agent`, `close_agent`, richer final-status
+  tracking, and full ThreadManager-backed `AgentControl` remain pending.
 - 2026-05-18: Swift live app-server MultiAgentV2 `close_agent` now resolves
   Rust-style targets through thread ids or agent paths, rejects the root thread
   with Rust's `root is not a spawned agent` response, emits
   `collab_close_begin`/`collab_close_end`, returns `previous_status`, marks the
   persisted thread-spawn subtree closed, and cancels the target plus live
-  descendants in runtime state. `spawn_agent`, final-status mailbox
-  notifications, richer final-status tracking, and full ThreadManager-backed
-  `AgentControl` remain pending.
+  descendants in runtime state. `spawn_agent`, richer final-status tracking,
+  and full ThreadManager-backed `AgentControl` remain pending.
 - 2026-05-18: Swift live app-server runtime state now tracks Rust-shaped
   `AgentStatus` transitions from turn lifecycle events instead of flattening
   live multi-agent tool status to `running`/`completed(null)`. MultiAgentV2
   `list_agents`, `send_message`/`followup_task`, and `close_agent` now read the
   tracked live status, preserving completed-message and not-found shutdown
-  states when the runtime has observed them. `spawn_agent`, final-status
-  mailbox notifications, and full ThreadManager-backed `AgentControl` remain
-  pending.
+  states when the runtime has observed them. `spawn_agent` and full
+  ThreadManager-backed `AgentControl` remain pending.
 - 2026-05-18: Swift live app-server runtime now mirrors Rust's terminal
   MultiAgentV2 child-turn notification for loaded thread-spawn subagents:
   completed child turns enqueue the standard `<subagent_notification>` envelope
   as non-triggering inter-agent mailbox mail to the direct parent agent path,
   while interrupted child turns remain quiet. `spawn_agent` and full
   ThreadManager-backed `AgentControl` remain pending.
+- 2026-05-18: Swift live app-server runtime now mirrors Rust `AgentControl`
+  final-status notification coverage for loaded MultiAgentV2 thread-spawn
+  children beyond normal turn completion: errored, shutdown, and not-found
+  terminal statuses enqueue the same `<subagent_notification>` envelope to the
+  direct parent mailbox and wake `wait_agent` through the mailbox-change path.
+  Full ThreadManager-backed `AgentControl` remains pending.
 - 2026-05-18: Swift live app-server MultiAgentV2 now routes `spawn_agent`
   calls through the live runtime: Rust v2 arguments decode with the same
   `fork_context` rejection and `fork_turns` validation, spawn begin/end events
