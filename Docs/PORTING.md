@@ -844,6 +844,11 @@ Recent upstream audit checkpoint:
   reports `/root` using the root thread status rather than the caller's status,
   and includes the current spawned agent instead of filtering it out of the live
   agent list.
+- 2026-05-18: Swift live app-server MultiAgentV2 `list_agents` now includes
+  open spawned threads that lack a canonical `agent_path` by reporting the
+  thread id as `agent_name` when no `path_prefix` filter is supplied, matching
+  Rust's tolerant live registry projection. Prefix-filtered listings still skip
+  pathless agents.
 - 2026-05-18: Swift live app-server MultiAgentV2 `wait_agent` now mirrors
   Rust's configured timeout bounds, default timeout selection, immediate
   completion when mailbox items are already pending for the current thread,

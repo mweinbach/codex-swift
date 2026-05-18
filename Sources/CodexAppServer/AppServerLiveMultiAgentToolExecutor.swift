@@ -506,6 +506,16 @@ struct AppServerLiveMultiAgentToolExecutor {
                 ))
             }
             if let stateStore {
+                if prefix == nil {
+                    let unnamedThreads = try await stateStore.listOpenThreadSpawnThreadsWithoutAgentPaths()
+                    for metadata in unnamedThreads {
+                        agents.append(ListedLiveAgent(
+                            agentName: metadata.id.description,
+                            agentStatus: await status(for: metadata.id),
+                            lastTaskMessage: await agentLastTaskMessage(metadata.id.description)
+                        ))
+                    }
+                }
                 let threadMetadata = try await stateStore.listThreadsWithAgentPaths()
                 for metadata in threadMetadata {
                     guard let rawPath = metadata.agentPath,

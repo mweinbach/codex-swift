@@ -13094,6 +13094,8 @@ final class CodexAppServerTests: XCTestCase {
         let nestedThreadID = ThreadId()
         let siblingThreadID = ThreadId()
         let closedThreadID = ThreadId()
+        let unnamedThreadID = try ThreadId(string: "00000000-0000-4000-8000-000000000910")
+        let closedUnnamedThreadID = try ThreadId(string: "00000000-0000-4000-8000-000000000911")
         let workerPath = try AgentPath.root.join("worker")
         let nestedPath = try workerPath.join("nested")
         let siblingPath = try AgentPath.root.join("sibling")
@@ -13122,6 +13124,38 @@ final class CodexAppServerTests: XCTestCase {
                 tokensUsed: 0
             ))
         }
+        for (threadID, title) in [
+            (unnamedThreadID, "unnamed"),
+            (closedUnnamedThreadID, "closed unnamed"),
+        ] {
+            try await stateStore.upsertThread(ThreadMetadata(
+                id: threadID,
+                rolloutPath: temp.url.appendingPathComponent("\(title).jsonl").path,
+                createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+                updatedAt: Date(timeIntervalSince1970: 1_700_000_001),
+                source: "vscode",
+                agentNickname: "Pathless",
+                agentRole: "explorer",
+                agentPath: nil,
+                modelProvider: "openai",
+                cwd: temp.url.path,
+                cliVersion: "0.0.0-test",
+                title: title,
+                sandboxPolicy: "danger-full-access",
+                approvalMode: "never",
+                tokensUsed: 0
+            ))
+        }
+        try await stateStore.upsertThreadSpawnEdge(
+            parentThreadID: rootThreadID,
+            childThreadID: unnamedThreadID,
+            status: .open
+        )
+        try await stateStore.upsertThreadSpawnEdge(
+            parentThreadID: rootThreadID,
+            childThreadID: closedUnnamedThreadID,
+            status: .closed
+        )
         try await stateStore.upsertThreadSpawnEdge(
             parentThreadID: rootThreadID,
             childThreadID: closedThreadID,
@@ -13129,6 +13163,7 @@ final class CodexAppServerTests: XCTestCase {
         )
         let capture = LiveMultiAgentToolCapture(runningThreadIDs: [rootThreadID.description, nestedThreadID.description])
         await capture.setStatus(threadID: workerThreadID.description, status: .completed("done"))
+        await capture.recordLastTaskMessage(threadID: unnamedThreadID.description, message: "pathless task")
         let executor = AppServerLiveMultiAgentToolExecutor(
             currentThreadID: rootThreadID,
             currentSessionSource: .vscode,
@@ -13179,16 +13214,19 @@ final class CodexAppServerTests: XCTestCase {
         )
         XCTAssertEqual(allResult.agents.map(\.agentName), [
             "/root",
+            unnamedThreadID.description,
             "/root/sibling",
             "/root/worker",
             "/root/worker/nested",
         ])
         XCTAssertEqual(allResult.agents[0].agentStatus, .running)
         XCTAssertEqual(allResult.agents[0].lastTaskMessage, "Main thread")
-        XCTAssertEqual(allResult.agents[2].agentStatus, .completed("done"))
-        XCTAssertEqual(allResult.agents[2].lastTaskMessage, "inspect the logs")
-        XCTAssertEqual(allResult.agents[3].agentStatus, .running)
-        XCTAssertNil(allResult.agents[3].lastTaskMessage)
+        XCTAssertEqual(allResult.agents[1].agentStatus, .completed(nil))
+        XCTAssertEqual(allResult.agents[1].lastTaskMessage, "pathless task")
+        XCTAssertEqual(allResult.agents[3].agentStatus, .completed("done"))
+        XCTAssertEqual(allResult.agents[3].lastTaskMessage, "inspect the logs")
+        XCTAssertEqual(allResult.agents[4].agentStatus, .running)
+        XCTAssertNil(allResult.agents[4].lastTaskMessage)
 
         let listWorkerSubtree = await executor.execute(.functionCall(
             name: "list_agents",
