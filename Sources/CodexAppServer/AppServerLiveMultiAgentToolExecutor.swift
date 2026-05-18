@@ -404,7 +404,8 @@ struct AppServerLiveMultiAgentToolExecutor {
 
         do {
             let target = try await resolveAgentTarget(args.target)
-            if target.threadID == currentThreadID || target.agentPath?.isRoot == true {
+            let targetsCurrentRoot = target.threadID == currentThreadID && currentSessionSource.agentPath == nil
+            if target.agentPath?.isRoot == true || targetsCurrentRoot {
                 return Self.output(callID: callID, content: "root is not a spawned agent", success: false)
             }
             let previousStatus = await status(for: target.threadID)

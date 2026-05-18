@@ -857,6 +857,11 @@ Recent upstream audit checkpoint:
   mirrors Rust's missing thread-id target path by emitting close begin/end
   events with `AgentStatus::NotFound` before returning `agent with id <id> not
   found`, instead of short-circuiting with a Swift-only missing-thread error.
+- 2026-05-18: Swift live app-server MultiAgentV2 `close_agent` now keys the
+  root-agent rejection off the resolved agent metadata's root `agent_path` like
+  Rust `AgentControl`, so a non-root thread-spawn agent can close its own thread
+  instead of being rejected only because the target id matches the caller's
+  current thread id.
 - 2026-05-18: Swift live app-server runtime state now tracks Rust-shaped
   `AgentStatus` transitions from turn lifecycle events instead of flattening
   live multi-agent tool status to `running`/`completed(null)`. MultiAgentV2

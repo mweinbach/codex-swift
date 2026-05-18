@@ -13237,6 +13237,90 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(missingEnd.status, .notFound)
     }
 
+    func testLiveCloseAgentAllowsCurrentNonRootAgentLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let stateStore = try SQLiteAgentGraphStore(databaseURL: temp.url.appendingPathComponent("state.sqlite3"))
+        let rootThreadID = ThreadId()
+        let workerThreadID = ThreadId()
+        let workerPath = try AgentPath.root.join("worker")
+        try await stateStore.upsertThread(ThreadMetadata(
+            id: workerThreadID,
+            rolloutPath: temp.url.appendingPathComponent("worker.jsonl").path,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_001),
+            source: "vscode",
+            agentNickname: "Bernoulli",
+            agentRole: "worker",
+            agentPath: workerPath.description,
+            modelProvider: "openai",
+            cwd: temp.url.path,
+            cliVersion: "0.0.0-test",
+            title: "worker",
+            sandboxPolicy: "danger-full-access",
+            approvalMode: "never",
+            tokensUsed: 0
+        ))
+        try await stateStore.upsertThreadSpawnEdge(
+            parentThreadID: rootThreadID,
+            childThreadID: workerThreadID,
+            status: .open
+        )
+        let capture = LiveMultiAgentToolCapture(runningThreadIDs: [workerThreadID.description])
+        let executor = AppServerLiveMultiAgentToolExecutor(
+            currentThreadID: workerThreadID,
+            currentSessionSource: .subagent(.threadSpawn(
+                parentThreadID: rootThreadID,
+                depth: 1,
+                agentPath: workerPath,
+                agentNickname: "Bernoulli",
+                agentRole: "worker"
+            )),
+            stateStore: stateStore,
+            waitTimeouts: MultiAgentV2WaitTimeouts(config: MultiAgentV2Config()),
+            isTurnRunning: { threadID in
+                await capture.isRunning(threadID: threadID)
+            },
+            agentStatus: { threadID in
+                await capture.status(threadID: threadID)
+            },
+            agentLastTaskMessage: { _ in nil },
+            hasPendingMailboxItems: { _ in false },
+            waitForMailboxChange: { _, _ in false },
+            queueMailboxCommunications: { _, _ in },
+            recordAgentLastTaskMessage: { _, _ in },
+            submitPendingWorkTurnIfIdle: { _ in false },
+            closeAgentThreads: { threadIDs in
+                await capture.close(threadIDs: threadIDs)
+            }
+        )
+
+        let closeSelf = await executor.execute(.functionCall(
+            name: "close_agent",
+            arguments: #"{"target":"\#(workerThreadID.description)"}"#,
+            callID: "call-close-self"
+        ))
+        let payload = try Self.functionOutputPayload(closeSelf, callID: "call-close-self")
+        XCTAssertEqual(payload.success, true)
+        let closeResult = try JSONDecoder().decode(
+            CloseAgentToolResultFixture.self,
+            from: Data(payload.content.utf8)
+        )
+        XCTAssertEqual(closeResult.previousStatus, .running)
+        let closedThreadIDs = await capture.closedThreadIDs()
+        XCTAssertEqual(closedThreadIDs, [workerThreadID.description])
+        let openChildren = try await stateStore.listThreadSpawnChildren(parentThreadID: rootThreadID, statusFilter: .open)
+        XCTAssertEqual(openChildren, [])
+        let runtimeEvents = try XCTUnwrap(closeSelf?.runtimeEvents)
+        XCTAssertEqual(runtimeEvents.count, 2)
+        guard case let .collabCloseEnd(end) = runtimeEvents[1] else {
+            return XCTFail("expected close end event")
+        }
+        XCTAssertEqual(end.receiverThreadID, workerThreadID)
+        XCTAssertEqual(end.receiverAgentNickname, "Bernoulli")
+        XCTAssertEqual(end.receiverAgentRole, "worker")
+        XCTAssertEqual(end.status, .running)
+    }
+
     func testLiveRuntimeInterAgentCommunicationOpQueuesAndTriggersPendingWorkLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let threadID = ConversationId().description
