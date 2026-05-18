@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: extended CLI ordinary parse-failure parity for app-server daemon
+  and remote-control management commands. Swift now emits Rust/Clap exit-2
+  diagnostics for unknown daemon/remote-control child commands plus unexpected
+  positional arguments and flags on daemon lifecycle, daemon bootstrap, and
+  remote-control start/stop forms.
 - 2026-05-18: extended CLI ordinary parse-failure parity for visible
   feature-flag and execpolicy management commands. Swift now emits Rust/Clap
   exit-2 diagnostics for invalid `codex features {list,enable,disable}` forms

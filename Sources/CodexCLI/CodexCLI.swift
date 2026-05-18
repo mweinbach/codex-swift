@@ -7056,36 +7056,72 @@ public struct CodexCLI: Sendable {
         let remainder = Array(arguments.dropFirst())
         switch subcommand {
         case "start":
-            return parseNoArguments(remainder, commandName: "app-server daemon start", action: .daemonStart)
+            return parseNoArguments(
+                remainder,
+                commandName: "app-server daemon start",
+                clapUsage: "codex app-server daemon start [OPTIONS]",
+                action: .daemonStart
+            )
         case "restart":
-            return parseNoArguments(remainder, commandName: "app-server daemon restart", action: .daemonRestart)
+            return parseNoArguments(
+                remainder,
+                commandName: "app-server daemon restart",
+                clapUsage: "codex app-server daemon restart [OPTIONS]",
+                action: .daemonRestart
+            )
         case "stop":
-            return parseNoArguments(remainder, commandName: "app-server daemon stop", action: .daemonStop)
+            return parseNoArguments(
+                remainder,
+                commandName: "app-server daemon stop",
+                clapUsage: "codex app-server daemon stop [OPTIONS]",
+                action: .daemonStop
+            )
         case "version":
-            return parseNoArguments(remainder, commandName: "app-server daemon version", action: .daemonVersion)
+            return parseNoArguments(
+                remainder,
+                commandName: "app-server daemon version",
+                clapUsage: "codex app-server daemon version [OPTIONS]",
+                action: .daemonVersion
+            )
         case "pid-update-loop":
-            return parseNoArguments(remainder, commandName: "app-server daemon pid-update-loop", action: .daemonPidUpdateLoop)
+            return parseNoArguments(
+                remainder,
+                commandName: "app-server daemon pid-update-loop",
+                clapUsage: "codex app-server daemon pid-update-loop [OPTIONS]",
+                action: .daemonPidUpdateLoop
+            )
         case "enable-remote-control":
-            return parseNoArguments(remainder, commandName: "app-server daemon enable-remote-control", action: .daemonEnableRemoteControl)
+            return parseNoArguments(
+                remainder,
+                commandName: "app-server daemon enable-remote-control",
+                clapUsage: "codex app-server daemon enable-remote-control [OPTIONS]",
+                action: .daemonEnableRemoteControl
+            )
         case "disable-remote-control":
-            return parseNoArguments(remainder, commandName: "app-server daemon disable-remote-control", action: .daemonDisableRemoteControl)
+            return parseNoArguments(
+                remainder,
+                commandName: "app-server daemon disable-remote-control",
+                clapUsage: "codex app-server daemon disable-remote-control [OPTIONS]",
+                action: .daemonDisableRemoteControl
+            )
         case "bootstrap":
             return parseAppServerDaemonBootstrap(remainder)
         default:
-            if subcommand.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'app-server daemon': \(subcommand)", 64)
-            }
-            return .failure("codex-swift: unsupported app-server daemon subcommand: \(subcommand)", 64)
+            return clapUnrecognizedSubcommand(subcommand, usage: "codex app-server daemon [OPTIONS] <COMMAND>")
         }
     }
 
     private func parseNoArguments(
         _ arguments: [String],
         commandName: String,
+        clapUsage: String? = nil,
         action: AppServerCommandAction
     ) -> ParseResult<AppServerCommandAction> {
         guard arguments.isEmpty else {
             let argument = arguments[0]
+            if let clapUsage {
+                return clapUnexpectedArgument(argument, usage: clapUsage)
+            }
             if argument.hasPrefix("-") {
                 return .failure("codex-swift: unsupported option for command '\(commandName)': \(argument)", 64)
             }
@@ -7104,10 +7140,7 @@ public struct CodexCLI: Sendable {
                 index += 1
                 continue
             }
-            if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'app-server daemon bootstrap': \(argument)", 64)
-            }
-            return .failure("codex-swift: unexpected argument for command 'app-server daemon bootstrap': \(argument)", 64)
+            return clapUnexpectedArgument(argument, usage: "codex app-server daemon bootstrap [OPTIONS]")
         }
         return .success(.daemonBootstrap(remoteControlEnabled: remoteControlEnabled))
     }
@@ -7151,13 +7184,22 @@ public struct CodexCLI: Sendable {
         }
         guard commandArguments.isEmpty else {
             let argument = commandArguments[0]
-            if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command '\(commandName)': \(argument)", 64)
-            }
             if commandName == "remote-control" {
-                return .failure("codex-swift: unsupported remote-control subcommand: \(argument)", 64)
+                if argument.hasPrefix("-") {
+                    return clapUnexpectedArgument(argument, usage: "codex remote-control [OPTIONS] [COMMAND]")
+                }
+                return clapUnrecognizedSubcommand(argument, usage: "codex remote-control [OPTIONS] [COMMAND]")
             }
-            return .failure("codex-swift: unexpected argument for command '\(commandName)': \(argument)", 64)
+            let usage: String
+            switch commandName {
+            case "remote-control start":
+                usage = "codex remote-control start [OPTIONS]"
+            case "remote-control stop":
+                usage = "codex remote-control stop [OPTIONS]"
+            default:
+                usage = "codex \(commandName) [OPTIONS]"
+            }
+            return clapUnexpectedArgument(argument, usage: usage)
         }
         switch parseConfigOverrides(from: rootArguments) {
         case let .success(configOverrides):

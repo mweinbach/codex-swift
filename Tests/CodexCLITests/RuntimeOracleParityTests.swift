@@ -684,7 +684,20 @@ final class RuntimeOracleParityTests: XCTestCase {
             ["execpolicy", "check", "--pretty"],
             ["execpolicy", "check", "--pretty", "--rules", "policy.rules"],
             ["execpolicy", "check", "-rpolicy.rules", "--flaggy"],
-            ["execpolicy", "bogus"]
+            ["execpolicy", "bogus"],
+            ["app-server", "daemon", "bogus"],
+            ["app-server", "daemon", "start", "extra"],
+            ["app-server", "daemon", "start", "--remote-control"],
+            ["app-server", "daemon", "pid-update-loop", "--bad"],
+            ["app-server", "daemon", "bootstrap", "extra"],
+            ["app-server", "daemon", "bootstrap", "--remote-control", "extra"],
+            ["app-server", "daemon", "bootstrap", "--bad"],
+            ["remote-control", "bogus"],
+            ["remote-control", "--listen"],
+            ["remote-control", "start", "extra"],
+            ["remote-control", "start", "--listen"],
+            ["remote-control", "stop", "extra"],
+            ["remote-control", "stop", "--listen"]
         ]
 
         for arguments in commands {

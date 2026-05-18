@@ -1593,27 +1593,63 @@ final class CommandSurfaceCLITests: XCTestCase {
         let cases: [([String], String)] = [
             (
                 ["remote-control", "extra"],
-                "codex-swift: unsupported remote-control subcommand: extra"
+                """
+                error: unrecognized subcommand 'extra'
+
+                Usage: codex remote-control [OPTIONS] [COMMAND]
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["remote-control", "--listen"],
-                "codex-swift: unsupported option for command 'remote-control': --listen"
+                """
+                error: unexpected argument '--listen' found
+
+                Usage: codex remote-control [OPTIONS] [COMMAND]
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["remote-control", "start", "extra"],
-                "codex-swift: unexpected argument for command 'remote-control start': extra"
+                """
+                error: unexpected argument 'extra' found
+
+                Usage: codex remote-control start [OPTIONS]
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["remote-control", "start", "--listen"],
-                "codex-swift: unsupported option for command 'remote-control start': --listen"
+                """
+                error: unexpected argument '--listen' found
+
+                Usage: codex remote-control start [OPTIONS]
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["remote-control", "stop", "extra"],
-                "codex-swift: unexpected argument for command 'remote-control stop': extra"
+                """
+                error: unexpected argument 'extra' found
+
+                Usage: codex remote-control stop [OPTIONS]
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["remote-control", "stop", "--listen"],
-                "codex-swift: unsupported option for command 'remote-control stop': --listen"
+                """
+                error: unexpected argument '--listen' found
+
+                Usage: codex remote-control stop [OPTIONS]
+
+                For more information, try '--help'.
+                """
             )
         ]
 
@@ -1629,7 +1665,7 @@ final class CommandSurfaceCLITests: XCTestCase {
                 }
             )
 
-            XCTAssertEqual(exitCode, 64, "\(arguments)")
+            XCTAssertEqual(exitCode, 2, "\(arguments)")
             XCTAssertEqual(stderr, [expectedMessage], "\(arguments)")
         }
     }
@@ -1714,31 +1750,73 @@ final class CommandSurfaceCLITests: XCTestCase {
             ),
             (
                 ["app-server", "daemon", "bogus"],
-                "codex-swift: unsupported app-server daemon subcommand: bogus"
+                """
+                error: unrecognized subcommand 'bogus'
+
+                Usage: codex app-server daemon [OPTIONS] <COMMAND>
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["app-server", "daemon", "start", "extra"],
-                "codex-swift: unexpected argument for command 'app-server daemon start': extra"
+                """
+                error: unexpected argument 'extra' found
+
+                Usage: codex app-server daemon start [OPTIONS]
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["app-server", "daemon", "start", "--remote-control"],
-                "codex-swift: unsupported option for command 'app-server daemon start': --remote-control"
+                """
+                error: unexpected argument '--remote-control' found
+
+                Usage: codex app-server daemon start [OPTIONS]
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["app-server", "daemon", "pid-update-loop", "extra"],
-                "codex-swift: unexpected argument for command 'app-server daemon pid-update-loop': extra"
+                """
+                error: unexpected argument 'extra' found
+
+                Usage: codex app-server daemon pid-update-loop [OPTIONS]
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["app-server", "daemon", "pid-update-loop", "--bad"],
-                "codex-swift: unsupported option for command 'app-server daemon pid-update-loop': --bad"
+                """
+                error: unexpected argument '--bad' found
+
+                Usage: codex app-server daemon pid-update-loop [OPTIONS]
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["app-server", "daemon", "bootstrap", "extra"],
-                "codex-swift: unexpected argument for command 'app-server daemon bootstrap': extra"
+                """
+                error: unexpected argument 'extra' found
+
+                Usage: codex app-server daemon bootstrap [OPTIONS]
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["app-server", "daemon", "bootstrap", "--bad"],
-                "codex-swift: unsupported option for command 'app-server daemon bootstrap': --bad"
+                """
+                error: unexpected argument '--bad' found
+
+                Usage: codex app-server daemon bootstrap [OPTIONS]
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["app-server", "bogus"],
@@ -1758,7 +1836,8 @@ final class CommandSurfaceCLITests: XCTestCase {
                 }
             )
 
-            XCTAssertEqual(exitCode, 64, "\(arguments)")
+            let expectedExitCode: Int32 = expectedMessage.hasPrefix("error: ") ? 2 : 64
+            XCTAssertEqual(exitCode, expectedExitCode, "\(arguments)")
             XCTAssertEqual(stderr, [expectedMessage], "\(arguments)")
         }
     }
