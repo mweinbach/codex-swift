@@ -770,6 +770,14 @@ Recent upstream audit checkpoint:
   input item to a fresh runtime turn, and records that hidden item in the
   rollout. The broader Rust pending-work mailbox checks and no-activity
   continuation suppression remain pending with the full ThreadManager lifecycle.
+- 2026-05-18: Swift live goal continuation now preserves Rust's
+  `should_ignore_goal_for_mode` guard for plan mode. The live runtime carries
+  the current `CollaborationModeKind` from the resumed rollout or active
+  `userTurn` into the continuation launcher, records the active turn's
+  collaboration mode in the live `turn_context`, and refuses to build hidden
+  active-goal continuation input while the thread is in plan mode. Rust's
+  queued next-turn and trigger-turn mailbox pending-work checks remain pending
+  with the full ThreadManager lifecycle.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through

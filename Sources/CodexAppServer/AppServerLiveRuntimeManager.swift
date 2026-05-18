@@ -156,13 +156,15 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
     private func submitGoalContinuation(
         threadID: String,
         features: FeatureStates,
+        collaborationModeKind: CollaborationModeKind?,
         prototype: AppServerLiveRuntimeSubmission
     ) async {
         guard await state.canStartGoalContinuation(threadID: threadID),
               let inputItems = await Self.liveGoalContinuationInputItems(
                 stateStore: configuration.stateStore,
                 features: features,
-                threadID: threadID
+                threadID: threadID,
+                collaborationModeKind: collaborationModeKind
               )
         else {
             return
@@ -202,7 +204,8 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         let goalIsCurrent = await Self.liveGoalContinuationInputItems(
             stateStore: configuration.stateStore,
             features: features,
-            threadID: threadID
+            threadID: threadID,
+            collaborationModeKind: collaborationModeKind
         ) == inputItems
         guard goalIsCurrent else {
             await state.cancelTurnIfMatching(threadID: threadID, turnID: turnID)
@@ -235,9 +238,11 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         let startedAt = AppServerLiveRuntimeClock.millisecondsSinceEpoch()
         var goalAccounting: LiveThreadGoalAccountingSession?
         var goalContinuationFeatures: FeatureStates?
+        var goalContinuationCollaborationModeKind: CollaborationModeKind?
         do {
             let setup = try await prepareTurn(submission)
             goalContinuationFeatures = setup.settings.features
+            goalContinuationCollaborationModeKind = setup.collaborationModeKind
             await state.emit(
                 threadID: submission.threadID,
                 turnID: submission.turnID,
@@ -396,6 +401,7 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             await submitGoalContinuation(
                 threadID: submission.threadID,
                 features: goalContinuationFeatures,
+                collaborationModeKind: goalContinuationCollaborationModeKind,
                 prototype: submission
             )
         }
@@ -533,6 +539,7 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 approvalPolicy: approvalPolicy,
                 sandboxPolicy: sandboxPolicy,
                 model: model,
+                collaborationMode: turnInput.collaborationMode,
                 effort: settings.modelReasoningEffort ?? modelFamily.defaultReasoningEffort,
                 summary: turnInput.summary
                     ?? settings.modelReasoningSummary
@@ -574,6 +581,7 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             prompt: prompt,
             mcpToolInfos: mcpToolInfos,
             dynamicTools: summary.dynamicTools,
+            collaborationModeKind: turnInput.collaborationMode?.mode ?? summary.collaborationModeKind,
             userPromptText: turnInput.promptText,
             outputSchema: turnInput.outputSchema,
             serviceTier: turnInput.serviceTier ?? settings.serviceTier,
@@ -968,9 +976,11 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
     static func liveGoalContinuationInputItems(
         stateStore: SQLiteAgentGraphStore?,
         features: FeatureStates,
-        threadID: String
+        threadID: String,
+        collaborationModeKind: CollaborationModeKind? = nil
     ) async -> [ResponseItem]? {
         guard features.isEnabled(.goals),
+              collaborationModeKind != .plan,
               let stateStore,
               let parsedThreadID = try? ThreadId(string: threadID)
         else {
@@ -1640,6 +1650,7 @@ private struct PreparedLiveTurn {
     let prompt: Prompt
     let mcpToolInfos: [McpToolInfo]
     let dynamicTools: [DynamicToolSpec]
+    let collaborationModeKind: CollaborationModeKind?
     let userPromptText: String
     let outputSchema: JSONValue?
     let serviceTier: String?
@@ -1659,11 +1670,13 @@ private struct LiveRolloutSummary {
     let model: String?
     let modelProvider: String
     let dynamicTools: [DynamicToolSpec]
+    let collaborationModeKind: CollaborationModeKind?
 
     init(items: [RolloutRecordItem], defaultProvider: String) throws {
         var sessionMeta: SessionMeta?
         var latestCwd: String?
         var latestModel: String?
+        var latestCollaborationModeKind: CollaborationModeKind?
         for item in items {
             switch item {
             case let .sessionMeta(line):
@@ -1673,6 +1686,7 @@ private struct LiveRolloutSummary {
             case let .turnContext(context):
                 latestCwd = context.cwd
                 latestModel = context.model
+                latestCollaborationModeKind = context.collaborationMode?.mode
             case .responseItem, .compacted, .eventMsg:
                 continue
             }
@@ -1685,6 +1699,7 @@ private struct LiveRolloutSummary {
         self.model = latestModel
         self.modelProvider = sessionMeta.modelProvider ?? defaultProvider
         self.dynamicTools = sessionMeta.dynamicTools ?? []
+        self.collaborationModeKind = latestCollaborationModeKind
     }
 }
 
@@ -1700,6 +1715,7 @@ private struct LiveTurnInput {
     let model: String?
     let summary: ReasoningSummary?
     let serviceTier: String?
+    let collaborationMode: CollaborationMode?
 
     init(op: Op) throws {
         switch op {
@@ -1715,6 +1731,7 @@ private struct LiveTurnInput {
             self.model = nil
             self.summary = nil
             self.serviceTier = nil
+            self.collaborationMode = nil
         case let .userInputWithTurnContext(params):
             self.items = params.items
             self.environments = params.environments
@@ -1727,6 +1744,7 @@ private struct LiveTurnInput {
             self.model = params.model
             self.summary = params.summary
             self.serviceTier = params.serviceTier?.stringValue
+            self.collaborationMode = nil
         case let .userTurn(
             items: items,
             cwd: cwd,
@@ -1739,7 +1757,7 @@ private struct LiveTurnInput {
             summary: summary,
             serviceTier: serviceTier,
             finalOutputJSONSchema: finalOutputJSONSchema,
-            collaborationMode: _,
+            collaborationMode: collaborationMode,
             personality: _,
             environments: environments
         ):
@@ -1754,9 +1772,18 @@ private struct LiveTurnInput {
             self.model = model
             self.summary = summary
             self.serviceTier = serviceTier?.stringValue
+            self.collaborationMode = try Self.decodeCollaborationMode(collaborationMode)
         default:
             throw AppServerLiveRuntimeError("unsupported live runtime op: \(op)")
         }
+    }
+
+    private static func decodeCollaborationMode(_ value: JSONValue?) throws -> CollaborationMode? {
+        guard let value else {
+            return nil
+        }
+        let data = try JSONEncoder().encode(value)
+        return try JSONDecoder().decode(CollaborationMode.self, from: data)
     }
 
     var promptText: String {

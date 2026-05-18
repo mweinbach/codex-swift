@@ -11878,6 +11878,14 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(text.contains("Continue working toward the active thread goal."))
         XCTAssertTrue(text.contains("keep improving the benchmark"))
 
+        let planItems = await AppServerLiveRuntimeManager.liveGoalContinuationInputItems(
+            stateStore: stateStore,
+            features: features,
+            threadID: threadID,
+            collaborationModeKind: .plan
+        )
+        XCTAssertNil(planItems)
+
         _ = try await stateStore.updateThreadGoal(
             threadID: try ThreadId(string: threadID),
             status: .paused,
