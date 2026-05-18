@@ -27,6 +27,18 @@ final class RuntimeOracleParityTests: XCTestCase {
         XCTAssertEqual(normalizedHelp(swift.stdout), normalizedHelp(rust.stdout))
     }
 
+    func testExecVersionMatchesRustOracleModuloVersionNumber() throws {
+        let oracle = try RuntimeOracle.required()
+
+        let rust = try oracle.run(.rust, arguments: ["exec", "--version"])
+        let swift = try oracle.run(.swift, arguments: ["exec", "--version"])
+
+        XCTAssertEqual(rust.exitCode, 0, rust.stderr)
+        XCTAssertEqual(swift.exitCode, 0, swift.stderr)
+
+        XCTAssertEqual(normalizedVersionLine(swift.stdout), normalizedVersionLine(rust.stdout))
+    }
+
     func testAppServerInitializeMatchesRustOracle() throws {
         let oracle = try RuntimeOracle.required()
         let request = """
@@ -300,6 +312,17 @@ private func normalizedHelp(_ text: String) -> String {
         }
         .joined(separator: "\n")
         .trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+private func normalizedVersionLine(_ text: String) -> String {
+    let normalized = text
+        .replacingOccurrences(of: "\r\n", with: "\n")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    let parts = normalized.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+    guard let commandName = parts.first else {
+        return normalized
+    }
+    return "\(commandName) <version>"
 }
 
 private func normalizedAppServerMessages(_ stdout: String) throws -> [String] {

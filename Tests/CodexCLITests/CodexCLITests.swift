@@ -193,6 +193,32 @@ final class CodexCLITests: XCTestCase {
         XCTAssertTrue(help.contains("      --output-schema <FILE>"))
     }
 
+    func testCommandVersionTargetsSubcommandLikeRust() async {
+        let execSpec = CommandSpec(name: "exec", aliases: ["e"], summary: "Run Codex non-interactively.")
+        XCTAssertEqual(
+            CodexCLI().parseInvocation(arguments: ["exec", "--version"]),
+            .commandVersion(execSpec)
+        )
+        XCTAssertEqual(
+            CodexCLI().parseInvocation(arguments: ["exec", "-V"]),
+            .commandVersion(execSpec)
+        )
+        XCTAssertEqual(
+            CodexCLI().parseInvocation(arguments: ["--version", "exec"]),
+            .version
+        )
+
+        var stdout: [String] = []
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["exec", "--version"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(stdout, ["codex-cli-exec \(CodexBuildMetadata.version)"])
+    }
+
     func testPromptWithoutSubcommandIsInteractiveInvocation() {
         XCTAssertEqual(CodexCLI().parseInvocation(arguments: ["hello codex"]), .interactive(prompt: "hello codex"))
     }

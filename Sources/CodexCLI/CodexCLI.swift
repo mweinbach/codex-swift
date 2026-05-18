@@ -13,6 +13,7 @@ public struct CodexCLI: Sendable {
         case help
         case commandHelp(CommandSpec, arguments: [String])
         case version
+        case commandVersion(CommandSpec)
         case interactive(prompt: String?)
         case command(CommandSpec, arguments: [String])
         case unknown(String)
@@ -828,8 +829,8 @@ public struct CodexCLI: Sendable {
             switch versionTarget {
             case .root:
                 return .version
-            case let .command(spec, arguments):
-                return .command(spec, arguments: arguments)
+            case let .command(spec, _):
+                return .commandVersion(spec)
             }
         }
 
@@ -1099,6 +1100,15 @@ public struct CodexCLI: Sendable {
         "codex \(Self.version)"
     }
 
+    public func renderVersion(for spec: CommandSpec) -> String {
+        switch spec.name {
+        case "exec":
+            return "codex-cli-exec \(Self.version)"
+        default:
+            return "\(spec.name) \(Self.version)"
+        }
+    }
+
     private func renderExecHelp() -> String {
         """
         Run Codex non-interactively
@@ -1214,6 +1224,9 @@ public struct CodexCLI: Sendable {
         case .version:
             stdout(renderVersion())
             return 0
+        case let .commandVersion(spec):
+            stdout(renderVersion(for: spec))
+            return 0
         case .help:
             stdout(renderHelp())
             return 0
@@ -1310,6 +1323,9 @@ public struct CodexCLI: Sendable {
         switch invocation {
         case .version:
             stdout(renderVersion())
+            return 0
+        case let .commandVersion(spec):
+            stdout(renderVersion(for: spec))
             return 0
         case .help:
             stdout(renderHelp())
@@ -4089,7 +4105,7 @@ public struct CodexCLI: Sendable {
 
     private func rootRemovedFullAutoRejectionMessage(invocation: Invocation, arguments: [String]) -> String? {
         switch invocation {
-        case let .command(spec, _), let .commandHelp(spec, _):
+        case let .command(spec, _), let .commandHelp(spec, _), let .commandVersion(spec):
             if rootFlagPresent(named: "--full-auto", beforeCommands: [spec.name] + spec.aliases, in: arguments) {
                 return "codex-swift: unsupported option at top level: --full-auto"
             }
@@ -4105,7 +4121,7 @@ public struct CodexCLI: Sendable {
 
     private func rootProfileV2RejectionMessage(invocation: Invocation, arguments: [String]) -> String? {
         let commandNames: [String] = switch invocation {
-        case let .command(spec, _), let .commandHelp(spec, _):
+        case let .command(spec, _), let .commandHelp(spec, _), let .commandVersion(spec):
             [spec.name] + spec.aliases
         case .version, .help, .interactive, .unknown:
             []
@@ -4129,7 +4145,7 @@ public struct CodexCLI: Sendable {
             default:
                 return "--profile-v2 only applies to runtime commands: `codex`, `codex exec`, `codex review`, `codex resume`, `codex fork`, `codex exec-server`, and `codex debug prompt-input`."
             }
-        case .version, .help, .unknown:
+        case .version, .commandVersion, .help, .unknown:
             return nil
         }
     }
@@ -4175,7 +4191,7 @@ public struct CodexCLI: Sendable {
 
     private func rootDuplicateSharedOptionRejectionMessage(invocation: Invocation, arguments: [String]) -> String? {
         let commandNames: [String] = switch invocation {
-        case let .command(spec, _), let .commandHelp(spec, _):
+        case let .command(spec, _), let .commandHelp(spec, _), let .commandVersion(spec):
             [spec.name] + spec.aliases
         case .version, .help, .interactive, .unknown:
             []
@@ -4213,7 +4229,7 @@ public struct CodexCLI: Sendable {
         arguments: [String]
     ) -> String? {
         switch invocation {
-        case .version, .help:
+        case .version, .commandVersion, .help:
             return nil
         case let .command(spec, _), let .commandHelp(spec, _):
             return rootInteractivePermissionConflictMessage(

@@ -13,6 +13,11 @@ Source baseline inspected for this scaffold:
 Recent upstream audit checkpoint:
 
 - 2026-05-18: extended the Rust runtime oracle harness to cover subcommand
+  version dispatch. Swift now treats `codex exec --version` and
+  `codex exec -V` as Rust-shaped `exec` package version output
+  (`codex-cli-exec <version>`) while preserving root `codex --version exec`
+  behavior.
+- 2026-05-18: extended the Rust runtime oracle harness to cover subcommand
   help dispatch. Swift now treats `codex exec --help` and `codex help exec`
   as Rust-shaped `exec` subcommand help instead of falling back to root help,
   preserving the current long `codex exec [OPTIONS] [PROMPT]` output.
