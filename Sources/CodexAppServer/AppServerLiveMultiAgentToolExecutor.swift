@@ -30,7 +30,8 @@ struct AppServerLiveMultiAgentToolExecutor {
                 agentType: $0.agentType,
                 model: $0.model,
                 reasoningEffort: $0.reasoningEffort,
-                serviceTier: $0.serviceTier
+                serviceTier: $0.serviceTier,
+                developerInstructions: nil
             )
         },
         spawnAgent: @escaping @Sendable (LiveSpawnAgentRequest) async throws -> LiveSpawnAgentResult = { _ in
@@ -185,6 +186,7 @@ struct AppServerLiveMultiAgentToolExecutor {
                 model: resolvedOverrides.model,
                 reasoningEffort: resolvedOverrides.reasoningEffort,
                 serviceTier: resolvedOverrides.serviceTier,
+                developerInstructions: resolvedOverrides.developerInstructions,
                 forkMode: forkMode,
                 childAgentPath: childAgentPath
             ))
@@ -589,6 +591,7 @@ struct LiveSpawnAgentRequest: Equatable, Sendable {
     let model: String?
     let reasoningEffort: ReasoningEffort?
     let serviceTier: String?
+    let developerInstructions: String?
     let forkMode: LiveSpawnAgentForkMode
     let childAgentPath: AgentPath
 }
@@ -606,12 +609,14 @@ struct LiveSpawnAgentResolvedOverrides: Equatable, Sendable {
     let model: String?
     let reasoningEffort: ReasoningEffort?
     let serviceTier: String?
+    let developerInstructions: String?
 }
 
 struct LiveSpawnAgentRoleConfigOverrides: Equatable, Sendable {
     let model: String?
     let reasoningEffort: ReasoningEffort?
     let serviceTier: String?
+    let developerInstructions: String?
 }
 
 struct LiveSpawnAgentOverrideResolver: Sendable {
@@ -682,6 +687,7 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
 
         var roleResolvedModel = resolvedModel
         var roleServiceTier: String?
+        var roleDeveloperInstructions: String?
         if let agentType = request.agentType,
            let overrides = roleConfigOverrides[agentType] {
             if let roleModel = overrides.model {
@@ -695,6 +701,7 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
                 resolvedReasoningEffort = roleReasoningEffort
             }
             roleServiceTier = overrides.serviceTier
+            roleDeveloperInstructions = overrides.developerInstructions
             try Self.validateReasoningEffort(resolvedReasoningEffort, model: selectedModel)
         }
 
@@ -707,7 +714,8 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
             agentType: request.agentType,
             model: roleResolvedModel,
             reasoningEffort: resolvedReasoningEffort,
-            serviceTier: resolvedServiceTier
+            serviceTier: resolvedServiceTier,
+            developerInstructions: roleDeveloperInstructions
         )
     }
 
@@ -742,7 +750,8 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
             return LiveSpawnAgentRoleConfigOverrides(
                 model: try optionalString(table["model"]),
                 reasoningEffort: try optionalReasoningEffort(table["model_reasoning_effort"]),
-                serviceTier: try optionalString(table["service_tier"])
+                serviceTier: try optionalString(table["service_tier"]),
+                developerInstructions: try optionalString(table["developer_instructions"])
             )
         } catch {
             throw roleUnavailableError()

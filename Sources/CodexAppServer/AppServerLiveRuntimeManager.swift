@@ -702,6 +702,9 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         if let requestedSummary = turnInput.summary {
             settings.modelReasoningSummary = requestedSummary
         }
+        if let developerInstructionsOverride = submission.developerInstructionsOverride {
+            settings.developerInstructions = developerInstructionsOverride
+        }
         let runtimeRefreshSnapshot = await state.runtimeConfigSnapshot(threadID: submission.threadID)
         let refreshedConfigStack = try runtimeRefreshSnapshot.map {
             try AppServerRuntimeConfigRefresh.applyRuntimeRefreshableSnapshot(
@@ -1015,7 +1018,8 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             extensionToolSpecs: prototype.extensionToolSpecs,
             extensionRegisteredToolExecutor: prototype.extensionRegisteredToolExecutor,
             extensionApprovalReviewer: prototype.extensionApprovalReviewer,
-            additionalInputItems: []
+            additionalInputItems: [],
+            developerInstructionsOverride: request.developerInstructions
         ))
 
         let status = await state.agentStatus(threadID: childThreadID.description)

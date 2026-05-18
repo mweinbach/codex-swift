@@ -890,9 +890,10 @@ Recent upstream audit checkpoint:
   reasoning effort and unsupported inherited parent service tiers are cleared.
   Configured role `config_file` values are now read through the config-layer
   TOML reader for live spawns and apply Rust's post-argument role layer for the
-  child model, reasoning effort, and service tier, with malformed role files
-  mapped to Rust's `agent type is currently not available` error. Full Rust
-  `AgentControl` parity and broader child config application remain pending.
+  child model, reasoning effort, service tier, and developer instructions, with
+  malformed role files mapped to Rust's `agent type is currently not available`
+  error. Full Rust `AgentControl` parity and broader child config application
+  remain pending.
 - 2026-05-18: Swift live app-server MultiAgentV2 `spawn_agent` now reserves
   Rust-style spawned-agent nicknames for live child threads, using the upstream
   default nickname pool plus role-specific `nickname_candidates`, persists the

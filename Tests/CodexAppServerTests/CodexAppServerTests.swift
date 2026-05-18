@@ -12253,6 +12253,7 @@ final class CodexAppServerTests: XCTestCase {
                 model: "gpt-5.4",
                 reasoningEffort: .high,
                 serviceTier: "flex",
+                developerInstructions: nil,
                 forkMode: .none,
                 childAgentPath: workerPath
             )
@@ -12328,7 +12329,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(updatedRequests.last?.agentType, nil)
     }
 
-    func testLiveSpawnAgentValidatesRustRoleModelReasoningAndServiceTierOverrides() async throws {
+    func testLiveSpawnAgentValidatesRustRoleModelReasoningServiceTierAndDeveloperOverrides() async throws {
         let priorityTier = ModelServiceTier(
             id: ServiceTier.fast.requestValue,
             name: "fast",
@@ -12428,7 +12429,8 @@ final class CodexAppServerTests: XCTestCase {
             agentType: "custom-role",
             model: "gpt-5.3-codex",
             reasoningEffort: .low,
-            serviceTier: nil
+            serviceTier: nil,
+            developerInstructions: nil
         ))
 
         let temp = try TemporaryDirectory()
@@ -12468,7 +12470,8 @@ final class CodexAppServerTests: XCTestCase {
             agentType: "reviewer",
             model: "gpt-5.4",
             reasoningEffort: .high,
-            serviceTier: "priority"
+            serviceTier: "priority",
+            developerInstructions: "Review carefully"
         ))
 
         let badRoleFile = temp.url.appendingPathComponent("bad-reviewer.toml", isDirectory: false)

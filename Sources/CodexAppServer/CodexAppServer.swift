@@ -117,6 +117,7 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
     public let extensionRegisteredToolExecutor: NonInteractiveExec.RegisteredToolExecutor?
     public let extensionApprovalReviewer: AppServerExtensionApprovalReviewer?
     public let additionalInputItems: [ResponseItem]
+    public let developerInstructionsOverride: String?
 
     public init(
         requestID: RequestID,
@@ -131,7 +132,8 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
         extensionToolSpecs: [ConfiguredToolSpec] = [],
         extensionRegisteredToolExecutor: NonInteractiveExec.RegisteredToolExecutor? = nil,
         extensionApprovalReviewer: AppServerExtensionApprovalReviewer? = nil,
-        additionalInputItems: [ResponseItem] = []
+        additionalInputItems: [ResponseItem] = [],
+        developerInstructionsOverride: String? = nil
     ) {
         self.requestID = requestID
         self.threadID = threadID
@@ -146,6 +148,7 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
         self.extensionRegisteredToolExecutor = extensionRegisteredToolExecutor
         self.extensionApprovalReviewer = extensionApprovalReviewer
         self.additionalInputItems = additionalInputItems
+        self.developerInstructionsOverride = developerInstructionsOverride
     }
 
     public static func == (lhs: AppServerLiveRuntimeSubmission, rhs: AppServerLiveRuntimeSubmission) -> Bool {
@@ -159,6 +162,7 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
             && lhs.extensionPromptFragments == rhs.extensionPromptFragments
             && lhs.extensionToolSpecs == rhs.extensionToolSpecs
             && lhs.additionalInputItems == rhs.additionalInputItems
+            && lhs.developerInstructionsOverride == rhs.developerInstructionsOverride
     }
 }
 
