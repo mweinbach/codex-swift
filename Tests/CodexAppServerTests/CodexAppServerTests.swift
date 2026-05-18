@@ -5145,6 +5145,118 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(request["service_tier"] as? String, "priority")
     }
 
+    func testLiveRuntimeEnvironmentContextIncludesOpenSubagentsLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let server = try AppServerResponsesRequestCaptureServer()
+        defer {
+            server.stop()
+        }
+        try """
+        model = "gpt-5.5"
+        model_provider = "mock_provider"
+
+        [model_providers.mock_provider]
+        name = "mock_provider"
+        base_url = "\(server.baseURL)"
+        wire_api = "responses"
+        requires_openai_auth = false
+        """.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T13-35-00",
+            timestamp: "2025-01-05T13:35:00Z",
+            preview: "Saved user message",
+            provider: "mock_provider",
+            cwd: temp.url.path
+        )
+        let stateStore = try await createAppServerGoalStateStore(
+            codexHome: temp.url,
+            threadID: threadID,
+            title: "parent"
+        )
+        let parentThreadID = try ThreadId(string: threadID)
+        let pathlessThreadID = try ThreadId(string: "00000000-0000-4000-8000-000000001101")
+        let workerThreadID = try ThreadId(string: "00000000-0000-4000-8000-000000001102")
+        let closedThreadID = try ThreadId(string: "00000000-0000-4000-8000-000000001103")
+        for (childThreadID, agentPath, nickname, status) in [
+            (pathlessThreadID, nil, nil, ThreadSpawnEdgeStatus.open),
+            (workerThreadID, "/root/worker", "Bernoulli", .open),
+            (closedThreadID, "/root/closed", "Curie", .closed),
+        ] {
+            try await stateStore.upsertThread(ThreadMetadata(
+                id: childThreadID,
+                rolloutPath: temp.url.appendingPathComponent("\(childThreadID).jsonl").path,
+                createdAt: try appServerDate("2025-01-05T13:35:01Z"),
+                updatedAt: try appServerDate("2025-01-05T13:35:02Z"),
+                source: "vscode",
+                agentNickname: nickname,
+                agentRole: "explorer",
+                agentPath: agentPath,
+                modelProvider: "mock_provider",
+                cwd: temp.url.path,
+                cliVersion: "0.0.0-test",
+                title: "child",
+                sandboxPolicy: "read-only",
+                approvalMode: "never",
+                tokensUsed: 0
+            ))
+            try await stateStore.upsertThreadSpawnEdge(
+                parentThreadID: parentThreadID,
+                childThreadID: childThreadID,
+                status: status
+            )
+        }
+        let manager = AppServerLiveRuntimeManager(configuration: testConfiguration(
+            codexHome: temp.url,
+            requiresOpenAIAuth: false,
+            stateStore: stateStore
+        ))
+        let capture = AppServerRuntimeEventCapture()
+        manager.setEventSink { threadID, turnID, event in
+            await capture.append(threadID: threadID, turnID: turnID, event: event)
+        }
+        defer {
+            manager.shutdown()
+        }
+        let op = Op.userInput(items: [.text("Summarize child agents")])
+
+        let turnID = try manager.submitCoreOp(requestID: .integer(9), threadID: threadID, op: op)
+        _ = try manager.submitLiveRuntime(AppServerLiveRuntimeSubmission(
+            requestID: .integer(9),
+            threadID: threadID,
+            turnID: turnID,
+            op: op
+        ))
+        _ = try await capture.waitForEvents(count: 2)
+
+        let body = try server.waitForRequestBody()
+        let request = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let input = try XCTUnwrap(request["input"] as? [[String: Any]])
+        let environmentText = try XCTUnwrap(input.lazy.compactMap { item -> String? in
+            guard item["role"] as? String == "user",
+                  let content = item["content"] as? [[String: Any]]
+            else {
+                return nil
+            }
+            return content.compactMap { part -> String? in
+                let text = part["text"] as? String
+                return text?.contains("<environment_context>") == true ? text : nil
+            }.first
+        }.first)
+        XCTAssertTrue(environmentText.contains("""
+          <subagents>
+            - \(pathlessThreadID.description)
+            - worker: Bernoulli
+          </subagents>
+        """))
+        XCTAssertFalse(environmentText.contains("closed"))
+        XCTAssertFalse(environmentText.contains("Curie"))
+    }
+
     func testLiveRuntimeConfigRefreshAppliesRuntimeRefreshableFieldsLikeRust() throws {
         let temp = try TemporaryDirectory()
         var features = FeatureStates.withDefaults()

@@ -62,6 +62,7 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
     public let networkAccess: NetworkAccess?
     public let writableRoots: [AbsolutePath]?
     public let shell: Shell
+    public let subagents: String?
 
     private enum CodingKeys: String, CodingKey {
         case environments
@@ -74,6 +75,7 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
         case networkAccess = "network_access"
         case writableRoots = "writable_roots"
         case shell
+        case subagents
     }
 
     public init(
@@ -84,7 +86,8 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
         environments: [EnvironmentContextEnvironment]? = nil,
         currentDate: String? = nil,
         timezone: String? = nil,
-        network: EnvironmentContextNetwork? = nil
+        network: EnvironmentContextNetwork? = nil,
+        subagents: String? = nil
     ) {
         self.environments = environments
         self.currentDate = currentDate
@@ -96,6 +99,7 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
         self.networkAccess = sandboxPolicy.map(Self.networkAccess(for:))
         self.writableRoots = Self.writableRoots(for: sandboxPolicy)
         self.shell = shell
+        self.subagents = subagents.flatMap(Self.nonEmpty)
     }
 
     public init(
@@ -108,7 +112,8 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
         environments: [EnvironmentContextEnvironment]? = nil,
         currentDate: String? = nil,
         timezone: String? = nil,
-        network: EnvironmentContextNetwork? = nil
+        network: EnvironmentContextNetwork? = nil,
+        subagents: String? = nil
     ) {
         self.environments = environments
         self.currentDate = currentDate
@@ -120,6 +125,7 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
         self.networkAccess = networkAccess
         self.writableRoots = writableRoots
         self.shell = shell
+        self.subagents = subagents.flatMap(Self.nonEmpty)
     }
 
     public static func diff(before: TurnContext, after: TurnContext, shell: Shell) -> EnvironmentContext {
@@ -154,6 +160,7 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
             && sandboxMode == other.sandboxMode
             && networkAccess == other.networkAccess
             && writableRoots == other.writableRoots
+            && subagents == other.subagents
     }
 
     public func serializeToXML() -> String {
@@ -191,6 +198,13 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
         }
         if let network {
             lines.append("  \(renderNetwork(network))")
+        }
+        if let subagents {
+            lines.append("  <subagents>")
+            lines.append(contentsOf: subagents
+                .split(separator: "\n", omittingEmptySubsequences: false)
+                .map { "    \($0)" })
+            lines.append("  </subagents>")
         }
         lines.append(Self.closeTag)
         return lines.joined(separator: "\n")
@@ -290,5 +304,9 @@ public struct EnvironmentContext: Equatable, Codable, Sendable {
             return
         }
         rendered += "<\(name)>\(domains.joined(separator: ","))</\(name)>"
+    }
+
+    private static func nonEmpty(_ value: String) -> String? {
+        value.isEmpty ? nil : value
     }
 }

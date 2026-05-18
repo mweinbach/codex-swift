@@ -790,6 +790,7 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             mcpToolInfos: mcpToolInfos,
             mcpTools: submission.mcpTools
         )
+        let environmentContextSubagents = await environmentContextSubagents(parentThreadID: submission.threadID)
         var input = NonInteractiveExec.makeInitialPromptInput(
             cwd: cwd,
             approvalPolicy: approvalPolicy,
@@ -806,7 +807,8 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             multiAgentV2UsageHintText: settings.multiAgentV2.usageHintText(
                 features: settings.features,
                 sessionSource: configuration.sessionSource
-            )
+            ),
+            environmentContextSubagents: environmentContextSubagents
         )
         input.append(contentsOf: responseHistory)
         let queuedInputItems = await state.takeQueuedResponseItemsForNextTurn(threadID: submission.threadID)
@@ -903,6 +905,27 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             return candidates
         }
         return defaultAgentNicknameCandidates
+    }
+
+    private func environmentContextSubagents(parentThreadID rawThreadID: String) async -> String? {
+        guard let stateStore = configuration.stateStore,
+              let parentThreadID = try? ThreadId(string: rawThreadID),
+              let children = try? await stateStore.listOpenThreadSpawnChildThreads(parentThreadID: parentThreadID)
+        else {
+            return nil
+        }
+        let lines = children.map(Self.formatEnvironmentContextSubagent)
+        return lines.isEmpty ? nil : lines.joined(separator: "\n")
+    }
+
+    private static func formatEnvironmentContextSubagent(_ metadata: ThreadMetadata) -> String {
+        let reference = metadata.agentPath
+            .flatMap { try? AgentPath(validating: $0).name }
+            ?? metadata.id.description
+        guard let nickname = metadata.agentNickname, !nickname.isEmpty else {
+            return "- \(reference)"
+        }
+        return "- \(reference): \(nickname)"
     }
 
     private func spawnLiveAgent(

@@ -653,6 +653,45 @@ final class NonInteractiveExecTests: XCTestCase {
         })
     }
 
+    func testMakePromptIncludesSubagentsInEnvironmentContextLikeRust() {
+        let prompt = NonInteractiveExec.makePrompt(
+            prompt: "ship it",
+            imagePaths: [],
+            outputSchema: nil,
+            cwd: URL(fileURLWithPath: "/tmp/project", isDirectory: true),
+            approvalPolicy: .never,
+            sandboxPolicy: .readOnly,
+            shell: Shell(shellType: .zsh, shellPath: "/bin/zsh"),
+            environmentContextSubagents: "- worker: Bernoulli\n- pathless-id"
+        )
+
+        let environmentText = prompt.input.compactMap { item -> String? in
+            guard case let .message(_, "user", content, _) = item else {
+                return nil
+            }
+            return content.compactMap { contentItem -> String? in
+                guard case let .inputText(text) = contentItem, text.contains("<environment_context>") else {
+                    return nil
+                }
+                return text
+            }.first
+        }.first
+
+        XCTAssertEqual(environmentText, """
+        <environment_context>
+          <cwd>/tmp/project</cwd>
+          <approval_policy>never</approval_policy>
+          <sandbox_mode>read-only</sandbox_mode>
+          <network_access>restricted</network_access>
+          <shell>zsh</shell>
+          <subagents>
+            - worker: Bernoulli
+            - pathless-id
+          </subagents>
+        </environment_context>
+        """)
+    }
+
     func testMemoryToolInstructionsRenderRustReadPathTemplate() throws {
         let temp = try NonInteractiveExecTemporaryDirectory()
         let memories = temp.url.appendingPathComponent("memories", isDirectory: true)

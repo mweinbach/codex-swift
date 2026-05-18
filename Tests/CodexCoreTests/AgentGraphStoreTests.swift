@@ -621,6 +621,66 @@ final class AgentGraphStoreTests: XCTestCase {
         XCTAssertEqual(closedDescendants, [closedChildThreadID, closedGreatGrandchildThreadID])
     }
 
+    func testSQLiteStoreListsOpenThreadSpawnChildThreadsLikeRustSubagentContext() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let store = try SQLiteAgentGraphStore(databaseURL: temp.url.appendingPathComponent("state.sqlite3"))
+        let parentThreadID = try threadID(690)
+        let pathlessThreadID = try threadID(691)
+        let workerThreadID = try threadID(692)
+        let nestedThreadID = try threadID(693)
+        let closedThreadID = try threadID(694)
+
+        try await store.upsertThread(try threadMetadata(
+            id: pathlessThreadID,
+            rolloutPath: temp.url.appendingPathComponent("pathless.jsonl").path,
+            updatedAt: date(milliseconds: 1_700_000_001_000),
+            title: "pathless",
+            agentPath: .some(nil)
+        ))
+        try await store.upsertThread(try threadMetadata(
+            id: workerThreadID,
+            rolloutPath: temp.url.appendingPathComponent("worker.jsonl").path,
+            updatedAt: date(milliseconds: 1_700_000_002_000),
+            title: "worker",
+            agentNickname: "Bernoulli",
+            agentPath: "/root/worker"
+        ))
+        try await store.upsertThread(try threadMetadata(
+            id: nestedThreadID,
+            rolloutPath: temp.url.appendingPathComponent("nested.jsonl").path,
+            updatedAt: date(milliseconds: 1_700_000_003_000),
+            title: "nested",
+            agentNickname: "Bohr",
+            agentPath: "/root/worker/nested"
+        ))
+        try await store.upsertThread(try threadMetadata(
+            id: closedThreadID,
+            rolloutPath: temp.url.appendingPathComponent("closed.jsonl").path,
+            updatedAt: date(milliseconds: 1_700_000_004_000),
+            title: "closed",
+            agentNickname: "Curie",
+            agentPath: "/root/closed"
+        ))
+        for (threadID, status) in [
+            (pathlessThreadID, ThreadSpawnEdgeStatus.open),
+            (workerThreadID, .open),
+            (nestedThreadID, .open),
+            (closedThreadID, .closed),
+        ] {
+            try await store.upsertThreadSpawnEdge(
+                parentThreadID: parentThreadID,
+                childThreadID: threadID,
+                status: status
+            )
+        }
+
+        let children = try await store.listOpenThreadSpawnChildThreads(parentThreadID: parentThreadID)
+
+        XCTAssertEqual(children.map(\.id), [pathlessThreadID, workerThreadID, nestedThreadID])
+        XCTAssertEqual(children.map(\.agentPath), [nil, "/root/worker", "/root/worker/nested"])
+        XCTAssertEqual(children.map(\.agentNickname), [nil, "Bernoulli", "Bohr"])
+    }
+
     func testSQLiteStoreFindsDirectChildAndDescendantByAgentPath() async throws {
         let temp = try AgentGraphStoreTemporaryDirectory()
         let databaseURL = temp.url.appendingPathComponent("state.sqlite3")
@@ -3160,17 +3220,23 @@ final class AgentGraphStoreTests: XCTestCase {
         updatedAt: Date,
         source: String = "cli",
         title: String,
+        agentNickname: String? = nil,
+        agentRole: String? = nil,
+        agentPath: String?? = nil,
         tokensUsed: Int64 = 0,
         firstUserMessage: String? = "hello",
         gitInfo: ThreadGitInfo = ThreadGitInfo()
     ) throws -> ThreadMetadata {
-        ThreadMetadata(
+        let defaultAgentPath = try AgentPath(validating: "/root/thread_\(id.description.suffix(12))").description
+        return ThreadMetadata(
             id: id,
             rolloutPath: rolloutPath,
             createdAt: createdAt,
             updatedAt: updatedAt,
             source: source,
-            agentPath: try AgentPath(validating: "/root/thread_\(id.description.suffix(12))").description,
+            agentNickname: agentNickname,
+            agentRole: agentRole,
+            agentPath: agentPath ?? defaultAgentPath,
             modelProvider: "openai",
             cwd: "/repo",
             cliVersion: "0.0.0-test",

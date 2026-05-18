@@ -999,6 +999,11 @@ Recent upstream audit checkpoint:
   Rust's post-spawn missing canonical task-name path: a successful child spawn
   can still emit `collabAgentSpawnEnd` with the returned thread metadata before
   failing the tool call with `spawned agent is missing a canonical task name`.
+- 2026-05-18: Swift live app-server prompt preparation now mirrors Rust's
+  direct thread-spawn child summary inside `<environment_context><subagents>`.
+  Open persisted child edges are rendered in Rust order using the final
+  `agent_path` component plus nickname when available, or the thread id for
+  pathless children; closed children are omitted.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through

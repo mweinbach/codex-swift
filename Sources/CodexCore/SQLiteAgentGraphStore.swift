@@ -634,6 +634,38 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         }
     }
 
+    public func listOpenThreadSpawnChildThreads(parentThreadID: ThreadId) async throws -> [ThreadMetadata] {
+        let query =
+            """
+            \(Self.threadSelectColumns)
+            FROM threads
+            JOIN thread_spawn_edges AS incoming_spawn_edge
+              ON incoming_spawn_edge.child_thread_id = threads.id
+            WHERE threads.archived = 0
+              AND incoming_spawn_edge.parent_thread_id = ?
+              AND incoming_spawn_edge.status = 'open'
+            ORDER BY COALESCE(threads.agent_path, '') ASC, threads.id ASC
+            """
+        let database = handle.database
+        return try Self.withStatement(
+            query: query,
+            bindings: [.text(parentThreadID.description)],
+            database: database
+        ) { statement in
+            var items: [ThreadMetadata] = []
+            while true {
+                let result = sqlite3_step(statement)
+                if result == SQLITE_DONE {
+                    return items
+                }
+                guard result == SQLITE_ROW else {
+                    throw Self.sqliteError(database: database)
+                }
+                items.append(try Self.threadMetadata(from: statement))
+            }
+        }
+    }
+
     public func upsertThread(_ metadata: ThreadMetadata) async throws {
         try await upsertThread(metadata, creationMemoryMode: nil)
     }

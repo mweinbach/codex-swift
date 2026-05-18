@@ -188,6 +188,30 @@ final class EnvironmentContextTests: XCTestCase {
         """#)
     }
 
+    func testSerializeEnvironmentContextWithSubagentsLikeRust() {
+        let context = EnvironmentContext(
+            cwd: "/repo",
+            approvalPolicy: .never,
+            sandboxPolicy: .readOnly,
+            shell: fakeShell(),
+            subagents: "- worker: Bernoulli\n- 00000000-0000-4000-8000-000000000910"
+        )
+
+        XCTAssertEqual(context.serializeToXML(), """
+        <environment_context>
+          <cwd>/repo</cwd>
+          <approval_policy>never</approval_policy>
+          <sandbox_mode>read-only</sandbox_mode>
+          <network_access>restricted</network_access>
+          <shell>bash</shell>
+          <subagents>
+            - worker: Bernoulli
+            - 00000000-0000-4000-8000-000000000910
+          </subagents>
+        </environment_context>
+        """)
+    }
+
     func testEqualsExceptShellComparesApprovalPolicy() throws {
         let context1 = EnvironmentContext(
             cwd: "/repo",
