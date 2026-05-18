@@ -750,6 +750,9 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         if let compactPromptOverride = submission.compactPromptOverride {
             settings.compactPrompt = compactPromptOverride
         }
+        if !submission.modelProvidersOverride.isEmpty {
+            settings.modelProviders.merge(submission.modelProvidersOverride) { _, override in override }
+        }
         if let modelProviderOverride = submission.modelProviderOverride {
             settings.modelProvider = modelProviderOverride
         }
@@ -1128,6 +1131,7 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             verbosityOverride: request.verbosity,
             compactPromptOverride: request.compactPrompt,
             modelProviderOverride: request.modelProvider,
+            modelProvidersOverride: request.modelProviders,
             modelContextWindowOverride: request.modelContextWindow,
             modelAutoCompactTokenLimitOverride: request.modelAutoCompactTokenLimit,
             toolOutputTokenLimitOverride: request.toolOutputTokenLimit

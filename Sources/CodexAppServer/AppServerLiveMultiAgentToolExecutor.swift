@@ -36,6 +36,7 @@ struct AppServerLiveMultiAgentToolExecutor {
                 verbosity: nil,
                 compactPrompt: nil,
                 modelProvider: nil,
+                modelProviders: [:],
                 modelContextWindow: nil,
                 modelAutoCompactTokenLimit: nil,
                 toolOutputTokenLimit: nil
@@ -211,6 +212,7 @@ struct AppServerLiveMultiAgentToolExecutor {
                 verbosity: resolvedOverrides.verbosity,
                 compactPrompt: resolvedOverrides.compactPrompt,
                 modelProvider: resolvedOverrides.modelProvider,
+                modelProviders: resolvedOverrides.modelProviders,
                 modelContextWindow: resolvedOverrides.modelContextWindow,
                 modelAutoCompactTokenLimit: resolvedOverrides.modelAutoCompactTokenLimit,
                 toolOutputTokenLimit: resolvedOverrides.toolOutputTokenLimit,
@@ -708,6 +710,7 @@ struct LiveSpawnAgentRequest: Equatable, Sendable {
     let verbosity: Verbosity?
     let compactPrompt: String?
     let modelProvider: String?
+    let modelProviders: [String: ModelProviderInfo]
     let modelContextWindow: Int64?
     let modelAutoCompactTokenLimit: Int64?
     let toolOutputTokenLimit: Int?
@@ -733,6 +736,7 @@ struct LiveSpawnAgentResolvedOverrides: Equatable, Sendable {
     let verbosity: Verbosity?
     let compactPrompt: String?
     let modelProvider: String?
+    let modelProviders: [String: ModelProviderInfo]
     let modelContextWindow: Int64?
     let modelAutoCompactTokenLimit: Int64?
     let toolOutputTokenLimit: Int?
@@ -747,6 +751,7 @@ struct LiveSpawnAgentRoleConfigOverrides: Equatable, Sendable {
     let verbosity: Verbosity?
     let compactPrompt: String?
     let modelProvider: String?
+    let modelProviders: [String: ModelProviderInfo]
     let modelContextWindow: Int64?
     let modelAutoCompactTokenLimit: Int64?
     let toolOutputTokenLimit: Int?
@@ -825,6 +830,7 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
         var roleVerbosity: Verbosity?
         var roleCompactPrompt: String?
         var roleModelProvider: String?
+        var roleModelProviders: [String: ModelProviderInfo] = [:]
         var roleModelContextWindow: Int64?
         var roleModelAutoCompactTokenLimit: Int64?
         var roleToolOutputTokenLimit: Int?
@@ -846,6 +852,7 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
             roleVerbosity = overrides.verbosity
             roleCompactPrompt = overrides.compactPrompt
             roleModelProvider = overrides.modelProvider
+            roleModelProviders = overrides.modelProviders
             roleModelContextWindow = overrides.modelContextWindow
             roleModelAutoCompactTokenLimit = overrides.modelAutoCompactTokenLimit
             roleToolOutputTokenLimit = overrides.toolOutputTokenLimit
@@ -867,6 +874,7 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
             verbosity: roleVerbosity,
             compactPrompt: roleCompactPrompt,
             modelProvider: roleModelProvider,
+            modelProviders: roleModelProviders,
             modelContextWindow: roleModelContextWindow,
             modelAutoCompactTokenLimit: roleModelAutoCompactTokenLimit,
             toolOutputTokenLimit: roleToolOutputTokenLimit
@@ -930,6 +938,7 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
                 modelProvider: try optionalString(table["model_provider"])
                     ?? optionalString(profile?["model_provider"])
                     ?? activeProfileProviderUpdate,
+                modelProviders: try modelProviderOverrides(from: table["model_providers"]),
                 modelContextWindow: try optionalInt64(table["model_context_window"]),
                 modelAutoCompactTokenLimit: try optionalInt64(table["model_auto_compact_token_limit"]),
                 toolOutputTokenLimit: try optionalNonNegativeInt(table["tool_output_token_limit"])
@@ -977,6 +986,27 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
             return nil
         }
         return table
+    }
+
+    private static func modelProviderOverrides(from value: ConfigValue?) throws -> [String: ModelProviderInfo] {
+        guard let value else {
+            return [:]
+        }
+        guard let providers = configTable(value) else {
+            throw roleUnavailableError()
+        }
+
+        var overrides: [String: ModelProviderInfo] = [:]
+        for (providerID, providerValue) in providers {
+            guard configTable(providerValue) != nil else {
+                throw roleUnavailableError()
+            }
+            let data = try JSONEncoder().encode(providerValue)
+            let provider = try JSONDecoder().decode(ModelProviderInfo.self, from: data)
+            try provider.validate()
+            overrides[providerID] = provider
+        }
+        return overrides
     }
 
     private static func optionalString(_ value: ConfigValue?) throws -> String? {

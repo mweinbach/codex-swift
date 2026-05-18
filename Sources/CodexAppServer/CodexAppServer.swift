@@ -122,6 +122,7 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
     public let verbosityOverride: Verbosity?
     public let compactPromptOverride: String?
     public let modelProviderOverride: String?
+    public let modelProvidersOverride: [String: ModelProviderInfo]
     public let modelContextWindowOverride: Int64?
     public let modelAutoCompactTokenLimitOverride: Int64?
     public let toolOutputTokenLimitOverride: Int?
@@ -145,6 +146,7 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
         verbosityOverride: Verbosity? = nil,
         compactPromptOverride: String? = nil,
         modelProviderOverride: String? = nil,
+        modelProvidersOverride: [String: ModelProviderInfo] = [:],
         modelContextWindowOverride: Int64? = nil,
         modelAutoCompactTokenLimitOverride: Int64? = nil,
         toolOutputTokenLimitOverride: Int? = nil
@@ -167,6 +169,7 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
         self.verbosityOverride = verbosityOverride
         self.compactPromptOverride = compactPromptOverride
         self.modelProviderOverride = modelProviderOverride
+        self.modelProvidersOverride = modelProvidersOverride
         self.modelContextWindowOverride = modelContextWindowOverride
         self.modelAutoCompactTokenLimitOverride = modelAutoCompactTokenLimitOverride
         self.toolOutputTokenLimitOverride = toolOutputTokenLimitOverride
@@ -188,6 +191,7 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
             && lhs.verbosityOverride == rhs.verbosityOverride
             && lhs.compactPromptOverride == rhs.compactPromptOverride
             && lhs.modelProviderOverride == rhs.modelProviderOverride
+            && lhs.modelProvidersOverride == rhs.modelProvidersOverride
             && lhs.modelContextWindowOverride == rhs.modelContextWindowOverride
             && lhs.modelAutoCompactTokenLimitOverride == rhs.modelAutoCompactTokenLimitOverride
             && lhs.toolOutputTokenLimitOverride == rhs.toolOutputTokenLimitOverride

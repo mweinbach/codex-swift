@@ -5187,12 +5187,6 @@ final class CodexAppServerTests: XCTestCase {
         base_url = "\(server.baseURL)"
         wire_api = "responses"
         requires_openai_auth = false
-
-        [model_providers.role_provider]
-        name = "role_provider"
-        base_url = "\(roleProviderServer.baseURL)"
-        wire_api = "responses"
-        requires_openai_auth = false
         """.write(
             to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
             atomically: true,
@@ -5228,6 +5222,14 @@ final class CodexAppServerTests: XCTestCase {
             serviceTierOverride: "priority",
             verbosityOverride: .high,
             modelProviderOverride: "role_provider",
+            modelProvidersOverride: [
+                "role_provider": ModelProviderInfo(
+                    name: "role_provider",
+                    baseURL: roleProviderServer.baseURL,
+                    wireAPI: .responses,
+                    requiresOpenAIAuth: false
+                )
+            ],
             modelContextWindowOverride: 123_456,
             modelAutoCompactTokenLimitOverride: 120_000,
             toolOutputTokenLimitOverride: 12_000
@@ -13016,6 +13018,7 @@ final class CodexAppServerTests: XCTestCase {
                 verbosity: nil,
                 compactPrompt: nil,
                 modelProvider: nil,
+                modelProviders: [:],
                 modelContextWindow: nil,
                 modelAutoCompactTokenLimit: nil,
                 toolOutputTokenLimit: nil,
@@ -13108,6 +13111,7 @@ final class CodexAppServerTests: XCTestCase {
             verbosity: nil,
             compactPrompt: nil,
             modelProvider: nil,
+            modelProviders: [:],
             modelContextWindow: nil,
             modelAutoCompactTokenLimit: nil,
             toolOutputTokenLimit: nil,
@@ -13371,6 +13375,7 @@ final class CodexAppServerTests: XCTestCase {
             verbosity: nil,
             compactPrompt: nil,
             modelProvider: nil,
+            modelProviders: [:],
             modelContextWindow: nil,
             modelAutoCompactTokenLimit: nil,
             toolOutputTokenLimit: nil
@@ -13392,6 +13397,12 @@ final class CodexAppServerTests: XCTestCase {
         model_auto_compact_token_limit = 120000
         tool_output_token_limit = 12000
         service_tier = "priority"
+
+        [model_providers.role-provider]
+        name = "Role Provider"
+        base_url = "http://role-provider.test/v1"
+        wire_api = "responses"
+        requires_openai_auth = false
         """.write(to: roleFile, atomically: true, encoding: .utf8)
         let roleConfigOverrides = try LiveSpawnAgentOverrideResolver.roleConfigOverrides(
             configuredAgentRoles: [
@@ -13426,6 +13437,14 @@ final class CodexAppServerTests: XCTestCase {
             verbosity: .high,
             compactPrompt: "Role compact instructions",
             modelProvider: "role-provider",
+            modelProviders: [
+                "role-provider": ModelProviderInfo(
+                    name: "Role Provider",
+                    baseURL: "http://role-provider.test/v1",
+                    wireAPI: .responses,
+                    requiresOpenAIAuth: false
+                )
+            ],
             modelContextWindow: 123_456,
             modelAutoCompactTokenLimit: 120_000,
             toolOutputTokenLimit: 12_000
@@ -13484,6 +13503,7 @@ final class CodexAppServerTests: XCTestCase {
             verbosity: .high,
             compactPrompt: nil,
             modelProvider: "profile-provider",
+            modelProviders: [:],
             modelContextWindow: nil,
             modelAutoCompactTokenLimit: nil,
             toolOutputTokenLimit: nil
