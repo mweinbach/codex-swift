@@ -4917,6 +4917,8 @@ final class CodexAppServerTests: XCTestCase {
         ))
 
         XCTAssertEqual(immediateEvents, [])
+        let runningStatus = await manager.agentStatus(threadID: threadID)
+        XCTAssertEqual(runningStatus, .running)
         let events = try await capture.waitForEvents(count: 2)
         XCTAssertEqual(events.map(\.threadID), [threadID, threadID])
         XCTAssertEqual(events.map(\.turnID), [turnID, turnID])
@@ -4928,6 +4930,8 @@ final class CodexAppServerTests: XCTestCase {
             return XCTFail("expected missing rollout turn to complete after reporting the error")
         }
         XCTAssertEqual(completeEvent.turnID, turnID)
+        let completedStatus = await manager.agentStatus(threadID: threadID)
+        XCTAssertEqual(completedStatus, .completed(nil))
     }
 
     func testLiveRuntimeConfigRefreshAppliesRuntimeRefreshableFieldsLikeRust() throws {
@@ -12035,6 +12039,9 @@ final class CodexAppServerTests: XCTestCase {
             stateStore: stateStore,
             waitTimeouts: MultiAgentV2WaitTimeouts(config: MultiAgentV2Config()),
             isTurnRunning: { _ in false },
+            agentStatus: { threadID in
+                await capture.status(threadID: threadID)
+            },
             agentLastTaskMessage: { threadID in
                 await capture.lastTaskMessage(threadID: threadID)
             },
@@ -12150,6 +12157,7 @@ final class CodexAppServerTests: XCTestCase {
             ))
         }
         let capture = LiveMultiAgentToolCapture(runningThreadIDs: [rootThreadID.description, nestedThreadID.description])
+        await capture.setStatus(threadID: workerThreadID.description, status: .completed("done"))
         let executor = AppServerLiveMultiAgentToolExecutor(
             currentThreadID: rootThreadID,
             currentSessionSource: .vscode,
@@ -12157,6 +12165,9 @@ final class CodexAppServerTests: XCTestCase {
             waitTimeouts: MultiAgentV2WaitTimeouts(config: MultiAgentV2Config()),
             isTurnRunning: { threadID in
                 await capture.isRunning(threadID: threadID)
+            },
+            agentStatus: { threadID in
+                await capture.status(threadID: threadID)
             },
             agentLastTaskMessage: { threadID in
                 await capture.lastTaskMessage(threadID: threadID)
@@ -12203,7 +12214,7 @@ final class CodexAppServerTests: XCTestCase {
         ])
         XCTAssertEqual(allResult.agents[0].agentStatus, .running)
         XCTAssertEqual(allResult.agents[0].lastTaskMessage, "Main thread")
-        XCTAssertEqual(allResult.agents[2].agentStatus, .completed(nil))
+        XCTAssertEqual(allResult.agents[2].agentStatus, .completed("done"))
         XCTAssertEqual(allResult.agents[2].lastTaskMessage, "inspect the logs")
         XCTAssertEqual(allResult.agents[3].agentStatus, .running)
         XCTAssertNil(allResult.agents[3].lastTaskMessage)
@@ -12238,6 +12249,9 @@ final class CodexAppServerTests: XCTestCase {
                 defaultWaitTimeoutMS: 5
             )),
             isTurnRunning: { _ in false },
+            agentStatus: { threadID in
+                await capture.status(threadID: threadID)
+            },
             agentLastTaskMessage: { _ in nil },
             hasPendingMailboxItems: { threadID in
                 await capture.hasPendingMailbox(threadID: threadID)
@@ -12362,6 +12376,9 @@ final class CodexAppServerTests: XCTestCase {
             waitTimeouts: MultiAgentV2WaitTimeouts(config: MultiAgentV2Config()),
             isTurnRunning: { threadID in
                 await capture.isRunning(threadID: threadID)
+            },
+            agentStatus: { threadID in
+                await capture.status(threadID: threadID)
             },
             agentLastTaskMessage: { _ in nil },
             hasPendingMailboxItems: { _ in false },
@@ -37683,6 +37700,7 @@ private actor LiveMultiAgentToolCapture {
     private var queued: [String: [InterAgentCommunication]] = [:]
     private var pendingWork: [String] = []
     private var runningThreadIDs: Set<String>
+    private var statuses: [String: AgentStatus] = [:]
     private var lastTaskMessages: [String: String] = [:]
     private var pendingMailboxThreadIDs: Set<String> = []
     private var closed: [String] = []
@@ -37709,6 +37727,23 @@ private actor LiveMultiAgentToolCapture {
 
     func isRunning(threadID: String) -> Bool {
         runningThreadIDs.contains(threadID)
+    }
+
+    func status(threadID: String) -> AgentStatus {
+        if let status = statuses[threadID] {
+            return status
+        }
+        return runningThreadIDs.contains(threadID) ? .running : .completed(nil)
+    }
+
+    func setStatus(threadID: String, status: AgentStatus) {
+        statuses[threadID] = status
+        switch status {
+        case .running:
+            runningThreadIDs.insert(threadID)
+        default:
+            runningThreadIDs.remove(threadID)
+        }
     }
 
     func recordLastTaskMessage(threadID: String, message: String) {
@@ -37744,6 +37779,9 @@ private actor LiveMultiAgentToolCapture {
     func close(threadIDs: [String]) {
         closed.append(contentsOf: threadIDs)
         runningThreadIDs.subtract(threadIDs)
+        for threadID in threadIDs {
+            statuses[threadID] = .notFound
+        }
     }
 
     func closedThreadIDs() -> [String] {

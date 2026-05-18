@@ -7,6 +7,7 @@ struct AppServerLiveMultiAgentToolExecutor {
     let stateStore: SQLiteAgentGraphStore?
     let waitTimeouts: MultiAgentV2WaitTimeouts
     let isTurnRunning: @Sendable (String) async -> Bool
+    let agentStatus: @Sendable (String) async -> AgentStatus
     let agentLastTaskMessage: @Sendable (String) async -> String?
     let hasPendingMailboxItems: @Sendable (String) async -> Bool
     let waitForMailboxChange: @Sendable (String, Int64) async -> Bool
@@ -330,7 +331,7 @@ struct AppServerLiveMultiAgentToolExecutor {
     }
 
     private func status(for threadID: ThreadId) async -> AgentStatus {
-        await isTurnRunning(threadID.description) ? .running : .completed(nil)
+        await agentStatus(threadID.description)
     }
 
     private static func agentPath(_ agentPath: AgentPath, matchesPrefix prefix: AgentPath?) -> Bool {

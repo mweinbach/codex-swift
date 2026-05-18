@@ -220,6 +220,10 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         await state.isTurnRunning(threadID: threadID)
     }
 
+    func agentStatus(threadID: String) async -> AgentStatus {
+        await state.agentStatus(threadID: threadID)
+    }
+
     private func submitGoalContinuation(
         threadID: String,
         features: FeatureStates,
@@ -769,6 +773,9 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                     waitTimeouts: multiAgentV2WaitTimeouts,
                     isTurnRunning: { threadID in
                         await state.isTurnRunning(threadID: threadID)
+                    },
+                    agentStatus: { threadID in
+                        await state.agentStatus(threadID: threadID)
                     },
                     agentLastTaskMessage: { threadID in
                         await state.agentLastTaskMessage(threadID: threadID)
@@ -1633,6 +1640,7 @@ private actor AppServerLiveRuntimeState {
     private var mailboxDeliveryPhases: [String: MailboxDeliveryPhase] = [:]
     private var mailboxChangeWaiters: [String: [String: CheckedContinuation<Bool, Never>]] = [:]
     private var agentLastTaskMessages: [String: String] = [:]
+    private var agentStatuses: [String: AgentStatus] = [:]
     private var emittedAbortKeys: Set<String> = []
 
     func setEventSink(_ sink: AppServerRuntimeEventSink?) {
@@ -1642,6 +1650,7 @@ private actor AppServerLiveRuntimeState {
     func startTurn(threadID: String, turnID: String, task: Task<Void, Never>) {
         runningTurns[threadID]?.task.cancel()
         runningTurns[threadID] = RunningTurn(turnID: turnID, task: task)
+        agentStatuses[threadID] = .running
         activePendingInput.removeValue(forKey: threadID)
         mailboxDeliveryPhases[threadID] = .currentTurn
     }
@@ -1654,6 +1663,7 @@ private actor AppServerLiveRuntimeState {
             return false
         }
         runningTurns[threadID] = RunningTurn(turnID: turnID, task: task)
+        agentStatuses[threadID] = .running
         activePendingInput.removeValue(forKey: threadID)
         mailboxDeliveryPhases[threadID] = .currentTurn
         return true
@@ -1668,6 +1678,7 @@ private actor AppServerLiveRuntimeState {
             return false
         }
         runningTurns[threadID] = RunningTurn(turnID: turnID, task: task)
+        agentStatuses[threadID] = .running
         activePendingInput.removeValue(forKey: threadID)
         mailboxDeliveryPhases[threadID] = .currentTurn
         return true
@@ -1675,6 +1686,13 @@ private actor AppServerLiveRuntimeState {
 
     func isTurnRunning(threadID: String) -> Bool {
         runningTurns[threadID] != nil
+    }
+
+    func agentStatus(threadID: String) -> AgentStatus {
+        if let status = agentStatuses[threadID] {
+            return status
+        }
+        return runningTurns[threadID] == nil ? .completed(nil) : .running
     }
 
     func finishTurn(threadID: String, turnID: String) {
@@ -1834,6 +1852,7 @@ private actor AppServerLiveRuntimeState {
         }
         sessionGrantedPermissionProfiles.removeValue(forKey: threadID)
         runtimeConfigSnapshots.removeValue(forKey: threadID)
+        agentStatuses[threadID] = .notFound
         idlePendingInput.removeValue(forKey: threadID)
         activePendingInput.removeValue(forKey: threadID)
         mailboxCommunications.removeValue(forKey: threadID)
@@ -1853,6 +1872,7 @@ private actor AppServerLiveRuntimeState {
         runningTurns.removeAll()
         sessionGrantedPermissionProfiles.removeAll()
         runtimeConfigSnapshots.removeAll()
+        agentStatuses.removeAll()
         idlePendingInput.removeAll()
         activePendingInput.removeAll()
         mailboxCommunications.removeAll()
@@ -1882,6 +1902,9 @@ private actor AppServerLiveRuntimeState {
     }
 
     func emit(threadID: String, turnID: String, event: EventMessage) async {
+        if let status = AgentStatus.from(eventMessage: event) {
+            agentStatuses[threadID] = status
+        }
         await eventSink?(threadID, turnID, event)
     }
 

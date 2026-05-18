@@ -844,6 +844,14 @@ Recent upstream audit checkpoint:
   descendants in runtime state. `spawn_agent`, final-status mailbox
   notifications, richer final-status tracking, and full ThreadManager-backed
   `AgentControl` remain pending.
+- 2026-05-18: Swift live app-server runtime state now tracks Rust-shaped
+  `AgentStatus` transitions from turn lifecycle events instead of flattening
+  live multi-agent tool status to `running`/`completed(null)`. MultiAgentV2
+  `list_agents`, `send_message`/`followup_task`, and `close_agent` now read the
+  tracked live status, preserving completed-message and not-found shutdown
+  states when the runtime has observed them. `spawn_agent`, final-status
+  mailbox notifications, and full ThreadManager-backed `AgentControl` remain
+  pending.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through
