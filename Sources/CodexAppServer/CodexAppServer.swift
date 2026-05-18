@@ -121,6 +121,9 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
     public let serviceTierOverride: String?
     public let verbosityOverride: Verbosity?
     public let compactPromptOverride: String?
+    public let modelContextWindowOverride: Int64?
+    public let modelAutoCompactTokenLimitOverride: Int64?
+    public let toolOutputTokenLimitOverride: Int?
 
     public init(
         requestID: RequestID,
@@ -139,7 +142,10 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
         developerInstructionsOverride: String? = nil,
         serviceTierOverride: String? = nil,
         verbosityOverride: Verbosity? = nil,
-        compactPromptOverride: String? = nil
+        compactPromptOverride: String? = nil,
+        modelContextWindowOverride: Int64? = nil,
+        modelAutoCompactTokenLimitOverride: Int64? = nil,
+        toolOutputTokenLimitOverride: Int? = nil
     ) {
         self.requestID = requestID
         self.threadID = threadID
@@ -158,6 +164,9 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
         self.serviceTierOverride = serviceTierOverride
         self.verbosityOverride = verbosityOverride
         self.compactPromptOverride = compactPromptOverride
+        self.modelContextWindowOverride = modelContextWindowOverride
+        self.modelAutoCompactTokenLimitOverride = modelAutoCompactTokenLimitOverride
+        self.toolOutputTokenLimitOverride = toolOutputTokenLimitOverride
     }
 
     public static func == (lhs: AppServerLiveRuntimeSubmission, rhs: AppServerLiveRuntimeSubmission) -> Bool {
@@ -175,6 +184,9 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
             && lhs.serviceTierOverride == rhs.serviceTierOverride
             && lhs.verbosityOverride == rhs.verbosityOverride
             && lhs.compactPromptOverride == rhs.compactPromptOverride
+            && lhs.modelContextWindowOverride == rhs.modelContextWindowOverride
+            && lhs.modelAutoCompactTokenLimitOverride == rhs.modelAutoCompactTokenLimitOverride
+            && lhs.toolOutputTokenLimitOverride == rhs.toolOutputTokenLimitOverride
     }
 }
 

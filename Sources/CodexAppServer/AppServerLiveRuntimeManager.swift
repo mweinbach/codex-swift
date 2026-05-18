@@ -750,6 +750,15 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         if let compactPromptOverride = submission.compactPromptOverride {
             settings.compactPrompt = compactPromptOverride
         }
+        if let modelContextWindowOverride = submission.modelContextWindowOverride {
+            settings.modelContextWindow = modelContextWindowOverride
+        }
+        if let modelAutoCompactTokenLimitOverride = submission.modelAutoCompactTokenLimitOverride {
+            settings.modelAutoCompactTokenLimit = modelAutoCompactTokenLimitOverride
+        }
+        if let toolOutputTokenLimitOverride = submission.toolOutputTokenLimitOverride {
+            settings.toolOutputTokenLimit = toolOutputTokenLimitOverride
+        }
         await state.recordMultiAgentV2Feature(
             threadID: submission.threadID,
             enabled: settings.features.isEnabled(.multiAgentV2)
@@ -1111,7 +1120,10 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             developerInstructionsOverride: request.developerInstructions,
             serviceTierOverride: request.serviceTier,
             verbosityOverride: request.verbosity,
-            compactPromptOverride: request.compactPrompt
+            compactPromptOverride: request.compactPrompt,
+            modelContextWindowOverride: request.modelContextWindow,
+            modelAutoCompactTokenLimitOverride: request.modelAutoCompactTokenLimit,
+            toolOutputTokenLimitOverride: request.toolOutputTokenLimit
         ))
 
         let status = await state.agentStatus(threadID: childThreadID.description)

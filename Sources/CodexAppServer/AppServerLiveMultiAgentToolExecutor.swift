@@ -34,7 +34,10 @@ struct AppServerLiveMultiAgentToolExecutor {
                 developerInstructions: nil,
                 reasoningSummary: nil,
                 verbosity: nil,
-                compactPrompt: nil
+                compactPrompt: nil,
+                modelContextWindow: nil,
+                modelAutoCompactTokenLimit: nil,
+                toolOutputTokenLimit: nil
             )
         },
         spawnAgent: @escaping @Sendable (LiveSpawnAgentRequest) async throws -> LiveSpawnAgentResult = { _ in
@@ -206,6 +209,9 @@ struct AppServerLiveMultiAgentToolExecutor {
                 reasoningSummary: resolvedOverrides.reasoningSummary,
                 verbosity: resolvedOverrides.verbosity,
                 compactPrompt: resolvedOverrides.compactPrompt,
+                modelContextWindow: resolvedOverrides.modelContextWindow,
+                modelAutoCompactTokenLimit: resolvedOverrides.modelAutoCompactTokenLimit,
+                toolOutputTokenLimit: resolvedOverrides.toolOutputTokenLimit,
                 forkMode: forkMode,
                 childAgentPath: childAgentPath
             ))
@@ -699,6 +705,9 @@ struct LiveSpawnAgentRequest: Equatable, Sendable {
     let reasoningSummary: ReasoningSummary?
     let verbosity: Verbosity?
     let compactPrompt: String?
+    let modelContextWindow: Int64?
+    let modelAutoCompactTokenLimit: Int64?
+    let toolOutputTokenLimit: Int?
     let forkMode: LiveSpawnAgentForkMode
     let childAgentPath: AgentPath
 }
@@ -720,6 +729,9 @@ struct LiveSpawnAgentResolvedOverrides: Equatable, Sendable {
     let reasoningSummary: ReasoningSummary?
     let verbosity: Verbosity?
     let compactPrompt: String?
+    let modelContextWindow: Int64?
+    let modelAutoCompactTokenLimit: Int64?
+    let toolOutputTokenLimit: Int?
 }
 
 struct LiveSpawnAgentRoleConfigOverrides: Equatable, Sendable {
@@ -730,6 +742,9 @@ struct LiveSpawnAgentRoleConfigOverrides: Equatable, Sendable {
     let reasoningSummary: ReasoningSummary?
     let verbosity: Verbosity?
     let compactPrompt: String?
+    let modelContextWindow: Int64?
+    let modelAutoCompactTokenLimit: Int64?
+    let toolOutputTokenLimit: Int?
 }
 
 struct LiveSpawnAgentOverrideResolver: Sendable {
@@ -804,6 +819,9 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
         var roleReasoningSummary: ReasoningSummary?
         var roleVerbosity: Verbosity?
         var roleCompactPrompt: String?
+        var roleModelContextWindow: Int64?
+        var roleModelAutoCompactTokenLimit: Int64?
+        var roleToolOutputTokenLimit: Int?
         if let agentType = request.agentType,
            let overrides = roleConfigOverrides[agentType] {
             if let roleModel = overrides.model {
@@ -821,6 +839,9 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
             roleReasoningSummary = overrides.reasoningSummary
             roleVerbosity = overrides.verbosity
             roleCompactPrompt = overrides.compactPrompt
+            roleModelContextWindow = overrides.modelContextWindow
+            roleModelAutoCompactTokenLimit = overrides.modelAutoCompactTokenLimit
+            roleToolOutputTokenLimit = overrides.toolOutputTokenLimit
             try Self.validateReasoningEffort(resolvedReasoningEffort, model: selectedModel)
         }
 
@@ -837,7 +858,10 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
             developerInstructions: roleDeveloperInstructions,
             reasoningSummary: roleReasoningSummary,
             verbosity: roleVerbosity,
-            compactPrompt: roleCompactPrompt
+            compactPrompt: roleCompactPrompt,
+            modelContextWindow: roleModelContextWindow,
+            modelAutoCompactTokenLimit: roleModelAutoCompactTokenLimit,
+            toolOutputTokenLimit: roleToolOutputTokenLimit
         )
     }
 
@@ -876,7 +900,10 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
                 developerInstructions: try optionalString(table["developer_instructions"]),
                 reasoningSummary: try optionalReasoningSummary(table["model_reasoning_summary"]),
                 verbosity: try optionalVerbosity(table["model_verbosity"]),
-                compactPrompt: try optionalString(table["compact_prompt"])
+                compactPrompt: try optionalString(table["compact_prompt"]),
+                modelContextWindow: try optionalInt64(table["model_context_window"]),
+                modelAutoCompactTokenLimit: try optionalInt64(table["model_auto_compact_token_limit"]),
+                toolOutputTokenLimit: try optionalNonNegativeInt(table["tool_output_token_limit"])
             )
         } catch {
             throw roleUnavailableError()
@@ -892,6 +919,29 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
         }
         let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func optionalInt64(_ value: ConfigValue?) throws -> Int64? {
+        guard let value else {
+            return nil
+        }
+        guard case let .integer(integer) = value else {
+            throw roleUnavailableError()
+        }
+        return integer
+    }
+
+    private static func optionalNonNegativeInt(_ value: ConfigValue?) throws -> Int? {
+        guard let integer = try optionalInt64(value),
+              integer >= 0,
+              integer <= Int64(Int.max)
+        else {
+            if value == nil {
+                return nil
+            }
+            throw roleUnavailableError()
+        }
+        return Int(integer)
     }
 
     private static func optionalReasoningEffort(_ value: ConfigValue?) throws -> ReasoningEffort? {

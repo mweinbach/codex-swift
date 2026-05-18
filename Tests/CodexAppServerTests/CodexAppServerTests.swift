@@ -5218,9 +5218,16 @@ final class CodexAppServerTests: XCTestCase {
             turnID: turnID,
             op: op,
             serviceTierOverride: "priority",
-            verbosityOverride: .high
+            verbosityOverride: .high,
+            modelContextWindowOverride: 123_456,
+            modelAutoCompactTokenLimitOverride: 120_000,
+            toolOutputTokenLimitOverride: 12_000
         ))
-        _ = try await capture.waitForEvents(count: 2)
+        let events = try await capture.waitForEvents(count: 2)
+        guard case let .taskStarted(startedEvent) = events[0].event else {
+            return XCTFail("expected turn start event")
+        }
+        XCTAssertEqual(startedEvent.modelContextWindow, 123_456)
 
         let body = try server.waitForRequestBody()
         let request = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
@@ -12999,6 +13006,9 @@ final class CodexAppServerTests: XCTestCase {
                 reasoningSummary: nil,
                 verbosity: nil,
                 compactPrompt: nil,
+                modelContextWindow: nil,
+                modelAutoCompactTokenLimit: nil,
+                toolOutputTokenLimit: nil,
                 forkMode: .none,
                 childAgentPath: workerPath
             )
@@ -13087,6 +13097,9 @@ final class CodexAppServerTests: XCTestCase {
             reasoningSummary: nil,
             verbosity: nil,
             compactPrompt: nil,
+            modelContextWindow: nil,
+            modelAutoCompactTokenLimit: nil,
+            toolOutputTokenLimit: nil,
             forkMode: .fullHistory,
             childAgentPath: tierWorkerPath
         ))
@@ -13345,7 +13358,10 @@ final class CodexAppServerTests: XCTestCase {
             developerInstructions: nil,
             reasoningSummary: nil,
             verbosity: nil,
-            compactPrompt: nil
+            compactPrompt: nil,
+            modelContextWindow: nil,
+            modelAutoCompactTokenLimit: nil,
+            toolOutputTokenLimit: nil
         ))
 
         let temp = try TemporaryDirectory()
@@ -13359,6 +13375,9 @@ final class CodexAppServerTests: XCTestCase {
         model_reasoning_summary = "detailed"
         model_verbosity = "high"
         compact_prompt = "Role compact instructions"
+        model_context_window = 123456
+        model_auto_compact_token_limit = 120000
+        tool_output_token_limit = 12000
         service_tier = "priority"
         """.write(to: roleFile, atomically: true, encoding: .utf8)
         let roleConfigOverrides = try LiveSpawnAgentOverrideResolver.roleConfigOverrides(
@@ -13392,7 +13411,10 @@ final class CodexAppServerTests: XCTestCase {
             developerInstructions: "Review carefully",
             reasoningSummary: .detailed,
             verbosity: .high,
-            compactPrompt: "Role compact instructions"
+            compactPrompt: "Role compact instructions",
+            modelContextWindow: 123_456,
+            modelAutoCompactTokenLimit: 120_000,
+            toolOutputTokenLimit: 12_000
         ))
 
         let badRoleFile = temp.url.appendingPathComponent("bad-reviewer.toml", isDirectory: false)
