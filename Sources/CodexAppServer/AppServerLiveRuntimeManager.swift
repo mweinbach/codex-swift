@@ -705,6 +705,9 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         if let developerInstructionsOverride = submission.developerInstructionsOverride {
             settings.developerInstructions = developerInstructionsOverride
         }
+        if let serviceTierOverride = submission.serviceTierOverride {
+            settings.serviceTier = serviceTierOverride
+        }
         let runtimeRefreshSnapshot = await state.runtimeConfigSnapshot(threadID: submission.threadID)
         let refreshedConfigStack = try runtimeRefreshSnapshot.map {
             try AppServerRuntimeConfigRefresh.applyRuntimeRefreshableSnapshot(
@@ -1019,7 +1022,8 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             extensionRegisteredToolExecutor: prototype.extensionRegisteredToolExecutor,
             extensionApprovalReviewer: prototype.extensionApprovalReviewer,
             additionalInputItems: [],
-            developerInstructionsOverride: request.developerInstructions
+            developerInstructionsOverride: request.developerInstructions,
+            serviceTierOverride: request.serviceTier
         ))
 
         let status = await state.agentStatus(threadID: childThreadID.description)

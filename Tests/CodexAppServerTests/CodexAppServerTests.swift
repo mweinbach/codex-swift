@@ -5003,6 +5003,62 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(turnContext.effort, .high)
     }
 
+    func testLiveRuntimeSubmissionServiceTierOverrideReachesResponsesRequestLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let server = try AppServerResponsesRequestCaptureServer()
+        defer {
+            server.stop()
+        }
+        try """
+        model = "gpt-5.5"
+        model_provider = "mock_provider"
+
+        [model_providers.mock_provider]
+        name = "mock_provider"
+        base_url = "\(server.baseURL)"
+        wire_api = "responses"
+        requires_openai_auth = false
+        """.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T13-30-00",
+            timestamp: "2025-01-05T13:30:00Z",
+            preview: "Saved user message",
+            provider: "mock_provider",
+            cwd: temp.url.path
+        )
+        let manager = AppServerLiveRuntimeManager(configuration: testConfiguration(
+            codexHome: temp.url,
+            requiresOpenAIAuth: false
+        ))
+        let capture = AppServerRuntimeEventCapture()
+        manager.setEventSink { threadID, turnID, event in
+            await capture.append(threadID: threadID, turnID: turnID, event: event)
+        }
+        defer {
+            manager.shutdown()
+        }
+        let op = Op.userInput(items: [.text("Use priority service tier")])
+
+        let turnID = try manager.submitCoreOp(requestID: .integer(8), threadID: threadID, op: op)
+        _ = try manager.submitLiveRuntime(AppServerLiveRuntimeSubmission(
+            requestID: .integer(8),
+            threadID: threadID,
+            turnID: turnID,
+            op: op,
+            serviceTierOverride: "priority"
+        ))
+        _ = try await capture.waitForEvents(count: 2)
+
+        let body = try server.waitForRequestBody()
+        let request = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(request["service_tier"] as? String, "priority")
+    }
+
     func testLiveRuntimeConfigRefreshAppliesRuntimeRefreshableFieldsLikeRust() throws {
         let temp = try TemporaryDirectory()
         var features = FeatureStates.withDefaults()
@@ -38352,6 +38408,218 @@ private final class AppServerCoreOpFailingInterruptCapture: @unchecked Sendable 
             return "turn-\(value)"
         }
     }
+}
+
+private final class AppServerResponsesRequestCaptureServer: @unchecked Sendable {
+    let baseURL: String
+
+    private let listenerFD: Int32
+    private let bodySemaphore = DispatchSemaphore(value: 0)
+    private let lock = NSLock()
+    private var stopped = false
+    private var requestBody: Data?
+
+    init() throws {
+        let listener = try Self.makeListeningSocket()
+        listenerFD = listener.fd
+        baseURL = "http://127.0.0.1:\(listener.port)/v1"
+        Thread.detachNewThread { [weak self] in
+            self?.serveOneRequest()
+        }
+    }
+
+    func waitForRequestBody() throws -> Data {
+        guard bodySemaphore.wait(timeout: .now() + 5) == .success else {
+            throw AppServerResponsesRequestCaptureServerError.timeout
+        }
+        return try lock.withLock {
+            guard let requestBody else {
+                throw AppServerResponsesRequestCaptureServerError.missingBody
+            }
+            return requestBody
+        }
+    }
+
+    func stop() {
+        let shouldClose = lock.withLock { () -> Bool in
+            guard !stopped else {
+                return false
+            }
+            stopped = true
+            return true
+        }
+        if shouldClose {
+            Darwin.shutdown(listenerFD, SHUT_RDWR)
+            Darwin.close(listenerFD)
+        }
+    }
+
+    private func serveOneRequest() {
+        let clientFD = Darwin.accept(listenerFD, nil, nil)
+        guard clientFD >= 0 else {
+            return
+        }
+        defer {
+            Darwin.close(clientFD)
+            stop()
+        }
+
+        do {
+            let request = try Self.readHTTPRequest(fd: clientFD)
+            lock.withLock {
+                requestBody = request.body
+            }
+            bodySemaphore.signal()
+            _ = Self.sendAll(fd: clientFD, data: Self.responsesSSEHTTPResponse())
+        } catch {
+            bodySemaphore.signal()
+        }
+    }
+
+    private static func makeListeningSocket() throws -> (fd: Int32, port: UInt16) {
+        let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else {
+            throw AppServerResponsesRequestCaptureServerError.socket(String(cString: strerror(errno)))
+        }
+
+        var reuse: Int32 = 1
+        _ = setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.stride))
+
+        var addr = sockaddr_in()
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.stride)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = 0
+        addr.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
+
+        let bindResult = withUnsafePointer(to: &addr) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                Darwin.bind(fd, sockaddrPointer, socklen_t(MemoryLayout<sockaddr_in>.stride))
+            }
+        }
+        guard bindResult == 0 else {
+            let message = String(cString: strerror(errno))
+            Darwin.close(fd)
+            throw AppServerResponsesRequestCaptureServerError.socket(message)
+        }
+
+        guard Darwin.listen(fd, SOMAXCONN) == 0 else {
+            let message = String(cString: strerror(errno))
+            Darwin.close(fd)
+            throw AppServerResponsesRequestCaptureServerError.socket(message)
+        }
+
+        var bound = sockaddr_in()
+        var boundLength = socklen_t(MemoryLayout<sockaddr_in>.stride)
+        let localResult = withUnsafeMutablePointer(to: &bound) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                Darwin.getsockname(fd, sockaddrPointer, &boundLength)
+            }
+        }
+        guard localResult == 0 else {
+            let message = String(cString: strerror(errno))
+            Darwin.close(fd)
+            throw AppServerResponsesRequestCaptureServerError.socket(message)
+        }
+
+        return (fd, UInt16(bigEndian: bound.sin_port))
+    }
+
+    private static func readHTTPRequest(fd: Int32) throws -> CapturedHTTPRequest {
+        let headerMarker = Data([13, 10, 13, 10])
+        var data = try readUntil(fd: fd, contains: headerMarker)
+        guard let range = data.range(of: headerMarker) else {
+            throw AppServerResponsesRequestCaptureServerError.invalidRequest
+        }
+        let headerEnd = range.upperBound
+        let headers = String(decoding: data[..<range.lowerBound], as: UTF8.self)
+        let contentLength = headers
+            .components(separatedBy: "\r\n")
+            .first { $0.lowercased().hasPrefix("content-length:") }
+            .flatMap { line -> Int? in
+                guard let value = line.split(separator: ":", maxSplits: 1).last else {
+                    return nil
+                }
+                return Int(value.trimmingCharacters(in: .whitespacesAndNewlines))
+            } ?? 0
+        while data.count < headerEnd + contentLength {
+            data.append(try readChunk(fd: fd))
+        }
+        return CapturedHTTPRequest(body: Data(data[headerEnd..<headerEnd + contentLength]))
+    }
+
+    private static func readUntil(fd: Int32, contains marker: Data) throws -> Data {
+        var data = Data()
+        while data.range(of: marker) == nil {
+            data.append(try readChunk(fd: fd))
+        }
+        return data
+    }
+
+    private static func readChunk(fd: Int32) throws -> Data {
+        var buffer = [UInt8](repeating: 0, count: 4_096)
+        let count = buffer.withUnsafeMutableBytes { rawBuffer in
+            Darwin.recv(fd, rawBuffer.baseAddress, rawBuffer.count, 0)
+        }
+        if count == 0 {
+            throw AppServerResponsesRequestCaptureServerError.closed
+        }
+        if count < 0 {
+            if errno == EINTR {
+                return try readChunk(fd: fd)
+            }
+            throw AppServerResponsesRequestCaptureServerError.socket(String(cString: strerror(errno)))
+        }
+        return Data(buffer.prefix(count))
+    }
+
+    private static func sendAll(fd: Int32, data: Data) -> Bool {
+        var sent = 0
+        return data.withUnsafeBytes { rawBuffer in
+            while sent < data.count {
+                let pointer = rawBuffer.baseAddress!.advanced(by: sent)
+                let count = Darwin.send(fd, pointer, data.count - sent, 0)
+                if count <= 0 {
+                    return false
+                }
+                sent += count
+            }
+            return true
+        }
+    }
+
+    private static func responsesSSEHTTPResponse() -> Data {
+        let body = [
+            #"event: response.created"#,
+            #"data: {"type":"response.created","response":{"id":"resp-service-tier"}}"#,
+            "",
+            #"event: response.completed"#,
+            #"data: {"type":"response.completed","response":{"id":"resp-service-tier","usage":null,"output":[]}}"#,
+            "",
+        ].joined(separator: "\n")
+        let header = [
+            "HTTP/1.1 200 OK",
+            "Content-Type: text/event-stream",
+            "Content-Length: \(body.utf8.count)",
+            "Connection: close",
+            "",
+            ""
+        ].joined(separator: "\r\n")
+        var response = Data(header.utf8)
+        response.append(Data(body.utf8))
+        return response
+    }
+
+    private struct CapturedHTTPRequest {
+        let body: Data
+    }
+}
+
+private enum AppServerResponsesRequestCaptureServerError: Error {
+    case closed
+    case invalidRequest
+    case missingBody
+    case socket(String)
+    case timeout
 }
 
 private final class AppServerLiveRuntimeCapture: @unchecked Sendable {
