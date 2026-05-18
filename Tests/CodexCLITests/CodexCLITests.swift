@@ -191,6 +191,31 @@ final class CodexCLITests: XCTestCase {
         XCTAssertTrue(help.hasPrefix("Run Codex non-interactively\n\nUsage: codex exec [OPTIONS] [PROMPT]"))
         XCTAssertTrue(help.contains("  resume  Resume a previous session by id or pick the most recent with --last"))
         XCTAssertTrue(help.contains("      --output-schema <FILE>"))
+
+        stdout.removeAll()
+        let reviewExitCode = await CodexCLI().runAsync(
+            arguments: ["review", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(reviewExitCode, 0)
+        let reviewHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(reviewHelp.hasPrefix("Run a code review non-interactively\n\nUsage: codex review [OPTIONS] [PROMPT]"))
+        XCTAssertTrue(reviewHelp.contains("      --uncommitted"))
+        XCTAssertTrue(reviewHelp.contains("      --commit <SHA>"))
+
+        stdout.removeAll()
+        let completionExitCode = await CodexCLI().runAsync(
+            arguments: ["completion", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(completionExitCode, 0)
+        let completionHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(completionHelp.hasPrefix("Generate shell completion scripts\n\nUsage: codex completion [OPTIONS] [SHELL]"))
+        XCTAssertTrue(completionHelp.contains("[possible values: bash, elvish, fish, powershell, zsh]"))
     }
 
     func testCommandVersionTargetsSubcommandLikeRust() async {

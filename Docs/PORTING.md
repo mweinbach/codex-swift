@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: extended the Rust runtime oracle harness around subcommand
+  help dispatch. Swift now renders Rust-shaped `codex review --help` and
+  `codex completion --help` output instead of falling back to root CLI help,
+  preserving their subcommand usage, arguments, and option lists.
 - 2026-05-18: tightened the subcommand version runtime oracle around Rust's
   Clap boundary. Swift still accepts `codex exec --version` / `codex e -V` as
   `codex-cli-exec <version>`, but normal subcommands such as
