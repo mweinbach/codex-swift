@@ -216,7 +216,9 @@ final class RuntimeOracleParityTests: XCTestCase {
         let oracle = try RuntimeOracle.required()
         let commands = [
             ["sandbox", "macos", "--help"],
+            ["sandbox", "seatbelt", "--help"],
             ["sandbox", "linux", "--help"],
+            ["sandbox", "landlock", "--help"],
             ["sandbox", "windows", "--help"]
         ]
 

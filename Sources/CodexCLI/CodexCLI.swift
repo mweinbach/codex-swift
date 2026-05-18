@@ -992,7 +992,7 @@ public struct CodexCLI: Sendable {
         case "sandbox":
             return unrecognizedHelpSubcommand(
                 child,
-                allowed: ["macos", "seatbelt", "linux", "windows"],
+                allowed: ["macos", "seatbelt", "linux", "landlock", "windows"],
                 usage: "codex sandbox [OPTIONS] <COMMAND>"
             )
         case "debug":

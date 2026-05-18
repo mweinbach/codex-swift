@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: tightened CLI help runtime-oracle parity for sandbox child
+  aliases. Swift now accepts Rust's visible `codex sandbox landlock --help`
+  alias for the Linux sandbox help surface, matching the already-supported
+  `seatbelt` alias for macOS instead of rejecting it during explicit-help
+  child validation.
 - 2026-05-18: extended CLI help runtime-oracle parity into `exec` nested
   child help. Swift now renders Rust-shaped `codex exec resume --help` /
   `codex exec help resume` and `codex exec review --help` /

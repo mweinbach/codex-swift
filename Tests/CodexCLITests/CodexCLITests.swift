@@ -391,6 +391,18 @@ final class CodexCLITests: XCTestCase {
         XCTAssertTrue(sandboxMacosHelp.contains("      --allow-unix-socket <ALLOW_UNIX_SOCKETS>"))
 
         stdout.removeAll()
+        let sandboxLandlockExitCode = await CodexCLI().runAsync(
+            arguments: ["sandbox", "landlock", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(sandboxLandlockExitCode, 0)
+        let sandboxLandlockHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(sandboxLandlockHelp.hasPrefix("Run a command under the Linux sandbox (bubblewrap by default)\n\nUsage: codex sandbox linux [OPTIONS] [COMMAND]..."))
+        XCTAssertTrue(sandboxLandlockHelp.contains("      --permissions-profile <NAME>"))
+
+        stdout.removeAll()
         let debugExitCode = await CodexCLI().runAsync(
             arguments: ["debug", "--help"],
             stdout: { stdout.append($0) },
