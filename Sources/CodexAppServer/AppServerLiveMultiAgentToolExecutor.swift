@@ -215,8 +215,16 @@ struct AppServerLiveMultiAgentToolExecutor {
                 reasoningEffort: result.reasoningEffort ?? requestedReasoningEffort,
                 status: result.status
             )))
+            guard let agentPath = result.agentPath else {
+                return Self.output(
+                    callID: callID,
+                    content: "spawned agent is missing a canonical task name",
+                    success: false,
+                    runtimeEvents: runtimeEvents
+                )
+            }
             let output = SpawnAgentToolResult(
-                taskName: result.agentPath.description,
+                taskName: agentPath.description,
                 nickname: hideSpawnAgentMetadata ? nil : result.nickname,
                 hidesMetadata: hideSpawnAgentMetadata
             )
@@ -906,7 +914,7 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
 
 struct LiveSpawnAgentResult: Equatable, Sendable {
     let threadID: ThreadId
-    let agentPath: AgentPath
+    let agentPath: AgentPath?
     let nickname: String?
     let role: String?
     let model: String?

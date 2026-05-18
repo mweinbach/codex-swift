@@ -990,6 +990,10 @@ Recent upstream audit checkpoint:
   and child override checks, so invalid task names no longer mask earlier Rust
   model-visible errors and still leave the same one-event trace before child
   creation is skipped.
+- 2026-05-18: Swift live app-server MultiAgentV2 `spawn_agent` now mirrors
+  Rust's post-spawn missing canonical task-name path: a successful child spawn
+  can still emit `collabAgentSpawnEnd` with the returned thread metadata before
+  failing the tool call with `spawned agent is missing a canonical task name`.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through

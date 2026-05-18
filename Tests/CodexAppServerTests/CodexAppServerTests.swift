@@ -12991,6 +12991,66 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(begin.prompt, "inspect this repo")
     }
 
+    func testLiveSpawnAgentMissingCanonicalTaskNameFailsAfterSpawnEndLikeRust() async throws {
+        let rootThreadID = ThreadId()
+        let workerThreadID = ThreadId()
+        let executor = AppServerLiveMultiAgentToolExecutor(
+            currentThreadID: rootThreadID,
+            currentSessionSource: .vscode,
+            stateStore: nil,
+            waitTimeouts: MultiAgentV2WaitTimeouts(config: MultiAgentV2Config()),
+            hideSpawnAgentMetadata: false,
+            spawnAgent: { _ in
+                LiveSpawnAgentResult(
+                    threadID: workerThreadID,
+                    agentPath: nil,
+                    nickname: "Bernoulli",
+                    role: "explorer",
+                    model: "gpt-5.4",
+                    reasoningEffort: .high,
+                    status: .running
+                )
+            },
+            isTurnRunning: { _ in false },
+            agentStatus: { _ in .completed(nil) },
+            agentLastTaskMessage: { _ in nil },
+            hasPendingMailboxItems: { _ in false },
+            waitForMailboxChange: { _, _ in false },
+            queueMailboxCommunications: { _, _ in },
+            recordAgentLastTaskMessage: { _, _ in },
+            submitPendingWorkTurnIfIdle: { _ in false },
+            closeAgentThreads: { _ in }
+        )
+
+        let spawn = await executor.execute(.functionCall(
+            name: "spawn_agent",
+            arguments: #"{"message":"inspect this repo","task_name":"worker","agent_type":"explorer","model":"gpt-5.4","reasoning_effort":"high","fork_turns":"none"}"#,
+            callID: "call-missing-task-name"
+        ))
+        let payload = try Self.functionOutputPayload(spawn, callID: "call-missing-task-name")
+        XCTAssertEqual(payload.content, "spawned agent is missing a canonical task name")
+        XCTAssertEqual(payload.success, false)
+        let runtimeEvents = try XCTUnwrap(spawn?.runtimeEvents)
+        XCTAssertEqual(runtimeEvents.count, 2)
+        guard case let .collabAgentSpawnBegin(begin) = runtimeEvents[0] else {
+            return XCTFail("expected spawn begin event")
+        }
+        XCTAssertEqual(begin.senderThreadID, rootThreadID)
+        XCTAssertEqual(begin.prompt, "inspect this repo")
+        XCTAssertEqual(begin.model, "gpt-5.4")
+        XCTAssertEqual(begin.reasoningEffort, .high)
+        guard case let .collabAgentSpawnEnd(end) = runtimeEvents[1] else {
+            return XCTFail("expected spawn end event before canonical-name failure")
+        }
+        XCTAssertEqual(end.senderThreadID, rootThreadID)
+        XCTAssertEqual(end.newThreadID, workerThreadID)
+        XCTAssertEqual(end.newAgentNickname, "Bernoulli")
+        XCTAssertEqual(end.newAgentRole, "explorer")
+        XCTAssertEqual(end.model, "gpt-5.4")
+        XCTAssertEqual(end.reasoningEffort, .high)
+        XCTAssertEqual(end.status, .running)
+    }
+
     func testLiveSpawnLastNTurnsSelectsRecentForkTurnsLikeRust() throws {
         let sourceID = try ConversationId(string: "77e55044-10b1-426f-9247-bb680e5fe0c8")
         let workerPath = try AgentPath.root.join("worker")
