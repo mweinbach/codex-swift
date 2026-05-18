@@ -293,6 +293,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
     public let threadConfigSources: [ThreadConfigSource]
     public let configLayerOverrides: ConfigLayerLoaderOverrides
     public let stateStore: SQLiteAgentGraphStore?
+    public let agentJobStore: SQLiteAgentJobStore?
     public let configWarnings: [ConfigWarning]
     let notificationBroadcaster: AppServerNotificationBroadcaster
     public let remoteControlStatusSnapshot: RemoteControlStatusSnapshot?
@@ -335,6 +336,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         threadConfigSources: [ThreadConfigSource] = [],
         configLayerOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides(),
         stateStore: SQLiteAgentGraphStore? = nil,
+        agentJobStore: SQLiteAgentJobStore? = nil,
         configWarnings: [ConfigWarning] = [],
         remoteControlStatusSnapshot: RemoteControlStatusSnapshot? = nil,
         remoteControlStatusBroadcaster: AppServerRemoteControlStatusBroadcaster? = nil,
@@ -387,6 +389,7 @@ public struct CodexAppServerConfiguration: Equatable, Sendable {
         self.threadConfigSources = threadConfigSources
         self.configLayerOverrides = configLayerOverrides
         self.stateStore = stateStore
+        self.agentJobStore = agentJobStore
         self.configWarnings = configWarnings
         self.notificationBroadcaster = AppServerNotificationBroadcaster()
         self.remoteControlStatusSnapshot = remoteControlStatusSnapshot
@@ -1136,14 +1139,29 @@ public enum CodexAppServer {
         codexHome: URL,
         runtimeConfig: CodexRuntimeConfig
     ) throws -> SQLiteAgentGraphStore {
+        try SQLiteAgentGraphStore(
+            databaseURL: defaultStateDatabaseURL(codexHome: codexHome, runtimeConfig: runtimeConfig),
+            defaultProvider: runtimeConfig.selectedModelProviderID
+        )
+    }
+
+    public static func defaultAgentJobStore(
+        codexHome: URL,
+        runtimeConfig: CodexRuntimeConfig
+    ) throws -> SQLiteAgentJobStore {
+        try SQLiteAgentJobStore(
+            databaseURL: defaultStateDatabaseURL(codexHome: codexHome, runtimeConfig: runtimeConfig)
+        )
+    }
+
+    private static func defaultStateDatabaseURL(
+        codexHome: URL,
+        runtimeConfig: CodexRuntimeConfig
+    ) -> URL {
         let sqliteHome = runtimeConfig.sqliteHome.map {
             URL(fileURLWithPath: $0, isDirectory: true)
         } ?? codexHome
-        let databaseURL = sqliteHome.appendingPathComponent(stateDatabaseFilename, isDirectory: false)
-        return try SQLiteAgentGraphStore(
-            databaseURL: databaseURL,
-            defaultProvider: runtimeConfig.selectedModelProviderID
-        )
+        return sqliteHome.appendingPathComponent(stateDatabaseFilename, isDirectory: false)
     }
 
     public static func defaultMcpOAuthLoginStarter(

@@ -1001,8 +1001,10 @@ private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) as
             try settings.otel.validateProviderStartup(traceEnabled: traceEnabled)
         }
         let stateStore: SQLiteAgentGraphStore?
+        let agentJobStore: SQLiteAgentJobStore?
         do {
             stateStore = try CodexAppServer.defaultStateStore(codexHome: codexHome, runtimeConfig: settings)
+            agentJobStore = try CodexAppServer.defaultAgentJobStore(codexHome: codexHome, runtimeConfig: settings)
         } catch {
             throw StateDBRecovery.startupError(
                 codexHome: codexHome,
@@ -1032,6 +1034,7 @@ private func runAppServerCommand(_ request: CodexCLI.AppServerCommandRequest) as
             sessionSource: request.sessionSource,
             activeProfile: settings.activeProfile,
             stateStore: stateStore,
+            agentJobStore: agentJobStore,
             remoteControlStatusSnapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot(
                 remoteControlStartState.statusSnapshot
             )

@@ -13645,6 +13645,65 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(result.isEmpty)
     }
 
+    func testDefaultAgentJobStoreUsesStateDatabaseLikeRustLiveSessions() async throws {
+        let temp = try TemporaryDirectory()
+        let sqliteHome = temp.url.appendingPathComponent("sqlite-home", isDirectory: true)
+        try FileManager.default.createDirectory(at: sqliteHome, withIntermediateDirectories: true)
+        var runtimeConfig = CodexRuntimeConfig(modelProvider: "test-provider", projectDocMaxBytes: 0)
+        runtimeConfig.sqliteHome = sqliteHome.path
+
+        let stateStore = try CodexAppServer.defaultStateStore(codexHome: temp.url, runtimeConfig: runtimeConfig)
+        let agentJobStore = try CodexAppServer.defaultAgentJobStore(codexHome: temp.url, runtimeConfig: runtimeConfig)
+        let threadID = try ThreadId(string: "00000000-0000-0000-0000-000000009026")
+        let sessionSource = String(
+            decoding: try JSONEncoder().encode(SessionSource.subagent(.other("agent_job:job-1"))),
+            as: UTF8.self
+        )
+        try await stateStore.upsertThread(ThreadMetadata(
+            id: threadID,
+            rolloutPath: temp.url.appendingPathComponent("sessions/test.jsonl", isDirectory: false).path,
+            createdAt: try appServerDate("2025-01-05T13:00:00Z"),
+            updatedAt: try appServerDate("2025-01-05T13:00:00Z"),
+            source: sessionSource,
+            threadSource: .subagent,
+            modelProvider: "test-provider",
+            cwd: temp.url.path,
+            cliVersion: "0.0.0",
+            title: "row-1",
+            sandboxPolicy: "read-only",
+            approvalMode: "never",
+            tokensUsed: 0,
+            firstUserMessage: "worker prompt"
+        ))
+        _ = try await agentJobStore.createAgentJob(
+            params: AgentJobCreateParams(
+                id: "job-1",
+                name: "job-1",
+                instruction: "check {id}",
+                outputSchemaJSON: nil,
+                inputHeaders: ["id"],
+                inputCSVPath: temp.url.appendingPathComponent("input.csv").path,
+                outputCSVPath: temp.url.appendingPathComponent("output.csv").path,
+                autoExport: true,
+                maxRuntimeSeconds: nil
+            ),
+            items: [
+                AgentJobItemCreateParams(
+                    itemID: "row-1",
+                    rowIndex: 1,
+                    sourceID: "row-1",
+                    rowJSON: .object(["id": .string("row-1")])
+                )
+            ]
+        )
+
+        let persistedThread = try await stateStore.getThread(threadID: threadID)
+        let persistedJob = try await agentJobStore.getAgentJob("job-1")
+        XCTAssertEqual(persistedThread?.title, "row-1")
+        XCTAssertEqual(persistedJob?.instruction, "check {id}")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sqliteHome.appendingPathComponent("state_5.sqlite").path))
+    }
+
     func testMemoryResetRequiresExperimentalAPI() throws {
         let temp = try TemporaryDirectory()
 
@@ -36238,6 +36297,7 @@ final class CodexAppServerTests: XCTestCase {
         threadConfigSources: [ThreadConfigSource] = [],
         configLayerOverrides: ConfigLayerLoaderOverrides = ConfigLayerLoaderOverrides(),
         stateStore: SQLiteAgentGraphStore? = nil,
+        agentJobStore: SQLiteAgentJobStore? = nil,
         configWarnings: [CodexAppServerConfiguration.ConfigWarning] = [],
         remoteControlStatusSnapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot? = nil,
         pluginStartupTasksEnabled: Bool = false,
@@ -36278,6 +36338,7 @@ final class CodexAppServerTests: XCTestCase {
             threadConfigSources: threadConfigSources,
             configLayerOverrides: configLayerOverrides,
             stateStore: stateStore,
+            agentJobStore: agentJobStore,
             configWarnings: configWarnings,
             remoteControlStatusSnapshot: remoteControlStatusSnapshot,
             pluginStartupTasksEnabled: pluginStartupTasksEnabled,

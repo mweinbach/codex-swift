@@ -574,6 +574,7 @@ private extension CodexAppServerConfiguration {
             threadConfigSources: threadConfigSources,
             configLayerOverrides: configLayerOverrides,
             stateStore: stateStore,
+            agentJobStore: agentJobStore,
             configWarnings: configWarnings,
             remoteControlStatusSnapshot: CodexAppServerConfiguration.RemoteControlStatusSnapshot(snapshot),
             remoteControlStatusBroadcaster: remoteControlStatusBroadcaster,

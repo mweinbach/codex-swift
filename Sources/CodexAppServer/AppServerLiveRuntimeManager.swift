@@ -857,6 +857,162 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         )
     }
 
+    private func spawnLiveAgentJobWorker(
+        _ request: AgentJobWorkerSpawnRequest,
+        setup: PreparedLiveTurn,
+        prototype: AppServerLiveRuntimeSubmission
+    ) async -> AgentJobWorkerSpawnResult {
+        do {
+            let childConversationID = ConversationId()
+            let childThreadID = try ThreadId(string: childConversationID.description)
+            let childSource = request.sessionSource ?? .subagent(.other("agent_job:\(request.jobID)"))
+            let spawnConfig = request.spawnConfig
+            let childCwd = URL(
+                fileURLWithPath: spawnConfig?.cwd ?? setup.cwd.path,
+                isDirectory: true
+            )
+            let childModel = spawnConfig?.model ?? setup.model
+            let childReasoningEffort = spawnConfig?.modelReasoningEffort
+                ?? setup.settings.modelReasoningEffort
+                ?? setup.modelFamily.defaultReasoningEffort
+            let childReasoningSummary = spawnConfig?.modelReasoningSummary
+                ?? setup.settings.modelReasoningSummary
+                ?? (setup.modelFamily.supportsReasoningSummaries ? .auto : .none)
+            let childApprovalPolicy = spawnConfig?.approvalPolicy ?? setup.approvalPolicy
+            let childSandboxPolicy = spawnConfig?.sandboxPolicy ?? setup.sandboxPolicy
+            let childRollout = try RolloutRecorder.create(
+                codexHome: configuration.codexHome,
+                cwd: childCwd,
+                conversationID: childConversationID,
+                instructions: nil,
+                source: childSource,
+                forkedFromID: nil,
+                threadSource: .subagent,
+                originator: configuration.originator,
+                cliVersion: configuration.version,
+                modelProvider: spawnConfig?.modelProviderID
+                    ?? setup.settings.modelProvider
+                    ?? configuration.defaultModelProvider,
+                dynamicTools: setup.dynamicTools
+            )
+            try childRollout.recordItems([
+                .turnContext(TurnContextItem(
+                    cwd: childCwd.path,
+                    approvalPolicy: childApprovalPolicy,
+                    sandboxPolicy: childSandboxPolicy,
+                    model: childModel,
+                    effort: childReasoningEffort,
+                    summary: childReasoningSummary,
+                    truncationPolicy: setup.modelFamily.truncationPolicy
+                ))
+            ])
+            try childRollout.flush()
+            try childRollout.shutdown()
+
+            if let stateStore = configuration.stateStore {
+                let createdAt = Date()
+                _ = try await stateStore.insertThreadIfAbsent(ThreadMetadata(
+                    id: childThreadID,
+                    rolloutPath: childRollout.rolloutPath.path,
+                    createdAt: createdAt,
+                    updatedAt: createdAt,
+                    source: Self.persistedSessionSource(childSource),
+                    threadSource: .subagent,
+                    agentNickname: childSource.nickname,
+                    agentRole: childSource.agentRole,
+                    agentPath: childSource.agentPath?.description,
+                    modelProvider: spawnConfig?.modelProviderID
+                        ?? setup.settings.modelProvider
+                        ?? configuration.defaultModelProvider,
+                    model: childModel,
+                    reasoningEffort: childReasoningEffort,
+                    cwd: childCwd.path,
+                    cliVersion: configuration.version,
+                    title: request.itemID,
+                    sandboxPolicy: Self.persistedSandboxPolicy(childSandboxPolicy),
+                    approvalMode: childApprovalPolicy.rawValue,
+                    tokensUsed: 0,
+                    firstUserMessage: request.prompt
+                ))
+            }
+            await state.recordSessionSource(threadID: childThreadID.description, source: childSource)
+
+            _ = try submitLiveRuntime(AppServerLiveRuntimeSubmission(
+                requestID: .string("agent-job-\(request.jobID)-\(request.itemID)-\(childConversationID)"),
+                threadID: childThreadID.description,
+                turnID: UUID().uuidString.lowercased(),
+                op: .userInput(items: [.text(request.prompt)], environments: request.environments),
+                turnMetadataHeader: prototype.turnMetadataHeader,
+                mcpElicitationsAutoDeny: prototype.mcpElicitationsAutoDeny,
+                mcpTools: prototype.mcpTools,
+                mcpToolCallHandler: prototype.mcpToolCallHandler,
+                extensionPromptFragments: prototype.extensionPromptFragments,
+                extensionToolSpecs: prototype.extensionToolSpecs,
+                extensionRegisteredToolExecutor: prototype.extensionRegisteredToolExecutor,
+                extensionApprovalReviewer: prototype.extensionApprovalReviewer
+            ))
+            return .spawned(childThreadID)
+        } catch {
+            return .failed(String(describing: error))
+        }
+    }
+
+    private func liveAgentJobToolContext(
+        setup: PreparedLiveTurn,
+        sessionSource: SessionSource,
+        submission: AppServerLiveRuntimeSubmission
+    ) async -> AgentJobToolContext? {
+        guard let agentJobStore = configuration.agentJobStore else {
+            return nil
+        }
+        let configuredEnvironmentSnapshot = await configuration.environmentRegistry.applying(
+            to: ConfiguredEnvironmentLoader.legacyEnvironmentSnapshot(environment: configuration.environment)
+        )
+        return AgentJobToolContext(
+            store: agentJobStore,
+            reportingThreadID: submission.threadID,
+            maxThreads: setup.settings.agents.maxThreads,
+            sessionSource: sessionSource,
+            maxDepth: setup.settings.agents.maxDepth,
+            spawnConfigSource: AgentJobSpawnConfigSource(
+                parentConfig: setup.settings,
+                baseInstructions: setup.settings.baseInstructions ?? setup.modelFamily.baseInstructions,
+                model: setup.model,
+                modelProviderID: setup.settings.modelProvider ?? configuration.defaultModelProvider,
+                reasoningEffort: setup.settings.modelReasoningEffort ?? setup.modelFamily.defaultReasoningEffort,
+                reasoningSummary: setup.settings.modelReasoningSummary
+                    ?? (setup.modelFamily.supportsReasoningSummaries ? .auto : .none),
+                developerInstructions: setup.settings.developerInstructions,
+                compactPrompt: setup.settings.compactPrompt,
+                turnContext: TurnContext(
+                    cwd: setup.cwd.path,
+                    approvalPolicy: setup.approvalPolicy,
+                    sandboxPolicy: setup.sandboxPolicy
+                ),
+                shellEnvironmentPolicy: setup.settings.shellEnvironmentPolicy
+            ),
+            environments: setup.turnEnvironmentSelections,
+            remoteEnvironmentIDs: Self.remoteEnvironmentIDs(from: configuredEnvironmentSnapshot),
+            configuredMaxRuntimeSeconds: setup.settings.agents.jobMaxRuntimeSeconds,
+            statusForThread: { [state] threadID in
+                await state.agentStatus(threadID: threadID.description)
+            },
+            spawnWorker: { [self, setup, submission] request in
+                await self.spawnLiveAgentJobWorker(request, setup: setup, prototype: submission)
+            },
+            shutdownThread: { [state] threadID in
+                await state.cancelThread(threadID: threadID.description)
+            },
+            waitWhenIdle: {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+        )
+    }
+
+    private static func remoteEnvironmentIDs(from snapshot: ConfiguredEnvironmentSnapshot) -> Set<String> {
+        Set(snapshot.environments.filter(\.isRemote).map(\.id))
+    }
+
     private func runResponsesLoop(
         submission: AppServerLiveRuntimeSubmission,
         setup: PreparedLiveTurn,
@@ -990,6 +1146,20 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 )
                 if let result = await multiAgentExecutor.execute(item) {
                     return result
+                }
+                if case let .functionCall(_, name, _, arguments, callID) = item,
+                   let agentJobOutput = await AgentJobToolExecutor.execute(
+                       name: name,
+                       arguments: arguments,
+                       callID: callID,
+                       cwd: setup.cwd,
+                       context: await self.liveAgentJobToolContext(
+                           setup: setup,
+                           sessionSource: sessionSource,
+                           submission: submission
+                       )
+                   ) {
+                    return NonInteractiveExec.FunctionCallExecutionResult(output: agentJobOutput)
                 }
                 return await submission.extensionRegisteredToolExecutor?(item)
             },
