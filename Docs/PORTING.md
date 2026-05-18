@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: pinned Rust's `thread/loaded/list` missing-cursor pagination
+  rule from
+  `codex-rs/app-server/src/request_processors/thread_processor.rs`. Swift
+  already matched Rust's `binary_search` insertion-point behavior when a valid
+  cursor thread id is not loaded; app-server tests now cover that edge in
+  addition to exact-cursor pagination and invalid-cursor rejection.
 - 2026-05-17: matched Rust's `ThreadWatchManager` status precedence from
   `codex-rs/app-server/src/thread_status.rs`. Swift live app-server thread
   snapshots now clear the active-turn marker on system errors and report
