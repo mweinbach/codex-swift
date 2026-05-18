@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: extended CLI ordinary parse-failure parity for visible
+  feature-flag and execpolicy management commands. Swift now emits Rust/Clap
+  exit-2 diagnostics for invalid `codex features {list,enable,disable}` forms
+  and `codex execpolicy check` missing/invalid required arguments, including
+  Clap's compact-short-option boundary for `-rpolicy.rules`.
 - 2026-05-18: extended CLI ordinary parse-failure parity to the remaining
   visible single-argument utility commands covered by the Rust runtime oracle.
   Swift now emits Rust/Clap exit-2 required-argument diagnostics for

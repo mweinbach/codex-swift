@@ -65,7 +65,7 @@ final class ExecPolicyCLITests: XCTestCase {
         var receivedRequest: CodexCLI.ExecPolicyCommandRequest?
 
         let exitCode = await CodexCLI().runAsync(
-            arguments: ["execpolicy", "check", "-rpolicy.rules", "--flaggy"],
+            arguments: ["execpolicy", "check", "--rules=policy.rules", "--flaggy"],
             stdout: { _ in },
             stderr: { _ in },
             execPolicyRunner: { request in
@@ -81,6 +81,32 @@ final class ExecPolicyCLITests: XCTestCase {
         )
     }
 
+    func testRunAsyncExecPolicyCheckRejectsCompactShortRulesLikeRustClap() async {
+        var stderr: [String] = []
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["execpolicy", "check", "-rpolicy.rules", "--flaggy"],
+            stdout: { _ in XCTFail("stdout should not be written") },
+            stderr: { stderr.append($0) },
+            execPolicyRunner: { _ in
+                XCTFail("runner should not be called without Rust-recognized rules")
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 2)
+        XCTAssertEqual(stderr, [
+            """
+            error: the following required arguments were not provided:
+              --rules <PATH>
+
+            Usage: codex execpolicy check --rules <PATH> <COMMAND>...
+
+            For more information, try '--help'.
+            """
+        ])
+    }
+
     func testRunAsyncExecPolicyCheckRequiresRules() async {
         var stderr: [String] = []
 
@@ -94,8 +120,17 @@ final class ExecPolicyCLITests: XCTestCase {
             }
         )
 
-        XCTAssertEqual(exitCode, 64)
-        XCTAssertEqual(stderr, ["codex-swift: missing required option for command 'execpolicy check': --rules <PATH>"])
+        XCTAssertEqual(exitCode, 2)
+        XCTAssertEqual(stderr, [
+            """
+            error: the following required arguments were not provided:
+              --rules <PATH>
+
+            Usage: codex execpolicy check --rules <PATH> <COMMAND>...
+
+            For more information, try '--help'.
+            """
+        ])
     }
 
     func testRunAsyncExecPolicyCheckRequiresCommand() async {
@@ -111,7 +146,16 @@ final class ExecPolicyCLITests: XCTestCase {
             }
         )
 
-        XCTAssertEqual(exitCode, 64)
-        XCTAssertEqual(stderr, ["codex-swift: missing required argument for command 'execpolicy check': <COMMAND>"])
+        XCTAssertEqual(exitCode, 2)
+        XCTAssertEqual(stderr, [
+            """
+            error: the following required arguments were not provided:
+              <COMMAND>...
+
+            Usage: codex execpolicy check --rules <PATH> <COMMAND>...
+
+            For more information, try '--help'.
+            """
+        ])
     }
 }

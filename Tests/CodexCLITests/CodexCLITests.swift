@@ -1440,27 +1440,65 @@ final class CodexCLITests: XCTestCase {
         let cases: [([String], String)] = [
             (
                 ["features", "bogus"],
-                "codex-swift: unsupported features subcommand: bogus"
+                """
+                error: unrecognized subcommand 'bogus'
+
+                Usage: codex features [OPTIONS] <COMMAND>
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["features", "list", "extra"],
-                "codex-swift: unexpected argument for command 'features list': extra"
+                """
+                error: unexpected argument 'extra' found
+
+                Usage: codex features list [OPTIONS]
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["features", "enable"],
-                "codex-swift: missing required argument for command 'features enable': <FEATURE>"
+                """
+                error: the following required arguments were not provided:
+                  <FEATURE>
+
+                Usage: codex features enable <FEATURE>
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["features", "enable", "runtime_metrics", "extra"],
-                "codex-swift: unexpected argument for command 'features enable': extra"
+                """
+                error: unexpected argument 'extra' found
+
+                Usage: codex features enable [OPTIONS] <FEATURE>
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["features", "disable"],
-                "codex-swift: missing required argument for command 'features disable': <FEATURE>"
+                """
+                error: the following required arguments were not provided:
+                  <FEATURE>
+
+                Usage: codex features disable <FEATURE>
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["features", "disable", "shell_tool", "extra"],
-                "codex-swift: unexpected argument for command 'features disable': extra"
+                """
+                error: unexpected argument 'extra' found
+
+                Usage: codex features disable [OPTIONS] <FEATURE>
+
+                For more information, try '--help'.
+                """
             )
         ]
 
@@ -1476,7 +1514,7 @@ final class CodexCLITests: XCTestCase {
                 }
             )
 
-            XCTAssertEqual(exitCode, 64, "\(arguments)")
+            XCTAssertEqual(exitCode, 2, "\(arguments)")
             XCTAssertEqual(stderr, [expectedMessage], "\(arguments)")
         }
     }

@@ -5340,33 +5340,27 @@ public struct CodexCLI: Sendable {
         switch subcommand {
         case "list":
             guard arguments.count == 1 else {
-                return .failure("codex-swift: unexpected argument for command 'features list': \(arguments[1])", 64)
+                return clapUnexpectedArgument(arguments[1], usage: "codex features list [OPTIONS]")
             }
             return .success(.list)
         case "enable":
             guard arguments.count >= 2 else {
-                return .failure(
-                    "codex-swift: missing required argument for command 'features enable': <FEATURE>",
-                    64
-                )
+                return clapMissingRequired(["<FEATURE>"], usage: "codex features enable <FEATURE>")
             }
             guard arguments.count == 2 else {
-                return .failure("codex-swift: unexpected argument for command 'features enable': \(arguments[2])", 64)
+                return clapUnexpectedArgument(arguments[2], usage: "codex features enable [OPTIONS] <FEATURE>")
             }
             return .success(.enable(feature: arguments[1]))
         case "disable":
             guard arguments.count >= 2 else {
-                return .failure(
-                    "codex-swift: missing required argument for command 'features disable': <FEATURE>",
-                    64
-                )
+                return clapMissingRequired(["<FEATURE>"], usage: "codex features disable <FEATURE>")
             }
             guard arguments.count == 2 else {
-                return .failure("codex-swift: unexpected argument for command 'features disable': \(arguments[2])", 64)
+                return clapUnexpectedArgument(arguments[2], usage: "codex features disable [OPTIONS] <FEATURE>")
             }
             return .success(.disable(feature: arguments[1]))
         default:
-            return .failure("codex-swift: unsupported features subcommand: \(subcommand)", 64)
+            return clapUnrecognizedSubcommand(subcommand, usage: "codex features [OPTIONS] <COMMAND>")
         }
     }
 
@@ -8254,7 +8248,7 @@ public struct CodexCLI: Sendable {
             return .failure("codex-swift: missing required subcommand for command 'execpolicy': check", 64)
         }
         guard subcommand == "check" else {
-            return .failure("codex-swift: unsupported execpolicy subcommand: \(subcommand)", 64)
+            return clapUnrecognizedSubcommand(subcommand, usage: "codex execpolicy [OPTIONS] <COMMAND>")
         }
         return parseExecPolicyCheck(Array(arguments.dropFirst()))
     }
@@ -8273,24 +8267,23 @@ public struct CodexCLI: Sendable {
             }
             if argument == "--rules" || argument == "-r" {
                 guard index + 1 < arguments.count else {
-                    return .failure("codex-swift: missing value for \(argument)", 64)
+                    return clapMissingValue(option: "--rules", valueDisplay: "<PATH>")
                 }
                 rules.append(arguments[index + 1])
                 index += 2
                 continue
             }
             if argument.hasPrefix("--rules=") {
-                rules.append(String(argument.dropFirst("--rules=".count)))
+                let value = String(argument.dropFirst("--rules=".count))
+                guard !value.isEmpty else {
+                    return clapMissingValue(option: "--rules", valueDisplay: "<PATH>")
+                }
+                rules.append(value)
                 index += 1
                 continue
             }
             if argument == "--pretty" {
                 pretty = true
-                index += 1
-                continue
-            }
-            if argument.hasPrefix("-r"), argument.count > 2, !argument.hasPrefix("--") {
-                rules.append(String(argument.dropFirst(2)))
                 index += 1
                 continue
             }
@@ -8300,11 +8293,16 @@ public struct CodexCLI: Sendable {
             break
         }
 
+        let usage = "codex execpolicy check --rules <PATH>\(pretty ? " --pretty" : "") <COMMAND>..."
         guard !rules.isEmpty else {
-            return .failure("codex-swift: missing required option for command 'execpolicy check': --rules <PATH>", 64)
+            var missing = ["--rules <PATH>"]
+            if command.isEmpty {
+                missing.append("<COMMAND>...")
+            }
+            return clapMissingRequired(missing, usage: usage)
         }
         guard !command.isEmpty else {
-            return .failure("codex-swift: missing required argument for command 'execpolicy check': <COMMAND>", 64)
+            return clapMissingRequired(["<COMMAND>..."], usage: usage)
         }
         return .success(.check(rules: rules, pretty: pretty, command: command))
     }
@@ -8679,6 +8677,10 @@ public struct CodexCLI: Sendable {
             """,
             2
         )
+    }
+
+    private func clapUnrecognizedSubcommand<Success>(_ subcommand: String, usage: String) -> ParseResult<Success> {
+        .failure(renderUnrecognizedSubcommandError(subcommand, usage: usage), 2)
     }
 
     private func emitParseFailure<Success>(_ result: ParseResult<Success>, stderr: (String) -> Void) -> Int32 {

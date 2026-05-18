@@ -670,7 +670,21 @@ final class RuntimeOracleParityTests: XCTestCase {
             ["cloud", "exec"],
             ["cloud", "list", "extra"],
             ["cloud", "list", "--limit"],
-            ["cloud", "diff", "task_123", "--attempt"]
+            ["cloud", "diff", "task_123", "--attempt"],
+            ["features", "list", "extra"],
+            ["features", "enable"],
+            ["features", "enable", "runtime_metrics", "extra"],
+            ["features", "disable"],
+            ["features", "disable", "shell_tool", "extra"],
+            ["features", "bogus"],
+            ["execpolicy", "check"],
+            ["execpolicy", "check", "git", "status"],
+            ["execpolicy", "check", "--rules"],
+            ["execpolicy", "check", "--rules=policy.rules"],
+            ["execpolicy", "check", "--pretty"],
+            ["execpolicy", "check", "--pretty", "--rules", "policy.rules"],
+            ["execpolicy", "check", "-rpolicy.rules", "--flaggy"],
+            ["execpolicy", "bogus"]
         ]
 
         for arguments in commands {
