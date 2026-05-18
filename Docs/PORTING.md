@@ -727,6 +727,14 @@ Recent upstream audit checkpoint:
   objective-edited steering, and standard contextual-user filtering now
   recognizes those fragments like Rust's `GoalContext`. Actual injection from
   live turn accounting remains pending with the ThreadManager runtime wiring.
+- 2026-05-18: Swift live app-server Responses turns now propagate completed
+  response token usage out of `NonInteractiveExec.runResponsesLoopWithTranscript`
+  and account it against active persisted thread goals when a live turn finishes,
+  using the existing Rust-shaped `accountThreadGoalUsage(.activeOnly)` state
+  helper and emitting `thread/goal/updated` before `turn/completed`. This covers
+  the first live automatic accounting hook; turn-start goal-id baselines,
+  mid-turn tool-completion accounting, budget-limit steering injection, and idle
+  continuation turns remain pending with the broader ThreadManager goal runtime.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through

@@ -11596,6 +11596,49 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(persistedGoal?.status, .usageLimited)
     }
 
+    func testLiveRuntimeGoalAccountingUpdatesActiveGoalLikeRustTurnFinish() async throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T07-38-00",
+            timestamp: "2025-01-06T07:38:00Z",
+            preview: "live goal accounting",
+            provider: "mock_provider"
+        )
+        let stateStore = try await createAppServerGoalStateStore(
+            codexHome: temp.url,
+            threadID: threadID,
+            title: "live goal accounting"
+        )
+        let parsedThreadID = try ThreadId(string: threadID)
+        _ = try await stateStore.replaceThreadGoal(
+            threadID: parsedThreadID,
+            objective: "keep polishing",
+            status: .active,
+            tokenBudget: 20
+        )
+        var features = FeatureStates.withDefaults()
+        features.set(.goals, enabled: true)
+
+        let updated = await AppServerLiveRuntimeManager.accountCompletedLiveThreadGoalUsage(
+            stateStore: stateStore,
+            features: features,
+            threadID: threadID,
+            turnID: "turn-live",
+            tokenUsage: TokenUsage(totalTokens: 25),
+            durationMilliseconds: 2_500
+        )
+
+        XCTAssertEqual(updated?.threadID, parsedThreadID)
+        XCTAssertEqual(updated?.status, .budgetLimited)
+        XCTAssertEqual(updated?.tokensUsed, 25)
+        XCTAssertEqual(updated?.timeUsedSeconds, 2)
+        let persisted = try await stateStore.getThreadGoal(threadID: parsedThreadID)
+        XCTAssertEqual(persisted?.status, .budgetLimited)
+        XCTAssertEqual(persisted?.tokensUsed, 25)
+        XCTAssertEqual(persisted?.timeUsedSeconds, 2)
+    }
+
     func testThreadResumeKeepsPausedGoalPausedLikeRust() async throws {
         let temp = try TemporaryDirectory()
         try """

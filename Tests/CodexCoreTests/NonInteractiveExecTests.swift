@@ -1722,6 +1722,40 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(result.transcriptItems.last, .message(role: "assistant", content: [.outputText(text: "done")]))
     }
 
+    func testResponsesLoopAccumulatesCompletedTokenUsageForLiveRuntimeAccounting() async throws {
+        let initial = Prompt(input: [
+            .message(role: "user", content: [.inputText(text: "run echo")])
+        ])
+        let script = TokenUsageLoopScript()
+
+        let result = await NonInteractiveExec.runResponsesLoopWithTranscript(
+            initialPrompt: initial,
+            streamPrompt: { prompt in
+                .success(await script.next(prompt))
+            },
+            executeFunctionCall: { item in
+                guard case let .functionCall(_, _, _, _, callID) = item else {
+                    return .functionCallOutput(
+                        callID: "bad",
+                        output: FunctionCallOutputPayload(content: "bad", success: false)
+                    )
+                }
+                return .functionCallOutput(
+                    callID: callID,
+                    output: FunctionCallOutputPayload(content: "ok", success: true)
+                )
+            }
+        )
+
+        XCTAssertEqual(result.tokenUsage, TokenUsage(
+            inputTokens: 7,
+            cachedInputTokens: 2,
+            outputTokens: 11,
+            reasoningOutputTokens: 3,
+            totalTokens: 18
+        ))
+    }
+
     func testResponsesLoopContinuesWhenCompletedEndTurnFalseWithoutToolCalls() async throws {
         let initial = Prompt(input: [
             .message(role: "user", content: [.inputText(text: "continue")])
@@ -5589,6 +5623,47 @@ private actor ExecLoopScript {
 
     func prompts() -> [Prompt] {
         recordedPrompts
+    }
+}
+
+private actor TokenUsageLoopScript {
+    private var calls = 0
+
+    func next(_: Prompt) -> ResponseEventResults {
+        calls += 1
+        if calls == 1 {
+            return [
+                .success(.outputItemDone(.functionCall(
+                    name: "shell_command",
+                    arguments: #"{"command":"echo hi"}"#,
+                    callID: "call-1"
+                ))),
+                .success(.completed(
+                    responseID: "resp-1",
+                    tokenUsage: TokenUsage(
+                        inputTokens: 3,
+                        cachedInputTokens: 1,
+                        outputTokens: 5,
+                        reasoningOutputTokens: 2,
+                        totalTokens: 8
+                    )
+                ))
+            ]
+        }
+
+        return [
+            .success(.outputItemDone(.message(role: "assistant", content: [.outputText(text: "done")]))),
+            .success(.completed(
+                responseID: "resp-2",
+                tokenUsage: TokenUsage(
+                    inputTokens: 4,
+                    cachedInputTokens: 1,
+                    outputTokens: 6,
+                    reasoningOutputTokens: 1,
+                    totalTokens: 10
+                )
+            ))
+        ]
     }
 }
 

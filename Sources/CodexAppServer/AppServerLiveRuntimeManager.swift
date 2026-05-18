@@ -248,6 +248,24 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                     turnID: submission.turnID
                 )
             }
+            if let goal = await Self.accountCompletedLiveThreadGoalUsage(
+                stateStore: configuration.stateStore,
+                features: setup.settings.features,
+                threadID: submission.threadID,
+                turnID: submission.turnID,
+                tokenUsage: loopResult.tokenUsage,
+                durationMilliseconds: AppServerLiveRuntimeClock.millisecondsSinceEpoch() - startedAt
+            ) {
+                await state.emit(
+                    threadID: submission.threadID,
+                    turnID: submission.turnID,
+                    event: .threadGoalUpdated(ThreadGoalUpdatedEvent(
+                        threadID: goal.threadID,
+                        turnID: submission.turnID,
+                        goal: goal
+                    ))
+                )
+            }
             try setup.recorder?.flush()
             await completeTurn(
                 submission: submission,
@@ -639,6 +657,42 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             return nil
         }
         return NonInteractiveExec.GoalToolContext(threadID: parsedThreadID, stateStore: stateStore)
+    }
+
+    static func accountCompletedLiveThreadGoalUsage(
+        stateStore: SQLiteAgentGraphStore?,
+        features: FeatureStates,
+        threadID: String,
+        turnID _: String,
+        tokenUsage: TokenUsage?,
+        durationMilliseconds: Int64
+    ) async -> ThreadGoal? {
+        guard features.isEnabled(.goals),
+              let stateStore,
+              let parsedThreadID = try? ThreadId(string: threadID)
+        else {
+            return nil
+        }
+        let tokenDelta = max(tokenUsage?.totalTokens ?? 0, 0)
+        let timeDeltaSeconds = max(durationMilliseconds / 1_000, 0)
+        guard tokenDelta > 0 || timeDeltaSeconds > 0 else {
+            return nil
+        }
+        do {
+            switch try await stateStore.accountThreadGoalUsage(
+                threadID: parsedThreadID,
+                timeDeltaSeconds: timeDeltaSeconds,
+                tokenDelta: tokenDelta,
+                mode: .activeOnly
+            ) {
+            case let .updated(goal):
+                return goal
+            case .unchanged:
+                return nil
+            }
+        } catch {
+            return nil
+        }
     }
 
     private func completeTurn(

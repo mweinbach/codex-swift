@@ -59,15 +59,18 @@ public struct NonInteractiveExecLoopResult: Equatable, Sendable {
     public let events: ResponseEventResults
     public let transcriptItems: [ResponseItem]
     public let runtimeEvents: [EventMessage]
+    public let tokenUsage: TokenUsage?
 
     public init(
         events: ResponseEventResults,
         transcriptItems: [ResponseItem],
-        runtimeEvents: [EventMessage] = []
+        runtimeEvents: [EventMessage] = [],
+        tokenUsage: TokenUsage? = nil
     ) {
         self.events = events
         self.transcriptItems = transcriptItems
         self.runtimeEvents = runtimeEvents
+        self.tokenUsage = tokenUsage
     }
 }
 
@@ -870,6 +873,7 @@ public enum NonInteractiveExec {
         var allEvents: ResponseEventResults = []
         var transcriptItems: [ResponseItem] = []
         var runtimeEvents: [EventMessage] = []
+        var tokenUsage: TokenUsage?
         var stopHookActive = false
 
         for _ in 0..<maxToolIterations {
@@ -886,13 +890,15 @@ public enum NonInteractiveExec {
             }
 
             allEvents.append(contentsOf: turnEvents)
+            appendCompletedTokenUsage(from: turnEvents, into: &tokenUsage)
             await handleModelsETags(from: turnEvents, handleModelsETag: handleModelsETag)
             runtimeEvents.append(contentsOf: applyPatchStreamingEvents(from: turnEvents, features: features))
             if containsFailure(turnEvents) {
                 return NonInteractiveExecLoopResult(
                     events: allEvents,
                     transcriptItems: transcriptItems,
-                    runtimeEvents: runtimeEvents
+                    runtimeEvents: runtimeEvents,
+                    tokenUsage: tokenUsage
                 )
             }
 
@@ -922,14 +928,16 @@ public enum NonInteractiveExec {
                         return NonInteractiveExecLoopResult(
                             events: allEvents,
                             transcriptItems: transcriptItems,
-                            runtimeEvents: runtimeEvents
+                            runtimeEvents: runtimeEvents,
+                            tokenUsage: tokenUsage
                         )
                     }
                 }
                 return NonInteractiveExecLoopResult(
                     events: allEvents,
                     transcriptItems: transcriptItems,
-                    runtimeEvents: runtimeEvents
+                    runtimeEvents: runtimeEvents,
+                    tokenUsage: tokenUsage
                 )
             }
 
@@ -950,8 +958,26 @@ public enum NonInteractiveExec {
         return NonInteractiveExecLoopResult(
             events: allEvents,
             transcriptItems: transcriptItems,
-            runtimeEvents: runtimeEvents
+            runtimeEvents: runtimeEvents,
+            tokenUsage: tokenUsage
         )
+    }
+
+    private static func appendCompletedTokenUsage(
+        from events: ResponseEventResults,
+        into total: inout TokenUsage?
+    ) {
+        for result in events {
+            guard case let .success(.completed(_, usage, _)) = result,
+                  let usage
+            else {
+                continue
+            }
+            if total == nil {
+                total = TokenUsage()
+            }
+            total?.addAssign(usage)
+        }
     }
 
     private static func handleModelsETags(
