@@ -826,6 +826,15 @@ final class RuntimeOracleParityTests: XCTestCase {
             ["mcp-server", "extra"],
             ["exec-server", "--listen"],
             ["exec-server", "--remote", "https://registry.example.test"],
+            ["exec-server", "--remote", "https://registry.example.test", "--name", "Local Executor"],
+            [
+                "exec-server",
+                "--remote",
+                "https://registry.example.test",
+                "--name",
+                "Local Executor",
+                "--use-agent-identity-auth"
+            ],
             ["exec-server", "--listen", "stdio", "--remote", "https://registry.example.test"],
             ["exec-server", "--listen", "stdio", "--listen=ws://127.0.0.1:4500"],
             ["exec-server", "--remote", "https://registry.example.test", "--remote=https://other.example.test"],

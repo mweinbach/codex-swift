@@ -7100,7 +7100,10 @@ public struct CodexCLI: Sendable {
             guard let executorID else {
                 return clapMissingRequired(
                     ["--executor-id <ID>"],
-                    usage: "codex exec-server --executor-id <ID> --remote <URL>"
+                    usage: execServerRemoteMissingExecutorIDUsage(
+                        hasName: name != nil,
+                        useAgentIdentityAuth: useAgentIdentityAuth
+                    )
                 )
             }
             let configOverrides: CliConfigOverrides
@@ -7134,6 +7137,20 @@ public struct CodexCLI: Sendable {
 
     private func execServerOptionDisplayName(_ option: String) -> String {
         "\(option) \(execServerOptionValueDisplay(option))"
+    }
+
+    private func execServerRemoteMissingExecutorIDUsage(
+        hasName: Bool,
+        useAgentIdentityAuth: Bool
+    ) -> String {
+        var parts = ["codex exec-server", "--executor-id <ID>", "--remote <URL>"]
+        if hasName {
+            parts.append("--name <NAME>")
+        }
+        if useAgentIdentityAuth {
+            parts.append("--use-agent-identity-auth")
+        }
+        return parts.joined(separator: " ")
     }
 
     private func execServerOptionValueDisplay(_ option: String) -> String {

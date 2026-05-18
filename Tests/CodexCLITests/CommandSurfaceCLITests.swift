@@ -1143,6 +1143,37 @@ final class CommandSurfaceCLITests: XCTestCase {
                 2
             ),
             (
+                ["exec-server", "--remote", "https://registry.example.test", "--name", "Local Executor"],
+                """
+                error: the following required arguments were not provided:
+                  --executor-id <ID>
+
+                Usage: codex exec-server --executor-id <ID> --remote <URL> --name <NAME>
+
+                For more information, try '--help'.
+                """,
+                2
+            ),
+            (
+                [
+                    "exec-server",
+                    "--remote",
+                    "https://registry.example.test",
+                    "--name",
+                    "Local Executor",
+                    "--use-agent-identity-auth"
+                ],
+                """
+                error: the following required arguments were not provided:
+                  --executor-id <ID>
+
+                Usage: codex exec-server --executor-id <ID> --remote <URL> --name <NAME> --use-agent-identity-auth
+
+                For more information, try '--help'.
+                """,
+                2
+            ),
+            (
                 ["exec-server", "--listen", "stdio", "--remote", "https://registry.example.test"],
                 """
                 error: the argument '--listen <URL>' cannot be used with '--remote <URL>'
