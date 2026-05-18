@@ -852,6 +852,12 @@ Recent upstream audit checkpoint:
   states when the runtime has observed them. `spawn_agent`, final-status
   mailbox notifications, and full ThreadManager-backed `AgentControl` remain
   pending.
+- 2026-05-18: Swift live app-server runtime now mirrors Rust's terminal
+  MultiAgentV2 child-turn notification for loaded thread-spawn subagents:
+  completed child turns enqueue the standard `<subagent_notification>` envelope
+  as non-triggering inter-agent mailbox mail to the direct parent agent path,
+  while interrupted child turns remain quiet. `spawn_agent` and full
+  ThreadManager-backed `AgentControl` remain pending.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through

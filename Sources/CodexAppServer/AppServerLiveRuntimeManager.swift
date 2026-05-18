@@ -224,6 +224,14 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         await state.agentStatus(threadID: threadID)
     }
 
+    func recordSessionSource(threadID: String, source: SessionSource) async {
+        await state.recordSessionSource(threadID: threadID, source: source)
+    }
+
+    func emitRuntimeEvent(threadID: String, turnID: String, event: EventMessage) async {
+        await state.emit(threadID: threadID, turnID: turnID, event: event)
+    }
+
     private func submitGoalContinuation(
         threadID: String,
         features: FeatureStates,
@@ -312,6 +320,7 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         var goalContinuationCollaborationModeKind: CollaborationModeKind?
         do {
             let setup = try await prepareTurn(submission)
+            await state.recordSessionSource(threadID: submission.threadID, source: setup.sessionSource)
             goalContinuationFeatures = setup.settings.features
             goalContinuationCollaborationModeKind = setup.collaborationModeKind
             await state.emit(
@@ -1641,6 +1650,7 @@ private actor AppServerLiveRuntimeState {
     private var mailboxChangeWaiters: [String: [String: CheckedContinuation<Bool, Never>]] = [:]
     private var agentLastTaskMessages: [String: String] = [:]
     private var agentStatuses: [String: AgentStatus] = [:]
+    private var sessionSources: [String: SessionSource] = [:]
     private var emittedAbortKeys: Set<String> = []
 
     func setEventSink(_ sink: AppServerRuntimeEventSink?) {
@@ -1693,6 +1703,10 @@ private actor AppServerLiveRuntimeState {
             return status
         }
         return runningTurns[threadID] == nil ? .completed(nil) : .running
+    }
+
+    func recordSessionSource(threadID: String, source: SessionSource) {
+        sessionSources[threadID] = source
     }
 
     func finishTurn(threadID: String, turnID: String) {
@@ -1853,6 +1867,7 @@ private actor AppServerLiveRuntimeState {
         sessionGrantedPermissionProfiles.removeValue(forKey: threadID)
         runtimeConfigSnapshots.removeValue(forKey: threadID)
         agentStatuses[threadID] = .notFound
+        sessionSources.removeValue(forKey: threadID)
         idlePendingInput.removeValue(forKey: threadID)
         activePendingInput.removeValue(forKey: threadID)
         mailboxCommunications.removeValue(forKey: threadID)
@@ -1873,6 +1888,7 @@ private actor AppServerLiveRuntimeState {
         sessionGrantedPermissionProfiles.removeAll()
         runtimeConfigSnapshots.removeAll()
         agentStatuses.removeAll()
+        sessionSources.removeAll()
         idlePendingInput.removeAll()
         activePendingInput.removeAll()
         mailboxCommunications.removeAll()
@@ -1906,6 +1922,7 @@ private actor AppServerLiveRuntimeState {
             agentStatuses[threadID] = status
         }
         await eventSink?(threadID, turnID, event)
+        maybeNotifyParentOfTerminalTurn(threadID: threadID, event: event)
     }
 
     func markAbortEmitted(threadID: String, turnID: String) -> Bool {
@@ -2039,6 +2056,57 @@ private actor AppServerLiveRuntimeState {
         for waiter in waiters {
             waiter.resume(returning: result)
         }
+    }
+
+    private func maybeNotifyParentOfTerminalTurn(threadID: String, event: EventMessage) {
+        let status: AgentStatus?
+        if case let .taskComplete(complete) = event {
+            status = .completed(complete.lastAgentMessage)
+        } else if case let .turnAborted(aborted) = event {
+            status = AgentStatus.from(eventMessage: .turnAborted(aborted))
+        } else {
+            return
+        }
+
+        guard let status,
+              status.isFinal,
+              case let .subagent(.threadSpawn(parentThreadID, _, childAgentPath, _, _)) = sessionSources[threadID],
+              let childAgentPath,
+              let parentAgentPath = Self.parentAgentPath(of: childAgentPath)
+        else {
+            return
+        }
+        let communication = InterAgentCommunication(
+            author: childAgentPath,
+            recipient: parentAgentPath,
+            content: Self.subagentNotificationMessage(
+                agentPath: childAgentPath,
+                status: status
+            ),
+            triggerTurn: false
+        )
+        queueMailboxCommunications(
+            threadID: parentThreadID.description,
+            communications: [communication]
+        )
+    }
+
+    private static func parentAgentPath(of childAgentPath: AgentPath) -> AgentPath? {
+        let path = childAgentPath.description
+        guard let slashIndex = path.lastIndex(of: "/"),
+              slashIndex != path.startIndex
+        else {
+            return nil
+        }
+        return try? AgentPath(validating: String(path[..<slashIndex]))
+    }
+
+    private static func subagentNotificationMessage(agentPath: AgentPath, status: AgentStatus) -> String {
+        let statusData = (try? JSONEncoder().encode(status)) ?? Data()
+        let statusJSON = String(data: statusData, encoding: .utf8)?.replacingOccurrences(of: "\\/", with: "/")
+            ?? "null"
+        let body = #"{"agent_path":"\#(agentPath.description)","status":\#(statusJSON)}"#
+        return "<subagent_notification>\n\(body)\n</subagent_notification>"
     }
 
     private func cancelPendingContinuations(turnID: String) {

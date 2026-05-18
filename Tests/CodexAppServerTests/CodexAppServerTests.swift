@@ -12484,6 +12484,87 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(triggerStartedTurn)
     }
 
+    func testLiveRuntimeTerminalSubagentTurnQueuesDirectParentNotificationLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let parentThreadID = ThreadId()
+        let childThreadID = ThreadId()
+        let manager = AppServerLiveRuntimeManager(
+            configuration: testConfiguration(codexHome: temp.url, requiresOpenAIAuth: false)
+        )
+        defer {
+            manager.shutdown()
+        }
+        let workerPath = try AgentPath.root.join("worker")
+        let testerPath = try workerPath.join("tester")
+        await manager.recordSessionSource(
+            threadID: childThreadID.description,
+            source: .subagent(.threadSpawn(
+                parentThreadID: parentThreadID,
+                depth: 2,
+                agentPath: testerPath,
+                agentRole: "explorer"
+            ))
+        )
+
+        await manager.emitRuntimeEvent(
+            threadID: childThreadID.description,
+            turnID: "turn-complete",
+            event: .taskComplete(TaskCompleteEvent(
+                turnID: "turn-complete",
+                lastAgentMessage: "done"
+            ))
+        )
+
+        let parentMailbox = await manager.takeMailboxCommunications(threadID: parentThreadID.description)
+        XCTAssertEqual(parentMailbox, [
+            InterAgentCommunication(
+                author: testerPath,
+                recipient: workerPath,
+                content: """
+                <subagent_notification>
+                {"agent_path":"/root/worker/tester","status":{"completed":"done"}}
+                </subagent_notification>
+                """,
+                triggerTurn: false
+            )
+        ])
+        let rootMailbox = await manager.takeMailboxCommunications(threadID: ThreadId().description)
+        XCTAssertEqual(rootMailbox, [])
+    }
+
+    func testLiveRuntimeInterruptedSubagentTurnDoesNotQueueParentNotificationLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let parentThreadID = ThreadId()
+        let childThreadID = ThreadId()
+        let manager = AppServerLiveRuntimeManager(
+            configuration: testConfiguration(codexHome: temp.url, requiresOpenAIAuth: false)
+        )
+        defer {
+            manager.shutdown()
+        }
+        await manager.recordSessionSource(
+            threadID: childThreadID.description,
+            source: .subagent(.threadSpawn(
+                parentThreadID: parentThreadID,
+                depth: 1,
+                agentPath: try AgentPath.root.join("worker"),
+                agentRole: "explorer"
+            ))
+        )
+
+        await manager.emitRuntimeEvent(
+            threadID: childThreadID.description,
+            turnID: "turn-aborted",
+            event: .turnAborted(TurnAbortedEvent(
+                turnID: "turn-aborted",
+                reason: .interrupted
+            ))
+        )
+
+        let parentMailbox = await manager.takeMailboxCommunications(threadID: parentThreadID.description)
+        XCTAssertEqual(parentMailbox, [])
+    }
+
     func testLiveRuntimeGoalAccountingIgnoresGoalCreatedAfterTurnStartLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(
