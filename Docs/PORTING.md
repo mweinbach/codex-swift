@@ -756,6 +756,12 @@ Recent upstream audit checkpoint:
   completed goal while suppressing extra budget-limit steering, matching Rust's
   `ToolCompletedGoal` handler behavior. Idle continuation turns remain pending
   with the broader ThreadManager goal runtime.
+- 2026-05-18: Swift live app-server interrupt handling now covers Rust's
+  active-goal pause path for `GoalRuntimeEvent::TaskAborted`: cancellation
+  accounts final live turn goal usage through the turn-start goal snapshot,
+  pauses the active persisted goal, and emits `thread/goal/updated` before the
+  interrupted turn abort notification. Idle continuation turns remain pending
+  with the broader ThreadManager goal runtime.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through

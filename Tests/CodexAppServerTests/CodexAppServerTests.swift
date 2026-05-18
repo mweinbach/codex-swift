@@ -11784,6 +11784,59 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(persisted?.timeUsedSeconds, 2)
     }
 
+    func testLiveRuntimeGoalInterruptAccountsBeforePausingLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T07-38-50",
+            timestamp: "2025-01-06T07:38:50Z",
+            preview: "live interrupt goal accounting",
+            provider: "mock_provider"
+        )
+        let stateStore = try await createAppServerGoalStateStore(
+            codexHome: temp.url,
+            threadID: threadID,
+            title: "live interrupt goal accounting"
+        )
+        let parsedThreadID = try ThreadId(string: threadID)
+        _ = try await stateStore.replaceThreadGoal(
+            threadID: parsedThreadID,
+            objective: "keep improving the benchmark",
+            status: .active,
+            tokenBudget: nil
+        )
+        var features = FeatureStates.withDefaults()
+        features.set(.goals, enabled: true)
+        let snapshot = await AppServerLiveRuntimeManager.liveThreadGoalAccountingSnapshot(
+            stateStore: stateStore,
+            features: features,
+            threadID: threadID,
+            tokenUsage: TokenUsage(totalTokens: 10)
+        )
+        let accounting = AppServerLiveRuntimeManager.LiveThreadGoalAccountingSession(
+            stateStore: stateStore,
+            features: features,
+            threadID: threadID,
+            snapshot: snapshot,
+            lastAccountingAtMilliseconds: 1_000
+        )
+
+        let paused = await accounting.accountInterruptBeforePause(
+            tokenUsage: TokenUsage(totalTokens: 80),
+            completedAtMilliseconds: 3_500
+        )
+
+        XCTAssertEqual(paused?.threadID, parsedThreadID)
+        XCTAssertEqual(paused?.objective, "keep improving the benchmark")
+        XCTAssertEqual(paused?.status, .paused)
+        XCTAssertEqual(paused?.tokensUsed, 70)
+        XCTAssertEqual(paused?.timeUsedSeconds, 2)
+        let persisted = try await stateStore.getThreadGoal(threadID: parsedThreadID)
+        XCTAssertEqual(persisted?.status, .paused)
+        XCTAssertEqual(persisted?.tokensUsed, 70)
+        XCTAssertEqual(persisted?.timeUsedSeconds, 2)
+    }
+
     func testLiveRuntimeGoalAccountingIgnoresGoalCreatedAfterTurnStartLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(

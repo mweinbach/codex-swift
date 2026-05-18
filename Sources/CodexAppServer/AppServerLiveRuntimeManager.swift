@@ -174,6 +174,7 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
 
     private func runTurn(_ submission: AppServerLiveRuntimeSubmission) async {
         let startedAt = AppServerLiveRuntimeClock.millisecondsSinceEpoch()
+        var goalAccounting: LiveThreadGoalAccountingSession?
         do {
             let setup = try await prepareTurn(submission)
             await state.emit(
@@ -242,18 +243,19 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 threadID: submission.threadID,
                 tokenUsage: TokenUsage()
             )
-            let goalAccounting = LiveThreadGoalAccountingSession(
+            let turnGoalAccounting = LiveThreadGoalAccountingSession(
                 stateStore: configuration.stateStore,
                 features: setup.settings.features,
                 threadID: submission.threadID,
                 snapshot: goalAccountingSnapshot,
                 lastAccountingAtMilliseconds: startedAt
             )
+            goalAccounting = turnGoalAccounting
             let loopResult = await runResponsesLoop(
                 submission: submission,
                 setup: setup,
                 prompt: prompt,
-                goalAccounting: goalAccounting
+                goalAccounting: turnGoalAccounting
             )
             try setup.recorder?.recordItems(loopResult.transcriptItems.map(RolloutRecordItem.responseItem))
             for item in loopResult.transcriptItems {
@@ -266,7 +268,7 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                     turnID: submission.turnID
                 )
             }
-            if let goal = await goalAccounting.accountTurnCompletion(
+            if let goal = await turnGoalAccounting.accountTurnCompletion(
                 tokenUsage: loopResult.tokenUsage,
                 completedAtMilliseconds: AppServerLiveRuntimeClock.millisecondsSinceEpoch()
             ) {
@@ -288,6 +290,21 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 lastAssistantMessage: Self.lastAssistantMessage(from: loopResult.transcriptItems)
             )
         } catch is CancellationError {
+            let completedAt = AppServerLiveRuntimeClock.millisecondsSinceEpoch()
+            if let goal = await goalAccounting?.accountInterruptBeforePause(
+                tokenUsage: nil,
+                completedAtMilliseconds: completedAt
+            ) {
+                await state.emit(
+                    threadID: submission.threadID,
+                    turnID: submission.turnID,
+                    event: .threadGoalUpdated(ThreadGoalUpdatedEvent(
+                        threadID: goal.threadID,
+                        turnID: submission.turnID,
+                        goal: goal
+                    ))
+                )
+            }
             if await state.markAbortEmitted(threadID: submission.threadID, turnID: submission.turnID) {
                 await state.emit(
                     threadID: submission.threadID,
@@ -295,8 +312,8 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                     event: .turnAborted(TurnAbortedEvent(
                         turnID: submission.turnID,
                         reason: .interrupted,
-                        completedAt: AppServerLiveRuntimeClock.millisecondsSinceEpoch(),
-                        durationMilliseconds: AppServerLiveRuntimeClock.millisecondsSinceEpoch() - startedAt
+                        completedAt: completedAt,
+                        durationMilliseconds: completedAt - startedAt
                     ))
                 )
             }
@@ -812,6 +829,22 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             return result?.goal
         }
 
+        func accountInterruptBeforePause(
+            tokenUsage: TokenUsage?,
+            completedAtMilliseconds: Int64
+        ) async -> ThreadGoal? {
+            _ = await accountUsage(
+                tokenUsage: tokenUsage,
+                completedAtMilliseconds: completedAtMilliseconds,
+                budgetLimitSteeringAllowed: false
+            )
+            return await AppServerLiveRuntimeManager.pauseActiveLiveThreadGoal(
+                stateStore: stateStore,
+                features: features,
+                threadID: threadID
+            )
+        }
+
         private func accountUsage(
             tokenUsage: TokenUsage?,
             completedAtMilliseconds: Int64,
@@ -840,6 +873,24 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 budgetLimitReportedGoalID = nil
             }
             return result
+        }
+    }
+
+    static func pauseActiveLiveThreadGoal(
+        stateStore: SQLiteAgentGraphStore?,
+        features: FeatureStates,
+        threadID: String
+    ) async -> ThreadGoal? {
+        guard features.isEnabled(.goals),
+              let stateStore,
+              let parsedThreadID = try? ThreadId(string: threadID)
+        else {
+            return nil
+        }
+        do {
+            return try await stateStore.pauseActiveThreadGoal(threadID: parsedThreadID)
+        } catch {
+            return nil
         }
     }
 
