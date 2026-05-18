@@ -33,7 +33,8 @@ struct AppServerLiveMultiAgentToolExecutor {
                 serviceTier: $0.serviceTier,
                 developerInstructions: nil,
                 reasoningSummary: nil,
-                verbosity: nil
+                verbosity: nil,
+                compactPrompt: nil
             )
         },
         spawnAgent: @escaping @Sendable (LiveSpawnAgentRequest) async throws -> LiveSpawnAgentResult = { _ in
@@ -204,6 +205,7 @@ struct AppServerLiveMultiAgentToolExecutor {
                 developerInstructions: resolvedOverrides.developerInstructions,
                 reasoningSummary: resolvedOverrides.reasoningSummary,
                 verbosity: resolvedOverrides.verbosity,
+                compactPrompt: resolvedOverrides.compactPrompt,
                 forkMode: forkMode,
                 childAgentPath: childAgentPath
             ))
@@ -696,6 +698,7 @@ struct LiveSpawnAgentRequest: Equatable, Sendable {
     let developerInstructions: String?
     let reasoningSummary: ReasoningSummary?
     let verbosity: Verbosity?
+    let compactPrompt: String?
     let forkMode: LiveSpawnAgentForkMode
     let childAgentPath: AgentPath
 }
@@ -716,6 +719,7 @@ struct LiveSpawnAgentResolvedOverrides: Equatable, Sendable {
     let developerInstructions: String?
     let reasoningSummary: ReasoningSummary?
     let verbosity: Verbosity?
+    let compactPrompt: String?
 }
 
 struct LiveSpawnAgentRoleConfigOverrides: Equatable, Sendable {
@@ -725,6 +729,7 @@ struct LiveSpawnAgentRoleConfigOverrides: Equatable, Sendable {
     let developerInstructions: String?
     let reasoningSummary: ReasoningSummary?
     let verbosity: Verbosity?
+    let compactPrompt: String?
 }
 
 struct LiveSpawnAgentOverrideResolver: Sendable {
@@ -798,6 +803,7 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
         var roleDeveloperInstructions: String?
         var roleReasoningSummary: ReasoningSummary?
         var roleVerbosity: Verbosity?
+        var roleCompactPrompt: String?
         if let agentType = request.agentType,
            let overrides = roleConfigOverrides[agentType] {
             if let roleModel = overrides.model {
@@ -814,6 +820,7 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
             roleDeveloperInstructions = overrides.developerInstructions
             roleReasoningSummary = overrides.reasoningSummary
             roleVerbosity = overrides.verbosity
+            roleCompactPrompt = overrides.compactPrompt
             try Self.validateReasoningEffort(resolvedReasoningEffort, model: selectedModel)
         }
 
@@ -829,7 +836,8 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
             serviceTier: resolvedServiceTier,
             developerInstructions: roleDeveloperInstructions,
             reasoningSummary: roleReasoningSummary,
-            verbosity: roleVerbosity
+            verbosity: roleVerbosity,
+            compactPrompt: roleCompactPrompt
         )
     }
 
@@ -867,7 +875,8 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
                 serviceTier: try optionalString(table["service_tier"]),
                 developerInstructions: try optionalString(table["developer_instructions"]),
                 reasoningSummary: try optionalReasoningSummary(table["model_reasoning_summary"]),
-                verbosity: try optionalVerbosity(table["model_verbosity"])
+                verbosity: try optionalVerbosity(table["model_verbosity"]),
+                compactPrompt: try optionalString(table["compact_prompt"])
             )
         } catch {
             throw roleUnavailableError()

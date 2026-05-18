@@ -120,6 +120,7 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
     public let developerInstructionsOverride: String?
     public let serviceTierOverride: String?
     public let verbosityOverride: Verbosity?
+    public let compactPromptOverride: String?
 
     public init(
         requestID: RequestID,
@@ -137,7 +138,8 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
         additionalInputItems: [ResponseItem] = [],
         developerInstructionsOverride: String? = nil,
         serviceTierOverride: String? = nil,
-        verbosityOverride: Verbosity? = nil
+        verbosityOverride: Verbosity? = nil,
+        compactPromptOverride: String? = nil
     ) {
         self.requestID = requestID
         self.threadID = threadID
@@ -155,6 +157,7 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
         self.developerInstructionsOverride = developerInstructionsOverride
         self.serviceTierOverride = serviceTierOverride
         self.verbosityOverride = verbosityOverride
+        self.compactPromptOverride = compactPromptOverride
     }
 
     public static func == (lhs: AppServerLiveRuntimeSubmission, rhs: AppServerLiveRuntimeSubmission) -> Bool {
@@ -171,6 +174,7 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
             && lhs.developerInstructionsOverride == rhs.developerInstructionsOverride
             && lhs.serviceTierOverride == rhs.serviceTierOverride
             && lhs.verbosityOverride == rhs.verbosityOverride
+            && lhs.compactPromptOverride == rhs.compactPromptOverride
     }
 }
 

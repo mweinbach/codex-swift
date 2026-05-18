@@ -747,6 +747,9 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         if let verbosityOverride = submission.verbosityOverride {
             settings.modelVerbosity = verbosityOverride
         }
+        if let compactPromptOverride = submission.compactPromptOverride {
+            settings.compactPrompt = compactPromptOverride
+        }
         await state.recordMultiAgentV2Feature(
             threadID: submission.threadID,
             enabled: settings.features.isEnabled(.multiAgentV2)
@@ -1107,7 +1110,8 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             additionalInputItems: [],
             developerInstructionsOverride: request.developerInstructions,
             serviceTierOverride: request.serviceTier,
-            verbosityOverride: request.verbosity
+            verbosityOverride: request.verbosity,
+            compactPromptOverride: request.compactPrompt
         ))
 
         let status = await state.agentStatus(threadID: childThreadID.description)

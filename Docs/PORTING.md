@@ -969,10 +969,12 @@ Recent upstream audit checkpoint:
 - 2026-05-18: Swift live app-server MultiAgentV2 `spawn_agent` role
   `config_file` handling now also carries Rust's `model_reasoning_summary` and
   `model_verbosity` overrides through the resolved child spawn request and
-  initial child `turn_context`, while malformed summary/verbosity values map to
-  Rust's `agent type is currently not available` model-visible error. Broader
-  full role-layer rebuild parity remains pending with the full `AgentControl`
-  port.
+  initial child `turn_context`; role `compact_prompt` is also parsed from the
+  config layer and applied to the child runtime's compact prompt, matching
+  Rust's post-argument role config layering for future compaction. Malformed
+  summary/verbosity values map to Rust's `agent type is currently not
+  available` model-visible error. Broader full role-layer rebuild parity remains
+  pending with the full `AgentControl` port.
 - 2026-05-18: Swift live app-server context-only `turn/start` updates now match
   Rust `OverrideTurnContext` behavior by staying in runtime state instead of
   starting a model turn or appending rollout history before user input. The next

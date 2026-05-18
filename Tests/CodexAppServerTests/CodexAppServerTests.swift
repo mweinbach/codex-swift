@@ -12998,6 +12998,7 @@ final class CodexAppServerTests: XCTestCase {
                 developerInstructions: nil,
                 reasoningSummary: nil,
                 verbosity: nil,
+                compactPrompt: nil,
                 forkMode: .none,
                 childAgentPath: workerPath
             )
@@ -13085,6 +13086,7 @@ final class CodexAppServerTests: XCTestCase {
             developerInstructions: nil,
             reasoningSummary: nil,
             verbosity: nil,
+            compactPrompt: nil,
             forkMode: .fullHistory,
             childAgentPath: tierWorkerPath
         ))
@@ -13342,7 +13344,8 @@ final class CodexAppServerTests: XCTestCase {
             serviceTier: nil,
             developerInstructions: nil,
             reasoningSummary: nil,
-            verbosity: nil
+            verbosity: nil,
+            compactPrompt: nil
         ))
 
         let temp = try TemporaryDirectory()
@@ -13355,6 +13358,7 @@ final class CodexAppServerTests: XCTestCase {
         model_reasoning_effort = "high"
         model_reasoning_summary = "detailed"
         model_verbosity = "high"
+        compact_prompt = "Role compact instructions"
         service_tier = "priority"
         """.write(to: roleFile, atomically: true, encoding: .utf8)
         let roleConfigOverrides = try LiveSpawnAgentOverrideResolver.roleConfigOverrides(
@@ -13387,7 +13391,8 @@ final class CodexAppServerTests: XCTestCase {
             serviceTier: "priority",
             developerInstructions: "Review carefully",
             reasoningSummary: .detailed,
-            verbosity: .high
+            verbosity: .high,
+            compactPrompt: "Role compact instructions"
         ))
 
         let badRoleFile = temp.url.appendingPathComponent("bad-reviewer.toml", isDirectory: false)
