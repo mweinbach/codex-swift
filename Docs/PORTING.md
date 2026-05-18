@@ -1031,6 +1031,11 @@ Recent upstream audit checkpoint:
   labels, inline default reasoning effort marker, service-tier id list, hidden
   model filtering, and top-five cap. Non-interactive tool construction now
   forwards the resolved configured or bundled model presets into that spec path.
+- 2026-05-18: rechecked Rust `multi_agents_v2::spawn` full-history fork
+  handling. Swift live `spawn_agent` now has parity coverage that full-history
+  forks still reject `agent_type`, `model`, and `reasoning_effort` overrides
+  while accepting an explicit `service_tier` override through the child spawn
+  request.
 - 2026-05-17: rechecked Rust commit `610b86fefb` (`Pass Codex product SKU to
   ChatGPT backend`). Swift direct ChatGPT backend GET requests now send Rust's
   `OAI-Product-Sku: codex` header alongside bearer auth, ChatGPT account id,

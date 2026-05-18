@@ -12492,7 +12492,7 @@ final class CodexAppServerTests: XCTestCase {
                 await capture.recordSpawnRequest(request)
                 return LiveSpawnAgentResult(
                     threadID: workerThreadID,
-                    agentPath: workerPath,
+                    agentPath: request.childAgentPath,
                     nickname: "Bernoulli",
                     role: "explorer",
                     model: "gpt-5.4",
@@ -12602,6 +12602,38 @@ final class CodexAppServerTests: XCTestCase {
             return XCTFail("expected full-history override rejection to emit spawn begin only")
         }
         XCTAssertEqual(fullForkBegin.model, "gpt-5.4")
+
+        let fullForkServiceTier = await executor.execute(.functionCall(
+            name: "spawn_agent",
+            arguments: #"{"message":"x","task_name":"tier_worker","fork_turns":"all","service_tier":"priority"}"#,
+            callID: "call-full-fork-service-tier"
+        ))
+        let fullForkServiceTierPayload = try Self.functionOutputPayload(
+            fullForkServiceTier,
+            callID: "call-full-fork-service-tier"
+        )
+        XCTAssertEqual(fullForkServiceTierPayload.success, true)
+        let tierWorkerPath = try AgentPath.root.join("tier_worker")
+        let fullForkServiceTierRequests = await capture.recordedSpawnRequests()
+        XCTAssertEqual(fullForkServiceTierRequests.last, LiveSpawnAgentRequest(
+            callID: "call-full-fork-service-tier",
+            message: "x",
+            taskName: "tier_worker",
+            agentType: nil,
+            model: nil,
+            reasoningEffort: nil,
+            serviceTier: "priority",
+            developerInstructions: nil,
+            forkMode: .fullHistory,
+            childAgentPath: tierWorkerPath
+        ))
+        let fullForkServiceTierEvents = try XCTUnwrap(fullForkServiceTier?.runtimeEvents)
+        XCTAssertEqual(fullForkServiceTierEvents.count, 2)
+        guard case let .collabAgentSpawnBegin(fullForkTierBegin) = fullForkServiceTierEvents[0] else {
+            return XCTFail("expected full-history service-tier spawn begin event")
+        }
+        XCTAssertEqual(fullForkTierBegin.model, "")
+        XCTAssertEqual(fullForkTierBegin.reasoningEffort, .medium)
 
         let emptyAgentType = await executor.execute(.functionCall(
             name: "spawn_agent",
