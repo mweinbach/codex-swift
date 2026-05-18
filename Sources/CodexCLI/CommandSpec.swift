@@ -21,7 +21,7 @@ public struct CommandSpec: Equatable, Sendable {
 public enum CodexCommandRegistry {
     public static let commands: [CommandSpec] = [
         CommandSpec(name: "exec", aliases: ["e"], summary: "Run Codex non-interactively."),
-        CommandSpec(name: "computer-use", aliases: ["cu"], summary: "Run Codex in computer-use mode (CLI-only or GUI-enabled)."),
+        CommandSpec(name: "computer-use", aliases: ["cu"], summary: "Run Codex in computer-use mode (CLI-only or GUI-enabled).", isHidden: true),
         CommandSpec(name: "review", summary: "Run a code review non-interactively."),
         CommandSpec(name: "login", summary: "Manage login."),
         CommandSpec(name: "logout", summary: "Remove stored authentication credentials."),
@@ -29,7 +29,7 @@ public enum CodexCommandRegistry {
         CommandSpec(name: "plugin", summary: "Manage Codex plugins."),
         CommandSpec(name: "mcp-server", summary: "Start Codex as an MCP server (stdio)."),
         CommandSpec(name: "app-server", summary: "[experimental] Run the app server or related tooling."),
-        CommandSpec(name: "remote-control", summary: "[experimental] Manage a headless app-server with remote control enabled."),
+        CommandSpec(name: "remote-control", summary: "[experimental] Manage the app-server daemon with remote control enabled."),
         CommandSpec(name: "app", summary: "Launch the Codex desktop app (opens the app installer if missing)."),
         CommandSpec(name: "completion", summary: "Generate shell completion scripts."),
         CommandSpec(name: "update", summary: "Update Codex to the latest version."),

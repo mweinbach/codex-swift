@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: closed the expected-failing top-level CLI help runtime oracle.
+  Swift `codex --help` now renders Rust's Clap-shaped root help output,
+  including command ordering, aliases, wrapped descriptions, prompt arguments,
+  and root option text, while keeping Swift-only/internal commands hidden from
+  visible help and completions.
 - 2026-05-18: added the first opt-in Rust runtime oracle parity harness for
   executable behavior. `scripts/check-runtime-oracle-parity.sh` now resolves a
   Rust `codex` binary plus the Swift `codex` product and runs

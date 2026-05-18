@@ -12,9 +12,7 @@ final class RuntimeOracleParityTests: XCTestCase {
         XCTAssertEqual(rust.exitCode, 0, rust.stderr)
         XCTAssertEqual(swift.exitCode, 0, swift.stderr)
 
-        XCTExpectFailure("Swift top-level help still uses the hand-rendered Swift command surface; this oracle keeps the Rust drift visible until help is ported to the Rust shape.") {
-            XCTAssertEqual(normalizedHelp(swift.stdout), normalizedHelp(rust.stdout))
-        }
+        XCTAssertEqual(normalizedHelp(swift.stdout), normalizedHelp(rust.stdout))
     }
 
     func testAppServerInitializeMatchesRustOracle() throws {
@@ -279,6 +277,16 @@ private func runProcess(
 private func normalizedHelp(_ text: String) -> String {
     text
         .replacingOccurrences(of: "\r\n", with: "\n")
+        .replacingOccurrences(of: "\u{2011}", with: "-")
+        .split(separator: "\n", omittingEmptySubsequences: false)
+        .map { line in
+            String(line).replacingOccurrences(
+                of: #"[ \t]+$"#,
+                with: "",
+                options: .regularExpression
+            )
+        }
+        .joined(separator: "\n")
         .trimmingCharacters(in: .whitespacesAndNewlines)
 }
 

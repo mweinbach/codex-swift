@@ -43,10 +43,12 @@ final class CodexCLITests: XCTestCase {
 
     func testHelpShowsVisibleCommandsButNotHiddenCommands() {
         let help = CodexCLI().renderHelp()
-        XCTAssertTrue(help.contains("exec [alias: e]"))
+        XCTAssertTrue(help.contains("exec            Run Codex non-interactively [aliases: e]"))
         XCTAssertTrue(help.contains("app-server"))
         XCTAssertTrue(help.contains("exec-server"))
+        XCTAssertTrue(help.contains("help            Print this message or the help of the given subcommand(s)"))
         XCTAssertFalse(help.contains("--full-auto"))
+        XCTAssertFalse(help.contains("computer-use"))
         XCTAssertFalse(help.contains("execpolicy"))
         XCTAssertFalse(help.contains("responses-api-proxy"))
     }
@@ -70,7 +72,8 @@ final class CodexCLITests: XCTestCase {
         XCTAssertEqual(stdout.count, 1)
         XCTAssertTrue(stdout[0].contains("_codex()"))
         XCTAssertTrue(stdout[0].contains("complete -F _codex codex"))
-        XCTAssertTrue(stdout[0].contains("exec e computer-use cu review"))
+        XCTAssertTrue(stdout[0].contains("exec e review"))
+        XCTAssertFalse(stdout[0].contains("computer-use"))
         XCTAssertTrue(stdout[0].contains("update doctor sandbox"))
         XCTAssertFalse(stdout[0].contains("--full-auto"))
         XCTAssertFalse(stdout[0].contains("execpolicy"))
