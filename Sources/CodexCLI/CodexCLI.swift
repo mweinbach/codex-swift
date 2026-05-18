@@ -942,12 +942,16 @@ public struct CodexCLI: Sendable {
             return renderDoctorHelp()
         case "sandbox":
             return renderSandboxHelp()
+        case "debug":
+            return renderDebugHelp()
         case "apply":
             return renderApplyHelp()
         case "resume":
             return renderResumeHelp()
         case "fork":
             return renderForkHelp()
+        case "cloud":
+            return renderCloudHelp()
         case "exec-server":
             return renderExecServerHelp()
         case "features":
@@ -1817,6 +1821,38 @@ public struct CodexCLI: Sendable {
         """
     }
 
+    private func renderDebugHelp() -> String {
+        """
+        Debugging tools
+
+        Usage: codex debug [OPTIONS] <COMMAND>
+
+        Commands:
+          models        Render the raw model catalog as JSON
+          app-server    Tooling: helps debug the app server
+          prompt-input  Render the model-visible prompt input list as JSON
+          help          Print this message or the help of the given subcommand(s)
+
+        Options:
+          -c, --config <key=value>
+                  Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                  Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                  as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                  Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                  shell_environment_policy.inherit=all`
+
+              --enable <FEATURE>
+                  Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+              --disable <FEATURE>
+                  Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+          -h, --help
+                  Print help (see a summary with '-h')
+        """
+    }
+
     private func renderResumeHelp() -> String {
         """
         Resume a previous interactive session (picker by default; use --last to continue the most recent)
@@ -2047,6 +2083,43 @@ public struct CodexCLI: Sendable {
                   Disable alternate screen mode
 
                   Runs the TUI in inline mode, preserving terminal scrollback history.
+
+          -h, --help
+                  Print help (see a summary with '-h')
+
+          -V, --version
+                  Print version
+        """
+    }
+
+    private func renderCloudHelp() -> String {
+        """
+        [EXPERIMENTAL] Browse tasks from Codex Cloud and apply changes locally
+
+        Usage: codex cloud [OPTIONS] [COMMAND]
+
+        Commands:
+          exec    Submit a new Codex Cloud task without launching the TUI
+          status  Show the status of a Codex Cloud task
+          list    List Codex Cloud tasks
+          apply   Apply the diff for a Codex Cloud task locally
+          diff    Show the unified diff for a Codex Cloud task
+          help    Print this message or the help of the given subcommand(s)
+
+        Options:
+          -c, --config <key=value>
+                  Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                  Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                  as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                  Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                  shell_environment_policy.inherit=all`
+
+              --enable <FEATURE>
+                  Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+              --disable <FEATURE>
+                  Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
 
           -h, --help
                   Print help (see a summary with '-h')

@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: extended CLI help runtime-oracle parity to the remaining visible
+  orchestration command groups. Swift now renders Rust-shaped
+  `codex debug --help` and `codex cloud --help` output instead of falling back
+  to root help, preserving debug tooling subcommands and Codex Cloud task
+  management subcommands plus command-local option/version flags.
 - 2026-05-18: extended CLI help runtime-oracle parity to the interactive
   session picker commands. Swift now renders Rust-shaped `codex resume --help`
   and `codex fork --help` output instead of falling back to root help,

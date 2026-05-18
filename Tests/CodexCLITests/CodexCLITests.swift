@@ -303,6 +303,18 @@ final class CodexCLITests: XCTestCase {
         XCTAssertTrue(sandboxHelp.contains("  windows  Run a command under Windows restricted token (Windows only)"))
 
         stdout.removeAll()
+        let debugExitCode = await CodexCLI().runAsync(
+            arguments: ["debug", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(debugExitCode, 0)
+        let debugHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(debugHelp.hasPrefix("Debugging tools\n\nUsage: codex debug [OPTIONS] <COMMAND>"))
+        XCTAssertTrue(debugHelp.contains("  prompt-input  Render the model-visible prompt input list as JSON"))
+
+        stdout.removeAll()
         let applyExitCode = await CodexCLI().runAsync(
             arguments: ["apply", "--help"],
             stdout: { stdout.append($0) },
@@ -412,6 +424,18 @@ final class CodexCLITests: XCTestCase {
         XCTAssertTrue(forkHelp.hasPrefix("Fork a previous interactive session (picker by default; use --last to fork the most recent)\n\nUsage: codex fork [OPTIONS] [SESSION_ID] [PROMPT]"))
         XCTAssertTrue(forkHelp.contains("      --last\n          Fork the most recent session without showing the picker"))
         XCTAssertTrue(forkHelp.contains("  -V, --version"))
+
+        stdout.removeAll()
+        let cloudExitCode = await CodexCLI().runAsync(
+            arguments: ["cloud", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(cloudExitCode, 0)
+        let cloudHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(cloudHelp.hasPrefix("[EXPERIMENTAL] Browse tasks from Codex Cloud and apply changes locally\n\nUsage: codex cloud [OPTIONS] [COMMAND]"))
+        XCTAssertTrue(cloudHelp.contains("  diff    Show the unified diff for a Codex Cloud task"))
     }
 
     func testCommandVersionTargetsSubcommandLikeRust() async {
