@@ -862,6 +862,10 @@ Recent upstream audit checkpoint:
   Rust `AgentControl`, so a non-root thread-spawn agent can close its own thread
   instead of being rejected only because the target id matches the caller's
   current thread id.
+- 2026-05-18: Swift live app-server MultiAgentV2 `close_agent` now also rejects
+  child-session attempts to close the root via either `/root` or the root thread
+  id with Rust's `root is not a spawned agent` response, preserving the live
+  thread-spawn edge and avoiding close events for the protected root.
 - 2026-05-18: Swift live app-server runtime state now tracks Rust-shaped
   `AgentStatus` transitions from turn lifecycle events instead of flattening
   live multi-agent tool status to `running`/`completed(null)`. MultiAgentV2

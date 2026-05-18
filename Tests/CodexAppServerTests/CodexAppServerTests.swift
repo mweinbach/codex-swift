@@ -13428,6 +13428,84 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(end.status, .running)
     }
 
+    func testLiveCloseAgentRejectsRootTargetFromChildLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let stateStore = try SQLiteAgentGraphStore(databaseURL: temp.url.appendingPathComponent("state.sqlite3"))
+        let rootThreadID = ThreadId()
+        let workerThreadID = ThreadId()
+        let workerPath = try AgentPath.root.join("worker")
+        try await stateStore.upsertThread(ThreadMetadata(
+            id: workerThreadID,
+            rolloutPath: temp.url.appendingPathComponent("worker.jsonl").path,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_001),
+            source: "vscode",
+            agentNickname: "Bernoulli",
+            agentRole: "worker",
+            agentPath: workerPath.description,
+            modelProvider: "openai",
+            cwd: temp.url.path,
+            cliVersion: "0.0.0-test",
+            title: "worker",
+            sandboxPolicy: "danger-full-access",
+            approvalMode: "never",
+            tokensUsed: 0
+        ))
+        try await stateStore.upsertThreadSpawnEdge(
+            parentThreadID: rootThreadID,
+            childThreadID: workerThreadID,
+            status: .open
+        )
+        let capture = LiveMultiAgentToolCapture(runningThreadIDs: [rootThreadID.description, workerThreadID.description])
+        let executor = AppServerLiveMultiAgentToolExecutor(
+            currentThreadID: workerThreadID,
+            currentSessionSource: .subagent(.threadSpawn(
+                parentThreadID: rootThreadID,
+                depth: 1,
+                agentPath: workerPath,
+                agentNickname: "Bernoulli",
+                agentRole: "worker"
+            )),
+            stateStore: stateStore,
+            waitTimeouts: MultiAgentV2WaitTimeouts(config: MultiAgentV2Config()),
+            isTurnRunning: { threadID in
+                await capture.isRunning(threadID: threadID)
+            },
+            agentStatus: { threadID in
+                await capture.status(threadID: threadID)
+            },
+            agentLastTaskMessage: { _ in nil },
+            hasPendingMailboxItems: { _ in false },
+            waitForMailboxChange: { _, _ in false },
+            queueMailboxCommunications: { _, _ in },
+            recordAgentLastTaskMessage: { _, _ in },
+            submitPendingWorkTurnIfIdle: { _ in false },
+            closeAgentThreads: { threadIDs in
+                await capture.close(threadIDs: threadIDs)
+            }
+        )
+
+        for (target, callID) in [
+            ("/root", "call-close-root-path"),
+            (rootThreadID.description, "call-close-root-id"),
+        ] {
+            let closeRoot = await executor.execute(.functionCall(
+                name: "close_agent",
+                arguments: #"{"target":"\#(target)"}"#,
+                callID: callID
+            ))
+            let payload = try Self.functionOutputPayload(closeRoot, callID: callID)
+            XCTAssertEqual(payload.content, "root is not a spawned agent")
+            XCTAssertEqual(payload.success, false)
+            XCTAssertEqual(closeRoot?.runtimeEvents ?? [], [])
+        }
+
+        let closedThreadIDs = await capture.closedThreadIDs()
+        XCTAssertEqual(closedThreadIDs, [])
+        let openChildren = try await stateStore.listThreadSpawnChildren(parentThreadID: rootThreadID, statusFilter: .open)
+        XCTAssertEqual(openChildren, [workerThreadID])
+    }
+
     func testLiveRuntimeInterAgentCommunicationOpQueuesAndTriggersPendingWorkLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let threadID = ConversationId().description

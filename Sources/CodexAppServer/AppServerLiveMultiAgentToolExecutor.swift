@@ -404,8 +404,7 @@ struct AppServerLiveMultiAgentToolExecutor {
 
         do {
             let target = try await resolveAgentTarget(args.target)
-            let targetsCurrentRoot = target.threadID == currentThreadID && currentSessionSource.agentPath == nil
-            if target.agentPath?.isRoot == true || targetsCurrentRoot {
+            if try await targetIsCurrentRootAgent(target) {
                 return Self.output(callID: callID, content: "root is not a spawned agent", success: false)
             }
             let previousStatus = await status(for: target.threadID)
@@ -564,11 +563,24 @@ struct AppServerLiveMultiAgentToolExecutor {
     }
 
     private func rootThreadID() async throws -> ThreadId {
-        guard let stateStore, currentSessionSource.agentPath != nil else {
+        guard currentSessionSource.agentPath != nil else {
             return currentThreadID
         }
-        return try await stateStore.findThreadSpawnRootAncestor(childThreadID: currentThreadID)
-            ?? currentThreadID
+        if let stateStore,
+           let rootThreadID = try await stateStore.findThreadSpawnRootAncestor(childThreadID: currentThreadID) {
+            return rootThreadID
+        }
+        guard case let .subagent(.threadSpawn(parentThreadID, _, _, _, _)) = currentSessionSource else {
+            return currentThreadID
+        }
+        return parentThreadID
+    }
+
+    private func targetIsCurrentRootAgent(_ target: ResolvedLiveAgentTarget) async throws -> Bool {
+        if target.agentPath?.isRoot == true {
+            return true
+        }
+        return target.threadID == (try await rootThreadID())
     }
 
     private func status(for threadID: ThreadId) async -> AgentStatus {
