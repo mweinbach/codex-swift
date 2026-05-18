@@ -1013,6 +1013,11 @@ Recent upstream audit checkpoint:
   whitespace-only prompts with Rust's `Empty message can't be sent to an agent`
   tool output before emitting spawn begin/end events or attempting child thread
   creation.
+- 2026-05-18: Swift MultiAgentV2 `spawn_agent` tool specs now mirror Rust's
+  agent-role description projection: configured roles are listed before
+  built-ins, user-defined names shadow built-ins, missing descriptions render as
+  `no description`, and role config files that pin `model` and/or
+  `model_reasoning_effort` add Rust's model-visible locked-setting note.
 - 2026-05-18: Swift live app-server MultiAgentV2 tool argument decoding now
   rejects unknown fields like Rust's `deny_unknown_fields` structs for
   `spawn_agent`, `send_message`, `followup_task`, `wait_agent`, `close_agent`,

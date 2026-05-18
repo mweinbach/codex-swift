@@ -292,6 +292,7 @@ public enum NonInteractiveExec {
             multiAgentV2NonCodeModeOnly: multiAgentV2Enabled
                 && config.multiAgentV2.nonCodeModeOnly,
             availableModels: availableModels,
+            agentRoles: config.agentRoles,
             spawnAgentUsageHint: config.multiAgentV2.usageHintEnabled,
             spawnAgentUsageHintText: config.multiAgentV2.usageHintText,
             hideSpawnAgentMetadata: config.multiAgentV2.hideSpawnAgentMetadata,

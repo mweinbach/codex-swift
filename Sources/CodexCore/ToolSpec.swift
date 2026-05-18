@@ -812,6 +812,7 @@ public struct ToolsConfig: Equatable, Sendable {
     public let multiAgentV2Tools: Bool
     public let multiAgentV2NonCodeModeOnly: Bool
     public let availableModels: [ModelPreset]
+    public let agentRoles: [String: AgentRoleConfig]
     public let spawnAgentUsageHint: Bool
     public let spawnAgentUsageHintText: String?
     public let hideSpawnAgentMetadata: Bool
@@ -845,6 +846,7 @@ public struct ToolsConfig: Equatable, Sendable {
         multiAgentV2Tools: Bool = false,
         multiAgentV2NonCodeModeOnly: Bool = false,
         availableModels: [ModelPreset] = [],
+        agentRoles: [String: AgentRoleConfig] = [:],
         spawnAgentUsageHint: Bool = true,
         spawnAgentUsageHintText: String? = nil,
         hideSpawnAgentMetadata: Bool = false,
@@ -879,6 +881,7 @@ public struct ToolsConfig: Equatable, Sendable {
         self.multiAgentV2Tools = multiAgentV2Tools
         self.multiAgentV2NonCodeModeOnly = multiAgentV2NonCodeModeOnly
         self.availableModels = availableModels
+        self.agentRoles = agentRoles
         self.spawnAgentUsageHint = spawnAgentUsageHint
         self.spawnAgentUsageHintText = spawnAgentUsageHintText
         self.hideSpawnAgentMetadata = hideSpawnAgentMetadata
@@ -914,6 +917,7 @@ public struct ToolsConfig: Equatable, Sendable {
             multiAgentV2Tools: multiAgentV2Tools,
             multiAgentV2NonCodeModeOnly: multiAgentV2NonCodeModeOnly,
             availableModels: availableModels,
+            agentRoles: agentRoles,
             spawnAgentUsageHint: spawnAgentUsageHint,
             spawnAgentUsageHintText: spawnAgentUsageHintText,
             hideSpawnAgentMetadata: hideSpawnAgentMetadata,
@@ -1070,6 +1074,28 @@ type CallToolResult<TStructured = { [key: string]: unknown }> = {
     private static let spawnAgentModelOverrideDescription = "Optional model override for the new agent. Leave unset to inherit the same model as the parent, which is the preferred default. Only set this when the user explicitly asks for a different model or the task clearly requires one."
     private static let spawnAgentServiceTierOverrideDescription = "Optional service tier override for the new agent. Leave unset unless the user explicitly asks for one."
     private static let defaultAgentTypeDescription = "Optional type name for the new agent. If omitted, `default` is used."
+    private static let builtInAgentRoles: [String: AgentRoleConfig] = [
+        "default": AgentRoleConfig(description: "Default agent."),
+        "explorer": AgentRoleConfig(description: """
+        Use `explorer` for specific codebase questions.
+        Explorers are fast and authoritative.
+        They must be used to ask specific, well-scoped questions on the codebase.
+        Rules:
+        - In order to avoid redundant work, you should avoid exploring the same problem that explorers have already covered. Typically, you should trust the explorer results without additional verification. You are still allowed to inspect the code yourself to gain the needed context!
+        - You are encouraged to spawn up multiple explorers in parallel when you have multiple distinct questions to ask about the codebase that can be answered independently. This allows you to get more information faster without waiting for one question to finish before asking the next. While waiting for the explorer results, you can continue working on other local tasks that do not depend on those results. This parallelism is a key advantage of delegation, so use it whenever you have multiple questions to ask.
+        - Reuse existing explorers for related questions.
+        """),
+        "worker": AgentRoleConfig(description: """
+        Use for execution and production work.
+        Typical tasks:
+        - Implement part of a feature
+        - Fix tests or bugs
+        - Split large refactors into independent chunks
+        Rules:
+        - Explicitly assign **ownership** of the task (files / responsibility). When the subtask involves code changes, you should clearly specify which files or modules the worker is responsible for. This helps avoid merge conflicts and ensures accountability. For example, you can say "Worker 1 is responsible for updating the authentication module, while Worker 2 will handle the database layer." By defining clear ownership, you can delegate more effectively and reduce coordination overhead.
+        - Always tell workers they are **not alone in the codebase**, and they should not revert the edits made by others, and they should adjust their implementation to accommodate the changes made by others. This is important because there may be multiple workers making changes in parallel, and they need to be aware of each other's work to avoid conflicts and ensure a cohesive final product.
+        """)
+    ]
     private static let maxModelOverridesInSpawnAgentDescription = 5
 
     public static func buildSpecs(
@@ -1237,6 +1263,7 @@ type CallToolResult<TStructured = { [key: string]: unknown }> = {
                 usageHintText: config.spawnAgentUsageHintText,
                 hideAgentMetadata: config.hideSpawnAgentMetadata,
                 availableModels: config.availableModels,
+                agentRoles: config.agentRoles,
                 maxConcurrentThreadsPerSession: config.maxConcurrentThreadsPerSession,
                 waitAgentMinTimeoutMS: config.waitAgentMinTimeoutMS,
                 waitAgentMaxTimeoutMS: config.waitAgentMaxTimeoutMS,
@@ -2405,6 +2432,7 @@ type CallToolResult<TStructured = { [key: string]: unknown }> = {
         usageHintText: String? = nil,
         hideAgentMetadata: Bool = false,
         availableModels: [ModelPreset] = [],
+        agentRoles: [String: AgentRoleConfig] = [:],
         maxConcurrentThreadsPerSession: Int? = nil,
         waitAgentMinTimeoutMS: Int64? = nil,
         waitAgentMaxTimeoutMS: Int64? = nil,
@@ -2416,6 +2444,7 @@ type CallToolResult<TStructured = { [key: string]: unknown }> = {
                 usageHintText: usageHintText,
                 hideAgentMetadata: hideAgentMetadata,
                 availableModels: availableModels,
+                agentRoles: agentRoles,
                 maxConcurrentThreadsPerSession: maxConcurrentThreadsPerSession
             ),
             createSendMessageTool(),
@@ -2435,11 +2464,12 @@ type CallToolResult<TStructured = { [key: string]: unknown }> = {
         usageHintText: String? = nil,
         hideAgentMetadata: Bool = false,
         availableModels: [ModelPreset] = [],
+        agentRoles: [String: AgentRoleConfig] = [:],
         maxConcurrentThreadsPerSession: Int? = nil
     ) -> ToolSpec {
         var properties: [String: JSONSchema] = [
             "message": .string(description: "Initial plain-text task for the new agent."),
-            "agent_type": .string(description: defaultAgentTypeDescription),
+            "agent_type": .string(description: spawnAgentTypeDescription(agentRoles: agentRoles)),
             "fork_turns": .string(description: "Optional number of turns to fork. Defaults to `all`. Use `none`, `all`, or a positive integer string such as `3` to fork only the most recent turns."),
             "model": .string(description: spawnAgentModelOverrideDescription),
             "reasoning_effort": .string(description: "Optional reasoning effort override for the new agent. Replaces the inherited reasoning effort."),
@@ -2460,6 +2490,7 @@ type CallToolResult<TStructured = { [key: string]: unknown }> = {
                 usageHintText: usageHintText,
                 hideAgentMetadata: hideAgentMetadata,
                 availableModels: availableModels,
+                agentRoles: agentRoles,
                 maxConcurrentThreadsPerSession: maxConcurrentThreadsPerSession
             ),
             properties: properties,
@@ -2632,6 +2663,7 @@ type CallToolResult<TStructured = { [key: string]: unknown }> = {
         usageHintText: String?,
         hideAgentMetadata: Bool,
         availableModels: [ModelPreset],
+        agentRoles: [String: AgentRoleConfig],
         maxConcurrentThreadsPerSession: Int?
     ) -> String {
         let modelGuidance = hideAgentMetadata ? "" : "\(spawnAgentModelsDescription(availableModels))\n"
@@ -2651,6 +2683,58 @@ type CallToolResult<TStructured = { [key: string]: unknown }> = {
             description += "\n\(usageHintText)"
         }
         return description
+    }
+
+    private static func spawnAgentTypeDescription(agentRoles: [String: AgentRoleConfig]) -> String {
+        var seen = Set<String>()
+        var formattedRoles: [String] = []
+        for name in agentRoles.keys.sorted() where seen.insert(name).inserted {
+            formattedRoles.append(formatAgentRole(name: name, config: agentRoles[name]!))
+        }
+        for name in builtInAgentRoles.keys.sorted() where seen.insert(name).inserted {
+            formattedRoles.append(formatAgentRole(name: name, config: builtInAgentRoles[name]!))
+        }
+        guard !formattedRoles.isEmpty else {
+            return defaultAgentTypeDescription
+        }
+        return "\(defaultAgentTypeDescription)\nAvailable roles:\n\(formattedRoles.joined(separator: "\n"))"
+    }
+
+    private static func formatAgentRole(name: String, config: AgentRoleConfig) -> String {
+        guard let description = config.description else {
+            return "\(name): no description"
+        }
+        return "\(name): {\n\(description)\(lockedAgentRoleSettingsNote(config: config))\n}"
+    }
+
+    private static func lockedAgentRoleSettingsNote(config: AgentRoleConfig) -> String {
+        guard let configFile = config.configFile,
+              let configValue = try? CodexConfigLayerLoader.readConfig(
+                from: URL(fileURLWithPath: configFile, isDirectory: false)
+              ),
+              case let .table(table) = configValue
+        else {
+            return ""
+        }
+        let model = stringConfigValue(table["model"])
+        let reasoningEffort = stringConfigValue(table["model_reasoning_effort"])
+        switch (model, reasoningEffort) {
+        case let (model?, reasoningEffort?):
+            return "\n- This role's model is set to `\(model)` and its reasoning effort is set to `\(reasoningEffort)`. These settings cannot be changed."
+        case let (model?, nil):
+            return "\n- This role's model is set to `\(model)` and cannot be changed."
+        case let (nil, reasoningEffort?):
+            return "\n- This role's reasoning effort is set to `\(reasoningEffort)` and cannot be changed."
+        case (nil, nil):
+            return ""
+        }
+    }
+
+    private static func stringConfigValue(_ value: ConfigValue?) -> String? {
+        guard case let .string(string)? = value else {
+            return nil
+        }
+        return string
     }
 
     private static func spawnAgentModelsDescription(_ models: [ModelPreset]) -> String {

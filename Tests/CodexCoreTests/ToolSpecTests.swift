@@ -461,22 +461,33 @@ final class ToolSpecTests: XCTestCase {
         XCTAssertTrue(spawn.description.contains("task_name \"task_3\""))
         XCTAssertTrue(spawn.description.contains("max_concurrent_threads_per_session = 5"))
         XCTAssertTrue(spawn.description.contains("Custom delegation guidance."))
-        XCTAssertEqual(
-            spawn.parameters,
-            .object(
-                properties: [
-                    "message": .string(description: "Initial plain-text task for the new agent."),
-                    "agent_type": .string(description: "Optional type name for the new agent. If omitted, `default` is used."),
-                    "fork_turns": .string(description: "Optional number of turns to fork. Defaults to `all`. Use `none`, `all`, or a positive integer string such as `3` to fork only the most recent turns."),
-                    "model": .string(description: "Optional model override for the new agent. Leave unset to inherit the same model as the parent, which is the preferred default. Only set this when the user explicitly asks for a different model or the task clearly requires one."),
-                    "reasoning_effort": .string(description: "Optional reasoning effort override for the new agent. Replaces the inherited reasoning effort."),
-                    "service_tier": .string(description: "Optional service tier override for the new agent. Leave unset unless the user explicitly asks for one."),
-                    "task_name": .string(description: "Task name for the new agent. Use lowercase letters, digits, and underscores.")
-                ],
-                required: ["task_name", "message"],
-                additionalProperties: .boolean(false)
-            )
-        )
+        guard case let .object(spawnProperties, spawnRequired, spawnAdditionalProperties) = spawn.parameters else {
+            return XCTFail("expected spawn_agent parameters to be an object")
+        }
+        XCTAssertEqual(Set(spawnProperties.keys), [
+            "message",
+            "agent_type",
+            "fork_turns",
+            "model",
+            "reasoning_effort",
+            "service_tier",
+            "task_name"
+        ])
+        XCTAssertEqual(spawnProperties["message"], .string(description: "Initial plain-text task for the new agent."))
+        XCTAssertEqual(spawnProperties["fork_turns"], .string(description: "Optional number of turns to fork. Defaults to `all`. Use `none`, `all`, or a positive integer string such as `3` to fork only the most recent turns."))
+        XCTAssertEqual(spawnProperties["model"], .string(description: "Optional model override for the new agent. Leave unset to inherit the same model as the parent, which is the preferred default. Only set this when the user explicitly asks for a different model or the task clearly requires one."))
+        XCTAssertEqual(spawnProperties["reasoning_effort"], .string(description: "Optional reasoning effort override for the new agent. Replaces the inherited reasoning effort."))
+        XCTAssertEqual(spawnProperties["service_tier"], .string(description: "Optional service tier override for the new agent. Leave unset unless the user explicitly asks for one."))
+        XCTAssertEqual(spawnProperties["task_name"], .string(description: "Task name for the new agent. Use lowercase letters, digits, and underscores."))
+        guard case let .string(agentTypeDescription?) = spawnProperties["agent_type"] else {
+            return XCTFail("expected agent_type description")
+        }
+        XCTAssertTrue(agentTypeDescription.contains("Optional type name for the new agent. If omitted, `default` is used."))
+        XCTAssertTrue(agentTypeDescription.contains("default: {\nDefault agent.\n}"))
+        XCTAssertTrue(agentTypeDescription.contains("explorer: {"))
+        XCTAssertTrue(agentTypeDescription.contains("worker: {"))
+        XCTAssertEqual(spawnRequired, ["task_name", "message"])
+        XCTAssertEqual(spawnAdditionalProperties, .boolean(false))
         XCTAssertEqual(outputRequiredFields(spawn.outputSchema), ["task_name", "nickname"])
 
         let sendMessage = try functionTool(named: "send_message", in: specs)
@@ -576,6 +587,50 @@ final class ToolSpecTests: XCTestCase {
         XCTAssertEqual(
             waitProperties["timeout_ms"],
             .number(description: "Optional timeout in milliseconds. Defaults to 10000, min 5000, max 50000.")
+        )
+    }
+
+    func testBuildSpecsMultiAgentV2AgentTypeDescriptionListsRolesLikeRust() throws {
+        let temp = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: temp) }
+        let rolePath = temp.appendingPathComponent("researcher.toml", isDirectory: false)
+        try """
+        developer_instructions = "Research carefully"
+        model = "gpt-5"
+        model_reasoning_effort = "high"
+        """.write(to: rolePath, atomically: true, encoding: .utf8)
+
+        let specs = ToolSpecFactory.buildSpecs(config: ToolsConfig(
+            shellType: .disabled,
+            multiAgentV2Tools: true,
+            agentRoles: [
+                "explorer": AgentRoleConfig(description: "User explorer override."),
+                "researcher": AgentRoleConfig(
+                    description: "Research carefully.",
+                    configFile: rolePath.path
+                ),
+                "reviewer": AgentRoleConfig()
+            ]
+        ))
+
+        let spawn = try functionTool(named: "spawn_agent", in: specs)
+        guard case let .object(properties, _, _) = spawn.parameters,
+              case let .string(agentTypeDescription?) = properties["agent_type"]
+        else {
+            return XCTFail("expected agent_type description")
+        }
+        let researcher = "researcher: {\nResearch carefully.\n- This role's model is set to `gpt-5` and its reasoning effort is set to `high`. These settings cannot be changed.\n}"
+        XCTAssertTrue(agentTypeDescription.contains(researcher))
+        XCTAssertTrue(agentTypeDescription.contains("reviewer: no description"))
+        XCTAssertTrue(agentTypeDescription.contains("explorer: {\nUser explorer override.\n}"))
+        XCTAssertFalse(agentTypeDescription.contains("Explorers are fast and authoritative."))
+        XCTAssertLessThan(
+            try XCTUnwrap(agentTypeDescription.range(of: "explorer:")).lowerBound,
+            try XCTUnwrap(agentTypeDescription.range(of: "researcher:")).lowerBound
+        )
+        XCTAssertLessThan(
+            try XCTUnwrap(agentTypeDescription.range(of: "reviewer:")).lowerBound,
+            try XCTUnwrap(agentTypeDescription.range(of: "default:")).lowerBound
         )
     }
 
@@ -2521,6 +2576,13 @@ final class ToolSpecTests: XCTestCase {
             }
             return value
         }
+    }
+
+    private func makeTemporaryDirectory() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ToolSpecTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
     }
 
     private func toolName(_ value: JSONValue) -> String? {
