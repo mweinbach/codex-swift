@@ -869,6 +869,12 @@ Recent upstream audit checkpoint:
   `AgentControl::get_status` projection instead of deriving status only from
   whether a turn is currently running, so errored and completed-message receiver
   statuses survive in `collab_agent_interaction_end`.
+- 2026-05-18: Swift live app-server MultiAgentV2 `send_message` and
+  `followup_task` now also mirror Rust's raw missing thread-id target path:
+  after resolving a raw `ThreadId` with no agent metadata, Swift emits
+  `collab_agent_interaction_begin` before returning
+  `target agent is missing an agent_path`, and does not emit an interaction-end
+  event.
 - 2026-05-18: Swift live app-server runtime now mirrors Rust's terminal
   MultiAgentV2 child-turn notification for loaded thread-spawn subagents:
   completed child turns enqueue the standard `<subagent_notification>` envelope

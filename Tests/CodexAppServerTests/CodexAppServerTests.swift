@@ -12333,6 +12333,41 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(end.receiverAgentNickname, "Bernoulli")
         XCTAssertEqual(end.receiverAgentRole, "explorer")
         XCTAssertEqual(end.status, .errored("worker failed"))
+
+        let missingThreadID = ThreadId()
+        let missingTarget = await executor.execute(.functionCall(
+            name: "send_message",
+            arguments: #"{"target":"\#(missingThreadID.description)","message":"missing path"}"#,
+            callID: "call-missing-target"
+        ))
+        let missingTargetPayload = try Self.functionOutputPayload(missingTarget, callID: "call-missing-target")
+        XCTAssertEqual(missingTargetPayload.content, "target agent is missing an agent_path")
+        XCTAssertEqual(missingTargetPayload.success, false)
+        let missingTargetEvents = try XCTUnwrap(missingTarget?.runtimeEvents)
+        XCTAssertEqual(missingTargetEvents.count, 1)
+        guard case let .collabAgentInteractionBegin(missingBegin) = missingTargetEvents[0] else {
+            return XCTFail("expected missing target begin event")
+        }
+        XCTAssertEqual(missingBegin.senderThreadID, rootThreadID)
+        XCTAssertEqual(missingBegin.receiverThreadID, missingThreadID)
+        XCTAssertEqual(missingBegin.prompt, "missing path")
+
+        let missingFollowup = await executor.execute(.functionCall(
+            name: "followup_task",
+            arguments: #"{"target":"\#(missingThreadID.description)","message":"missing followup"}"#,
+            callID: "call-missing-followup"
+        ))
+        let missingFollowupPayload = try Self.functionOutputPayload(missingFollowup, callID: "call-missing-followup")
+        XCTAssertEqual(missingFollowupPayload.content, "target agent is missing an agent_path")
+        XCTAssertEqual(missingFollowupPayload.success, false)
+        let missingFollowupEvents = try XCTUnwrap(missingFollowup?.runtimeEvents)
+        XCTAssertEqual(missingFollowupEvents.count, 1)
+        guard case let .collabAgentInteractionBegin(missingFollowupBegin) = missingFollowupEvents[0] else {
+            return XCTFail("expected missing followup begin event")
+        }
+        XCTAssertEqual(missingFollowupBegin.senderThreadID, rootThreadID)
+        XCTAssertEqual(missingFollowupBegin.receiverThreadID, missingThreadID)
+        XCTAssertEqual(missingFollowupBegin.prompt, "missing followup")
     }
 
     func testLiveSpawnAgentRoutesRustV2ArgumentsAndEvents() async throws {

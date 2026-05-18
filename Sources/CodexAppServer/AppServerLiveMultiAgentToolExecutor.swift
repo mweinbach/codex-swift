@@ -270,10 +270,8 @@ struct AppServerLiveMultiAgentToolExecutor {
 
         do {
             let target = try await resolveAgentTarget(args.target)
-            guard let receiverAgentPath = target.agentPath else {
-                return Self.output(callID: callID, content: "target agent is missing an agent_path", success: false)
-            }
-            if triggerTurn, receiverAgentPath.isRoot {
+            let receiverAgentPath = target.agentPath
+            if triggerTurn, receiverAgentPath?.isRoot == true {
                 return Self.output(callID: callID, content: "Tasks can't be assigned to the root agent", success: false)
             }
 
@@ -287,6 +285,14 @@ struct AppServerLiveMultiAgentToolExecutor {
                     prompt: prompt
                 ))
             ]
+            guard let receiverAgentPath else {
+                return Self.output(
+                    callID: callID,
+                    content: "target agent is missing an agent_path",
+                    success: false,
+                    runtimeEvents: runtimeEvents
+                )
+            }
             let communication = InterAgentCommunication(
                 author: currentSessionSource.agentPath ?? .root,
                 recipient: receiverAgentPath,
