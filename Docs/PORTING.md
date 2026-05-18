@@ -811,6 +811,12 @@ Recent upstream audit checkpoint:
   Responses loop observes raw completed output items before draining pending
   input, preserving the Rust boundary even when streaming aggregation rewrites
   assistant message phases. Full `AgentControl` routing remains pending.
+- 2026-05-18: Swift live app-server turn preparation now applies Rust's
+  per-turn reasoning-effort override from `Op::UserInputWithTurnContext` and
+  `Op::UserTurn` before building the Responses request and rollout turn
+  context, so explicit `effort` values no longer fall back to the thread's
+  persisted `model_reasoning_effort`. Broader live ThreadManager runtime parity
+  remains pending.
 - 2026-05-18: Swift live app-server tool execution now routes Rust
   MultiAgentV2 `send_message` and `followup_task` calls into the live mailbox
   path. The new executor mirrors Rust's `agent_resolver` thread-id fast path and

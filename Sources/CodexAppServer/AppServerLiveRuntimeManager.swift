@@ -564,6 +564,14 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         if let requestedModel = turnInput.model {
             settings.model = requestedModel
         }
+        if let requestedEffort = turnInput.effort {
+            switch requestedEffort {
+            case .clear:
+                settings.modelReasoningEffort = nil
+            case let .set(effort):
+                settings.modelReasoningEffort = effort
+            }
+        }
         if let requestedSummary = turnInput.summary {
             settings.modelReasoningSummary = requestedSummary
         }
@@ -2588,6 +2596,7 @@ private struct LiveTurnInput {
     let sandboxPolicy: SandboxPolicy?
     let permissionProfile: PermissionProfile?
     let model: String?
+    let effort: ReasoningEffortOverride?
     let summary: ReasoningSummary?
     let serviceTier: String?
     let collaborationMode: CollaborationMode?
@@ -2604,6 +2613,7 @@ private struct LiveTurnInput {
             self.sandboxPolicy = nil
             self.permissionProfile = nil
             self.model = nil
+            self.effort = nil
             self.summary = nil
             self.serviceTier = nil
             self.collaborationMode = nil
@@ -2617,6 +2627,7 @@ private struct LiveTurnInput {
             self.sandboxPolicy = params.sandboxPolicy
             self.permissionProfile = params.permissionProfile
             self.model = params.model
+            self.effort = try Self.decodeReasoningEffortOverride(params.effort)
             self.summary = params.summary
             self.serviceTier = params.serviceTier?.stringValue
             self.collaborationMode = nil
@@ -2628,7 +2639,7 @@ private struct LiveTurnInput {
             sandboxPolicy: sandboxPolicy,
             permissionProfile: permissionProfile,
             model: model,
-            effort: _,
+            effort: effort,
             summary: summary,
             serviceTier: serviceTier,
             finalOutputJSONSchema: finalOutputJSONSchema,
@@ -2645,11 +2656,29 @@ private struct LiveTurnInput {
             self.sandboxPolicy = sandboxPolicy
             self.permissionProfile = permissionProfile
             self.model = model
+            self.effort = effort.map { .set($0) }
             self.summary = summary
             self.serviceTier = serviceTier?.stringValue
             self.collaborationMode = try Self.decodeCollaborationMode(collaborationMode)
         default:
             throw AppServerLiveRuntimeError("unsupported live runtime op: \(op)")
+        }
+    }
+
+    private static func decodeReasoningEffortOverride(_ value: JSONValue?) throws -> ReasoningEffortOverride? {
+        guard let value else {
+            return nil
+        }
+        switch value {
+        case .null:
+            return .clear
+        case let .string(rawValue):
+            guard let effort = ReasoningEffort(rawValue: rawValue) else {
+                throw AppServerLiveRuntimeError("invalid reasoning effort override: \(rawValue)")
+            }
+            return .set(effort)
+        default:
+            throw AppServerLiveRuntimeError("invalid reasoning effort override: \(value)")
         }
     }
 
