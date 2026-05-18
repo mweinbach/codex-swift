@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: extended CLI ordinary parse-failure parity for the `debug`
+  command family. Swift now emits Rust/Clap exit-2 diagnostics for unknown
+  debug subcommands, invalid `debug models`, `debug app-server send-message-v2`,
+  `debug prompt-input`, `debug trace-reduce`, and `debug clear-memories` forms,
+  including missing-value, duplicate-option, required-argument, and value-tip
+  messages.
 - 2026-05-18: extended CLI ordinary parse-failure parity for sandbox command
   forms that Rust/Clap rejects before platform runtime execution. Swift now
   emits Rust/Clap exit-2 diagnostics for unknown `codex sandbox` child names

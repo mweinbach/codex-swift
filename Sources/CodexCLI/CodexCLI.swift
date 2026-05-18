@@ -8544,7 +8544,7 @@ public struct CodexCLI: Sendable {
         case "clear-memories":
             return parseNoArgumentDebugAction(rest, subcommand: subcommand, action: .clearMemories)
         default:
-            return .failure("codex-swift: unsupported debug subcommand: \(subcommand)", 64)
+            return clapUnrecognizedSubcommand(subcommand, usage: "codex debug [OPTIONS] <COMMAND>")
         }
     }
 
@@ -8556,9 +8556,9 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'debug models': \(argument)", 64)
+                return clapUnexpectedArgument(argument, usage: "codex debug models [OPTIONS]")
             }
-            return .failure("codex-swift: unexpected argument for command 'debug models': \(argument)", 64)
+            return clapUnexpectedArgument(argument, usage: "codex debug models [OPTIONS]")
         }
         return .success(.models(bundled: bundled))
     }
@@ -8568,17 +8568,24 @@ public struct CodexCLI: Sendable {
             return .failure("codex-swift: missing required subcommand for command 'debug app-server': send-message-v2", 64)
         }
         guard subcommand == "send-message-v2" else {
-            return .failure("codex-swift: unsupported debug app-server subcommand: \(subcommand)", 64)
+            return clapUnrecognizedSubcommand(subcommand, usage: "codex debug app-server [OPTIONS] <COMMAND>")
         }
         let rest = Array(arguments.dropFirst())
         guard let message = rest.first else {
-            return .failure("codex-swift: missing required argument for command 'debug app-server send-message-v2': <USER_MESSAGE>", 64)
+            return clapMissingRequired(
+                ["<USER_MESSAGE>"],
+                usage: "codex debug app-server send-message-v2 <USER_MESSAGE>"
+            )
         }
         if message.hasPrefix("-") {
-            return .failure("codex-swift: unsupported option for command 'debug app-server send-message-v2': \(message)", 64)
+            return clapUnexpectedArgument(
+                message,
+                usage: "codex debug app-server send-message-v2 [OPTIONS] <USER_MESSAGE>",
+                asValueTip: true
+            )
         }
         guard rest.count == 1 else {
-            return .failure("codex-swift: unexpected argument for command 'debug app-server send-message-v2': \(rest[1])", 64)
+            return clapUnexpectedArgument(rest[1], usage: "codex debug app-server send-message-v2 [OPTIONS] <USER_MESSAGE>")
         }
         return .success(.appServerSendMessageV2(message: message))
     }
@@ -8592,7 +8599,7 @@ public struct CodexCLI: Sendable {
             let argument = arguments[index]
             if argument == "--image" || argument == "-i" {
                 guard index + 1 < arguments.count else {
-                    return .failure("codex-swift: missing value for \(argument)", 64)
+                    return clapMissingValue(option: "--image", valueDisplay: "<FILE>...")
                 }
                 imagePaths.append(contentsOf: splitCommaDelimited(arguments[index + 1]))
                 index += 2
@@ -8609,10 +8616,14 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'debug prompt-input': \(argument)", 64)
+                return clapUnexpectedArgument(
+                    argument,
+                    usage: "codex debug prompt-input [OPTIONS] [PROMPT]",
+                    asValueTip: true
+                )
             }
             if prompt != nil {
-                return .failure("codex-swift: unexpected argument for command 'debug prompt-input': \(argument)", 64)
+                return clapUnexpectedArgument(argument, usage: "codex debug prompt-input [OPTIONS] [PROMPT]")
             }
             prompt = argument
             index += 1
@@ -8629,7 +8640,7 @@ public struct CodexCLI: Sendable {
 
         func markOutputOption() -> ParseResult<Void> {
             guard !sawOutput else {
-                return .failure("codex-swift: duplicate option for command 'debug trace-reduce': --output", 64)
+                return clapDuplicateArgument("--output <FILE>", usage: "codex debug trace-reduce [OPTIONS] <TRACE_BUNDLE>")
             }
             sawOutput = true
             return .success(())
@@ -8645,7 +8656,7 @@ public struct CodexCLI: Sendable {
                     return .failure(message, code)
                 }
                 guard index + 1 < arguments.count else {
-                    return .failure("codex-swift: missing value for \(argument)", 64)
+                    return clapMissingValue(option: "--output", valueDisplay: "<FILE>")
                 }
                 output = arguments[index + 1]
                 index += 2
@@ -8674,17 +8685,21 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'debug trace-reduce': \(argument)", 64)
+                return clapUnexpectedArgument(
+                    argument,
+                    usage: "codex debug trace-reduce [OPTIONS] <TRACE_BUNDLE>",
+                    asValueTip: true
+                )
             }
             if traceBundle != nil {
-                return .failure("codex-swift: unexpected argument for command 'debug trace-reduce': \(argument)", 64)
+                return clapUnexpectedArgument(argument, usage: "codex debug trace-reduce [OPTIONS] <TRACE_BUNDLE>")
             }
             traceBundle = argument
             index += 1
         }
 
         guard let traceBundle else {
-            return .failure("codex-swift: missing required argument for command 'debug trace-reduce': <TRACE_BUNDLE>", 64)
+            return clapMissingRequired(["<TRACE_BUNDLE>"], usage: "codex debug trace-reduce <TRACE_BUNDLE>")
         }
         return .success(.traceReduce(traceBundle: traceBundle, output: output))
     }
@@ -8698,9 +8713,9 @@ public struct CodexCLI: Sendable {
             return .success(action)
         }
         if argument.hasPrefix("-") {
-            return .failure("codex-swift: unsupported option for command 'debug \(subcommand)': \(argument)", 64)
+            return clapUnexpectedArgument(argument, usage: "codex debug \(subcommand) [OPTIONS]")
         }
-        return .failure("codex-swift: unexpected argument for command 'debug \(subcommand)': \(argument)", 64)
+        return clapUnexpectedArgument(argument, usage: "codex debug \(subcommand) [OPTIONS]")
     }
 
     private func clapMissingRequired<Success>(_ displays: [String], usage: String) -> ParseResult<Success> {
@@ -8724,6 +8739,19 @@ public struct CodexCLI: Sendable {
         .failure(
             """
             error: a value is required for '\(option) \(valueDisplay)' but none was supplied
+
+            For more information, try '--help'.
+            """,
+            2
+        )
+    }
+
+    private func clapDuplicateArgument<Success>(_ argument: String, usage: String) -> ParseResult<Success> {
+        .failure(
+            """
+            error: the argument '\(argument)' cannot be used multiple times
+
+            Usage: \(usage)
 
             For more information, try '--help'.
             """,

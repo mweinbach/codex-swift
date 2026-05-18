@@ -2042,24 +2042,124 @@ final class CommandSurfaceCLITests: XCTestCase {
     func testRunAsyncDebugRejectsInvalidFormsBeforeRunner() async {
         let cases: [([String], String)] = [
             (
+                ["debug", "bogus"],
+                """
+                error: unrecognized subcommand 'bogus'
+
+                Usage: codex debug [OPTIONS] <COMMAND>
+
+                For more information, try '--help'.
+                """
+            ),
+            (
                 ["debug", "models", "extra"],
-                "codex-swift: unexpected argument for command 'debug models': extra"
+                """
+                error: unexpected argument 'extra' found
+
+                Usage: codex debug models [OPTIONS]
+
+                For more information, try '--help'.
+                """
+            ),
+            (
+                ["debug", "app-server", "bogus"],
+                """
+                error: unrecognized subcommand 'bogus'
+
+                Usage: codex debug app-server [OPTIONS] <COMMAND>
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["debug", "app-server", "send-message-v2"],
-                "codex-swift: missing required argument for command 'debug app-server send-message-v2': <USER_MESSAGE>"
+                """
+                error: the following required arguments were not provided:
+                  <USER_MESSAGE>
+
+                Usage: codex debug app-server send-message-v2 <USER_MESSAGE>
+
+                For more information, try '--help'.
+                """
+            ),
+            (
+                ["debug", "app-server", "send-message-v2", "--bad"],
+                """
+                error: unexpected argument '--bad' found
+
+                  tip: to pass '--bad' as a value, use '-- --bad'
+
+                Usage: codex debug app-server send-message-v2 [OPTIONS] <USER_MESSAGE>
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["debug", "prompt-input", "a", "b"],
-                "codex-swift: unexpected argument for command 'debug prompt-input': b"
+                """
+                error: unexpected argument 'b' found
+
+                Usage: codex debug prompt-input [OPTIONS] [PROMPT]
+
+                For more information, try '--help'.
+                """
+            ),
+            (
+                ["debug", "prompt-input", "--image"],
+                """
+                error: a value is required for '--image <FILE>...' but none was supplied
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["debug", "trace-reduce"],
-                "codex-swift: missing required argument for command 'debug trace-reduce': <TRACE_BUNDLE>"
+                """
+                error: the following required arguments were not provided:
+                  <TRACE_BUNDLE>
+
+                Usage: codex debug trace-reduce <TRACE_BUNDLE>
+
+                For more information, try '--help'.
+                """
+            ),
+            (
+                ["debug", "trace-reduce", "--output"],
+                """
+                error: a value is required for '--output <FILE>' but none was supplied
+
+                For more information, try '--help'.
+                """
+            ),
+            (
+                ["debug", "trace-reduce", "/tmp/trace", "extra"],
+                """
+                error: unexpected argument 'extra' found
+
+                Usage: codex debug trace-reduce [OPTIONS] <TRACE_BUNDLE>
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["debug", "trace-reduce", "/tmp/trace", "--output", "/tmp/a.json", "-o/tmp/b.json"],
-                "codex-swift: duplicate option for command 'debug trace-reduce': --output"
+                """
+                error: the argument '--output <FILE>' cannot be used multiple times
+
+                Usage: codex debug trace-reduce [OPTIONS] <TRACE_BUNDLE>
+
+                For more information, try '--help'.
+                """
+            ),
+            (
+                ["debug", "clear-memories", "extra"],
+                """
+                error: unexpected argument 'extra' found
+
+                Usage: codex debug clear-memories [OPTIONS]
+
+                For more information, try '--help'.
+                """
             )
         ]
 
@@ -2075,7 +2175,7 @@ final class CommandSurfaceCLITests: XCTestCase {
                 }
             )
 
-            XCTAssertEqual(exitCode, 64, "\(arguments)")
+            XCTAssertEqual(exitCode, 2, "\(arguments)")
             XCTAssertEqual(stderr, [expectedMessage], "\(arguments)")
         }
     }

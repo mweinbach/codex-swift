@@ -703,7 +703,20 @@ final class RuntimeOracleParityTests: XCTestCase {
             ["sandbox", "linux", "--full-auto"],
             ["sandbox", "linux", "--allow-unix-socket=/tmp"],
             ["sandbox", "macos", "--full-auto"],
-            ["sandbox", "windows", "--foo=bar"]
+            ["sandbox", "windows", "--foo=bar"],
+            ["debug", "bogus"],
+            ["debug", "models", "extra"],
+            ["debug", "models", "--bad"],
+            ["debug", "app-server", "bogus"],
+            ["debug", "app-server", "send-message-v2"],
+            ["debug", "app-server", "send-message-v2", "--bad"],
+            ["debug", "prompt-input", "--image"],
+            ["debug", "prompt-input", "extra1", "extra2"],
+            ["debug", "trace-reduce"],
+            ["debug", "trace-reduce", "--output"],
+            ["debug", "trace-reduce", "bundle", "extra"],
+            ["debug", "trace-reduce", "bundle", "--output", "a.json", "-ob.json"],
+            ["debug", "clear-memories", "extra"]
         ]
 
         for arguments in commands {
