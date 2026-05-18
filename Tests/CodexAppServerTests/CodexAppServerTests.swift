@@ -12943,6 +12943,31 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(triggerStartedTurn)
     }
 
+    func testLiveRuntimeReservesSpawnedAgentNicknamesLikeRustAgentControl() async throws {
+        let temp = try TemporaryDirectory()
+        let manager = AppServerLiveRuntimeManager(
+            configuration: testConfiguration(codexHome: temp.url, requiresOpenAIAuth: false)
+        )
+        defer {
+            manager.shutdown()
+        }
+
+        var settings = CodexRuntimeConfig()
+        let reservedDefaultNickname = await manager.reserveLiveAgentNickname(settings: settings, agentRole: nil)
+        let defaultNickname = try XCTUnwrap(reservedDefaultNickname)
+        XCTAssertFalse(defaultNickname.isEmpty)
+
+        settings.agentRoles["researcher"] = AgentRoleConfig(
+            description: "Research role",
+            nicknameCandidates: ["Atlas"]
+        )
+        let roleNickname = await manager.reserveLiveAgentNickname(settings: settings, agentRole: "researcher")
+        XCTAssertEqual(roleNickname, "Atlas")
+
+        let reusedRoleNickname = await manager.reserveLiveAgentNickname(settings: settings, agentRole: "researcher")
+        XCTAssertEqual(reusedRoleNickname, "Atlas the 2nd")
+    }
+
     func testLiveRuntimeTerminalSubagentTurnQueuesDirectParentNotificationLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let parentThreadID = ThreadId()

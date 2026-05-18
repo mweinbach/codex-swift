@@ -27,6 +27,109 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
     private let configuration: CodexAppServerConfiguration
     private let state = AppServerLiveRuntimeState()
     private let commandAuthRunner = ProviderAuthCommandRunner()
+    private static let defaultAgentNicknameCandidates = [
+        "Euclid",
+        "Archimedes",
+        "Ptolemy",
+        "Hypatia",
+        "Avicenna",
+        "Averroes",
+        "Aquinas",
+        "Copernicus",
+        "Kepler",
+        "Galileo",
+        "Bacon",
+        "Descartes",
+        "Pascal",
+        "Fermat",
+        "Huygens",
+        "Leibniz",
+        "Newton",
+        "Halley",
+        "Euler",
+        "Lagrange",
+        "Laplace",
+        "Volta",
+        "Gauss",
+        "Ampere",
+        "Faraday",
+        "Darwin",
+        "Lovelace",
+        "Boole",
+        "Pasteur",
+        "Maxwell",
+        "Mendel",
+        "Curie",
+        "Planck",
+        "Tesla",
+        "Poincare",
+        "Noether",
+        "Hilbert",
+        "Einstein",
+        "Raman",
+        "Bohr",
+        "Turing",
+        "Hubble",
+        "Feynman",
+        "Franklin",
+        "McClintock",
+        "Meitner",
+        "Herschel",
+        "Linnaeus",
+        "Wegener",
+        "Chandrasekhar",
+        "Sagan",
+        "Goodall",
+        "Carson",
+        "Carver",
+        "Socrates",
+        "Plato",
+        "Aristotle",
+        "Epicurus",
+        "Cicero",
+        "Confucius",
+        "Mencius",
+        "Zeno",
+        "Locke",
+        "Hume",
+        "Kant",
+        "Hegel",
+        "Kierkegaard",
+        "Mill",
+        "Nietzsche",
+        "Peirce",
+        "James",
+        "Dewey",
+        "Russell",
+        "Popper",
+        "Sartre",
+        "Beauvoir",
+        "Arendt",
+        "Rawls",
+        "Singer",
+        "Anscombe",
+        "Parfit",
+        "Kuhn",
+        "Boyle",
+        "Hooke",
+        "Harvey",
+        "Dalton",
+        "Ohm",
+        "Helmholtz",
+        "Gibbs",
+        "Lorentz",
+        "Schrodinger",
+        "Heisenberg",
+        "Pauli",
+        "Dirac",
+        "Bernoulli",
+        "Godel",
+        "Nash",
+        "Banach",
+        "Ramanujan",
+        "Erdos",
+        "Jason"
+    ]
 
     public init(configuration: CodexAppServerConfiguration) {
         self.configuration = configuration
@@ -222,6 +325,12 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
 
     func agentStatus(threadID: String) async -> AgentStatus {
         await state.agentStatus(threadID: threadID)
+    }
+
+    func reserveLiveAgentNickname(settings: CodexRuntimeConfig, agentRole: String?) async -> String? {
+        await state.reserveAgentNickname(
+            candidates: Self.agentNicknameCandidates(settings: settings, agentRole: agentRole)
+        )
     }
 
     func recordSessionSource(threadID: String, source: SessionSource) async {
@@ -737,6 +846,14 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         return ModelsManager.builtinModelPresets(authMode: authMode)
     }
 
+    static func agentNicknameCandidates(settings: CodexRuntimeConfig, agentRole: String?) -> [String] {
+        let roleName = agentRole ?? "default"
+        if let candidates = settings.agentRoles[roleName]?.nicknameCandidates {
+            return candidates
+        }
+        return defaultAgentNicknameCandidates
+    }
+
     private func spawnLiveAgent(
         _ request: LiveSpawnAgentRequest,
         parentThreadID: ThreadId,
@@ -747,11 +864,12 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         let childConversationID = ConversationId()
         let childThreadID = try ThreadId(string: childConversationID.description)
         let childDepth = Self.nextThreadSpawnDepth(parentSessionSource)
+        let childNickname = await reserveLiveAgentNickname(settings: setup.settings, agentRole: request.agentType)
         let childSource = SessionSource.subagent(.threadSpawn(
             parentThreadID: parentThreadID,
             depth: childDepth,
             agentPath: request.childAgentPath,
-            agentNickname: nil,
+            agentNickname: childNickname,
             agentRole: request.agentType
         ))
         let childRollout: RolloutRecorder
@@ -814,7 +932,7 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 updatedAt: createdAt,
                 source: Self.persistedSessionSource(childSource),
                 threadSource: .subagent,
-                agentNickname: childSource.nickname,
+                agentNickname: childNickname,
                 agentRole: childSource.agentRole,
                 agentPath: request.childAgentPath.description,
                 modelProvider: setup.settings.modelProvider ?? configuration.defaultModelProvider,
@@ -857,7 +975,7 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         return LiveSpawnAgentResult(
             threadID: childThreadID,
             agentPath: request.childAgentPath,
-            nickname: childSource.nickname,
+            nickname: childNickname,
             role: childSource.agentRole,
             model: request.model ?? setup.model,
             reasoningEffort: request.reasoningEffort ?? setup.settings.modelReasoningEffort,
@@ -2042,6 +2160,8 @@ private actor AppServerLiveRuntimeState {
     private var agentLastTaskMessages: [String: String] = [:]
     private var agentStatuses: [String: AgentStatus] = [:]
     private var sessionSources: [String: SessionSource] = [:]
+    private var usedAgentNicknames: Set<String> = []
+    private var nicknameResetCount: Int = 0
     private var emittedAbortKeys: Set<String> = []
 
     func setEventSink(_ sink: AppServerRuntimeEventSink?) {
@@ -2098,6 +2218,34 @@ private actor AppServerLiveRuntimeState {
 
     func recordSessionSource(threadID: String, source: SessionSource) {
         sessionSources[threadID] = source
+        if let nickname = source.nickname {
+            usedAgentNicknames.insert(nickname)
+        }
+    }
+
+    func reserveAgentNickname(candidates: [String], preferred: String? = nil) -> String? {
+        if let preferred {
+            usedAgentNicknames.insert(preferred)
+            return preferred
+        }
+        let baseNames = candidates
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !baseNames.isEmpty else {
+            return nil
+        }
+        let formattedNames = baseNames.map {
+            Self.formatAgentNickname($0, resetCount: nicknameResetCount)
+        }
+        if let nickname = formattedNames.first(where: { !usedAgentNicknames.contains($0) }) {
+            usedAgentNicknames.insert(nickname)
+            return nickname
+        }
+        usedAgentNicknames.removeAll()
+        nicknameResetCount += 1
+        let nickname = Self.formatAgentNickname(baseNames[0], resetCount: nicknameResetCount)
+        usedAgentNicknames.insert(nickname)
+        return nickname
     }
 
     func finishTurn(threadID: String, turnID: String) {
@@ -2493,6 +2641,31 @@ private actor AppServerLiveRuntimeState {
             ?? "null"
         let body = #"{"agent_path":"\#(agentPath.description)","status":\#(statusJSON)}"#
         return "<subagent_notification>\n\(body)\n</subagent_notification>"
+    }
+
+    private static func formatAgentNickname(_ name: String, resetCount: Int) -> String {
+        guard resetCount > 0 else {
+            return name
+        }
+        let ordinal = resetCount + 1
+        return "\(name) the \(ordinal)\(ordinalSuffix(for: ordinal))"
+    }
+
+    private static func ordinalSuffix(for value: Int) -> String {
+        let tens = (value / 10) % 10
+        if tens == 1 {
+            return "th"
+        }
+        switch value % 10 {
+        case 1:
+            return "st"
+        case 2:
+            return "nd"
+        case 3:
+            return "rd"
+        default:
+            return "th"
+        }
     }
 
     private func cancelPendingContinuations(turnID: String) {

@@ -893,6 +893,13 @@ Recent upstream audit checkpoint:
   child model, reasoning effort, and service tier, with malformed role files
   mapped to Rust's `agent type is currently not available` error. Full Rust
   `AgentControl` parity and broader child config application remain pending.
+- 2026-05-18: Swift live app-server MultiAgentV2 `spawn_agent` now reserves
+  Rust-style spawned-agent nicknames for live child threads, using the upstream
+  default nickname pool plus role-specific `nickname_candidates`, persists the
+  nickname in the thread-spawn session source and SQLite thread metadata, and
+  returns it through the v2 spawn result/collab spawn-end event. The allocator
+  preserves Rust's pool-reset ordinal shape (`Atlas the 2nd`) while full shared
+  `AgentControl` registry ownership remains pending.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through
