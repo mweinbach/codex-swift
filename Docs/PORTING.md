@@ -744,9 +744,18 @@ Recent upstream audit checkpoint:
   emit `thread/goal/updated`, inject Rust's hidden budget-limit `<goal_context>`
   steering item exactly once per budget-limited goal, and advance the accounting
   baseline so turn-finish accounting only captures remaining deltas. The
-  `update_goal`-specific `ToolCompletedGoal` pre-completion accounting path and
-  idle continuation turns remain pending with the broader ThreadManager goal
-  runtime.
+  `update_goal`-specific `ToolCompletedGoal` pre-completion accounting path is
+  covered by the next checkpoint; idle continuation turns remain pending with
+  the broader ThreadManager goal runtime.
+- 2026-05-18: Swift live app-server Responses turns now mirror Rust's
+  `GoalRuntimeEvent::ToolCompletedGoal` accounting shape for `update_goal`.
+  `NonInteractiveExec.runResponsesLoopWithTranscript` exposes a pre-tool
+  execution callback with the current accumulated Responses token usage, and
+  the live runtime uses it to account usage before `update_goal` mutates the
+  persisted goal to `complete`. This preserves consumed tokens/time on the
+  completed goal while suppressing extra budget-limit steering, matching Rust's
+  `ToolCompletedGoal` handler behavior. Idle continuation turns remain pending
+  with the broader ThreadManager goal runtime.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through

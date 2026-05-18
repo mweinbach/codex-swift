@@ -411,6 +411,10 @@ public enum NonInteractiveExec {
         _ toolCall: ResponseItem,
         _ tokenUsage: TokenUsage?
     ) async -> NonInteractiveExecToolCompletionResult?
+    public typealias ToolPreExecutionHandler = @Sendable (
+        _ toolCall: ResponseItem,
+        _ tokenUsage: TokenUsage?
+    ) async -> NonInteractiveExecToolCompletionResult?
     public typealias RegisteredToolExecutor = @Sendable (ResponseItem) async -> FunctionCallExecutionResult?
     public typealias ModelsETagHandler = (String) async -> Void
     public typealias RequestUserInputHandler = @Sendable (RequestUserInputEvent) async -> RequestUserInputResponse?
@@ -841,6 +845,7 @@ public enum NonInteractiveExec {
         features: FeatureStates = .withDefaults(),
         handleModelsETag: ModelsETagHandler? = nil,
         streamPrompt: ResponseStreamer,
+        handleToolPreExecution: ToolPreExecutionHandler? = nil,
         handleToolCompletion: ToolCompletionHandler? = nil,
         executeFunctionCall: FunctionCallExecutor
     ) async -> NonInteractiveExecLoopResult {
@@ -850,6 +855,7 @@ public enum NonInteractiveExec {
             features: features,
             handleModelsETag: handleModelsETag,
             streamPrompt: streamPrompt,
+            handleToolPreExecution: handleToolPreExecution,
             handleToolCompletion: handleToolCompletion,
             executeFunctionCall: { item in
                 FunctionCallExecutionResult(output: await executeFunctionCall(item))
@@ -864,6 +870,7 @@ public enum NonInteractiveExec {
         handleModelsETag: ModelsETagHandler? = nil,
         streamPrompt: ResponseStreamer,
         stopHookContext: StopHookContext? = nil,
+        handleToolPreExecution: ToolPreExecutionHandler? = nil,
         handleToolCompletion: ToolCompletionHandler? = nil,
         toolRouter: ToolRouter
     ) async -> NonInteractiveExecLoopResult {
@@ -874,6 +881,7 @@ public enum NonInteractiveExec {
             handleModelsETag: handleModelsETag,
             streamPrompt: streamPrompt,
             stopHookContext: stopHookContext,
+            handleToolPreExecution: handleToolPreExecution,
             handleToolCompletion: handleToolCompletion,
             executeFunctionCall: { item in
                 await toolRouter.execute(item)
@@ -888,6 +896,7 @@ public enum NonInteractiveExec {
         handleModelsETag: ModelsETagHandler? = nil,
         streamPrompt: ResponseStreamer,
         stopHookContext: StopHookContext? = nil,
+        handleToolPreExecution: ToolPreExecutionHandler? = nil,
         handleToolCompletion: ToolCompletionHandler? = nil,
         executeFunctionCall: FunctionCallResultExecutor
     ) async -> NonInteractiveExecLoopResult {
@@ -964,6 +973,14 @@ public enum NonInteractiveExec {
             }
 
             for call in toolCalls {
+                if let preExecution = await handleToolPreExecution?(call, tokenUsage) {
+                    runtimeEvents.append(contentsOf: preExecution.runtimeEvents)
+                    allEvents.append(contentsOf: preExecution.runtimeEvents.map { .success(.runtimeEvent($0)) })
+                    if !preExecution.additionalContextItems.isEmpty {
+                        prompt.input.append(contentsOf: preExecution.additionalContextItems)
+                        transcriptItems.append(contentsOf: preExecution.additionalContextItems)
+                    }
+                }
                 let result = await executeFunctionCall(call)
                 prompt.input.append(result.output)
                 transcriptItems.append(result.output)

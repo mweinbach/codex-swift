@@ -11721,6 +11721,69 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(completed?.timeUsedSeconds, 4)
     }
 
+    func testLiveRuntimeGoalUpdateGoalAccountsBeforeCompletionAndSuppressesBudgetSteeringLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T07-38-45",
+            timestamp: "2025-01-06T07:38:45Z",
+            preview: "live update_goal accounting",
+            provider: "mock_provider"
+        )
+        let stateStore = try await createAppServerGoalStateStore(
+            codexHome: temp.url,
+            threadID: threadID,
+            title: "live update_goal accounting"
+        )
+        let parsedThreadID = try ThreadId(string: threadID)
+        _ = try await stateStore.replaceThreadGoal(
+            threadID: parsedThreadID,
+            objective: "finish the slice",
+            status: .active,
+            tokenBudget: 20
+        )
+        var features = FeatureStates.withDefaults()
+        features.set(.goals, enabled: true)
+        let snapshot = await AppServerLiveRuntimeManager.liveThreadGoalAccountingSnapshot(
+            stateStore: stateStore,
+            features: features,
+            threadID: threadID,
+            tokenUsage: TokenUsage()
+        )
+        let accounting = AppServerLiveRuntimeManager.LiveThreadGoalAccountingSession(
+            stateStore: stateStore,
+            features: features,
+            threadID: threadID,
+            snapshot: snapshot,
+            lastAccountingAtMilliseconds: 1_000
+        )
+
+        let preCompletion = await accounting.accountGoalToolCompletion(
+            tokenUsage: TokenUsage(totalTokens: 40),
+            completedAtMilliseconds: 3_500
+        )
+
+        XCTAssertEqual(preCompletion?.goal.threadID, parsedThreadID)
+        XCTAssertEqual(preCompletion?.goal.status, .budgetLimited)
+        XCTAssertEqual(preCompletion?.goal.tokensUsed, 40)
+        XCTAssertEqual(preCompletion?.goal.timeUsedSeconds, 2)
+        XCTAssertEqual(preCompletion?.additionalContextItems, [])
+
+        let completed = try await stateStore.updateThreadGoal(
+            threadID: parsedThreadID,
+            status: .complete,
+            tokenBudget: .preserve
+        )
+
+        XCTAssertEqual(completed?.status, .complete)
+        XCTAssertEqual(completed?.tokensUsed, 40)
+        XCTAssertEqual(completed?.timeUsedSeconds, 2)
+        let persisted = try await stateStore.getThreadGoal(threadID: parsedThreadID)
+        XCTAssertEqual(persisted?.status, .complete)
+        XCTAssertEqual(persisted?.tokensUsed, 40)
+        XCTAssertEqual(persisted?.timeUsedSeconds, 2)
+    }
+
     func testLiveRuntimeGoalAccountingIgnoresGoalCreatedAfterTurnStartLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(

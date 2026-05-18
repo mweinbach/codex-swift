@@ -639,6 +639,27 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 }
             },
             stopHookContext: stopHookContext,
+            handleToolPreExecution: { [state, submission, goalAccounting] item, tokenUsage in
+                guard Self.shouldAccountLiveThreadGoalCompletionTool(item) else {
+                    return nil
+                }
+                guard let result = await goalAccounting.accountGoalToolCompletion(
+                    tokenUsage: tokenUsage,
+                    completedAtMilliseconds: AppServerLiveRuntimeClock.millisecondsSinceEpoch()
+                ) else {
+                    return nil
+                }
+                await state.emit(
+                    threadID: submission.threadID,
+                    turnID: submission.turnID,
+                    event: .threadGoalUpdated(ThreadGoalUpdatedEvent(
+                        threadID: result.goal.threadID,
+                        turnID: submission.turnID,
+                        goal: result.goal
+                    ))
+                )
+                return NonInteractiveExecToolCompletionResult()
+            },
             handleToolCompletion: { [state, submission, goalAccounting] item, tokenUsage in
                 guard Self.shouldAccountLiveThreadGoalToolCompletion(item) else {
                     return nil
@@ -683,6 +704,13 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 return result
             }
         )
+    }
+
+    private static func shouldAccountLiveThreadGoalCompletionTool(_ item: ResponseItem) -> Bool {
+        if case let .functionCall(_, name, _, _, _) = item {
+            return name == "update_goal"
+        }
+        return false
     }
 
     private static func shouldAccountLiveThreadGoalToolCompletion(_ item: ResponseItem) -> Bool {
@@ -758,6 +786,17 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 tokenUsage: tokenUsage,
                 completedAtMilliseconds: completedAtMilliseconds,
                 budgetLimitSteeringAllowed: true
+            )
+        }
+
+        func accountGoalToolCompletion(
+            tokenUsage: TokenUsage?,
+            completedAtMilliseconds: Int64
+        ) async -> LiveThreadGoalAccountingResult? {
+            await accountUsage(
+                tokenUsage: tokenUsage,
+                completedAtMilliseconds: completedAtMilliseconds,
+                budgetLimitSteeringAllowed: false
             )
         }
 

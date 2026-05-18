@@ -2694,6 +2694,55 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(result.transcriptItems.last, .message(role: "assistant", content: [.outputText(text: "done")]))
     }
 
+    func testResponsesLoopRunsToolPreExecutionHandlerBeforeExecutorWithCurrentTokenUsageLikeRustGoalRuntime() async throws {
+        let initial = Prompt(input: [
+            .message(role: "user", content: [.inputText(text: "run echo")])
+        ])
+        let script = TokenUsageLoopScript()
+        let capture = ToolLifecycleCapture()
+
+        let result = await NonInteractiveExec.runResponsesLoopWithTranscript(
+            initialPrompt: initial,
+            streamPrompt: { prompt in
+                .success(await script.next(prompt))
+            },
+            handleToolPreExecution: { item, tokenUsage in
+                guard case let .functionCall(_, name, _, _, _) = item else {
+                    await capture.append("pre:unknown")
+                    return nil
+                }
+                await capture.append("pre:\(name):\(tokenUsage?.totalTokens ?? -1)")
+                return nil
+            },
+            executeFunctionCall: { item in
+                await capture.append("execute")
+                guard case let .functionCall(_, _, _, _, callID) = item else {
+                    return .functionCallOutput(
+                        callID: "bad",
+                        output: FunctionCallOutputPayload(content: "bad", success: false)
+                    )
+                }
+                return .functionCallOutput(
+                    callID: callID,
+                    output: FunctionCallOutputPayload(content: "ok", success: true)
+                )
+            }
+        )
+
+        let events = await capture.events()
+        XCTAssertEqual(events, [
+            "pre:shell_command:8",
+            "execute"
+        ])
+        XCTAssertEqual(result.tokenUsage, TokenUsage(
+            inputTokens: 7,
+            cachedInputTokens: 2,
+            outputTokens: 11,
+            reasoningOutputTokens: 3,
+            totalTokens: 18
+        ))
+    }
+
     func testResponsesLoopDoesNotExecuteServerToolSearchCall() async throws {
         let initial = Prompt(input: [
             .message(role: "user", content: [.inputText(text: "find tools")])
@@ -5727,6 +5776,18 @@ private actor ToolCompletionCapture {
 
     func calls() -> [(item: ResponseItem, tokenUsage: TokenUsage?)] {
         recordedCalls
+    }
+}
+
+private actor ToolLifecycleCapture {
+    private var recordedEvents: [String] = []
+
+    func append(_ event: String) {
+        recordedEvents.append(event)
+    }
+
+    func events() -> [String] {
+        recordedEvents
     }
 }
 
