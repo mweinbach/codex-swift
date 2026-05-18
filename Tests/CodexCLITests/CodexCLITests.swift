@@ -386,6 +386,32 @@ final class CodexCLITests: XCTestCase {
         let execServerHelp = try XCTUnwrap(stdout.first)
         XCTAssertTrue(execServerHelp.hasPrefix("[EXPERIMENTAL] Run the standalone exec-server service\n\nUsage: codex exec-server [OPTIONS]"))
         XCTAssertTrue(execServerHelp.contains("      --use-agent-identity-auth"))
+
+        stdout.removeAll()
+        let resumeExitCode = await CodexCLI().runAsync(
+            arguments: ["resume", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(resumeExitCode, 0)
+        let resumeHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(resumeHelp.hasPrefix("Resume a previous interactive session (picker by default; use --last to continue the most recent)\n\nUsage: codex resume [OPTIONS] [SESSION_ID] [PROMPT]"))
+        XCTAssertTrue(resumeHelp.contains("      --include-non-interactive"))
+        XCTAssertTrue(resumeHelp.contains("  -V, --version"))
+
+        stdout.removeAll()
+        let forkExitCode = await CodexCLI().runAsync(
+            arguments: ["fork", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(forkExitCode, 0)
+        let forkHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(forkHelp.hasPrefix("Fork a previous interactive session (picker by default; use --last to fork the most recent)\n\nUsage: codex fork [OPTIONS] [SESSION_ID] [PROMPT]"))
+        XCTAssertTrue(forkHelp.contains("      --last\n          Fork the most recent session without showing the picker"))
+        XCTAssertTrue(forkHelp.contains("  -V, --version"))
     }
 
     func testCommandVersionTargetsSubcommandLikeRust() async {

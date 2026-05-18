@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: extended CLI help runtime-oracle parity to the interactive
+  session picker commands. Swift now renders Rust-shaped `codex resume --help`
+  and `codex fork --help` output instead of falling back to root help,
+  preserving their session-id/prompt arguments, picker flags,
+  non-interactive-resume inclusion, remote app-server flags, and interactive
+  model/sandbox/approval options.
 - 2026-05-18: extended CLI help runtime-oracle parity across the remaining
   service/control command surfaces. Swift now renders Rust-shaped
   `codex app-server --help`, `codex remote-control --help`,
