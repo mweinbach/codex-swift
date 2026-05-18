@@ -1047,7 +1047,8 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 permissionProfile: setup.permissionProfile,
                 model: request.model ?? setup.model,
                 effort: request.reasoningEffort ?? setup.settings.modelReasoningEffort ?? setup.modelFamily.defaultReasoningEffort,
-                summary: setup.settings.modelReasoningSummary
+                summary: request.reasoningSummary
+                    ?? setup.settings.modelReasoningSummary
                     ?? (setup.modelFamily.supportsReasoningSummaries ? .auto : .none),
                 truncationPolicy: setup.modelFamily.truncationPolicy
             ))

@@ -31,7 +31,8 @@ struct AppServerLiveMultiAgentToolExecutor {
                 model: $0.model,
                 reasoningEffort: $0.reasoningEffort,
                 serviceTier: $0.serviceTier,
-                developerInstructions: nil
+                developerInstructions: nil,
+                reasoningSummary: nil
             )
         },
         spawnAgent: @escaping @Sendable (LiveSpawnAgentRequest) async throws -> LiveSpawnAgentResult = { _ in
@@ -200,6 +201,7 @@ struct AppServerLiveMultiAgentToolExecutor {
                 reasoningEffort: resolvedOverrides.reasoningEffort,
                 serviceTier: resolvedOverrides.serviceTier,
                 developerInstructions: resolvedOverrides.developerInstructions,
+                reasoningSummary: resolvedOverrides.reasoningSummary,
                 forkMode: forkMode,
                 childAgentPath: childAgentPath
             ))
@@ -690,6 +692,7 @@ struct LiveSpawnAgentRequest: Equatable, Sendable {
     let reasoningEffort: ReasoningEffort?
     let serviceTier: String?
     let developerInstructions: String?
+    let reasoningSummary: ReasoningSummary?
     let forkMode: LiveSpawnAgentForkMode
     let childAgentPath: AgentPath
 }
@@ -708,6 +711,7 @@ struct LiveSpawnAgentResolvedOverrides: Equatable, Sendable {
     let reasoningEffort: ReasoningEffort?
     let serviceTier: String?
     let developerInstructions: String?
+    let reasoningSummary: ReasoningSummary?
 }
 
 struct LiveSpawnAgentRoleConfigOverrides: Equatable, Sendable {
@@ -715,6 +719,7 @@ struct LiveSpawnAgentRoleConfigOverrides: Equatable, Sendable {
     let reasoningEffort: ReasoningEffort?
     let serviceTier: String?
     let developerInstructions: String?
+    let reasoningSummary: ReasoningSummary?
 }
 
 struct LiveSpawnAgentOverrideResolver: Sendable {
@@ -786,6 +791,7 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
         var roleResolvedModel = resolvedModel
         var roleServiceTier: String?
         var roleDeveloperInstructions: String?
+        var roleReasoningSummary: ReasoningSummary?
         if let agentType = request.agentType,
            let overrides = roleConfigOverrides[agentType] {
             if let roleModel = overrides.model {
@@ -800,6 +806,7 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
             }
             roleServiceTier = overrides.serviceTier
             roleDeveloperInstructions = overrides.developerInstructions
+            roleReasoningSummary = overrides.reasoningSummary
             try Self.validateReasoningEffort(resolvedReasoningEffort, model: selectedModel)
         }
 
@@ -813,7 +820,8 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
             model: roleResolvedModel,
             reasoningEffort: resolvedReasoningEffort,
             serviceTier: resolvedServiceTier,
-            developerInstructions: roleDeveloperInstructions
+            developerInstructions: roleDeveloperInstructions,
+            reasoningSummary: roleReasoningSummary
         )
     }
 
@@ -849,7 +857,8 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
                 model: try optionalString(table["model"]),
                 reasoningEffort: try optionalReasoningEffort(table["model_reasoning_effort"]),
                 serviceTier: try optionalString(table["service_tier"]),
-                developerInstructions: try optionalString(table["developer_instructions"])
+                developerInstructions: try optionalString(table["developer_instructions"]),
+                reasoningSummary: try optionalReasoningSummary(table["model_reasoning_summary"])
             )
         } catch {
             throw roleUnavailableError()
@@ -875,6 +884,16 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
             throw roleUnavailableError()
         }
         return effort
+    }
+
+    private static func optionalReasoningSummary(_ value: ConfigValue?) throws -> ReasoningSummary? {
+        guard let rawValue = try optionalString(value) else {
+            return nil
+        }
+        guard let summary = ReasoningSummary(rawValue: rawValue) else {
+            throw roleUnavailableError()
+        }
+        return summary
     }
 
     private static func roleUnavailableError() -> AppServerLiveMultiAgentToolError {

@@ -12993,6 +12993,7 @@ final class CodexAppServerTests: XCTestCase {
                 reasoningEffort: .high,
                 serviceTier: "flex",
                 developerInstructions: nil,
+                reasoningSummary: nil,
                 forkMode: .none,
                 childAgentPath: workerPath
             )
@@ -13078,6 +13079,7 @@ final class CodexAppServerTests: XCTestCase {
             reasoningEffort: nil,
             serviceTier: "priority",
             developerInstructions: nil,
+            reasoningSummary: nil,
             forkMode: .fullHistory,
             childAgentPath: tierWorkerPath
         ))
@@ -13333,7 +13335,8 @@ final class CodexAppServerTests: XCTestCase {
             model: "gpt-5.3-codex",
             reasoningEffort: .low,
             serviceTier: nil,
-            developerInstructions: nil
+            developerInstructions: nil,
+            reasoningSummary: nil
         ))
 
         let temp = try TemporaryDirectory()
@@ -13344,6 +13347,7 @@ final class CodexAppServerTests: XCTestCase {
         developer_instructions = "Review carefully"
         model = "gpt-5.4"
         model_reasoning_effort = "high"
+        model_reasoning_summary = "detailed"
         service_tier = "priority"
         """.write(to: roleFile, atomically: true, encoding: .utf8)
         let roleConfigOverrides = try LiveSpawnAgentOverrideResolver.roleConfigOverrides(
@@ -13374,7 +13378,8 @@ final class CodexAppServerTests: XCTestCase {
             model: "gpt-5.4",
             reasoningEffort: .high,
             serviceTier: "priority",
-            developerInstructions: "Review carefully"
+            developerInstructions: "Review carefully",
+            reasoningSummary: .detailed
         ))
 
         let badRoleFile = temp.url.appendingPathComponent("bad-reviewer.toml", isDirectory: false)
@@ -13389,6 +13394,26 @@ final class CodexAppServerTests: XCTestCase {
                 "bad-reviewer": AgentRoleConfig(
                     description: "Bad reviewer",
                     configFile: badRoleFile.path
+                )
+            ]
+        )) { error in
+            XCTAssertEqual(
+                (error as? AppServerLiveMultiAgentToolError)?.message,
+                "agent type is currently not available"
+            )
+        }
+
+        let badSummaryRoleFile = temp.url.appendingPathComponent("bad-summary-reviewer.toml", isDirectory: false)
+        try """
+        name = "bad-summary-reviewer"
+        description = "Bad summary reviewer"
+        model_reasoning_summary = "verbose"
+        """.write(to: badSummaryRoleFile, atomically: true, encoding: .utf8)
+        XCTAssertThrowsError(try LiveSpawnAgentOverrideResolver.roleConfigOverrides(
+            configuredAgentRoles: [
+                "bad-summary-reviewer": AgentRoleConfig(
+                    description: "Bad summary reviewer",
+                    configFile: badSummaryRoleFile.path
                 )
             ]
         )) { error in
