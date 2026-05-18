@@ -49,4 +49,20 @@ final class PermissionProfileSnapshotTests: XCTestCase {
         XCTAssertNil(config.activePermissionProfile)
         XCTAssertEqual(config.profileWorkspaceRoots, [])
     }
+
+    func testPermissionSnapshotConstraintRejectsInvalidReplacementAtomicallyLikeRust() throws {
+        let initial = PermissionProfileSnapshot.legacy(.readOnly())
+        var constrained = Constrained.allowOnly(initial)
+        let replacement = PermissionProfileSnapshot.active(
+            .workspaceWrite(),
+            activePermissionProfile: ActivePermissionProfile(id: ":workspace-write")
+        )
+
+        XCTAssertThrowsError(try constrained.set(replacement)) { error in
+            XCTAssertTrue(error is ConstraintError)
+        }
+        XCTAssertEqual(constrained.value, initial)
+        XCTAssertEqual(constrained.value.permissionProfile, .readOnly())
+        XCTAssertNil(constrained.value.activePermissionProfile)
+    }
 }

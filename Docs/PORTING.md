@@ -1152,7 +1152,8 @@ Recent upstream audit checkpoint:
   config-loader workspace-root materialization now apply that snapshot instead
   of leaving the profile identity and concrete profile as loose paired fields,
   with focused tests covering legacy snapshots, active snapshots with profile
-  roots, and atomic runtime-config replacement. The broader live session
+  roots, atomic runtime-config replacement, and Rust's constraint-preserving
+  rejection path for invalid snapshot replacements. The broader live session
   retargeting path remains pending with the symbolic permission-state work.
 - 2026-05-16: rechecked Rust commit `5d30764fe9` (`Run compact hooks for
   remote compaction v2`). Swift core remote-v2 compaction orchestration now
