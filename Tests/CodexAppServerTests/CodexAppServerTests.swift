@@ -13761,6 +13761,59 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(rootMailbox, [])
     }
 
+    func testLiveRuntimeTerminalSubagentTurnIgnoresDeadDirectParentLikeRustAgentControl() async throws {
+        let temp = try TemporaryDirectory()
+        let rootThreadID = ThreadId()
+        let parentThreadID = ThreadId()
+        let childThreadID = ThreadId()
+        let manager = AppServerLiveRuntimeManager(
+            configuration: testConfiguration(codexHome: temp.url, requiresOpenAIAuth: false)
+        )
+        defer {
+            manager.shutdown()
+        }
+        let workerPath = try AgentPath.root.join("worker")
+        let testerPath = try workerPath.join("tester")
+        await manager.recordSessionSource(
+            threadID: parentThreadID.description,
+            source: .subagent(.threadSpawn(
+                parentThreadID: rootThreadID,
+                depth: 1,
+                agentPath: workerPath,
+                agentRole: "worker"
+            ))
+        )
+        await manager.recordSessionSource(
+            threadID: childThreadID.description,
+            source: .subagent(.threadSpawn(
+                parentThreadID: parentThreadID,
+                depth: 2,
+                agentPath: testerPath,
+                agentRole: "explorer"
+            ))
+        )
+        _ = try manager.submitCoreOp(
+            requestID: .string("shutdown-parent"),
+            threadID: parentThreadID.description,
+            op: .shutdown
+        )
+        _ = await manager.takeMailboxCommunications(threadID: rootThreadID.description)
+
+        await manager.emitRuntimeEvent(
+            threadID: childThreadID.description,
+            turnID: "turn-complete",
+            event: .taskComplete(TaskCompleteEvent(
+                turnID: "turn-complete",
+                lastAgentMessage: "done"
+            ))
+        )
+
+        let parentMailbox = await manager.takeMailboxCommunications(threadID: parentThreadID.description)
+        XCTAssertEqual(parentMailbox, [])
+        let rootMailbox = await manager.takeMailboxCommunications(threadID: rootThreadID.description)
+        XCTAssertEqual(rootMailbox, [])
+    }
+
     func testLiveRuntimeFinalSubagentStatusesQueueParentNotificationsLikeRustAgentControl() async throws {
         let temp = try TemporaryDirectory()
         let parentThreadID = ThreadId()

@@ -2748,6 +2748,9 @@ private actor AppServerLiveRuntimeState {
         else {
             return
         }
+        guard agentStatus(threadID: parentThreadID.description) != .notFound else {
+            return
+        }
         let communication = InterAgentCommunication(
             author: childAgentPath,
             recipient: parentAgentPath,

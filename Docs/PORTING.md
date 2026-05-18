@@ -900,7 +900,8 @@ Recent upstream audit checkpoint:
   MultiAgentV2 child-turn notification for loaded thread-spawn subagents:
   completed child turns enqueue the standard `<subagent_notification>` envelope
   as non-triggering inter-agent mailbox mail to the direct parent agent path,
-  while interrupted child turns remain quiet. `spawn_agent` and full
+  while interrupted child turns remain quiet and dead direct parents are ignored
+  like Rust's failed `AgentControl` delivery path. `spawn_agent` and full
   ThreadManager-backed `AgentControl` remain pending.
 - 2026-05-18: Swift live app-server runtime now mirrors Rust `AgentControl`
   final-status notification coverage for loaded MultiAgentV2 thread-spawn
