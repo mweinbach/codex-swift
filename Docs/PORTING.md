@@ -914,6 +914,11 @@ Recent upstream audit checkpoint:
   whitespace-only prompts with Rust's `Empty message can't be sent to an agent`
   tool output before emitting spawn begin/end events or attempting child thread
   creation.
+- 2026-05-18: Swift live app-server MultiAgentV2 tool argument decoding now
+  rejects unknown fields like Rust's `deny_unknown_fields` structs for
+  `spawn_agent`, `send_message`, `followup_task`, `wait_agent`, `close_agent`,
+  and `list_agents`, returning Rust-style `failed to parse function arguments`
+  messages before running tool side effects.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through

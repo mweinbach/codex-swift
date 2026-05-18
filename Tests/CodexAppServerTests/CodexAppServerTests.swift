@@ -12418,6 +12418,84 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(spawn?.runtimeEvents, [])
     }
 
+    func testLiveMultiAgentV2ToolsRejectUnknownArgumentFieldsLikeRust() async throws {
+        let rootThreadID = ThreadId()
+        let executor = AppServerLiveMultiAgentToolExecutor(
+            currentThreadID: rootThreadID,
+            currentSessionSource: .vscode,
+            stateStore: nil,
+            waitTimeouts: MultiAgentV2WaitTimeouts(config: MultiAgentV2Config()),
+            spawnAgent: { _ in
+                XCTFail("unknown spawn_agent fields should fail before spawning")
+                throw AppServerLiveMultiAgentToolError(message: "unexpected spawn")
+            },
+            isTurnRunning: { _ in false },
+            agentStatus: { _ in .completed(nil) },
+            agentLastTaskMessage: { _ in nil },
+            hasPendingMailboxItems: { _ in false },
+            waitForMailboxChange: { _, _ in false },
+            queueMailboxCommunications: { _, _ in
+                XCTFail("unknown message fields should fail before queuing mailbox mail")
+            },
+            recordAgentLastTaskMessage: { _, _ in },
+            submitPendingWorkTurnIfIdle: { _ in false },
+            closeAgentThreads: { _ in
+                XCTFail("unknown close_agent fields should fail before closing agents")
+            }
+        )
+
+        let cases: [(name: String, arguments: String, callID: String, expected: String)] = [
+            (
+                "spawn_agent",
+                #"{"message":"hello","task_name":"worker","extra":true}"#,
+                "call-spawn-extra",
+                "unknown field `extra`, expected `message`, `task_name`, `agent_type`, `model`, `reasoning_effort`, `service_tier`, `fork_turns`, or `fork_context`"
+            ),
+            (
+                "send_message",
+                #"{"target":"worker","message":"continue","interrupt":true}"#,
+                "call-send-extra",
+                "unknown field `interrupt`, expected `target` or `message`"
+            ),
+            (
+                "followup_task",
+                #"{"target":"worker","message":"continue","interrupt":true}"#,
+                "call-followup-extra",
+                "unknown field `interrupt`, expected `target` or `message`"
+            ),
+            (
+                "wait_agent",
+                #"{"timeout_ms":1000,"extra":true}"#,
+                "call-wait-extra",
+                "unknown field `extra`, expected `timeout_ms`"
+            ),
+            (
+                "close_agent",
+                #"{"target":"worker","extra":true}"#,
+                "call-close-extra",
+                "unknown field `extra`, expected `target`"
+            ),
+            (
+                "list_agents",
+                #"{"path_prefix":"/root","extra":true}"#,
+                "call-list-extra",
+                "unknown field `extra`, expected `path_prefix`"
+            )
+        ]
+
+        for testCase in cases {
+            let result = await executor.execute(.functionCall(
+                name: testCase.name,
+                arguments: testCase.arguments,
+                callID: testCase.callID
+            ))
+            let payload = try Self.functionOutputPayload(result, callID: testCase.callID)
+            XCTAssertEqual(payload.content, "failed to parse function arguments: \(testCase.expected)")
+            XCTAssertEqual(payload.success, false)
+            XCTAssertEqual(result?.runtimeEvents, [])
+        }
+    }
+
     func testLiveSpawnAgentValidatesRustRoleModelReasoningServiceTierAndDeveloperOverrides() async throws {
         let priorityTier = ModelServiceTier(
             id: ServiceTier.fast.requestValue,

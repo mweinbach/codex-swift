@@ -105,7 +105,11 @@ struct AppServerLiveMultiAgentToolExecutor {
         do {
             args = try JSONDecoder().decode(SpawnAgentToolArguments.self, from: Data(arguments.utf8))
         } catch {
-            return Self.output(callID: callID, content: "failed to parse spawn_agent arguments: \(error)", success: false)
+            return Self.output(
+                callID: callID,
+                content: "failed to parse function arguments: \(Self.toolArgumentParseDescription(error))",
+                success: false
+            )
         }
 
         let forkMode: LiveSpawnAgentForkMode
@@ -247,7 +251,11 @@ struct AppServerLiveMultiAgentToolExecutor {
         do {
             args = try JSONDecoder().decode(AgentMessageToolArguments.self, from: Data(arguments.utf8))
         } catch {
-            return Self.output(callID: callID, content: "failed to parse \(name) arguments: \(error)", success: false)
+            return Self.output(
+                callID: callID,
+                content: "failed to parse function arguments: \(Self.toolArgumentParseDescription(error))",
+                success: false
+            )
         }
 
         let prompt = args.message
@@ -315,7 +323,11 @@ struct AppServerLiveMultiAgentToolExecutor {
         do {
             args = try JSONDecoder().decode(WaitAgentToolArguments.self, from: Data(arguments.utf8))
         } catch {
-            return Self.output(callID: callID, content: "failed to parse wait_agent arguments: \(error)", success: false)
+            return Self.output(
+                callID: callID,
+                content: "failed to parse function arguments: \(Self.toolArgumentParseDescription(error))",
+                success: false
+            )
         }
 
         let timeoutMS: Int64
@@ -374,7 +386,11 @@ struct AppServerLiveMultiAgentToolExecutor {
         do {
             args = try JSONDecoder().decode(CloseAgentToolArguments.self, from: Data(arguments.utf8))
         } catch {
-            return Self.output(callID: callID, content: "failed to parse close_agent arguments: \(error)", success: false)
+            return Self.output(
+                callID: callID,
+                content: "failed to parse function arguments: \(Self.toolArgumentParseDescription(error))",
+                success: false
+            )
         }
 
         do {
@@ -446,7 +462,11 @@ struct AppServerLiveMultiAgentToolExecutor {
         do {
             args = try JSONDecoder().decode(ListAgentsToolArguments.self, from: Data(arguments.utf8))
         } catch {
-            return Self.output(callID: callID, content: "failed to parse list_agents arguments: \(error)", success: false)
+            return Self.output(
+                callID: callID,
+                content: "failed to parse function arguments: \(Self.toolArgumentParseDescription(error))",
+                success: false
+            )
         }
 
         do {
@@ -571,6 +591,20 @@ struct AppServerLiveMultiAgentToolExecutor {
                 content: "failed to encode list_agents result: \(error)",
                 success: false
             )
+        }
+    }
+
+    private static func toolArgumentParseDescription(_ error: Error) -> String {
+        switch error {
+        case DecodingError.dataCorrupted(let context):
+            return context.debugDescription
+        case DecodingError.keyNotFound(let key, _):
+            return "missing field `\(key.stringValue)`"
+        case DecodingError.typeMismatch(_, let context),
+             DecodingError.valueNotFound(_, let context):
+            return context.debugDescription
+        default:
+            return String(describing: error)
         }
     }
 }
@@ -870,7 +904,7 @@ private struct SpawnAgentToolArguments: Decodable {
     let forkTurns: String?
     let forkContext: Bool?
 
-    private enum CodingKeys: String, CodingKey {
+    private enum CodingKeys: String, CodingKey, CaseIterable {
         case message
         case taskName = "task_name"
         case agentType = "agent_type"
@@ -879,6 +913,23 @@ private struct SpawnAgentToolArguments: Decodable {
         case serviceTier = "service_tier"
         case forkTurns = "fork_turns"
         case forkContext = "fork_context"
+    }
+
+    init(from decoder: Decoder) throws {
+        try StrictToolArgumentFields.rejectUnknownFields(
+            in: decoder,
+            allowedKeys: Set(CodingKeys.allCases.map(\.stringValue)),
+            expected: "`message`, `task_name`, `agent_type`, `model`, `reasoning_effort`, `service_tier`, `fork_turns`, or `fork_context`"
+        )
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        message = try container.decode(String.self, forKey: .message)
+        taskName = try container.decode(String.self, forKey: .taskName)
+        agentType = try container.decodeIfPresent(String.self, forKey: .agentType)
+        model = try container.decodeIfPresent(String.self, forKey: .model)
+        reasoningEffort = try container.decodeIfPresent(ReasoningEffort.self, forKey: .reasoningEffort)
+        serviceTier = try container.decodeIfPresent(String.self, forKey: .serviceTier)
+        forkTurns = try container.decodeIfPresent(String.self, forKey: .forkTurns)
+        forkContext = try container.decodeIfPresent(Bool.self, forKey: .forkContext)
     }
 
     func resolvedForkMode() throws -> LiveSpawnAgentForkMode {
@@ -910,26 +961,108 @@ private struct SpawnAgentToolArguments: Decodable {
 private struct AgentMessageToolArguments: Decodable {
     let target: String
     let message: String
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case target
+        case message
+    }
+
+    init(from decoder: Decoder) throws {
+        try StrictToolArgumentFields.rejectUnknownFields(
+            in: decoder,
+            allowedKeys: Set(CodingKeys.allCases.map(\.stringValue)),
+            expected: "`target` or `message`"
+        )
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        target = try container.decode(String.self, forKey: .target)
+        message = try container.decode(String.self, forKey: .message)
+    }
 }
 
 private struct ListAgentsToolArguments: Decodable {
     let pathPrefix: String?
 
-    private enum CodingKeys: String, CodingKey {
+    private enum CodingKeys: String, CodingKey, CaseIterable {
         case pathPrefix = "path_prefix"
+    }
+
+    init(from decoder: Decoder) throws {
+        try StrictToolArgumentFields.rejectUnknownFields(
+            in: decoder,
+            allowedKeys: Set(CodingKeys.allCases.map(\.stringValue)),
+            expected: "`path_prefix`"
+        )
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        pathPrefix = try container.decodeIfPresent(String.self, forKey: .pathPrefix)
     }
 }
 
 private struct WaitAgentToolArguments: Decodable {
     let timeoutMS: Int64?
 
-    private enum CodingKeys: String, CodingKey {
+    private enum CodingKeys: String, CodingKey, CaseIterable {
         case timeoutMS = "timeout_ms"
+    }
+
+    init(from decoder: Decoder) throws {
+        try StrictToolArgumentFields.rejectUnknownFields(
+            in: decoder,
+            allowedKeys: Set(CodingKeys.allCases.map(\.stringValue)),
+            expected: "`timeout_ms`"
+        )
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        timeoutMS = try container.decodeIfPresent(Int64.self, forKey: .timeoutMS)
     }
 }
 
 private struct CloseAgentToolArguments: Decodable {
     let target: String
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case target
+    }
+
+    init(from decoder: Decoder) throws {
+        try StrictToolArgumentFields.rejectUnknownFields(
+            in: decoder,
+            allowedKeys: Set(CodingKeys.allCases.map(\.stringValue)),
+            expected: "`target`"
+        )
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        target = try container.decode(String.self, forKey: .target)
+    }
+}
+
+private enum StrictToolArgumentFields {
+    static func rejectUnknownFields(
+        in decoder: Decoder,
+        allowedKeys: Set<String>,
+        expected: String
+    ) throws {
+        let container = try decoder.container(keyedBy: DynamicCodingKey.self)
+        guard let unknown = container.allKeys.first(where: { !allowedKeys.contains($0.stringValue) }) else {
+            return
+        }
+        throw DecodingError.dataCorrupted(DecodingError.Context(
+            codingPath: decoder.codingPath,
+            debugDescription: "unknown field `\(unknown.stringValue)`, expected \(expected)"
+        ))
+    }
+}
+
+private struct DynamicCodingKey: CodingKey {
+    let stringValue: String
+    let intValue: Int?
+
+    init?(stringValue: String) {
+        self.stringValue = stringValue
+        self.intValue = nil
+    }
+
+    init?(intValue: Int) {
+        self.stringValue = "\(intValue)"
+        self.intValue = intValue
+    }
 }
 
 private struct WaitAgentToolResult: Encodable, Equatable {
