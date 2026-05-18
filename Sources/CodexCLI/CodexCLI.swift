@@ -8863,6 +8863,25 @@ public struct CodexCLI: Sendable {
         .failure(renderUnrecognizedSubcommandError(subcommand, usage: usage), 2)
     }
 
+    private func clapUnrecognizedSubcommandWithSuggestion<Success>(
+        _ subcommand: String,
+        suggestion: String,
+        usage: String
+    ) -> ParseResult<Success> {
+        .failure(
+            """
+            error: unrecognized subcommand '\(subcommand)'
+
+              tip: a similar subcommand exists: '\(suggestion)'
+
+            Usage: \(usage)
+
+            For more information, try '--help'.
+            """,
+            2
+        )
+    }
+
     private func emitParseFailure<Success>(_ result: ParseResult<Success>, stderr: (String) -> Void) -> Int32 {
         switch result {
         case .success:
@@ -9471,8 +9490,14 @@ public struct CodexCLI: Sendable {
             return parsePluginMarketplaceCommand(rest)
         case "remove":
             return parsePluginSelectionCommand(rest, commandName: "plugin remove", action: PluginCommandAction.remove)
+        case "install":
+            return clapUnrecognizedSubcommandWithSuggestion(
+                subcommand,
+                suggestion: "list",
+                usage: "codex plugin [OPTIONS] <COMMAND>"
+            )
         default:
-            return .failure("codex-swift: unsupported plugin subcommand: \(subcommand)", 64)
+            return clapUnrecognizedSubcommand(subcommand, usage: "codex plugin [OPTIONS] <COMMAND>")
         }
     }
 
@@ -9488,7 +9513,10 @@ public struct CodexCLI: Sendable {
 
         func markMarketplaceOption() -> ParseResult<Void> {
             guard !sawMarketplace else {
-                return .failure("codex-swift: duplicate option for command '\(commandName)': --marketplace", 64)
+                return clapDuplicateArgument(
+                    "--marketplace <MARKETPLACE>",
+                    usage: "codex \(commandName) [OPTIONS] <PLUGIN[@MARKETPLACE]>"
+                )
             }
             sawMarketplace = true
             return .success(())
@@ -9519,10 +9547,17 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command '\(commandName)': \(argument)", 64)
+                return clapUnexpectedArgument(
+                    argument,
+                    usage: "codex \(commandName) [OPTIONS] <PLUGIN[@MARKETPLACE]>",
+                    asValueTip: true
+                )
             }
             if plugin != nil {
-                return .failure("codex-swift: unexpected argument for command '\(commandName)': \(argument)", 64)
+                return clapUnexpectedArgument(
+                    argument,
+                    usage: "codex \(commandName) [OPTIONS] <PLUGIN[@MARKETPLACE]>"
+                )
             }
             plugin = argument
         }
@@ -9543,7 +9578,10 @@ public struct CodexCLI: Sendable {
 
         func markMarketplaceOption() -> ParseResult<Void> {
             guard !sawMarketplace else {
-                return .failure("codex-swift: duplicate option for command 'plugin list': --marketplace", 64)
+                return clapDuplicateArgument(
+                    "--marketplace <MARKETPLACE>",
+                    usage: "codex plugin list [OPTIONS]"
+                )
             }
             sawMarketplace = true
             return .success(())
@@ -9574,9 +9612,9 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'plugin list': \(argument)", 64)
+                return clapUnexpectedArgument(argument, usage: "codex plugin list [OPTIONS]")
             }
-            return .failure("codex-swift: unexpected argument for command 'plugin list': \(argument)", 64)
+            return clapUnexpectedArgument(argument, usage: "codex plugin list [OPTIONS]")
         }
 
         return .success(.list(marketplaceName: marketplaceName))
@@ -9597,7 +9635,7 @@ public struct CodexCLI: Sendable {
         case "remove":
             return parsePluginMarketplaceRemove(rest)
         default:
-            return .failure("codex-swift: unsupported plugin marketplace subcommand: \(subcommand)", 64)
+            return clapUnrecognizedSubcommand(subcommand, usage: "codex plugin marketplace [OPTIONS] <COMMAND>")
         }
     }
 
@@ -9610,7 +9648,10 @@ public struct CodexCLI: Sendable {
 
         func markRefOption() -> ParseResult<Void> {
             guard !sawRef else {
-                return .failure("codex-swift: duplicate option for command 'plugin marketplace add': --ref", 64)
+                return clapDuplicateArgument(
+                    "--ref <REF>",
+                    usage: "codex plugin marketplace add [OPTIONS] <SOURCE>"
+                )
             }
             sawRef = true
             return .success(())
@@ -9652,10 +9693,17 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'plugin marketplace add': \(argument)", 64)
+                return clapUnexpectedArgument(
+                    argument,
+                    usage: "codex plugin marketplace add [OPTIONS] <SOURCE>",
+                    asValueTip: true
+                )
             }
             if source != nil {
-                return .failure("codex-swift: unexpected argument for command 'plugin marketplace add': \(argument)", 64)
+                return clapUnexpectedArgument(
+                    argument,
+                    usage: "codex plugin marketplace add [OPTIONS] <SOURCE>"
+                )
             }
             source = argument
         }
@@ -9670,7 +9718,7 @@ public struct CodexCLI: Sendable {
         guard arguments.isEmpty else {
             let argument = arguments[0]
             if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'plugin marketplace list': \(argument)", 64)
+                return clapUnexpectedArgument(argument, usage: "codex plugin marketplace list [OPTIONS]")
             }
             return clapUnexpectedArgument(argument, usage: "codex plugin marketplace list [OPTIONS]")
         }
@@ -9681,10 +9729,17 @@ public struct CodexCLI: Sendable {
         var name: String?
         for argument in arguments {
             if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'plugin marketplace upgrade': \(argument)", 64)
+                return clapUnexpectedArgument(
+                    argument,
+                    usage: "codex plugin marketplace upgrade [OPTIONS] [MARKETPLACE_NAME]",
+                    asValueTip: true
+                )
             }
             if name != nil {
-                return .failure("codex-swift: unexpected argument for command 'plugin marketplace upgrade': \(argument)", 64)
+                return clapUnexpectedArgument(
+                    argument,
+                    usage: "codex plugin marketplace upgrade [OPTIONS] [MARKETPLACE_NAME]"
+                )
             }
             name = argument
         }
@@ -9695,10 +9750,17 @@ public struct CodexCLI: Sendable {
         var name: String?
         for argument in arguments {
             if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'plugin marketplace remove': \(argument)", 64)
+                return clapUnexpectedArgument(
+                    argument,
+                    usage: "codex plugin marketplace remove [OPTIONS] <MARKETPLACE_NAME>",
+                    asValueTip: true
+                )
             }
             if name != nil {
-                return .failure("codex-swift: unexpected argument for command 'plugin marketplace remove': \(argument)", 64)
+                return clapUnexpectedArgument(
+                    argument,
+                    usage: "codex plugin marketplace remove [OPTIONS] <MARKETPLACE_NAME>"
+                )
             }
             name = argument
         }

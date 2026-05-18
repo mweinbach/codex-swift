@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: tightened plugin CLI parse-failure parity for additional
+  `codex plugin` invalid forms. Swift now emits Rust/Clap exit-2 diagnostics
+  for unrecognized plugin subcommands, duplicate plugin options, plugin
+  selection extras, and plugin marketplace add/list/upgrade/remove argument
+  failures.
 - 2026-05-18: tightened MCP CLI parse-failure parity for additional `codex mcp`
   invalid forms. Swift now emits Rust/Clap exit-2 diagnostics for invalid
   `mcp get/remove/login/logout` trailing or flag-looking arguments and

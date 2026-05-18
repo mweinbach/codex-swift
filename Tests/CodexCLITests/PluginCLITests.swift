@@ -118,8 +118,16 @@ final class PluginCLITests: XCTestCase {
         let cases: [([String], Int32, String)] = [
             (
                 ["plugin", "install"],
-                64,
-                "codex-swift: unsupported plugin subcommand: install"
+                2,
+                """
+                error: unrecognized subcommand 'install'
+
+                  tip: a similar subcommand exists: 'list'
+
+                Usage: codex plugin [OPTIONS] <COMMAND>
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["plugin", "add"],
@@ -135,23 +143,47 @@ final class PluginCLITests: XCTestCase {
             ),
             (
                 ["plugin", "add", "weather", "--marketplace", "debug", "--marketplace=other"],
-                64,
-                "codex-swift: duplicate option for command 'plugin add': --marketplace"
+                2,
+                """
+                error: the argument '--marketplace <MARKETPLACE>' cannot be used multiple times
+
+                Usage: codex plugin add [OPTIONS] <PLUGIN[@MARKETPLACE]>
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["plugin", "add", "weather", "extra"],
-                64,
-                "codex-swift: unexpected argument for command 'plugin add': extra"
+                2,
+                """
+                error: unexpected argument 'extra' found
+
+                Usage: codex plugin add [OPTIONS] <PLUGIN[@MARKETPLACE]>
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["plugin", "list", "extra"],
-                64,
-                "codex-swift: unexpected argument for command 'plugin list': extra"
+                2,
+                """
+                error: unexpected argument 'extra' found
+
+                Usage: codex plugin list [OPTIONS]
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["plugin", "list", "--marketplace", "debug", "-m", "other"],
-                64,
-                "codex-swift: duplicate option for command 'plugin list': --marketplace"
+                2,
+                """
+                error: the argument '--marketplace <MARKETPLACE>' cannot be used multiple times
+
+                Usage: codex plugin list [OPTIONS]
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["plugin", "remove"],
@@ -179,18 +211,38 @@ final class PluginCLITests: XCTestCase {
             ),
             (
                 ["plugin", "marketplace", "add", "owner/repo", "extra"],
-                64,
-                "codex-swift: unexpected argument for command 'plugin marketplace add': extra"
+                2,
+                """
+                error: unexpected argument 'extra' found
+
+                Usage: codex plugin marketplace add [OPTIONS] <SOURCE>
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["plugin", "marketplace", "add", "--ref", "main", "owner/repo", "--ref=next"],
-                64,
-                "codex-swift: duplicate option for command 'plugin marketplace add': --ref"
+                2,
+                """
+                error: the argument '--ref <REF>' cannot be used multiple times
+
+                Usage: codex plugin marketplace add [OPTIONS] <SOURCE>
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["plugin", "marketplace", "upgrade", "--all"],
-                64,
-                "codex-swift: unsupported option for command 'plugin marketplace upgrade': --all"
+                2,
+                """
+                error: unexpected argument '--all' found
+
+                  tip: to pass '--all' as a value, use '-- --all'
+
+                Usage: codex plugin marketplace upgrade [OPTIONS] [MARKETPLACE_NAME]
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["plugin", "marketplace", "list", "extra"],
@@ -204,6 +256,17 @@ final class PluginCLITests: XCTestCase {
                 """
             ),
             (
+                ["plugin", "marketplace", "upgrade", "debug", "extra"],
+                2,
+                """
+                error: unexpected argument 'extra' found
+
+                Usage: codex plugin marketplace upgrade [OPTIONS] [MARKETPLACE_NAME]
+
+                For more information, try '--help'.
+                """
+            ),
+            (
                 ["plugin", "marketplace", "remove"],
                 2,
                 """
@@ -211,6 +274,19 @@ final class PluginCLITests: XCTestCase {
                   <MARKETPLACE_NAME>
 
                 Usage: codex plugin marketplace remove <MARKETPLACE_NAME>
+
+                For more information, try '--help'.
+                """
+            ),
+            (
+                ["plugin", "marketplace", "remove", "--bad"],
+                2,
+                """
+                error: unexpected argument '--bad' found
+
+                  tip: to pass '--bad' as a value, use '-- --bad'
+
+                Usage: codex plugin marketplace remove [OPTIONS] <MARKETPLACE_NAME>
 
                 For more information, try '--help'.
                 """
