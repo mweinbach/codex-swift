@@ -27,6 +27,8 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
     private let configuration: CodexAppServerConfiguration
     private let state = AppServerLiveRuntimeState()
     private let commandAuthRunner = ProviderAuthCommandRunner()
+    private static let interruptedUserGuidance = "The user interrupted the previous turn on purpose. Any running unified exec processes may still be running in the background. If any tools/commands were aborted, they may have partially executed."
+    private static let interruptedDeveloperGuidance = "The previous turn was interrupted on purpose. Any running unified exec processes may still be running in the background. If any tools/commands were aborted, they may have partially executed."
     private static let defaultAgentNicknameCandidates = [
         "Euclid",
         "Archimedes",
@@ -162,17 +164,13 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             }
             if let turnID = cancelledTurnID {
                 Task { [state] in
-                    if await state.markAbortEmitted(threadID: threadID, turnID: turnID) {
-                        await state.emit(
-                            threadID: threadID,
-                            turnID: turnID,
-                            event: .turnAborted(TurnAbortedEvent(
-                                turnID: turnID,
-                                reason: .interrupted,
-                                completedAt: AppServerLiveRuntimeClock.millisecondsSinceEpoch()
-                            ))
-                        )
-                    }
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                    await state.emitInterruptedAbortIfNeeded(
+                        threadID: threadID,
+                        turnID: turnID,
+                        completedAt: AppServerLiveRuntimeClock.millisecondsSinceEpoch(),
+                        durationMilliseconds: nil
+                    )
                 }
             }
             return UUID().uuidString.lowercased()
@@ -468,6 +466,12 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         var goalContinuationCollaborationModeKind: CollaborationModeKind?
         do {
             let setup = try await prepareTurn(submission)
+            await state.recordInterruptMarkerContext(
+                threadID: submission.threadID,
+                turnID: submission.turnID,
+                marker: Self.interruptedTurnHistoryMarker(settings: setup.settings),
+                recorder: setup.recorder
+            )
             await state.recordSessionSource(threadID: submission.threadID, source: setup.sessionSource)
             goalContinuationFeatures = setup.settings.features
             goalContinuationCollaborationModeKind = setup.collaborationModeKind
@@ -551,6 +555,9 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 prompt: prompt,
                 goalAccounting: turnGoalAccounting
             )
+            if Task.isCancelled {
+                throw CancellationError()
+            }
             try setup.recorder?.recordItems(loopResult.transcriptItems.map(RolloutRecordItem.responseItem))
             for item in loopResult.transcriptItems {
                 if Task.isCancelled {
@@ -599,18 +606,12 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                     ))
                 )
             }
-            if await state.markAbortEmitted(threadID: submission.threadID, turnID: submission.turnID) {
-                await state.emit(
-                    threadID: submission.threadID,
-                    turnID: submission.turnID,
-                    event: .turnAborted(TurnAbortedEvent(
-                        turnID: submission.turnID,
-                        reason: .interrupted,
-                        completedAt: completedAt,
-                        durationMilliseconds: completedAt - startedAt
-                    ))
-                )
-            }
+            await state.emitInterruptedAbortIfNeeded(
+                threadID: submission.threadID,
+                turnID: submission.turnID,
+                completedAt: completedAt,
+                durationMilliseconds: completedAt - startedAt
+            )
         } catch {
             await state.emit(
                 threadID: submission.threadID,
@@ -2180,6 +2181,19 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         return depth + 1
     }
 
+    private static func interruptedTurnHistoryMarker(settings: CodexRuntimeConfig) -> ResponseItem? {
+        guard settings.agents.interruptMessageEnabled else {
+            return nil
+        }
+        let multiAgentV2Enabled = settings.features.isEnabled(.multiAgentV2)
+        let guidance = multiAgentV2Enabled ? interruptedDeveloperGuidance : interruptedUserGuidance
+        let role = multiAgentV2Enabled ? "developer" : "user"
+        return .message(
+            role: role,
+            content: [.inputText(text: "<turn_aborted>\n\(guidance)\n</turn_aborted>")]
+        )
+    }
+
     private static func configuredMultiAgentV2UsageHintTexts(settings: CodexRuntimeConfig) -> [String] {
         guard settings.features.isEnabled(.multiAgentV2) else {
             return []
@@ -2290,6 +2304,7 @@ private actor AppServerLiveRuntimeState {
     private var usedAgentNicknames: Set<String> = []
     private var nicknameResetCount: Int = 0
     private var emittedAbortKeys: Set<String> = []
+    private var interruptMarkerContexts: [String: InterruptMarkerContext] = [:]
 
     func setEventSink(_ sink: AppServerRuntimeEventSink?) {
         eventSink = sink
@@ -2330,6 +2345,51 @@ private actor AppServerLiveRuntimeState {
         activePendingInput.removeValue(forKey: threadID)
         mailboxDeliveryPhases[threadID] = .currentTurn
         return true
+    }
+
+    func recordInterruptMarkerContext(
+        threadID: String,
+        turnID: String,
+        marker: ResponseItem?,
+        recorder: RolloutRecorder?
+    ) {
+        interruptMarkerContexts[Self.abortKey(threadID: threadID, turnID: turnID)] = InterruptMarkerContext(
+            marker: marker,
+            recorder: recorder
+        )
+    }
+
+    func emitInterruptedAbortIfNeeded(
+        threadID: String,
+        turnID: String,
+        completedAt: Int64,
+        durationMilliseconds: Int64?
+    ) async {
+        guard markAbortEmitted(threadID: threadID, turnID: turnID) else {
+            return
+        }
+        let abortKey = Self.abortKey(threadID: threadID, turnID: turnID)
+        let abortedEvent = TurnAbortedEvent(
+            turnID: turnID,
+            reason: .interrupted,
+            completedAt: completedAt,
+            durationMilliseconds: durationMilliseconds
+        )
+        if let context = interruptMarkerContexts.removeValue(forKey: abortKey),
+           let recorder = context.recorder {
+            var items: [RolloutRecordItem] = []
+            if let marker = context.marker {
+                items.append(.responseItem(marker))
+            }
+            items.append(.eventMsg(.turnAborted(abortedEvent)))
+            try? recorder.recordItems(items)
+            try? context.recorder?.flush()
+        }
+        await emit(
+            threadID: threadID,
+            turnID: turnID,
+            event: .turnAborted(abortedEvent)
+        )
     }
 
     func isTurnRunning(threadID: String) -> Bool {
@@ -2753,6 +2813,11 @@ private actor AppServerLiveRuntimeState {
     private struct RunningTurn {
         let turnID: String
         let task: Task<Void, Never>
+    }
+
+    private struct InterruptMarkerContext {
+        let marker: ResponseItem?
+        let recorder: RolloutRecorder?
     }
 
     private struct PendingDynamicTool {

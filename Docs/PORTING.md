@@ -1009,6 +1009,12 @@ Recent upstream audit checkpoint:
   active turns, so idle mailbox mail remains immediately drainable while
   in-flight turns can still defer late mailbox updates to the next turn and
   reopen delivery after steer/tool-call input.
+- 2026-05-18: Swift live app-server interrupt persistence now mirrors Rust's
+  interrupted-turn history marker from `codex-rs/core/src/tasks/mod.rs`.
+  Interrupted live turns record the model-visible `<turn_aborted>` marker before
+  the persisted `turn_aborted` event, use the MultiAgentV2 developer-role
+  guidance when that feature is active, and honor `[agents].interrupt_message =
+  false` by skipping the marker.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through

@@ -12401,6 +12401,35 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(InterAgentCommunication.fromMessageContent(content), mail)
     }
 
+    func testLiveRuntimeInterruptedTurnPersistsRustMarkerBeforeAbort() async throws {
+        try await assertLiveRuntimeInterruptedTurnMarker(
+            extraConfig: "",
+            expectedRole: "user",
+            expectedGuidance: "The user interrupted the previous turn on purpose. Any running unified exec processes may still be running in the background. If any tools/commands were aborted, they may have partially executed."
+        )
+    }
+
+    func testLiveRuntimeInterruptedTurnUsesDeveloperMarkerForMultiAgentV2AndSkipsWhenDisabled() async throws {
+        try await assertLiveRuntimeInterruptedTurnMarker(
+            extraConfig: """
+
+            [features.multi_agent_v2]
+            enabled = true
+            """,
+            expectedRole: "developer",
+            expectedGuidance: "The previous turn was interrupted on purpose. Any running unified exec processes may still be running in the background. If any tools/commands were aborted, they may have partially executed."
+        )
+        try await assertLiveRuntimeInterruptedTurnMarker(
+            extraConfig: """
+
+            [agents]
+            interrupt_message = false
+            """,
+            expectedRole: nil,
+            expectedGuidance: nil
+        )
+    }
+
     func testLiveMultiAgentMessageToolsQueueMailboxLikeRustAgentControl() async throws {
         let temp = try TemporaryDirectory()
         let stateStore = try SQLiteAgentGraphStore(databaseURL: temp.url.appendingPathComponent("state.sqlite3"))
@@ -39069,6 +39098,105 @@ private final class FeaturedPluginIDsTransport: @unchecked Sendable {
             statusCode: 200,
             body: Data(#"["linear@openai-curated"]"#.utf8)
         )
+    }
+}
+
+private extension CodexAppServerTests {
+    func assertLiveRuntimeInterruptedTurnMarker(
+        extraConfig: String,
+        expectedRole: String?,
+        expectedGuidance: String?
+    ) async throws {
+        let temp = try TemporaryDirectory()
+        let server = try AppServerResponsesRequestCaptureServer(blockResponseUntilReleased: true)
+        defer {
+            server.releaseResponse()
+            server.stop()
+        }
+        try """
+        model = "gpt-5.5"
+        model_provider = "mock_provider"
+
+        [model_providers.mock_provider]
+        name = "mock_provider"
+        base_url = "\(server.baseURL)"
+        wire_api = "responses"
+        requires_openai_auth = false
+        \(extraConfig)
+        """.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T08-10-00",
+            timestamp: "2025-01-06T08:10:00Z",
+            preview: "interrupted marker",
+            provider: "mock_provider",
+            cwd: temp.url.path
+        )
+        let manager = AppServerLiveRuntimeManager(
+            configuration: testConfiguration(codexHome: temp.url, requiresOpenAIAuth: false)
+        )
+        let capture = AppServerRuntimeEventCapture()
+        manager.setEventSink { threadID, turnID, event in
+            await capture.append(threadID: threadID, turnID: turnID, event: event)
+        }
+        defer {
+            manager.shutdown()
+        }
+
+        let op = Op.userInput(items: [.text("start an interruptible live turn")])
+        let turnID = try manager.submitCoreOp(requestID: .integer(930), threadID: threadID, op: op)
+        _ = try manager.submitLiveRuntime(AppServerLiveRuntimeSubmission(
+            requestID: .integer(930),
+            threadID: threadID,
+            turnID: turnID,
+            op: op
+        ))
+        _ = try server.waitForRequestBody()
+        _ = try manager.submitCoreOp(requestID: .integer(931), threadID: threadID, op: .interrupt)
+        server.releaseResponse()
+        let events = try await capture.waitForEvents(count: 3)
+        XCTAssertTrue(events.contains { entry in
+            if case let .turnAborted(event) = entry.event {
+                return event.turnID == turnID && event.reason == .interrupted
+            }
+            return false
+        })
+
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        guard case let .resumed(history) = try RolloutRecorder.getRolloutHistory(
+            path: URL(fileURLWithPath: rolloutPath)
+        ) else {
+            return XCTFail("expected interrupted rollout history")
+        }
+        let abortIndex = try XCTUnwrap(history.history.firstIndex { item in
+            if case let .eventMsg(.turnAborted(event)) = item {
+                return event.turnID == turnID && event.reason == .interrupted
+            }
+            return false
+        })
+        let markerIndex = history.history.firstIndex { item in
+            guard case let .responseItem(.message(_, role, content, _)) = item,
+                  let expectedRole,
+                  role == expectedRole,
+                  content == [.inputText(text: "<turn_aborted>\n\(expectedGuidance ?? "")\n</turn_aborted>")]
+            else {
+                return false
+            }
+            return true
+        }
+        if expectedRole == nil {
+            XCTAssertNil(markerIndex)
+        } else {
+            let markerIndex = try XCTUnwrap(markerIndex)
+            XCTAssertLessThan(markerIndex, abortIndex)
+        }
     }
 }
 
