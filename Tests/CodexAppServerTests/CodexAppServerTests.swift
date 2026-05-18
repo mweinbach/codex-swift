@@ -5003,6 +5003,92 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(turnContext.effort, .high)
     }
 
+    func testLiveRuntimeTurnPreparationReusesRolloutRuntimePermissionsLikeRustSpawnAgents() async throws {
+        let temp = try TemporaryDirectory()
+        try """
+        model = "gpt-test"
+        model_provider = "mock_provider"
+        approval_policy = "never"
+        sandbox_mode = "danger-full-access"
+
+        [model_providers.mock_provider]
+        name = "mock_provider"
+        base_url = "http://127.0.0.1:1/api/codex"
+        wire_api = "responses"
+        requires_openai_auth = false
+        """.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T13-10-00",
+            timestamp: "2025-01-05T13:10:00Z",
+            preview: "Saved user message",
+            provider: "mock_provider",
+            cwd: temp.url.path
+        )
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        let expectedSandbox = SandboxPolicy.readOnlyWithNetworkAccess
+        let expectedPermissionProfile = PermissionProfile.fromLegacySandboxPolicyForCwd(
+            expectedSandbox,
+            cwd: temp.url.path
+        )
+        try appendRolloutItems(
+            to: rolloutPath,
+            timestamp: "2025-01-05T13:10:01Z",
+            items: [.turnContext(TurnContextItem(
+                cwd: temp.url.path,
+                approvalPolicy: .onRequest,
+                sandboxPolicy: expectedSandbox,
+                permissionProfile: expectedPermissionProfile,
+                model: "gpt-test",
+                summary: .auto
+            ))]
+        )
+
+        let manager = AppServerLiveRuntimeManager(configuration: testConfiguration(
+            codexHome: temp.url,
+            requiresOpenAIAuth: false
+        ))
+        let capture = AppServerRuntimeEventCapture()
+        manager.setEventSink { threadID, turnID, event in
+            await capture.append(threadID: threadID, turnID: turnID, event: event)
+        }
+        defer {
+            manager.shutdown()
+        }
+        let op = Op.userInput(items: [.text("Continue with inherited runtime permissions")])
+
+        let turnID = try manager.submitCoreOp(requestID: .integer(17), threadID: threadID, op: op)
+        _ = try manager.submitLiveRuntime(AppServerLiveRuntimeSubmission(
+            requestID: .integer(17),
+            threadID: threadID,
+            turnID: turnID,
+            op: op
+        ))
+        _ = try await capture.waitForEvents(count: 2)
+
+        guard case let .resumed(history) = try RolloutRecorder.getRolloutHistory(
+            path: URL(fileURLWithPath: rolloutPath)
+        ) else {
+            return XCTFail("expected resumed rollout history")
+        }
+        let turnContext = try XCTUnwrap(history.history.compactMap { item -> TurnContextItem? in
+            if case let .turnContext(context) = item {
+                return context
+            }
+            return nil
+        }.last)
+        XCTAssertEqual(turnContext.approvalPolicy, .onRequest)
+        XCTAssertEqual(turnContext.sandboxPolicy, expectedSandbox)
+        XCTAssertEqual(turnContext.permissionProfile, expectedPermissionProfile)
+    }
+
     func testLiveRuntimeSubmissionServiceTierOverrideReachesResponsesRequestLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let server = try AppServerResponsesRequestCaptureServer()

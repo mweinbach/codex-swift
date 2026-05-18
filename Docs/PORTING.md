@@ -901,6 +901,13 @@ Recent upstream audit checkpoint:
   preparation so the spawned agent's actual Responses request uses the child
   tier rather than the parent's or global default. Full Rust `AgentControl`
   parity and broader child config application remain pending.
+- 2026-05-18: Swift live app-server turn preparation now reuses the latest
+  rollout `turn_context` approval policy, sandbox policy, and permission
+  profile when a follow-on live turn does not provide explicit overrides. Live
+  `spawn_agent` child rollouts also persist the parent runtime permission
+  profile in their initial `turn_context`, matching Rust's
+  `apply_spawn_agent_runtime_overrides` requirement that role config does not
+  stale the child's runtime sandbox/approval state.
 - 2026-05-18: Swift live app-server MultiAgentV2 `spawn_agent` now reserves
   Rust-style spawned-agent nicknames for live child threads, using the upstream
   default nickname pool plus role-specific `nickname_candidates`, persists the

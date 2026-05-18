@@ -682,12 +682,6 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             environment: configuration.environment
         )
         settings.modelProvider = summary.modelProvider
-        if let requestedApprovalPolicy = turnInput.approvalPolicy {
-            settings.approvalPolicy = requestedApprovalPolicy
-        }
-        if let requestedSandbox = turnInput.sandboxPolicy {
-            settings.sandboxPolicy = requestedSandbox
-        }
         if let requestedModel = turnInput.model {
             settings.model = requestedModel
         }
@@ -718,6 +712,18 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 environment: configuration.environment
             )
         }
+        let approvalPolicy = turnInput.approvalPolicy
+            ?? summary.approvalPolicy
+            ?? settings.approvalPolicy
+            ?? .unlessTrusted
+        let sandboxPolicy = turnInput.sandboxPolicy ?? summary.sandboxPolicy ?? settings.legacySandboxPolicy()
+        let permissionProfile = turnInput.permissionProfile
+            ?? (turnInput.sandboxPolicy == nil ? summary.permissionProfile : nil)
+            ?? settings.permissionProfile
+            ?? PermissionProfile.fromLegacySandboxPolicyForCwd(sandboxPolicy, cwd: cwd.path)
+        settings.approvalPolicy = approvalPolicy
+        settings.sandboxPolicy = sandboxPolicy
+        settings.permissionProfile = permissionProfile
 
         try await CodexAuthStorage.enforceLoginRestrictions(
             codexHome: configuration.codexHome,
@@ -747,11 +753,6 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             model: model,
             configOverrides: settings.modelFamilyConfigOverrides
         )
-        let approvalPolicy = turnInput.approvalPolicy ?? settings.approvalPolicy ?? .unlessTrusted
-        let sandboxPolicy = turnInput.sandboxPolicy ?? settings.legacySandboxPolicy()
-        let permissionProfile = turnInput.permissionProfile
-            ?? settings.permissionProfile
-            ?? PermissionProfile.fromLegacySandboxPolicyForCwd(sandboxPolicy, cwd: cwd.path)
         let shell = ShellResolver.defaultUserShell()
         let turnEnvironmentSelections = turnInput.environments ?? []
         let mcpToolInfos = Self.mcpToolInfos(from: submission.mcpTools)
@@ -804,6 +805,7 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 cwd: cwd.path,
                 approvalPolicy: approvalPolicy,
                 sandboxPolicy: sandboxPolicy,
+                permissionProfile: permissionProfile,
                 model: model,
                 collaborationMode: turnInput.collaborationMode,
                 effort: settings.modelReasoningEffort ?? modelFamily.defaultReasoningEffort,
@@ -966,6 +968,7 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 cwd: setup.cwd.path,
                 approvalPolicy: setup.approvalPolicy,
                 sandboxPolicy: setup.sandboxPolicy,
+                permissionProfile: setup.permissionProfile,
                 model: request.model ?? setup.model,
                 effort: request.reasoningEffort ?? setup.settings.modelReasoningEffort ?? setup.modelFamily.defaultReasoningEffort,
                 summary: setup.settings.modelReasoningSummary
@@ -1061,6 +1064,9 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 ?? (setup.modelFamily.supportsReasoningSummaries ? .auto : .none)
             let childApprovalPolicy = spawnConfig?.approvalPolicy ?? setup.approvalPolicy
             let childSandboxPolicy = spawnConfig?.sandboxPolicy ?? setup.sandboxPolicy
+            let childPermissionProfile = childSandboxPolicy == setup.sandboxPolicy
+                ? setup.permissionProfile
+                : PermissionProfile.fromLegacySandboxPolicyForCwd(childSandboxPolicy, cwd: childCwd.path)
             let childRollout = try RolloutRecorder.create(
                 codexHome: configuration.codexHome,
                 cwd: childCwd,
@@ -1081,6 +1087,7 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                     cwd: childCwd.path,
                     approvalPolicy: childApprovalPolicy,
                     sandboxPolicy: childSandboxPolicy,
+                    permissionProfile: childPermissionProfile,
                     model: childModel,
                     effort: childReasoningEffort,
                     summary: childReasoningSummary,
@@ -2801,12 +2808,18 @@ private struct LiveRolloutSummary {
     let dynamicTools: [DynamicToolSpec]
     let sessionSource: SessionSource
     let collaborationModeKind: CollaborationModeKind?
+    let approvalPolicy: AskForApproval?
+    let sandboxPolicy: SandboxPolicy?
+    let permissionProfile: PermissionProfile?
 
     init(items: [RolloutRecordItem], defaultProvider: String) throws {
         var sessionMeta: SessionMeta?
         var latestCwd: String?
         var latestModel: String?
         var latestCollaborationModeKind: CollaborationModeKind?
+        var latestApprovalPolicy: AskForApproval?
+        var latestSandboxPolicy: SandboxPolicy?
+        var latestPermissionProfile: PermissionProfile?
         for item in items {
             switch item {
             case let .sessionMeta(line):
@@ -2817,6 +2830,9 @@ private struct LiveRolloutSummary {
                 latestCwd = context.cwd
                 latestModel = context.model
                 latestCollaborationModeKind = context.collaborationMode?.mode
+                latestApprovalPolicy = context.approvalPolicy
+                latestSandboxPolicy = context.sandboxPolicy
+                latestPermissionProfile = context.permissionProfile
             case .responseItem, .compacted, .eventMsg:
                 continue
             }
@@ -2831,6 +2847,9 @@ private struct LiveRolloutSummary {
         self.dynamicTools = sessionMeta.dynamicTools ?? []
         self.sessionSource = sessionMeta.source
         self.collaborationModeKind = latestCollaborationModeKind
+        self.approvalPolicy = latestApprovalPolicy
+        self.sandboxPolicy = latestSandboxPolicy
+        self.permissionProfile = latestPermissionProfile
     }
 }
 
