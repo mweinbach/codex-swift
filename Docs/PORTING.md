@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: matched Rust's `ThreadWatchManager` status precedence from
+  `codex-rs/app-server/src/thread_status.rs`. Swift live app-server thread
+  snapshots now clear the active-turn marker on system errors and report
+  pending approval/user-input flags as active if a later request arrives after a
+  system error, matching Rust's `loaded_thread_status` ordering.
 - 2026-05-17: matched Rust's live app-server pending request status release
   from `codex-rs/app-server/src/thread_status.rs` and
   `codex-rs/app-server/src/bespoke_event_handling.rs`. Swift now drops

@@ -9537,6 +9537,47 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(status["type"] as? String, "idle")
     }
 
+    func testThreadReadReportsPendingRequestActiveAfterSystemErrorLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-05T12-00-00",
+            timestamp: "2025-01-05T12:00:00Z",
+            preview: "Saved user message",
+            provider: "mock_provider"
+        )
+        let processor = try initializedProcessor(configuration: testConfiguration(codexHome: temp.url))
+        _ = try decode(processor.processLine(Data(#"{"id":1,"method":"thread/resume","params":{"threadId":"\#(threadID)"}}"#.utf8)))
+
+        await processor.handleRuntimeEvent(
+            threadID: threadID,
+            turnID: "turn-1",
+            event: .error(ErrorEvent(message: "runtime failed", codexErrorInfo: .badRequest))
+        )
+        var read = try decode(processor.processLine(Data(#"{"id":2,"method":"thread/read","params":{"threadId":"\#(threadID)"}}"#.utf8)))
+        var result = try XCTUnwrap(read["result"] as? [String: Any])
+        var thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        var status = try XCTUnwrap(thread["status"] as? [String: Any])
+        XCTAssertEqual(status["type"] as? String, "systemError")
+
+        await processor.handleRuntimeEvent(
+            threadID: threadID,
+            turnID: "turn-1",
+            event: .elicitationRequest(ElicitationRequestEvent(
+                serverName: "docs",
+                id: .string("approval-1"),
+                message: "approve tool call"
+            ))
+        )
+
+        read = try decode(processor.processLine(Data(#"{"id":3,"method":"thread/read","params":{"threadId":"\#(threadID)"}}"#.utf8)))
+        result = try XCTUnwrap(read["result"] as? [String: Any])
+        thread = try XCTUnwrap(result["thread"] as? [String: Any])
+        status = try XCTUnwrap(thread["status"] as? [String: Any])
+        XCTAssertEqual(status["type"] as? String, "active")
+        XCTAssertEqual(status["activeFlags"] as? [String], ["waitingOnApproval"])
+    }
+
     func testThreadResumeOverlaysLiveStartedTurnLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let processor = try initializedProcessor(

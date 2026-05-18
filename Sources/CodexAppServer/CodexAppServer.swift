@@ -27267,11 +27267,14 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         guard isThreadLoaded(threadID) else {
             return nil
         }
+        let flags = runtimeActiveFlags(threadID: threadID)
+        if !flags.isEmpty {
+            return CodexAppServer.activeThreadStatus(activeFlags: flags)
+        }
         if runtimeSystemErrorThreadIDs.contains(threadID) {
             return CodexAppServer.systemErrorThreadStatus()
         }
-        let flags = runtimeActiveFlags(threadID: threadID)
-        if activeTurnIDs[threadID] != nil || !flags.isEmpty {
+        if activeTurnIDs[threadID] != nil {
             return CodexAppServer.activeThreadStatus(activeFlags: flags)
         }
         return CodexAppServer.idleThreadStatus()
@@ -27998,6 +28001,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                 )
                 runtimeTurnErrorInfos[threadID, default: [:]][turnID] = event.codexErrorInfo ?? .other
             }
+            activeTurnIDs.removeValue(forKey: threadID)
             runtimeSystemErrorThreadIDs.insert(threadID)
             notifications = projected
         case let .tokenCount(event):
