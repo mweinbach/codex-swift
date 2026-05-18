@@ -651,6 +651,8 @@ final class AgentGraphStoreTests: XCTestCase {
             agentPath: childPath
         )
         XCTAssertEqual(directChild, childThreadID)
+        let globallyResolvedChild = try await store.findThreadByAgentPath(agentPath: childPath)
+        XCTAssertEqual(globallyResolvedChild, childThreadID)
 
         let directGrandchild = try await store.findThreadSpawnChild(
             parentThreadID: rootThreadID,
@@ -669,6 +671,8 @@ final class AgentGraphStoreTests: XCTestCase {
             agentPath: missingPath
         )
         XCTAssertNil(missing)
+        let globallyMissing = try await store.findThreadByAgentPath(agentPath: missingPath)
+        XCTAssertNil(globallyMissing)
     }
 
     func testSQLiteStoreFindByAgentPathReportsDuplicateCanonicalPath() async throws {
@@ -700,6 +704,16 @@ final class AgentGraphStoreTests: XCTestCase {
                 agentPath: duplicatePath
             )
             XCTFail("duplicate canonical path lookup should fail")
+        } catch let error as AgentGraphStoreError {
+            XCTAssertEqual(
+                error,
+                .internal(message: "multiple agents found for canonical path `/root/worker`")
+            )
+        }
+
+        do {
+            _ = try await store.findThreadByAgentPath(agentPath: duplicatePath)
+            XCTFail("duplicate global canonical path lookup should fail")
         } catch let error as AgentGraphStoreError {
             XCTAssertEqual(
                 error,

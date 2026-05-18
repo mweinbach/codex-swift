@@ -811,6 +811,15 @@ Recent upstream audit checkpoint:
   Responses loop observes raw completed output items before draining pending
   input, preserving the Rust boundary even when streaming aggregation rewrites
   assistant message phases. Full `AgentControl` routing remains pending.
+- 2026-05-18: Swift live app-server tool execution now routes Rust
+  MultiAgentV2 `send_message` and `followup_task` calls into the live mailbox
+  path. The new executor mirrors Rust's `agent_resolver` thread-id fast path and
+  root-relative `AgentPath::resolve` behavior, resolves canonical agent paths
+  through the SQLite thread graph, emits collab-agent interaction begin/end
+  runtime events, queues queue-only mail, and asks the pending-work launcher to
+  wake trigger-turn followups. `spawn_agent`, `wait_agent`, `close_agent`,
+  `list_agents`, richer live status tracking, and full ThreadManager-backed
+  `AgentControl` remain pending.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through

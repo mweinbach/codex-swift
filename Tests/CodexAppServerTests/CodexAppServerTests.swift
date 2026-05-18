@@ -11999,6 +11999,101 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(reopenedInput, [mail.toResponseInputItem()])
     }
 
+    func testLiveMultiAgentMessageToolsQueueMailboxLikeRustAgentControl() async throws {
+        let temp = try TemporaryDirectory()
+        let stateStore = try SQLiteAgentGraphStore(databaseURL: temp.url.appendingPathComponent("state.sqlite3"))
+        let rootThreadID = ThreadId()
+        let workerThreadID = ThreadId()
+        let workerPath = try AgentPath.root.join("worker")
+        try await stateStore.upsertThread(ThreadMetadata(
+            id: workerThreadID,
+            rolloutPath: temp.url.appendingPathComponent("worker.jsonl").path,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_001),
+            source: "vscode",
+            agentNickname: "Bernoulli",
+            agentRole: "explorer",
+            agentPath: workerPath.description,
+            modelProvider: "openai",
+            cwd: temp.url.path,
+            cliVersion: "0.0.0-test",
+            title: "worker",
+            sandboxPolicy: "danger-full-access",
+            approvalMode: "never",
+            tokensUsed: 0
+        ))
+        let capture = LiveMultiAgentToolCapture()
+        let executor = AppServerLiveMultiAgentToolExecutor(
+            currentThreadID: rootThreadID,
+            currentSessionSource: .vscode,
+            stateStore: stateStore,
+            isTurnRunning: { _ in false },
+            queueMailboxCommunications: { threadID, communications in
+                await capture.queue(threadID: threadID, communications: communications)
+            },
+            submitPendingWorkTurnIfIdle: { threadID in
+                await capture.submitPendingWork(threadID: threadID)
+                return true
+            }
+        )
+
+        let queueOnly = await executor.execute(.functionCall(
+            name: "send_message",
+            arguments: #"{"target":"worker","message":"queued hello"}"#,
+            callID: "call-send"
+        ))
+        let queueOnlyPayload = try Self.functionOutputPayload(queueOnly, callID: "call-send")
+        XCTAssertEqual(queueOnlyPayload.content, "")
+        XCTAssertEqual(queueOnlyPayload.success, true)
+        let queuedAfterSend = await capture.queuedCommunications(threadID: workerThreadID.description)
+        XCTAssertEqual(
+            queuedAfterSend,
+            [InterAgentCommunication(
+                author: .root,
+                recipient: workerPath,
+                content: "queued hello",
+                triggerTurn: false
+            )]
+        )
+        let pendingAfterSend = await capture.pendingWorkThreadIDs()
+        XCTAssertEqual(pendingAfterSend, [])
+
+        let followup = await executor.execute(.functionCall(
+            name: "followup_task",
+            arguments: #"{"target":"/root/worker","message":"wake up"}"#,
+            callID: "call-followup"
+        ))
+        let followupPayload = try Self.functionOutputPayload(followup, callID: "call-followup")
+        XCTAssertEqual(followupPayload.content, "")
+        XCTAssertEqual(followupPayload.success, true)
+        let queuedAfterFollowup = await capture.queuedCommunications(threadID: workerThreadID.description)
+        XCTAssertEqual(
+            queuedAfterFollowup.last,
+            InterAgentCommunication(
+                author: .root,
+                recipient: workerPath,
+                content: "wake up",
+                triggerTurn: true
+            )
+        )
+        let pendingAfterFollowup = await capture.pendingWorkThreadIDs()
+        XCTAssertEqual(pendingAfterFollowup, [workerThreadID.description])
+        let runtimeEvents = try XCTUnwrap(followup?.runtimeEvents)
+        XCTAssertEqual(runtimeEvents.count, 2)
+        guard case let .collabAgentInteractionBegin(begin) = runtimeEvents[0] else {
+            return XCTFail("expected collab interaction begin event")
+        }
+        XCTAssertEqual(begin.senderThreadID, rootThreadID)
+        XCTAssertEqual(begin.receiverThreadID, workerThreadID)
+        XCTAssertEqual(begin.prompt, "wake up")
+        guard case let .collabAgentInteractionEnd(end) = runtimeEvents[1] else {
+            return XCTFail("expected collab interaction end event")
+        }
+        XCTAssertEqual(end.receiverAgentNickname, "Bernoulli")
+        XCTAssertEqual(end.receiverAgentRole, "explorer")
+        XCTAssertEqual(end.status, .completed(nil))
+    }
+
     func testLiveRuntimeInterAgentCommunicationOpQueuesAndTriggersPendingWorkLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let threadID = ConversationId().description
@@ -37239,6 +37334,49 @@ private final class AppServerRecordingWindowsSandboxSetupRunner: @unchecked Send
         lock.withLock {
             recordedRequests.append(request)
         }
+    }
+}
+
+private extension CodexAppServerTests {
+    static func functionOutputPayload(
+        _ result: NonInteractiveExec.FunctionCallExecutionResult?,
+        callID: String
+    ) throws -> FunctionCallOutputPayload {
+        let result = try XCTUnwrap(result)
+        guard case let .functionCallOutput(outputCallID, payload) = result.output else {
+            throw TestFailure("expected function_call_output")
+        }
+        XCTAssertEqual(outputCallID, callID)
+        return payload
+    }
+}
+
+private actor LiveMultiAgentToolCapture {
+    private var queued: [String: [InterAgentCommunication]] = [:]
+    private var pendingWork: [String] = []
+
+    func queue(threadID: String, communications: [InterAgentCommunication]) {
+        queued[threadID, default: []].append(contentsOf: communications)
+    }
+
+    func queuedCommunications(threadID: String) -> [InterAgentCommunication] {
+        queued[threadID] ?? []
+    }
+
+    func submitPendingWork(threadID: String) {
+        pendingWork.append(threadID)
+    }
+
+    func pendingWorkThreadIDs() -> [String] {
+        pendingWork
+    }
+}
+
+private struct TestFailure: Error, CustomStringConvertible {
+    let description: String
+
+    init(_ description: String) {
+        self.description = description
     }
 }
 

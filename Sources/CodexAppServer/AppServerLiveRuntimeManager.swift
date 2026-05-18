@@ -604,7 +604,7 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         let configuredTools = NonInteractiveExec.toolSpecs(
             modelFamily: modelFamily,
             config: settings,
-            sessionSource: configuration.sessionSource,
+            sessionSource: summary.sessionSource,
             environmentMode: .fromCount(turnEnvironmentSelections.count),
             dynamicTools: summary.dynamicTools,
             mcpToolInfos: mcpToolInfos,
@@ -693,6 +693,7 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             prompt: prompt,
             mcpToolInfos: mcpToolInfos,
             dynamicTools: summary.dynamicTools,
+            sessionSource: summary.sessionSource,
             collaborationModeKind: turnInput.collaborationMode?.mode ?? summary.collaborationModeKind,
             userPromptText: turnInput.promptText,
             outputSchema: turnInput.outputSchema,
@@ -728,6 +729,7 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             approvalPolicy: setup.approvalPolicy
         )
         let planMode = setup.collaborationModeKind == .plan
+        let sessionSource = setup.sessionSource
         let toolRouter = NonInteractiveExec.ToolRouter(
             hookContext: stopHookContext,
             cwd: setup.cwd,
@@ -755,7 +757,35 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             windowsSandboxLevel: setup.settings.windowsSandboxLevel,
             mcpToolInfos: setup.mcpToolInfos,
             dynamicTools: setup.dynamicTools,
-            registeredToolExecutor: submission.extensionRegisteredToolExecutor,
+            registeredToolExecutor: { [self, configuration, state, sessionSource, submission] item in
+                guard let currentThreadID = try? ThreadId(string: submission.threadID) else {
+                    return await submission.extensionRegisteredToolExecutor?(item)
+                }
+                let multiAgentExecutor = AppServerLiveMultiAgentToolExecutor(
+                    currentThreadID: currentThreadID,
+                    currentSessionSource: sessionSource,
+                    stateStore: configuration.stateStore,
+                    isTurnRunning: { threadID in
+                        await state.isTurnRunning(threadID: threadID)
+                    },
+                    queueMailboxCommunications: { threadID, communications in
+                        await state.queueMailboxCommunications(
+                            threadID: threadID,
+                            communications: communications
+                        )
+                    },
+                    submitPendingWorkTurnIfIdle: { threadID in
+                        return await self.submitPendingWorkTurnIfIdle(
+                            threadID: threadID,
+                            prototype: submission
+                        )
+                    }
+                )
+                if let result = await multiAgentExecutor.execute(item) {
+                    return result
+                }
+                return await submission.extensionRegisteredToolExecutor?(item)
+            },
             approvalHandler: { [state, submission] request in
                 await Self.resolveApprovalRequest(
                     request,
@@ -1936,6 +1966,7 @@ private struct PreparedLiveTurn {
     let prompt: Prompt
     let mcpToolInfos: [McpToolInfo]
     let dynamicTools: [DynamicToolSpec]
+    let sessionSource: SessionSource
     let collaborationModeKind: CollaborationModeKind?
     let userPromptText: String
     let outputSchema: JSONValue?
@@ -1956,6 +1987,7 @@ private struct LiveRolloutSummary {
     let model: String?
     let modelProvider: String
     let dynamicTools: [DynamicToolSpec]
+    let sessionSource: SessionSource
     let collaborationModeKind: CollaborationModeKind?
 
     init(items: [RolloutRecordItem], defaultProvider: String) throws {
@@ -1985,6 +2017,7 @@ private struct LiveRolloutSummary {
         self.model = latestModel
         self.modelProvider = sessionMeta.modelProvider ?? defaultProvider
         self.dynamicTools = sessionMeta.dynamicTools ?? []
+        self.sessionSource = sessionMeta.source
         self.collaborationModeKind = latestCollaborationModeKind
     }
 }

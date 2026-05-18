@@ -516,6 +516,21 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         }
     }
 
+    public func findThreadByAgentPath(agentPath: AgentPath) async throws -> ThreadId? {
+        try oneThreadID(
+            query:
+            """
+            SELECT threads.id
+            FROM threads
+            WHERE threads.agent_path = ?
+            ORDER BY threads.id
+            LIMIT 2
+            """,
+            bindings: [agentPath.description],
+            agentPath: agentPath
+        )
+    }
+
     public func upsertThread(_ metadata: ThreadMetadata) async throws {
         try await upsertThread(metadata, creationMemoryMode: nil)
     }
