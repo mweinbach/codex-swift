@@ -5898,15 +5898,19 @@ public struct CodexCLI: Sendable {
         var ignoreRules = false
         var configProfileV2: String?
         var removedFullAuto = false
+        var removedFullAutoOption: String?
         var strictConfig = strictConfigEnabled(in: rootArguments)
         var dangerouslyBypassApprovalsAndSandbox = rootDangerouslyBypassBeforeExec(in: rootArguments)
+        var dangerouslyBypassApprovalsAndSandboxOption: String?
+        var permissionConflictOrder: [String] = []
         var bypassHookTrust = rootBypassHookTrustBeforeExec(in: rootArguments)
         var actionTokens: [String] = []
         var index = 0
+        let usage = "codex exec [OPTIONS] [PROMPT]\n       codex exec [OPTIONS] <COMMAND> [ARGS]"
 
         func value(after option: String, at index: Int) -> ParseResult<String> {
             guard index + 1 < arguments.count else {
-                return .failure("codex-swift: missing value for \(option)", 64)
+                return clapExecMissingValue(option: option)
             }
             return .success(arguments[index + 1])
         }
@@ -5955,6 +5959,8 @@ public struct CodexCLI: Sendable {
                 }
             case "--full-auto":
                 removedFullAuto = true
+                removedFullAutoOption = "--full-auto"
+                permissionConflictOrder.append("--full-auto")
                 index += 1
                 continue
             case "--strict-config":
@@ -5963,6 +5969,8 @@ public struct CodexCLI: Sendable {
                 continue
             case "--dangerously-bypass-approvals-and-sandbox", "--yolo":
                 dangerouslyBypassApprovalsAndSandbox = true
+                dangerouslyBypassApprovalsAndSandboxOption = "--dangerously-bypass-approvals-and-sandbox"
+                permissionConflictOrder.append("--dangerously-bypass-approvals-and-sandbox")
                 index += 1
                 continue
             case "--dangerously-bypass-hook-trust":
@@ -6039,7 +6047,7 @@ public struct CodexCLI: Sendable {
 
             if execOptionConsumesValue(argument) {
                 guard index + 1 < arguments.count else {
-                    return .failure("codex-swift: missing value for \(argument)", 64)
+                    return clapExecMissingValue(option: argument)
                 }
                 index += 2
                 continue
@@ -6049,7 +6057,7 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'exec': \(argument)", 64)
+                return clapUnexpectedArgument(argument, usage: usage, asValueTip: true)
             }
 
             actionTokens = Array(arguments.dropFirst(index))
@@ -6075,8 +6083,12 @@ public struct CodexCLI: Sendable {
                 ignoreUserConfig = ignoreUserConfig || parsed.ignoreUserConfig
                 ignoreRules = ignoreRules || parsed.ignoreRules
                 removedFullAuto = removedFullAuto || parsed.removedFullAuto
+                removedFullAutoOption = removedFullAutoOption ?? parsed.removedFullAutoOption
                 dangerouslyBypassApprovalsAndSandbox =
                     dangerouslyBypassApprovalsAndSandbox || parsed.dangerouslyBypassApprovalsAndSandbox
+                dangerouslyBypassApprovalsAndSandboxOption =
+                    dangerouslyBypassApprovalsAndSandboxOption ?? parsed.dangerouslyBypassApprovalsAndSandboxOption
+                permissionConflictOrder.append(contentsOf: parsed.permissionConflictOrder)
                 bypassHookTrust = bypassHookTrust || parsed.bypassHookTrust
                 action = .resume(parsed.command)
             case let .failure(message, exitCode):
@@ -6093,8 +6105,12 @@ public struct CodexCLI: Sendable {
                 ignoreUserConfig = ignoreUserConfig || parsed.ignoreUserConfig
                 ignoreRules = ignoreRules || parsed.ignoreRules
                 removedFullAuto = removedFullAuto || parsed.removedFullAuto
+                removedFullAutoOption = removedFullAutoOption ?? parsed.removedFullAutoOption
                 dangerouslyBypassApprovalsAndSandbox =
                     dangerouslyBypassApprovalsAndSandbox || parsed.dangerouslyBypassApprovalsAndSandbox
+                dangerouslyBypassApprovalsAndSandboxOption =
+                    dangerouslyBypassApprovalsAndSandboxOption ?? parsed.dangerouslyBypassApprovalsAndSandboxOption
+                permissionConflictOrder.append(contentsOf: parsed.permissionConflictOrder)
                 bypassHookTrust = bypassHookTrust || parsed.bypassHookTrust
                 action = .resume(parsed.command)
             case let .failure(message, exitCode):
@@ -6109,10 +6125,17 @@ public struct CodexCLI: Sendable {
             }
         }
 
-        if removedFullAuto, dangerouslyBypassApprovalsAndSandbox {
-            return .failure(
-                "codex-swift: argument conflict for command 'exec': --full-auto conflicts with --dangerously-bypass-approvals-and-sandbox",
-                64
+        if removedFullAuto, dangerouslyBypassApprovalsAndSandboxOption != nil {
+            let first = permissionConflictOrder.first ?? removedFullAutoOption ?? "--full-auto"
+            let second = permissionConflictOrder.dropFirst().first(where: {
+                ($0 == "--full-auto" && first != "--full-auto")
+                    || ($0 == "--dangerously-bypass-approvals-and-sandbox"
+                        && first != "--dangerously-bypass-approvals-and-sandbox")
+            }) ?? (first == "--full-auto" ? "--dangerously-bypass-approvals-and-sandbox" : "--full-auto")
+            return clapArgumentConflict(
+                first,
+                conflictingArgument: second,
+                usage: usage
             )
         }
 
@@ -6147,7 +6170,10 @@ public struct CodexCLI: Sendable {
             return .success(nil)
         }
         guard tokens.count == 1 else {
-            return .failure("codex-swift: unexpected argument for command 'exec': \(tokens[1])", 64)
+            return clapUnexpectedArgument(
+                tokens[1],
+                usage: "codex exec [OPTIONS] [PROMPT]\n       codex exec [OPTIONS] <COMMAND> [ARGS]"
+            )
         }
         return .success(tokens[0])
     }
@@ -6162,7 +6188,10 @@ public struct CodexCLI: Sendable {
         let ignoreUserConfig: Bool
         let ignoreRules: Bool
         let removedFullAuto: Bool
+        let removedFullAutoOption: String?
         let dangerouslyBypassApprovalsAndSandbox: Bool
+        let dangerouslyBypassApprovalsAndSandboxOption: String?
+        let permissionConflictOrder: [String]
         let bypassHookTrust: Bool
     }
 
@@ -6180,7 +6209,10 @@ public struct CodexCLI: Sendable {
         var ignoreUserConfig = false
         var ignoreRules = false
         var removedFullAuto = false
+        var removedFullAutoOption: String?
         var dangerouslyBypassApprovalsAndSandbox = false
+        var dangerouslyBypassApprovalsAndSandboxOption: String?
+        var permissionConflictOrder: [String] = []
         var bypassHookTrust = false
         var positionals: [String] = []
         var index = 0
@@ -6231,11 +6263,15 @@ public struct CodexCLI: Sendable {
             }
             if argument == "--full-auto" {
                 removedFullAuto = true
+                removedFullAutoOption = "--full-auto"
+                permissionConflictOrder.append("--full-auto")
                 index += 1
                 continue
             }
             if argument == "--dangerously-bypass-approvals-and-sandbox" || argument == "--yolo" {
                 dangerouslyBypassApprovalsAndSandbox = true
+                dangerouslyBypassApprovalsAndSandboxOption = "--dangerously-bypass-approvals-and-sandbox"
+                permissionConflictOrder.append("--dangerously-bypass-approvals-and-sandbox")
                 index += 1
                 continue
             }
@@ -6330,7 +6366,10 @@ public struct CodexCLI: Sendable {
             ignoreUserConfig: ignoreUserConfig,
             ignoreRules: ignoreRules,
             removedFullAuto: removedFullAuto,
+            removedFullAutoOption: removedFullAutoOption,
             dangerouslyBypassApprovalsAndSandbox: dangerouslyBypassApprovalsAndSandbox,
+            dangerouslyBypassApprovalsAndSandboxOption: dangerouslyBypassApprovalsAndSandboxOption,
+            permissionConflictOrder: permissionConflictOrder,
             bypassHookTrust: bypassHookTrust
         ))
     }
@@ -6339,6 +6378,81 @@ public struct CodexCLI: Sendable {
         value
             .split(separator: ",", omittingEmptySubsequences: true)
             .map(String.init)
+    }
+
+    private func clapExecMissingValue<Success>(option: String) -> ParseResult<Success> {
+        let displayOption = execOptionDisplayName(option)
+        if displayOption == "--color <COLOR>" {
+            return .failure(
+                """
+                error: a value is required for '--color <COLOR>' but none was supplied
+                  [possible values: always, never, auto]
+
+                For more information, try '--help'.
+                """,
+                2
+            )
+        }
+        return clapMissingValue(
+            option: execOptionName(option),
+            valueDisplay: execOptionValueDisplay(option)
+        )
+    }
+
+    private func execOptionDisplayName(_ option: String) -> String {
+        "\(execOptionName(option)) \(execOptionValueDisplay(option))"
+    }
+
+    private func execOptionName(_ option: String) -> String {
+        switch option {
+        case "-m":
+            return "--model"
+        case "-p":
+            return "--profile"
+        case "-s":
+            return "--sandbox"
+        case "-a":
+            return "--ask-for-approval"
+        case "-C":
+            return "--cd"
+        case "-c":
+            return "--config"
+        case "-o":
+            return "--output-last-message"
+        case "-i":
+            return "--image"
+        default:
+            return option
+        }
+    }
+
+    private func execOptionValueDisplay(_ option: String) -> String {
+        switch execOptionName(option) {
+        case "--model":
+            return "<MODEL>"
+        case "--local-provider":
+            return "<LOCAL_PROVIDER>"
+        case "--profile", "--profile-v2":
+            return "<PROFILE>"
+        case "--sandbox":
+            return "<SANDBOX_MODE>"
+        case "--ask-for-approval":
+            return "<APPROVAL_POLICY>"
+        case "--cd":
+            return "<DIR>"
+        case "--add-dir":
+            return "<DIR>"
+        case "--config":
+            return "<key=value>"
+        case "--color":
+            return "<COLOR>"
+        case "--output-schema", "--output-last-message":
+            return "<FILE>"
+        case "--image":
+            return "<FILE>..."
+        default:
+            return "<VALUE>"
+        }
     }
 
     private func execOptionConsumesValue(_ argument: String) -> Bool {

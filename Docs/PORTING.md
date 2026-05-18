@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: tightened `codex exec` CLI parse-failure parity for the
+  command-local preflight surface. Swift now emits Rust/Clap exit-2 diagnostics
+  for missing exec option values, unexpected flags and extra prompt arguments,
+  and `--full-auto` / `--dangerously-bypass-approvals-and-sandbox` conflicts
+  before invoking the non-interactive runner.
 - 2026-05-18: tightened `exec-server` CLI parse-failure parity for command-local
   invalid forms. Swift now emits Rust/Clap exit-2 diagnostics for missing
   exec-server option values, duplicate single-value options, `--listen` /

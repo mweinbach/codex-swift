@@ -113,6 +113,26 @@ final class CommandSurfaceCLITests: XCTestCase {
         XCTAssertEqual(receivedRequest?.options.removedFullAuto, true)
     }
 
+    func testRunAsyncExecAllowsRootDangerousBypassWithCommandLocalFullAutoLikeRust() async {
+        var stderr: [String] = []
+        var receivedRequest: CodexCLI.ExecCommandRequest?
+
+        let exitCode = await CodexCLI().runAsync(
+            arguments: ["--dangerously-bypass-approvals-and-sandbox", "exec", "--full-auto", "summarize"],
+            stdout: { _ in XCTFail("stdout should not be written") },
+            stderr: { stderr.append($0) },
+            execRunner: { request in
+                receivedRequest = request
+                return CodexCLI.CommandExecutionResult(exitCode: 0)
+            }
+        )
+
+        XCTAssertEqual(exitCode, 0)
+        XCTAssertEqual(stderr, [CodexCLI.ExecCommandOptions.removedFullAutoWarningMessage])
+        XCTAssertEqual(receivedRequest?.action, .run(prompt: "summarize"))
+        XCTAssertEqual(receivedRequest?.options.removedFullAuto, true)
+    }
+
     func testRunAsyncExecResumeFullAutoReportsRustMigrationWarning() async {
         var stderr: [String] = []
         var receivedRequest: CodexCLI.ExecCommandRequest?
@@ -140,7 +160,6 @@ final class CommandSurfaceCLITests: XCTestCase {
     func testRunAsyncExecFullAutoRejectsNoSandboxConflictLikeRust() async {
         let cases = [
             ["exec", "--full-auto", "--dangerously-bypass-approvals-and-sandbox", "summarize"],
-            ["--dangerously-bypass-approvals-and-sandbox", "exec", "--full-auto", "summarize"],
             ["exec", "resume", "--last", "--full-auto", "--yolo", "follow up"]
         ]
 
@@ -156,9 +175,16 @@ final class CommandSurfaceCLITests: XCTestCase {
                 }
             )
 
-            XCTAssertEqual(exitCode, 64, "\(arguments)")
+            XCTAssertEqual(exitCode, 2, "\(arguments)")
             XCTAssertEqual(stderr, [
-                "codex-swift: argument conflict for command 'exec': --full-auto conflicts with --dangerously-bypass-approvals-and-sandbox"
+                """
+                error: the argument '--full-auto' cannot be used with '--dangerously-bypass-approvals-and-sandbox'
+
+                Usage: codex exec [OPTIONS] [PROMPT]
+                       codex exec [OPTIONS] <COMMAND> [ARGS]
+
+                For more information, try '--help'.
+                """
             ], "\(arguments)")
         }
     }
@@ -397,13 +423,36 @@ final class CommandSurfaceCLITests: XCTestCase {
     }
 
     func testRunAsyncExecRejectsInvalidPreflightArgumentsBeforeRunner() async {
-        let cases: [([String], String)] = [
-            (["exec", "--output-schema"], "codex-swift: missing value for --output-schema"),
-            (["exec", "ship", "extra"], "codex-swift: unexpected argument for command 'exec': extra"),
-            (["exec", "resume", "--bogus"], "codex-swift: unsupported option for command 'exec resume': --bogus")
+        let cases: [([String], String, Int32)] = [
+            (
+                ["exec", "--output-schema"],
+                """
+                error: a value is required for '--output-schema <FILE>' but none was supplied
+
+                For more information, try '--help'.
+                """,
+                2
+            ),
+            (
+                ["exec", "ship", "extra"],
+                """
+                error: unexpected argument 'extra' found
+
+                Usage: codex exec [OPTIONS] [PROMPT]
+                       codex exec [OPTIONS] <COMMAND> [ARGS]
+
+                For more information, try '--help'.
+                """,
+                2
+            ),
+            (
+                ["exec", "resume", "--bogus"],
+                "codex-swift: unsupported option for command 'exec resume': --bogus",
+                64
+            )
         ]
 
-        for (arguments, expectedMessage) in cases {
+        for (arguments, expectedMessage, expectedExitCode) in cases {
             var stderr: [String] = []
             let exitCode = await CodexCLI().runAsync(
                 arguments: arguments,
@@ -415,7 +464,7 @@ final class CommandSurfaceCLITests: XCTestCase {
                 }
             )
 
-            XCTAssertEqual(exitCode, 64, "\(arguments)")
+            XCTAssertEqual(exitCode, expectedExitCode, "\(arguments)")
             XCTAssertEqual(stderr, [expectedMessage], "\(arguments)")
         }
     }
