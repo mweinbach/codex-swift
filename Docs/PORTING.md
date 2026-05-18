@@ -972,7 +972,9 @@ Recent upstream audit checkpoint:
   initial child `turn_context`; role `compact_prompt` is also parsed from the
   config layer and applied to the child runtime's compact prompt, and role
   `model_provider` now selects the child live runtime provider when the role
-  points at an already-loaded provider, while role
+  points at an already-loaded provider, role `profile` can now source the
+  child model/provider/reasoning/verbosity/service-tier layer from an existing
+  profile, and active-profile `model_provider` rewrites are honored, while role
   `model_context_window`, `model_auto_compact_token_limit`, and
   `tool_output_token_limit` now feed the child model-family construction,
   matching Rust's post-argument role config layering for context-window and

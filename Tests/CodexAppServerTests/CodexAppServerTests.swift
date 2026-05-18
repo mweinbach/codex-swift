@@ -13431,6 +13431,84 @@ final class CodexAppServerTests: XCTestCase {
             toolOutputTokenLimit: 12_000
         ))
 
+        let profileRoleFile = temp.url.appendingPathComponent("profile-reviewer.toml", isDirectory: false)
+        try """
+        name = "profile-reviewer"
+        description = "Review with profile"
+        developer_instructions = "Review from profile"
+        profile = "role-profile"
+        """.write(to: profileRoleFile, atomically: true, encoding: .utf8)
+        let profileRoleConfig = ConfigValue.table([
+            "profiles": .table([
+                "role-profile": .table([
+                    "model": .string("gpt-5.4"),
+                    "model_provider": .string("profile-provider"),
+                    "model_reasoning_effort": .string("high"),
+                    "model_reasoning_summary": .string("detailed"),
+                    "model_verbosity": .string("high"),
+                    "service_tier": .string("priority")
+                ])
+            ])
+        ])
+        let profileRoleOverrides = try LiveSpawnAgentOverrideResolver.roleConfigOverrides(
+            configuredAgentRoles: [
+                "profile-reviewer": AgentRoleConfig(
+                    description: "Review with profile",
+                    configFile: profileRoleFile.path
+                )
+            ],
+            effectiveConfig: profileRoleConfig
+        )
+        let profileRoleResolver = LiveSpawnAgentOverrideResolver(
+            availableModels: [gpt54, codex53],
+            currentModel: "gpt-5.3-codex",
+            currentModelDefaultReasoningEffort: .low,
+            parentServiceTier: nil,
+            configuredAgentRoles: ["profile-reviewer"],
+            roleConfigOverrides: profileRoleOverrides
+        )
+        let profileRoleResolved = try profileRoleResolver.resolve(LiveSpawnAgentOverrideRequest(
+            agentType: "profile-reviewer",
+            model: nil,
+            reasoningEffort: nil,
+            serviceTier: nil,
+            forkMode: .none
+        ))
+        XCTAssertEqual(profileRoleResolved, LiveSpawnAgentResolvedOverrides(
+            agentType: "profile-reviewer",
+            model: "gpt-5.4",
+            reasoningEffort: .high,
+            serviceTier: "priority",
+            developerInstructions: "Review from profile",
+            reasoningSummary: .detailed,
+            verbosity: .high,
+            compactPrompt: nil,
+            modelProvider: "profile-provider",
+            modelContextWindow: nil,
+            modelAutoCompactTokenLimit: nil,
+            toolOutputTokenLimit: nil
+        ))
+
+        let activeProfileRoleFile = temp.url.appendingPathComponent("active-profile-reviewer.toml", isDirectory: false)
+        try """
+        name = "active-profile-reviewer"
+        description = "Update active profile"
+        developer_instructions = "Stay focused"
+
+        [profiles.base-profile]
+        model_provider = "updated-provider"
+        """.write(to: activeProfileRoleFile, atomically: true, encoding: .utf8)
+        let activeProfileOverrides = try LiveSpawnAgentOverrideResolver.roleConfigOverrides(
+            configuredAgentRoles: [
+                "active-profile-reviewer": AgentRoleConfig(
+                    description: "Update active profile",
+                    configFile: activeProfileRoleFile.path
+                )
+            ],
+            activeProfile: "base-profile"
+        )
+        XCTAssertEqual(activeProfileOverrides["active-profile-reviewer"]?.modelProvider, "updated-provider")
+
         let badRoleFile = temp.url.appendingPathComponent("bad-reviewer.toml", isDirectory: false)
         try """
         name = "bad-reviewer"

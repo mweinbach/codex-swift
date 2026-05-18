@@ -875,6 +875,8 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
 
     static func roleConfigOverrides(
         configuredAgentRoles: [String: AgentRoleConfig],
+        effectiveConfig: ConfigValue? = nil,
+        activeProfile: String? = nil,
         fileManager: FileManager = .default
     ) throws -> [String: LiveSpawnAgentRoleConfigOverrides] {
         var overrides: [String: LiveSpawnAgentRoleConfigOverrides] = [:]
@@ -894,22 +896,40 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
             guard case let .table(table) = configValue else {
                 throw roleUnavailableError()
             }
-            overrides[roleName] = try roleConfigOverrides(from: table)
+            overrides[roleName] = try roleConfigOverrides(
+                from: table,
+                effectiveConfig: effectiveConfig,
+                activeProfile: activeProfile
+            )
         }
         return overrides
     }
 
-    private static func roleConfigOverrides(from table: [String: ConfigValue]) throws -> LiveSpawnAgentRoleConfigOverrides {
+    private static func roleConfigOverrides(
+        from table: [String: ConfigValue],
+        effectiveConfig: ConfigValue? = nil,
+        activeProfile: String? = nil
+    ) throws -> LiveSpawnAgentRoleConfigOverrides {
         do {
+            let profile = try selectedRoleProfile(in: table, effectiveConfig: effectiveConfig)
+            let activeProfileProviderUpdate = try activeProfileProviderUpdate(
+                in: table,
+                activeProfile: activeProfile
+            )
             return LiveSpawnAgentRoleConfigOverrides(
-                model: try optionalString(table["model"]),
-                reasoningEffort: try optionalReasoningEffort(table["model_reasoning_effort"]),
-                serviceTier: try optionalString(table["service_tier"]),
+                model: try optionalString(table["model"]) ?? optionalString(profile?["model"]),
+                reasoningEffort: try optionalReasoningEffort(table["model_reasoning_effort"])
+                    ?? optionalReasoningEffort(profile?["model_reasoning_effort"]),
+                serviceTier: try optionalString(table["service_tier"]) ?? optionalString(profile?["service_tier"]),
                 developerInstructions: try optionalString(table["developer_instructions"]),
-                reasoningSummary: try optionalReasoningSummary(table["model_reasoning_summary"]),
-                verbosity: try optionalVerbosity(table["model_verbosity"]),
+                reasoningSummary: try optionalReasoningSummary(table["model_reasoning_summary"])
+                    ?? optionalReasoningSummary(profile?["model_reasoning_summary"]),
+                verbosity: try optionalVerbosity(table["model_verbosity"])
+                    ?? optionalVerbosity(profile?["model_verbosity"]),
                 compactPrompt: try optionalString(table["compact_prompt"]),
-                modelProvider: try optionalString(table["model_provider"]),
+                modelProvider: try optionalString(table["model_provider"])
+                    ?? optionalString(profile?["model_provider"])
+                    ?? activeProfileProviderUpdate,
                 modelContextWindow: try optionalInt64(table["model_context_window"]),
                 modelAutoCompactTokenLimit: try optionalInt64(table["model_auto_compact_token_limit"]),
                 toolOutputTokenLimit: try optionalNonNegativeInt(table["tool_output_token_limit"])
@@ -917,6 +937,46 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
         } catch {
             throw roleUnavailableError()
         }
+    }
+
+    private static func selectedRoleProfile(
+        in table: [String: ConfigValue],
+        effectiveConfig: ConfigValue?
+    ) throws -> [String: ConfigValue]? {
+        guard let profileName = try optionalString(table["profile"]) else {
+            return nil
+        }
+        var mergedConfig = effectiveConfig ?? .table([:])
+        mergedConfig.merge(overlay: .table(table))
+        guard case let .table(root) = mergedConfig,
+              let profiles = configTable(root["profiles"]),
+              let profile = configTable(profiles[profileName])
+        else {
+            throw roleUnavailableError()
+        }
+        return profile
+    }
+
+    private static func activeProfileProviderUpdate(
+        in table: [String: ConfigValue],
+        activeProfile: String?
+    ) throws -> String? {
+        guard table["profile"] == nil,
+              table["model_provider"] == nil,
+              let activeProfile,
+              let profiles = configTable(table["profiles"]),
+              let profile = configTable(profiles[activeProfile])
+        else {
+            return nil
+        }
+        return try optionalString(profile["model_provider"])
+    }
+
+    private static func configTable(_ value: ConfigValue?) -> [String: ConfigValue]? {
+        guard case let .table(table)? = value else {
+            return nil
+        }
+        return table
     }
 
     private static func optionalString(_ value: ConfigValue?) throws -> String? {

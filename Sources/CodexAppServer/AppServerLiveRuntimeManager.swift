@@ -1377,8 +1377,20 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                         } else {
                             selectedAgentRoles = [:]
                         }
+                        let effectiveConfig = selectedAgentRoles.isEmpty
+                            ? nil
+                            : try CodexConfigLayerLoader.loadConfigLayerStack(
+                                codexHome: configuration.codexHome,
+                                cwd: setup.cwd,
+                                cliOverrides: configuration.cliConfigOverrides,
+                                threadConfigSources: configuration.threadConfigSources,
+                                overrides: configuration.configLayerOverrides,
+                                environment: configuration.environment
+                            ).effectiveConfig()
                         let roleConfigOverrides = try LiveSpawnAgentOverrideResolver.roleConfigOverrides(
-                            configuredAgentRoles: selectedAgentRoles
+                            configuredAgentRoles: selectedAgentRoles,
+                            effectiveConfig: effectiveConfig,
+                            activeProfile: setup.settings.activeProfile
                         )
                         let resolver = LiveSpawnAgentOverrideResolver(
                             availableModels: Self.liveSpawnAgentAvailableModels(
