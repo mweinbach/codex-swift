@@ -227,7 +227,9 @@ final class RuntimeOracleParityTests: XCTestCase {
             ["debug", "models", "--help"],
             ["debug", "app-server", "--help"],
             ["debug", "app-server", "send-message-v2", "--help"],
-            ["debug", "prompt-input", "--help"]
+            ["debug", "prompt-input", "--help"],
+            ["debug", "trace-reduce", "--help"],
+            ["debug", "clear-memories", "--help"]
         ]
 
         for arguments in commands {
@@ -299,9 +301,11 @@ final class RuntimeOracleParityTests: XCTestCase {
             ["app-server", "daemon", "disable-remote-control", "--help"],
             ["app-server", "daemon", "stop", "--help"],
             ["app-server", "daemon", "version", "--help"],
+            ["app-server", "daemon", "pid-update-loop", "--help"],
             ["app-server", "proxy", "--help"],
             ["app-server", "generate-ts", "--help"],
-            ["app-server", "generate-json-schema", "--help"]
+            ["app-server", "generate-json-schema", "--help"],
+            ["app-server", "generate-internal-json-schema", "--help"]
         ]
 
         for arguments in commands {

@@ -2261,6 +2261,33 @@ public struct CodexCLI: Sendable {
               -h, --help
                       Print help (see a summary with '-h')
             """
+        case "generate-internal-json-schema":
+            return """
+            [internal] Generate internal JSON Schema artifacts for Codex tooling
+
+            Usage: codex app-server generate-internal-json-schema [OPTIONS] --out <DIR>
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+              -o, --out <DIR>
+                      Output directory where internal JSON Schema artifacts will be written
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              -h, --help
+                      Print help (see a summary with '-h')
+            """
         default:
             return nil
         }
@@ -2362,6 +2389,11 @@ public struct CodexCLI: Sendable {
             return renderAppServerDaemonSimpleHelp(
                 summary: "Print local CLI and running app-server versions as JSON",
                 usage: "codex app-server daemon version [OPTIONS]"
+            )
+        case "pid-update-loop":
+            return renderAppServerDaemonSimpleHelp(
+                summary: "[internal] Run the detached pid-backed standalone updater loop",
+                usage: "codex app-server daemon pid-update-loop [OPTIONS]"
             )
         default:
             return nil
@@ -2908,6 +2940,61 @@ public struct CodexCLI: Sendable {
 
               -i, --image <FILE>...
                       Optional image(s) to attach to the user prompt
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              -h, --help
+                      Print help (see a summary with '-h')
+            """
+        case "trace-reduce":
+            return """
+            Replay a rollout trace bundle and write reduced state JSON
+
+            Usage: codex debug trace-reduce [OPTIONS] <TRACE_BUNDLE>
+
+            Arguments:
+              <TRACE_BUNDLE>
+                      Trace bundle directory containing manifest.json and trace.jsonl
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+              -o, --output <FILE>
+                      Output path for reduced RolloutTrace JSON. Defaults to TRACE_BUNDLE/state.json
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              -h, --help
+                      Print help (see a summary with '-h')
+            """
+        case "clear-memories":
+            return """
+            Internal: reset local memory state for a fresh start
+
+            Usage: codex debug clear-memories [OPTIONS]
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
 
                   --enable <FEATURE>
                       Enable a feature (repeatable). Equivalent to `-c features.<name>=true`

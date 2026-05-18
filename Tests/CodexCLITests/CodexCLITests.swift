@@ -375,6 +375,30 @@ final class CodexCLITests: XCTestCase {
         XCTAssertTrue(debugPromptInputHelp.contains("Optional image(s) to attach to the user prompt"))
 
         stdout.removeAll()
+        let debugTraceReduceExitCode = await CodexCLI().runAsync(
+            arguments: ["debug", "trace-reduce", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(debugTraceReduceExitCode, 0)
+        let debugTraceReduceHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(debugTraceReduceHelp.hasPrefix("Replay a rollout trace bundle and write reduced state JSON\n\nUsage: codex debug trace-reduce [OPTIONS] <TRACE_BUNDLE>"))
+        XCTAssertTrue(debugTraceReduceHelp.contains("  -o, --output <FILE>"))
+
+        stdout.removeAll()
+        let debugClearMemoriesExitCode = await CodexCLI().runAsync(
+            arguments: ["debug", "clear-memories", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(debugClearMemoriesExitCode, 0)
+        let debugClearMemoriesHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(debugClearMemoriesHelp.hasPrefix("Internal: reset local memory state for a fresh start\n\nUsage: codex debug clear-memories [OPTIONS]"))
+        XCTAssertTrue(debugClearMemoriesHelp.contains("      --disable <FEATURE>"))
+
+        stdout.removeAll()
         let execPolicyExitCode = await CodexCLI().runAsync(
             arguments: ["execpolicy", "--help"],
             stdout: { stdout.append($0) },
@@ -446,6 +470,30 @@ final class CodexCLITests: XCTestCase {
         let appServerGenerateTSHelp = try XCTUnwrap(stdout.first)
         XCTAssertTrue(appServerGenerateTSHelp.hasPrefix("[experimental] Generate TypeScript bindings for the app server protocol\n\nUsage: codex app-server generate-ts [OPTIONS] --out <DIR>"))
         XCTAssertTrue(appServerGenerateTSHelp.contains("  -p, --prettier <PRETTIER_BIN>"))
+
+        stdout.removeAll()
+        let appServerPidUpdateLoopExitCode = await CodexCLI().runAsync(
+            arguments: ["app-server", "daemon", "pid-update-loop", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(appServerPidUpdateLoopExitCode, 0)
+        let appServerPidUpdateLoopHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(appServerPidUpdateLoopHelp.hasPrefix("[internal] Run the detached pid-backed standalone updater loop\n\nUsage: codex app-server daemon pid-update-loop [OPTIONS]"))
+        XCTAssertTrue(appServerPidUpdateLoopHelp.contains("      --enable <FEATURE>"))
+
+        stdout.removeAll()
+        let appServerInternalSchemaExitCode = await CodexCLI().runAsync(
+            arguments: ["app-server", "generate-internal-json-schema", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(appServerInternalSchemaExitCode, 0)
+        let appServerInternalSchemaHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(appServerInternalSchemaHelp.hasPrefix("[internal] Generate internal JSON Schema artifacts for Codex tooling\n\nUsage: codex app-server generate-internal-json-schema [OPTIONS] --out <DIR>"))
+        XCTAssertTrue(appServerInternalSchemaHelp.contains("Output directory where internal JSON Schema artifacts will be written"))
 
         stdout.removeAll()
         let remoteControlExitCode = await CodexCLI().runAsync(

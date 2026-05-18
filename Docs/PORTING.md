@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: extended CLI help runtime-oracle parity into hidden child
+  command help surfaces that Rust still answers explicitly. Swift now renders
+  Rust-shaped help for `app-server daemon pid-update-loop`,
+  `app-server generate-internal-json-schema`, `debug trace-reduce`, and
+  `debug clear-memories` instead of falling through to interactive startup.
 - 2026-05-18: extended CLI help runtime-oracle parity into remaining
   advertised child command groups for `app-server`, `remote-control`, and
   `execpolicy`. Swift now renders Rust-shaped help for app-server daemon
