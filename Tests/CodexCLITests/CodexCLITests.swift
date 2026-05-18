@@ -255,6 +255,18 @@ final class CodexCLITests: XCTestCase {
         XCTAssertTrue(mcpHelp.contains("  remove"))
 
         stdout.removeAll()
+        let mcpAddExitCode = await CodexCLI().runAsync(
+            arguments: ["mcp", "add", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(mcpAddExitCode, 0)
+        let mcpAddHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(mcpAddHelp.hasPrefix("Usage: codex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)"))
+        XCTAssertTrue(mcpAddHelp.contains("      --bearer-token-env-var <ENV_VAR>"))
+
+        stdout.removeAll()
         let pluginExitCode = await CodexCLI().runAsync(
             arguments: ["plugin", "--help"],
             stdout: { stdout.append($0) },
@@ -265,6 +277,18 @@ final class CodexCLITests: XCTestCase {
         let pluginHelp = try XCTUnwrap(stdout.first)
         XCTAssertTrue(pluginHelp.hasPrefix("Manage Codex plugins\n\nUsage: codex plugin [OPTIONS] <COMMAND>"))
         XCTAssertTrue(pluginHelp.contains("  marketplace  Add, list, upgrade, or remove configured plugin marketplaces"))
+
+        stdout.removeAll()
+        let pluginMarketplaceAddExitCode = await CodexCLI().runAsync(
+            arguments: ["plugin", "marketplace", "add", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(pluginMarketplaceAddExitCode, 0)
+        let pluginMarketplaceAddHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(pluginMarketplaceAddHelp.hasPrefix("Add a local or Git marketplace to the configured marketplace sources\n\nUsage: codex plugin marketplace add [OPTIONS] <SOURCE>"))
+        XCTAssertTrue(pluginMarketplaceAddHelp.contains("      --sparse <PATH>"))
 
         stdout.removeAll()
         let updateExitCode = await CodexCLI().runAsync(

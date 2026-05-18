@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: extended CLI help runtime-oracle parity into nested management
+  subcommands. Swift now renders Rust-shaped `codex mcp {list,get,add,remove,
+  login,logout} --help` output plus `codex plugin {add,list,remove} --help`
+  and `codex plugin marketplace {add,list,remove,upgrade} --help`, instead of
+  collapsing nested help requests back to the parent command surface.
 - 2026-05-18: extended CLI help runtime-oracle parity to hidden/internal
   command surfaces. Swift now renders Rust-shaped `codex execpolicy --help`,
   `codex responses-api-proxy --help`, and `codex stdio-to-uds --help` output

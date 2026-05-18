@@ -912,7 +912,7 @@ public struct CodexCLI: Sendable {
         return nil
     }
 
-    public func renderHelp(for spec: CommandSpec) -> String {
+    public func renderHelp(for spec: CommandSpec, arguments: [String] = []) -> String {
         switch spec.name {
         case "exec":
             return renderExecHelp()
@@ -923,8 +923,14 @@ public struct CodexCLI: Sendable {
         case "logout":
             return renderLogoutHelp()
         case "mcp":
+            if let childHelp = renderMcpChildHelp(arguments: arguments) {
+                return childHelp
+            }
             return renderMcpHelp()
         case "plugin":
+            if let childHelp = renderPluginChildHelp(arguments: arguments) {
+                return childHelp
+            }
             return renderPluginHelp()
         case "mcp-server":
             return renderMcpServerHelp()
@@ -1489,6 +1495,191 @@ public struct CodexCLI: Sendable {
         """
     }
 
+    private func renderMcpChildHelp(arguments: [String]) -> String? {
+        guard let child = arguments.first, child != "--help", child != "-h" else {
+            return nil
+        }
+
+        switch child {
+        case "list":
+            return """
+            Usage: codex mcp list [OPTIONS]
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+                  --json
+                      Output the configured servers as JSON
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              -h, --help
+                      Print help (see a summary with '-h')
+            """
+        case "get":
+            return """
+            Usage: codex mcp get [OPTIONS] <NAME>
+
+            Arguments:
+              <NAME>
+                      Name of the MCP server to display
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+                  --json
+                      Output the server configuration as JSON
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              -h, --help
+                      Print help (see a summary with '-h')
+            """
+        case "add":
+            return """
+            Usage: codex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)
+
+            Arguments:
+              <NAME>
+                      Name for the MCP server configuration
+
+              [COMMAND]...
+                      Command to launch the MCP server. Use --url for a streamable HTTP server
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+                  --env <KEY=VALUE>
+                      Environment variables to set when launching the server. Only valid with stdio servers
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --url <URL>
+                      URL for a streamable HTTP MCP server
+
+                  --bearer-token-env-var <ENV_VAR>
+                      Optional environment variable to read for a bearer token. Only valid with streamable HTTP
+                      servers
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              -h, --help
+                      Print help (see a summary with '-h')
+            """
+        case "remove":
+            return """
+            Usage: codex mcp remove [OPTIONS] <NAME>
+
+            Arguments:
+              <NAME>
+                      Name of the MCP server configuration to remove
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              -h, --help
+                      Print help (see a summary with '-h')
+            """
+        case "login":
+            return """
+            Usage: codex mcp login [OPTIONS] <NAME>
+
+            Arguments:
+              <NAME>
+                      Name of the MCP server to authenticate with oauth
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+                  --scopes <SCOPE,SCOPE>
+                      Comma-separated list of OAuth scopes to request
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              -h, --help
+                      Print help (see a summary with '-h')
+            """
+        case "logout":
+            return """
+            Usage: codex mcp logout [OPTIONS] <NAME>
+
+            Arguments:
+              <NAME>
+                      Name of the MCP server to deauthenticate
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              -h, --help
+                      Print help (see a summary with '-h')
+            """
+        default:
+            return nil
+        }
+    }
+
     private func renderPluginHelp() -> String {
         """
         Manage Codex plugins
@@ -1520,6 +1711,292 @@ public struct CodexCLI: Sendable {
           -h, --help
                   Print help (see a summary with '-h')
         """
+    }
+
+    private func renderPluginChildHelp(arguments: [String]) -> String? {
+        guard let child = arguments.first, child != "--help", child != "-h" else {
+            return nil
+        }
+
+        switch child {
+        case "add":
+            return """
+            Install a plugin from a configured marketplace snapshot.
+
+            Pass either `PLUGIN@MARKETPLACE` or pass `PLUGIN` with `--marketplace MARKETPLACE`.
+
+            Usage: codex plugin add [OPTIONS] <PLUGIN[@MARKETPLACE]>
+
+            Arguments:
+              <PLUGIN[@MARKETPLACE]>
+                      Plugin selector to install: either PLUGIN@MARKETPLACE or PLUGIN with --marketplace
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+              -m, --marketplace <MARKETPLACE>
+                      Configured marketplace name to use when PLUGIN does not include @MARKETPLACE
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              -h, --help
+                      Print help (see a summary with '-h')
+
+            Examples:
+              codex plugin add sample@debug
+              codex plugin add sample --marketplace debug
+            """
+        case "list":
+            return """
+            List plugins available from configured marketplace snapshots
+
+            Usage: codex plugin list [OPTIONS]
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+              -m, --marketplace <MARKETPLACE>
+                      Only list plugins from this configured marketplace name
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              -h, --help
+                      Print help (see a summary with '-h')
+
+            Examples:
+              codex plugin list
+              codex plugin list --marketplace debug
+            """
+        case "remove":
+            return """
+            Remove an installed plugin from local config and cache.
+
+            Pass either `PLUGIN@MARKETPLACE` or pass `PLUGIN` with `--marketplace MARKETPLACE`.
+
+            Usage: codex plugin remove [OPTIONS] <PLUGIN[@MARKETPLACE]>
+
+            Arguments:
+              <PLUGIN[@MARKETPLACE]>
+                      Plugin selector to remove: either PLUGIN@MARKETPLACE or PLUGIN with --marketplace
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+              -m, --marketplace <MARKETPLACE>
+                      Marketplace name to use when PLUGIN does not include @MARKETPLACE
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              -h, --help
+                      Print help (see a summary with '-h')
+
+            Examples:
+              codex plugin remove sample@debug
+              codex plugin remove sample --marketplace debug
+            """
+        case "marketplace":
+            return renderPluginMarketplaceHelp(arguments: Array(arguments.dropFirst()))
+        default:
+            return nil
+        }
+    }
+
+    private func renderPluginMarketplaceHelp(arguments: [String]) -> String? {
+        guard let child = arguments.first, child != "--help", child != "-h" else {
+            return """
+            Add, list, upgrade, or remove configured plugin marketplaces
+
+            Usage: codex plugin marketplace [OPTIONS] <COMMAND>
+
+            Commands:
+              add      Add a local or Git marketplace to the configured marketplace sources
+              list     List configured marketplace names and their local snapshot roots
+              upgrade  Refresh configured Git marketplace snapshots
+              remove   Remove a configured marketplace source by name
+              help     Print this message or the help of the given subcommand(s)
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              -h, --help
+                      Print help (see a summary with '-h')
+            """
+        }
+
+        switch child {
+        case "add":
+            return """
+            Add a local or Git marketplace to the configured marketplace sources
+
+            Usage: codex plugin marketplace add [OPTIONS] <SOURCE>
+
+            Arguments:
+              <SOURCE>
+                      Marketplace source: a local path, owner/repo[@ref], HTTPS Git URL, or SSH Git URL
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+                  --ref <REF>
+                      Git ref to fetch for Git marketplace sources
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --sparse <PATH>
+                      Sparse checkout path for Git marketplace sources. Can be repeated
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              -h, --help
+                      Print help (see a summary with '-h')
+
+            Examples:
+              codex plugin marketplace add ./path/to/marketplace
+              codex plugin marketplace add owner/repo --ref main
+              codex plugin marketplace add https://github.com/owner/repo --sparse plugins/foo
+            """
+        case "list":
+            return """
+            List configured marketplace names and their local snapshot roots
+
+            Usage: codex plugin marketplace list [OPTIONS]
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              -h, --help
+                      Print help (see a summary with '-h')
+            """
+        case "remove":
+            return """
+            Remove a configured marketplace source by name
+
+            Usage: codex plugin marketplace remove [OPTIONS] <MARKETPLACE_NAME>
+
+            Arguments:
+              <MARKETPLACE_NAME>
+                      Configured marketplace name to remove
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              -h, --help
+                      Print help (see a summary with '-h')
+
+            Example:
+              codex plugin marketplace remove debug
+            """
+        case "upgrade":
+            return """
+            Refresh configured Git marketplace snapshots.
+
+            Omit MARKETPLACE_NAME to upgrade all configured Git marketplaces.
+
+            Usage: codex plugin marketplace upgrade [OPTIONS] [MARKETPLACE_NAME]
+
+            Arguments:
+              [MARKETPLACE_NAME]
+                      Optional configured marketplace name to upgrade. Omit to upgrade all Git marketplaces
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              -h, --help
+                      Print help (see a summary with '-h')
+
+            Examples:
+              codex plugin marketplace upgrade
+              codex plugin marketplace upgrade debug
+            """
+        default:
+            return nil
+        }
     }
 
     private func renderMcpServerHelp() -> String {
@@ -2325,8 +2802,8 @@ public struct CodexCLI: Sendable {
         case .help:
             stdout(renderHelp())
             return 0
-        case let .commandHelp(spec, _):
-            stdout(renderHelp(for: spec))
+        case let .commandHelp(spec, arguments):
+            stdout(renderHelp(for: spec, arguments: arguments))
             return 0
         case let .command(spec, commandArguments) where spec.name == "completion":
             do {
@@ -2428,8 +2905,8 @@ public struct CodexCLI: Sendable {
         case .help:
             stdout(renderHelp())
             return 0
-        case let .commandHelp(spec, _):
-            stdout(renderHelp(for: spec))
+        case let .commandHelp(spec, arguments):
+            stdout(renderHelp(for: spec, arguments: arguments))
             return 0
         case let .command(spec, commandArguments) where spec.name == "completion":
             do {

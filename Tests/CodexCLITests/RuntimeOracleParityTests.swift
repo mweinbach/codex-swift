@@ -87,6 +87,27 @@ final class RuntimeOracleParityTests: XCTestCase {
         XCTAssertEqual(normalizedHelp(swift.stdout), normalizedHelp(rust.stdout))
     }
 
+    func testMcpChildHelpMatchesRustOracleModuloWhitespace() throws {
+        let oracle = try RuntimeOracle.required()
+        let commands = [
+            ["mcp", "list", "--help"],
+            ["mcp", "get", "--help"],
+            ["mcp", "add", "--help"],
+            ["mcp", "remove", "--help"],
+            ["mcp", "login", "--help"],
+            ["mcp", "logout", "--help"]
+        ]
+
+        for arguments in commands {
+            let rust = try oracle.run(.rust, arguments: arguments)
+            let swift = try oracle.run(.swift, arguments: arguments)
+
+            XCTAssertEqual(rust.exitCode, 0, rust.stderr)
+            XCTAssertEqual(swift.exitCode, 0, swift.stderr)
+            XCTAssertEqual(normalizedHelp(swift.stdout), normalizedHelp(rust.stdout), arguments.joined(separator: " "))
+        }
+    }
+
     func testPluginHelpMatchesRustOracleModuloWhitespace() throws {
         let oracle = try RuntimeOracle.required()
 
@@ -97,6 +118,29 @@ final class RuntimeOracleParityTests: XCTestCase {
         XCTAssertEqual(swift.exitCode, 0, swift.stderr)
 
         XCTAssertEqual(normalizedHelp(swift.stdout), normalizedHelp(rust.stdout))
+    }
+
+    func testPluginChildHelpMatchesRustOracleModuloWhitespace() throws {
+        let oracle = try RuntimeOracle.required()
+        let commands = [
+            ["plugin", "add", "--help"],
+            ["plugin", "list", "--help"],
+            ["plugin", "remove", "--help"],
+            ["plugin", "marketplace", "--help"],
+            ["plugin", "marketplace", "add", "--help"],
+            ["plugin", "marketplace", "list", "--help"],
+            ["plugin", "marketplace", "remove", "--help"],
+            ["plugin", "marketplace", "upgrade", "--help"]
+        ]
+
+        for arguments in commands {
+            let rust = try oracle.run(.rust, arguments: arguments)
+            let swift = try oracle.run(.swift, arguments: arguments)
+
+            XCTAssertEqual(rust.exitCode, 0, rust.stderr)
+            XCTAssertEqual(swift.exitCode, 0, swift.stderr)
+            XCTAssertEqual(normalizedHelp(swift.stdout), normalizedHelp(rust.stdout), arguments.joined(separator: " "))
+        }
     }
 
     func testUpdateHelpMatchesRustOracleModuloWhitespace() throws {
