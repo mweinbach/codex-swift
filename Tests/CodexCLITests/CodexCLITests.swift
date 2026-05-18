@@ -327,6 +327,18 @@ final class CodexCLITests: XCTestCase {
         XCTAssertTrue(sandboxHelp.contains("  windows  Run a command under Windows restricted token (Windows only)"))
 
         stdout.removeAll()
+        let sandboxMacosExitCode = await CodexCLI().runAsync(
+            arguments: ["sandbox", "macos", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(sandboxMacosExitCode, 0)
+        let sandboxMacosHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(sandboxMacosHelp.hasPrefix("Run a command under Seatbelt (macOS only)\n\nUsage: codex sandbox macos [OPTIONS] [COMMAND]..."))
+        XCTAssertTrue(sandboxMacosHelp.contains("      --allow-unix-socket <ALLOW_UNIX_SOCKETS>"))
+
+        stdout.removeAll()
         let debugExitCode = await CodexCLI().runAsync(
             arguments: ["debug", "--help"],
             stdout: { stdout.append($0) },
@@ -398,6 +410,18 @@ final class CodexCLITests: XCTestCase {
         let featuresHelp = try XCTUnwrap(stdout.first)
         XCTAssertTrue(featuresHelp.hasPrefix("Inspect feature flags\n\nUsage: codex features [OPTIONS] <COMMAND>"))
         XCTAssertTrue(featuresHelp.contains("  disable  Disable a feature in config.toml"))
+
+        stdout.removeAll()
+        let featuresEnableExitCode = await CodexCLI().runAsync(
+            arguments: ["features", "enable", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(featuresEnableExitCode, 0)
+        let featuresEnableHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(featuresEnableHelp.hasPrefix("Enable a feature in config.toml\n\nUsage: codex features enable [OPTIONS] <FEATURE>"))
+        XCTAssertTrue(featuresEnableHelp.contains("Feature key to update (for example: unified_exec)"))
 
         stdout.removeAll()
         let mcpServerExitCode = await CodexCLI().runAsync(

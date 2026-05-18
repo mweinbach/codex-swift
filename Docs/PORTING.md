@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: extended CLI help runtime-oracle parity into nested sandbox and
+  feature-flag subcommands. Swift now renders Rust-shaped
+  `codex sandbox {macos,linux,windows} --help` output and
+  `codex features {list,enable,disable} --help` output instead of collapsing
+  those child help requests back to the parent command surface.
 - 2026-05-18: extended CLI help runtime-oracle parity into nested management
   subcommands. Swift now renders Rust-shaped `codex mcp {list,get,add,remove,
   login,logout} --help` output plus `codex plugin {add,list,remove} --help`

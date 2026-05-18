@@ -947,6 +947,9 @@ public struct CodexCLI: Sendable {
         case "doctor":
             return renderDoctorHelp()
         case "sandbox":
+            if let childHelp = renderSandboxChildHelp(arguments: arguments) {
+                return childHelp
+            }
             return renderSandboxHelp()
         case "debug":
             return renderDebugHelp()
@@ -967,6 +970,9 @@ public struct CodexCLI: Sendable {
         case "exec-server":
             return renderExecServerHelp()
         case "features":
+            if let childHelp = renderFeaturesChildHelp(arguments: arguments) {
+                return childHelp
+            }
             return renderFeaturesHelp()
         default:
             return renderHelp()
@@ -2274,6 +2280,136 @@ public struct CodexCLI: Sendable {
         """
     }
 
+    private func renderSandboxChildHelp(arguments: [String]) -> String? {
+        guard let child = arguments.first, child != "--help", child != "-h" else {
+            return nil
+        }
+
+        switch child {
+        case "macos", "seatbelt":
+            return """
+            Run a command under Seatbelt (macOS only)
+
+            Usage: codex sandbox macos [OPTIONS] [COMMAND]...
+
+            Arguments:
+              [COMMAND]...
+                      Full command args to run under seatbelt
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+                  --permissions-profile <NAME>
+                      Named permissions profile to apply from the active configuration stack
+
+              -C, --cd <DIR>
+                      Working directory used for profile resolution and command execution
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+                  --include-managed-config
+                      Include managed requirements while resolving an explicit permissions profile
+
+                  --allow-unix-socket <ALLOW_UNIX_SOCKETS>
+                      Allow the sandboxed command to bind/connect AF_UNIX sockets rooted at this path. Relative
+                      paths are resolved against the current directory. Repeat to allow multiple paths
+
+                  --log-denials
+                      While the command runs, capture macOS sandbox denials via `log stream` and print them
+                      after exit
+
+              -h, --help
+                      Print help (see a summary with '-h')
+            """
+        case "linux", "landlock":
+            return """
+            Run a command under the Linux sandbox (bubblewrap by default)
+
+            Usage: codex sandbox linux [OPTIONS] [COMMAND]...
+
+            Arguments:
+              [COMMAND]...
+                      Full command args to run under the Linux sandbox
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+                  --permissions-profile <NAME>
+                      Named permissions profile to apply from the active configuration stack
+
+              -C, --cd <DIR>
+                      Working directory used for profile resolution and command execution
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+                  --include-managed-config
+                      Include managed requirements while resolving an explicit permissions profile
+
+              -h, --help
+                      Print help (see a summary with '-h')
+            """
+        case "windows":
+            return """
+            Run a command under Windows restricted token (Windows only)
+
+            Usage: codex sandbox windows [OPTIONS] [COMMAND]...
+
+            Arguments:
+              [COMMAND]...
+                      Full command args to run under Windows restricted token sandbox
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+                  --permissions-profile <NAME>
+                      Named permissions profile to apply from the active configuration stack
+
+              -C, --cd <DIR>
+                      Working directory used for profile resolution and command execution
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+                  --include-managed-config
+                      Include managed requirements while resolving an explicit permissions profile
+
+              -h, --help
+                      Print help (see a summary with '-h')
+            """
+        default:
+            return nil
+        }
+    }
+
     private func renderApplyHelp() -> String {
         """
         Apply the latest diff produced by Codex agent as a `git apply` to your local working tree
@@ -2786,6 +2922,97 @@ public struct CodexCLI: Sendable {
           -h, --help
                   Print help (see a summary with '-h')
         """
+    }
+
+    private func renderFeaturesChildHelp(arguments: [String]) -> String? {
+        guard let child = arguments.first, child != "--help", child != "-h" else {
+            return nil
+        }
+
+        switch child {
+        case "list":
+            return """
+            List known features with their stage and effective state
+
+            Usage: codex features list [OPTIONS]
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              -h, --help
+                      Print help (see a summary with '-h')
+            """
+        case "enable":
+            return """
+            Enable a feature in config.toml
+
+            Usage: codex features enable [OPTIONS] <FEATURE>
+
+            Arguments:
+              <FEATURE>
+                      Feature key to update (for example: unified_exec)
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              -h, --help
+                      Print help (see a summary with '-h')
+            """
+        case "disable":
+            return """
+            Disable a feature in config.toml
+
+            Usage: codex features disable [OPTIONS] <FEATURE>
+
+            Arguments:
+              <FEATURE>
+                      Feature key to update (for example: unified_exec)
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              -h, --help
+                      Print help (see a summary with '-h')
+            """
+        default:
+            return nil
+        }
     }
 
     public func run(arguments: [String], stdout: (String) -> Void = { print($0) }, stderr: (String) -> Void = { fputs($0 + "\n", Darwin.stderr) }) -> Int32 {
