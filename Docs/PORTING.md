@@ -737,6 +737,16 @@ Recent upstream audit checkpoint:
   replacement does not receive completed-turn usage. Mid-turn tool-completion
   accounting, budget-limit steering injection, and idle continuation turns
   remain pending with the broader ThreadManager goal runtime.
+- 2026-05-18: continued Rust `GoalRuntimeEvent::ToolCompleted` parity for the
+  live app-server loop. `NonInteractiveExec.runResponsesLoopWithTranscript` now
+  exposes a post-tool completion callback with the current accumulated Responses
+  token usage, and the live runtime uses it to account ordinary tool completions,
+  emit `thread/goal/updated`, inject Rust's hidden budget-limit `<goal_context>`
+  steering item exactly once per budget-limited goal, and advance the accounting
+  baseline so turn-finish accounting only captures remaining deltas. The
+  `update_goal`-specific `ToolCompletedGoal` pre-completion accounting path and
+  idle continuation turns remain pending with the broader ThreadManager goal
+  runtime.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through

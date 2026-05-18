@@ -11645,6 +11645,82 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(persisted?.timeUsedSeconds, 2)
     }
 
+    func testLiveRuntimeGoalToolCompletionAccountsAndSteersBudgetLimitLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T07-38-30",
+            timestamp: "2025-01-06T07:38:30Z",
+            preview: "live goal tool accounting",
+            provider: "mock_provider"
+        )
+        let stateStore = try await createAppServerGoalStateStore(
+            codexHome: temp.url,
+            threadID: threadID,
+            title: "live goal tool accounting"
+        )
+        let parsedThreadID = try ThreadId(string: threadID)
+        _ = try await stateStore.replaceThreadGoal(
+            threadID: parsedThreadID,
+            objective: "keep polishing",
+            status: .active,
+            tokenBudget: 20
+        )
+        var features = FeatureStates.withDefaults()
+        features.set(.goals, enabled: true)
+        let snapshot = await AppServerLiveRuntimeManager.liveThreadGoalAccountingSnapshot(
+            stateStore: stateStore,
+            features: features,
+            threadID: threadID,
+            tokenUsage: TokenUsage()
+        )
+        let accounting = AppServerLiveRuntimeManager.LiveThreadGoalAccountingSession(
+            stateStore: stateStore,
+            features: features,
+            threadID: threadID,
+            snapshot: snapshot,
+            lastAccountingAtMilliseconds: 1_000
+        )
+
+        let first = await accounting.accountToolCompletion(
+            tokenUsage: TokenUsage(totalTokens: 25),
+            completedAtMilliseconds: 3_500
+        )
+
+        XCTAssertEqual(first?.goal.threadID, parsedThreadID)
+        XCTAssertEqual(first?.goal.status, .budgetLimited)
+        XCTAssertEqual(first?.goal.tokensUsed, 25)
+        XCTAssertEqual(first?.goal.timeUsedSeconds, 2)
+        let steeringItem = try XCTUnwrap(first?.additionalContextItems.first)
+        guard case let .message(_, role, content, _) = steeringItem,
+              case let .inputText(text)? = content.first
+        else {
+            return XCTFail("expected hidden budget-limit goal context")
+        }
+        XCTAssertEqual(role, "user")
+        XCTAssertTrue(text.starts(with: "<goal_context>"))
+        XCTAssertTrue(text.contains("budget_limited"))
+        XCTAssertTrue(text.lowercased().contains("wrap up this turn soon"))
+
+        let second = await accounting.accountToolCompletion(
+            tokenUsage: TokenUsage(totalTokens: 40),
+            completedAtMilliseconds: 4_500
+        )
+
+        XCTAssertEqual(second?.goal.status, .budgetLimited)
+        XCTAssertEqual(second?.goal.tokensUsed, 40)
+        XCTAssertEqual(second?.goal.timeUsedSeconds, 3)
+        XCTAssertEqual(second?.additionalContextItems, [])
+
+        let completed = await accounting.accountTurnCompletion(
+            tokenUsage: TokenUsage(totalTokens: 50),
+            completedAtMilliseconds: 5_500
+        )
+        XCTAssertEqual(completed?.status, .budgetLimited)
+        XCTAssertEqual(completed?.tokensUsed, 50)
+        XCTAssertEqual(completed?.timeUsedSeconds, 4)
+    }
+
     func testLiveRuntimeGoalAccountingIgnoresGoalCreatedAfterTurnStartLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(

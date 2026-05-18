@@ -1756,6 +1756,57 @@ final class NonInteractiveExecTests: XCTestCase {
         ))
     }
 
+    func testResponsesLoopRunsToolCompletionHandlerWithCurrentTokenUsageLikeRustGoalRuntime() async throws {
+        let initial = Prompt(input: [
+            .message(role: "user", content: [.inputText(text: "run echo")])
+        ])
+        let script = TokenUsageLoopScript()
+        let capture = ToolCompletionCapture()
+
+        let result = await NonInteractiveExec.runResponsesLoopWithTranscript(
+            initialPrompt: initial,
+            streamPrompt: { prompt in
+                .success(await script.next(prompt))
+            },
+            handleToolCompletion: { item, tokenUsage in
+                await capture.append(item: item, tokenUsage: tokenUsage)
+                return NonInteractiveExecToolCompletionResult(additionalContextItems: [
+                    .message(role: "user", content: [.inputText(text: "<goal_context>\nwrap up soon\n</goal_context>")])
+                ])
+            },
+            executeFunctionCall: { item in
+                guard case let .functionCall(_, _, _, _, callID) = item else {
+                    return .functionCallOutput(
+                        callID: "bad",
+                        output: FunctionCallOutputPayload(content: "bad", success: false)
+                    )
+                }
+                return .functionCallOutput(
+                    callID: callID,
+                    output: FunctionCallOutputPayload(content: "ok", success: true)
+                )
+            }
+        )
+
+        let calls = await capture.calls()
+        XCTAssertEqual(calls.map(\.item), [
+            .functionCall(name: "shell_command", arguments: #"{"command":"echo hi"}"#, callID: "call-1")
+        ])
+        XCTAssertEqual(calls.first?.tokenUsage, TokenUsage(
+            inputTokens: 3,
+            cachedInputTokens: 1,
+            outputTokens: 5,
+            reasoningOutputTokens: 2,
+            totalTokens: 8
+        ))
+        XCTAssertEqual(result.transcriptItems, [
+            .functionCall(name: "shell_command", arguments: #"{"command":"echo hi"}"#, callID: "call-1"),
+            .functionCallOutput(callID: "call-1", output: FunctionCallOutputPayload(content: "ok", success: true)),
+            .message(role: "user", content: [.inputText(text: "<goal_context>\nwrap up soon\n</goal_context>")]),
+            .message(role: "assistant", content: [.outputText(text: "done")])
+        ])
+    }
+
     func testResponsesLoopContinuesWhenCompletedEndTurnFalseWithoutToolCalls() async throws {
         let initial = Prompt(input: [
             .message(role: "user", content: [.inputText(text: "continue")])
@@ -5664,6 +5715,18 @@ private actor TokenUsageLoopScript {
                 )
             ))
         ]
+    }
+}
+
+private actor ToolCompletionCapture {
+    private var recordedCalls: [(item: ResponseItem, tokenUsage: TokenUsage?)] = []
+
+    func append(item: ResponseItem, tokenUsage: TokenUsage?) {
+        recordedCalls.append((item, tokenUsage))
+    }
+
+    func calls() -> [(item: ResponseItem, tokenUsage: TokenUsage?)] {
+        recordedCalls
     }
 }
 

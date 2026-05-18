@@ -242,7 +242,19 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 threadID: submission.threadID,
                 tokenUsage: TokenUsage()
             )
-            let loopResult = await runResponsesLoop(submission: submission, setup: setup, prompt: prompt)
+            let goalAccounting = LiveThreadGoalAccountingSession(
+                stateStore: configuration.stateStore,
+                features: setup.settings.features,
+                threadID: submission.threadID,
+                snapshot: goalAccountingSnapshot,
+                lastAccountingAtMilliseconds: startedAt
+            )
+            let loopResult = await runResponsesLoop(
+                submission: submission,
+                setup: setup,
+                prompt: prompt,
+                goalAccounting: goalAccounting
+            )
             try setup.recorder?.recordItems(loopResult.transcriptItems.map(RolloutRecordItem.responseItem))
             for item in loopResult.transcriptItems {
                 if Task.isCancelled {
@@ -254,13 +266,9 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                     turnID: submission.turnID
                 )
             }
-            if let goal = await Self.accountCompletedLiveThreadGoalUsage(
-                stateStore: configuration.stateStore,
-                features: setup.settings.features,
-                threadID: submission.threadID,
-                snapshot: goalAccountingSnapshot,
+            if let goal = await goalAccounting.accountTurnCompletion(
                 tokenUsage: loopResult.tokenUsage,
-                durationMilliseconds: AppServerLiveRuntimeClock.millisecondsSinceEpoch() - startedAt
+                completedAtMilliseconds: AppServerLiveRuntimeClock.millisecondsSinceEpoch()
             ) {
                 await state.emit(
                     threadID: submission.threadID,
@@ -490,7 +498,8 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
     private func runResponsesLoop(
         submission: AppServerLiveRuntimeSubmission,
         setup: PreparedLiveTurn,
-        prompt: Prompt
+        prompt: Prompt,
+        goalAccounting: LiveThreadGoalAccountingSession
     ) async -> NonInteractiveExecLoopResult {
         let client = ResponsesClient(
             transport: URLSessionAPITransport(),
@@ -630,6 +639,29 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 }
             },
             stopHookContext: stopHookContext,
+            handleToolCompletion: { [state, submission, goalAccounting] item, tokenUsage in
+                guard Self.shouldAccountLiveThreadGoalToolCompletion(item) else {
+                    return nil
+                }
+                guard let result = await goalAccounting.accountToolCompletion(
+                    tokenUsage: tokenUsage,
+                    completedAtMilliseconds: AppServerLiveRuntimeClock.millisecondsSinceEpoch()
+                ) else {
+                    return nil
+                }
+                await state.emit(
+                    threadID: submission.threadID,
+                    turnID: submission.turnID,
+                    event: .threadGoalUpdated(ThreadGoalUpdatedEvent(
+                        threadID: result.goal.threadID,
+                        turnID: submission.turnID,
+                        goal: result.goal
+                    ))
+                )
+                return NonInteractiveExecToolCompletionResult(
+                    additionalContextItems: result.additionalContextItems
+                )
+            },
             executeFunctionCall: { [state, submission] item in
                 let result = await toolRouter.execute(item)
                 for event in result.runtimeEvents {
@@ -651,6 +683,19 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 return result
             }
         )
+    }
+
+    private static func shouldAccountLiveThreadGoalToolCompletion(_ item: ResponseItem) -> Bool {
+        switch item {
+        case let .functionCall(_, name, _, _, _):
+            return name != "update_goal"
+        case .customToolCall,
+             .localShellCall,
+             .toolSearchCall:
+            return true
+        default:
+            return false
+        }
     }
 
     private static func goalToolContext(
@@ -675,6 +720,87 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
 
         func tokenDelta(since current: TokenUsage?) -> Int64 {
             max((current?.totalTokens ?? 0) - tokenUsageBaseline.totalTokens, 0)
+        }
+    }
+
+    struct LiveThreadGoalAccountingResult: Equatable, Sendable {
+        var goal: ThreadGoal
+        var additionalContextItems: [ResponseItem]
+    }
+
+    actor LiveThreadGoalAccountingSession {
+        private let stateStore: SQLiteAgentGraphStore?
+        private let features: FeatureStates
+        private let threadID: String
+        private var snapshot: LiveThreadGoalAccountingSnapshot
+        private var lastAccountingAtMilliseconds: Int64
+        private var budgetLimitReportedGoalID: String?
+
+        init(
+            stateStore: SQLiteAgentGraphStore?,
+            features: FeatureStates,
+            threadID: String,
+            snapshot: LiveThreadGoalAccountingSnapshot,
+            lastAccountingAtMilliseconds: Int64
+        ) {
+            self.stateStore = stateStore
+            self.features = features
+            self.threadID = threadID
+            self.snapshot = snapshot
+            self.lastAccountingAtMilliseconds = lastAccountingAtMilliseconds
+        }
+
+        func accountToolCompletion(
+            tokenUsage: TokenUsage?,
+            completedAtMilliseconds: Int64
+        ) async -> LiveThreadGoalAccountingResult? {
+            await accountUsage(
+                tokenUsage: tokenUsage,
+                completedAtMilliseconds: completedAtMilliseconds,
+                budgetLimitSteeringAllowed: true
+            )
+        }
+
+        func accountTurnCompletion(
+            tokenUsage: TokenUsage?,
+            completedAtMilliseconds: Int64
+        ) async -> ThreadGoal? {
+            let result = await accountUsage(
+                tokenUsage: tokenUsage,
+                completedAtMilliseconds: completedAtMilliseconds,
+                budgetLimitSteeringAllowed: false
+            )
+            return result?.goal
+        }
+
+        private func accountUsage(
+            tokenUsage: TokenUsage?,
+            completedAtMilliseconds: Int64,
+            budgetLimitSteeringAllowed: Bool
+        ) async -> LiveThreadGoalAccountingResult? {
+            let durationMilliseconds = max(completedAtMilliseconds - lastAccountingAtMilliseconds, 0)
+            guard let result = await AppServerLiveRuntimeManager.accountLiveThreadGoalUsage(
+                stateStore: stateStore,
+                features: features,
+                threadID: threadID,
+                snapshot: snapshot,
+                tokenUsage: tokenUsage,
+                durationMilliseconds: durationMilliseconds,
+                budgetLimitSteeringAllowed: budgetLimitSteeringAllowed,
+                budgetLimitReportedGoalID: budgetLimitReportedGoalID
+            ) else {
+                return nil
+            }
+            snapshot.tokenUsageBaseline = tokenUsage ?? snapshot.tokenUsageBaseline
+            lastAccountingAtMilliseconds = completedAtMilliseconds
+            if result.goal.status == .budgetLimited {
+                if !result.additionalContextItems.isEmpty {
+                    budgetLimitReportedGoalID = snapshot.expectedGoalID
+                }
+            } else {
+                budgetLimitReportedGoalID = nil
+            }
+            return result
         }
     }
 
@@ -708,6 +834,28 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         tokenUsage: TokenUsage?,
         durationMilliseconds: Int64
     ) async -> ThreadGoal? {
+        await accountLiveThreadGoalUsage(
+            stateStore: stateStore,
+            features: features,
+            threadID: threadID,
+            snapshot: snapshot,
+            tokenUsage: tokenUsage,
+            durationMilliseconds: durationMilliseconds,
+            budgetLimitSteeringAllowed: false,
+            budgetLimitReportedGoalID: nil
+        )?.goal
+    }
+
+    static func accountLiveThreadGoalUsage(
+        stateStore: SQLiteAgentGraphStore?,
+        features: FeatureStates,
+        threadID: String,
+        snapshot: LiveThreadGoalAccountingSnapshot,
+        tokenUsage: TokenUsage?,
+        durationMilliseconds: Int64,
+        budgetLimitSteeringAllowed: Bool,
+        budgetLimitReportedGoalID: String?
+    ) async -> LiveThreadGoalAccountingResult? {
         guard features.isEnabled(.goals),
               let stateStore,
               let parsedThreadID = try? ThreadId(string: threadID),
@@ -729,7 +877,15 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 expectedGoalID: snapshot.expectedGoalID
             ) {
             case let .updated(goal):
-                return goal
+                let shouldSteerBudgetLimit = budgetLimitSteeringAllowed
+                    && goal.status == .budgetLimited
+                    && budgetLimitReportedGoalID != snapshot.expectedGoalID
+                return LiveThreadGoalAccountingResult(
+                    goal: goal,
+                    additionalContextItems: shouldSteerBudgetLimit
+                        ? [ThreadGoalRuntimeContext.budgetLimitInputItem(for: goal)]
+                        : []
+                )
             case .unchanged:
                 return nil
             }

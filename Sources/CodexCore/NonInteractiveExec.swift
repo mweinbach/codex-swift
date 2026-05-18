@@ -74,6 +74,19 @@ public struct NonInteractiveExecLoopResult: Equatable, Sendable {
     }
 }
 
+public struct NonInteractiveExecToolCompletionResult: Equatable, Sendable {
+    public var additionalContextItems: [ResponseItem]
+    public var runtimeEvents: [EventMessage]
+
+    public init(
+        additionalContextItems: [ResponseItem] = [],
+        runtimeEvents: [EventMessage] = []
+    ) {
+        self.additionalContextItems = additionalContextItems
+        self.runtimeEvents = runtimeEvents
+    }
+}
+
 public enum NonInteractiveExec {
     private static let unifiedExecSessions = UnifiedExecSessionRegistry()
     public typealias AgentJobToolContext = CodexCore.AgentJobToolContext
@@ -394,6 +407,10 @@ public enum NonInteractiveExec {
     public typealias ResponseStreamer = (Prompt) async -> Result<ResponseEventResults, APIError>
     public typealias FunctionCallExecutor = (ResponseItem) async -> ResponseItem
     public typealias FunctionCallResultExecutor = (ResponseItem) async -> FunctionCallExecutionResult
+    public typealias ToolCompletionHandler = @Sendable (
+        _ toolCall: ResponseItem,
+        _ tokenUsage: TokenUsage?
+    ) async -> NonInteractiveExecToolCompletionResult?
     public typealias RegisteredToolExecutor = @Sendable (ResponseItem) async -> FunctionCallExecutionResult?
     public typealias ModelsETagHandler = (String) async -> Void
     public typealias RequestUserInputHandler = @Sendable (RequestUserInputEvent) async -> RequestUserInputResponse?
@@ -824,6 +841,7 @@ public enum NonInteractiveExec {
         features: FeatureStates = .withDefaults(),
         handleModelsETag: ModelsETagHandler? = nil,
         streamPrompt: ResponseStreamer,
+        handleToolCompletion: ToolCompletionHandler? = nil,
         executeFunctionCall: FunctionCallExecutor
     ) async -> NonInteractiveExecLoopResult {
         await runResponsesLoopWithTranscript(
@@ -832,6 +850,7 @@ public enum NonInteractiveExec {
             features: features,
             handleModelsETag: handleModelsETag,
             streamPrompt: streamPrompt,
+            handleToolCompletion: handleToolCompletion,
             executeFunctionCall: { item in
                 FunctionCallExecutionResult(output: await executeFunctionCall(item))
             }
@@ -845,6 +864,7 @@ public enum NonInteractiveExec {
         handleModelsETag: ModelsETagHandler? = nil,
         streamPrompt: ResponseStreamer,
         stopHookContext: StopHookContext? = nil,
+        handleToolCompletion: ToolCompletionHandler? = nil,
         toolRouter: ToolRouter
     ) async -> NonInteractiveExecLoopResult {
         await runResponsesLoopWithTranscript(
@@ -854,6 +874,7 @@ public enum NonInteractiveExec {
             handleModelsETag: handleModelsETag,
             streamPrompt: streamPrompt,
             stopHookContext: stopHookContext,
+            handleToolCompletion: handleToolCompletion,
             executeFunctionCall: { item in
                 await toolRouter.execute(item)
             }
@@ -867,6 +888,7 @@ public enum NonInteractiveExec {
         handleModelsETag: ModelsETagHandler? = nil,
         streamPrompt: ResponseStreamer,
         stopHookContext: StopHookContext? = nil,
+        handleToolCompletion: ToolCompletionHandler? = nil,
         executeFunctionCall: FunctionCallResultExecutor
     ) async -> NonInteractiveExecLoopResult {
         var prompt = initialPrompt
@@ -950,6 +972,14 @@ public enum NonInteractiveExec {
                 if !result.additionalContextItems.isEmpty {
                     prompt.input.append(contentsOf: result.additionalContextItems)
                     transcriptItems.append(contentsOf: result.additionalContextItems)
+                }
+                if let completion = await handleToolCompletion?(call, tokenUsage) {
+                    runtimeEvents.append(contentsOf: completion.runtimeEvents)
+                    allEvents.append(contentsOf: completion.runtimeEvents.map { .success(.runtimeEvent($0)) })
+                    if !completion.additionalContextItems.isEmpty {
+                        prompt.input.append(contentsOf: completion.additionalContextItems)
+                        transcriptItems.append(contentsOf: completion.additionalContextItems)
+                    }
                 }
             }
         }
