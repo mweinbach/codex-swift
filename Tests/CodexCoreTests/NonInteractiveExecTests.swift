@@ -1086,6 +1086,140 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertTrue(enabledNames.contains("update_goal"))
     }
 
+    func testGoalToolCallsPersistAndReturnRustShapedResponses() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let store = try SQLiteAgentGraphStore(databaseURL: temp.url.appendingPathComponent("state.sqlite3"))
+        let threadID = try ThreadId(string: "00000000-0000-4000-8000-000000000070")
+        var features = FeatureStates.withDefaults()
+        features.set(.goals, enabled: true)
+        let router = NonInteractiveExec.ToolRouter(
+            cwd: temp.url,
+            model: "gpt-test",
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            goalToolContext: NonInteractiveExec.GoalToolContext(threadID: threadID, stateStore: store),
+            features: features
+        )
+
+        let create = await router.execute(.functionCall(
+            name: "create_goal",
+            arguments: #"{"objective":"  Ship goal tools  ","token_budget":1000}"#,
+            callID: "call-create-goal"
+        ))
+        let createResponse = try goalToolResponse(from: create.output, callID: "call-create-goal")
+        XCTAssertEqual(createResponse.goal?.threadID, threadID)
+        XCTAssertEqual(createResponse.goal?.objective, "Ship goal tools")
+        XCTAssertEqual(createResponse.goal?.status, .active)
+        XCTAssertEqual(createResponse.goal?.tokenBudget, 1000)
+        XCTAssertEqual(createResponse.remainingTokens, 1000)
+        XCTAssertNil(createResponse.completionBudgetReport)
+        XCTAssertEqual(create.runtimeEvents, [
+            .threadGoalUpdated(ThreadGoalUpdatedEvent(threadID: threadID, turnID: "turn-1", goal: try XCTUnwrap(createResponse.goal)))
+        ])
+
+        let duplicate = await router.execute(.functionCall(
+            name: "create_goal",
+            arguments: #"{"objective":"Another goal"}"#,
+            callID: "call-create-duplicate"
+        ))
+        let duplicatePayload = try functionOutputPayload(from: duplicate.output, callID: "call-create-duplicate")
+        XCTAssertEqual(
+            duplicatePayload.content,
+            "cannot create a new goal because this thread already has a goal; use update_goal only when the existing goal is complete"
+        )
+        XCTAssertEqual(duplicatePayload.success, false)
+
+        let get = await router.execute(.functionCall(
+            name: "get_goal",
+            arguments: #"{}"#,
+            callID: "call-get-goal"
+        ))
+        let getResponse = try goalToolResponse(from: get.output, callID: "call-get-goal")
+        XCTAssertEqual(getResponse.goal?.objective, "Ship goal tools")
+        XCTAssertEqual(get.runtimeEvents, [])
+
+        let update = await router.execute(.functionCall(
+            name: "update_goal",
+            arguments: #"{"status":"complete"}"#,
+            callID: "call-update-goal"
+        ))
+        let updateResponse = try goalToolResponse(from: update.output, callID: "call-update-goal")
+        XCTAssertEqual(updateResponse.goal?.status, .complete)
+        XCTAssertEqual(updateResponse.remainingTokens, 1000)
+        XCTAssertEqual(updateResponse.completionBudgetReport, ThreadGoalToolResponse.completionBudgetReportMessage)
+        XCTAssertEqual(update.runtimeEvents, [
+            .threadGoalUpdated(ThreadGoalUpdatedEvent(threadID: threadID, turnID: "turn-1", goal: try XCTUnwrap(updateResponse.goal)))
+        ])
+
+        let persisted = try await store.getThreadGoal(threadID: threadID)
+        XCTAssertEqual(persisted?.status, .complete)
+        XCTAssertEqual(persisted?.objective, "Ship goal tools")
+    }
+
+    func testGoalToolCallsValidateRuntimeContextAndCompleteOnlyStatusLikeRust() async throws {
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let store = try SQLiteAgentGraphStore(databaseURL: temp.url.appendingPathComponent("state.sqlite3"))
+        let threadID = try ThreadId(string: "00000000-0000-4000-8000-000000000071")
+        var features = FeatureStates.withDefaults()
+        features.set(.goals, enabled: true)
+        let router = NonInteractiveExec.ToolRouter(
+            cwd: temp.url,
+            model: "gpt-test",
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            goalToolContext: NonInteractiveExec.GoalToolContext(threadID: threadID, stateStore: store),
+            features: features
+        )
+
+        let invalidCreate = await router.execute(.functionCall(
+            name: "create_goal",
+            arguments: #"{"objective":"   ","token_budget":0}"#,
+            callID: "call-invalid-create"
+        ))
+        var payload = try functionOutputPayload(from: invalidCreate.output, callID: "call-invalid-create")
+        XCTAssertEqual(payload.content, "goal objective must not be empty")
+        XCTAssertEqual(payload.success, false)
+
+        _ = await router.execute(.functionCall(
+            name: "create_goal",
+            arguments: #"{"objective":"Finish validation"}"#,
+            callID: "call-valid-create"
+        ))
+        let invalidUpdate = await router.execute(.functionCall(
+            name: "update_goal",
+            arguments: #"{"status":"paused"}"#,
+            callID: "call-invalid-update"
+        ))
+        payload = try functionOutputPayload(from: invalidUpdate.output, callID: "call-invalid-update")
+        XCTAssertEqual(
+            payload.content,
+            "update_goal can only mark the existing goal complete; pause, resume, and budget-limited status changes are controlled by the user or system"
+        )
+        XCTAssertEqual(payload.success, false)
+
+        let missingContextRouter = NonInteractiveExec.ToolRouter(
+            cwd: temp.url,
+            model: "gpt-test",
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            features: features
+        )
+        let missingContext = await missingContextRouter.execute(.functionCall(
+            name: "get_goal",
+            arguments: #"{}"#,
+            callID: "call-missing-context"
+        ))
+        payload = try functionOutputPayload(from: missingContext.output, callID: "call-missing-context")
+        XCTAssertEqual(payload.content, "sqlite state db unavailable for thread goals")
+        XCTAssertEqual(payload.success, false)
+    }
+
     func testToolSpecsHonorDisabledEnvironmentModeLikeRust() {
         var features = FeatureStates.withDefaults()
         features.set(.unifiedExec, enabled: true)
@@ -5760,6 +5894,20 @@ private func hookInputObject(at url: URL) throws -> [String: Any] {
 
 private func shellSingleQuote(_ value: String) -> String {
     "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+}
+
+private func functionOutputPayload(from item: ResponseItem, callID: String) throws -> FunctionCallOutputPayload {
+    guard case let .functionCallOutput(outputCallID, payload) = item else {
+        return try XCTUnwrap(nil, "expected function call output")
+    }
+    XCTAssertEqual(outputCallID, callID)
+    return payload
+}
+
+private func goalToolResponse(from item: ResponseItem, callID: String) throws -> ThreadGoalToolResponse {
+    let payload = try functionOutputPayload(from: item, callID: callID)
+    XCTAssertEqual(payload.success, true)
+    return try JSONDecoder().decode(ThreadGoalToolResponse.self, from: Data(payload.content.utf8))
 }
 
 private final class NonInteractiveExecTemporaryDirectory {

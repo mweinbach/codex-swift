@@ -500,6 +500,10 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             allowLoginShell: setup.settings.allowLoginShell,
             canRequestOriginalImageDetail: setup.modelFamily.supportsImageDetailOriginal,
             backgroundTerminalMaxTimeoutMS: setup.settings.backgroundTerminalMaxTimeoutMS,
+            goalToolContext: Self.goalToolContext(
+                threadID: submission.threadID,
+                stateStore: configuration.stateStore
+            ),
             turnEnvironmentSelections: setup.turnEnvironmentSelections,
             configuredEnvironmentSnapshot: ConfiguredEnvironmentLoader.legacyEnvironmentSnapshot(
                 environment: configuration.environment
@@ -623,6 +627,18 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 return result
             }
         )
+    }
+
+    private static func goalToolContext(
+        threadID: String,
+        stateStore: SQLiteAgentGraphStore?
+    ) -> NonInteractiveExec.GoalToolContext? {
+        guard let stateStore,
+              let parsedThreadID = try? ThreadId(string: threadID)
+        else {
+            return nil
+        }
+        return NonInteractiveExec.GoalToolContext(threadID: parsedThreadID, stateStore: stateStore)
     }
 
     private func completeTurn(

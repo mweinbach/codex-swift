@@ -699,6 +699,17 @@ Recent upstream audit checkpoint:
   spec-building and `NonInteractiveExec.toolsConfig`; live runtime execution
   and automatic goal accounting remain tracked with the broader
   tool-handler/ThreadManager parity work below.
+- 2026-05-18: Swift's shared `NonInteractiveExec.ToolRouter` now executes the
+  model-visible goal tools when a materialized thread/state-store goal context
+  is available. `create_goal` trims and validates objectives/budgets, refuses
+  existing goals with Rust's model-facing guidance, persists a fresh active
+  goal, and emits `threadGoalUpdated`; `get_goal` returns the Rust-shaped
+  `ThreadGoalToolResponse` without emitting lifecycle events; `update_goal`
+  accepts only `complete`, persists completion, includes Rust's final-usage
+  report hint for budgeted goals, and emits `threadGoalUpdated`. The app-server
+  live Responses loop now passes the loaded thread/state-store context into the
+  router. Runtime token/time accounting, budget-limited continuation steering,
+  and broader ThreadManager lifecycle integration remain pending below.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through

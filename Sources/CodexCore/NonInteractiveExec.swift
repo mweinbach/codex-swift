@@ -75,6 +75,16 @@ public enum NonInteractiveExec {
     private static let unifiedExecSessions = UnifiedExecSessionRegistry()
     public typealias AgentJobToolContext = CodexCore.AgentJobToolContext
 
+    public struct GoalToolContext: Sendable {
+        public let threadID: ThreadId
+        public let stateStore: SQLiteAgentGraphStore
+
+        public init(threadID: ThreadId, stateStore: SQLiteAgentGraphStore) {
+            self.threadID = threadID
+            self.stateStore = stateStore
+        }
+    }
+
     public static func makeInitialPromptInput(
         cwd: URL,
         approvalPolicy: AskForApproval,
@@ -515,6 +525,7 @@ public enum NonInteractiveExec {
         public var backgroundTerminalMaxTimeoutMS: UInt64
         public var toolSearchIndex: ToolSearchIndex?
         public var agentJobContext: AgentJobToolContext?
+        public var goalToolContext: GoalToolContext?
         public var turnEnvironmentSelections: [TurnEnvironmentSelection]?
         public var configuredEnvironmentSnapshot: ConfiguredEnvironmentSnapshot?
         public var remoteEnvironmentFileSystems: [String: ExecServerRemoteFileSystem]
@@ -547,6 +558,7 @@ public enum NonInteractiveExec {
             backgroundTerminalMaxTimeoutMS: UInt64 = CodexConfigDefaults.backgroundTerminalMaxTimeoutMS,
             toolSearchIndex: ToolSearchIndex? = nil,
             agentJobContext: AgentJobToolContext? = nil,
+            goalToolContext: GoalToolContext? = nil,
             turnEnvironmentSelections: [TurnEnvironmentSelection]? = nil,
             configuredEnvironmentSnapshot: ConfiguredEnvironmentSnapshot? = nil,
             remoteEnvironmentFileSystems: [String: ExecServerRemoteFileSystem] = [:],
@@ -578,6 +590,7 @@ public enum NonInteractiveExec {
             self.backgroundTerminalMaxTimeoutMS = backgroundTerminalMaxTimeoutMS
             self.toolSearchIndex = toolSearchIndex
             self.agentJobContext = agentJobContext
+            self.goalToolContext = goalToolContext
             self.turnEnvironmentSelections = turnEnvironmentSelections
             self.configuredEnvironmentSnapshot = configuredEnvironmentSnapshot
             self.remoteEnvironmentFileSystems = remoteEnvironmentFileSystems
@@ -762,6 +775,7 @@ public enum NonInteractiveExec {
                 backgroundTerminalMaxTimeoutMS: backgroundTerminalMaxTimeoutMS,
                 toolSearchIndex: toolSearchIndex,
                 agentJobContext: agentJobContext,
+                goalToolContext: goalToolContext,
                 turnEnvironmentSelections: turnEnvironmentSelections,
                 configuredEnvironmentSnapshot: configuredEnvironmentSnapshot,
                 remoteEnvironmentFileSystems: remoteEnvironmentFileSystems,
@@ -1171,6 +1185,7 @@ public enum NonInteractiveExec {
         backgroundTerminalMaxTimeoutMS: UInt64 = CodexConfigDefaults.backgroundTerminalMaxTimeoutMS,
         toolSearchIndex: ToolSearchIndex? = nil,
         agentJobContext: AgentJobToolContext? = nil,
+        goalToolContext: GoalToolContext? = nil,
         turnEnvironmentSelections: [TurnEnvironmentSelection]? = nil,
         configuredEnvironmentSnapshot: ConfiguredEnvironmentSnapshot? = nil,
         remoteEnvironmentFileSystems: [String: ExecServerRemoteFileSystem] = [:],
@@ -1268,6 +1283,7 @@ public enum NonInteractiveExec {
         backgroundTerminalMaxTimeoutMS: UInt64 = CodexConfigDefaults.backgroundTerminalMaxTimeoutMS,
         toolSearchIndex: ToolSearchIndex? = nil,
         agentJobContext: AgentJobToolContext? = nil,
+        goalToolContext: GoalToolContext? = nil,
         turnEnvironmentSelections: [TurnEnvironmentSelection]? = nil,
         configuredEnvironmentSnapshot: ConfiguredEnvironmentSnapshot? = nil,
         remoteEnvironmentFileSystems: [String: ExecServerRemoteFileSystem] = [:],
@@ -1305,6 +1321,7 @@ public enum NonInteractiveExec {
                 canRequestOriginalImageDetail: canRequestOriginalImageDetail,
                 backgroundTerminalMaxTimeoutMS: backgroundTerminalMaxTimeoutMS,
                 agentJobContext: agentJobContext,
+                goalToolContext: goalToolContext,
                 turnEnvironmentSelections: turnEnvironmentSelections,
                 configuredEnvironmentSnapshot: configuredEnvironmentSnapshot,
                 remoteEnvironmentFileSystems: remoteEnvironmentFileSystems,
@@ -1425,6 +1442,7 @@ public enum NonInteractiveExec {
         backgroundTerminalMaxTimeoutMS: UInt64 = CodexConfigDefaults.backgroundTerminalMaxTimeoutMS,
         toolSearchIndex: ToolSearchIndex? = nil,
         agentJobContext: AgentJobToolContext? = nil,
+        goalToolContext: GoalToolContext? = nil,
         turnEnvironmentSelections: [TurnEnvironmentSelection]? = nil,
         configuredEnvironmentSnapshot: ConfiguredEnvironmentSnapshot? = nil,
         remoteEnvironmentFileSystems: [String: ExecServerRemoteFileSystem] = [:],
@@ -1464,6 +1482,7 @@ public enum NonInteractiveExec {
             backgroundTerminalMaxTimeoutMS: backgroundTerminalMaxTimeoutMS,
             toolSearchIndex: toolSearchIndex,
             agentJobContext: agentJobContext,
+            goalToolContext: goalToolContext,
             turnEnvironmentSelections: turnEnvironmentSelections,
             configuredEnvironmentSnapshot: configuredEnvironmentSnapshot,
             remoteEnvironmentFileSystems: remoteEnvironmentFileSystems,
@@ -2024,6 +2043,7 @@ public enum NonInteractiveExec {
         canRequestOriginalImageDetail: Bool,
         backgroundTerminalMaxTimeoutMS: UInt64,
         agentJobContext: AgentJobToolContext?,
+        goalToolContext: GoalToolContext?,
         turnEnvironmentSelections: [TurnEnvironmentSelection]?,
         configuredEnvironmentSnapshot: ConfiguredEnvironmentSnapshot?,
         remoteEnvironmentFileSystems: [String: ExecServerRemoteFileSystem],
@@ -2241,6 +2261,16 @@ public enum NonInteractiveExec {
                 return executed(
                     functionOutput(callID: callID, content: content, success: true),
                     requestPermissionsResponse: normalizedResponse
+                )
+
+            case "get_goal", "create_goal", "update_goal":
+                return await executeGoalToolCall(
+                    name: name,
+                    arguments: arguments,
+                    callID: callID,
+                    turnID: turnID,
+                    features: features,
+                    context: goalToolContext
                 )
 
             case "update_plan":
@@ -2586,6 +2616,150 @@ public enum NonInteractiveExec {
 
     private struct RequestPermissionsToolArguments: Decodable {
         let permissions: RequestPermissionProfile
+    }
+
+    private struct CreateGoalToolArguments: Decodable {
+        let objective: String
+        let tokenBudget: Int64?
+
+        private enum CodingKeys: String, CodingKey {
+            case objective
+            case tokenBudget = "token_budget"
+        }
+    }
+
+    private struct UpdateGoalToolArguments: Decodable {
+        let status: ThreadGoalStatus
+    }
+
+    private static func executeGoalToolCall(
+        name: String,
+        arguments: String,
+        callID: String,
+        turnID: String,
+        features: FeatureStates,
+        context: GoalToolContext?
+    ) async -> ExecutedFunctionCall {
+        guard features.isEnabled(.goals) else {
+            return executed(functionOutput(callID: callID, content: "unsupported call: \(name)", success: false))
+        }
+        guard let context else {
+            return executed(functionOutput(
+                callID: callID,
+                content: "sqlite state db unavailable for thread goals",
+                success: false
+            ))
+        }
+
+        do {
+            switch name {
+            case "get_goal":
+                let goal = try await context.stateStore.getThreadGoal(threadID: context.threadID)
+                return try executedGoalToolResponse(callID: callID, goal: goal, completionReportMode: .omit)
+
+            case "create_goal":
+                let args = try JSONDecoder().decode(CreateGoalToolArguments.self, from: Data(arguments.utf8))
+                let objective = args.objective.trimmingCharacters(in: .whitespacesAndNewlines)
+                try validateGoalToolObjective(objective)
+                try validateGoalToolBudget(args.tokenBudget)
+                if try await context.stateStore.getThreadGoal(threadID: context.threadID) != nil {
+                    return executed(functionOutput(
+                        callID: callID,
+                        content: "cannot create a new goal because this thread already has a goal; use update_goal only when the existing goal is complete",
+                        success: false
+                    ))
+                }
+                let goal = try await context.stateStore.replaceThreadGoal(
+                    threadID: context.threadID,
+                    objective: objective,
+                    status: .active,
+                    tokenBudget: args.tokenBudget
+                )
+                return try executedGoalToolResponse(
+                    callID: callID,
+                    goal: goal,
+                    completionReportMode: .omit,
+                    turnID: turnID,
+                    emitRuntimeEvent: true
+                )
+
+            case "update_goal":
+                let args = try JSONDecoder().decode(UpdateGoalToolArguments.self, from: Data(arguments.utf8))
+                guard args.status == .complete else {
+                    return executed(functionOutput(
+                        callID: callID,
+                        content: "update_goal can only mark the existing goal complete; pause, resume, and budget-limited status changes are controlled by the user or system",
+                        success: false
+                    ))
+                }
+                guard let goal = try await context.stateStore.updateThreadGoal(
+                    threadID: context.threadID,
+                    status: .complete,
+                    tokenBudget: .preserve
+                ) else {
+                    return executed(functionOutput(
+                        callID: callID,
+                        content: "cannot update goal for thread \(context.threadID): no goal exists",
+                        success: false
+                    ))
+                }
+                return try executedGoalToolResponse(
+                    callID: callID,
+                    goal: goal,
+                    completionReportMode: .include,
+                    turnID: turnID,
+                    emitRuntimeEvent: true
+                )
+
+            default:
+                return executed(functionOutput(callID: callID, content: "unsupported call: \(name)", success: false))
+            }
+        } catch let error as FunctionCallError {
+            return executed(functionOutput(callID: callID, content: error.description, success: false))
+        } catch {
+            return executed(functionOutput(callID: callID, content: String(describing: error), success: false))
+        }
+    }
+
+    private static func executedGoalToolResponse(
+        callID: String,
+        goal: ThreadGoal?,
+        completionReportMode: ThreadGoalCompletionReportMode,
+        turnID: String? = nil,
+        emitRuntimeEvent: Bool = false
+    ) throws -> ExecutedFunctionCall {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted]
+        let response = ThreadGoalToolResponse(goal: goal, completionReportMode: completionReportMode)
+        let data = try encoder.encode(response)
+        let output = functionOutput(
+            callID: callID,
+            content: String(decoding: data, as: UTF8.self),
+            success: true
+        )
+        let events = emitRuntimeEvent ? goal.map { goal in
+            [EventMessage.threadGoalUpdated(ThreadGoalUpdatedEvent(
+                threadID: goal.threadID,
+                turnID: turnID,
+                goal: goal
+            ))]
+        } ?? [] : []
+        return executed(output, runtimeEvents: events)
+    }
+
+    private static func validateGoalToolObjective(_ objective: String) throws {
+        guard !objective.isEmpty else {
+            throw FunctionCallError.respondToModel("goal objective must not be empty")
+        }
+        guard objective.count <= 4_000 else {
+            throw FunctionCallError.respondToModel("goal objective must be at most 4000 characters")
+        }
+    }
+
+    private static func validateGoalToolBudget(_ value: Int64?) throws {
+        if let value, value <= 0 {
+            throw FunctionCallError.respondToModel("goal budgets must be positive when provided")
+        }
     }
 
     private static func materializeRequestPermissionPaths(_ value: JSONValue, cwd: URL) -> JSONValue {
