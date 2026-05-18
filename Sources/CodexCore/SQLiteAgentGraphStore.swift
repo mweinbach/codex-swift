@@ -670,6 +670,10 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
 
     public func getThreadGoal(threadID: ThreadId) async throws -> ThreadGoal? {
         let database = handle.database
+        return try Self.getThreadGoalSync(threadID: threadID, database: database)
+    }
+
+    private static func getThreadGoalSync(threadID: ThreadId, database: OpaquePointer) throws -> ThreadGoal? {
         return try Self.withStatement(
             query:
             """
@@ -841,6 +845,121 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
             database: database
         )
         return sqlite3_changes(database) > 0
+    }
+
+    public func pauseActiveThreadGoal(threadID: ThreadId) async throws -> ThreadGoal? {
+        let database = handle.database
+        try Self.execute(
+            """
+            UPDATE thread_goals
+            SET
+                status = ?,
+                updated_at_ms = ?
+            WHERE thread_id = ?
+              AND status = 'active'
+            """,
+            bindings: [
+                .text(Self.databaseStatus(.paused)),
+                .int(Self.currentTimeMilliseconds()),
+                .text(threadID.description),
+            ],
+            database: database
+        )
+        guard sqlite3_changes(database) > 0 else {
+            return nil
+        }
+        return try await getThreadGoal(threadID: threadID)
+    }
+
+    public func accountThreadGoalUsage(
+        threadID: ThreadId,
+        timeDeltaSeconds: Int64,
+        tokenDelta: Int64,
+        mode: ThreadGoalAccountingMode,
+        expectedGoalID: String? = nil
+    ) async throws -> ThreadGoalAccountingOutcome {
+        let timeDeltaSeconds = max(timeDeltaSeconds, 0)
+        let tokenDelta = max(tokenDelta, 0)
+        if timeDeltaSeconds == 0, tokenDelta == 0 {
+            return .unchanged(try await getThreadGoal(threadID: threadID))
+        }
+
+        let statusFilter: String
+        switch mode {
+        case .activeStatusOnly:
+            statusFilter = "status = 'active'"
+        case .activeOnly:
+            statusFilter = "status IN ('active', 'budget_limited')"
+        case .activeOrComplete:
+            statusFilter = "status IN ('active', 'budget_limited', 'complete')"
+        case .activeOrStopped:
+            statusFilter = "status IN ('active', 'paused', 'budget_limited')"
+        }
+
+        let budgetLimitStatusFilter: String
+        switch mode {
+        case .activeStatusOnly, .activeOnly, .activeOrComplete:
+            budgetLimitStatusFilter = "status = 'active'"
+        case .activeOrStopped:
+            budgetLimitStatusFilter = "status IN ('active', 'paused', 'budget_limited')"
+        }
+
+        var query =
+            """
+            UPDATE thread_goals
+            SET
+                time_used_seconds = time_used_seconds + ?,
+                tokens_used = tokens_used + ?,
+                status = CASE
+                    WHEN \(budgetLimitStatusFilter) AND token_budget IS NOT NULL AND tokens_used + ? >= token_budget
+                        THEN ?
+                    ELSE status
+                END,
+                updated_at_ms = ?
+            WHERE thread_id = ?
+              AND \(statusFilter)
+            """
+        var bindings: [SQLiteBinding] = [
+            .int(timeDeltaSeconds),
+            .int(tokenDelta),
+            .int(tokenDelta),
+            .text(Self.databaseStatus(.budgetLimited)),
+            .int(Self.currentTimeMilliseconds()),
+            .text(threadID.description),
+        ]
+        if let expectedGoalID {
+            query += "\n  AND goal_id = ?"
+            bindings.append(.text(expectedGoalID))
+        }
+        query +=
+            """
+
+            RETURNING
+                thread_id,
+                objective,
+                status,
+                token_budget,
+                tokens_used,
+                time_used_seconds,
+                created_at_ms,
+                updated_at_ms
+            """
+
+        let database = handle.database
+        return try Self.withStatement(
+            query: query,
+            bindings: bindings,
+            database: database
+        ) { statement in
+            let result = sqlite3_step(statement)
+            if result == SQLITE_DONE {
+                return .unchanged(try Self.getThreadGoalSync(threadID: threadID, database: database))
+            }
+            guard result == SQLITE_ROW else {
+                throw Self.sqliteError(database: database)
+            }
+            return .updated(try Self.threadGoal(from: statement))
+        }
     }
 
     public func findRolloutPath(
@@ -3375,6 +3494,18 @@ public struct ThreadsPage: Equatable, Sendable {
 public enum ThreadGoalTokenBudgetUpdate: Equatable, Sendable {
     case preserve
     case set(Int64?)
+}
+
+public enum ThreadGoalAccountingMode: Equatable, Sendable {
+    case activeStatusOnly
+    case activeOnly
+    case activeOrComplete
+    case activeOrStopped
+}
+
+public enum ThreadGoalAccountingOutcome: Equatable, Sendable {
+    case updated(ThreadGoal)
+    case unchanged(ThreadGoal?)
 }
 
 public struct ThreadListFilterOptions: Equatable, Sendable {

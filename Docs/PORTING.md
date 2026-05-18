@@ -710,6 +710,16 @@ Recent upstream audit checkpoint:
   live Responses loop now passes the loaded thread/state-store context into the
   router. Runtime token/time accounting, budget-limited continuation steering,
   and broader ThreadManager lifecycle integration remain pending below.
+- 2026-05-18: Swift's SQLite state store now mirrors Rust's lower-level
+  thread-goal runtime accounting helpers from `codex-rs/state/src/runtime/goals.rs`.
+  `accountThreadGoalUsage` clamps negative time/token deltas to zero, returns
+  unchanged goals for zero deltas or non-matching accounting modes, updates
+  active and in-flight budget-limited goals, promotes active/stopped goals to
+  `budgetLimited` when the token budget is reached, and preserves Rust's
+  `activeStatusOnly`, `activeOnly`, `activeOrComplete`, and `activeOrStopped`
+  mode filters. `pauseActiveThreadGoal` now pauses only active goals without
+  clobbering terminal states. Live turn-start baselines, continuation steering,
+  and automatic accounting hooks remain pending with the ThreadManager work.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through

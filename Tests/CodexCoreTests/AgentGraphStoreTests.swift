@@ -386,6 +386,131 @@ final class AgentGraphStoreTests: XCTestCase {
         XCTAssertEqual(persistedGoal?.status, .usageLimited)
     }
 
+    func testSQLiteStoreAccountsThreadGoalUsageLikeRust() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let store = try SQLiteAgentGraphStore(databaseURL: temp.url.appendingPathComponent("state.sqlite3"))
+        let threadID = try threadID(49)
+        try await store.upsertThread(try threadMetadata(
+            id: threadID,
+            rolloutPath: "/tmp/goal-accounting.jsonl",
+            updatedAt: date(milliseconds: 1_700_000_000_000),
+            title: "Goal accounting"
+        ))
+        _ = try await store.replaceThreadGoal(
+            threadID: threadID,
+            objective: "stay within budget",
+            status: .active,
+            tokenBudget: 20
+        )
+
+        let clampedNoOp = try await store.accountThreadGoalUsage(
+            threadID: threadID,
+            timeDeltaSeconds: -1,
+            tokenDelta: -1,
+            mode: .activeOnly
+        )
+        guard case let .unchanged(initialGoal?) = clampedNoOp else {
+            return XCTFail("negative deltas should clamp to an unchanged goal")
+        }
+        XCTAssertEqual(initialGoal.tokensUsed, 0)
+        XCTAssertEqual(initialGoal.timeUsedSeconds, 0)
+
+        let first = try await store.accountThreadGoalUsage(
+            threadID: threadID,
+            timeDeltaSeconds: 7,
+            tokenDelta: 5,
+            mode: .activeOnly
+        )
+        guard case let .updated(firstGoal) = first else {
+            return XCTFail("active goal should account usage")
+        }
+        XCTAssertEqual(firstGoal.status, .active)
+        XCTAssertEqual(firstGoal.tokensUsed, 5)
+        XCTAssertEqual(firstGoal.timeUsedSeconds, 7)
+
+        let budgetCrossing = try await store.accountThreadGoalUsage(
+            threadID: threadID,
+            timeDeltaSeconds: 3,
+            tokenDelta: 15,
+            mode: .activeOnly
+        )
+        guard case let .updated(budgetLimitedGoal) = budgetCrossing else {
+            return XCTFail("budget crossing should update the goal")
+        }
+        XCTAssertEqual(budgetLimitedGoal.status, .budgetLimited)
+        XCTAssertEqual(budgetLimitedGoal.tokensUsed, 20)
+        XCTAssertEqual(budgetLimitedGoal.timeUsedSeconds, 10)
+
+        let inFlight = try await store.accountThreadGoalUsage(
+            threadID: threadID,
+            timeDeltaSeconds: 5,
+            tokenDelta: 5,
+            mode: .activeOnly
+        )
+        guard case let .updated(inFlightGoal) = inFlight else {
+            return XCTFail("budget-limited in-flight goal should still account usage")
+        }
+        XCTAssertEqual(inFlightGoal.status, .budgetLimited)
+        XCTAssertEqual(inFlightGoal.tokensUsed, 25)
+        XCTAssertEqual(inFlightGoal.timeUsedSeconds, 15)
+    }
+
+    func testSQLiteStoreGoalAccountingModesAndPauseMatchRust() async throws {
+        let temp = try AgentGraphStoreTemporaryDirectory()
+        let store = try SQLiteAgentGraphStore(databaseURL: temp.url.appendingPathComponent("state.sqlite3"))
+        let threadID = try threadID(50)
+        try await store.upsertThread(try threadMetadata(
+            id: threadID,
+            rolloutPath: "/tmp/goal-accounting-modes.jsonl",
+            updatedAt: date(milliseconds: 1_700_000_000_000),
+            title: "Goal accounting modes"
+        ))
+        _ = try await store.replaceThreadGoal(
+            threadID: threadID,
+            objective: "stay stopped",
+            status: .budgetLimited,
+            tokenBudget: 20
+        )
+
+        let activeStatusOnly = try await store.accountThreadGoalUsage(
+            threadID: threadID,
+            timeDeltaSeconds: 5,
+            tokenDelta: 5,
+            mode: .activeStatusOnly
+        )
+        guard case let .unchanged(budgetLimitedGoal?) = activeStatusOnly else {
+            return XCTFail("budget-limited goal should not match active-status-only accounting")
+        }
+        XCTAssertEqual(budgetLimitedGoal.status, .budgetLimited)
+        XCTAssertEqual(budgetLimitedGoal.tokensUsed, 0)
+        XCTAssertEqual(budgetLimitedGoal.timeUsedSeconds, 0)
+
+        let activeGoal = try await store.replaceThreadGoal(
+            threadID: threadID,
+            objective: "pause active work",
+            status: .active,
+            tokenBudget: 20
+        )
+        let paused = try await store.pauseActiveThreadGoal(threadID: threadID)
+        XCTAssertEqual(paused?.status, .paused)
+        XCTAssertEqual(paused?.objective, activeGoal.objective)
+        let secondPause = try await store.pauseActiveThreadGoal(threadID: threadID)
+        XCTAssertNil(secondPause)
+
+        let stoppedAccounting = try await store.accountThreadGoalUsage(
+            threadID: threadID,
+            timeDeltaSeconds: 3,
+            tokenDelta: 25,
+            mode: .activeOrStopped
+        )
+        guard case let .updated(stoppedGoal) = stoppedAccounting else {
+            return XCTFail("stopped goal should account final in-flight usage")
+        }
+        XCTAssertEqual(stoppedGoal.status, .budgetLimited)
+        XCTAssertEqual(stoppedGoal.tokensUsed, 25)
+        XCTAssertEqual(stoppedGoal.timeUsedSeconds, 3)
+    }
+
     func testSQLiteStoreInsertsThreadSpawnEdgeFromSourceOnlyWhenAbsent() async throws {
         let temp = try AgentGraphStoreTemporaryDirectory()
         let store = try SQLiteAgentGraphStore(databaseURL: temp.url.appendingPathComponent("state.sqlite3"))
