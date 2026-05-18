@@ -966,6 +966,11 @@ Recent upstream audit checkpoint:
   `spawn_agent` role/model reasoning overrides recorded in the child rollout
   aligned with the actual child turn, matching Rust's
   `build_agent_shared_config` reuse of turn-context reasoning state.
+- 2026-05-18: Swift live app-server context-only `turn/start` updates now match
+  Rust `OverrideTurnContext` behavior by staying in runtime state instead of
+  starting a model turn or appending rollout history before user input. The next
+  non-empty live user turn consumes those pending approval/model/reasoning
+  overrides and records the effective `turn_context` with the user input.
 - 2026-05-18: Swift live app-server MultiAgentV2 `spawn_agent` now reserves
   Rust-style spawned-agent nicknames for live child threads, using the upstream
   default nickname pool plus role-specific `nickname_candidates`, persists the

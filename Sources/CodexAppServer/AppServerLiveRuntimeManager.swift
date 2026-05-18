@@ -240,6 +240,18 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
     public func submitLiveRuntime(_ submission: AppServerLiveRuntimeSubmission) throws -> [EventMessage] {
         switch submission.op {
         case .userInput, .userInputWithTurnContext, .userTurn:
+            if case .userInputWithTurnContext = submission.op {
+                let turnInput = try LiveTurnInput(op: submission.op)
+                if turnInput.items.isEmpty {
+                    AppServerLiveRuntimeBlocking.run {
+                        await self.state.recordPendingTurnContextOverrides(
+                            threadID: submission.threadID,
+                            overrides: PendingLiveTurnContextOverrides(turnInput: turnInput)
+                        )
+                    }
+                    return []
+                }
+            }
             let startGate = AppServerLiveRuntimeStartGate()
             let task = Task { [weak self, startGate] in
                 await startGate.wait()
@@ -693,7 +705,9 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             items: initialHistory.rolloutItems,
             defaultProvider: configuration.defaultModelProvider
         )
-        let turnInput = try LiveTurnInput(op: submission.op)
+        let rawTurnInput = try LiveTurnInput(op: submission.op)
+        let pendingOverrides = await state.takePendingTurnContextOverrides(threadID: submission.threadID)
+        let turnInput = rawTurnInput.applying(pendingOverrides)
         let cwd = URL(fileURLWithPath: turnInput.cwd ?? summary.cwd, isDirectory: true)
         var settings = try CodexConfigLoader.load(
             codexHome: configuration.codexHome,
@@ -2304,6 +2318,7 @@ private actor AppServerLiveRuntimeState {
     private var agentStatuses: [String: AgentStatus] = [:]
     private var sessionSources: [String: SessionSource] = [:]
     private var multiAgentV2Features: [String: Bool] = [:]
+    private var pendingTurnContextOverrides: [String: PendingLiveTurnContextOverrides] = [:]
     private var reservedSpawnThreadIDs: Set<String> = []
     private var reservedAgentPathThreadIDs: [String: String] = [:]
     private var reservedAgentPathsByThreadID: [String: String] = [:]
@@ -2456,6 +2471,18 @@ private actor AppServerLiveRuntimeState {
 
     func recordMultiAgentV2Feature(threadID: String, enabled: Bool) {
         multiAgentV2Features[threadID] = enabled
+    }
+
+    func recordPendingTurnContextOverrides(
+        threadID: String,
+        overrides: PendingLiveTurnContextOverrides
+    ) {
+        pendingTurnContextOverrides[threadID] = pendingTurnContextOverrides[threadID]
+            .map { $0.merging(overrides) } ?? overrides
+    }
+
+    func takePendingTurnContextOverrides(threadID: String) -> PendingLiveTurnContextOverrides? {
+        pendingTurnContextOverrides.removeValue(forKey: threadID)
     }
 
     func reserveAgentNickname(candidates: [String], preferred: String? = nil) -> String? {
@@ -2646,6 +2673,7 @@ private actor AppServerLiveRuntimeState {
         }
         sessionGrantedPermissionProfiles.removeValue(forKey: threadID)
         runtimeConfigSnapshots.removeValue(forKey: threadID)
+        pendingTurnContextOverrides.removeValue(forKey: threadID)
         let status = AgentStatus.notFound
         agentStatuses[threadID] = status
         maybeNotifyParentOfFinalStatus(threadID: threadID, status: status)
@@ -2675,6 +2703,7 @@ private actor AppServerLiveRuntimeState {
         agentStatuses.removeAll()
         sessionSources.removeAll()
         multiAgentV2Features.removeAll()
+        pendingTurnContextOverrides.removeAll()
         reservedSpawnThreadIDs.removeAll()
         reservedAgentPathThreadIDs.removeAll()
         reservedAgentPathsByThreadID.removeAll()
@@ -3069,6 +3098,81 @@ private struct LiveRolloutSummary {
     }
 }
 
+private struct PendingLiveTurnContextOverrides: Sendable {
+    let environments: [TurnEnvironmentSelection]?
+    let outputSchema: JSONValue?
+    let responsesAPIClientMetadata: [String: String]?
+    let cwd: String?
+    let approvalPolicy: AskForApproval?
+    let sandboxPolicy: SandboxPolicy?
+    let permissionProfile: PermissionProfile?
+    let model: String?
+    let effort: ReasoningEffortOverride?
+    let summary: ReasoningSummary?
+    let serviceTier: String?
+    let collaborationMode: CollaborationMode?
+
+    init(turnInput: LiveTurnInput) {
+        self.environments = turnInput.environments
+        self.outputSchema = turnInput.outputSchema
+        self.responsesAPIClientMetadata = turnInput.responsesAPIClientMetadata
+        self.cwd = turnInput.cwd
+        self.approvalPolicy = turnInput.approvalPolicy
+        self.sandboxPolicy = turnInput.sandboxPolicy
+        self.permissionProfile = turnInput.permissionProfile
+        self.model = turnInput.model
+        self.effort = turnInput.effort
+        self.summary = turnInput.summary
+        self.serviceTier = turnInput.serviceTier
+        self.collaborationMode = turnInput.collaborationMode
+    }
+
+    private init(
+        environments: [TurnEnvironmentSelection]?,
+        outputSchema: JSONValue?,
+        responsesAPIClientMetadata: [String: String]?,
+        cwd: String?,
+        approvalPolicy: AskForApproval?,
+        sandboxPolicy: SandboxPolicy?,
+        permissionProfile: PermissionProfile?,
+        model: String?,
+        effort: ReasoningEffortOverride?,
+        summary: ReasoningSummary?,
+        serviceTier: String?,
+        collaborationMode: CollaborationMode?
+    ) {
+        self.environments = environments
+        self.outputSchema = outputSchema
+        self.responsesAPIClientMetadata = responsesAPIClientMetadata
+        self.cwd = cwd
+        self.approvalPolicy = approvalPolicy
+        self.sandboxPolicy = sandboxPolicy
+        self.permissionProfile = permissionProfile
+        self.model = model
+        self.effort = effort
+        self.summary = summary
+        self.serviceTier = serviceTier
+        self.collaborationMode = collaborationMode
+    }
+
+    func merging(_ newer: PendingLiveTurnContextOverrides) -> PendingLiveTurnContextOverrides {
+        PendingLiveTurnContextOverrides(
+            environments: newer.environments ?? environments,
+            outputSchema: newer.outputSchema ?? outputSchema,
+            responsesAPIClientMetadata: newer.responsesAPIClientMetadata ?? responsesAPIClientMetadata,
+            cwd: newer.cwd ?? cwd,
+            approvalPolicy: newer.approvalPolicy ?? approvalPolicy,
+            sandboxPolicy: newer.sandboxPolicy ?? sandboxPolicy,
+            permissionProfile: newer.permissionProfile ?? permissionProfile,
+            model: newer.model ?? model,
+            effort: newer.effort ?? effort,
+            summary: newer.summary ?? summary,
+            serviceTier: newer.serviceTier ?? serviceTier,
+            collaborationMode: newer.collaborationMode ?? collaborationMode
+        )
+    }
+}
+
 private struct LiveTurnInput {
     let items: [UserInput]
     let environments: [TurnEnvironmentSelection]?
@@ -3083,6 +3187,36 @@ private struct LiveTurnInput {
     let summary: ReasoningSummary?
     let serviceTier: String?
     let collaborationMode: CollaborationMode?
+
+    private init(
+        items: [UserInput],
+        environments: [TurnEnvironmentSelection]?,
+        outputSchema: JSONValue?,
+        responsesAPIClientMetadata: [String: String]?,
+        cwd: String?,
+        approvalPolicy: AskForApproval?,
+        sandboxPolicy: SandboxPolicy?,
+        permissionProfile: PermissionProfile?,
+        model: String?,
+        effort: ReasoningEffortOverride?,
+        summary: ReasoningSummary?,
+        serviceTier: String?,
+        collaborationMode: CollaborationMode?
+    ) {
+        self.items = items
+        self.environments = environments
+        self.outputSchema = outputSchema
+        self.responsesAPIClientMetadata = responsesAPIClientMetadata
+        self.cwd = cwd
+        self.approvalPolicy = approvalPolicy
+        self.sandboxPolicy = sandboxPolicy
+        self.permissionProfile = permissionProfile
+        self.model = model
+        self.effort = effort
+        self.summary = summary
+        self.serviceTier = serviceTier
+        self.collaborationMode = collaborationMode
+    }
 
     init(op: Op) throws {
         switch op {
@@ -3146,6 +3280,27 @@ private struct LiveTurnInput {
         default:
             throw AppServerLiveRuntimeError("unsupported live runtime op: \(op)")
         }
+    }
+
+    func applying(_ overrides: PendingLiveTurnContextOverrides?) -> LiveTurnInput {
+        guard let overrides else {
+            return self
+        }
+        return LiveTurnInput(
+            items: items,
+            environments: environments ?? overrides.environments,
+            outputSchema: outputSchema ?? overrides.outputSchema,
+            responsesAPIClientMetadata: responsesAPIClientMetadata ?? overrides.responsesAPIClientMetadata,
+            cwd: cwd ?? overrides.cwd,
+            approvalPolicy: approvalPolicy ?? overrides.approvalPolicy,
+            sandboxPolicy: sandboxPolicy ?? overrides.sandboxPolicy,
+            permissionProfile: permissionProfile ?? overrides.permissionProfile,
+            model: model ?? overrides.model,
+            effort: effort ?? overrides.effort,
+            summary: summary ?? overrides.summary,
+            serviceTier: serviceTier ?? overrides.serviceTier,
+            collaborationMode: collaborationMode ?? overrides.collaborationMode
+        )
     }
 
     private static func decodeReasoningEffortOverride(_ value: JSONValue?) throws -> ReasoningEffortOverride? {

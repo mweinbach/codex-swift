@@ -12482,6 +12482,92 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(InterAgentCommunication.fromMessageContent(content), mail)
     }
 
+    func testLiveRuntimeContextOnlyTurnStartDefersRolloutUntilUserInputLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let server = try AppServerResponsesRequestCaptureServer(blockResponseUntilReleased: true)
+        defer {
+            server.releaseResponse()
+            server.stop()
+        }
+        try """
+        model = "gpt-5.5"
+        model_provider = "mock_provider"
+
+        [model_providers.mock_provider]
+        name = "mock_provider"
+        base_url = "\(server.baseURL)"
+        wire_api = "responses"
+        requires_openai_auth = false
+        """.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T07-41-05",
+            timestamp: "2025-01-06T07:41:05Z",
+            preview: "context only",
+            provider: "mock_provider",
+            cwd: temp.url.path
+        )
+        let rolloutPath = try XCTUnwrap(RolloutListing.findConversationPathByIDString(
+            codexHome: temp.url,
+            idString: threadID
+        ))
+        let baseline = try rolloutRecordTypes(at: rolloutPath)
+        let manager = AppServerLiveRuntimeManager(
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                requiresOpenAIAuth: false
+            )
+        )
+        defer {
+            manager.shutdown()
+        }
+
+        let contextOnly = Op.userInputWithTurnContext(UserInputWithTurnContextParams(
+            items: [],
+            approvalPolicy: .never,
+            model: "gpt-live",
+            effort: .string("high"),
+            summary: .detailed
+        ))
+        _ = try manager.submitCoreOp(requestID: .integer(921), threadID: threadID, op: contextOnly)
+        _ = try manager.submitLiveRuntime(AppServerLiveRuntimeSubmission(
+            requestID: .integer(921),
+            threadID: threadID,
+            turnID: "context-only-turn",
+            op: contextOnly
+        ))
+
+        let contextOnlyStartedTurn = await manager.isTurnRunning(threadID: threadID)
+        XCTAssertFalse(contextOnlyStartedTurn)
+        XCTAssertEqual(try rolloutRecordTypes(at: rolloutPath), baseline)
+
+        let userInput = Op.userInput(items: [.text("use deferred context")])
+        let userTurnID = try manager.submitCoreOp(requestID: .integer(922), threadID: threadID, op: userInput)
+        _ = try manager.submitLiveRuntime(AppServerLiveRuntimeSubmission(
+            requestID: .integer(922),
+            threadID: threadID,
+            turnID: userTurnID,
+            op: userInput
+        ))
+        _ = try server.waitForRequestBody()
+
+        let history = try RolloutRecorder.getRolloutHistory(path: URL(fileURLWithPath: rolloutPath))
+        let turnContext = try XCTUnwrap(history.rolloutItems.compactMap { item -> TurnContextItem? in
+            if case let .turnContext(context) = item {
+                return context
+            }
+            return nil
+        }.last)
+        XCTAssertEqual(turnContext.approvalPolicy, .never)
+        XCTAssertEqual(turnContext.model, "gpt-live")
+        XCTAssertEqual(turnContext.effort, .high)
+        XCTAssertEqual(turnContext.summary, .detailed)
+    }
+
     func testLiveRuntimeInterruptedTurnPersistsRustMarkerBeforeAbort() async throws {
         try await assertLiveRuntimeInterruptedTurnMarker(
             extraConfig: "",
