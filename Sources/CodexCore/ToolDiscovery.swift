@@ -35,6 +35,16 @@ public let disallowedConnectorIDs: Set<String> = [
 public let firstPartyChatDisallowedConnectorIDs: Set<String> = [
     "connector_0f9c9d4592e54d0a9a12b3f44a1e2010"
 ]
+public let maxPluginCapabilitySummaryDescriptionLength = 1024
+
+public func promptSafePluginDescription(_ description: String?) -> String? {
+    guard let description else { return nil }
+    let normalized = description
+        .split { $0.isWhitespace }
+        .joined(separator: " ")
+    guard !normalized.isEmpty else { return nil }
+    return String(normalized.prefix(maxPluginCapabilitySummaryDescriptionLength))
+}
 
 public enum DiscoverableToolType: String, Codable, Equatable, Sendable {
     case connector
@@ -137,7 +147,7 @@ public struct DiscoverablePluginInfo: Equatable, Sendable {
     ) {
         self.id = id
         self.name = name
-        self.description = description
+        self.description = promptSafePluginDescription(description)
         self.hasSkills = hasSkills
         self.mcpServerNames = mcpServerNames
         self.appConnectorIDs = appConnectorIDs
@@ -164,8 +174,8 @@ public struct RequestPluginInstallEntry: Equatable, Sendable {
     ) {
         self.id = id
         self.name = name
-        self.description = description
         self.toolType = toolType
+        self.description = toolType == .plugin ? promptSafePluginDescription(description) : description
         self.hasSkills = hasSkills
         self.mcpServerNames = mcpServerNames
         self.appConnectorIDs = appConnectorIDs

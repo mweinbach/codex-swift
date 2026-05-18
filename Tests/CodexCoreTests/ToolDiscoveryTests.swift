@@ -90,6 +90,47 @@ final class ToolDiscoveryTests: XCTestCase {
         )
     }
 
+    func testPromptSafePluginDescriptionMatchesRustCapabilitySummary() {
+        XCTAssertNil(promptSafePluginDescription(nil))
+        XCTAssertNil(promptSafePluginDescription(" \n\t "))
+        XCTAssertEqual(
+            promptSafePluginDescription("  Reads\n\nlocal\tweather   and\r\ncalendars  "),
+            "Reads local weather and calendars"
+        )
+
+        let longDescription = String(repeating: "a", count: maxPluginCapabilitySummaryDescriptionLength + 10)
+        XCTAssertEqual(
+            promptSafePluginDescription(longDescription),
+            String(repeating: "a", count: maxPluginCapabilitySummaryDescriptionLength)
+        )
+    }
+
+    func testCollectRequestPluginInstallEntriesNormalizesPluginDescriptionsLikeRust() {
+        let plugin = DiscoverableTool.plugin(DiscoverablePluginInfo(
+            id: "weather@local",
+            name: "Weather",
+            description: "  Reads\n\nlocal\tweather   ",
+            hasSkills: true,
+            mcpServerNames: [],
+            appConnectorIDs: []
+        ))
+
+        XCTAssertEqual(
+            collectRequestPluginInstallEntries([plugin]),
+            [
+                RequestPluginInstallEntry(
+                    id: "weather@local",
+                    name: "Weather",
+                    description: "Reads local weather",
+                    toolType: .plugin,
+                    hasSkills: true,
+                    mcpServerNames: [],
+                    appConnectorIDs: []
+                )
+            ]
+        )
+    }
+
     func testAccessibleConnectorsFromMCPToolsCarriesPluginDisplayNames() {
         let tools = [
             "mcp__codex_apps__calendar_list_events": McpTool(

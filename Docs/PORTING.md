@@ -3398,6 +3398,8 @@ Recent upstream audit checkpoint:
   - hosted `request_plugin_install` Responses API tool schema, description guardrails, discoverable connector/plugin listing order, plugin capability fallback summaries, `tool_suggest` registration gate, and parallel-tool-call support flag
 - `codex-rs/tools/src/tool_discovery.rs` and `codex-rs/tools/src/request_plugin_install.rs`
   - request-plugin-install discoverable connector/plugin metadata, entry collection, snake_case tool/action enums, Codex TUI plugin filtering, `tool_suggestion` elicitation metadata, connector install completion checks, Rust-shaped MCP elicitation request construction, decline-always persistence into `tool_suggest.disabled_tools`, configured connector suggestion ID collection, and installed/disabled/allowlisted/configured plugin suggestion filtering including Rust's OpenAI Developers curated plugin allowlist entry
+- `codex-rs/plugin/src/load_outcome.rs` plugin capability summaries
+  - normalized model-facing plugin capability descriptions by collapsing whitespace, dropping empty descriptions, and truncating to Rust's 1024-character prompt-safety cap before `request_plugin_install` entries are rendered.
 - `codex-rs/core/src/unified_exec/errors.rs` and `codex-rs/protocol/src/error.rs`
   - unified exec error cases, Rust `thiserror` display strings, sandbox-denied output carrying, constructor helpers, and Rust's sandbox-denied UI message selection/truncation
 - `codex-rs/core/src/config/constraint.rs` and `codex-rs/core/src/config_loader/config_requirements.rs`
