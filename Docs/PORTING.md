@@ -22,9 +22,7 @@ Recent upstream audit checkpoint:
   Rust `codex` binary plus the Swift `codex` product and runs
   `RuntimeOracleParityTests` with isolated `CODEX_HOME` directories. The live
   app-server `initialize` subprocess scenario now passes against Rust after
-  normalizing dynamic home/user-agent fields; top-level CLI help is wired into
-  the same harness as an expected-failing oracle until Swift help is ported to
-  the Rust Clap-shaped output.
+  normalizing dynamic home/user-agent fields.
 - 2026-05-18: extended the runtime oracle harness to cover a full
   non-interactive no-tools Responses turn. The test now runs Rust and Swift
   `codex exec --json` against the same local Responses fixture server, uses
