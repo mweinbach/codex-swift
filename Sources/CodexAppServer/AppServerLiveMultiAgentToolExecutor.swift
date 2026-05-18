@@ -6,6 +6,8 @@ struct AppServerLiveMultiAgentToolExecutor {
     let currentSessionSource: SessionSource
     let stateStore: SQLiteAgentGraphStore?
     let waitTimeouts: MultiAgentV2WaitTimeouts
+    let hideSpawnAgentMetadata: Bool
+    let spawnAgent: @Sendable (LiveSpawnAgentRequest) async throws -> LiveSpawnAgentResult
     let isTurnRunning: @Sendable (String) async -> Bool
     let agentStatus: @Sendable (String) async -> AgentStatus
     let agentLastTaskMessage: @Sendable (String) async -> String?
@@ -16,11 +18,49 @@ struct AppServerLiveMultiAgentToolExecutor {
     let submitPendingWorkTurnIfIdle: @Sendable (String) async -> Bool
     let closeAgentThreads: @Sendable ([String]) async -> Void
 
+    init(
+        currentThreadID: ThreadId,
+        currentSessionSource: SessionSource,
+        stateStore: SQLiteAgentGraphStore?,
+        waitTimeouts: MultiAgentV2WaitTimeouts,
+        hideSpawnAgentMetadata: Bool = false,
+        spawnAgent: @escaping @Sendable (LiveSpawnAgentRequest) async throws -> LiveSpawnAgentResult = { _ in
+            throw AppServerLiveMultiAgentToolError(message: "spawn_agent is not available in this runtime")
+        },
+        isTurnRunning: @escaping @Sendable (String) async -> Bool,
+        agentStatus: @escaping @Sendable (String) async -> AgentStatus,
+        agentLastTaskMessage: @escaping @Sendable (String) async -> String?,
+        hasPendingMailboxItems: @escaping @Sendable (String) async -> Bool,
+        waitForMailboxChange: @escaping @Sendable (String, Int64) async -> Bool,
+        queueMailboxCommunications: @escaping @Sendable (String, [InterAgentCommunication]) async -> Void,
+        recordAgentLastTaskMessage: @escaping @Sendable (String, String) async -> Void,
+        submitPendingWorkTurnIfIdle: @escaping @Sendable (String) async -> Bool,
+        closeAgentThreads: @escaping @Sendable ([String]) async -> Void
+    ) {
+        self.currentThreadID = currentThreadID
+        self.currentSessionSource = currentSessionSource
+        self.stateStore = stateStore
+        self.waitTimeouts = waitTimeouts
+        self.hideSpawnAgentMetadata = hideSpawnAgentMetadata
+        self.spawnAgent = spawnAgent
+        self.isTurnRunning = isTurnRunning
+        self.agentStatus = agentStatus
+        self.agentLastTaskMessage = agentLastTaskMessage
+        self.hasPendingMailboxItems = hasPendingMailboxItems
+        self.waitForMailboxChange = waitForMailboxChange
+        self.queueMailboxCommunications = queueMailboxCommunications
+        self.recordAgentLastTaskMessage = recordAgentLastTaskMessage
+        self.submitPendingWorkTurnIfIdle = submitPendingWorkTurnIfIdle
+        self.closeAgentThreads = closeAgentThreads
+    }
+
     func execute(_ item: ResponseItem) async -> NonInteractiveExec.FunctionCallExecutionResult? {
         guard case let .functionCall(_, name, _, arguments, callID) = item else {
             return nil
         }
         switch name {
+        case "spawn_agent":
+            return await executeSpawnAgent(arguments: arguments, callID: callID)
         case "send_message":
             return await executeMessageTool(
                 name: name,
@@ -43,6 +83,103 @@ struct AppServerLiveMultiAgentToolExecutor {
             return await executeCloseAgent(arguments: arguments, callID: callID)
         default:
             return nil
+        }
+    }
+
+    private func executeSpawnAgent(
+        arguments: String,
+        callID: String
+    ) async -> NonInteractiveExec.FunctionCallExecutionResult {
+        let args: SpawnAgentToolArguments
+        do {
+            args = try JSONDecoder().decode(SpawnAgentToolArguments.self, from: Data(arguments.utf8))
+        } catch {
+            return Self.output(callID: callID, content: "failed to parse spawn_agent arguments: \(error)", success: false)
+        }
+
+        let forkMode: LiveSpawnAgentForkMode
+        do {
+            forkMode = try args.resolvedForkMode()
+        } catch let error as AppServerLiveMultiAgentToolError {
+            return Self.output(callID: callID, content: error.message, success: false)
+        } catch {
+            return Self.output(callID: callID, content: String(describing: error), success: false)
+        }
+
+        let currentAgentPath = currentSessionSource.agentPath ?? .root
+        let childAgentPath: AgentPath
+        do {
+            childAgentPath = try currentAgentPath.join(args.taskName)
+        } catch {
+            return Self.output(callID: callID, content: String(describing: error), success: false)
+        }
+
+        let prompt = args.message
+        let requestedModel = args.model ?? ""
+        let requestedReasoningEffort = args.reasoningEffort ?? .medium
+        var runtimeEvents: [EventMessage] = [
+            .collabAgentSpawnBegin(CollabAgentSpawnBeginEvent(
+                callID: callID,
+                startedAtMilliseconds: AppServerLiveMultiAgentToolClock.millisecondsSinceEpoch(),
+                senderThreadID: currentThreadID,
+                prompt: prompt,
+                model: requestedModel,
+                reasoningEffort: requestedReasoningEffort
+            ))
+        ]
+
+        do {
+            let result = try await spawnAgent(LiveSpawnAgentRequest(
+                callID: callID,
+                message: prompt,
+                taskName: args.taskName,
+                agentType: args.agentType?.trimmingCharacters(in: .whitespacesAndNewlines),
+                model: args.model,
+                reasoningEffort: args.reasoningEffort,
+                serviceTier: args.serviceTier,
+                forkMode: forkMode,
+                childAgentPath: childAgentPath
+            ))
+            runtimeEvents.append(.collabAgentSpawnEnd(CollabAgentSpawnEndEvent(
+                callID: callID,
+                completedAtMilliseconds: AppServerLiveMultiAgentToolClock.millisecondsSinceEpoch(),
+                senderThreadID: currentThreadID,
+                newThreadID: result.threadID,
+                newAgentNickname: result.nickname,
+                newAgentRole: result.role,
+                prompt: prompt,
+                model: result.model ?? requestedModel,
+                reasoningEffort: result.reasoningEffort ?? requestedReasoningEffort,
+                status: result.status
+            )))
+            let output = SpawnAgentToolResult(
+                taskName: result.agentPath.description,
+                nickname: hideSpawnAgentMetadata ? nil : result.nickname,
+                hidesMetadata: hideSpawnAgentMetadata
+            )
+            return Self.jsonOutput(callID: callID, value: output, success: true, runtimeEvents: runtimeEvents)
+        } catch let error as AppServerLiveMultiAgentToolError {
+            runtimeEvents.append(.collabAgentSpawnEnd(CollabAgentSpawnEndEvent(
+                callID: callID,
+                completedAtMilliseconds: AppServerLiveMultiAgentToolClock.millisecondsSinceEpoch(),
+                senderThreadID: currentThreadID,
+                prompt: prompt,
+                model: requestedModel,
+                reasoningEffort: requestedReasoningEffort,
+                status: .notFound
+            )))
+            return Self.output(callID: callID, content: error.message, success: false, runtimeEvents: runtimeEvents)
+        } catch {
+            runtimeEvents.append(.collabAgentSpawnEnd(CollabAgentSpawnEndEvent(
+                callID: callID,
+                completedAtMilliseconds: AppServerLiveMultiAgentToolClock.millisecondsSinceEpoch(),
+                senderThreadID: currentThreadID,
+                prompt: prompt,
+                model: requestedModel,
+                reasoningEffort: requestedReasoningEffort,
+                status: .notFound
+            )))
+            return Self.output(callID: callID, content: String(describing: error), success: false, runtimeEvents: runtimeEvents)
         }
     }
 
@@ -396,6 +533,81 @@ struct MultiAgentV2WaitTimeouts: Equatable, Sendable {
     }
 }
 
+struct LiveSpawnAgentRequest: Equatable, Sendable {
+    let callID: String
+    let message: String
+    let taskName: String
+    let agentType: String?
+    let model: String?
+    let reasoningEffort: ReasoningEffort?
+    let serviceTier: String?
+    let forkMode: LiveSpawnAgentForkMode
+    let childAgentPath: AgentPath
+}
+
+struct LiveSpawnAgentResult: Equatable, Sendable {
+    let threadID: ThreadId
+    let agentPath: AgentPath
+    let nickname: String?
+    let role: String?
+    let model: String?
+    let reasoningEffort: ReasoningEffort?
+    let status: AgentStatus
+}
+
+enum LiveSpawnAgentForkMode: Equatable, Sendable {
+    case none
+    case fullHistory
+    case lastNTurns(Int)
+}
+
+private struct SpawnAgentToolArguments: Decodable {
+    let message: String
+    let taskName: String
+    let agentType: String?
+    let model: String?
+    let reasoningEffort: ReasoningEffort?
+    let serviceTier: String?
+    let forkTurns: String?
+    let forkContext: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case message
+        case taskName = "task_name"
+        case agentType = "agent_type"
+        case model
+        case reasoningEffort = "reasoning_effort"
+        case serviceTier = "service_tier"
+        case forkTurns = "fork_turns"
+        case forkContext = "fork_context"
+    }
+
+    func resolvedForkMode() throws -> LiveSpawnAgentForkMode {
+        if forkContext != nil {
+            throw AppServerLiveMultiAgentToolError(
+                message: "fork_context is not supported in MultiAgentV2; use fork_turns instead"
+            )
+        }
+
+        let value = forkTurns?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nilIfEmpty
+            ?? "all"
+        if value.caseInsensitiveCompare("none") == .orderedSame {
+            return .none
+        }
+        if value.caseInsensitiveCompare("all") == .orderedSame {
+            return .fullHistory
+        }
+        guard let count = Int(value), count > 0 else {
+            throw AppServerLiveMultiAgentToolError(
+                message: "fork_turns must be `none`, `all`, or a positive integer string"
+            )
+        }
+        return .lastNTurns(count)
+    }
+}
+
 private struct AgentMessageToolArguments: Decodable {
     let target: String
     let message: String
@@ -444,6 +656,25 @@ private struct CloseAgentToolResult: Encodable, Equatable {
     }
 }
 
+private struct SpawnAgentToolResult: Encodable, Equatable {
+    let taskName: String
+    let nickname: String?
+    let hidesMetadata: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case taskName = "task_name"
+        case nickname
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(taskName, forKey: .taskName)
+        if !hidesMetadata {
+            try container.encodeIfPresent(nickname, forKey: .nickname)
+        }
+    }
+}
+
 private struct ListAgentsToolResult: Encodable {
     let agents: [ListedLiveAgent]
 }
@@ -472,12 +703,18 @@ private struct ResolvedLiveAgentTarget {
     }
 }
 
-private struct AppServerLiveMultiAgentToolError: Error {
+struct AppServerLiveMultiAgentToolError: Error {
     let message: String
 }
 
 private enum AppServerLiveMultiAgentToolClock {
     static func millisecondsSinceEpoch() -> Int64 {
         Int64((Date().timeIntervalSince1970 * 1000).rounded())
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
     }
 }

@@ -717,6 +717,133 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         )
     }
 
+    private func spawnLiveAgent(
+        _ request: LiveSpawnAgentRequest,
+        parentThreadID: ThreadId,
+        parentSessionSource: SessionSource,
+        setup: PreparedLiveTurn,
+        prototype: AppServerLiveRuntimeSubmission
+    ) async throws -> LiveSpawnAgentResult {
+        let childConversationID = ConversationId()
+        let childThreadID = try ThreadId(string: childConversationID.description)
+        let childDepth = Self.nextThreadSpawnDepth(parentSessionSource)
+        let childSource = SessionSource.subagent(.threadSpawn(
+            parentThreadID: parentThreadID,
+            depth: childDepth,
+            agentPath: request.childAgentPath,
+            agentNickname: nil,
+            agentRole: request.agentType
+        ))
+        let childRollout: RolloutRecorder
+        switch request.forkMode {
+        case .none:
+            childRollout = try RolloutRecorder.create(
+                codexHome: configuration.codexHome,
+                cwd: setup.cwd,
+                conversationID: childConversationID,
+                instructions: nil,
+                source: childSource,
+                forkedFromID: nil,
+                threadSource: .subagent,
+                originator: configuration.originator,
+                cliVersion: configuration.version,
+                modelProvider: setup.settings.modelProvider ?? configuration.defaultModelProvider,
+                dynamicTools: setup.dynamicTools
+            )
+
+        case .fullHistory, .lastNTurns:
+            let parentHistory = try RolloutRecorder.getRolloutHistory(path: setup.rolloutPath)
+            childRollout = try RolloutRecorder.createFork(
+                codexHome: configuration.codexHome,
+                cwd: setup.cwd,
+                conversationID: childConversationID,
+                forkedFromID: setup.conversationID,
+                initialHistory: parentHistory,
+                instructions: nil,
+                source: childSource,
+                threadSource: .subagent,
+                originator: configuration.originator,
+                cliVersion: configuration.version,
+                modelProvider: setup.settings.modelProvider ?? configuration.defaultModelProvider,
+                dynamicTools: setup.dynamicTools
+            )
+        }
+
+        try childRollout.recordItems([
+            .turnContext(TurnContextItem(
+                cwd: setup.cwd.path,
+                approvalPolicy: setup.approvalPolicy,
+                sandboxPolicy: setup.sandboxPolicy,
+                model: request.model ?? setup.model,
+                effort: request.reasoningEffort ?? setup.settings.modelReasoningEffort ?? setup.modelFamily.defaultReasoningEffort,
+                summary: setup.settings.modelReasoningSummary
+                    ?? (setup.modelFamily.supportsReasoningSummaries ? .auto : .none),
+                truncationPolicy: setup.modelFamily.truncationPolicy
+            ))
+        ])
+        try childRollout.flush()
+        try childRollout.shutdown()
+
+        if let stateStore = configuration.stateStore {
+            let createdAt = Date()
+            _ = try await stateStore.insertThreadIfAbsent(ThreadMetadata(
+                id: childThreadID,
+                rolloutPath: childRollout.rolloutPath.path,
+                createdAt: createdAt,
+                updatedAt: createdAt,
+                source: Self.persistedSessionSource(childSource),
+                threadSource: .subagent,
+                agentNickname: childSource.nickname,
+                agentRole: childSource.agentRole,
+                agentPath: request.childAgentPath.description,
+                modelProvider: setup.settings.modelProvider ?? configuration.defaultModelProvider,
+                model: request.model ?? setup.model,
+                reasoningEffort: request.reasoningEffort ?? setup.settings.modelReasoningEffort,
+                cwd: setup.cwd.path,
+                cliVersion: configuration.version,
+                title: request.taskName,
+                sandboxPolicy: Self.persistedSandboxPolicy(setup.sandboxPolicy),
+                approvalMode: setup.approvalPolicy.rawValue,
+                tokensUsed: 0
+            ))
+        }
+        await state.recordSessionSource(threadID: childThreadID.description, source: childSource)
+        await state.recordAgentLastTaskMessage(threadID: childThreadID.description, message: request.message)
+
+        let communication = InterAgentCommunication(
+            author: parentSessionSource.agentPath ?? .root,
+            recipient: request.childAgentPath,
+            content: request.message,
+            triggerTurn: true
+        )
+        _ = try submitLiveRuntime(AppServerLiveRuntimeSubmission(
+            requestID: .string("spawn-agent-\(childConversationID)"),
+            threadID: childThreadID.description,
+            turnID: UUID().uuidString.lowercased(),
+            op: .interAgentCommunication(communication: communication),
+            turnMetadataHeader: prototype.turnMetadataHeader,
+            mcpElicitationsAutoDeny: prototype.mcpElicitationsAutoDeny,
+            mcpTools: prototype.mcpTools,
+            mcpToolCallHandler: prototype.mcpToolCallHandler,
+            extensionPromptFragments: prototype.extensionPromptFragments,
+            extensionToolSpecs: prototype.extensionToolSpecs,
+            extensionRegisteredToolExecutor: prototype.extensionRegisteredToolExecutor,
+            extensionApprovalReviewer: prototype.extensionApprovalReviewer,
+            additionalInputItems: []
+        ))
+
+        let status = await state.agentStatus(threadID: childThreadID.description)
+        return LiveSpawnAgentResult(
+            threadID: childThreadID,
+            agentPath: request.childAgentPath,
+            nickname: childSource.nickname,
+            role: childSource.agentRole,
+            model: request.model ?? setup.model,
+            reasoningEffort: request.reasoningEffort ?? setup.settings.modelReasoningEffort,
+            status: status
+        )
+    }
+
     private func runResponsesLoop(
         submission: AppServerLiveRuntimeSubmission,
         setup: PreparedLiveTurn,
@@ -780,6 +907,16 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                     currentSessionSource: sessionSource,
                     stateStore: configuration.stateStore,
                     waitTimeouts: multiAgentV2WaitTimeouts,
+                    hideSpawnAgentMetadata: setup.settings.multiAgentV2.hideSpawnAgentMetadata,
+                    spawnAgent: { request in
+                        try await self.spawnLiveAgent(
+                            request,
+                            parentThreadID: currentThreadID,
+                            parentSessionSource: sessionSource,
+                            setup: setup,
+                            prototype: submission
+                        )
+                    },
                     isTurnRunning: { threadID in
                         await state.isTurnRunning(threadID: threadID)
                     },
@@ -1587,6 +1724,35 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             return text.isEmpty ? nil : text
         }.first
     }
+
+    private static func nextThreadSpawnDepth(_ source: SessionSource) -> Int32 {
+        guard case let .subagent(.threadSpawn(_, depth, _, _, _)) = source else {
+            return 1
+        }
+        return depth + 1
+    }
+
+    private static func persistedSessionSource(_ source: SessionSource) -> String {
+        guard let data = try? JSONEncoder().encode(source),
+              let text = String(data: data, encoding: .utf8)
+        else {
+            return source.description
+        }
+        return text
+    }
+
+    private static func persistedSandboxPolicy(_ policy: SandboxPolicy) -> String {
+        switch policy {
+        case .dangerFullAccess:
+            return "danger-full-access"
+        case .readOnly, .readOnlyWithNetworkAccess:
+            return "read-only"
+        case .externalSandbox:
+            return "external-sandbox"
+        case .workspaceWrite:
+            return "workspace-write"
+        }
+    }
 }
 
 private actor AppServerLiveRuntimeStartGate {
@@ -2124,7 +2290,7 @@ private actor AppServerLiveRuntimeState {
     }
 }
 
-private struct PreparedLiveTurn {
+private struct PreparedLiveTurn: @unchecked Sendable {
     let conversationID: ConversationId
     let rolloutPath: URL
     let recorder: RolloutRecorder?

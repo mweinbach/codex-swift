@@ -12123,6 +12123,114 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(end.status, .completed(nil))
     }
 
+    func testLiveSpawnAgentRoutesRustV2ArgumentsAndEvents() async throws {
+        let rootThreadID = ThreadId()
+        let workerThreadID = ThreadId()
+        let workerPath = try AgentPath.root.join("worker")
+        let capture = LiveMultiAgentToolCapture()
+        let executor = AppServerLiveMultiAgentToolExecutor(
+            currentThreadID: rootThreadID,
+            currentSessionSource: .vscode,
+            stateStore: nil,
+            waitTimeouts: MultiAgentV2WaitTimeouts(config: MultiAgentV2Config()),
+            hideSpawnAgentMetadata: false,
+            spawnAgent: { request in
+                await capture.recordSpawnRequest(request)
+                return LiveSpawnAgentResult(
+                    threadID: workerThreadID,
+                    agentPath: workerPath,
+                    nickname: "Bernoulli",
+                    role: "explorer",
+                    model: "gpt-5.4",
+                    reasoningEffort: .high,
+                    status: .running
+                )
+            },
+            isTurnRunning: { _ in false },
+            agentStatus: { threadID in
+                await capture.status(threadID: threadID)
+            },
+            agentLastTaskMessage: { _ in nil },
+            hasPendingMailboxItems: { _ in false },
+            waitForMailboxChange: { _, _ in false },
+            queueMailboxCommunications: { _, _ in },
+            recordAgentLastTaskMessage: { _, _ in },
+            submitPendingWorkTurnIfIdle: { _ in false },
+            closeAgentThreads: { _ in }
+        )
+
+        let spawn = await executor.execute(.functionCall(
+            name: "spawn_agent",
+            arguments: #"{"message":"inspect this repo","task_name":"worker","agent_type":"explorer","model":"gpt-5.4","reasoning_effort":"high","service_tier":"flex","fork_turns":"none"}"#,
+            callID: "call-spawn"
+        ))
+        let payload = try Self.functionOutputPayload(spawn, callID: "call-spawn")
+        XCTAssertEqual(payload.success, true)
+        let spawnResult = try JSONDecoder().decode(
+            SpawnAgentToolResultFixture.self,
+            from: Data(payload.content.utf8)
+        )
+        XCTAssertEqual(spawnResult, SpawnAgentToolResultFixture(
+            taskName: workerPath.description,
+            nickname: "Bernoulli"
+        ))
+        let requests = await capture.recordedSpawnRequests()
+        XCTAssertEqual(requests, [
+            LiveSpawnAgentRequest(
+                callID: "call-spawn",
+                message: "inspect this repo",
+                taskName: "worker",
+                agentType: "explorer",
+                model: "gpt-5.4",
+                reasoningEffort: .high,
+                serviceTier: "flex",
+                forkMode: .none,
+                childAgentPath: workerPath
+            )
+        ])
+        let runtimeEvents = try XCTUnwrap(spawn?.runtimeEvents)
+        XCTAssertEqual(runtimeEvents.count, 2)
+        guard case let .collabAgentSpawnBegin(begin) = runtimeEvents[0] else {
+            return XCTFail("expected spawn begin event")
+        }
+        XCTAssertEqual(begin.senderThreadID, rootThreadID)
+        XCTAssertEqual(begin.prompt, "inspect this repo")
+        XCTAssertEqual(begin.model, "gpt-5.4")
+        XCTAssertEqual(begin.reasoningEffort, .high)
+        guard case let .collabAgentSpawnEnd(end) = runtimeEvents[1] else {
+            return XCTFail("expected spawn end event")
+        }
+        XCTAssertEqual(end.senderThreadID, rootThreadID)
+        XCTAssertEqual(end.newThreadID, workerThreadID)
+        XCTAssertEqual(end.newAgentNickname, "Bernoulli")
+        XCTAssertEqual(end.newAgentRole, "explorer")
+        XCTAssertEqual(end.status, .running)
+
+        let legacyForkContext = await executor.execute(.functionCall(
+            name: "spawn_agent",
+            arguments: #"{"message":"x","task_name":"worker","fork_context":true}"#,
+            callID: "call-fork-context"
+        ))
+        let legacyPayload = try Self.functionOutputPayload(legacyForkContext, callID: "call-fork-context")
+        XCTAssertEqual(
+            legacyPayload.content,
+            "fork_context is not supported in MultiAgentV2; use fork_turns instead"
+        )
+        XCTAssertEqual(legacyPayload.success, false)
+
+        let invalidForkTurns = await executor.execute(.functionCall(
+            name: "spawn_agent",
+            arguments: #"{"message":"x","task_name":"worker","fork_turns":"0"}"#,
+            callID: "call-fork-zero"
+        ))
+        let invalidPayload = try Self.functionOutputPayload(invalidForkTurns, callID: "call-fork-zero")
+        XCTAssertEqual(
+            invalidPayload.content,
+            "fork_turns must be `none`, `all`, or a positive integer string"
+        )
+        XCTAssertEqual(invalidPayload.success, false)
+    }
+
     func testLiveListAgentsUsesRustAgentPathsStatusAndLastTaskMessages() async throws {
         let temp = try TemporaryDirectory()
         let stateStore = try SQLiteAgentGraphStore(databaseURL: temp.url.appendingPathComponent("state.sqlite3"))
@@ -37785,6 +37893,7 @@ private actor LiveMultiAgentToolCapture {
     private var lastTaskMessages: [String: String] = [:]
     private var pendingMailboxThreadIDs: Set<String> = []
     private var closed: [String] = []
+    private var spawnRequests: [LiveSpawnAgentRequest] = []
 
     init(runningThreadIDs: Set<String> = []) {
         self.runningThreadIDs = runningThreadIDs
@@ -37868,10 +37977,28 @@ private actor LiveMultiAgentToolCapture {
     func closedThreadIDs() -> [String] {
         closed
     }
+
+    func recordSpawnRequest(_ request: LiveSpawnAgentRequest) {
+        spawnRequests.append(request)
+    }
+
+    func recordedSpawnRequests() -> [LiveSpawnAgentRequest] {
+        spawnRequests
+    }
 }
 
 private struct ListAgentsToolResultFixture: Decodable {
     let agents: [ListedAgentFixture]
+}
+
+private struct SpawnAgentToolResultFixture: Decodable, Equatable {
+    let taskName: String
+    let nickname: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case taskName = "task_name"
+        case nickname
+    }
 }
 
 private struct WaitAgentToolResultFixture: Decodable, Equatable {

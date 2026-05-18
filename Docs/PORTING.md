@@ -858,6 +858,13 @@ Recent upstream audit checkpoint:
   as non-triggering inter-agent mailbox mail to the direct parent agent path,
   while interrupted child turns remain quiet. `spawn_agent` and full
   ThreadManager-backed `AgentControl` remain pending.
+- 2026-05-18: Swift live app-server MultiAgentV2 now routes `spawn_agent`
+  calls through the live runtime: Rust v2 arguments decode with the same
+  `fork_context` rejection and `fork_turns` validation, spawn begin/end events
+  are emitted, child rollouts/agent-path graph metadata are created, and the
+  initial prompt is delivered as trigger-turn inter-agent mail. Full Rust
+  `AgentControl` parity, exact `LastNTurns` truncation semantics, and complete
+  role/model/service-tier validation remain pending.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through
