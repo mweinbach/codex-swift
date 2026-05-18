@@ -14,6 +14,7 @@ public struct CodexCLI: Sendable {
         case commandHelp(CommandSpec, arguments: [String])
         case version
         case commandVersion(CommandSpec)
+        case commandUnsupportedVersion(CommandSpec, flag: String)
         case interactive(prompt: String?)
         case command(CommandSpec, arguments: [String])
         case unknown(String)
@@ -829,8 +830,12 @@ public struct CodexCLI: Sendable {
             switch versionTarget {
             case .root:
                 return .version
-            case let .command(spec, _):
-                return .commandVersion(spec)
+            case let .command(spec, arguments):
+                if spec.name == "exec" {
+                    return .commandVersion(spec)
+                }
+                let flag = arguments.first(where: { $0 == "--version" || $0 == "-V" }) ?? "--version"
+                return .commandUnsupportedVersion(spec, flag: flag)
             }
         }
 
@@ -1109,6 +1114,45 @@ public struct CodexCLI: Sendable {
         }
     }
 
+    public func renderUnsupportedVersionError(for spec: CommandSpec, flag: String) -> String {
+        let tip = switch spec.name {
+        case "review", "completion", "apply", "exec":
+            "\n\n  tip: to pass '\(flag)' as a value, use '-- \(flag)'"
+        default:
+            ""
+        }
+        return """
+        error: unexpected argument '\(flag)' found\(tip)
+
+        Usage: \(usageLine(forUnsupportedVersion: spec))
+
+        For more information, try '--help'.
+        """
+    }
+
+    private func usageLine(forUnsupportedVersion spec: CommandSpec) -> String {
+        switch spec.name {
+        case "review":
+            return "codex review [OPTIONS] [PROMPT]"
+        case "completion":
+            return "codex completion [OPTIONS] [SHELL]"
+        case "mcp":
+            return "codex mcp [OPTIONS] <COMMAND>"
+        case "plugin":
+            return "codex plugin [OPTIONS] <COMMAND>"
+        case "app-server":
+            return "codex app-server [OPTIONS] <COMMAND>"
+        case "remote-control":
+            return "codex remote-control [OPTIONS] <COMMAND>"
+        case "features":
+            return "codex features [OPTIONS] <COMMAND>"
+        case "apply":
+            return "codex apply [OPTIONS] [TASK_ID]"
+        default:
+            return "codex \(spec.name) [OPTIONS]"
+        }
+    }
+
     private func renderExecHelp() -> String {
         """
         Run Codex non-interactively
@@ -1227,6 +1271,9 @@ public struct CodexCLI: Sendable {
         case let .commandVersion(spec):
             stdout(renderVersion(for: spec))
             return 0
+        case let .commandUnsupportedVersion(spec, flag):
+            stderr(renderUnsupportedVersionError(for: spec, flag: flag))
+            return 2
         case .help:
             stdout(renderHelp())
             return 0
@@ -1327,6 +1374,9 @@ public struct CodexCLI: Sendable {
         case let .commandVersion(spec):
             stdout(renderVersion(for: spec))
             return 0
+        case let .commandUnsupportedVersion(spec, flag):
+            stderr(renderUnsupportedVersionError(for: spec, flag: flag))
+            return 2
         case .help:
             stdout(renderHelp())
             return 0
@@ -4105,7 +4155,10 @@ public struct CodexCLI: Sendable {
 
     private func rootRemovedFullAutoRejectionMessage(invocation: Invocation, arguments: [String]) -> String? {
         switch invocation {
-        case let .command(spec, _), let .commandHelp(spec, _), let .commandVersion(spec):
+        case let .command(spec, _),
+             let .commandHelp(spec, _),
+             let .commandVersion(spec),
+             let .commandUnsupportedVersion(spec, _):
             if rootFlagPresent(named: "--full-auto", beforeCommands: [spec.name] + spec.aliases, in: arguments) {
                 return "codex-swift: unsupported option at top level: --full-auto"
             }
@@ -4121,7 +4174,10 @@ public struct CodexCLI: Sendable {
 
     private func rootProfileV2RejectionMessage(invocation: Invocation, arguments: [String]) -> String? {
         let commandNames: [String] = switch invocation {
-        case let .command(spec, _), let .commandHelp(spec, _), let .commandVersion(spec):
+        case let .command(spec, _),
+             let .commandHelp(spec, _),
+             let .commandVersion(spec),
+             let .commandUnsupportedVersion(spec, _):
             [spec.name] + spec.aliases
         case .version, .help, .interactive, .unknown:
             []
@@ -4145,7 +4201,7 @@ public struct CodexCLI: Sendable {
             default:
                 return "--profile-v2 only applies to runtime commands: `codex`, `codex exec`, `codex review`, `codex resume`, `codex fork`, `codex exec-server`, and `codex debug prompt-input`."
             }
-        case .version, .commandVersion, .help, .unknown:
+        case .version, .commandVersion, .commandUnsupportedVersion, .help, .unknown:
             return nil
         }
     }
@@ -4191,7 +4247,10 @@ public struct CodexCLI: Sendable {
 
     private func rootDuplicateSharedOptionRejectionMessage(invocation: Invocation, arguments: [String]) -> String? {
         let commandNames: [String] = switch invocation {
-        case let .command(spec, _), let .commandHelp(spec, _), let .commandVersion(spec):
+        case let .command(spec, _),
+             let .commandHelp(spec, _),
+             let .commandVersion(spec),
+             let .commandUnsupportedVersion(spec, _):
             [spec.name] + spec.aliases
         case .version, .help, .interactive, .unknown:
             []
@@ -4229,7 +4288,7 @@ public struct CodexCLI: Sendable {
         arguments: [String]
     ) -> String? {
         switch invocation {
-        case .version, .commandVersion, .help:
+        case .version, .commandVersion, .commandUnsupportedVersion, .help:
             return nil
         case let .command(spec, _), let .commandHelp(spec, _):
             return rootInteractivePermissionConflictMessage(

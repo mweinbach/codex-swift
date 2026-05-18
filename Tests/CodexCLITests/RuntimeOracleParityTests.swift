@@ -39,6 +39,24 @@ final class RuntimeOracleParityTests: XCTestCase {
         XCTAssertEqual(normalizedVersionLine(swift.stdout), normalizedVersionLine(rust.stdout))
     }
 
+    func testReviewVersionRejectionMatchesRustOracle() throws {
+        let oracle = try RuntimeOracle.required()
+        let codexHome = try RuntimeOracleTemporaryDirectory(prefix: "codex-runtime-oracle-home")
+        let environment = [
+            "CODEX_HOME": codexHome.url.path,
+            "NO_COLOR": "1",
+            "TERM": "dumb"
+        ]
+
+        let rust = try oracle.run(.rust, arguments: ["review", "--version"], environment: environment)
+        let swift = try oracle.run(.swift, arguments: ["review", "--version"], environment: environment)
+
+        XCTAssertEqual(rust.exitCode, 2, rust.stderr)
+        XCTAssertEqual(swift.exitCode, 2, swift.stderr)
+        XCTAssertEqual(swift.stdout, rust.stdout)
+        XCTAssertEqual(normalizedCommandError(swift.stderr), normalizedCommandError(rust.stderr))
+    }
+
     func testAppServerInitializeMatchesRustOracle() throws {
         let oracle = try RuntimeOracle.required()
         let request = """
@@ -323,6 +341,12 @@ private func normalizedVersionLine(_ text: String) -> String {
         return normalized
     }
     return "\(commandName) <version>"
+}
+
+private func normalizedCommandError(_ text: String) -> String {
+    text
+        .replacingOccurrences(of: "\r\n", with: "\n")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
 private func normalizedAppServerMessages(_ stdout: String) throws -> [String] {

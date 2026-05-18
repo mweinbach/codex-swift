@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: tightened the subcommand version runtime oracle around Rust's
+  Clap boundary. Swift still accepts `codex exec --version` / `codex e -V` as
+  `codex-cli-exec <version>`, but normal subcommands such as
+  `codex review --version` now reject the flag with Rust's unexpected-argument
+  error instead of printing a made-up command version.
 - 2026-05-18: extended the Rust runtime oracle harness to cover subcommand
   version dispatch. Swift now treats `codex exec --version` and
   `codex exec -V` as Rust-shaped `exec` package version output

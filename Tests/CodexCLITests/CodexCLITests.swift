@@ -207,6 +207,11 @@ final class CodexCLITests: XCTestCase {
             CodexCLI().parseInvocation(arguments: ["--version", "exec"]),
             .version
         )
+        let reviewSpec = CommandSpec(name: "review", summary: "Run a code review non-interactively.")
+        XCTAssertEqual(
+            CodexCLI().parseInvocation(arguments: ["review", "--version"]),
+            .commandUnsupportedVersion(reviewSpec, flag: "--version")
+        )
 
         var stdout: [String] = []
         let exitCode = await CodexCLI().runAsync(
@@ -217,6 +222,29 @@ final class CodexCLITests: XCTestCase {
 
         XCTAssertEqual(exitCode, 0)
         XCTAssertEqual(stdout, ["codex-cli-exec \(CodexBuildMetadata.version)"])
+
+        var stderr: [String] = []
+        let unsupportedExitCode = await CodexCLI().runAsync(
+            arguments: ["review", "-V"],
+            stdout: { _ in XCTFail("stdout should not be written") },
+            stderr: { stderr.append($0) }
+        )
+
+        XCTAssertEqual(unsupportedExitCode, 2)
+        XCTAssertEqual(
+            stderr,
+            [
+                """
+                error: unexpected argument '-V' found
+
+                  tip: to pass '-V' as a value, use '-- -V'
+
+                Usage: codex review [OPTIONS] [PROMPT]
+
+                For more information, try '--help'.
+                """
+            ]
+        )
     }
 
     func testPromptWithoutSubcommandIsInteractiveInvocation() {
