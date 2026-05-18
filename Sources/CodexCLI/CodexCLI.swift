@@ -952,6 +952,9 @@ public struct CodexCLI: Sendable {
             }
             return renderSandboxHelp()
         case "debug":
+            if let childHelp = renderDebugChildHelp(arguments: arguments) {
+                return childHelp
+            }
             return renderDebugHelp()
         case "execpolicy":
             return renderExecPolicyHelp()
@@ -2470,6 +2473,131 @@ public struct CodexCLI: Sendable {
           -h, --help
                   Print help (see a summary with '-h')
         """
+    }
+
+    private func renderDebugChildHelp(arguments: [String]) -> String? {
+        guard let child = arguments.first, child != "--help", child != "-h" else {
+            return nil
+        }
+
+        switch child {
+        case "models":
+            return """
+            Render the raw model catalog as JSON
+
+            Usage: codex debug models [OPTIONS]
+
+            Options:
+                  --bundled
+                      Skip refresh and dump only the bundled catalog shipped with this binary
+
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              -h, --help
+                      Print help (see a summary with '-h')
+            """
+        case "app-server":
+            let remaining = Array(arguments.dropFirst())
+            if remaining.first == "send-message-v2" {
+                return """
+                Usage: codex debug app-server send-message-v2 [OPTIONS] <USER_MESSAGE>
+
+                Arguments:
+                  <USER_MESSAGE>
+
+
+                Options:
+                  -c, --config <key=value>
+                          Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                          Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                          as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                          Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                          shell_environment_policy.inherit=all`
+
+                      --enable <FEATURE>
+                          Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                      --disable <FEATURE>
+                          Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+                  -h, --help
+                          Print help (see a summary with '-h')
+                """
+            }
+            return """
+            Tooling: helps debug the app server
+
+            Usage: codex debug app-server [OPTIONS] <COMMAND>
+
+            Commands:
+              send-message-v2
+              help             Print this message or the help of the given subcommand(s)
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              -h, --help
+                      Print help (see a summary with '-h')
+            """
+        case "prompt-input":
+            return """
+            Render the model-visible prompt input list as JSON
+
+            Usage: codex debug prompt-input [OPTIONS] [PROMPT]
+
+            Arguments:
+              [PROMPT]
+                      Optional user prompt to append after session context
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+              -i, --image <FILE>...
+                      Optional image(s) to attach to the user prompt
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              -h, --help
+                      Print help (see a summary with '-h')
+            """
+        default:
+            return nil
+        }
     }
 
     private func renderExecPolicyHelp() -> String {

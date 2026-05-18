@@ -209,6 +209,25 @@ final class RuntimeOracleParityTests: XCTestCase {
         XCTAssertEqual(normalizedHelp(swift.stdout), normalizedHelp(rust.stdout))
     }
 
+    func testDebugChildHelpMatchesRustOracleModuloWhitespace() throws {
+        let oracle = try RuntimeOracle.required()
+        let commands = [
+            ["debug", "models", "--help"],
+            ["debug", "app-server", "--help"],
+            ["debug", "app-server", "send-message-v2", "--help"],
+            ["debug", "prompt-input", "--help"]
+        ]
+
+        for arguments in commands {
+            let rust = try oracle.run(.rust, arguments: arguments)
+            let swift = try oracle.run(.swift, arguments: arguments)
+
+            XCTAssertEqual(rust.exitCode, 0, rust.stderr)
+            XCTAssertEqual(swift.exitCode, 0, swift.stderr)
+            XCTAssertEqual(normalizedHelp(swift.stdout), normalizedHelp(rust.stdout), arguments.joined(separator: " "))
+        }
+    }
+
     func testExecPolicyHelpMatchesRustOracleModuloWhitespace() throws {
         let oracle = try RuntimeOracle.required()
 

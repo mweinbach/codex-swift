@@ -351,6 +351,18 @@ final class CodexCLITests: XCTestCase {
         XCTAssertTrue(debugHelp.contains("  prompt-input  Render the model-visible prompt input list as JSON"))
 
         stdout.removeAll()
+        let debugPromptInputExitCode = await CodexCLI().runAsync(
+            arguments: ["debug", "prompt-input", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(debugPromptInputExitCode, 0)
+        let debugPromptInputHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(debugPromptInputHelp.hasPrefix("Render the model-visible prompt input list as JSON\n\nUsage: codex debug prompt-input [OPTIONS] [PROMPT]"))
+        XCTAssertTrue(debugPromptInputHelp.contains("Optional image(s) to attach to the user prompt"))
+
+        stdout.removeAll()
         let execPolicyExitCode = await CodexCLI().runAsync(
             arguments: ["execpolicy", "--help"],
             stdout: { stdout.append($0) },

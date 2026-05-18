@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: extended CLI help runtime-oracle parity into nested debug
+  tooling subcommands. Swift now renders Rust-shaped
+  `codex debug {models,app-server,prompt-input} --help` output and
+  `codex debug app-server send-message-v2 --help` output instead of collapsing
+  those child help requests back to the parent debug command surface.
 - 2026-05-18: extended CLI help runtime-oracle parity into nested sandbox and
   feature-flag subcommands. Swift now renders Rust-shaped
   `codex sandbox {macos,linux,windows} --help` output and
