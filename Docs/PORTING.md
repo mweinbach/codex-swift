@@ -797,6 +797,13 @@ Recent upstream audit checkpoint:
   pending-work launcher to wake an idle live thread. Full `AgentControl` routing
   and in-turn mailbox delivery phase transitions remain pending with the broader
   ThreadManager lifecycle.
+- 2026-05-18: Swift's shared Responses loop now accepts a live pending-input
+  provider and mirrors Rust's mailbox preemption point for assistant commentary
+  and reasoning output: if mailbox input arrives before the model finishes that
+  item, the loop appends the pending input and immediately samples again instead
+  of ending the turn. The live app-server runtime wires this provider to the
+  mailbox queue; exact Rust phase toggles for steer/tool-call reopening and full
+  `AgentControl` routing remain pending.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through

@@ -415,6 +415,7 @@ public enum NonInteractiveExec {
         _ toolCall: ResponseItem,
         _ tokenUsage: TokenUsage?
     ) async -> NonInteractiveExecToolCompletionResult?
+    public typealias PendingInputProvider = @Sendable () async -> [ResponseInputItem]
     public typealias RegisteredToolExecutor = @Sendable (ResponseItem) async -> FunctionCallExecutionResult?
     public typealias ModelsETagHandler = (String) async -> Void
     public typealias RequestUserInputHandler = @Sendable (RequestUserInputEvent) async -> RequestUserInputResponse?
@@ -827,6 +828,7 @@ public enum NonInteractiveExec {
         features: FeatureStates = .withDefaults(),
         handleModelsETag: ModelsETagHandler? = nil,
         streamPrompt: ResponseStreamer,
+        takePendingInput: PendingInputProvider? = nil,
         executeFunctionCall: FunctionCallExecutor
     ) async -> ResponseEventResults {
         await runResponsesLoopWithTranscript(
@@ -835,6 +837,7 @@ public enum NonInteractiveExec {
             features: features,
             handleModelsETag: handleModelsETag,
             streamPrompt: streamPrompt,
+            takePendingInput: takePendingInput,
             executeFunctionCall: executeFunctionCall
         ).events
     }
@@ -845,6 +848,7 @@ public enum NonInteractiveExec {
         features: FeatureStates = .withDefaults(),
         handleModelsETag: ModelsETagHandler? = nil,
         streamPrompt: ResponseStreamer,
+        takePendingInput: PendingInputProvider? = nil,
         handleToolPreExecution: ToolPreExecutionHandler? = nil,
         handleToolCompletion: ToolCompletionHandler? = nil,
         executeFunctionCall: FunctionCallExecutor
@@ -855,6 +859,7 @@ public enum NonInteractiveExec {
             features: features,
             handleModelsETag: handleModelsETag,
             streamPrompt: streamPrompt,
+            takePendingInput: takePendingInput,
             handleToolPreExecution: handleToolPreExecution,
             handleToolCompletion: handleToolCompletion,
             executeFunctionCall: { item in
@@ -870,6 +875,7 @@ public enum NonInteractiveExec {
         handleModelsETag: ModelsETagHandler? = nil,
         streamPrompt: ResponseStreamer,
         stopHookContext: StopHookContext? = nil,
+        takePendingInput: PendingInputProvider? = nil,
         handleToolPreExecution: ToolPreExecutionHandler? = nil,
         handleToolCompletion: ToolCompletionHandler? = nil,
         toolRouter: ToolRouter
@@ -881,6 +887,7 @@ public enum NonInteractiveExec {
             handleModelsETag: handleModelsETag,
             streamPrompt: streamPrompt,
             stopHookContext: stopHookContext,
+            takePendingInput: takePendingInput,
             handleToolPreExecution: handleToolPreExecution,
             handleToolCompletion: handleToolCompletion,
             executeFunctionCall: { item in
@@ -896,6 +903,7 @@ public enum NonInteractiveExec {
         handleModelsETag: ModelsETagHandler? = nil,
         streamPrompt: ResponseStreamer,
         stopHookContext: StopHookContext? = nil,
+        takePendingInput: PendingInputProvider? = nil,
         handleToolPreExecution: ToolPreExecutionHandler? = nil,
         handleToolCompletion: ToolCompletionHandler? = nil,
         executeFunctionCall: FunctionCallResultExecutor
@@ -908,6 +916,13 @@ public enum NonInteractiveExec {
         var stopHookActive = false
 
         for _ in 0..<maxToolIterations {
+            let pendingInputItems = await takePendingInput?() ?? []
+            if !pendingInputItems.isEmpty {
+                let pendingResponseItems = pendingInputItems.map { $0.responseItem() }
+                prompt.input.append(contentsOf: pendingResponseItems)
+                transcriptItems.append(contentsOf: pendingResponseItems)
+            }
+
             var samplingPrompt = prompt
             // Rust normalizes cloned history before each sampling request; keep transcript order raw.
             ContextNormalization.normalizeHistory(&samplingPrompt.input)
@@ -936,6 +951,17 @@ public enum NonInteractiveExec {
             let completedItems = completedOutputItems(from: turnEvents)
             transcriptItems.append(contentsOf: completedItems)
             prompt.input.append(contentsOf: completedItems)
+
+            let mailboxPreemptionItems = completedItems + rawCompletedOutputItems(from: turnEvents)
+            if mailboxPreemptionItems.contains(where: shouldPreemptForPendingMailboxInput),
+               let pendingInputItems = await takePendingInput?(),
+               !pendingInputItems.isEmpty
+            {
+                let pendingResponseItems = pendingInputItems.map { $0.responseItem() }
+                prompt.input.append(contentsOf: pendingResponseItems)
+                transcriptItems.append(contentsOf: pendingResponseItems)
+                continue
+            }
 
             let toolCalls = toolCalls(from: completedItems)
             if toolCalls.isEmpty {
@@ -1024,6 +1050,17 @@ public enum NonInteractiveExec {
                 total = TokenUsage()
             }
             total?.addAssign(usage)
+        }
+    }
+
+    private static func shouldPreemptForPendingMailboxInput(_ item: ResponseItem) -> Bool {
+        switch item {
+        case let .message(_, role, _, phase):
+            role == "assistant" && phase == .commentary
+        case .reasoning:
+            true
+        default:
+            false
         }
     }
 
@@ -3679,6 +3716,15 @@ public enum NonInteractiveExec {
 
     private static func completedOutputItems(from events: ResponseEventResults) -> [ResponseItem] {
         ResponseEventAggregator.aggregate(events, mode: .aggregatedOnly).compactMap { result in
+            guard case let .success(.outputItemDone(item)) = result else {
+                return nil
+            }
+            return item
+        }
+    }
+
+    private static func rawCompletedOutputItems(from events: ResponseEventResults) -> [ResponseItem] {
+        events.compactMap { result in
             guard case let .success(.outputItemDone(item)) = result else {
                 return nil
             }

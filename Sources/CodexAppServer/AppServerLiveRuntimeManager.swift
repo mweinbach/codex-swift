@@ -825,6 +825,10 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 }
             },
             stopHookContext: stopHookContext,
+            takePendingInput: { [state, submission] in
+                await state.takeMailboxCommunications(threadID: submission.threadID)
+                    .map { $0.toResponseInputItem() }
+            },
             handleToolPreExecution: { [state, submission, goalAccounting] item, tokenUsage in
                 guard Self.shouldAccountLiveThreadGoalCompletionTool(item) else {
                     return nil

@@ -2527,6 +2527,46 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertTrue(hookInputs.contains(#""last_assistant_message":"final draft""#), hookInputs)
     }
 
+    func testResponsesLoopPreemptsCommentaryForPendingMailboxInputLikeRust() async throws {
+        let pendingMailboxInput = ResponseInputItem.message(
+            role: "assistant",
+            content: [.outputText(text: "child update")],
+            phase: .commentary
+        )
+        let mailbox = PendingInputBox(item: pendingMailboxInput)
+        let script = CommentaryPreemptionLoopScript(mailbox: mailbox)
+
+        let result = await NonInteractiveExec.runResponsesLoopWithTranscript(
+            initialPrompt: Prompt(input: [
+                .message(role: "user", content: [.inputText(text: "start")])
+            ]),
+            streamPrompt: { prompt in
+                .success(await script.next(prompt))
+            },
+            takePendingInput: {
+                await mailbox.takeIfAvailable()
+            },
+            executeFunctionCall: { _ in
+                .functionCallOutput(
+                    callID: "unused",
+                    output: FunctionCallOutputPayload(content: "unused", success: true)
+                )
+            }
+        )
+
+        let prompts = await script.prompts()
+        XCTAssertEqual(prompts.count, 2)
+        let firstPrompt = try XCTUnwrap(prompts.first)
+        let secondPrompt = try XCTUnwrap(prompts.dropFirst().first)
+        XCTAssertFalse(firstPrompt.input.contains(pendingMailboxInput.responseItem()))
+        XCTAssertTrue(secondPrompt.input.contains(pendingMailboxInput.responseItem()))
+        XCTAssertEqual(result.transcriptItems, [
+            .message(role: "assistant", content: [.outputText(text: "still working")]),
+            pendingMailboxInput.responseItem(),
+            .message(role: "assistant", content: [.outputText(text: "done")])
+        ])
+    }
+
     func testResponsesLoopExecutesCustomToolCallAndContinues() async throws {
         let initial = Prompt(input: [
             .message(role: "user", content: [.inputText(text: "patch")])
@@ -6029,6 +6069,68 @@ private actor StreamingApplyPatchToolLoopScript {
             .success(.outputItemDone(.message(role: "assistant", content: [.outputText(text: "done")]))),
             .success(.completed(responseID: "resp-2", tokenUsage: nil))
         ]
+    }
+}
+
+private actor PendingInputBox {
+    private let item: ResponseInputItem
+    private var available = false
+    private var drained = false
+
+    init(item: ResponseInputItem) {
+        self.item = item
+    }
+
+    func makeAvailable() {
+        available = true
+    }
+
+    func takeIfAvailable() -> [ResponseInputItem] {
+        guard available, !drained else {
+            return []
+        }
+        drained = true
+        return [item]
+    }
+}
+
+private actor CommentaryPreemptionLoopScript {
+    private let mailbox: PendingInputBox
+    private var calls = 0
+    private var recordedPrompts: [Prompt] = []
+
+    init(mailbox: PendingInputBox) {
+        self.mailbox = mailbox
+    }
+
+    func next(_ prompt: Prompt) async -> ResponseEventResults {
+        calls += 1
+        recordedPrompts.append(prompt)
+
+        if calls == 1 {
+            await mailbox.makeAvailable()
+            return [
+                .success(.outputItemDone(.message(
+                    role: "assistant",
+                    content: [.outputText(text: "still working")],
+                    phase: .commentary
+                ))),
+                .success(.completed(responseID: "resp-1", tokenUsage: nil))
+            ]
+        }
+
+        return [
+            .success(.outputItemDone(.message(
+                role: "assistant",
+                content: [.outputText(text: "done")],
+                phase: .finalAnswer
+            ))),
+            .success(.completed(responseID: "resp-2", tokenUsage: nil))
+        ]
+    }
+
+    func prompts() -> [Prompt] {
+        recordedPrompts
     }
 }
 
