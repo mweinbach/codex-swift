@@ -183,8 +183,14 @@ extension CodexAppServer {
              "marketplace/upgrade",
              "windowsSandbox/readiness":
             return .global("config")
+        case "environment/add":
+            return .global("environment")
         case "memory/reset":
             return .global("memory")
+        case "remoteControl/enable", "remoteControl/disable":
+            return .global("remote-control")
+        case "remoteControl/status/read":
+            return .globalSharedRead("remote-control")
         case "config/mcpServer/reload", "mcpServerStatus/list":
             return .global("mcp-registry")
         case "windowsSandbox/setupStart":

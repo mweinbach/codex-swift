@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: tightened app-server request serialization parity for live
+  environment and remote-control requests. Swift now mirrors Rust's
+  `environment/add` global environment scope, exclusive
+  `remoteControl/enable` / `remoteControl/disable` remote-control scope, and
+  shared-read `remoteControl/status/read` scope.
 - 2026-05-18: tightened `codex exec resume` CLI parse-failure parity for the
   command-local preflight surface. Swift now matches Rust/Clap exit-2
   diagnostics for resume missing global option values, extra positionals, and

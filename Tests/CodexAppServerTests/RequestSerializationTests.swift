@@ -150,6 +150,13 @@ final class RequestSerializationTests: XCTestCase {
         }
 
         XCTAssertEqual(CodexAppServer.requestSerializationScope(forMethod: "memory/reset"), .global("memory"))
+        XCTAssertEqual(CodexAppServer.requestSerializationScope(forMethod: "environment/add"), .global("environment"))
+        XCTAssertEqual(CodexAppServer.requestSerializationScope(forMethod: "remoteControl/enable"), .global("remote-control"))
+        XCTAssertEqual(CodexAppServer.requestSerializationScope(forMethod: "remoteControl/disable"), .global("remote-control"))
+        XCTAssertEqual(
+            CodexAppServer.requestSerializationScope(forMethod: "remoteControl/status/read"),
+            .globalSharedRead("remote-control")
+        )
         XCTAssertEqual(CodexAppServer.requestSerializationScope(forMethod: "config/mcpServer/reload"), .global("mcp-registry"))
         XCTAssertEqual(CodexAppServer.requestSerializationScope(forMethod: "mcpServerStatus/list"), .global("mcp-registry"))
         XCTAssertEqual(CodexAppServer.requestSerializationScope(forMethod: "windowsSandbox/setupStart"), .global("windows-sandbox-setup"))
