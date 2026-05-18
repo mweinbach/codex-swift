@@ -119,6 +119,7 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
     public let additionalInputItems: [ResponseItem]
     public let developerInstructionsOverride: String?
     public let serviceTierOverride: String?
+    public let verbosityOverride: Verbosity?
 
     public init(
         requestID: RequestID,
@@ -135,7 +136,8 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
         extensionApprovalReviewer: AppServerExtensionApprovalReviewer? = nil,
         additionalInputItems: [ResponseItem] = [],
         developerInstructionsOverride: String? = nil,
-        serviceTierOverride: String? = nil
+        serviceTierOverride: String? = nil,
+        verbosityOverride: Verbosity? = nil
     ) {
         self.requestID = requestID
         self.threadID = threadID
@@ -152,6 +154,7 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
         self.additionalInputItems = additionalInputItems
         self.developerInstructionsOverride = developerInstructionsOverride
         self.serviceTierOverride = serviceTierOverride
+        self.verbosityOverride = verbosityOverride
     }
 
     public static func == (lhs: AppServerLiveRuntimeSubmission, rhs: AppServerLiveRuntimeSubmission) -> Bool {
@@ -167,6 +170,7 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
             && lhs.additionalInputItems == rhs.additionalInputItems
             && lhs.developerInstructionsOverride == rhs.developerInstructionsOverride
             && lhs.serviceTierOverride == rhs.serviceTierOverride
+            && lhs.verbosityOverride == rhs.verbosityOverride
     }
 }
 

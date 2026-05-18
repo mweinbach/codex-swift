@@ -744,6 +744,9 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         if let serviceTierOverride = submission.serviceTierOverride {
             settings.serviceTier = serviceTierOverride
         }
+        if let verbosityOverride = submission.verbosityOverride {
+            settings.modelVerbosity = verbosityOverride
+        }
         await state.recordMultiAgentV2Feature(
             threadID: submission.threadID,
             enabled: settings.features.isEnabled(.multiAgentV2)
@@ -1103,7 +1106,8 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             extensionApprovalReviewer: prototype.extensionApprovalReviewer,
             additionalInputItems: [],
             developerInstructionsOverride: request.developerInstructions,
-            serviceTierOverride: request.serviceTier
+            serviceTierOverride: request.serviceTier,
+            verbosityOverride: request.verbosity
         ))
 
         let status = await state.agentStatus(threadID: childThreadID.description)

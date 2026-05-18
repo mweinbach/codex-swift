@@ -32,7 +32,8 @@ struct AppServerLiveMultiAgentToolExecutor {
                 reasoningEffort: $0.reasoningEffort,
                 serviceTier: $0.serviceTier,
                 developerInstructions: nil,
-                reasoningSummary: nil
+                reasoningSummary: nil,
+                verbosity: nil
             )
         },
         spawnAgent: @escaping @Sendable (LiveSpawnAgentRequest) async throws -> LiveSpawnAgentResult = { _ in
@@ -202,6 +203,7 @@ struct AppServerLiveMultiAgentToolExecutor {
                 serviceTier: resolvedOverrides.serviceTier,
                 developerInstructions: resolvedOverrides.developerInstructions,
                 reasoningSummary: resolvedOverrides.reasoningSummary,
+                verbosity: resolvedOverrides.verbosity,
                 forkMode: forkMode,
                 childAgentPath: childAgentPath
             ))
@@ -693,6 +695,7 @@ struct LiveSpawnAgentRequest: Equatable, Sendable {
     let serviceTier: String?
     let developerInstructions: String?
     let reasoningSummary: ReasoningSummary?
+    let verbosity: Verbosity?
     let forkMode: LiveSpawnAgentForkMode
     let childAgentPath: AgentPath
 }
@@ -712,6 +715,7 @@ struct LiveSpawnAgentResolvedOverrides: Equatable, Sendable {
     let serviceTier: String?
     let developerInstructions: String?
     let reasoningSummary: ReasoningSummary?
+    let verbosity: Verbosity?
 }
 
 struct LiveSpawnAgentRoleConfigOverrides: Equatable, Sendable {
@@ -720,6 +724,7 @@ struct LiveSpawnAgentRoleConfigOverrides: Equatable, Sendable {
     let serviceTier: String?
     let developerInstructions: String?
     let reasoningSummary: ReasoningSummary?
+    let verbosity: Verbosity?
 }
 
 struct LiveSpawnAgentOverrideResolver: Sendable {
@@ -792,6 +797,7 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
         var roleServiceTier: String?
         var roleDeveloperInstructions: String?
         var roleReasoningSummary: ReasoningSummary?
+        var roleVerbosity: Verbosity?
         if let agentType = request.agentType,
            let overrides = roleConfigOverrides[agentType] {
             if let roleModel = overrides.model {
@@ -807,6 +813,7 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
             roleServiceTier = overrides.serviceTier
             roleDeveloperInstructions = overrides.developerInstructions
             roleReasoningSummary = overrides.reasoningSummary
+            roleVerbosity = overrides.verbosity
             try Self.validateReasoningEffort(resolvedReasoningEffort, model: selectedModel)
         }
 
@@ -821,7 +828,8 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
             reasoningEffort: resolvedReasoningEffort,
             serviceTier: resolvedServiceTier,
             developerInstructions: roleDeveloperInstructions,
-            reasoningSummary: roleReasoningSummary
+            reasoningSummary: roleReasoningSummary,
+            verbosity: roleVerbosity
         )
     }
 
@@ -858,7 +866,8 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
                 reasoningEffort: try optionalReasoningEffort(table["model_reasoning_effort"]),
                 serviceTier: try optionalString(table["service_tier"]),
                 developerInstructions: try optionalString(table["developer_instructions"]),
-                reasoningSummary: try optionalReasoningSummary(table["model_reasoning_summary"])
+                reasoningSummary: try optionalReasoningSummary(table["model_reasoning_summary"]),
+                verbosity: try optionalVerbosity(table["model_verbosity"])
             )
         } catch {
             throw roleUnavailableError()
@@ -894,6 +903,16 @@ struct LiveSpawnAgentOverrideResolver: Sendable {
             throw roleUnavailableError()
         }
         return summary
+    }
+
+    private static func optionalVerbosity(_ value: ConfigValue?) throws -> Verbosity? {
+        guard let rawValue = try optionalString(value) else {
+            return nil
+        }
+        guard let verbosity = Verbosity(rawValue: rawValue) else {
+            throw roleUnavailableError()
+        }
+        return verbosity
     }
 
     private static func roleUnavailableError() -> AppServerLiveMultiAgentToolError {

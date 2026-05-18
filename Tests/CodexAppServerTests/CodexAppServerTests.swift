@@ -5217,13 +5217,16 @@ final class CodexAppServerTests: XCTestCase {
             threadID: threadID,
             turnID: turnID,
             op: op,
-            serviceTierOverride: "priority"
+            serviceTierOverride: "priority",
+            verbosityOverride: .high
         ))
         _ = try await capture.waitForEvents(count: 2)
 
         let body = try server.waitForRequestBody()
         let request = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
         XCTAssertEqual(request["service_tier"] as? String, "priority")
+        let text = try XCTUnwrap(request["text"] as? [String: Any])
+        XCTAssertEqual(text["verbosity"] as? String, "high")
     }
 
     func testLiveRuntimeEnvironmentContextIncludesOpenSubagentsLikeRust() async throws {
@@ -12994,6 +12997,7 @@ final class CodexAppServerTests: XCTestCase {
                 serviceTier: "flex",
                 developerInstructions: nil,
                 reasoningSummary: nil,
+                verbosity: nil,
                 forkMode: .none,
                 childAgentPath: workerPath
             )
@@ -13080,6 +13084,7 @@ final class CodexAppServerTests: XCTestCase {
             serviceTier: "priority",
             developerInstructions: nil,
             reasoningSummary: nil,
+            verbosity: nil,
             forkMode: .fullHistory,
             childAgentPath: tierWorkerPath
         ))
@@ -13336,7 +13341,8 @@ final class CodexAppServerTests: XCTestCase {
             reasoningEffort: .low,
             serviceTier: nil,
             developerInstructions: nil,
-            reasoningSummary: nil
+            reasoningSummary: nil,
+            verbosity: nil
         ))
 
         let temp = try TemporaryDirectory()
@@ -13348,6 +13354,7 @@ final class CodexAppServerTests: XCTestCase {
         model = "gpt-5.4"
         model_reasoning_effort = "high"
         model_reasoning_summary = "detailed"
+        model_verbosity = "high"
         service_tier = "priority"
         """.write(to: roleFile, atomically: true, encoding: .utf8)
         let roleConfigOverrides = try LiveSpawnAgentOverrideResolver.roleConfigOverrides(
@@ -13379,7 +13386,8 @@ final class CodexAppServerTests: XCTestCase {
             reasoningEffort: .high,
             serviceTier: "priority",
             developerInstructions: "Review carefully",
-            reasoningSummary: .detailed
+            reasoningSummary: .detailed,
+            verbosity: .high
         ))
 
         let badRoleFile = temp.url.appendingPathComponent("bad-reviewer.toml", isDirectory: false)
@@ -13414,6 +13422,26 @@ final class CodexAppServerTests: XCTestCase {
                 "bad-summary-reviewer": AgentRoleConfig(
                     description: "Bad summary reviewer",
                     configFile: badSummaryRoleFile.path
+                )
+            ]
+        )) { error in
+            XCTAssertEqual(
+                (error as? AppServerLiveMultiAgentToolError)?.message,
+                "agent type is currently not available"
+            )
+        }
+
+        let badVerbosityRoleFile = temp.url.appendingPathComponent("bad-verbosity-reviewer.toml", isDirectory: false)
+        try """
+        name = "bad-verbosity-reviewer"
+        description = "Bad verbosity reviewer"
+        model_verbosity = "loud"
+        """.write(to: badVerbosityRoleFile, atomically: true, encoding: .utf8)
+        XCTAssertThrowsError(try LiveSpawnAgentOverrideResolver.roleConfigOverrides(
+            configuredAgentRoles: [
+                "bad-verbosity-reviewer": AgentRoleConfig(
+                    description: "Bad verbosity reviewer",
+                    configFile: badVerbosityRoleFile.path
                 )
             ]
         )) { error in
