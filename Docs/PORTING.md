@@ -12,6 +12,14 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: added the first opt-in Rust runtime oracle parity harness for
+  executable behavior. `scripts/check-runtime-oracle-parity.sh` now resolves a
+  Rust `codex` binary plus the Swift `codex` product and runs
+  `RuntimeOracleParityTests` with isolated `CODEX_HOME` directories. The live
+  app-server `initialize` subprocess scenario now passes against Rust after
+  normalizing dynamic home/user-agent fields; top-level CLI help is wired into
+  the same harness as an expected-failing oracle until Swift help is ported to
+  the Rust Clap-shaped output.
 - 2026-05-18: matched Rust's live MCP tool-call item lifecycle projection from
   `codex-rs/core/src/mcp_tool_call.rs`. Swift app-server runtime
   `mcp_tool_call_begin` and `mcp_tool_call_end` events now emit

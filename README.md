@@ -73,6 +73,21 @@ output trees diverge. A Swift-native generator can replace this bridge later,
 but freezing generated protocol artifacts without this check is intentionally
 avoided.
 
+## Runtime Oracle Parity
+
+The Swift test suite also has an opt-in runtime oracle harness for executable
+behavior that must match Rust. It builds the Swift `codex` product, requires a
+built Rust `codex`, and runs XCTest scenarios that spawn both binaries with
+isolated `CODEX_HOME` directories:
+
+```shell
+scripts/check-runtime-oracle-parity.sh
+```
+
+Set `CODEX_RUST_BINARY` or `SWIFT_CODEX_BINARY` to override either executable.
+The ordinary `swift test` path skips these tests unless
+`CODEX_RUN_RUST_ORACLE_TESTS=1` is set.
+
 ## Docs
 
 - `Docs/PORTING.md` tracks completed parity slices and known gaps.
