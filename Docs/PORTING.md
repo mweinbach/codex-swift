@@ -720,6 +720,13 @@ Recent upstream audit checkpoint:
   mode filters. `pauseActiveThreadGoal` now pauses only active goals without
   clobbering terminal states. Live turn-start baselines, continuation steering,
   and automatic accounting hooks remain pending with the ThreadManager work.
+- 2026-05-18: Swift now carries Rust's runtime-owned goal context prompts from
+  `codex-rs/core/templates/goals/{continuation,budget_limit,objective_updated}.md`.
+  `ThreadGoalRuntimeContext` renders escaped hidden `<goal_context>` user
+  fragments for active-goal continuation, budget-limit steering, and
+  objective-edited steering, and standard contextual-user filtering now
+  recognizes those fragments like Rust's `GoalContext`. Actual injection from
+  live turn accounting remains pending with the ThreadManager runtime wiring.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through

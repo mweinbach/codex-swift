@@ -89,6 +89,9 @@ final class InstructionItemsTests: XCTestCase {
             "  <SUBAGENT_NOTIFICATION>{}</subagent_notification>\n"
         ))
         XCTAssertTrue(ContextualUserFragments.isStandardText(
+            "  <GOAL_CONTEXT>Continue</goal_context>\n"
+        ))
+        XCTAssertTrue(ContextualUserFragments.isStandardText(
             " Warning: The maximum number of unified exec processes you can keep open is 60 and you currently have 61 processes open. "
         ))
         XCTAssertTrue(ContextualUserFragments.isStandardText(
@@ -101,6 +104,7 @@ final class InstructionItemsTests: XCTestCase {
         XCTAssertFalse(ContextualUserFragments.isStandardText("<environment_context>ctx"))
         XCTAssertFalse(ContextualUserFragments.isStandardText("<turn_aborted>interrupted"))
         XCTAssertFalse(ContextualUserFragments.isStandardText("<subagent_notification>{}"))
+        XCTAssertFalse(ContextualUserFragments.isStandardText("<goal_context>Continue"))
         XCTAssertFalse(ContextualUserFragments.isStandardText(
             "Warning: apply_patch was requested via exec_command."
         ))

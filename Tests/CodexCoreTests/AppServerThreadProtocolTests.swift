@@ -3207,6 +3207,46 @@ final class AppServerThreadProtocolTests: XCTestCase {
         )
     }
 
+    func testThreadGoalRuntimeContextPromptsMatchRustTemplates() throws {
+        let threadID = try ThreadId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
+        let goal = ThreadGoal(
+            threadID: threadID,
+            objective: "Port <Rust> & keep parity",
+            status: .active,
+            tokenBudget: 100,
+            tokensUsed: 125,
+            timeUsedSeconds: 30,
+            createdAt: 1,
+            updatedAt: 2
+        )
+
+        let continuation = ThreadGoalRuntimeContext.continuationPrompt(for: goal)
+        XCTAssertTrue(continuation.hasPrefix("Continue working toward the active thread goal."))
+        XCTAssertTrue(continuation.contains("<objective>\nPort &lt;Rust&gt; &amp; keep parity\n</objective>"))
+        XCTAssertTrue(continuation.contains("- Tokens used: 125"))
+        XCTAssertTrue(continuation.contains("- Token budget: 100"))
+        XCTAssertTrue(continuation.contains("- Tokens remaining: 0"))
+        XCTAssertTrue(continuation.contains("call update_goal with status \"complete\""))
+
+        let budgetLimit = ThreadGoalRuntimeContext.budgetLimitPrompt(for: goal)
+        XCTAssertTrue(budgetLimit.hasPrefix("The active thread goal has reached its token budget."))
+        XCTAssertTrue(budgetLimit.contains("- Time spent pursuing goal: 30 seconds"))
+        XCTAssertTrue(budgetLimit.contains("The system has marked the goal as budget_limited"))
+
+        let objectiveUpdated = ThreadGoalRuntimeContext.objectiveUpdatedPrompt(for: goal)
+        XCTAssertTrue(objectiveUpdated.hasPrefix("The active thread goal objective was edited by the user."))
+        XCTAssertTrue(objectiveUpdated.contains("<untrusted_objective>\nPort &lt;Rust&gt; &amp; keep parity\n</untrusted_objective>"))
+        XCTAssertTrue(objectiveUpdated.contains("supersedes any previous thread goal objective"))
+    }
+
+    func testThreadGoalRuntimeContextInputItemIsHiddenUserContext() throws {
+        let item = ThreadGoalRuntimeContext.goalContextInputItem("Continue working.")
+        XCTAssertEqual(item, .message(
+            role: "user",
+            content: [.inputText(text: "<goal_context>\nContinue working.\n</goal_context>")]
+        ))
+    }
+
     func testThreadReadRollbackMetadataAndMemoryResetRoundTripLikeRustProtocol() throws {
         let threadID = "018f7a2d-4c5b-7abc-8def-0123456789ab"
         let thread = AppServerThread(

@@ -1,6 +1,8 @@
 import Foundation
 
 enum ContextualUserFragments {
+    static let goalContextOpenTag = "<goal_context>"
+    static let goalContextCloseTag = "</goal_context>"
     static let turnAbortedOpenTag = "<turn_aborted>"
     static let turnAbortedCloseTag = "</turn_aborted>"
     static let subagentNotificationOpenTag = "<subagent_notification>"
@@ -11,11 +13,20 @@ enum ContextualUserFragments {
             || EnvironmentContext.matchesText(text)
             || SkillInstructions.matchesText(text)
             || UserShellCommand.isUserShellCommandText(text)
+            || matchesGoalContext(text)
             || matchesTurnAborted(text)
             || matchesSubagentNotification(text)
             || matchesLegacyUnifiedExecProcessLimitWarning(text)
             || matchesLegacyApplyPatchExecCommandWarning(text)
             || matchesLegacyModelMismatchWarning(text)
+    }
+
+    static func matchesGoalContext(_ text: String) -> Bool {
+        contextualFragmentMatches(
+            text,
+            startMarker: goalContextOpenTag,
+            endMarker: goalContextCloseTag
+        )
     }
 
     static func matchesTurnAborted(_ text: String) -> Bool {
