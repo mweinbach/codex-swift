@@ -1,0 +1,33 @@
+name: App Server Protocol Generator
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  drift-check:
+    name: Drift Check
+    runs-on: macos-latest
+    steps:
+      - name: Check out Swift port
+        uses: actions/checkout@v4
+        with:
+          path: codex-swift
+
+      - name: Check out Rust oracle
+        uses: actions/checkout@v4
+        with:
+          repository: openai/codex
+          path: codex
+
+      - name: Build Rust codex oracle
+        working-directory: codex/codex-rs
+        run: cargo build --bin codex
+
+      - name: Compare Swift wrapper output to Rust oracle
+        working-directory: codex-swift
+        env:
+          CODEX_RUST_BINARY: ${{ github.workspace }}/codex/codex-rs/target/debug/codex
+        run: scripts/check-app-server-protocol-generator.sh
