@@ -804,6 +804,13 @@ Recent upstream audit checkpoint:
   of ending the turn. The live app-server runtime wires this provider to the
   mailbox queue; exact Rust phase toggles for steer/tool-call reopening and full
   `AgentControl` routing remain pending.
+- 2026-05-18: Swift live app-server mailbox state now carries Rust's current-turn
+  versus next-turn delivery phase. Completed non-commentary assistant answers and
+  image-generation items defer new mailbox mail to the next turn; model tool
+  calls and accepted steered input reopen delivery for the active turn. The live
+  Responses loop observes raw completed output items before draining pending
+  input, preserving the Rust boundary even when streaming aggregation rewrites
+  assistant message phases. Full `AgentControl` routing remains pending.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through

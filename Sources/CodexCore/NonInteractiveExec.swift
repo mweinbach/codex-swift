@@ -415,6 +415,7 @@ public enum NonInteractiveExec {
         _ toolCall: ResponseItem,
         _ tokenUsage: TokenUsage?
     ) async -> NonInteractiveExecToolCompletionResult?
+    public typealias CompletedOutputItemHandler = @Sendable (ResponseItem) async -> Void
     public typealias PendingInputProvider = @Sendable () async -> [ResponseInputItem]
     public typealias RegisteredToolExecutor = @Sendable (ResponseItem) async -> FunctionCallExecutionResult?
     public typealias ModelsETagHandler = (String) async -> Void
@@ -828,6 +829,7 @@ public enum NonInteractiveExec {
         features: FeatureStates = .withDefaults(),
         handleModelsETag: ModelsETagHandler? = nil,
         streamPrompt: ResponseStreamer,
+        handleCompletedOutputItem: CompletedOutputItemHandler? = nil,
         takePendingInput: PendingInputProvider? = nil,
         executeFunctionCall: FunctionCallExecutor
     ) async -> ResponseEventResults {
@@ -837,6 +839,7 @@ public enum NonInteractiveExec {
             features: features,
             handleModelsETag: handleModelsETag,
             streamPrompt: streamPrompt,
+            handleCompletedOutputItem: handleCompletedOutputItem,
             takePendingInput: takePendingInput,
             executeFunctionCall: executeFunctionCall
         ).events
@@ -848,6 +851,7 @@ public enum NonInteractiveExec {
         features: FeatureStates = .withDefaults(),
         handleModelsETag: ModelsETagHandler? = nil,
         streamPrompt: ResponseStreamer,
+        handleCompletedOutputItem: CompletedOutputItemHandler? = nil,
         takePendingInput: PendingInputProvider? = nil,
         handleToolPreExecution: ToolPreExecutionHandler? = nil,
         handleToolCompletion: ToolCompletionHandler? = nil,
@@ -859,6 +863,7 @@ public enum NonInteractiveExec {
             features: features,
             handleModelsETag: handleModelsETag,
             streamPrompt: streamPrompt,
+            handleCompletedOutputItem: handleCompletedOutputItem,
             takePendingInput: takePendingInput,
             handleToolPreExecution: handleToolPreExecution,
             handleToolCompletion: handleToolCompletion,
@@ -875,6 +880,7 @@ public enum NonInteractiveExec {
         handleModelsETag: ModelsETagHandler? = nil,
         streamPrompt: ResponseStreamer,
         stopHookContext: StopHookContext? = nil,
+        handleCompletedOutputItem: CompletedOutputItemHandler? = nil,
         takePendingInput: PendingInputProvider? = nil,
         handleToolPreExecution: ToolPreExecutionHandler? = nil,
         handleToolCompletion: ToolCompletionHandler? = nil,
@@ -887,6 +893,7 @@ public enum NonInteractiveExec {
             handleModelsETag: handleModelsETag,
             streamPrompt: streamPrompt,
             stopHookContext: stopHookContext,
+            handleCompletedOutputItem: handleCompletedOutputItem,
             takePendingInput: takePendingInput,
             handleToolPreExecution: handleToolPreExecution,
             handleToolCompletion: handleToolCompletion,
@@ -903,6 +910,7 @@ public enum NonInteractiveExec {
         handleModelsETag: ModelsETagHandler? = nil,
         streamPrompt: ResponseStreamer,
         stopHookContext: StopHookContext? = nil,
+        handleCompletedOutputItem: CompletedOutputItemHandler? = nil,
         takePendingInput: PendingInputProvider? = nil,
         handleToolPreExecution: ToolPreExecutionHandler? = nil,
         handleToolCompletion: ToolCompletionHandler? = nil,
@@ -949,10 +957,16 @@ public enum NonInteractiveExec {
             }
 
             let completedItems = completedOutputItems(from: turnEvents)
+            let rawCompletedItems = rawCompletedOutputItems(from: turnEvents)
+            if let handleCompletedOutputItem {
+                for item in rawCompletedItems {
+                    await handleCompletedOutputItem(item)
+                }
+            }
             transcriptItems.append(contentsOf: completedItems)
             prompt.input.append(contentsOf: completedItems)
 
-            let mailboxPreemptionItems = completedItems + rawCompletedOutputItems(from: turnEvents)
+            let mailboxPreemptionItems = completedItems + rawCompletedItems
             if mailboxPreemptionItems.contains(where: shouldPreemptForPendingMailboxInput),
                let pendingInputItems = await takePendingInput?(),
                !pendingInputItems.isEmpty

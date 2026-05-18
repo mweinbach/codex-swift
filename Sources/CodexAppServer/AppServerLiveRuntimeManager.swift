@@ -41,6 +41,16 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
     public func submitCoreOp(requestID: RequestID, threadID: String, op: Op) throws -> String {
         switch op {
         case .userInput, .userInputWithTurnContext, .userTurn:
+            let turnInput = try LiveTurnInput(op: op)
+            if !turnInput.items.isEmpty {
+                let inputItem = ResponseInputItem(userInputs: turnInput.items)
+                AppServerLiveRuntimeBlocking.run {
+                    await self.state.queuePendingInputForCurrentTurn(
+                        threadID: threadID,
+                        items: [inputItem]
+                    )
+                }
+            }
             return UUID().uuidString.lowercased()
 
         case .interrupt:
@@ -192,6 +202,18 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
 
     func takeMailboxCommunications(threadID: String) async -> [InterAgentCommunication] {
         await state.takeMailboxCommunications(threadID: threadID)
+    }
+
+    func takePendingInputForCurrentTurn(threadID: String) async -> [ResponseInputItem] {
+        await state.takePendingInputForCurrentTurn(threadID: threadID)
+    }
+
+    func deferMailboxDeliveryToNextTurn(threadID: String) async {
+        await state.deferMailboxDeliveryToNextTurn(threadID: threadID)
+    }
+
+    func acceptMailboxDeliveryForCurrentTurn(threadID: String) async {
+        await state.acceptMailboxDeliveryForCurrentTurn(threadID: threadID)
     }
 
     func isTurnRunning(threadID: String) async -> Bool {
@@ -705,6 +727,7 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             model: setup.model,
             approvalPolicy: setup.approvalPolicy
         )
+        let planMode = setup.collaborationModeKind == .plan
         let toolRouter = NonInteractiveExec.ToolRouter(
             hookContext: stopHookContext,
             cwd: setup.cwd,
@@ -825,9 +848,16 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 }
             },
             stopHookContext: stopHookContext,
+            handleCompletedOutputItem: { [state, submission, planMode] item in
+                await Self.updateMailboxDeliveryPhase(
+                    afterCompletedOutputItem: item,
+                    state: state,
+                    threadID: submission.threadID,
+                    planMode: planMode
+                )
+            },
             takePendingInput: { [state, submission] in
-                await state.takeMailboxCommunications(threadID: submission.threadID)
-                    .map { $0.toResponseInputItem() }
+                await state.takePendingInputForCurrentTurn(threadID: submission.threadID)
             },
             handleToolPreExecution: { [state, submission, goalAccounting] item, tokenUsage in
                 guard Self.shouldAccountLiveThreadGoalCompletionTool(item) else {
@@ -910,6 +940,51 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         case .customToolCall,
              .localShellCall,
              .toolSearchCall:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func updateMailboxDeliveryPhase(
+        afterCompletedOutputItem item: ResponseItem,
+        state: AppServerLiveRuntimeState,
+        threadID: String,
+        planMode: Bool
+    ) async {
+        if completedOutputItemAcceptsMailboxDeliveryForCurrentTurn(item) {
+            await state.acceptMailboxDeliveryForCurrentTurn(threadID: threadID)
+            return
+        }
+        if completedOutputItemDefersMailboxDeliveryToNextTurn(item, planMode: planMode) {
+            await state.deferMailboxDeliveryToNextTurn(threadID: threadID)
+        }
+    }
+
+    private static func completedOutputItemAcceptsMailboxDeliveryForCurrentTurn(_ item: ResponseItem) -> Bool {
+        switch item {
+        case .functionCall,
+             .customToolCall,
+             .localShellCall:
+            return true
+        case let .toolSearchCall(_, callID, _, execution, _):
+            return callID != nil && execution == "client"
+        default:
+            return false
+        }
+    }
+
+    private static func completedOutputItemDefersMailboxDeliveryToNextTurn(
+        _ item: ResponseItem,
+        planMode: Bool
+    ) -> Bool {
+        switch item {
+        case let .message(_, role, _, phase):
+            guard role == "assistant", phase != .commentary else {
+                return false
+            }
+            return StreamEventUtils.lastAssistantMessage(from: item, planMode: planMode) != nil
+        case .imageGenerationCall:
             return true
         default:
             return false
@@ -1506,7 +1581,9 @@ private actor AppServerLiveRuntimeState {
     private var sessionGrantedPermissionProfiles: [String: RequestPermissionProfile] = [:]
     private var runtimeConfigSnapshots: [String: ConfigValue] = [:]
     private var idlePendingInput: [String: [ResponseInputItem]] = [:]
+    private var activePendingInput: [String: [ResponseInputItem]] = [:]
     private var mailboxCommunications: [String: [InterAgentCommunication]] = [:]
+    private var mailboxDeliveryPhases: [String: MailboxDeliveryPhase] = [:]
     private var emittedAbortKeys: Set<String> = []
 
     func setEventSink(_ sink: AppServerRuntimeEventSink?) {
@@ -1516,6 +1593,8 @@ private actor AppServerLiveRuntimeState {
     func startTurn(threadID: String, turnID: String, task: Task<Void, Never>) {
         runningTurns[threadID]?.task.cancel()
         runningTurns[threadID] = RunningTurn(turnID: turnID, task: task)
+        activePendingInput.removeValue(forKey: threadID)
+        mailboxDeliveryPhases[threadID] = .currentTurn
     }
 
     func startTurnIfIdle(threadID: String, turnID: String, task: Task<Void, Never>) -> Bool {
@@ -1526,6 +1605,8 @@ private actor AppServerLiveRuntimeState {
             return false
         }
         runningTurns[threadID] = RunningTurn(turnID: turnID, task: task)
+        activePendingInput.removeValue(forKey: threadID)
+        mailboxDeliveryPhases[threadID] = .currentTurn
         return true
     }
 
@@ -1538,6 +1619,8 @@ private actor AppServerLiveRuntimeState {
             return false
         }
         runningTurns[threadID] = RunningTurn(turnID: turnID, task: task)
+        activePendingInput.removeValue(forKey: threadID)
+        mailboxDeliveryPhases[threadID] = .currentTurn
         return true
     }
 
@@ -1549,6 +1632,8 @@ private actor AppServerLiveRuntimeState {
         if runningTurns[threadID]?.turnID == turnID {
             runningTurns.removeValue(forKey: threadID)
         }
+        activePendingInput.removeValue(forKey: threadID)
+        mailboxDeliveryPhases[threadID] = .currentTurn
         cancelPendingContinuations(turnID: turnID)
         emittedAbortKeys.remove(Self.abortKey(threadID: threadID, turnID: turnID))
     }
@@ -1559,6 +1644,8 @@ private actor AppServerLiveRuntimeState {
         }
         running.task.cancel()
         runningTurns.removeValue(forKey: threadID)
+        activePendingInput.removeValue(forKey: threadID)
+        mailboxDeliveryPhases[threadID] = .currentTurn
         cancelPendingContinuations(turnID: running.turnID)
         return running.turnID
     }
@@ -1568,6 +1655,8 @@ private actor AppServerLiveRuntimeState {
             return
         }
         runningTurns.removeValue(forKey: threadID)?.task.cancel()
+        activePendingInput.removeValue(forKey: threadID)
+        mailboxDeliveryPhases[threadID] = .currentTurn
         cancelPendingContinuations(turnID: turnID)
         emittedAbortKeys.remove(Self.abortKey(threadID: threadID, turnID: turnID))
     }
@@ -1585,6 +1674,16 @@ private actor AppServerLiveRuntimeState {
             return
         }
         idlePendingInput[threadID, default: []].append(contentsOf: items)
+    }
+
+    func queuePendingInputForCurrentTurn(threadID: String, items: [ResponseInputItem]) {
+        guard !items.isEmpty,
+              runningTurns[threadID] != nil
+        else {
+            return
+        }
+        activePendingInput[threadID, default: []].append(contentsOf: items)
+        mailboxDeliveryPhases[threadID] = .currentTurn
     }
 
     func takeQueuedResponseItemsForNextTurn(threadID: String) -> [ResponseInputItem] {
@@ -1605,7 +1704,31 @@ private actor AppServerLiveRuntimeState {
         guard let communications = mailboxCommunications.removeValue(forKey: threadID) else {
             return []
         }
+        mailboxDeliveryPhases[threadID] = .currentTurn
         return communications
+    }
+
+    func takePendingInputForCurrentTurn(threadID: String) -> [ResponseInputItem] {
+        let pendingInput = activePendingInput.removeValue(forKey: threadID) ?? []
+        guard mailboxDeliveryPhases[threadID, default: .currentTurn] == .currentTurn else {
+            return pendingInput
+        }
+        let mailboxInput = takeMailboxCommunications(threadID: threadID).map { $0.toResponseInputItem() }
+        guard !pendingInput.isEmpty else {
+            return mailboxInput
+        }
+        return pendingInput + mailboxInput
+    }
+
+    func deferMailboxDeliveryToNextTurn(threadID: String) {
+        guard activePendingInput[threadID]?.isEmpty != false else {
+            return
+        }
+        mailboxDeliveryPhases[threadID] = .nextTurn
+    }
+
+    func acceptMailboxDeliveryForCurrentTurn(threadID: String) {
+        mailboxDeliveryPhases[threadID] = .currentTurn
     }
 
     private func hasPendingWorkForNextTurn(threadID: String) -> Bool {
@@ -1629,7 +1752,9 @@ private actor AppServerLiveRuntimeState {
         sessionGrantedPermissionProfiles.removeValue(forKey: threadID)
         runtimeConfigSnapshots.removeValue(forKey: threadID)
         idlePendingInput.removeValue(forKey: threadID)
+        activePendingInput.removeValue(forKey: threadID)
         mailboxCommunications.removeValue(forKey: threadID)
+        mailboxDeliveryPhases.removeValue(forKey: threadID)
     }
 
     func cancelAll() {
@@ -1638,7 +1763,9 @@ private actor AppServerLiveRuntimeState {
         sessionGrantedPermissionProfiles.removeAll()
         runtimeConfigSnapshots.removeAll()
         idlePendingInput.removeAll()
+        activePendingInput.removeAll()
         mailboxCommunications.removeAll()
+        mailboxDeliveryPhases.removeAll()
         emittedAbortKeys.removeAll()
         for turn in turns {
             turn.task.cancel()

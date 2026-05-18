@@ -11972,6 +11972,33 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertTrue(canStartContinuationAfterDrain)
     }
 
+    func testLiveRuntimeMailboxDeliveryPhaseDefersAndReopensLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let threadID = ConversationId().description
+        let manager = AppServerLiveRuntimeManager(
+            configuration: testConfiguration(codexHome: temp.url)
+        )
+        let mail = InterAgentCommunication(
+            author: try AgentPath.root.join("worker"),
+            recipient: .root,
+            content: "queued child update",
+            triggerTurn: false
+        )
+
+        manager.queueMailboxCommunications(threadID: threadID, communications: [mail])
+        await manager.deferMailboxDeliveryToNextTurn(threadID: threadID)
+        let currentTurnInput = await manager.takePendingInputForCurrentTurn(threadID: threadID)
+        XCTAssertEqual(currentTurnInput, [])
+        let nextTurnMail = await manager.takeMailboxCommunications(threadID: threadID)
+        XCTAssertEqual(nextTurnMail, [mail])
+
+        manager.queueMailboxCommunications(threadID: threadID, communications: [mail])
+        await manager.deferMailboxDeliveryToNextTurn(threadID: threadID)
+        await manager.acceptMailboxDeliveryForCurrentTurn(threadID: threadID)
+        let reopenedInput = await manager.takePendingInputForCurrentTurn(threadID: threadID)
+        XCTAssertEqual(reopenedInput, [mail.toResponseInputItem()])
+    }
+
     func testLiveRuntimeInterAgentCommunicationOpQueuesAndTriggersPendingWorkLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let threadID = ConversationId().description
