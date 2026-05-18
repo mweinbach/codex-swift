@@ -11837,6 +11837,67 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(persisted?.timeUsedSeconds, 2)
     }
 
+    func testLiveRuntimeGoalContinuationInputUsesActivePersistedGoalLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T07-38-55",
+            timestamp: "2025-01-06T07:38:55Z",
+            preview: "live goal continuation",
+            provider: "mock_provider"
+        )
+        let stateStore = try await createAppServerGoalStateStore(
+            codexHome: temp.url,
+            threadID: threadID,
+            title: "live goal continuation"
+        )
+        _ = try await stateStore.replaceThreadGoal(
+            threadID: try ThreadId(string: threadID),
+            objective: "keep improving the benchmark",
+            status: .active,
+            tokenBudget: nil
+        )
+        var features = FeatureStates.withDefaults()
+        features.set(.goals, enabled: true)
+
+        let activeItems = await AppServerLiveRuntimeManager.liveGoalContinuationInputItems(
+            stateStore: stateStore,
+            features: features,
+            threadID: threadID
+        )
+        let items = try XCTUnwrap(activeItems)
+
+        XCTAssertEqual(items.count, 1)
+        guard case let .message(_, role, content, _) = items[0],
+              case let .inputText(text)? = content.first
+        else {
+            return XCTFail("expected hidden active-goal continuation context")
+        }
+        XCTAssertEqual(role, "user")
+        XCTAssertTrue(text.starts(with: "<goal_context>"))
+        XCTAssertTrue(text.contains("Continue working toward the active thread goal."))
+        XCTAssertTrue(text.contains("keep improving the benchmark"))
+
+        _ = try await stateStore.updateThreadGoal(
+            threadID: try ThreadId(string: threadID),
+            status: .paused,
+            tokenBudget: .preserve
+        )
+        let pausedItems = await AppServerLiveRuntimeManager.liveGoalContinuationInputItems(
+            stateStore: stateStore,
+            features: features,
+            threadID: threadID
+        )
+        XCTAssertNil(pausedItems)
+        features.set(.goals, enabled: false)
+        let disabledItems = await AppServerLiveRuntimeManager.liveGoalContinuationInputItems(
+            stateStore: stateStore,
+            features: features,
+            threadID: threadID
+        )
+        XCTAssertNil(disabledItems)
+    }
+
     func testLiveRuntimeGoalAccountingIgnoresGoalCreatedAfterTurnStartLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(

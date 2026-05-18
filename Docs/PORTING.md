@@ -762,6 +762,14 @@ Recent upstream audit checkpoint:
   pauses the active persisted goal, and emits `thread/goal/updated` before the
   interrupted turn abort notification. Idle continuation turns remain pending
   with the broader ThreadManager goal runtime.
+- 2026-05-18: Swift live app-server turn completion now has the first guarded
+  idle continuation launcher for Rust's `MaybeContinueIfIdle` path. After a
+  live turn releases its active slot, the manager rechecks the persisted active
+  goal, requires no running turn or pending user-input/dynamic-tool
+  continuation, appends Rust's hidden active-goal continuation `<goal_context>`
+  input item to a fresh runtime turn, and records that hidden item in the
+  rollout. The broader Rust pending-work mailbox checks and no-activity
+  continuation suppression remain pending with the full ThreadManager lifecycle.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through

@@ -153,6 +153,65 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         }
     }
 
+    private func submitGoalContinuation(
+        threadID: String,
+        features: FeatureStates,
+        prototype: AppServerLiveRuntimeSubmission
+    ) async {
+        guard await state.canStartGoalContinuation(threadID: threadID),
+              let inputItems = await Self.liveGoalContinuationInputItems(
+                stateStore: configuration.stateStore,
+                features: features,
+                threadID: threadID
+              )
+        else {
+            return
+        }
+        let turnID = UUID().uuidString.lowercased()
+        let startGate = AppServerLiveRuntimeStartGate()
+        let submission = AppServerLiveRuntimeSubmission(
+            requestID: .string("goal-continuation-\(turnID)"),
+            threadID: threadID,
+            turnID: turnID,
+            op: Op.userInput(items: []),
+            turnMetadataHeader: nil,
+            mcpElicitationsAutoDeny: prototype.mcpElicitationsAutoDeny,
+            mcpTools: prototype.mcpTools,
+            mcpToolCallHandler: prototype.mcpToolCallHandler,
+            extensionPromptFragments: prototype.extensionPromptFragments,
+            extensionToolSpecs: prototype.extensionToolSpecs,
+            extensionRegisteredToolExecutor: prototype.extensionRegisteredToolExecutor,
+            extensionApprovalReviewer: prototype.extensionApprovalReviewer,
+            additionalInputItems: inputItems
+        )
+        let task = Task { [weak self, startGate] in
+            await startGate.wait()
+            guard !Task.isCancelled else {
+                return
+            }
+            guard let self else {
+                return
+            }
+            await self.runTurn(submission)
+        }
+        guard await state.startTurnIfIdle(threadID: threadID, turnID: turnID, task: task) else {
+            task.cancel()
+            await startGate.open()
+            return
+        }
+        let goalIsCurrent = await Self.liveGoalContinuationInputItems(
+            stateStore: configuration.stateStore,
+            features: features,
+            threadID: threadID
+        ) == inputItems
+        guard goalIsCurrent else {
+            await state.cancelTurnIfMatching(threadID: threadID, turnID: turnID)
+            await startGate.open()
+            return
+        }
+        await startGate.open()
+    }
+
     public func shutdown() {
         AppServerLiveRuntimeBlocking.run {
             await self.state.cancelAll()
@@ -175,8 +234,10 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
     private func runTurn(_ submission: AppServerLiveRuntimeSubmission) async {
         let startedAt = AppServerLiveRuntimeClock.millisecondsSinceEpoch()
         var goalAccounting: LiveThreadGoalAccountingSession?
+        var goalContinuationFeatures: FeatureStates?
         do {
             let setup = try await prepareTurn(submission)
+            goalContinuationFeatures = setup.settings.features
             await state.emit(
                 threadID: submission.threadID,
                 turnID: submission.turnID,
@@ -331,6 +392,13 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             )
         }
         await state.finishTurn(threadID: submission.threadID, turnID: submission.turnID)
+        if let goalContinuationFeatures {
+            await submitGoalContinuation(
+                threadID: submission.threadID,
+                features: goalContinuationFeatures,
+                prototype: submission
+            )
+        }
     }
 
     private func prepareTurn(_ submission: AppServerLiveRuntimeSubmission) async throws -> PreparedLiveTurn {
@@ -446,8 +514,12 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             )
         )
         input.append(contentsOf: responseHistory)
-        let userItem = ResponseInputItem(userInputs: turnInput.items).responseItem()
-        input.append(userItem)
+        var newInputItems: [ResponseItem] = []
+        if !turnInput.items.isEmpty {
+            newInputItems.append(ResponseInputItem(userInputs: turnInput.items).responseItem())
+        }
+        newInputItems.append(contentsOf: submission.additionalInputItems)
+        input.append(contentsOf: newInputItems)
         let prompt = Prompt(
             input: input,
             tools: configuredTools.map { $0.spec } + submission.extensionToolSpecs.map { $0.spec },
@@ -468,8 +540,7 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 finalOutputJSONSchema: turnInput.outputSchema,
                 truncationPolicy: modelFamily.truncationPolicy
             )),
-            .responseItem(userItem)
-        ])
+        ] + newInputItems.map(RolloutRecordItem.responseItem))
         let hookConfigStack = try refreshedConfigStack ?? CodexConfigLayerLoader.loadConfigLayerStack(
             codexHome: configuration.codexHome,
             cwd: cwd,
@@ -889,6 +960,29 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         }
         do {
             return try await stateStore.pauseActiveThreadGoal(threadID: parsedThreadID)
+        } catch {
+            return nil
+        }
+    }
+
+    static func liveGoalContinuationInputItems(
+        stateStore: SQLiteAgentGraphStore?,
+        features: FeatureStates,
+        threadID: String
+    ) async -> [ResponseItem]? {
+        guard features.isEnabled(.goals),
+              let stateStore,
+              let parsedThreadID = try? ThreadId(string: threadID)
+        else {
+            return nil
+        }
+        do {
+            guard let goal = try await stateStore.getThreadGoal(threadID: parsedThreadID),
+                  goal.status == .active
+            else {
+                return nil
+            }
+            return [ThreadGoalRuntimeContext.continuationInputItem(for: goal)]
         } catch {
             return nil
         }
@@ -1318,6 +1412,17 @@ private actor AppServerLiveRuntimeState {
         runningTurns[threadID] = RunningTurn(turnID: turnID, task: task)
     }
 
+    func startTurnIfIdle(threadID: String, turnID: String, task: Task<Void, Never>) -> Bool {
+        guard runningTurns[threadID] == nil,
+              userInputContinuations.isEmpty,
+              dynamicToolContinuations.isEmpty
+        else {
+            return false
+        }
+        runningTurns[threadID] = RunningTurn(turnID: turnID, task: task)
+        return true
+    }
+
     func finishTurn(threadID: String, turnID: String) {
         if runningTurns[threadID]?.turnID == turnID {
             runningTurns.removeValue(forKey: threadID)
@@ -1334,6 +1439,21 @@ private actor AppServerLiveRuntimeState {
         runningTurns.removeValue(forKey: threadID)
         cancelPendingContinuations(turnID: running.turnID)
         return running.turnID
+    }
+
+    func cancelTurnIfMatching(threadID: String, turnID: String) {
+        guard runningTurns[threadID]?.turnID == turnID else {
+            return
+        }
+        runningTurns.removeValue(forKey: threadID)?.task.cancel()
+        cancelPendingContinuations(turnID: turnID)
+        emittedAbortKeys.remove(Self.abortKey(threadID: threadID, turnID: turnID))
+    }
+
+    func canStartGoalContinuation(threadID: String) -> Bool {
+        runningTurns[threadID] == nil
+            && userInputContinuations.isEmpty
+            && dynamicToolContinuations.isEmpty
     }
 
     func cancelThread(threadID: String) {

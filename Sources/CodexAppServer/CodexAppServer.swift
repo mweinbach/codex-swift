@@ -116,6 +116,7 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
     public let extensionToolSpecs: [ConfiguredToolSpec]
     public let extensionRegisteredToolExecutor: NonInteractiveExec.RegisteredToolExecutor?
     public let extensionApprovalReviewer: AppServerExtensionApprovalReviewer?
+    public let additionalInputItems: [ResponseItem]
 
     public init(
         requestID: RequestID,
@@ -129,7 +130,8 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
         extensionPromptFragments: [ExtensionPromptFragment] = [],
         extensionToolSpecs: [ConfiguredToolSpec] = [],
         extensionRegisteredToolExecutor: NonInteractiveExec.RegisteredToolExecutor? = nil,
-        extensionApprovalReviewer: AppServerExtensionApprovalReviewer? = nil
+        extensionApprovalReviewer: AppServerExtensionApprovalReviewer? = nil,
+        additionalInputItems: [ResponseItem] = []
     ) {
         self.requestID = requestID
         self.threadID = threadID
@@ -143,6 +145,7 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
         self.extensionToolSpecs = extensionToolSpecs
         self.extensionRegisteredToolExecutor = extensionRegisteredToolExecutor
         self.extensionApprovalReviewer = extensionApprovalReviewer
+        self.additionalInputItems = additionalInputItems
     }
 
     public static func == (lhs: AppServerLiveRuntimeSubmission, rhs: AppServerLiveRuntimeSubmission) -> Bool {
@@ -155,6 +158,7 @@ public struct AppServerLiveRuntimeSubmission: Equatable, Sendable {
             && lhs.mcpTools == rhs.mcpTools
             && lhs.extensionPromptFragments == rhs.extensionPromptFragments
             && lhs.extensionToolSpecs == rhs.extensionToolSpecs
+            && lhs.additionalInputItems == rhs.additionalInputItems
     }
 }
 
