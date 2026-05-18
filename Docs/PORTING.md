@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: extended CLI help runtime-oracle parity into remaining
+  advertised child command groups for `app-server`, `remote-control`, and
+  `execpolicy`. Swift now renders Rust-shaped help for app-server daemon
+  management children, app-server protocol generation/proxy children,
+  remote-control start/stop, and `execpolicy check` instead of collapsing
+  those child help requests back to the parent command surfaces.
 - 2026-05-18: extended CLI help runtime-oracle parity into login and Codex
   Cloud child subcommands. Swift now renders Rust-shaped
   `codex login status --help` plus

@@ -387,6 +387,18 @@ final class CodexCLITests: XCTestCase {
         XCTAssertTrue(execPolicyHelp.contains("  check  Check execpolicy files against a command"))
 
         stdout.removeAll()
+        let execPolicyCheckExitCode = await CodexCLI().runAsync(
+            arguments: ["execpolicy", "check", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(execPolicyCheckExitCode, 0)
+        let execPolicyCheckHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(execPolicyCheckHelp.hasPrefix("Check execpolicy files against a command\n\nUsage: codex execpolicy check [OPTIONS] --rules <PATH> <COMMAND>..."))
+        XCTAssertTrue(execPolicyCheckHelp.contains("      --resolve-host-executables"))
+
+        stdout.removeAll()
         let applyExitCode = await CodexCLI().runAsync(
             arguments: ["apply", "--help"],
             stdout: { stdout.append($0) },
@@ -412,6 +424,30 @@ final class CodexCLITests: XCTestCase {
         XCTAssertTrue(appServerHelp.contains("      --ws-max-clock-skew-seconds <SECONDS>"))
 
         stdout.removeAll()
+        let appServerDaemonExitCode = await CodexCLI().runAsync(
+            arguments: ["app-server", "daemon", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(appServerDaemonExitCode, 0)
+        let appServerDaemonHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(appServerDaemonHelp.hasPrefix("Manage the local app-server daemon\n\nUsage: codex app-server daemon [OPTIONS] <COMMAND>"))
+        XCTAssertTrue(appServerDaemonHelp.contains("  enable-remote-control"))
+
+        stdout.removeAll()
+        let appServerGenerateTSExitCode = await CodexCLI().runAsync(
+            arguments: ["app-server", "generate-ts", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(appServerGenerateTSExitCode, 0)
+        let appServerGenerateTSHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(appServerGenerateTSHelp.hasPrefix("[experimental] Generate TypeScript bindings for the app server protocol\n\nUsage: codex app-server generate-ts [OPTIONS] --out <DIR>"))
+        XCTAssertTrue(appServerGenerateTSHelp.contains("  -p, --prettier <PRETTIER_BIN>"))
+
+        stdout.removeAll()
         let remoteControlExitCode = await CodexCLI().runAsync(
             arguments: ["remote-control", "--help"],
             stdout: { stdout.append($0) },
@@ -422,6 +458,18 @@ final class CodexCLITests: XCTestCase {
         let remoteControlHelp = try XCTUnwrap(stdout.first)
         XCTAssertTrue(remoteControlHelp.hasPrefix("[experimental] Manage the app-server daemon with remote control enabled\n\nUsage: codex remote-control [OPTIONS] [COMMAND]"))
         XCTAssertTrue(remoteControlHelp.contains("  start  Start the app-server daemon with remote control enabled"))
+
+        stdout.removeAll()
+        let remoteControlStartExitCode = await CodexCLI().runAsync(
+            arguments: ["remote-control", "start", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(remoteControlStartExitCode, 0)
+        let remoteControlStartHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(remoteControlStartHelp.hasPrefix("Start the app-server daemon with remote control enabled\n\nUsage: codex remote-control start [OPTIONS]"))
+        XCTAssertTrue(remoteControlStartHelp.contains("      --disable <FEATURE>"))
 
         stdout.removeAll()
         let featuresExitCode = await CodexCLI().runAsync(

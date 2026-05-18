@@ -252,6 +252,18 @@ final class RuntimeOracleParityTests: XCTestCase {
         XCTAssertEqual(normalizedHelp(swift.stdout), normalizedHelp(rust.stdout))
     }
 
+    func testExecPolicyChildHelpMatchesRustOracleModuloWhitespace() throws {
+        let oracle = try RuntimeOracle.required()
+
+        let rust = try oracle.run(.rust, arguments: ["execpolicy", "check", "--help"])
+        let swift = try oracle.run(.swift, arguments: ["execpolicy", "check", "--help"])
+
+        XCTAssertEqual(rust.exitCode, 0, rust.stderr)
+        XCTAssertEqual(swift.exitCode, 0, swift.stderr)
+
+        XCTAssertEqual(normalizedHelp(swift.stdout), normalizedHelp(rust.stdout))
+    }
+
     func testApplyHelpMatchesRustOracleModuloWhitespace() throws {
         let oracle = try RuntimeOracle.required()
 
@@ -276,6 +288,32 @@ final class RuntimeOracleParityTests: XCTestCase {
         XCTAssertEqual(normalizedHelp(swift.stdout), normalizedHelp(rust.stdout))
     }
 
+    func testAppServerChildHelpMatchesRustOracleModuloWhitespace() throws {
+        let oracle = try RuntimeOracle.required()
+        let commands = [
+            ["app-server", "daemon", "--help"],
+            ["app-server", "daemon", "bootstrap", "--help"],
+            ["app-server", "daemon", "start", "--help"],
+            ["app-server", "daemon", "restart", "--help"],
+            ["app-server", "daemon", "enable-remote-control", "--help"],
+            ["app-server", "daemon", "disable-remote-control", "--help"],
+            ["app-server", "daemon", "stop", "--help"],
+            ["app-server", "daemon", "version", "--help"],
+            ["app-server", "proxy", "--help"],
+            ["app-server", "generate-ts", "--help"],
+            ["app-server", "generate-json-schema", "--help"]
+        ]
+
+        for arguments in commands {
+            let rust = try oracle.run(.rust, arguments: arguments)
+            let swift = try oracle.run(.swift, arguments: arguments)
+
+            XCTAssertEqual(rust.exitCode, 0, rust.stderr)
+            XCTAssertEqual(swift.exitCode, 0, swift.stderr)
+            XCTAssertEqual(normalizedHelp(swift.stdout), normalizedHelp(rust.stdout), arguments.joined(separator: " "))
+        }
+    }
+
     func testRemoteControlHelpMatchesRustOracleModuloWhitespace() throws {
         let oracle = try RuntimeOracle.required()
 
@@ -286,6 +324,23 @@ final class RuntimeOracleParityTests: XCTestCase {
         XCTAssertEqual(swift.exitCode, 0, swift.stderr)
 
         XCTAssertEqual(normalizedHelp(swift.stdout), normalizedHelp(rust.stdout))
+    }
+
+    func testRemoteControlChildHelpMatchesRustOracleModuloWhitespace() throws {
+        let oracle = try RuntimeOracle.required()
+        let commands = [
+            ["remote-control", "start", "--help"],
+            ["remote-control", "stop", "--help"]
+        ]
+
+        for arguments in commands {
+            let rust = try oracle.run(.rust, arguments: arguments)
+            let swift = try oracle.run(.swift, arguments: arguments)
+
+            XCTAssertEqual(rust.exitCode, 0, rust.stderr)
+            XCTAssertEqual(swift.exitCode, 0, swift.stderr)
+            XCTAssertEqual(normalizedHelp(swift.stdout), normalizedHelp(rust.stdout), arguments.joined(separator: " "))
+        }
     }
 
     func testFeaturesHelpMatchesRustOracleModuloWhitespace() throws {

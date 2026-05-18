@@ -938,8 +938,14 @@ public struct CodexCLI: Sendable {
         case "mcp-server":
             return renderMcpServerHelp()
         case "app-server":
+            if let childHelp = renderAppServerChildHelp(arguments: arguments) {
+                return childHelp
+            }
             return renderAppServerHelp()
         case "remote-control":
+            if let childHelp = renderRemoteControlChildHelp(arguments: arguments) {
+                return childHelp
+            }
             return renderRemoteControlHelp()
         case "app":
             return renderAppHelp()
@@ -960,6 +966,9 @@ public struct CodexCLI: Sendable {
             }
             return renderDebugHelp()
         case "execpolicy":
+            if let childHelp = renderExecPolicyChildHelp(arguments: arguments) {
+                return childHelp
+            }
             return renderExecPolicyHelp()
         case "apply":
             return renderApplyHelp()
@@ -2154,6 +2163,237 @@ public struct CodexCLI: Sendable {
         """
     }
 
+    private func renderAppServerChildHelp(arguments: [String]) -> String? {
+        guard let child = arguments.first, child != "--help", child != "-h" else {
+            return nil
+        }
+
+        switch child {
+        case "daemon":
+            return renderAppServerDaemonHelp(arguments: Array(arguments.dropFirst()))
+        case "proxy":
+            return """
+            Proxy stdio bytes to the running app-server control socket
+
+            Usage: codex app-server proxy [OPTIONS]
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+                  --sock <SOCKET_PATH>
+                      Path to the app-server Unix domain socket to connect to
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              -h, --help
+                      Print help (see a summary with '-h')
+            """
+        case "generate-ts":
+            return """
+            [experimental] Generate TypeScript bindings for the app server protocol
+
+            Usage: codex app-server generate-ts [OPTIONS] --out <DIR>
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+              -o, --out <DIR>
+                      Output directory where .ts files will be written
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+              -p, --prettier <PRETTIER_BIN>
+                      Optional path to the Prettier executable to format generated files
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+                  --experimental
+                      Include experimental methods and fields in the generated output
+
+              -h, --help
+                      Print help (see a summary with '-h')
+            """
+        case "generate-json-schema":
+            return """
+            [experimental] Generate JSON Schema for the app server protocol
+
+            Usage: codex app-server generate-json-schema [OPTIONS] --out <DIR>
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+              -o, --out <DIR>
+                      Output directory where the schema bundle will be written
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --experimental
+                      Include experimental methods and fields in the generated output
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              -h, --help
+                      Print help (see a summary with '-h')
+            """
+        default:
+            return nil
+        }
+    }
+
+    private func renderAppServerDaemonHelp(arguments: [String]) -> String? {
+        guard let child = arguments.first, child != "--help", child != "-h" else {
+            return """
+            Manage the local app-server daemon
+
+            Usage: codex app-server daemon [OPTIONS] <COMMAND>
+
+            Commands:
+              bootstrap               Install durable local app-server management for SSH-driven use
+              start                   Start the local app server daemon if it is not already running
+              restart                 Restart the local app server daemon
+              enable-remote-control   Enable remote control for future starts and a currently running managed
+                                      daemon
+              disable-remote-control  Disable remote control for future starts and a currently running managed
+                                      daemon
+              stop                    Stop the local app server daemon
+              version                 Print local CLI and running app-server versions as JSON
+              help                    Print this message or the help of the given subcommand(s)
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              -h, --help
+                      Print help (see a summary with '-h')
+            """
+        }
+
+        switch child {
+        case "bootstrap":
+            return """
+            Install durable local app-server management for SSH-driven use
+
+            Usage: codex app-server daemon bootstrap [OPTIONS]
+
+            Options:
+              -c, --config <key=value>
+                      Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                      Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                      as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                      Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                      shell_environment_policy.inherit=all`
+
+                  --remote-control
+                      Launch the managed app-server with remote control enabled
+
+                  --enable <FEATURE>
+                      Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+                  --disable <FEATURE>
+                      Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              -h, --help
+                      Print help (see a summary with '-h')
+            """
+        case "start":
+            return renderAppServerDaemonSimpleHelp(
+                summary: "Start the local app server daemon if it is not already running",
+                usage: "codex app-server daemon start [OPTIONS]"
+            )
+        case "restart":
+            return renderAppServerDaemonSimpleHelp(
+                summary: "Restart the local app server daemon",
+                usage: "codex app-server daemon restart [OPTIONS]"
+            )
+        case "enable-remote-control":
+            return renderAppServerDaemonSimpleHelp(
+                summary: "Enable remote control for future starts and a currently running managed daemon",
+                usage: "codex app-server daemon enable-remote-control [OPTIONS]"
+            )
+        case "disable-remote-control":
+            return renderAppServerDaemonSimpleHelp(
+                summary: "Disable remote control for future starts and a currently running managed daemon",
+                usage: "codex app-server daemon disable-remote-control [OPTIONS]"
+            )
+        case "stop":
+            return renderAppServerDaemonSimpleHelp(
+                summary: "Stop the local app server daemon",
+                usage: "codex app-server daemon stop [OPTIONS]"
+            )
+        case "version":
+            return renderAppServerDaemonSimpleHelp(
+                summary: "Print local CLI and running app-server versions as JSON",
+                usage: "codex app-server daemon version [OPTIONS]"
+            )
+        default:
+            return nil
+        }
+    }
+
+    private func renderAppServerDaemonSimpleHelp(summary: String, usage: String) -> String {
+        """
+        \(summary)
+
+        Usage: \(usage)
+
+        Options:
+          -c, --config <key=value>
+                  Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                  Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                  as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                  Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                  shell_environment_policy.inherit=all`
+
+              --enable <FEATURE>
+                  Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+              --disable <FEATURE>
+                  Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+          -h, --help
+                  Print help (see a summary with '-h')
+        """
+    }
+
     private func renderRemoteControlHelp() -> String {
         """
         [experimental] Manage the app-server daemon with remote control enabled
@@ -2164,6 +2404,53 @@ public struct CodexCLI: Sendable {
           start  Start the app-server daemon with remote control enabled
           stop   Stop the app-server daemon
           help   Print this message or the help of the given subcommand(s)
+
+        Options:
+          -c, --config <key=value>
+                  Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                  Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                  as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                  Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                  shell_environment_policy.inherit=all`
+
+              --enable <FEATURE>
+                  Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+              --disable <FEATURE>
+                  Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+          -h, --help
+                  Print help (see a summary with '-h')
+        """
+    }
+
+    private func renderRemoteControlChildHelp(arguments: [String]) -> String? {
+        guard let child = arguments.first, child != "--help", child != "-h" else {
+            return nil
+        }
+
+        switch child {
+        case "start":
+            return renderRemoteControlSimpleHelp(
+                summary: "Start the app-server daemon with remote control enabled",
+                usage: "codex remote-control start [OPTIONS]"
+            )
+        case "stop":
+            return renderRemoteControlSimpleHelp(
+                summary: "Stop the app-server daemon",
+                usage: "codex remote-control stop [OPTIONS]"
+            )
+        default:
+            return nil
+        }
+    }
+
+    private func renderRemoteControlSimpleHelp(summary: String, usage: String) -> String {
+        """
+        \(summary)
+
+        Usage: \(usage)
 
         Options:
           -c, --config <key=value>
@@ -2660,6 +2947,50 @@ public struct CodexCLI: Sendable {
 
               --disable <FEATURE>
                   Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+          -h, --help
+                  Print help (see a summary with '-h')
+        """
+    }
+
+    private func renderExecPolicyChildHelp(arguments: [String]) -> String? {
+        guard arguments.first == "check" else {
+            return nil
+        }
+
+        return """
+        Check execpolicy files against a command
+
+        Usage: codex execpolicy check [OPTIONS] --rules <PATH> <COMMAND>...
+
+        Arguments:
+          <COMMAND>...
+                  Command tokens to check against the policy
+
+        Options:
+          -c, --config <key=value>
+                  Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                  Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                  as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                  Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                  shell_environment_policy.inherit=all`
+
+          -r, --rules <PATH>
+                  Paths to execpolicy rule files to evaluate (repeatable)
+
+              --enable <FEATURE>
+                  Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+              --pretty
+                  Pretty-print the JSON output
+
+              --disable <FEATURE>
+                  Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              --resolve-host-executables
+                  Resolve absolute program paths against basename rules, gated by any `host_executable()`
+                  definitions in the loaded policy files
 
           -h, --help
                   Print help (see a summary with '-h')
