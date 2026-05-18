@@ -11619,12 +11619,18 @@ final class CodexAppServerTests: XCTestCase {
         )
         var features = FeatureStates.withDefaults()
         features.set(.goals, enabled: true)
+        let snapshot = await AppServerLiveRuntimeManager.liveThreadGoalAccountingSnapshot(
+            stateStore: stateStore,
+            features: features,
+            threadID: threadID,
+            tokenUsage: TokenUsage()
+        )
 
         let updated = await AppServerLiveRuntimeManager.accountCompletedLiveThreadGoalUsage(
             stateStore: stateStore,
             features: features,
             threadID: threadID,
-            turnID: "turn-live",
+            snapshot: snapshot,
             tokenUsage: TokenUsage(totalTokens: 25),
             durationMilliseconds: 2_500
         )
@@ -11637,6 +11643,105 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(persisted?.status, .budgetLimited)
         XCTAssertEqual(persisted?.tokensUsed, 25)
         XCTAssertEqual(persisted?.timeUsedSeconds, 2)
+    }
+
+    func testLiveRuntimeGoalAccountingIgnoresGoalCreatedAfterTurnStartLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T07-39-00",
+            timestamp: "2025-01-06T07:39:00Z",
+            preview: "live goal same turn create",
+            provider: "mock_provider"
+        )
+        let stateStore = try await createAppServerGoalStateStore(
+            codexHome: temp.url,
+            threadID: threadID,
+            title: "live goal same turn create"
+        )
+        let parsedThreadID = try ThreadId(string: threadID)
+        var features = FeatureStates.withDefaults()
+        features.set(.goals, enabled: true)
+        let snapshot = await AppServerLiveRuntimeManager.liveThreadGoalAccountingSnapshot(
+            stateStore: stateStore,
+            features: features,
+            threadID: threadID,
+            tokenUsage: TokenUsage()
+        )
+        _ = try await stateStore.replaceThreadGoal(
+            threadID: parsedThreadID,
+            objective: "same turn objective",
+            status: .active,
+            tokenBudget: 20
+        )
+
+        let updated = await AppServerLiveRuntimeManager.accountCompletedLiveThreadGoalUsage(
+            stateStore: stateStore,
+            features: features,
+            threadID: threadID,
+            snapshot: snapshot,
+            tokenUsage: TokenUsage(totalTokens: 25),
+            durationMilliseconds: 2_500
+        )
+
+        XCTAssertNil(updated)
+        let persisted = try await stateStore.getThreadGoal(threadID: parsedThreadID)
+        XCTAssertEqual(persisted?.status, .active)
+        XCTAssertEqual(persisted?.tokensUsed, 0)
+        XCTAssertEqual(persisted?.timeUsedSeconds, 0)
+    }
+
+    func testLiveRuntimeGoalAccountingIgnoresGoalReplacedAfterTurnStartLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T07-40-00",
+            timestamp: "2025-01-06T07:40:00Z",
+            preview: "live goal same turn replace",
+            provider: "mock_provider"
+        )
+        let stateStore = try await createAppServerGoalStateStore(
+            codexHome: temp.url,
+            threadID: threadID,
+            title: "live goal same turn replace"
+        )
+        let parsedThreadID = try ThreadId(string: threadID)
+        _ = try await stateStore.replaceThreadGoal(
+            threadID: parsedThreadID,
+            objective: "first objective",
+            status: .active,
+            tokenBudget: 20
+        )
+        var features = FeatureStates.withDefaults()
+        features.set(.goals, enabled: true)
+        let snapshot = await AppServerLiveRuntimeManager.liveThreadGoalAccountingSnapshot(
+            stateStore: stateStore,
+            features: features,
+            threadID: threadID,
+            tokenUsage: TokenUsage()
+        )
+        _ = try await stateStore.replaceThreadGoal(
+            threadID: parsedThreadID,
+            objective: "replacement objective",
+            status: .active,
+            tokenBudget: 20
+        )
+
+        let updated = await AppServerLiveRuntimeManager.accountCompletedLiveThreadGoalUsage(
+            stateStore: stateStore,
+            features: features,
+            threadID: threadID,
+            snapshot: snapshot,
+            tokenUsage: TokenUsage(totalTokens: 25),
+            durationMilliseconds: 2_500
+        )
+
+        XCTAssertNil(updated)
+        let persisted = try await stateStore.getThreadGoal(threadID: parsedThreadID)
+        XCTAssertEqual(persisted?.objective, "replacement objective")
+        XCTAssertEqual(persisted?.status, .active)
+        XCTAssertEqual(persisted?.tokensUsed, 0)
+        XCTAssertEqual(persisted?.timeUsedSeconds, 0)
     }
 
     func testThreadResumeKeepsPausedGoalPausedLikeRust() async throws {

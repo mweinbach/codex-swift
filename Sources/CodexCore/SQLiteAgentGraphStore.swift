@@ -673,6 +673,30 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         return try Self.getThreadGoalSync(threadID: threadID, database: database)
     }
 
+    public func getAccountableThreadGoalID(threadID: ThreadId) async throws -> String? {
+        let database = handle.database
+        return try Self.withStatement(
+            query:
+            """
+            SELECT goal_id
+            FROM thread_goals
+            WHERE thread_id = ?
+              AND status IN ('active', 'budget_limited')
+            """,
+            bindings: [.text(threadID.description)],
+            database: database
+        ) { statement in
+            let result = sqlite3_step(statement)
+            if result == SQLITE_DONE {
+                return nil
+            }
+            guard result == SQLITE_ROW else {
+                throw Self.sqliteError(database: database)
+            }
+            return Self.optionalTextColumn(statement, index: 0)
+        }
+    }
+
     private static func getThreadGoalSync(threadID: ThreadId, database: OpaquePointer) throws -> ThreadGoal? {
         return try Self.withStatement(
             query:

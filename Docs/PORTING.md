@@ -732,9 +732,11 @@ Recent upstream audit checkpoint:
   and account it against active persisted thread goals when a live turn finishes,
   using the existing Rust-shaped `accountThreadGoalUsage(.activeOnly)` state
   helper and emitting `thread/goal/updated` before `turn/completed`. This covers
-  the first live automatic accounting hook; turn-start goal-id baselines,
-  mid-turn tool-completion accounting, budget-limit steering injection, and idle
-  continuation turns remain pending with the broader ThreadManager goal runtime.
+  the first live automatic accounting hook. Swift now also captures Rust-style
+  turn-start goal IDs for live accounting, so same-turn goal creation or
+  replacement does not receive completed-turn usage. Mid-turn tool-completion
+  accounting, budget-limit steering injection, and idle continuation turns
+  remain pending with the broader ThreadManager goal runtime.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through

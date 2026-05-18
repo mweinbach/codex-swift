@@ -236,6 +236,12 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 return
             }
 
+            let goalAccountingSnapshot = await Self.liveThreadGoalAccountingSnapshot(
+                stateStore: configuration.stateStore,
+                features: setup.settings.features,
+                threadID: submission.threadID,
+                tokenUsage: TokenUsage()
+            )
             let loopResult = await runResponsesLoop(submission: submission, setup: setup, prompt: prompt)
             try setup.recorder?.recordItems(loopResult.transcriptItems.map(RolloutRecordItem.responseItem))
             for item in loopResult.transcriptItems {
@@ -252,7 +258,7 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 stateStore: configuration.stateStore,
                 features: setup.settings.features,
                 threadID: submission.threadID,
-                turnID: submission.turnID,
+                snapshot: goalAccountingSnapshot,
                 tokenUsage: loopResult.tokenUsage,
                 durationMilliseconds: AppServerLiveRuntimeClock.millisecondsSinceEpoch() - startedAt
             ) {
@@ -659,21 +665,57 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         return NonInteractiveExec.GoalToolContext(threadID: parsedThreadID, stateStore: stateStore)
     }
 
+    struct LiveThreadGoalAccountingSnapshot: Equatable, Sendable {
+        var expectedGoalID: String?
+        var tokenUsageBaseline: TokenUsage
+
+        var activeThisTurn: Bool {
+            expectedGoalID != nil
+        }
+
+        func tokenDelta(since current: TokenUsage?) -> Int64 {
+            max((current?.totalTokens ?? 0) - tokenUsageBaseline.totalTokens, 0)
+        }
+    }
+
+    static func liveThreadGoalAccountingSnapshot(
+        stateStore: SQLiteAgentGraphStore?,
+        features: FeatureStates,
+        threadID: String,
+        tokenUsage: TokenUsage
+    ) async -> LiveThreadGoalAccountingSnapshot {
+        guard features.isEnabled(.goals),
+              let stateStore,
+              let parsedThreadID = try? ThreadId(string: threadID)
+        else {
+            return LiveThreadGoalAccountingSnapshot(expectedGoalID: nil, tokenUsageBaseline: tokenUsage)
+        }
+        do {
+            return LiveThreadGoalAccountingSnapshot(
+                expectedGoalID: try await stateStore.getAccountableThreadGoalID(threadID: parsedThreadID),
+                tokenUsageBaseline: tokenUsage
+            )
+        } catch {
+            return LiveThreadGoalAccountingSnapshot(expectedGoalID: nil, tokenUsageBaseline: tokenUsage)
+        }
+    }
+
     static func accountCompletedLiveThreadGoalUsage(
         stateStore: SQLiteAgentGraphStore?,
         features: FeatureStates,
         threadID: String,
-        turnID _: String,
+        snapshot: LiveThreadGoalAccountingSnapshot,
         tokenUsage: TokenUsage?,
         durationMilliseconds: Int64
     ) async -> ThreadGoal? {
         guard features.isEnabled(.goals),
               let stateStore,
-              let parsedThreadID = try? ThreadId(string: threadID)
+              let parsedThreadID = try? ThreadId(string: threadID),
+              snapshot.activeThisTurn
         else {
             return nil
         }
-        let tokenDelta = max(tokenUsage?.totalTokens ?? 0, 0)
+        let tokenDelta = snapshot.tokenDelta(since: tokenUsage)
         let timeDeltaSeconds = max(durationMilliseconds / 1_000, 0)
         guard tokenDelta > 0 || timeDeltaSeconds > 0 else {
             return nil
@@ -683,7 +725,8 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 threadID: parsedThreadID,
                 timeDeltaSeconds: timeDeltaSeconds,
                 tokenDelta: tokenDelta,
-                mode: .activeOnly
+                mode: .activeOnly,
+                expectedGoalID: snapshot.expectedGoalID
             ) {
             case let .updated(goal):
                 return goal
