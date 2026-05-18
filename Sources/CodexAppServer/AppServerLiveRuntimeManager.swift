@@ -768,11 +768,17 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                     isTurnRunning: { threadID in
                         await state.isTurnRunning(threadID: threadID)
                     },
+                    agentLastTaskMessage: { threadID in
+                        await state.agentLastTaskMessage(threadID: threadID)
+                    },
                     queueMailboxCommunications: { threadID, communications in
                         await state.queueMailboxCommunications(
                             threadID: threadID,
                             communications: communications
                         )
+                    },
+                    recordAgentLastTaskMessage: { threadID, message in
+                        await state.recordAgentLastTaskMessage(threadID: threadID, message: message)
                     },
                     submitPendingWorkTurnIfIdle: { threadID in
                         return await self.submitPendingWorkTurnIfIdle(
@@ -1614,6 +1620,7 @@ private actor AppServerLiveRuntimeState {
     private var activePendingInput: [String: [ResponseInputItem]] = [:]
     private var mailboxCommunications: [String: [InterAgentCommunication]] = [:]
     private var mailboxDeliveryPhases: [String: MailboxDeliveryPhase] = [:]
+    private var agentLastTaskMessages: [String: String] = [:]
     private var emittedAbortKeys: Set<String> = []
 
     func setEventSink(_ sink: AppServerRuntimeEventSink?) {
@@ -1730,6 +1737,14 @@ private actor AppServerLiveRuntimeState {
         mailboxCommunications[threadID, default: []].append(contentsOf: communications)
     }
 
+    func recordAgentLastTaskMessage(threadID: String, message: String) {
+        agentLastTaskMessages[threadID] = message
+    }
+
+    func agentLastTaskMessage(threadID: String) -> String? {
+        agentLastTaskMessages[threadID]
+    }
+
     func takeMailboxCommunications(threadID: String) -> [InterAgentCommunication] {
         guard let communications = mailboxCommunications.removeValue(forKey: threadID) else {
             return []
@@ -1785,6 +1800,7 @@ private actor AppServerLiveRuntimeState {
         activePendingInput.removeValue(forKey: threadID)
         mailboxCommunications.removeValue(forKey: threadID)
         mailboxDeliveryPhases.removeValue(forKey: threadID)
+        agentLastTaskMessages.removeValue(forKey: threadID)
     }
 
     func cancelAll() {
@@ -1796,6 +1812,7 @@ private actor AppServerLiveRuntimeState {
         activePendingInput.removeAll()
         mailboxCommunications.removeAll()
         mailboxDeliveryPhases.removeAll()
+        agentLastTaskMessages.removeAll()
         emittedAbortKeys.removeAll()
         for turn in turns {
             turn.task.cancel()

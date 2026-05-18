@@ -531,6 +531,31 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         )
     }
 
+    public func listThreadsWithAgentPaths() async throws -> [ThreadMetadata] {
+        let query =
+            """
+            \(Self.threadSelectColumns)
+            FROM threads
+            WHERE threads.archived = 0
+              AND threads.agent_path IS NOT NULL
+            ORDER BY threads.agent_path ASC, threads.id ASC
+            """
+        let database = handle.database
+        return try Self.withStatement(query: query, bindings: [], database: database) { statement in
+            var items: [ThreadMetadata] = []
+            while true {
+                let result = sqlite3_step(statement)
+                if result == SQLITE_DONE {
+                    return items
+                }
+                guard result == SQLITE_ROW else {
+                    throw Self.sqliteError(database: database)
+                }
+                items.append(try Self.threadMetadata(from: statement))
+            }
+        }
+    }
+
     public func upsertThread(_ metadata: ThreadMetadata) async throws {
         try await upsertThread(metadata, creationMemoryMode: nil)
     }

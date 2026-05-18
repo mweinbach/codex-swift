@@ -12028,8 +12028,14 @@ final class CodexAppServerTests: XCTestCase {
             currentSessionSource: .vscode,
             stateStore: stateStore,
             isTurnRunning: { _ in false },
+            agentLastTaskMessage: { threadID in
+                await capture.lastTaskMessage(threadID: threadID)
+            },
             queueMailboxCommunications: { threadID, communications in
                 await capture.queue(threadID: threadID, communications: communications)
+            },
+            recordAgentLastTaskMessage: { threadID, message in
+                await capture.recordLastTaskMessage(threadID: threadID, message: message)
             },
             submitPendingWorkTurnIfIdle: { threadID in
                 await capture.submitPendingWork(threadID: threadID)
@@ -12092,6 +12098,104 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(end.receiverAgentNickname, "Bernoulli")
         XCTAssertEqual(end.receiverAgentRole, "explorer")
         XCTAssertEqual(end.status, .completed(nil))
+    }
+
+    func testLiveListAgentsUsesRustAgentPathsStatusAndLastTaskMessages() async throws {
+        let temp = try TemporaryDirectory()
+        let stateStore = try SQLiteAgentGraphStore(databaseURL: temp.url.appendingPathComponent("state.sqlite3"))
+        let rootThreadID = ThreadId()
+        let workerThreadID = ThreadId()
+        let nestedThreadID = ThreadId()
+        let siblingThreadID = ThreadId()
+        let workerPath = try AgentPath.root.join("worker")
+        let nestedPath = try workerPath.join("nested")
+        let siblingPath = try AgentPath.root.join("sibling")
+        for (threadID, path, nickname) in [
+            (workerThreadID, workerPath, "Bernoulli"),
+            (nestedThreadID, nestedPath, "Curie"),
+            (siblingThreadID, siblingPath, "Dirac"),
+        ] {
+            try await stateStore.upsertThread(ThreadMetadata(
+                id: threadID,
+                rolloutPath: temp.url.appendingPathComponent("\(path.name).jsonl").path,
+                createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+                updatedAt: Date(timeIntervalSince1970: 1_700_000_001),
+                source: "vscode",
+                agentNickname: nickname,
+                agentRole: "explorer",
+                agentPath: path.description,
+                modelProvider: "openai",
+                cwd: temp.url.path,
+                cliVersion: "0.0.0-test",
+                title: path.name,
+                sandboxPolicy: "danger-full-access",
+                approvalMode: "never",
+                tokensUsed: 0
+            ))
+        }
+        let capture = LiveMultiAgentToolCapture(runningThreadIDs: [rootThreadID.description, nestedThreadID.description])
+        let executor = AppServerLiveMultiAgentToolExecutor(
+            currentThreadID: rootThreadID,
+            currentSessionSource: .vscode,
+            stateStore: stateStore,
+            isTurnRunning: { threadID in
+                await capture.isRunning(threadID: threadID)
+            },
+            agentLastTaskMessage: { threadID in
+                await capture.lastTaskMessage(threadID: threadID)
+            },
+            queueMailboxCommunications: { threadID, communications in
+                await capture.queue(threadID: threadID, communications: communications)
+            },
+            recordAgentLastTaskMessage: { threadID, message in
+                await capture.recordLastTaskMessage(threadID: threadID, message: message)
+            },
+            submitPendingWorkTurnIfIdle: { _ in true }
+        )
+
+        _ = await executor.execute(.functionCall(
+            name: "send_message",
+            arguments: #"{"target":"worker","message":"inspect the logs"}"#,
+            callID: "call-send"
+        ))
+        let listAll = await executor.execute(.functionCall(
+            name: "list_agents",
+            arguments: #"{}"#,
+            callID: "call-list-all"
+        ))
+        let listAllPayload = try Self.functionOutputPayload(listAll, callID: "call-list-all")
+        XCTAssertEqual(listAllPayload.success, true)
+        let allResult = try JSONDecoder().decode(
+            ListAgentsToolResultFixture.self,
+            from: Data(listAllPayload.content.utf8)
+        )
+        XCTAssertEqual(allResult.agents.map(\.agentName), [
+            "/root",
+            "/root/sibling",
+            "/root/worker",
+            "/root/worker/nested",
+        ])
+        XCTAssertEqual(allResult.agents[0].agentStatus, .running)
+        XCTAssertEqual(allResult.agents[0].lastTaskMessage, "Main thread")
+        XCTAssertEqual(allResult.agents[2].agentStatus, .completed(nil))
+        XCTAssertEqual(allResult.agents[2].lastTaskMessage, "inspect the logs")
+        XCTAssertEqual(allResult.agents[3].agentStatus, .running)
+        XCTAssertNil(allResult.agents[3].lastTaskMessage)
+
+        let listWorkerSubtree = await executor.execute(.functionCall(
+            name: "list_agents",
+            arguments: #"{"path_prefix":"worker"}"#,
+            callID: "call-list-worker"
+        ))
+        let workerPayload = try Self.functionOutputPayload(listWorkerSubtree, callID: "call-list-worker")
+        let workerResult = try JSONDecoder().decode(
+            ListAgentsToolResultFixture.self,
+            from: Data(workerPayload.content.utf8)
+        )
+        XCTAssertEqual(workerResult.agents.map(\.agentName), [
+            "/root/worker",
+            "/root/worker/nested",
+        ])
     }
 
     func testLiveRuntimeInterAgentCommunicationOpQueuesAndTriggersPendingWorkLikeRust() async throws {
@@ -37354,6 +37458,12 @@ private extension CodexAppServerTests {
 private actor LiveMultiAgentToolCapture {
     private var queued: [String: [InterAgentCommunication]] = [:]
     private var pendingWork: [String] = []
+    private var runningThreadIDs: Set<String>
+    private var lastTaskMessages: [String: String] = [:]
+
+    init(runningThreadIDs: Set<String> = []) {
+        self.runningThreadIDs = runningThreadIDs
+    }
 
     func queue(threadID: String, communications: [InterAgentCommunication]) {
         queued[threadID, default: []].append(contentsOf: communications)
@@ -37369,6 +37479,34 @@ private actor LiveMultiAgentToolCapture {
 
     func pendingWorkThreadIDs() -> [String] {
         pendingWork
+    }
+
+    func isRunning(threadID: String) -> Bool {
+        runningThreadIDs.contains(threadID)
+    }
+
+    func recordLastTaskMessage(threadID: String, message: String) {
+        lastTaskMessages[threadID] = message
+    }
+
+    func lastTaskMessage(threadID: String) -> String? {
+        lastTaskMessages[threadID]
+    }
+}
+
+private struct ListAgentsToolResultFixture: Decodable {
+    let agents: [ListedAgentFixture]
+}
+
+private struct ListedAgentFixture: Decodable {
+    let agentName: String
+    let agentStatus: AgentStatus
+    let lastTaskMessage: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case agentName = "agent_name"
+        case agentStatus = "agent_status"
+        case lastTaskMessage = "last_task_message"
     }
 }
 

@@ -819,7 +819,15 @@ Recent upstream audit checkpoint:
   runtime events, queues queue-only mail, and asks the pending-work launcher to
   wake trigger-turn followups. `spawn_agent`, `wait_agent`, `close_agent`,
   `list_agents`, richer live status tracking, and full ThreadManager-backed
-  `AgentControl` remain pending.
+  `AgentControl` remained pending at that checkpoint.
+- 2026-05-18: Swift live app-server MultiAgentV2 `list_agents` now returns the
+  Rust-shaped root `/root` entry, resolves optional `path_prefix` values
+  relative to the current agent path, lists canonical agent-path threads in
+  Rust sort order, projects live running/completed status from the runtime
+  state, and preserves per-agent last-task messages recorded by
+  `send_message`/`followup_task`. `spawn_agent`, `wait_agent`, `close_agent`,
+  richer final-status tracking, and full ThreadManager-backed `AgentControl`
+  remain pending.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through
