@@ -12229,6 +12229,34 @@ final class CodexAppServerTests: XCTestCase {
             "fork_turns must be `none`, `all`, or a positive integer string"
         )
         XCTAssertEqual(invalidPayload.success, false)
+
+        let fullForkOverride = await executor.execute(.functionCall(
+            name: "spawn_agent",
+            arguments: #"{"message":"x","task_name":"worker","fork_turns":"all","model":"gpt-5.4"}"#,
+            callID: "call-full-fork-model"
+        ))
+        let fullForkPayload = try Self.functionOutputPayload(fullForkOverride, callID: "call-full-fork-model")
+        XCTAssertEqual(
+            fullForkPayload.content,
+            "Full-history forked agents inherit the parent agent type, model, and reasoning effort; omit agent_type, model, and reasoning_effort, or spawn without a full-history fork."
+        )
+        XCTAssertEqual(fullForkPayload.success, false)
+        let fullForkEvents = try XCTUnwrap(fullForkOverride?.runtimeEvents)
+        XCTAssertEqual(fullForkEvents.count, 1)
+        guard case let .collabAgentSpawnBegin(fullForkBegin) = fullForkEvents[0] else {
+            return XCTFail("expected full-history override rejection to emit spawn begin only")
+        }
+        XCTAssertEqual(fullForkBegin.model, "gpt-5.4")
+
+        let emptyAgentType = await executor.execute(.functionCall(
+            name: "spawn_agent",
+            arguments: #"{"message":"x","task_name":"worker","agent_type":"   ","fork_turns":"none"}"#,
+            callID: "call-empty-agent-type"
+        ))
+        let emptyAgentPayload = try Self.functionOutputPayload(emptyAgentType, callID: "call-empty-agent-type")
+        XCTAssertEqual(emptyAgentPayload.success, true)
+        let updatedRequests = await capture.recordedSpawnRequests()
+        XCTAssertEqual(updatedRequests.last?.agentType, nil)
     }
 
     func testLiveSpawnLastNTurnsSelectsRecentForkTurnsLikeRust() throws {

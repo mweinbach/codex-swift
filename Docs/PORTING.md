@@ -864,9 +864,11 @@ Recent upstream audit checkpoint:
   are emitted, child rollouts/agent-path graph metadata are created, and the
   initial prompt is delivered as trigger-turn inter-agent mail. `fork_turns:
   "<n>"` now applies Rust's `LastNTurns` rollout truncation before writing the
-  child fork, and child forks drop stale parent MultiAgentV2 usage hints. Full
-  Rust `AgentControl` parity and complete role/model/service-tier validation
-  remain pending.
+  child fork, child forks drop stale parent MultiAgentV2 usage hints, blank
+  `agent_type` is treated as absent, and full-history forks reject
+  `agent_type`/`model`/`reasoning_effort` overrides like Rust. Full Rust
+  `AgentControl` parity and complete role/model/service-tier validation remain
+  pending.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through

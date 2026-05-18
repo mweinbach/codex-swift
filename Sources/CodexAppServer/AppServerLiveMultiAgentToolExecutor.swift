@@ -127,13 +127,26 @@ struct AppServerLiveMultiAgentToolExecutor {
                 reasoningEffort: requestedReasoningEffort
             ))
         ]
+        let agentType = args.agentType?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nilIfEmpty
+        if forkMode == .fullHistory,
+           agentType != nil || args.model != nil || args.reasoningEffort != nil
+        {
+            return Self.output(
+                callID: callID,
+                content: "Full-history forked agents inherit the parent agent type, model, and reasoning effort; omit agent_type, model, and reasoning_effort, or spawn without a full-history fork.",
+                success: false,
+                runtimeEvents: runtimeEvents
+            )
+        }
 
         do {
             let result = try await spawnAgent(LiveSpawnAgentRequest(
                 callID: callID,
                 message: prompt,
                 taskName: args.taskName,
-                agentType: args.agentType?.trimmingCharacters(in: .whitespacesAndNewlines),
+                agentType: agentType,
                 model: args.model,
                 reasoningEffort: args.reasoningEffort,
                 serviceTier: args.serviceTier,
