@@ -1341,7 +1341,8 @@ public enum CodexConfigLoader {
         cwd: URL? = nil,
         runtimeWorkspaceRoots: [AbsolutePath]? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        requirements: ConfigRequirements = .default
     ) throws -> CodexRuntimeConfig {
         var parsed = ParsedCodexConfigToml()
         parsed.agentRoleDiscoveryDirs.append(codexHome.appendingPathComponent("agents", isDirectory: true))
@@ -1353,7 +1354,31 @@ public enum CodexConfigLoader {
             runtimeWorkspaceRoots: runtimeWorkspaceRoots,
             fileManager: fileManager,
             environment: environment,
-            requirements: .default
+            requirements: requirements
+        )
+    }
+
+    public static func loadEffectiveConfigStack(
+        _ stack: ConfigLayerStack,
+        codexHome: URL,
+        cwd: URL? = nil,
+        runtimeWorkspaceRoots: [AbsolutePath]? = nil,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        fileManager: FileManager = .default
+    ) throws -> CodexRuntimeConfig {
+        var parsed = ParsedCodexConfigToml()
+        parsed.agentRoleDiscoveryDirs.append(codexHome.appendingPathComponent("agents", isDirectory: true))
+        for layer in stack.layers {
+            try parsed.merge(layer.config)
+        }
+        return try finalizeResolvedConfig(
+            parsed,
+            codexHome: codexHome,
+            cwd: cwd,
+            runtimeWorkspaceRoots: runtimeWorkspaceRoots,
+            fileManager: fileManager,
+            environment: environment,
+            requirements: stack.requirements
         )
     }
 

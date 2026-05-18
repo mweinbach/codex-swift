@@ -748,6 +748,14 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             threadID: submission.threadID,
             enabled: settings.features.isEnabled(.multiAgentV2)
         )
+        let baseConfigStack = try CodexConfigLayerLoader.loadConfigLayerStack(
+            codexHome: configuration.codexHome,
+            cwd: cwd,
+            cliOverrides: configuration.cliConfigOverrides,
+            threadConfigSources: configuration.threadConfigSources,
+            overrides: configuration.configLayerOverrides,
+            environment: configuration.environment
+        )
         let runtimeRefreshSnapshot = await state.runtimeConfigSnapshot(threadID: submission.threadID)
         let refreshedConfigStack = try runtimeRefreshSnapshot.map {
             try AppServerRuntimeConfigRefresh.applyRuntimeRefreshableSnapshot(
@@ -755,7 +763,8 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 to: &settings,
                 codexHome: configuration.codexHome,
                 cwd: cwd,
-                environment: configuration.environment
+                environment: configuration.environment,
+                baseStack: baseConfigStack
             )
         }
         let approvalPolicy = turnInput.approvalPolicy
@@ -864,14 +873,7 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 truncationPolicy: modelFamily.truncationPolicy
             )),
         ] + newInputItems.map(RolloutRecordItem.responseItem))
-        let hookConfigStack = try refreshedConfigStack ?? CodexConfigLayerLoader.loadConfigLayerStack(
-            codexHome: configuration.codexHome,
-            cwd: cwd,
-            cliOverrides: configuration.cliConfigOverrides,
-            threadConfigSources: configuration.threadConfigSources,
-            overrides: configuration.configLayerOverrides,
-            environment: configuration.environment
-        )
+        let hookConfigStack = refreshedConfigStack ?? baseConfigStack
         let hookHandlers = HookConfig.configuredHandlers(
             from: hookConfigStack,
             codexHome: configuration.codexHome,

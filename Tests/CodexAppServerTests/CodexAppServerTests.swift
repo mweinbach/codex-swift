@@ -5384,6 +5384,83 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(stack.effectiveConfig(), snapshot)
     }
 
+    func testLiveRuntimeConfigRefreshPreservesThreadLocalLayersLikeRust() throws {
+        let temp = try TemporaryDirectory()
+        var settings = CodexRuntimeConfig(modelProvider: "mock_provider")
+        let userConfig = temp.url.appendingPathComponent("config.toml", isDirectory: false)
+        let projectConfig = temp.url.appendingPathComponent(".codex", isDirectory: true)
+        let baseStack = try ConfigLayerStack(layers: [
+            ConfigLayerEntry(
+                name: .user(file: AbsolutePath(absolutePath: userConfig.path)),
+                config: .table([
+                    "tool_suggest": .table([
+                        "disabled_tools": .array([
+                            .table([
+                                "type": .string("connector"),
+                                "id": .string("old-user")
+                            ])
+                        ])
+                    ])
+                ])
+            ),
+            ConfigLayerEntry(
+                name: .project(dotCodexFolder: AbsolutePath(absolutePath: projectConfig.path)),
+                config: .table([
+                    "include_plan_tool": .bool(false)
+                ])
+            ),
+            ConfigLayerEntry(
+                name: .sessionFlags,
+                config: .table([
+                    "tool_suggest": .table([
+                        "disabled_tools": .array([
+                            .table([
+                                "type": .string("plugin"),
+                                "id": .string("slack@openai-curated")
+                            ])
+                        ])
+                    ])
+                ])
+            )
+        ])
+        let snapshot: ConfigValue = .table([
+            "tool_suggest": .table([
+                "disabled_tools": .array([
+                    .table([
+                        "type": .string("connector"),
+                        "id": .string(" calendar ")
+                    ])
+                ])
+            ])
+        ])
+
+        let stack = try AppServerRuntimeConfigRefresh.applyRuntimeRefreshableSnapshot(
+            snapshot,
+            to: &settings,
+            codexHome: temp.url,
+            cwd: temp.url,
+            environment: [:],
+            baseStack: baseStack
+        )
+
+        XCTAssertEqual(stack.layers.map(\.name), baseStack.layers.map(\.name))
+        XCTAssertEqual(stack.effectiveConfig(), .table([
+            "tool_suggest": .table([
+                "disabled_tools": .array([
+                    .table([
+                        "type": .string("plugin"),
+                        "id": .string("slack@openai-curated")
+                    ])
+                ])
+            ]),
+            "include_plan_tool": .bool(false)
+        ]))
+        XCTAssertEqual(settings.toolSuggest.disabledTools, [
+            ToolSuggestDisabledTool(type: .connector, id: "calendar"),
+            ToolSuggestDisabledTool(type: .plugin, id: "slack@openai-curated")
+        ])
+    }
+
     func testQuickstartStyleThreadStartAndRunFlowUsesDefaultsLikeRustPythonSDK() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()

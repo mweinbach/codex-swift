@@ -7,11 +7,16 @@ struct AppServerRuntimeConfigRefresh {
         to settings: inout CodexRuntimeConfig,
         codexHome: URL,
         cwd: URL,
-        environment: [String: String]
+        environment: [String: String],
+        baseStack: ConfigLayerStack? = nil
     ) throws -> ConfigLayerStack {
-        let stack = try configLayerStack(snapshot, codexHome: codexHome)
-        let refreshed = try CodexConfigLoader.loadEffectiveConfigSnapshot(
+        let stack = try configLayerStack(
             snapshot,
+            codexHome: codexHome,
+            baseStack: baseStack
+        )
+        let refreshed = try CodexConfigLoader.loadEffectiveConfigStack(
+            stack,
             codexHome: codexHome,
             cwd: cwd,
             environment: environment
@@ -22,12 +27,17 @@ struct AppServerRuntimeConfigRefresh {
 
     static func configLayerStack(
         _ snapshot: ConfigValue,
-        codexHome: URL
+        codexHome: URL,
+        baseStack: ConfigLayerStack? = nil
     ) throws -> ConfigLayerStack {
         let configFile = codexHome.appendingPathComponent("config.toml", isDirectory: false)
+        let configPath = try AbsolutePath(absolutePath: configFile.standardizedFileURL.path)
+        if let baseStack {
+            return baseStack.withUserConfig(configToml: configPath, userConfig: snapshot)
+        }
         return try ConfigLayerStack(layers: [
             ConfigLayerEntry(
-                name: .user(file: AbsolutePath(absolutePath: configFile.standardizedFileURL.path)),
+                name: .user(file: configPath),
                 config: snapshot
             )
         ])
