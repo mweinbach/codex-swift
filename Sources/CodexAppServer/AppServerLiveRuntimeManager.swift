@@ -2544,6 +2544,9 @@ private actor AppServerLiveRuntimeState {
     }
 
     func deferMailboxDeliveryToNextTurn(threadID: String) {
+        guard runningTurns[threadID] != nil else {
+            return
+        }
         guard activePendingInput[threadID]?.isEmpty != false else {
             return
         }
@@ -2551,6 +2554,9 @@ private actor AppServerLiveRuntimeState {
     }
 
     func acceptMailboxDeliveryForCurrentTurn(threadID: String) {
+        guard runningTurns[threadID] != nil else {
+            return
+        }
         mailboxDeliveryPhases[threadID] = .currentTurn
     }
 

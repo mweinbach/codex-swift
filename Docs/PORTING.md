@@ -1004,6 +1004,11 @@ Recent upstream audit checkpoint:
   Open persisted child edges are rendered in Rust order using the final
   `agent_path` component plus nickname when available, or the thread id for
   pathless children; closed children are omitted.
+- 2026-05-18: Swift live app-server mailbox delivery phase now matches Rust's
+  active-turn guard for answer-boundary deferral. `defer`/`accept` only mutate
+  active turns, so idle mailbox mail remains immediately drainable while
+  in-flight turns can still defer late mailbox updates to the next turn and
+  reopen delivery after steer/tool-call input.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through

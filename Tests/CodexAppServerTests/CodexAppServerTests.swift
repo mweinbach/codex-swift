@@ -12301,16 +12301,59 @@ final class CodexAppServerTests: XCTestCase {
 
     func testLiveRuntimeMailboxDeliveryPhaseDefersAndReopensLikeRust() async throws {
         let temp = try TemporaryDirectory()
-        let threadID = ConversationId().description
-        let manager = AppServerLiveRuntimeManager(
-            configuration: testConfiguration(codexHome: temp.url)
+        let server = try AppServerResponsesRequestCaptureServer(blockResponseUntilReleased: true)
+        defer {
+            server.releaseResponse()
+            server.stop()
+        }
+        try """
+        model = "gpt-5.5"
+        model_provider = "mock_provider"
+
+        [model_providers.mock_provider]
+        name = "mock_provider"
+        base_url = "\(server.baseURL)"
+        wire_api = "responses"
+        requires_openai_auth = false
+        """.write(
+            to: temp.url.appendingPathComponent("config.toml", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
         )
+        let threadID = try writeRollout(
+            codexHome: temp.url,
+            filenameTimestamp: "2025-01-06T07-39-05",
+            timestamp: "2025-01-06T07:39:05Z",
+            preview: "mailbox delivery phase",
+            provider: "mock_provider",
+            cwd: temp.url.path
+        )
+        let manager = AppServerLiveRuntimeManager(
+            configuration: testConfiguration(
+                codexHome: temp.url,
+                requiresOpenAIAuth: false
+            )
+        )
+        defer {
+            manager.shutdown()
+        }
         let mail = InterAgentCommunication(
             author: try AgentPath.root.join("worker"),
             recipient: .root,
             content: "queued child update",
             triggerTurn: false
         )
+        let op = Op.userInput(items: [.text("start a blocked turn")])
+        let turnID = try manager.submitCoreOp(requestID: .integer(920), threadID: threadID, op: op)
+        _ = try manager.submitLiveRuntime(AppServerLiveRuntimeSubmission(
+            requestID: .integer(920),
+            threadID: threadID,
+            turnID: turnID,
+            op: op
+        ))
+        _ = try server.waitForRequestBody()
+        let isRunning = await manager.isTurnRunning(threadID: threadID)
+        XCTAssertTrue(isRunning)
 
         manager.queueMailboxCommunications(threadID: threadID, communications: [mail])
         await manager.deferMailboxDeliveryToNextTurn(threadID: threadID)
@@ -12326,6 +12369,32 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(reopenedInput.count, 1)
         guard case let .message(role, content, phase) = reopenedInput[0] else {
             return XCTFail("expected mailbox response message")
+        }
+        XCTAssertEqual(role, "assistant")
+        XCTAssertEqual(phase, MessagePhase.commentary)
+        XCTAssertEqual(InterAgentCommunication.fromMessageContent(content), mail)
+    }
+
+    func testLiveRuntimeMailboxDeliveryDeferNoOpsWithoutActiveTurnLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let threadID = ConversationId().description
+        let manager = AppServerLiveRuntimeManager(
+            configuration: testConfiguration(codexHome: temp.url)
+        )
+        let mail = InterAgentCommunication(
+            author: try AgentPath.root.join("worker"),
+            recipient: .root,
+            content: "queued while idle",
+            triggerTurn: false
+        )
+
+        manager.queueMailboxCommunications(threadID: threadID, communications: [mail])
+        await manager.deferMailboxDeliveryToNextTurn(threadID: threadID)
+        let input = await manager.takePendingInputForCurrentTurn(threadID: threadID)
+
+        XCTAssertEqual(input.count, 1)
+        guard case let .message(role, content, phase) = input[0] else {
+            return XCTFail("expected mailbox input to remain deliverable while idle")
         }
         XCTAssertEqual(role, "assistant")
         XCTAssertEqual(phase, MessagePhase.commentary)
@@ -39529,13 +39598,15 @@ private final class AppServerResponsesRequestCaptureServer: @unchecked Sendable 
 
     private let listenerFD: Int32
     private let bodySemaphore = DispatchSemaphore(value: 0)
+    private let responseSemaphore: DispatchSemaphore?
     private let lock = NSLock()
     private var stopped = false
     private var requestBody: Data?
 
-    init() throws {
+    init(blockResponseUntilReleased: Bool = false) throws {
         let listener = try Self.makeListeningSocket()
         listenerFD = listener.fd
+        responseSemaphore = blockResponseUntilReleased ? DispatchSemaphore(value: 0) : nil
         baseURL = "http://127.0.0.1:\(listener.port)/v1"
         Thread.detachNewThread { [weak self] in
             self?.serveOneRequest()
@@ -39554,6 +39625,10 @@ private final class AppServerResponsesRequestCaptureServer: @unchecked Sendable 
         }
     }
 
+    func releaseResponse() {
+        responseSemaphore?.signal()
+    }
+
     func stop() {
         let shouldClose = lock.withLock { () -> Bool in
             guard !stopped else {
@@ -39563,6 +39638,7 @@ private final class AppServerResponsesRequestCaptureServer: @unchecked Sendable 
             return true
         }
         if shouldClose {
+            releaseResponse()
             Darwin.shutdown(listenerFD, SHUT_RDWR)
             Darwin.close(listenerFD)
         }
@@ -39584,6 +39660,7 @@ private final class AppServerResponsesRequestCaptureServer: @unchecked Sendable 
                 requestBody = request.body
             }
             bodySemaphore.signal()
+            responseSemaphore?.wait()
             _ = Self.sendAll(fd: clientFD, data: Self.responsesSSEHTTPResponse())
         } catch {
             bodySemaphore.signal()
