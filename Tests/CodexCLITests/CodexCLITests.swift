@@ -1744,8 +1744,18 @@ final class CodexCLITests: XCTestCase {
             }
         )
 
-        XCTAssertEqual(exitCode, 64)
-        XCTAssertEqual(stderr, ["codex-swift: unsupported option for command 'cloud status': --attempt"])
+        XCTAssertEqual(exitCode, 2)
+        XCTAssertEqual(stderr, [
+            """
+            error: unexpected argument '--attempt' found
+
+              tip: to pass '--attempt' as a value, use '-- --attempt'
+
+            Usage: codex cloud status [OPTIONS] <TASK_ID>
+
+            For more information, try '--help'.
+            """
+        ])
     }
 
     func testRunAsyncCloudStatusAllowsDashPrefixedTaskAfterDelimiterLikeRustClap() async {
@@ -1799,8 +1809,14 @@ final class CodexCLITests: XCTestCase {
             }
         )
 
-        XCTAssertEqual(exitCode, 64)
-        XCTAssertEqual(stderr, ["limit must be between 1 and 20"])
+        XCTAssertEqual(exitCode, 2)
+        XCTAssertEqual(stderr, [
+            """
+            error: invalid value '0' for '--limit <N>': limit must be between 1 and 20
+
+            For more information, try '--help'.
+            """
+        ])
     }
 
     func testRunAsyncCloudListAcceptsBareDelimiterLikeRustClap() async {
@@ -1902,8 +1918,14 @@ final class CodexCLITests: XCTestCase {
             }
         )
 
-        XCTAssertEqual(exitCode, 64)
-        XCTAssertEqual(stderr, ["attempts must be between 1 and 4"])
+        XCTAssertEqual(exitCode, 2)
+        XCTAssertEqual(stderr, [
+            """
+            error: invalid value '5' for '--attempt <N>': attempts must be between 1 and 4
+
+            For more information, try '--help'.
+            """
+        ])
     }
 
     func testRunAsyncCloudExecParsesEnvAttemptsBranchAndQuery() async {
@@ -2021,8 +2043,114 @@ final class CodexCLITests: XCTestCase {
                 return CodexCLI.CommandExecutionResult(exitCode: 0)
             }
         )
-        XCTAssertEqual(invalidAttemptsExit, 64)
-        XCTAssertEqual(invalidAttemptsStderr, ["attempts must be between 1 and 4"])
+        XCTAssertEqual(invalidAttemptsExit, 2)
+        XCTAssertEqual(invalidAttemptsStderr, [
+            """
+            error: invalid value '0' for '--attempts <ATTEMPTS>': attempts must be between 1 and 4
+
+            For more information, try '--help'.
+            """
+        ])
+    }
+
+    func testRunAsyncCloudRejectsDuplicateOptionsAndExtrasLikeRustClap() async {
+        let cases: [([String], String)] = [
+            (
+                ["cloud", "bogus"],
+                """
+                error: unrecognized subcommand 'bogus'
+
+                Usage: codex cloud [OPTIONS] [COMMAND]
+
+                For more information, try '--help'.
+                """
+            ),
+            (
+                ["cloud", "status", "task_123", "extra"],
+                """
+                error: unexpected argument 'extra' found
+
+                Usage: codex cloud status [OPTIONS] <TASK_ID>
+
+                For more information, try '--help'.
+                """
+            ),
+            (
+                ["cloud", "diff", "task_123", "--attempt", "1", "--attempt", "2"],
+                """
+                error: the argument '--attempt <N>' cannot be used multiple times
+
+                Usage: codex cloud diff [OPTIONS] <TASK_ID>
+
+                For more information, try '--help'.
+                """
+            ),
+            (
+                ["cloud", "exec", "--env", "env_123", "--attempts", "abc"],
+                """
+                error: invalid value 'abc' for '--attempts <ATTEMPTS>': attempts must be an integer between 1 and 4
+
+                For more information, try '--help'.
+                """
+            ),
+            (
+                ["cloud", "exec", "--env", "env_123", "--env", "other"],
+                """
+                error: the argument '--env <ENV_ID>' cannot be used multiple times
+
+                Usage: codex cloud exec [OPTIONS] --env <ENV_ID> [QUERY]
+
+                For more information, try '--help'.
+                """
+            ),
+            (
+                ["cloud", "list", "--env", "env_a", "--env", "env_b"],
+                """
+                error: the argument '--env <ENV_ID>' cannot be used multiple times
+
+                Usage: codex cloud list [OPTIONS]
+
+                For more information, try '--help'.
+                """
+            ),
+            (
+                ["cloud", "list", "--limit", "1", "--limit", "2"],
+                """
+                error: the argument '--limit <N>' cannot be used multiple times
+
+                Usage: codex cloud list [OPTIONS]
+
+                For more information, try '--help'.
+                """
+            ),
+            (
+                ["cloud", "list", "--cursor", "a", "--cursor", "b"],
+                """
+                error: the argument '--cursor <CURSOR>' cannot be used multiple times
+
+                Usage: codex cloud list [OPTIONS]
+
+                For more information, try '--help'.
+                """
+            )
+        ]
+
+        for (arguments, expectedStderr) in cases {
+            var stderr: [String] = []
+
+            let exitCode = await CodexCLI().runAsync(
+                arguments: arguments,
+                stdout: { _ in XCTFail("stdout should not be written for \(arguments)") },
+                stderr: { stderr.append($0) },
+                cloudRunner: { _ in
+                    XCTFail("runner should not be called for \(arguments)")
+                    return CodexCLI.CommandExecutionResult(exitCode: 0)
+                }
+            )
+
+            XCTAssertEqual(exitCode, 2, "\(arguments)")
+            XCTAssertEqual(stderr, [expectedStderr], "\(arguments)")
+        }
     }
 
     func testRunAsyncCloudWithoutRunnerStillReportsUnimplemented() async {

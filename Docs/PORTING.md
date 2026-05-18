@@ -12,6 +12,10 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: tightened Codex Cloud CLI parse-failure parity for additional
+  invalid forms. Swift now emits Rust/Clap exit-2 diagnostics for unknown cloud
+  subcommands, duplicate cloud options, invalid `--attempt` / `--attempts` /
+  `--limit` values, and unexpected status/diff/apply/exec/list arguments.
 - 2026-05-18: tightened plugin CLI parse-failure parity for additional
   `codex plugin` invalid forms. Swift now emits Rust/Clap exit-2 diagnostics
   for unrecognized plugin subcommands, duplicate plugin options, plugin

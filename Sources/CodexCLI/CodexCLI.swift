@@ -9207,7 +9207,7 @@ public struct CodexCLI: Sendable {
         case "exec":
             return parseCloudExec(Array(arguments.dropFirst()))
         default:
-            return .failure("codex-swift: unsupported cloud subcommand: \(subcommand)", 64)
+            return clapUnrecognizedSubcommand(subcommand, usage: "codex cloud [OPTIONS] [COMMAND]")
         }
     }
 
@@ -9216,27 +9216,72 @@ public struct CodexCLI: Sendable {
         var limit = 20
         var cursor: String?
         var json = false
+        var sawEnvironment = false
+        var sawLimit = false
+        var sawCursor = false
         var iterator = arguments.makeIterator()
+
+        func markEnvironmentOption() -> ParseResult<Void> {
+            guard !sawEnvironment else {
+                return clapDuplicateArgument("--env <ENV_ID>", usage: "codex cloud list [OPTIONS]")
+            }
+            sawEnvironment = true
+            return .success(())
+        }
+
+        func markLimitOption() -> ParseResult<Void> {
+            guard !sawLimit else {
+                return clapDuplicateArgument("--limit <N>", usage: "codex cloud list [OPTIONS]")
+            }
+            sawLimit = true
+            return .success(())
+        }
+
+        func markCursorOption() -> ParseResult<Void> {
+            guard !sawCursor else {
+                return clapDuplicateArgument("--cursor <CURSOR>", usage: "codex cloud list [OPTIONS]")
+            }
+            sawCursor = true
+            return .success(())
+        }
 
         while let argument = iterator.next() {
             if argument == "--" {
                 if let extra = iterator.next() {
-                    return .failure("codex-swift: unexpected argument for command 'cloud list': \(extra)", 64)
+                    return clapUnexpectedArgument(extra, usage: "codex cloud list [OPTIONS]")
                 }
                 break
             }
             if argument == "--env" {
+                switch markEnvironmentOption() {
+                case .success:
+                    break
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
                 guard let value = iterator.next() else {
-                    return clapMissingValue(option: "--env", valueDisplay: "<ENV>")
+                    return clapMissingValue(option: "--env", valueDisplay: "<ENV_ID>")
                 }
                 environment = value
                 continue
             }
             if argument.hasPrefix("--env=") {
+                switch markEnvironmentOption() {
+                case .success:
+                    break
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
                 environment = String(argument.dropFirst("--env=".count))
                 continue
             }
             if argument == "--limit" {
+                switch markLimitOption() {
+                case .success:
+                    break
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
                 guard let value = iterator.next() else {
                     return clapMissingValue(option: "--limit", valueDisplay: "<N>")
                 }
@@ -9249,6 +9294,12 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("--limit=") {
+                switch markLimitOption() {
+                case .success:
+                    break
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
                 let value = String(argument.dropFirst("--limit=".count))
                 switch parseCloudListLimit(value) {
                 case let .success(parsed):
@@ -9259,6 +9310,12 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument == "--cursor" {
+                switch markCursorOption() {
+                case .success:
+                    break
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
                 guard let value = iterator.next() else {
                     return clapMissingValue(option: "--cursor", valueDisplay: "<CURSOR>")
                 }
@@ -9266,6 +9323,12 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("--cursor=") {
+                switch markCursorOption() {
+                case .success:
+                    break
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
                 cursor = String(argument.dropFirst("--cursor=".count))
                 continue
             }
@@ -9274,7 +9337,7 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'cloud list': \(argument)", 64)
+                return clapUnexpectedArgument(argument, usage: "codex cloud list [OPTIONS]")
             }
             return clapUnexpectedArgument(argument, usage: "codex cloud list [OPTIONS]")
         }
@@ -9292,17 +9355,27 @@ public struct CodexCLI: Sendable {
                 let remaining = Array(arguments.dropFirst(index + 1))
                 for positional in remaining {
                     if taskID != nil {
-                        return .failure("codex-swift: unexpected argument for command 'cloud \(command)': \(positional)", 64)
+                        return clapUnexpectedArgument(
+                            positional,
+                            usage: "codex cloud \(command) [OPTIONS] <TASK_ID>"
+                        )
                     }
                     taskID = positional
                 }
                 break
             }
             if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'cloud \(command)': \(argument)", 64)
+                return clapUnexpectedArgument(
+                    argument,
+                    usage: "codex cloud \(command) [OPTIONS] <TASK_ID>",
+                    asValueTip: true
+                )
             }
             if taskID != nil {
-                return .failure("codex-swift: unexpected argument for command 'cloud \(command)': \(argument)", 64)
+                return clapUnexpectedArgument(
+                    argument,
+                    usage: "codex cloud \(command) [OPTIONS] <TASK_ID>"
+                )
             }
             taskID = argument
             index += 1
@@ -9317,7 +9390,19 @@ public struct CodexCLI: Sendable {
     private func parseCloudTaskAndAttempt(_ arguments: [String], command: String) -> ParseResult<(taskID: String, attempt: Int?)> {
         var taskID: String?
         var attempt: Int?
+        var sawAttempt = false
         var index = 0
+
+        func markAttemptOption() -> ParseResult<Void> {
+            guard !sawAttempt else {
+                return clapDuplicateArgument(
+                    "--attempt <N>",
+                    usage: "codex cloud \(command) [OPTIONS] <TASK_ID>"
+                )
+            }
+            sawAttempt = true
+            return .success(())
+        }
 
         while index < arguments.count {
             let argument = arguments[index]
@@ -9325,17 +9410,26 @@ public struct CodexCLI: Sendable {
                 let remaining = Array(arguments.dropFirst(index + 1))
                 for positional in remaining {
                     if taskID != nil {
-                        return .failure("codex-swift: unexpected argument for command 'cloud \(command)': \(positional)", 64)
+                        return clapUnexpectedArgument(
+                            positional,
+                            usage: "codex cloud \(command) [OPTIONS] <TASK_ID>"
+                        )
                     }
                     taskID = positional
                 }
                 break
             }
             if argument == "--attempt" {
+                switch markAttemptOption() {
+                case .success:
+                    break
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
                 guard index + 1 < arguments.count else {
                     return clapMissingValue(option: "--attempt", valueDisplay: "<N>")
                 }
-                switch parseCloudAttempt(arguments[index + 1]) {
+                switch parseCloudAttempt(arguments[index + 1], option: "--attempt", valueDisplay: "<N>") {
                 case let .success(parsed):
                     attempt = parsed
                 case let .failure(message, exitCode):
@@ -9345,8 +9439,14 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("--attempt=") {
+                switch markAttemptOption() {
+                case .success:
+                    break
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
                 let value = String(argument.dropFirst("--attempt=".count))
-                switch parseCloudAttempt(value) {
+                switch parseCloudAttempt(value, option: "--attempt", valueDisplay: "<N>") {
                 case let .success(parsed):
                     attempt = parsed
                 case let .failure(message, exitCode):
@@ -9356,10 +9456,17 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'cloud \(command)': \(argument)", 64)
+                return clapUnexpectedArgument(
+                    argument,
+                    usage: "codex cloud \(command) <TASK_ID>",
+                    asValueTip: true
+                )
             }
             if taskID != nil {
-                return .failure("codex-swift: unexpected argument for command 'cloud \(command)': \(argument)", 64)
+                return clapUnexpectedArgument(
+                    argument,
+                    usage: "codex cloud \(command) [OPTIONS] <TASK_ID>"
+                )
             }
             taskID = argument
             index += 1
@@ -9376,7 +9483,43 @@ public struct CodexCLI: Sendable {
         var environment: String?
         var branch: String?
         var attempts = 1
+        var sawEnvironment = false
+        var sawBranch = false
+        var sawAttempts = false
         var index = 0
+
+        func markEnvironmentOption() -> ParseResult<Void> {
+            guard !sawEnvironment else {
+                return clapDuplicateArgument(
+                    "--env <ENV_ID>",
+                    usage: "codex cloud exec [OPTIONS] --env <ENV_ID> [QUERY]"
+                )
+            }
+            sawEnvironment = true
+            return .success(())
+        }
+
+        func markBranchOption() -> ParseResult<Void> {
+            guard !sawBranch else {
+                return clapDuplicateArgument(
+                    "--branch <BRANCH>",
+                    usage: "codex cloud exec [OPTIONS] --env <ENV_ID> [QUERY]"
+                )
+            }
+            sawBranch = true
+            return .success(())
+        }
+
+        func markAttemptsOption() -> ParseResult<Void> {
+            guard !sawAttempts else {
+                return clapDuplicateArgument(
+                    "--attempts <ATTEMPTS>",
+                    usage: "codex cloud exec [OPTIONS] --env <ENV_ID> [QUERY]"
+                )
+            }
+            sawAttempts = true
+            return .success(())
+        }
 
         while index < arguments.count {
             let argument = arguments[index]
@@ -9384,13 +9527,22 @@ public struct CodexCLI: Sendable {
                 let remaining = Array(arguments.dropFirst(index + 1))
                 for positional in remaining {
                     if query != nil {
-                        return .failure("codex-swift: unexpected argument for command 'cloud exec': \(positional)", 64)
+                        return clapUnexpectedArgument(
+                            positional,
+                            usage: "codex cloud exec [OPTIONS] --env <ENV_ID> [QUERY]"
+                        )
                     }
                     query = positional
                 }
                 break
             }
             if argument == "--env" {
+                switch markEnvironmentOption() {
+                case .success:
+                    break
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
                 guard index + 1 < arguments.count else {
                     return clapMissingValue(option: "--env", valueDisplay: "<ENV_ID>")
                 }
@@ -9399,11 +9551,23 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("--env=") {
+                switch markEnvironmentOption() {
+                case .success:
+                    break
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
                 environment = String(argument.dropFirst("--env=".count))
                 index += 1
                 continue
             }
             if argument == "--branch" {
+                switch markBranchOption() {
+                case .success:
+                    break
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
                 guard index + 1 < arguments.count else {
                     return clapMissingValue(option: "--branch", valueDisplay: "<BRANCH>")
                 }
@@ -9412,15 +9576,27 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("--branch=") {
+                switch markBranchOption() {
+                case .success:
+                    break
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
                 branch = String(argument.dropFirst("--branch=".count))
                 index += 1
                 continue
             }
             if argument == "--attempts" {
-                guard index + 1 < arguments.count else {
-                    return clapMissingValue(option: "--attempts", valueDisplay: "<N>")
+                switch markAttemptsOption() {
+                case .success:
+                    break
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
                 }
-                switch parseCloudAttempt(arguments[index + 1]) {
+                guard index + 1 < arguments.count else {
+                    return clapMissingValue(option: "--attempts", valueDisplay: "<ATTEMPTS>")
+                }
+                switch parseCloudAttempt(arguments[index + 1], option: "--attempts", valueDisplay: "<ATTEMPTS>") {
                 case let .success(parsed):
                     attempts = parsed
                 case let .failure(message, exitCode):
@@ -9430,8 +9606,14 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("--attempts=") {
+                switch markAttemptsOption() {
+                case .success:
+                    break
+                case let .failure(message, exitCode):
+                    return .failure(message, exitCode)
+                }
                 let value = String(argument.dropFirst("--attempts=".count))
-                switch parseCloudAttempt(value) {
+                switch parseCloudAttempt(value, option: "--attempts", valueDisplay: "<ATTEMPTS>") {
                 case let .success(parsed):
                     attempts = parsed
                 case let .failure(message, exitCode):
@@ -9441,10 +9623,18 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if query != nil {
-                return .failure("codex-swift: unexpected argument for command 'cloud exec': \(argument)", 64)
+                return clapUnexpectedArgument(
+                    argument,
+                    usage: "codex cloud exec [OPTIONS] --env <ENV_ID> [QUERY]",
+                    asValueTip: argument.hasPrefix("-")
+                )
             }
             if argument.hasPrefix("-"), argument != "-" {
-                return .failure("codex-swift: unsupported option for command 'cloud exec': \(argument)", 64)
+                return clapUnexpectedArgument(
+                    argument,
+                    usage: "codex cloud exec [OPTIONS] --env <ENV_ID> [QUERY]",
+                    asValueTip: true
+                )
             }
             query = argument
             index += 1
@@ -9456,22 +9646,42 @@ public struct CodexCLI: Sendable {
         return .success(.exec(query: query, environment: environment, branch: branch, attempts: attempts))
     }
 
-    private func parseCloudAttempt(_ value: String) -> ParseResult<Int> {
+    private func parseCloudAttempt(_ value: String, option: String, valueDisplay: String) -> ParseResult<Int> {
         guard let attempt = Int(value) else {
-            return .failure("attempts must be an integer between 1 and 4", 64)
+            return clapInvalidValue(
+                value,
+                option: option,
+                valueDisplay: valueDisplay,
+                reason: "attempts must be an integer between 1 and 4"
+            )
         }
         guard (1...4).contains(attempt) else {
-            return .failure("attempts must be between 1 and 4", 64)
+            return clapInvalidValue(
+                value,
+                option: option,
+                valueDisplay: valueDisplay,
+                reason: "attempts must be between 1 and 4"
+            )
         }
         return .success(attempt)
     }
 
     private func parseCloudListLimit(_ value: String) -> ParseResult<Int> {
         guard let limit = Int(value) else {
-            return .failure("limit must be an integer between 1 and 20", 64)
+            return clapInvalidValue(
+                value,
+                option: "--limit",
+                valueDisplay: "<N>",
+                reason: "limit must be an integer between 1 and 20"
+            )
         }
         guard (1...20).contains(limit) else {
-            return .failure("limit must be between 1 and 20", 64)
+            return clapInvalidValue(
+                value,
+                option: "--limit",
+                valueDisplay: "<N>",
+                reason: "limit must be between 1 and 20"
+            )
         }
         return .success(limit)
     }
