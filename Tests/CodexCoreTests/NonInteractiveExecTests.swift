@@ -224,6 +224,43 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(result.requestPermissionsResponse, response)
     }
 
+    func testStrictAutoReviewSessionScopeGrantsNoPermissionsLikeRust() async throws {
+        let item = ResponseItem.functionCall(
+            name: "request_permissions",
+            arguments: #"{"permissions":{"network":{"enabled":true}}}"#,
+            callID: "call-permissions"
+        )
+
+        let result = await NonInteractiveExec.executeFunctionCallWithHooks(
+            item,
+            handlers: [],
+            conversationID: ConversationId(),
+            turnID: "turn-1",
+            cwd: FileManager.default.temporaryDirectory,
+            model: "gpt-test",
+            approvalPolicy: .onRequest,
+            sandboxPolicy: .newWorkspaceWritePolicy(),
+            shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+            truncationPolicy: .bytes(10_000),
+            requestPermissionsHandler: { request in
+                RequestPermissionsResponse(
+                    permissions: request.permissions,
+                    scope: .session,
+                    strictAutoReview: true
+                )
+            }
+        )
+
+        guard case let .functionCallOutput(callID, payload) = result.output else {
+            return XCTFail("expected function call output")
+        }
+        XCTAssertEqual(callID, "call-permissions")
+        XCTAssertEqual(payload.success, true)
+        let response = try JSONDecoder().decode(RequestPermissionsResponse.self, from: Data(payload.content.utf8))
+        XCTAssertEqual(response, RequestPermissionsResponse(permissions: RequestPermissionProfile()))
+        XCTAssertEqual(result.requestPermissionsResponse, response)
+    }
+
     func testRequestUserInputToolRoundTripResolvesPendingLikeRust() async throws {
         let item = ResponseItem.functionCall(
             name: "request_user_input",

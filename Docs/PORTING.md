@@ -282,7 +282,10 @@ Recent upstream audit checkpoint:
   `Op.requestPermissionsResponse`. Granted turn/session permissions are now
   accumulated with Rust's merge/intersection rules and applied implicitly to
   later `shell_command`, `shell`, local shell, and unified `exec_command` calls,
-  including preapproved sandbox widening without a second prompt.
+  including preapproved sandbox widening without a second prompt. Focused
+  coverage now also pins Rust's strict-auto-review guard: a session-scoped
+  strict-auto-review response is normalized to an empty turn-scoped grant before
+  any permission can be reused.
 - 2026-05-17: Swift's live Responses/tool loop now exposes Rust's
   `request_user_input` tool and thread dynamic-tool specs, routes calls through
   live app-server pending continuations, and resumes the same turn from
