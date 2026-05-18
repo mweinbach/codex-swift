@@ -683,6 +683,15 @@ Recent upstream audit checkpoint:
   `plan_update` events, and emits Rust-shaped `todo_list` JSONL
   `item.started`, `item.updated`, and turn-ending `item.completed` events
   with completed booleans derived only from `completed` plan steps.
+- 2026-05-18: rechecked Rust's `shell_command` non-interactive runtime path in
+  `codex-rs/core/src/tools/handlers/shell.rs`,
+  `codex-rs/core/src/tools/handlers/shell/shell_command.rs`, and
+  `codex-rs/exec/src/exec_events.rs`. Swift now emits Rust-shaped
+  `command_execution` JSONL `item.started` / `item.completed` events for
+  streamed `shell_command` function calls, including shell-quoted command
+  display and explicit `exit_code: null` while the command is in progress.
+  `RuntimeOracleParityTests` now drives the same Responses SSE tool-call turn
+  through both Rust and Swift executables before the final assistant message.
 - 2026-05-17: rechecked Rust commit `0445b290fe` (`[1 of 4] tui:
   route primary settings writes through app server`). Swift app-server
   `config/value/write` and `config/batchWrite` now parse config `keyPath`

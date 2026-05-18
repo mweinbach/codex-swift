@@ -1,5 +1,6 @@
 import Foundation
 import Network
+@testable import CodexCore
 import XCTest
 
 final class RuntimeOracleParityTests: XCTestCase {
@@ -943,6 +944,61 @@ final class RuntimeOracleParityTests: XCTestCase {
             try normalizedExecJSONLines(rust.stdout)
         )
     }
+
+    func testNonInteractiveShellCommandToolMatchesRustOracle() throws {
+        let command = "printf 'oracle tool\\n'"
+        let responseBodies = [
+            functionCallSSE(callID: "call-shell", name: "shell_command", arguments: [
+                "command": command,
+                "login": false
+            ]),
+            noToolsAssistantMessageSSE(text: "tool complete")
+        ]
+        XCTAssertEqual(
+            ResponsesSSEParser.collectEvents(fromSSEText: responseBodies[0]),
+            [
+                .success(.created),
+                .success(.outputItemDone(.functionCall(
+                    name: "shell_command",
+                    arguments: #"{"command":"printf 'oracle tool\\n'","login":false}"#,
+                    callID: "call-shell"
+                ))),
+                .success(.completed(responseID: "resp-1", tokenUsage: nil))
+            ]
+        )
+        let oracle = try RuntimeOracle.required()
+        let rustServer = try RuntimeOracleResponsesServer(responseBodies: responseBodies)
+        let swiftServer = try RuntimeOracleResponsesServer(responseBodies: responseBodies)
+
+        let rust = try oracle.runNonInteractiveExec(
+            .rust,
+            responsesBaseURL: rustServer.baseURL,
+            prompt: "run oracle shell"
+        )
+        let swift = try oracle.runNonInteractiveExec(
+            .swift,
+            responsesBaseURL: swiftServer.baseURL,
+            prompt: "run oracle shell"
+        )
+
+        XCTAssertEqual(rust.exitCode, 0, rust.stderr)
+        XCTAssertEqual(swift.exitCode, 0, swift.stderr)
+
+        let normalizedSwiftOutput = try normalizedExecJSONLines(swift.stdout)
+        let normalizedRustOutput = try normalizedExecJSONLines(rust.stdout)
+        XCTAssertTrue(
+            normalizedSwiftOutput.contains { line in
+                line.contains(#""type":"command_execution""#)
+                    && line.contains(#""aggregated_output":"oracle tool\n""#)
+                    && line.contains(#""status":"completed""#)
+            },
+            normalizedSwiftOutput.joined(separator: "\n")
+        )
+        XCTAssertEqual(
+            normalizedSwiftOutput,
+            normalizedRustOutput
+        )
+    }
 }
 
 private enum RuntimeOracleProcessKind {
@@ -1271,6 +1327,25 @@ private func noToolsAssistantMessageSSE(text: String) -> String {
     ].joined(separator: "\n")
 }
 
+private func functionCallSSE(callID: String, name: String, arguments: [String: Any]) -> String {
+    let encodedArguments = (try? JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys]))
+        .flatMap { String(data: $0, encoding: .utf8) } ?? #"{}"#
+    let encodedArgumentsString = (try? JSONEncoder().encode(encodedArguments))
+        .flatMap { String(data: $0, encoding: .utf8) } ?? #""{}""#
+    return [
+        #"event: response.created"#,
+        #"data: {"type":"response.created","response":{"id":"resp-1"}}"#,
+        "",
+        #"event: response.output_item.done"#,
+        #"data: {"type":"response.output_item.done","item":{"type":"function_call","call_id":"\#(callID)","name":"\#(name)","arguments":\#(encodedArgumentsString)}}"#,
+        "",
+        #"event: response.completed"#,
+        #"data: {"type":"response.completed","response":{"id":"resp-1"}}"#,
+        "",
+        ""
+    ].joined(separator: "\n")
+}
+
 // NWListener invokes callbacks as @Sendable closures. This test server keeps
 // mutable response state behind a lock and routes network callbacks through one
 // serial queue, so sharing the helper across those callbacks is constrained.
@@ -1336,7 +1411,7 @@ private final class RuntimeOracleResponsesServer: @unchecked Sendable {
             if let data {
                 requestData.append(data)
             }
-            guard isComplete || error != nil || self.requestIsComplete(requestData) else {
+            guard error != nil || self.requestIsComplete(requestData) else {
                 self.receiveRequest(on: connection, accumulated: requestData)
                 return
             }

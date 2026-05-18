@@ -5490,11 +5490,86 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(startedCommand["type"], .string("command_execution"))
         XCTAssertEqual(startedCommand["command"], .string("printf 'hi\n'"))
         XCTAssertEqual(startedCommand["aggregated_output"], .string(""))
-        XCTAssertNil(startedCommand["exit_code"])
+        XCTAssertEqual(startedCommand["exit_code"], .null)
         XCTAssertEqual(startedCommand["status"], .string("in_progress"))
         XCTAssertEqual(completedCommand["id"], .string("item_0"))
         XCTAssertEqual(completedCommand["type"], .string("command_execution"))
         XCTAssertEqual(completedCommand["command"], .string("printf 'hi\n'"))
+        XCTAssertEqual(completedCommand["aggregated_output"], .string("hi\n"))
+        XCTAssertEqual(completedCommand["exit_code"], .integer(0))
+        XCTAssertEqual(completedCommand["status"], .string("completed"))
+        XCTAssertEqual(objects[4]["item"]?["type"], .string("agent_message"))
+    }
+
+    func testShellCommandEmitsJSONLinesCommandExecutionItemsLikeRust() async throws {
+        let id = try ConversationId(string: "018f7a2d-4c5b-7abc-8def-0123456789ab")
+        let temp = try NonInteractiveExecTemporaryDirectory()
+        let toolCall = ResponseItem.functionCall(
+            name: "shell_command",
+            arguments: #"{"command":"echo hi","login":false}"#,
+            callID: "shell-tool-call"
+        )
+        let finalMessage = ResponseItem.message(role: "assistant", content: [.outputText(text: "command done")])
+        let script = SingleToolLoopScript(toolCall: toolCall, finalMessage: finalMessage)
+
+        let loopResult = await NonInteractiveExec.runResponsesLoopWithTranscript(
+            initialPrompt: Prompt(input: [
+                .message(role: "user", content: [.inputText(text: "run a command")])
+            ]),
+            streamPrompt: { prompt in
+                .success(await script.next(prompt))
+            },
+            executeFunctionCall: { item in
+                await NonInteractiveExec.executeFunctionCallWithHooks(
+                    item,
+                    handlers: [],
+                    conversationID: id,
+                    turnID: "turn-jsonl-shell-command",
+                    cwd: temp.url,
+                    model: "gpt-test",
+                    approvalPolicy: .onRequest,
+                    sandboxPolicy: .dangerFullAccess,
+                    shell: Shell(shellType: .sh, shellPath: "/bin/sh"),
+                    truncationPolicy: .bytes(10_000),
+                    environment: ["PATH": "/bin:/usr/bin", "HOME": temp.url.path],
+                    approvalHandler: { _ in .approved }
+                )
+            }
+        )
+
+        XCTAssertEqual(loopResult.runtimeEvents.count, 2)
+        let result = NonInteractiveExec.finish(
+            responseEvents: loopResult.events,
+            outputMode: .jsonLines,
+            conversationID: id,
+            lastMessageFile: nil
+        )
+
+        XCTAssertEqual(result.exitCode, 0)
+        let lines = try XCTUnwrap(result.stdoutMessage?.split(separator: "\n").map(String.init))
+        let objects = try lines.map(jsonObject)
+        XCTAssertEqual(objects.map { $0["type"] }, [
+            .string("thread.started"),
+            .string("turn.started"),
+            .string("item.started"),
+            .string("item.completed"),
+            .string("item.completed"),
+            .string("turn.completed")
+        ])
+        guard case let .object(startedCommand)? = objects[2]["item"],
+              case let .object(completedCommand)? = objects[3]["item"]
+        else {
+            return XCTFail("expected command execution items")
+        }
+        XCTAssertEqual(startedCommand["id"], .string("item_0"))
+        XCTAssertEqual(startedCommand["type"], .string("command_execution"))
+        XCTAssertEqual(startedCommand["command"], .string(#"/bin/sh -c 'echo hi'"#))
+        XCTAssertEqual(startedCommand["aggregated_output"], .string(""))
+        XCTAssertEqual(startedCommand["exit_code"], .null)
+        XCTAssertEqual(startedCommand["status"], .string("in_progress"))
+        XCTAssertEqual(completedCommand["id"], .string("item_0"))
+        XCTAssertEqual(completedCommand["type"], .string("command_execution"))
+        XCTAssertEqual(completedCommand["command"], .string(#"/bin/sh -c 'echo hi'"#))
         XCTAssertEqual(completedCommand["aggregated_output"], .string("hi\n"))
         XCTAssertEqual(completedCommand["exit_code"], .integer(0))
         XCTAssertEqual(completedCommand["status"], .string("completed"))

@@ -1496,7 +1496,7 @@ public enum NonInteractiveExec {
                     success: false
                 ))
             }
-            return executed(await executeShellCommand(
+            return await executeShellCommand(
                 toolName: "local_shell",
                 command: params.command,
                 runtimeShellType: ShellResolver.detectShellType(params.command.first ?? ""),
@@ -1507,6 +1507,7 @@ public enum NonInteractiveExec {
                 prefixRule: nil,
                 additionalPermissions: nil,
                 approvalDescription: nil,
+                hookCommand: nil,
                 callID: callID ?? id ?? "local_shell",
                 cwd: cwd,
                 approvalPolicy: approvalPolicy,
@@ -1523,7 +1524,7 @@ public enum NonInteractiveExec {
                 explicitEnvOverrides: explicitEnvOverrides,
                 grantedPermissions: grantedPermissions,
                 responseFormat: .structured
-            ))
+            )
 
         case let .toolSearchCall(_, callID, _, execution, arguments):
             guard let callID, execution == "client" else {
@@ -1915,7 +1916,7 @@ public enum NonInteractiveExec {
 
     private static func execJSONCommandString(command: [String], fallback: String?) -> String {
         guard let fallback, !fallback.isEmpty else {
-            return command.joined(separator: " ")
+            return CommandParser.shlexJoin(command)
         }
         return fallback
     }
@@ -2245,7 +2246,7 @@ public enum NonInteractiveExec {
                 let params = try decoder.decode(ShellCommandToolCallParams.self, from: Data(arguments.utf8))
                 let useLoginShell = try resolveUseLoginShell(params.login, allowLoginShell: allowLoginShell)
                 let command = shell.deriveExecArgs(command: params.command, useLoginShell: useLoginShell)
-                return executed(await executeShellCommand(
+                return await executeShellCommand(
                     toolName: name,
                     command: command,
                     runtimeShellType: shell.shellType,
@@ -2256,6 +2257,7 @@ public enum NonInteractiveExec {
                     prefixRule: params.prefixRule,
                     additionalPermissions: params.additionalPermissions,
                     approvalDescription: params.justification,
+                    hookCommand: nil,
                     callID: callID,
                     cwd: cwd,
                     approvalPolicy: approvalPolicy,
@@ -2272,11 +2274,11 @@ public enum NonInteractiveExec {
                     explicitEnvOverrides: explicitEnvOverrides,
                     grantedPermissions: grantedPermissions,
                     responseFormat: .freeform
-                ))
+                )
 
             case "shell", "container.exec":
                 let params = try decoder.decode(ShellToolCallParams.self, from: Data(arguments.utf8))
-                return executed(await executeShellCommand(
+                return await executeShellCommand(
                     toolName: name,
                     command: params.command,
                     runtimeShellType: ShellResolver.detectShellType(params.command.first ?? ""),
@@ -2287,6 +2289,7 @@ public enum NonInteractiveExec {
                     prefixRule: params.prefixRule,
                     additionalPermissions: params.additionalPermissions,
                     approvalDescription: params.justification,
+                    hookCommand: nil,
                     callID: callID,
                     cwd: cwd,
                     approvalPolicy: approvalPolicy,
@@ -2303,7 +2306,7 @@ public enum NonInteractiveExec {
                     explicitEnvOverrides: explicitEnvOverrides,
                     grantedPermissions: grantedPermissions,
                     responseFormat: .structured
-                ))
+                )
 
             case "write_stdin":
                 let params = try decoder.decode(WriteStdinToolCallParams.self, from: Data(arguments.utf8))
@@ -3361,6 +3364,7 @@ public enum NonInteractiveExec {
         prefixRule: [String]?,
         additionalPermissions: RequestPermissionProfile?,
         approvalDescription: String?,
+        hookCommand: String?,
         callID: String,
         cwd: URL,
         approvalPolicy: AskForApproval,
@@ -3377,9 +3381,9 @@ public enum NonInteractiveExec {
         explicitEnvOverrides: [String: String],
         grantedPermissions: RequestPermissionProfile?,
         responseFormat: ShellResponseFormat
-    ) async -> ResponseItem {
+    ) async -> ExecutedFunctionCall {
         guard !command.isEmpty else {
-            return functionOutput(callID: callID, content: "\(toolName) command is empty", success: false)
+            return executed(functionOutput(callID: callID, content: "\(toolName) command is empty", success: false))
         }
 
         let commandCwd = resolveWorkdir(workdir, relativeTo: cwd)
@@ -3409,9 +3413,9 @@ public enum NonInteractiveExec {
                 additionalPermissions: effectiveAdditionalPermissions
             )
         } catch let error as FunctionCallError {
-            return functionOutput(callID: callID, content: error.description, success: false)
+            return executed(functionOutput(callID: callID, content: error.description, success: false))
         } catch {
-            return functionOutput(callID: callID, content: String(describing: error), success: false)
+            return executed(functionOutput(callID: callID, content: String(describing: error), success: false))
         }
 
         let approvalSandboxPermissions = requestedAdditionalPermissionsArePreapproved
@@ -3457,11 +3461,11 @@ public enum NonInteractiveExec {
                 parsedCmd: parseCommand(command)
             )))
             guard approvalAllowsExecution(decision) else {
-                return functionOutput(
+                return executed(functionOutput(
                     callID: callID,
                     content: approvalRejectionMessage(decision, action: "command"),
                     success: false
-                )
+                ))
             }
             effectiveApprovalGranted = true
         }
@@ -3471,11 +3475,11 @@ public enum NonInteractiveExec {
             approvalPolicy: approvalPolicy,
             approvalGranted: effectiveApprovalGranted
         ) {
-            return functionOutput(
+            return executed(functionOutput(
                 callID: callID,
                 content: rejection,
                 success: false
-            )
+            ))
         }
 
         let childEnvironment = ExecEnvironment.createEnv(policy: shellEnvironmentPolicy, environment: environment)
@@ -3498,23 +3502,23 @@ public enum NonInteractiveExec {
                 aggregatedOutput: result.content,
                 duration: 0
             )
-            return functionOutput(
+            return executed(functionOutput(
                 callID: callID,
                 content: formatShellResponse(output, truncationPolicy: truncationPolicy, format: responseFormat),
                 success: result.success
-            )
+            ))
         case let .shellParseError(error):
-            return functionOutput(
+            return executed(functionOutput(
                 callID: callID,
                 content: "failed to parse apply_patch shell command: \(String(describing: error))",
                 success: false
-            )
+            ))
         case let .correctnessError(error):
-            return functionOutput(
+            return executed(functionOutput(
                 callID: callID,
                 content: "invalid apply_patch command: \(error.description)",
                 success: false
-            )
+            ))
         case .notApplyPatch:
             break
         }
@@ -3549,11 +3553,39 @@ public enum NonInteractiveExec {
             )
         }.value
 
-        return functionOutput(
+        let formattedOutput = formatShellResponse(output, truncationPolicy: truncationPolicy, format: responseFormat)
+        let runtimeEvents: [EventMessage] = [
+            .execCommandBegin(ExecCommandBeginEvent(
+                callID: callID,
+                turnID: turnID,
+                command: command,
+                cwd: commandCwd.path,
+                parsedCmd: parseCommand(command),
+                source: .agent,
+                interactionInput: hookCommand
+            )),
+            .execCommandEnd(ExecCommandEndEvent(
+                callID: callID,
+                turnID: turnID,
+                command: command,
+                cwd: commandCwd.path,
+                parsedCmd: parseCommand(command),
+                source: .agent,
+                interactionInput: hookCommand,
+                stdout: output.stdout,
+                stderr: output.stderr,
+                aggregatedOutput: output.aggregatedOutput,
+                exitCode: Int32(output.exitCode),
+                duration: ProtocolDuration(timeInterval: output.duration),
+                formattedOutput: formattedOutput
+            ))
+        ]
+
+        return executed(functionOutput(
             callID: callID,
-            content: formatShellResponse(output, truncationPolicy: truncationPolicy, format: responseFormat),
+            content: formattedOutput,
             success: output.exitCode == 0 && !output.timedOut
-        )
+        ), runtimeEvents: runtimeEvents)
     }
 
     private static func executeUnifiedExecCommand(
@@ -5184,6 +5216,33 @@ private struct CompletedItem: Encodable {
         case result
         case error
         case status
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encodeIfPresent(text, forKey: .text)
+        try container.encodeIfPresent(query, forKey: .query)
+        try container.encodeIfPresent(action, forKey: .action)
+        try container.encodeIfPresent(items, forKey: .items)
+        try container.encodeIfPresent(command, forKey: .command)
+        try container.encodeIfPresent(aggregatedOutput, forKey: .aggregatedOutput)
+        if type == "command_execution" {
+            if let exitCode {
+                try container.encode(exitCode, forKey: .exitCode)
+            } else {
+                try container.encodeNil(forKey: .exitCode)
+            }
+        } else {
+            try container.encodeIfPresent(exitCode, forKey: .exitCode)
+        }
+        try container.encodeIfPresent(server, forKey: .server)
+        try container.encodeIfPresent(tool, forKey: .tool)
+        try container.encodeIfPresent(arguments, forKey: .arguments)
+        try container.encodeIfPresent(result, forKey: .result)
+        try container.encodeIfPresent(error, forKey: .error)
+        try container.encodeIfPresent(status, forKey: .status)
     }
 }
 
