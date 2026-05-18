@@ -12383,6 +12383,27 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(emptyAgentPayload.success, true)
         let updatedRequests = await capture.recordedSpawnRequests()
         XCTAssertEqual(updatedRequests.last?.agentType, nil)
+
+        let invalidTaskName = await executor.execute(.functionCall(
+            name: "spawn_agent",
+            arguments: #"{"message":"inspect this repo","task_name":"BadName"}"#,
+            callID: "call-invalid-task-name"
+        ))
+        let invalidTaskPayload = try Self.functionOutputPayload(invalidTaskName, callID: "call-invalid-task-name")
+        XCTAssertEqual(
+            invalidTaskPayload.content,
+            "agent_name must use only lowercase letters, digits, and underscores"
+        )
+        XCTAssertEqual(invalidTaskPayload.success, false)
+        let invalidTaskEvents = try XCTUnwrap(invalidTaskName?.runtimeEvents)
+        XCTAssertEqual(invalidTaskEvents.count, 1)
+        guard case let .collabAgentSpawnBegin(invalidTaskBegin) = invalidTaskEvents[0] else {
+            return XCTFail("expected task-name validation to happen after spawn begin")
+        }
+        XCTAssertEqual(invalidTaskBegin.senderThreadID, rootThreadID)
+        XCTAssertEqual(invalidTaskBegin.prompt, "inspect this repo")
+        let afterInvalidTaskRequests = await capture.recordedSpawnRequests()
+        XCTAssertEqual(afterInvalidTaskRequests, updatedRequests)
     }
 
     func testLiveSpawnAgentRejectsEmptyMessageBeforeSpawnLikeRust() async throws {

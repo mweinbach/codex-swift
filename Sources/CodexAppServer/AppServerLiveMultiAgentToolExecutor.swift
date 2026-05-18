@@ -126,14 +126,6 @@ struct AppServerLiveMultiAgentToolExecutor {
             return Self.output(callID: callID, content: "Empty message can't be sent to an agent", success: false)
         }
 
-        let currentAgentPath = currentSessionSource.agentPath ?? .root
-        let childAgentPath: AgentPath
-        do {
-            childAgentPath = try currentAgentPath.join(args.taskName)
-        } catch {
-            return Self.output(callID: callID, content: String(describing: error), success: false)
-        }
-
         let requestedModel = args.model ?? ""
         let requestedReasoningEffort = args.reasoningEffort ?? .medium
         var runtimeEvents: [EventMessage] = [
@@ -176,6 +168,19 @@ struct AppServerLiveMultiAgentToolExecutor {
                 success: false,
                 runtimeEvents: runtimeEvents
             )
+        } catch {
+            return Self.output(
+                callID: callID,
+                content: String(describing: error),
+                success: false,
+                runtimeEvents: runtimeEvents
+            )
+        }
+
+        let currentAgentPath = currentSessionSource.agentPath ?? .root
+        let childAgentPath: AgentPath
+        do {
+            childAgentPath = try currentAgentPath.join(args.taskName)
         } catch {
             return Self.output(
                 callID: callID,

@@ -919,6 +919,11 @@ Recent upstream audit checkpoint:
   `spawn_agent`, `send_message`, `followup_task`, `wait_agent`, `close_agent`,
   and `list_agents`, returning Rust-style `failed to parse function arguments`
   messages before running tool side effects.
+- 2026-05-18: Swift live app-server MultiAgentV2 `spawn_agent` now validates
+  `task_name` after emitting Rust's spawn-begin event and after the full-fork
+  and child override checks, so invalid task names no longer mask earlier Rust
+  model-visible errors and still leave the same one-event trace before child
+  creation is skipped.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through
