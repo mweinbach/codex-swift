@@ -5,8 +5,11 @@ struct AppServerLiveMultiAgentToolExecutor {
     let currentThreadID: ThreadId
     let currentSessionSource: SessionSource
     let stateStore: SQLiteAgentGraphStore?
+    let waitTimeouts: MultiAgentV2WaitTimeouts
     let isTurnRunning: @Sendable (String) async -> Bool
     let agentLastTaskMessage: @Sendable (String) async -> String?
+    let hasPendingMailboxItems: @Sendable (String) async -> Bool
+    let waitForMailboxChange: @Sendable (String, Int64) async -> Bool
     let queueMailboxCommunications: @Sendable (String, [InterAgentCommunication]) async -> Void
     let recordAgentLastTaskMessage: @Sendable (String, String) async -> Void
     let submitPendingWorkTurnIfIdle: @Sendable (String) async -> Bool
@@ -32,6 +35,8 @@ struct AppServerLiveMultiAgentToolExecutor {
             )
         case "list_agents":
             return await executeListAgents(arguments: arguments, callID: callID)
+        case "wait_agent":
+            return await executeWaitAgent(arguments: arguments, callID: callID)
         default:
             return nil
         }
@@ -105,6 +110,65 @@ struct AppServerLiveMultiAgentToolExecutor {
         } catch {
             return Self.output(callID: callID, content: String(describing: error), success: false)
         }
+    }
+
+    private func executeWaitAgent(
+        arguments: String,
+        callID: String
+    ) async -> NonInteractiveExec.FunctionCallExecutionResult {
+        let args: WaitAgentToolArguments
+        do {
+            args = try JSONDecoder().decode(WaitAgentToolArguments.self, from: Data(arguments.utf8))
+        } catch {
+            return Self.output(callID: callID, content: "failed to parse wait_agent arguments: \(error)", success: false)
+        }
+
+        let timeoutMS: Int64
+        if let requestedTimeout = args.timeoutMS {
+            guard requestedTimeout >= waitTimeouts.min else {
+                return Self.output(
+                    callID: callID,
+                    content: "timeout_ms must be at least \(waitTimeouts.min)",
+                    success: false
+                )
+            }
+            guard requestedTimeout <= waitTimeouts.max else {
+                return Self.output(
+                    callID: callID,
+                    content: "timeout_ms must be at most \(waitTimeouts.max)",
+                    success: false
+                )
+            }
+            timeoutMS = requestedTimeout
+        } else {
+            timeoutMS = waitTimeouts.default
+        }
+
+        let startedAt = AppServerLiveMultiAgentToolClock.millisecondsSinceEpoch()
+        var runtimeEvents: [EventMessage] = [
+            .collabWaitingBegin(CollabWaitingBeginEvent(
+                startedAtMilliseconds: startedAt,
+                senderThreadID: currentThreadID,
+                receiverThreadIDs: [],
+                receiverAgents: [],
+                callID: callID
+            ))
+        ]
+        let hasMailboxUpdate: Bool
+        if await hasPendingMailboxItems(currentThreadID.description) {
+            hasMailboxUpdate = true
+        } else {
+            hasMailboxUpdate = await waitForMailboxChange(currentThreadID.description, timeoutMS)
+        }
+        let result = WaitAgentToolResult(timedOut: !hasMailboxUpdate)
+        runtimeEvents.append(.collabWaitingEnd(CollabWaitingEndEvent(
+            senderThreadID: currentThreadID,
+            callID: callID,
+            completedAtMilliseconds: AppServerLiveMultiAgentToolClock.millisecondsSinceEpoch(),
+            agentStatuses: [],
+            statuses: [:]
+        )))
+        return Self.jsonOutput(callID: callID, value: result, success: nil, runtimeEvents: runtimeEvents)
     }
 
     private func executeListAgents(
@@ -207,7 +271,7 @@ struct AppServerLiveMultiAgentToolExecutor {
     private static func output(
         callID: String,
         content: String,
-        success: Bool,
+        success: Bool?,
         runtimeEvents: [EventMessage] = []
     ) -> NonInteractiveExec.FunctionCallExecutionResult {
         NonInteractiveExec.FunctionCallExecutionResult(
@@ -222,7 +286,8 @@ struct AppServerLiveMultiAgentToolExecutor {
     private static func jsonOutput<T: Encodable>(
         callID: String,
         value: T,
-        success: Bool
+        success: Bool?,
+        runtimeEvents: [EventMessage] = []
     ) -> NonInteractiveExec.FunctionCallExecutionResult {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
@@ -230,7 +295,8 @@ struct AppServerLiveMultiAgentToolExecutor {
             return output(
                 callID: callID,
                 content: String(decoding: try encoder.encode(value), as: UTF8.self),
-                success: success
+                success: success,
+                runtimeEvents: runtimeEvents
             )
         } catch {
             return output(
@@ -239,6 +305,18 @@ struct AppServerLiveMultiAgentToolExecutor {
                 success: false
             )
         }
+    }
+}
+
+struct MultiAgentV2WaitTimeouts: Equatable, Sendable {
+    let min: Int64
+    let max: Int64
+    let `default`: Int64
+
+    init(config: MultiAgentV2Config) {
+        self.min = config.minWaitTimeoutMS
+        self.max = config.maxWaitTimeoutMS
+        self.default = config.defaultWaitTimeoutMS
     }
 }
 
@@ -252,6 +330,29 @@ private struct ListAgentsToolArguments: Decodable {
 
     private enum CodingKeys: String, CodingKey {
         case pathPrefix = "path_prefix"
+    }
+}
+
+private struct WaitAgentToolArguments: Decodable {
+    let timeoutMS: Int64?
+
+    private enum CodingKeys: String, CodingKey {
+        case timeoutMS = "timeout_ms"
+    }
+}
+
+private struct WaitAgentToolResult: Encodable, Equatable {
+    let message: String
+    let timedOut: Bool
+
+    init(timedOut: Bool) {
+        self.timedOut = timedOut
+        self.message = timedOut ? "Wait timed out." : "Wait completed."
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case message
+        case timedOut = "timed_out"
     }
 }
 

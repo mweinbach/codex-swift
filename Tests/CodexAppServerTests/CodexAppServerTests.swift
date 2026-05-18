@@ -12027,9 +12027,16 @@ final class CodexAppServerTests: XCTestCase {
             currentThreadID: rootThreadID,
             currentSessionSource: .vscode,
             stateStore: stateStore,
+            waitTimeouts: MultiAgentV2WaitTimeouts(config: MultiAgentV2Config()),
             isTurnRunning: { _ in false },
             agentLastTaskMessage: { threadID in
                 await capture.lastTaskMessage(threadID: threadID)
+            },
+            hasPendingMailboxItems: { threadID in
+                await capture.hasPendingMailbox(threadID: threadID)
+            },
+            waitForMailboxChange: { threadID, timeoutMS in
+                await capture.waitForMailboxChange(threadID: threadID, timeoutMilliseconds: timeoutMS)
             },
             queueMailboxCommunications: { threadID, communications in
                 await capture.queue(threadID: threadID, communications: communications)
@@ -12138,11 +12145,18 @@ final class CodexAppServerTests: XCTestCase {
             currentThreadID: rootThreadID,
             currentSessionSource: .vscode,
             stateStore: stateStore,
+            waitTimeouts: MultiAgentV2WaitTimeouts(config: MultiAgentV2Config()),
             isTurnRunning: { threadID in
                 await capture.isRunning(threadID: threadID)
             },
             agentLastTaskMessage: { threadID in
                 await capture.lastTaskMessage(threadID: threadID)
+            },
+            hasPendingMailboxItems: { threadID in
+                await capture.hasPendingMailbox(threadID: threadID)
+            },
+            waitForMailboxChange: { threadID, timeoutMS in
+                await capture.waitForMailboxChange(threadID: threadID, timeoutMilliseconds: timeoutMS)
             },
             queueMailboxCommunications: { threadID, communications in
                 await capture.queue(threadID: threadID, communications: communications)
@@ -12196,6 +12210,93 @@ final class CodexAppServerTests: XCTestCase {
             "/root/worker",
             "/root/worker/nested",
         ])
+    }
+
+    func testLiveWaitAgentUsesRustTimeoutsMailboxAndEvents() async throws {
+        let rootThreadID = ThreadId()
+        let capture = LiveMultiAgentToolCapture()
+        await capture.setPendingMailbox(threadID: rootThreadID.description)
+        let executor = AppServerLiveMultiAgentToolExecutor(
+            currentThreadID: rootThreadID,
+            currentSessionSource: .vscode,
+            stateStore: nil,
+            waitTimeouts: MultiAgentV2WaitTimeouts(config: MultiAgentV2Config(
+                minWaitTimeoutMS: 0,
+                maxWaitTimeoutMS: 10,
+                defaultWaitTimeoutMS: 5
+            )),
+            isTurnRunning: { _ in false },
+            agentLastTaskMessage: { _ in nil },
+            hasPendingMailboxItems: { threadID in
+                await capture.hasPendingMailbox(threadID: threadID)
+            },
+            waitForMailboxChange: { threadID, timeoutMS in
+                await capture.waitForMailboxChange(threadID: threadID, timeoutMilliseconds: timeoutMS)
+            },
+            queueMailboxCommunications: { _, _ in },
+            recordAgentLastTaskMessage: { _, _ in },
+            submitPendingWorkTurnIfIdle: { _ in false }
+        )
+
+        let completed = await executor.execute(.functionCall(
+            name: "wait_agent",
+            arguments: #"{}"#,
+            callID: "call-wait"
+        ))
+        let completedPayload = try Self.functionOutputPayload(completed, callID: "call-wait")
+        XCTAssertNil(completedPayload.success)
+        let completedResult = try JSONDecoder().decode(
+            WaitAgentToolResultFixture.self,
+            from: Data(completedPayload.content.utf8)
+        )
+        XCTAssertEqual(completedResult, WaitAgentToolResultFixture(message: "Wait completed.", timedOut: false))
+        let runtimeEvents = try XCTUnwrap(completed?.runtimeEvents)
+        XCTAssertEqual(runtimeEvents.count, 2)
+        guard case let .collabWaitingBegin(begin) = runtimeEvents[0] else {
+            return XCTFail("expected waiting begin event")
+        }
+        XCTAssertEqual(begin.senderThreadID, rootThreadID)
+        XCTAssertEqual(begin.receiverThreadIDs, [])
+        XCTAssertEqual(begin.receiverAgents, [])
+        XCTAssertEqual(begin.callID, "call-wait")
+        guard case let .collabWaitingEnd(end) = runtimeEvents[1] else {
+            return XCTFail("expected waiting end event")
+        }
+        XCTAssertEqual(end.senderThreadID, rootThreadID)
+        XCTAssertEqual(end.callID, "call-wait")
+        XCTAssertEqual(end.agentStatuses, [])
+        XCTAssertEqual(end.statuses, [:])
+
+        await capture.clearPendingMailbox(threadID: rootThreadID.description)
+        let timedOut = await executor.execute(.functionCall(
+            name: "wait_agent",
+            arguments: #"{"timeout_ms":0}"#,
+            callID: "call-timeout"
+        ))
+        let timedOutPayload = try Self.functionOutputPayload(timedOut, callID: "call-timeout")
+        let timedOutResult = try JSONDecoder().decode(
+            WaitAgentToolResultFixture.self,
+            from: Data(timedOutPayload.content.utf8)
+        )
+        XCTAssertEqual(timedOutResult, WaitAgentToolResultFixture(message: "Wait timed out.", timedOut: true))
+
+        let tooSmall = await executor.execute(.functionCall(
+            name: "wait_agent",
+            arguments: #"{"timeout_ms":-1}"#,
+            callID: "call-too-small"
+        ))
+        let tooSmallPayload = try Self.functionOutputPayload(tooSmall, callID: "call-too-small")
+        XCTAssertEqual(tooSmallPayload.content, "timeout_ms must be at least 0")
+        XCTAssertEqual(tooSmallPayload.success, false)
+
+        let tooLarge = await executor.execute(.functionCall(
+            name: "wait_agent",
+            arguments: #"{"timeout_ms":11}"#,
+            callID: "call-too-large"
+        ))
+        let tooLargePayload = try Self.functionOutputPayload(tooLarge, callID: "call-too-large")
+        XCTAssertEqual(tooLargePayload.content, "timeout_ms must be at most 10")
+        XCTAssertEqual(tooLargePayload.success, false)
     }
 
     func testLiveRuntimeInterAgentCommunicationOpQueuesAndTriggersPendingWorkLikeRust() async throws {
@@ -37460,6 +37561,7 @@ private actor LiveMultiAgentToolCapture {
     private var pendingWork: [String] = []
     private var runningThreadIDs: Set<String>
     private var lastTaskMessages: [String: String] = [:]
+    private var pendingMailboxThreadIDs: Set<String> = []
 
     init(runningThreadIDs: Set<String> = []) {
         self.runningThreadIDs = runningThreadIDs
@@ -37492,10 +37594,42 @@ private actor LiveMultiAgentToolCapture {
     func lastTaskMessage(threadID: String) -> String? {
         lastTaskMessages[threadID]
     }
+
+    func setPendingMailbox(threadID: String) {
+        pendingMailboxThreadIDs.insert(threadID)
+    }
+
+    func clearPendingMailbox(threadID: String) {
+        pendingMailboxThreadIDs.remove(threadID)
+    }
+
+    func hasPendingMailbox(threadID: String) -> Bool {
+        pendingMailboxThreadIDs.contains(threadID)
+    }
+
+    func waitForMailboxChange(threadID: String, timeoutMilliseconds: Int64) async -> Bool {
+        if pendingMailboxThreadIDs.contains(threadID) {
+            return true
+        }
+        if timeoutMilliseconds > 0 {
+            try? await Task.sleep(nanoseconds: UInt64(timeoutMilliseconds) * 1_000_000)
+        }
+        return pendingMailboxThreadIDs.contains(threadID)
+    }
 }
 
 private struct ListAgentsToolResultFixture: Decodable {
     let agents: [ListedAgentFixture]
+}
+
+private struct WaitAgentToolResultFixture: Decodable, Equatable {
+    let message: String
+    let timedOut: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case message
+        case timedOut = "timed_out"
+    }
 }
 
 private struct ListedAgentFixture: Decodable {

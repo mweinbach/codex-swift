@@ -828,6 +828,14 @@ Recent upstream audit checkpoint:
   `send_message`/`followup_task`. `spawn_agent`, `wait_agent`, `close_agent`,
   richer final-status tracking, and full ThreadManager-backed `AgentControl`
   remain pending.
+- 2026-05-18: Swift live app-server MultiAgentV2 `wait_agent` now mirrors
+  Rust's configured timeout bounds, default timeout selection, immediate
+  completion when mailbox items are already pending for the current thread,
+  mailbox-change waiting, `collab_waiting_begin`/`collab_waiting_end` runtime
+  events, and Rust's JSON result shape (`Wait completed.` / `Wait timed out.`
+  with `timed_out`). `spawn_agent`, `close_agent`, final-status mailbox
+  notifications, richer final-status tracking, and full ThreadManager-backed
+  `AgentControl` remain pending.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through

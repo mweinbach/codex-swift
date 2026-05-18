@@ -730,6 +730,7 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         )
         let planMode = setup.collaborationModeKind == .plan
         let sessionSource = setup.sessionSource
+        let multiAgentV2WaitTimeouts = MultiAgentV2WaitTimeouts(config: setup.settings.multiAgentV2)
         let toolRouter = NonInteractiveExec.ToolRouter(
             hookContext: stopHookContext,
             cwd: setup.cwd,
@@ -765,11 +766,18 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                     currentThreadID: currentThreadID,
                     currentSessionSource: sessionSource,
                     stateStore: configuration.stateStore,
+                    waitTimeouts: multiAgentV2WaitTimeouts,
                     isTurnRunning: { threadID in
                         await state.isTurnRunning(threadID: threadID)
                     },
                     agentLastTaskMessage: { threadID in
                         await state.agentLastTaskMessage(threadID: threadID)
+                    },
+                    hasPendingMailboxItems: { threadID in
+                        await state.hasPendingMailboxItems(threadID: threadID)
+                    },
+                    waitForMailboxChange: { threadID, timeoutMS in
+                        await state.waitForMailboxChange(threadID: threadID, timeoutMilliseconds: timeoutMS)
                     },
                     queueMailboxCommunications: { threadID, communications in
                         await state.queueMailboxCommunications(
@@ -1620,6 +1628,7 @@ private actor AppServerLiveRuntimeState {
     private var activePendingInput: [String: [ResponseInputItem]] = [:]
     private var mailboxCommunications: [String: [InterAgentCommunication]] = [:]
     private var mailboxDeliveryPhases: [String: MailboxDeliveryPhase] = [:]
+    private var mailboxChangeWaiters: [String: [String: CheckedContinuation<Bool, Never>]] = [:]
     private var agentLastTaskMessages: [String: String] = [:]
     private var emittedAbortKeys: Set<String> = []
 
@@ -1735,6 +1744,7 @@ private actor AppServerLiveRuntimeState {
             return
         }
         mailboxCommunications[threadID, default: []].append(contentsOf: communications)
+        finishMailboxWaiters(threadID: threadID, result: true)
     }
 
     func recordAgentLastTaskMessage(threadID: String, message: String) {
@@ -1743,6 +1753,31 @@ private actor AppServerLiveRuntimeState {
 
     func agentLastTaskMessage(threadID: String) -> String? {
         agentLastTaskMessages[threadID]
+    }
+
+    func hasPendingMailboxItems(threadID: String) -> Bool {
+        mailboxCommunications[threadID]?.isEmpty == false
+    }
+
+    func waitForMailboxChange(threadID: String, timeoutMilliseconds: Int64) async -> Bool {
+        if hasPendingMailboxItems(threadID: threadID) {
+            return true
+        }
+        let waiterID = UUID().uuidString
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                mailboxChangeWaiters[threadID, default: [:]][waiterID] = continuation
+                Task {
+                    let timeoutNanoseconds = max(timeoutMilliseconds, 0) * 1_000_000
+                    try? await Task.sleep(nanoseconds: UInt64(timeoutNanoseconds))
+                    self.finishMailboxWaiter(threadID: threadID, waiterID: waiterID, result: false)
+                }
+            }
+        } onCancel: {
+            Task {
+                await self.finishMailboxWaiter(threadID: threadID, waiterID: waiterID, result: false)
+            }
+        }
     }
 
     func takeMailboxCommunications(threadID: String) -> [InterAgentCommunication] {
@@ -1800,6 +1835,7 @@ private actor AppServerLiveRuntimeState {
         activePendingInput.removeValue(forKey: threadID)
         mailboxCommunications.removeValue(forKey: threadID)
         mailboxDeliveryPhases.removeValue(forKey: threadID)
+        finishMailboxWaiters(threadID: threadID, result: true)
         agentLastTaskMessages.removeValue(forKey: threadID)
     }
 
@@ -1812,6 +1848,7 @@ private actor AppServerLiveRuntimeState {
         activePendingInput.removeAll()
         mailboxCommunications.removeAll()
         mailboxDeliveryPhases.removeAll()
+        finishAllMailboxWaiters(result: true)
         agentLastTaskMessages.removeAll()
         emittedAbortKeys.removeAll()
         for turn in turns {
@@ -1946,6 +1983,30 @@ private actor AppServerLiveRuntimeState {
     private struct PendingDynamicTool {
         let turnID: String
         let continuation: CheckedContinuation<DynamicToolResponse?, Never>
+    }
+
+    private func finishMailboxWaiter(threadID: String, waiterID: String, result: Bool) {
+        mailboxChangeWaiters[threadID]?.removeValue(forKey: waiterID)?.resume(returning: result)
+        if mailboxChangeWaiters[threadID]?.isEmpty == true {
+            mailboxChangeWaiters.removeValue(forKey: threadID)
+        }
+    }
+
+    private func finishMailboxWaiters(threadID: String, result: Bool) {
+        guard let waiters = mailboxChangeWaiters.removeValue(forKey: threadID) else {
+            return
+        }
+        for waiter in waiters.values {
+            waiter.resume(returning: result)
+        }
+    }
+
+    private func finishAllMailboxWaiters(result: Bool) {
+        let waiters = mailboxChangeWaiters.values.flatMap(\.values)
+        mailboxChangeWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume(returning: result)
+        }
     }
 
     private func cancelPendingContinuations(turnID: String) {
