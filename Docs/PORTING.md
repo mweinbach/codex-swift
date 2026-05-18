@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: extended CLI help runtime-oracle parity to hidden/internal
+  command surfaces. Swift now renders Rust-shaped `codex execpolicy --help`,
+  `codex responses-api-proxy --help`, and `codex stdio-to-uds --help` output
+  instead of falling back to root help, while preserving Rust's
+  `computer-use --help` root-help behavior.
 - 2026-05-18: extended CLI help runtime-oracle parity to the remaining visible
   orchestration command groups. Swift now renders Rust-shaped
   `codex debug --help` and `codex cloud --help` output instead of falling back

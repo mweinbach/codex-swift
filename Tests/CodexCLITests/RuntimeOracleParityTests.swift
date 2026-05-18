@@ -147,6 +147,18 @@ final class RuntimeOracleParityTests: XCTestCase {
         XCTAssertEqual(normalizedHelp(swift.stdout), normalizedHelp(rust.stdout))
     }
 
+    func testExecPolicyHelpMatchesRustOracleModuloWhitespace() throws {
+        let oracle = try RuntimeOracle.required()
+
+        let rust = try oracle.run(.rust, arguments: ["execpolicy", "--help"])
+        let swift = try oracle.run(.swift, arguments: ["execpolicy", "--help"])
+
+        XCTAssertEqual(rust.exitCode, 0, rust.stderr)
+        XCTAssertEqual(swift.exitCode, 0, swift.stderr)
+
+        XCTAssertEqual(normalizedHelp(swift.stdout), normalizedHelp(rust.stdout))
+    }
+
     func testApplyHelpMatchesRustOracleModuloWhitespace() throws {
         let oracle = try RuntimeOracle.required()
 
@@ -260,6 +272,30 @@ final class RuntimeOracleParityTests: XCTestCase {
 
         let rust = try oracle.run(.rust, arguments: ["cloud", "--help"])
         let swift = try oracle.run(.swift, arguments: ["cloud", "--help"])
+
+        XCTAssertEqual(rust.exitCode, 0, rust.stderr)
+        XCTAssertEqual(swift.exitCode, 0, swift.stderr)
+
+        XCTAssertEqual(normalizedHelp(swift.stdout), normalizedHelp(rust.stdout))
+    }
+
+    func testResponsesAPIProxyHelpMatchesRustOracleModuloWhitespace() throws {
+        let oracle = try RuntimeOracle.required()
+
+        let rust = try oracle.run(.rust, arguments: ["responses-api-proxy", "--help"])
+        let swift = try oracle.run(.swift, arguments: ["responses-api-proxy", "--help"])
+
+        XCTAssertEqual(rust.exitCode, 0, rust.stderr)
+        XCTAssertEqual(swift.exitCode, 0, swift.stderr)
+
+        XCTAssertEqual(normalizedHelp(swift.stdout), normalizedHelp(rust.stdout))
+    }
+
+    func testStdioToUDSHelpMatchesRustOracleModuloWhitespace() throws {
+        let oracle = try RuntimeOracle.required()
+
+        let rust = try oracle.run(.rust, arguments: ["stdio-to-uds", "--help"])
+        let swift = try oracle.run(.swift, arguments: ["stdio-to-uds", "--help"])
 
         XCTAssertEqual(rust.exitCode, 0, rust.stderr)
         XCTAssertEqual(swift.exitCode, 0, swift.stderr)

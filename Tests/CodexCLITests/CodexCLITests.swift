@@ -315,6 +315,18 @@ final class CodexCLITests: XCTestCase {
         XCTAssertTrue(debugHelp.contains("  prompt-input  Render the model-visible prompt input list as JSON"))
 
         stdout.removeAll()
+        let execPolicyExitCode = await CodexCLI().runAsync(
+            arguments: ["execpolicy", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(execPolicyExitCode, 0)
+        let execPolicyHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(execPolicyHelp.hasPrefix("Execpolicy tooling\n\nUsage: codex execpolicy [OPTIONS] <COMMAND>"))
+        XCTAssertTrue(execPolicyHelp.contains("  check  Check execpolicy files against a command"))
+
+        stdout.removeAll()
         let applyExitCode = await CodexCLI().runAsync(
             arguments: ["apply", "--help"],
             stdout: { stdout.append($0) },
@@ -436,6 +448,30 @@ final class CodexCLITests: XCTestCase {
         let cloudHelp = try XCTUnwrap(stdout.first)
         XCTAssertTrue(cloudHelp.hasPrefix("[EXPERIMENTAL] Browse tasks from Codex Cloud and apply changes locally\n\nUsage: codex cloud [OPTIONS] [COMMAND]"))
         XCTAssertTrue(cloudHelp.contains("  diff    Show the unified diff for a Codex Cloud task"))
+
+        stdout.removeAll()
+        let responsesAPIProxyExitCode = await CodexCLI().runAsync(
+            arguments: ["responses-api-proxy", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(responsesAPIProxyExitCode, 0)
+        let responsesAPIProxyHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(responsesAPIProxyHelp.hasPrefix("Internal: run the responses API proxy\n\nUsage: codex responses-api-proxy [OPTIONS]"))
+        XCTAssertTrue(responsesAPIProxyHelp.contains("      --server-info <FILE>"))
+
+        stdout.removeAll()
+        let stdioToUDSExitCode = await CodexCLI().runAsync(
+            arguments: ["stdio-to-uds", "--help"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(stdioToUDSExitCode, 0)
+        let stdioToUDSHelp = try XCTUnwrap(stdout.first)
+        XCTAssertTrue(stdioToUDSHelp.hasPrefix("Internal: relay stdio to a Unix domain socket\n\nUsage: codex stdio-to-uds [OPTIONS] <SOCKET_PATH>"))
+        XCTAssertTrue(stdioToUDSHelp.contains("Path to the Unix domain socket to connect to"))
     }
 
     func testCommandVersionTargetsSubcommandLikeRust() async {

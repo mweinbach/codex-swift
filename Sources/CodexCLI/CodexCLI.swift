@@ -944,6 +944,8 @@ public struct CodexCLI: Sendable {
             return renderSandboxHelp()
         case "debug":
             return renderDebugHelp()
+        case "execpolicy":
+            return renderExecPolicyHelp()
         case "apply":
             return renderApplyHelp()
         case "resume":
@@ -952,6 +954,10 @@ public struct CodexCLI: Sendable {
             return renderForkHelp()
         case "cloud":
             return renderCloudHelp()
+        case "responses-api-proxy":
+            return renderResponsesAPIProxyHelp()
+        case "stdio-to-uds":
+            return renderStdioToUDSHelp()
         case "exec-server":
             return renderExecServerHelp()
         case "features":
@@ -1853,6 +1859,36 @@ public struct CodexCLI: Sendable {
         """
     }
 
+    private func renderExecPolicyHelp() -> String {
+        """
+        Execpolicy tooling
+
+        Usage: codex execpolicy [OPTIONS] <COMMAND>
+
+        Commands:
+          check  Check execpolicy files against a command
+          help   Print this message or the help of the given subcommand(s)
+
+        Options:
+          -c, --config <key=value>
+                  Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                  Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                  as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                  Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                  shell_environment_policy.inherit=all`
+
+              --enable <FEATURE>
+                  Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+              --disable <FEATURE>
+                  Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+          -h, --help
+                  Print help (see a summary with '-h')
+        """
+    }
+
     private func renderResumeHelp() -> String {
         """
         Resume a previous interactive session (picker by default; use --last to continue the most recent)
@@ -2126,6 +2162,79 @@ public struct CodexCLI: Sendable {
 
           -V, --version
                   Print version
+        """
+    }
+
+    private func renderResponsesAPIProxyHelp() -> String {
+        """
+        Internal: run the responses API proxy
+
+        Usage: codex responses-api-proxy [OPTIONS]
+
+        Options:
+          -c, --config <key=value>
+                  Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                  Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                  as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                  Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                  shell_environment_policy.inherit=all`
+
+              --port <PORT>
+                  Port to listen on. If not set, an ephemeral port is used
+
+              --enable <FEATURE>
+                  Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+              --server-info <FILE>
+                  Path to a JSON file to write startup info (single line). Includes {"port": <u16>}
+
+              --disable <FEATURE>
+                  Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+              --http-shutdown
+                  Enable HTTP shutdown endpoint at GET /shutdown
+
+              --upstream-url <UPSTREAM_URL>
+                  Absolute URL the proxy should forward requests to (defaults to OpenAI)
+
+                  [default: https://api.openai.com/v1/responses]
+
+              --dump-dir <DIR>
+                  Directory where request/response dumps should be written as JSON
+
+          -h, --help
+                  Print help (see a summary with '-h')
+        """
+    }
+
+    private func renderStdioToUDSHelp() -> String {
+        """
+        Internal: relay stdio to a Unix domain socket
+
+        Usage: codex stdio-to-uds [OPTIONS] <SOCKET_PATH>
+
+        Arguments:
+          <SOCKET_PATH>
+                  Path to the Unix domain socket to connect to
+
+        Options:
+          -c, --config <key=value>
+                  Override a configuration value that would otherwise be loaded from `~/.codex/config.toml`.
+                  Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
+                  as TOML. If it fails to parse as TOML, the raw string is used as a literal.
+
+                  Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+                  shell_environment_policy.inherit=all`
+
+              --enable <FEATURE>
+                  Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+              --disable <FEATURE>
+                  Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+          -h, --help
+                  Print help (see a summary with '-h')
         """
     }
 
