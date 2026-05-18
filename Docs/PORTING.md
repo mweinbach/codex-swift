@@ -912,6 +912,13 @@ Recent upstream audit checkpoint:
   mirror Rust's fallback parent injection path by queueing a user-role
   `<subagent_notification>` with the child thread id as `agent_path`. Full
   ThreadManager-backed `AgentControl` remains pending.
+- 2026-05-18: Swift live app-server terminal subagent notification routing now
+  also snapshots the loaded child's `features.multi_agent_v2` state like Rust's
+  completion watcher: path-backed children with MultiAgentV2 disabled fall back
+  to a queued user-role parent `<subagent_notification>` instead of mailbox
+  inter-agent communication. Unknown/manual test state keeps the prior mailbox
+  route, matching Rust's missing-child default. Full ThreadManager-backed
+  `AgentControl` remains pending.
 - 2026-05-18: Swift live app-server MultiAgentV2 now routes `spawn_agent`
   calls through the live runtime: Rust v2 arguments decode with the same
   `fork_context` rejection and `fork_turns` validation, spawn begin/end events

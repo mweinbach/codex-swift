@@ -372,6 +372,10 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         await state.recordSessionSource(threadID: threadID, source: source)
     }
 
+    func recordMultiAgentV2Feature(threadID: String, enabled: Bool) async {
+        await state.recordMultiAgentV2Feature(threadID: threadID, enabled: enabled)
+    }
+
     func emitRuntimeEvent(threadID: String, turnID: String, event: EventMessage) async {
         await state.emit(threadID: threadID, turnID: turnID, event: event)
     }
@@ -719,6 +723,10 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         if let serviceTierOverride = submission.serviceTierOverride {
             settings.serviceTier = serviceTierOverride
         }
+        await state.recordMultiAgentV2Feature(
+            threadID: submission.threadID,
+            enabled: settings.features.isEnabled(.multiAgentV2)
+        )
         let runtimeRefreshSnapshot = await state.runtimeConfigSnapshot(threadID: submission.threadID)
         let refreshedConfigStack = try runtimeRefreshSnapshot.map {
             try AppServerRuntimeConfigRefresh.applyRuntimeRefreshableSnapshot(
@@ -2252,6 +2260,7 @@ private actor AppServerLiveRuntimeState {
     private var agentLastTaskMessages: [String: String] = [:]
     private var agentStatuses: [String: AgentStatus] = [:]
     private var sessionSources: [String: SessionSource] = [:]
+    private var multiAgentV2Features: [String: Bool] = [:]
     private var reservedSpawnThreadIDs: Set<String> = []
     private var reservedAgentPathThreadIDs: [String: String] = [:]
     private var reservedAgentPathsByThreadID: [String: String] = [:]
@@ -2354,6 +2363,10 @@ private actor AppServerLiveRuntimeState {
         if let nickname = source.nickname {
             usedAgentNicknames.insert(nickname)
         }
+    }
+
+    func recordMultiAgentV2Feature(threadID: String, enabled: Bool) {
+        multiAgentV2Features[threadID] = enabled
     }
 
     func reserveAgentNickname(candidates: [String], preferred: String? = nil) -> String? {
@@ -2544,6 +2557,7 @@ private actor AppServerLiveRuntimeState {
         reservedSpawnThreadIDs.remove(threadID)
         releaseAgentPath(threadID: threadID)
         sessionSources.removeValue(forKey: threadID)
+        multiAgentV2Features.removeValue(forKey: threadID)
         idlePendingInput.removeValue(forKey: threadID)
         activePendingInput.removeValue(forKey: threadID)
         mailboxCommunications.removeValue(forKey: threadID)
@@ -2565,6 +2579,7 @@ private actor AppServerLiveRuntimeState {
         runtimeConfigSnapshots.removeAll()
         agentStatuses.removeAll()
         sessionSources.removeAll()
+        multiAgentV2Features.removeAll()
         reservedSpawnThreadIDs.removeAll()
         reservedAgentPathThreadIDs.removeAll()
         reservedAgentPathsByThreadID.removeAll()
@@ -2762,21 +2777,34 @@ private actor AppServerLiveRuntimeState {
             )
             return
         }
-        guard let parentAgentPath = Self.parentAgentPath(of: childAgentPath) else {
+        if multiAgentV2Features[threadID] != false {
+            guard let parentAgentPath = Self.parentAgentPath(of: childAgentPath) else {
+                return
+            }
+            let communication = InterAgentCommunication(
+                author: childAgentPath,
+                recipient: parentAgentPath,
+                content: Self.subagentNotificationMessage(
+                    agentReference: childAgentPath.description,
+                    status: status
+                ),
+                triggerTurn: false
+            )
+            queueMailboxCommunications(
+                threadID: parentThreadID.description,
+                communications: [communication]
+            )
             return
         }
-        let communication = InterAgentCommunication(
-            author: childAgentPath,
-            recipient: parentAgentPath,
-            content: Self.subagentNotificationMessage(
-                agentReference: childAgentPath.description,
-                status: status
-            ),
-            triggerTurn: false
-        )
-        queueMailboxCommunications(
+        queueResponseItemsForNextTurn(
             threadID: parentThreadID.description,
-            communications: [communication]
+            items: [.message(
+                role: "user",
+                content: [.inputText(text: Self.subagentNotificationMessage(
+                    agentReference: childAgentPath.description,
+                    status: status
+                ))]
+            )]
         )
     }
 

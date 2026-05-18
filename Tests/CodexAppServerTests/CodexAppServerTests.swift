@@ -13761,6 +13761,56 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(rootMailbox, [])
     }
 
+    func testLiveRuntimeTerminalSubagentTurnFallsBackToParentInputWhenMultiAgentV2DisabledLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let parentThreadID = ThreadId()
+        let childThreadID = ThreadId()
+        let manager = AppServerLiveRuntimeManager(
+            configuration: testConfiguration(codexHome: temp.url, requiresOpenAIAuth: false)
+        )
+        defer {
+            manager.shutdown()
+        }
+        let workerPath = try AgentPath.root.join("worker")
+        let testerPath = try workerPath.join("tester")
+        await manager.recordSessionSource(
+            threadID: childThreadID.description,
+            source: .subagent(.threadSpawn(
+                parentThreadID: parentThreadID,
+                depth: 2,
+                agentPath: testerPath,
+                agentRole: "explorer"
+            ))
+        )
+        await manager.recordMultiAgentV2Feature(threadID: childThreadID.description, enabled: false)
+
+        await manager.emitRuntimeEvent(
+            threadID: childThreadID.description,
+            turnID: "turn-complete",
+            event: .taskComplete(TaskCompleteEvent(
+                turnID: "turn-complete",
+                lastAgentMessage: "done"
+            ))
+        )
+
+        let parentMailbox = await manager.takeMailboxCommunications(threadID: parentThreadID.description)
+        XCTAssertEqual(parentMailbox, [])
+        let queuedParentInput = await manager.takeQueuedResponseItemsForNextTurn(threadID: parentThreadID.description)
+        XCTAssertEqual(queuedParentInput.count, 1)
+        guard case let .message(role, content, phase) = queuedParentInput[0] else {
+            return XCTFail("expected disabled MultiAgentV2 child completion to queue a user message")
+        }
+        XCTAssertEqual(role, "user")
+        XCTAssertNil(phase)
+        XCTAssertEqual(content, [
+            .inputText(text: """
+            <subagent_notification>
+            {"agent_path":"/root/worker/tester","status":{"completed":"done"}}
+            </subagent_notification>
+            """)
+        ])
+    }
+
     func testLiveRuntimeTerminalSubagentTurnIgnoresDeadDirectParentLikeRustAgentControl() async throws {
         let temp = try TemporaryDirectory()
         let rootThreadID = ThreadId()
