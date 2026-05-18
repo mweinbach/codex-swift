@@ -158,12 +158,31 @@ final class CommandSurfaceCLITests: XCTestCase {
     }
 
     func testRunAsyncExecFullAutoRejectsNoSandboxConflictLikeRust() async {
-        let cases = [
-            ["exec", "--full-auto", "--dangerously-bypass-approvals-and-sandbox", "summarize"],
-            ["exec", "resume", "--last", "--full-auto", "--yolo", "follow up"]
+        let cases: [([String], String)] = [
+            (
+                ["exec", "--full-auto", "--dangerously-bypass-approvals-and-sandbox", "summarize"],
+                """
+                error: the argument '--full-auto' cannot be used with '--dangerously-bypass-approvals-and-sandbox'
+
+                Usage: codex exec [OPTIONS] [PROMPT]
+                       codex exec [OPTIONS] <COMMAND> [ARGS]
+
+                For more information, try '--help'.
+                """
+            ),
+            (
+                ["exec", "resume", "--last", "--full-auto", "--yolo", "follow up"],
+                """
+                error: the argument '--full-auto' cannot be used with '--dangerously-bypass-approvals-and-sandbox'
+
+                Usage: codex exec resume --last <SESSION_ID> [PROMPT]
+
+                For more information, try '--help'.
+                """
+            )
         ]
 
-        for arguments in cases {
+        for (arguments, expectedMessage) in cases {
             var stderr: [String] = []
             let exitCode = await CodexCLI().runAsync(
                 arguments: arguments,
@@ -176,16 +195,7 @@ final class CommandSurfaceCLITests: XCTestCase {
             )
 
             XCTAssertEqual(exitCode, 2, "\(arguments)")
-            XCTAssertEqual(stderr, [
-                """
-                error: the argument '--full-auto' cannot be used with '--dangerously-bypass-approvals-and-sandbox'
-
-                Usage: codex exec [OPTIONS] [PROMPT]
-                       codex exec [OPTIONS] <COMMAND> [ARGS]
-
-                For more information, try '--help'.
-                """
-            ], "\(arguments)")
+            XCTAssertEqual(stderr, [expectedMessage], "\(arguments)")
         }
     }
 
@@ -446,9 +456,24 @@ final class CommandSurfaceCLITests: XCTestCase {
                 2
             ),
             (
-                ["exec", "resume", "--bogus"],
-                "codex-swift: unsupported option for command 'exec resume': --bogus",
-                64
+                ["exec", "resume", "--last", "--output-last-message"],
+                """
+                error: a value is required for '--output-last-message <FILE>' but none was supplied
+
+                For more information, try '--help'.
+                """,
+                2
+            ),
+            (
+                ["exec", "resume", "sid", "prompt", "extra"],
+                """
+                error: unexpected argument 'extra' found
+
+                Usage: codex exec resume [OPTIONS] [SESSION_ID] [PROMPT]
+
+                For more information, try '--help'.
+                """,
+                2
             )
         ]
 

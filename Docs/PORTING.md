@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: tightened `codex exec resume` CLI parse-failure parity for the
+  command-local preflight surface. Swift now matches Rust/Clap exit-2
+  diagnostics for resume missing global option values, extra positionals, and
+  `--full-auto` / `--dangerously-bypass-approvals-and-sandbox` conflicts,
+  including the resume-specific usage shapes.
 - 2026-05-18: tightened `codex exec` CLI parse-failure parity for the
   command-local preflight surface. Swift now emits Rust/Clap exit-2 diagnostics
   for missing exec option values, unexpected flags and extra prompt arguments,

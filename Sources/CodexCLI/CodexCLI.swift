@@ -6132,10 +6132,18 @@ public struct CodexCLI: Sendable {
                     || ($0 == "--dangerously-bypass-approvals-and-sandbox"
                         && first != "--dangerously-bypass-approvals-and-sandbox")
             }) ?? (first == "--full-auto" ? "--dangerously-bypass-approvals-and-sandbox" : "--full-auto")
+            let conflictUsage: String
+            if case let .resume(resume) = action {
+                conflictUsage = resume.last
+                    ? "codex exec resume --last <SESSION_ID> [PROMPT]"
+                    : "codex exec resume [OPTIONS] [SESSION_ID] [PROMPT]"
+            } else {
+                conflictUsage = usage
+            }
             return clapArgumentConflict(
                 first,
                 conflictingArgument: second,
-                usage: usage
+                usage: conflictUsage
             )
         }
 
@@ -6216,10 +6224,11 @@ public struct CodexCLI: Sendable {
         var bypassHookTrust = false
         var positionals: [String] = []
         var index = 0
+        let usage = "codex exec resume [OPTIONS] [SESSION_ID] [PROMPT]"
 
         func value(after option: String, at index: Int) -> ParseResult<String> {
             guard index + 1 < arguments.count else {
-                return .failure("codex-swift: missing value for \(option)", 64)
+                return clapExecResumeMissingValue(option: option)
             }
             return .success(arguments[index + 1])
         }
@@ -6320,9 +6329,9 @@ public struct CodexCLI: Sendable {
                 index += 1
                 continue
             }
-            if execOptionConsumesValue(argument) {
+            if execResumeOptionConsumesValue(argument) {
                 guard index + 1 < arguments.count else {
-                    return .failure("codex-swift: missing value for \(argument)", 64)
+                    return clapExecResumeMissingValue(option: argument)
                 }
                 index += 2
                 continue
@@ -6332,14 +6341,19 @@ public struct CodexCLI: Sendable {
                 continue
             }
             if argument.hasPrefix("-") {
-                return .failure("codex-swift: unsupported option for command 'exec resume': \(argument)", 64)
+                if !last, positionals.isEmpty {
+                    positionals.append(argument)
+                    index += 1
+                    continue
+                }
+                return clapUnexpectedArgument(argument, usage: usage, asValueTip: true)
             }
             positionals.append(argument)
             index += 1
         }
 
         guard positionals.count <= 2 else {
-            return .failure("codex-swift: unexpected argument for command 'exec resume': \(positionals[2])", 64)
+            return clapUnexpectedArgument(positionals[2], usage: usage)
         }
 
         let prompt: String?
@@ -6399,6 +6413,13 @@ public struct CodexCLI: Sendable {
         )
     }
 
+    private func clapExecResumeMissingValue<Success>(option: String) -> ParseResult<Success> {
+        clapMissingValue(
+            option: execOptionName(option),
+            valueDisplay: execResumeOptionValueDisplay(option)
+        )
+    }
+
     private func execOptionDisplayName(_ option: String) -> String {
         "\(execOptionName(option)) \(execOptionValueDisplay(option))"
     }
@@ -6455,6 +6476,13 @@ public struct CodexCLI: Sendable {
         }
     }
 
+    private func execResumeOptionValueDisplay(_ option: String) -> String {
+        if execOptionName(option) == "--image" {
+            return "<FILE>"
+        }
+        return execOptionValueDisplay(option)
+    }
+
     private func execOptionConsumesValue(_ argument: String) -> Bool {
         if argument.contains("=") {
             return false
@@ -6476,6 +6504,18 @@ public struct CodexCLI: Sendable {
             "-c",
             "--config",
             "--color"
+        ].contains(argument)
+    }
+
+    private func execResumeOptionConsumesValue(_ argument: String) -> Bool {
+        if argument.contains("=") {
+            return false
+        }
+        return [
+            "-m",
+            "--model",
+            "-c",
+            "--config"
         ].contains(argument)
     }
 
