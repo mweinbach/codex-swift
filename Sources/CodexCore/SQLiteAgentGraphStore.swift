@@ -531,6 +531,29 @@ public actor SQLiteAgentGraphStore: AgentGraphStore {
         )
     }
 
+    public func findThreadSpawnRootAncestor(childThreadID: ThreadId) async throws -> ThreadId? {
+        let ids = try threadIDs(
+            query:
+            """
+            WITH RECURSIVE ancestors(thread_id, depth) AS (
+                SELECT parent_thread_id, 1
+                FROM thread_spawn_edges
+                WHERE child_thread_id = ?
+                UNION ALL
+                SELECT edge.parent_thread_id, ancestors.depth + 1
+                FROM thread_spawn_edges AS edge
+                JOIN ancestors ON edge.child_thread_id = ancestors.thread_id
+            )
+            SELECT thread_id
+            FROM ancestors
+            ORDER BY depth DESC
+            LIMIT 1
+            """,
+            bindings: [childThreadID.description]
+        )
+        return ids.first
+    }
+
     public func listThreadsWithAgentPaths() async throws -> [ThreadMetadata] {
         let query =
             """

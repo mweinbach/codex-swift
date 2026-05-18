@@ -551,11 +551,24 @@ struct AppServerLiveMultiAgentToolExecutor {
         guard let stateStore else {
             throw AppServerLiveMultiAgentToolError(message: "live agent path `\(agentPath)` not found")
         }
+        if agentPath.isRoot {
+            let threadID = try await rootThreadID()
+            let metadata = try await stateStore.getThread(threadID: threadID)
+            return ResolvedLiveAgentTarget(threadID: threadID, metadata: metadata, agentPathOverride: .root)
+        }
         guard let threadID = try await stateStore.findThreadByAgentPath(agentPath: agentPath) else {
             throw AppServerLiveMultiAgentToolError(message: "live agent path `\(agentPath)` not found")
         }
         let metadata = try await stateStore.getThread(threadID: threadID)
         return ResolvedLiveAgentTarget(threadID: threadID, metadata: metadata)
+    }
+
+    private func rootThreadID() async throws -> ThreadId {
+        guard let stateStore, currentSessionSource.agentPath != nil else {
+            return currentThreadID
+        }
+        return try await stateStore.findThreadSpawnRootAncestor(childThreadID: currentThreadID)
+            ?? currentThreadID
     }
 
     private func status(for threadID: ThreadId) async -> AgentStatus {
@@ -1143,8 +1156,12 @@ private struct ListedLiveAgent: Encodable, Equatable {
 private struct ResolvedLiveAgentTarget {
     let threadID: ThreadId
     let metadata: ThreadMetadata?
+    var agentPathOverride: AgentPath?
 
     var agentPath: AgentPath? {
+        if let agentPathOverride {
+            return agentPathOverride
+        }
         guard let rawPath = metadata?.agentPath else {
             return nil
         }

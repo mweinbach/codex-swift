@@ -12370,6 +12370,113 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(missingFollowupBegin.prompt, "missing followup")
     }
 
+    func testLiveMultiAgentMessageToolsResolveRootTargetFromChildLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let stateStore = try SQLiteAgentGraphStore(databaseURL: temp.url.appendingPathComponent("state.sqlite3"))
+        let rootThreadID = ThreadId()
+        let workerThreadID = ThreadId()
+        let workerPath = try AgentPath.root.join("worker")
+        let workerSource = SessionSource.subagent(.threadSpawn(
+            parentThreadID: rootThreadID,
+            depth: 1,
+            agentPath: workerPath,
+            agentRole: "worker"
+        ))
+        let workerSourceData = try JSONEncoder().encode(workerSource)
+        let workerSourceString = try XCTUnwrap(String(data: workerSourceData, encoding: .utf8))
+        try await stateStore.upsertThread(ThreadMetadata(
+            id: workerThreadID,
+            rolloutPath: temp.url.appendingPathComponent("worker.jsonl").path,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_001),
+            source: workerSourceString,
+            agentNickname: "Bernoulli",
+            agentRole: "worker",
+            agentPath: workerPath.description,
+            modelProvider: "openai",
+            cwd: temp.url.path,
+            cliVersion: "0.0.0-test",
+            title: "worker",
+            sandboxPolicy: "danger-full-access",
+            approvalMode: "never",
+            tokensUsed: 0
+        ))
+        let capture = LiveMultiAgentToolCapture(runningThreadIDs: [rootThreadID.description])
+        let executor = AppServerLiveMultiAgentToolExecutor(
+            currentThreadID: workerThreadID,
+            currentSessionSource: workerSource,
+            stateStore: stateStore,
+            waitTimeouts: MultiAgentV2WaitTimeouts(config: MultiAgentV2Config()),
+            isTurnRunning: { _ in false },
+            agentStatus: { threadID in
+                await capture.status(threadID: threadID)
+            },
+            agentLastTaskMessage: { threadID in
+                await capture.lastTaskMessage(threadID: threadID)
+            },
+            hasPendingMailboxItems: { threadID in
+                await capture.hasPendingMailbox(threadID: threadID)
+            },
+            waitForMailboxChange: { threadID, timeoutMS in
+                await capture.waitForMailboxChange(threadID: threadID, timeoutMilliseconds: timeoutMS)
+            },
+            queueMailboxCommunications: { threadID, communications in
+                await capture.queue(threadID: threadID, communications: communications)
+            },
+            recordAgentLastTaskMessage: { threadID, message in
+                await capture.recordLastTaskMessage(threadID: threadID, message: message)
+            },
+            submitPendingWorkTurnIfIdle: { threadID in
+                await capture.submitPendingWork(threadID: threadID)
+                return true
+            },
+            closeAgentThreads: { threadIDs in
+                await capture.close(threadIDs: threadIDs)
+            }
+        )
+
+        let send = await executor.execute(.functionCall(
+            name: "send_message",
+            arguments: #"{"target":"/root","message":"done"}"#,
+            callID: "call-child-send-root"
+        ))
+        let sendPayload = try Self.functionOutputPayload(send, callID: "call-child-send-root")
+        XCTAssertEqual(sendPayload.content, "")
+        XCTAssertEqual(sendPayload.success, true)
+        let queuedRootCommunications = await capture.queuedCommunications(threadID: rootThreadID.description)
+        XCTAssertEqual(
+            queuedRootCommunications,
+            [InterAgentCommunication(
+                author: workerPath,
+                recipient: .root,
+                content: "done",
+                triggerTurn: false
+            )]
+        )
+        let pendingAfterSend = await capture.pendingWorkThreadIDs()
+        XCTAssertEqual(pendingAfterSend, [])
+        let sendEvents = try XCTUnwrap(send?.runtimeEvents)
+        XCTAssertEqual(sendEvents.count, 2)
+        guard case let .collabAgentInteractionBegin(begin) = sendEvents[0] else {
+            return XCTFail("expected collab interaction begin event")
+        }
+        XCTAssertEqual(begin.senderThreadID, workerThreadID)
+        XCTAssertEqual(begin.receiverThreadID, rootThreadID)
+        XCTAssertEqual(begin.prompt, "done")
+
+        let followup = await executor.execute(.functionCall(
+            name: "followup_task",
+            arguments: #"{"target":"/root","message":"run this"}"#,
+            callID: "call-child-followup-root"
+        ))
+        let followupPayload = try Self.functionOutputPayload(followup, callID: "call-child-followup-root")
+        XCTAssertEqual(followupPayload.content, "Tasks can't be assigned to the root agent")
+        XCTAssertEqual(followupPayload.success, false)
+        XCTAssertEqual(followup?.runtimeEvents ?? [], [])
+        let pendingAfterFollowup = await capture.pendingWorkThreadIDs()
+        XCTAssertEqual(pendingAfterFollowup, [])
+    }
+
     func testLiveSpawnAgentRoutesRustV2ArgumentsAndEvents() async throws {
         let rootThreadID = ThreadId()
         let workerThreadID = ThreadId()
