@@ -12231,6 +12231,41 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(invalidPayload.success, false)
     }
 
+    func testLiveSpawnLastNTurnsSelectsRecentForkTurnsLikeRust() throws {
+        let sourceID = try ConversationId(string: "77e55044-10b1-426f-9247-bb680e5fe0c8")
+        let workerPath = try AgentPath.root.join("worker")
+        let items: [RolloutRecordItem] = [
+            .responseItem(.message(role: "user", content: [.outputText(text: "u1")])),
+            .responseItem(.message(role: "assistant", content: [.outputText(text: "a1")], phase: .finalAnswer)),
+            .responseItem(InterAgentCommunication(
+                author: .root,
+                recipient: workerPath,
+                content: "queued message",
+                triggerTurn: false
+            ).toResponseInputItem().responseItem()),
+            .responseItem(.message(role: "assistant", content: [.outputText(text: "a2")], phase: .finalAnswer)),
+            .responseItem(InterAgentCommunication(
+                author: .root,
+                recipient: workerPath,
+                content: "triggered task",
+                triggerTurn: true
+            ).toResponseInputItem().responseItem()),
+            .responseItem(.message(role: "assistant", content: [.outputText(text: "a3")], phase: .finalAnswer)),
+            .responseItem(.message(role: "user", content: [.outputText(text: "u2")])),
+            .responseItem(.message(role: "assistant", content: [.outputText(text: "a4")], phase: .finalAnswer)),
+        ]
+        let parentHistory = InitialHistory.resumed(ResumedHistory(
+            conversationID: sourceID,
+            history: items,
+            rolloutPath: "/source.jsonl"
+        ))
+
+        XCTAssertEqual(
+            LiveSpawnAgentForkMode.lastNTurns(2).initialHistory(from: parentHistory).rolloutItems,
+            Array(items[4...])
+        )
+    }
+
     func testLiveListAgentsUsesRustAgentPathsStatusAndLastTaskMessages() async throws {
         let temp = try TemporaryDirectory()
         let stateStore = try SQLiteAgentGraphStore(databaseURL: temp.url.appendingPathComponent("state.sqlite3"))

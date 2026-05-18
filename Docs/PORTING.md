@@ -862,9 +862,11 @@ Recent upstream audit checkpoint:
   calls through the live runtime: Rust v2 arguments decode with the same
   `fork_context` rejection and `fork_turns` validation, spawn begin/end events
   are emitted, child rollouts/agent-path graph metadata are created, and the
-  initial prompt is delivered as trigger-turn inter-agent mail. Full Rust
-  `AgentControl` parity, exact `LastNTurns` truncation semantics, and complete
-  role/model/service-tier validation remain pending.
+  initial prompt is delivered as trigger-turn inter-agent mail. `fork_turns:
+  "<n>"` now applies Rust's `LastNTurns` rollout truncation before writing the
+  child fork, and child forks drop stale parent MultiAgentV2 usage hints. Full
+  Rust `AgentControl` parity and complete role/model/service-tier validation
+  remain pending.
 - 2026-05-17: Swift live app-server Responses turns now carry the loaded MCP
   manager's tool inventory into runtime submissions and model-visible tool
   specs, plus an MCP tool-call handler that routes matching model calls through

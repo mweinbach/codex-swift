@@ -138,6 +138,7 @@ public final class RolloutRecorder {
         cliVersion: String,
         modelProvider: String?,
         dynamicTools: [DynamicToolSpec]? = nil,
+        usageHintTextsToFilter: [String] = [],
         gitInfo: GitInfo? = nil,
         eventPersistenceMode: EventPersistenceMode = .limited,
         calendar: Calendar = .current,
@@ -163,7 +164,12 @@ public final class RolloutRecorder {
             fileManager: fileManager
         )
         do {
-            try recorder.recordItems(forkedRolloutItems(from: initialHistory))
+            try recorder.recordItems(
+                forkedRolloutItems(
+                    from: initialHistory,
+                    usageHintTextsToFilter: usageHintTextsToFilter
+                )
+            )
         } catch {
             try? recorder.shutdown()
             throw error
@@ -171,8 +177,14 @@ public final class RolloutRecorder {
         return recorder
     }
 
-    public static func forkedRolloutItems(from history: InitialHistory) -> [RolloutRecordItem] {
-        history.rolloutItems.filter { item in
+    public static func forkedRolloutItems(
+        from history: InitialHistory,
+        usageHintTextsToFilter: [String] = []
+    ) -> [RolloutRecordItem] {
+        RolloutForking.filteredForkHistory(
+            history.rolloutItems,
+            usageHintTextsToFilter: usageHintTextsToFilter
+        ).filter { item in
             if case .sessionMeta = item {
                 return false
             }

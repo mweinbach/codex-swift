@@ -758,14 +758,15 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
                 cwd: setup.cwd,
                 conversationID: childConversationID,
                 forkedFromID: setup.conversationID,
-                initialHistory: parentHistory,
+                initialHistory: request.forkMode.initialHistory(from: parentHistory),
                 instructions: nil,
                 source: childSource,
                 threadSource: .subagent,
                 originator: configuration.originator,
                 cliVersion: configuration.version,
                 modelProvider: setup.settings.modelProvider ?? configuration.defaultModelProvider,
-                dynamicTools: setup.dynamicTools
+                dynamicTools: setup.dynamicTools,
+                usageHintTextsToFilter: Self.configuredMultiAgentV2UsageHintTexts(settings: setup.settings)
             )
         }
 
@@ -1730,6 +1731,16 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             return 1
         }
         return depth + 1
+    }
+
+    private static func configuredMultiAgentV2UsageHintTexts(settings: CodexRuntimeConfig) -> [String] {
+        guard settings.features.isEnabled(.multiAgentV2) else {
+            return []
+        }
+        return [
+            settings.multiAgentV2.rootAgentUsageHintText,
+            settings.multiAgentV2.subagentUsageHintText,
+        ].compactMap(\.self)
     }
 
     private static func persistedSessionSource(_ source: SessionSource) -> String {

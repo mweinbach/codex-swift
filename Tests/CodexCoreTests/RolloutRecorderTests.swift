@@ -175,6 +175,80 @@ final class RolloutRecorderTests: XCTestCase {
         XCTAssertEqual(lines[2].item, assistantMessage)
     }
 
+    func testCreateForkFiltersRuntimeHistoryAndUsageHintsLikeRustAgentControl() throws {
+        let temp = try RolloutRecorderTemporaryDirectory()
+        let sourceID = try ConversationId(string: "77e55044-10b1-426f-9247-bb680e5fe0c8")
+        let forkID = try ConversationId(string: "88e55044-10b1-426f-9247-bb680e5fe0c8")
+        let rootUsageHint = RolloutRecordItem.responseItem(.message(
+            role: "developer",
+            content: [.inputText(text: "root usage")]
+        ))
+        let keptDeveloper = RolloutRecordItem.responseItem(.message(
+            role: "developer",
+            content: [.inputText(text: "ordinary instruction")]
+        ))
+        let toolCall = RolloutRecordItem.responseItem(.functionCall(
+            name: "shell",
+            arguments: "{}",
+            callID: "call_1"
+        ))
+        let commentaryAssistant = RolloutRecordItem.responseItem(.message(
+            role: "assistant",
+            content: [.outputText(text: "working")],
+            phase: .commentary
+        ))
+        let finalAssistant = RolloutRecordItem.responseItem(.message(
+            role: "assistant",
+            content: [.outputText(text: "final")],
+            phase: .finalAnswer
+        ))
+        let sourceHistory = InitialHistory.forked([
+            .sessionMeta(SessionMetaLine(meta: SessionMeta(
+                id: sourceID,
+                timestamp: "2026-05-08T00:00:00.000Z",
+                cwd: "/source",
+                originator: "codex_swift",
+                cliVersion: "0.1.0"
+            ))),
+            rootUsageHint,
+            keptDeveloper,
+            toolCall,
+            commentaryAssistant,
+            finalAssistant,
+        ])
+        let dates = DateSequence([
+            fixedDate(year: 2026, month: 5, day: 8, hour: 3, minute: 0, second: 0),
+            fixedDate(year: 2026, month: 5, day: 8, hour: 3, minute: 0, second: 1),
+            fixedDate(year: 2026, month: 5, day: 8, hour: 3, minute: 0, second: 2)
+        ])
+
+        let recorder = try RolloutRecorder.createFork(
+            codexHome: temp.url,
+            cwd: URL(fileURLWithPath: "/fork", isDirectory: true),
+            conversationID: forkID,
+            forkedFromID: sourceID,
+            initialHistory: sourceHistory,
+            source: .cli,
+            originator: "codex_swift",
+            cliVersion: "0.1.0",
+            modelProvider: nil,
+            usageHintTextsToFilter: ["root usage"],
+            calendar: utcCalendar(),
+            timestampProvider: dates.next
+        )
+        try recorder.shutdown()
+
+        let lines = try rolloutLines(at: recorder.rolloutPath)
+        guard case .sessionMeta = lines[0].item else {
+            return XCTFail("expected fork session metadata first")
+        }
+        XCTAssertEqual(lines.map(\.item), [
+            lines[0].item,
+            keptDeveloper,
+            finalAssistant,
+        ])
+    }
+
     func testExtendedEventPersistenceSanitizesExecEndLikeRust() throws {
         let temp = try RolloutRecorderTemporaryDirectory()
         let conversationID = try ConversationId(string: "67e55044-10b1-426f-9247-bb680e5fe0c8")

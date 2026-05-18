@@ -559,6 +559,22 @@ enum LiveSpawnAgentForkMode: Equatable, Sendable {
     case none
     case fullHistory
     case lastNTurns(Int)
+
+    func initialHistory(from parentHistory: InitialHistory) -> InitialHistory {
+        switch self {
+        case .none:
+            return .forked([])
+        case .fullHistory:
+            return parentHistory
+        case let .lastNTurns(count):
+            return .forked(
+                RolloutTruncation.truncateToLastNForkTurns(
+                    parentHistory.rolloutItems,
+                    nFromEnd: count
+                )
+            )
+        }
+    }
 }
 
 private struct SpawnAgentToolArguments: Decodable {
