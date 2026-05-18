@@ -8317,6 +8317,126 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(idleStatus["type"] as? String, "idle")
     }
 
+    func testRuntimeApprovalAndUserInputResponsesReleaseActiveFlagsLikeRust() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let coreOpCapture = AppServerCoreOpCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) },
+            coreOpSubmitter: coreOpCapture.submit
+        )
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .taskStarted(TaskStartedEvent(
+                turnID: "turn-1",
+                modelContextWindow: nil
+            ))
+        )
+        let active = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(active[0]["method"] as? String, "thread/status/changed")
+        XCTAssertEqual(
+            ((active[0]["params"] as? [String: Any])?["status"] as? [String: Any])?["activeFlags"] as? [String],
+            []
+        )
+        _ = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .execApprovalRequest(ExecApprovalRequestEvent(
+                callID: "exec-1",
+                approvalID: "approval-1",
+                turnID: "turn-1",
+                command: ["git", "status"],
+                cwd: "/repo",
+                parsedCmd: []
+            ))
+        )
+        let waitingOnApproval = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(waitingOnApproval[0]["method"] as? String, "thread/status/changed")
+        XCTAssertEqual(
+            ((waitingOnApproval[0]["params"] as? [String: Any])?["status"] as? [String: Any])?["activeFlags"] as? [String],
+            ["waitingOnApproval"]
+        )
+        let approvalRequestPayload = try await nextNotificationPayload(notificationCapture)
+        let approvalRequest = try XCTUnwrap(JSONSerialization.jsonObject(with: approvalRequestPayload) as? [String: Any])
+        let approvalRequestID = try XCTUnwrap(approvalRequest["id"])
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .requestUserInput(RequestUserInputEvent(
+                callID: "input-1",
+                turnID: "turn-1",
+                questions: [RequestUserInputQuestion(id: "choice", header: "Choice", question: "Pick")]
+            ))
+        )
+        let waitingOnBoth = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(waitingOnBoth[0]["method"] as? String, "thread/status/changed")
+        XCTAssertEqual(
+            ((waitingOnBoth[0]["params"] as? [String: Any])?["status"] as? [String: Any])?["activeFlags"] as? [String],
+            ["waitingOnApproval", "waitingOnUserInput"]
+        )
+        let userInputRequestPayload = try await nextNotificationPayload(notificationCapture)
+        let userInputRequest = try XCTUnwrap(JSONSerialization.jsonObject(with: userInputRequestPayload) as? [String: Any])
+        let userInputRequestID = try XCTUnwrap(userInputRequest["id"])
+
+        let approvalResponse = try JSONSerialization.data(withJSONObject: [
+            "method": "item/commandExecution/requestApproval",
+            "id": approvalRequestID,
+            "response": ["decision": "accept"]
+        ])
+        XCTAssertNil(processor.processLine(approvalResponse))
+        try await assertResolvedServerRequest(
+            notificationCapture,
+            threadID: "thread-1",
+            requestID: approvalRequestID
+        )
+        let approvalReleased = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(approvalReleased[0]["method"] as? String, "thread/status/changed")
+        XCTAssertEqual(
+            ((approvalReleased[0]["params"] as? [String: Any])?["status"] as? [String: Any])?["activeFlags"] as? [String],
+            ["waitingOnUserInput"]
+        )
+
+        let userInputResponse = try JSONSerialization.data(withJSONObject: [
+            "method": "item/tool/requestUserInput",
+            "id": userInputRequestID,
+            "response": [
+                "answers": [
+                    "choice": ["answers": ["A"]]
+                ]
+            ]
+        ])
+        XCTAssertNil(processor.processLine(userInputResponse))
+        try await assertResolvedServerRequest(
+            notificationCapture,
+            threadID: "thread-1",
+            requestID: userInputRequestID
+        )
+        let userInputReleased = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        XCTAssertEqual(userInputReleased[0]["method"] as? String, "thread/status/changed")
+        XCTAssertEqual(
+            ((userInputReleased[0]["params"] as? [String: Any])?["status"] as? [String: Any])?["activeFlags"] as? [String],
+            []
+        )
+
+        let submissions = try await waitForSubmissions(coreOpCapture, count: 2)
+        guard case let .execApproval(approvalID, _, approvalDecision) = submissions[0].op else {
+            return XCTFail("expected exec approval response")
+        }
+        XCTAssertEqual(approvalID, "approval-1")
+        XCTAssertEqual(approvalDecision, .approved)
+        guard case let .userInputAnswer(turnID, userInputAnswer) = submissions[1].op else {
+            return XCTFail("expected user input response")
+        }
+        XCTAssertEqual(turnID, "turn-1")
+        XCTAssertEqual(userInputAnswer.answers["choice"]?.answers, ["A"])
+    }
+
     func testRuntimeTurnAbortedEmitsInterruptedCompletionWithTiming() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()

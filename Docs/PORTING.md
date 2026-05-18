@@ -12,6 +12,12 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-17: matched Rust's live app-server pending request status release
+  from `codex-rs/app-server/src/thread_status.rs` and
+  `codex-rs/app-server/src/bespoke_event_handling.rs`. Swift now drops
+  `waitingOnApproval` and `waitingOnUserInput` active flags when the
+  corresponding client approval / user-input response is received, rather than
+  leaving those flags stuck until terminal turn completion.
 - 2026-05-17: made the Swift port platform target explicit. The supported
   product target is macOS 14+ for now, matching `Package.swift` and current
   Darwin/CryptoKit/Security dependencies. Added macOS GitHub Actions CI for

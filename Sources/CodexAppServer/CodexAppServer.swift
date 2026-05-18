@@ -28017,7 +28017,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             let broker = outgoingRequestBroker
             let submitter = coreOpSubmitter
             afterNotifications = {
-                Task { [broker, submitter, threadID, event] in
+                Task { [weak self, broker, submitter, threadID, event] in
                     let result = await broker.requestFileChangeApproval(
                         params: AppServerProtocol.FileChangeRequestApprovalParams(
                             threadID: threadID,
@@ -28028,6 +28028,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                             grantRoot: event.grantRoot
                         )
                     )
+                    await self?.releaseRuntimeApprovalRequested(threadID: threadID)
                     guard let submitter,
                           let submission = Self.fileChangeApprovalSubmission(callID: event.callID, result: result)
                     else {
@@ -28043,13 +28044,14 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             let broker = outgoingRequestBroker
             let submitter = coreOpSubmitter
             afterNotifications = {
-                Task { [broker, submitter, threadID, turnID, event] in
+                Task { [weak self, broker, submitter, threadID, turnID, event] in
                     let isNetworkApproval = event.networkApprovalContext != nil
                     let cwd: AbsolutePath?
                     if isNetworkApproval {
                         cwd = nil
                     } else {
                         guard let commandCWD = try? AbsolutePath(absolutePath: event.cwd) else {
+                            await self?.releaseRuntimeApprovalRequested(threadID: threadID)
                             return
                         }
                         cwd = commandCWD
@@ -28076,6 +28078,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                             )
                         )
                     )
+                    await self?.releaseRuntimeApprovalRequested(threadID: threadID)
                     guard let submitter,
                           let submission = Self.commandExecutionApprovalSubmission(
                             callID: event.callID,
@@ -28100,9 +28103,10 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             let broker = outgoingRequestBroker
             let submitter = coreOpSubmitter
             afterNotifications = {
-                Task { [broker, submitter, threadID, event] in
+                Task { [weak self, broker, submitter, threadID, event] in
                     guard let cwd = event.cwd
                     else {
+                        await self?.releaseRuntimeApprovalRequested(threadID: threadID)
                         return
                     }
                     let result = await broker.requestPermissionsApproval(
@@ -28116,6 +28120,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                             permissions: Self.permissionsProfile(event.permissions)
                         )
                     )
+                    await self?.releaseRuntimeApprovalRequested(threadID: threadID)
                     guard let submitter,
                           let submission = Self.permissionsApprovalSubmission(
                             callID: event.callID,
@@ -28136,7 +28141,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
             let broker = outgoingRequestBroker
             let submitter = coreOpSubmitter
             afterNotifications = {
-                Task { [broker, submitter, threadID, turnID, event] in
+                Task { [weak self, broker, submitter, threadID, turnID, event] in
                     let result = await broker.requestToolUserInput(
                         params: AppServerProtocol.ToolRequestUserInputParams(
                             threadID: threadID,
@@ -28145,6 +28150,7 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
                             questions: event.questions
                         )
                     )
+                    await self?.releaseRuntimeUserInputRequested(threadID: threadID)
                     guard let submitter,
                           let submission = Self.toolRequestUserInputSubmission(turnID: turnID, result: result)
                     else {
@@ -28561,6 +28567,39 @@ final class CodexAppServerMessageProcessor: @unchecked Sendable {
         let previousFlags = runtimeActiveFlags(threadID: threadID)
         runtimePendingUserInputCounts[threadID, default: 0] += 1
         return runtimeActiveStatusNotificationIfChanged(threadID: threadID, previousFlags: previousFlags)
+    }
+
+    private func releaseRuntimeApprovalRequested(threadID: String) async {
+        let previousFlags = runtimeActiveFlags(threadID: threadID)
+        decrementRuntimePendingCount(&runtimePendingApprovalCounts, threadID: threadID)
+        if let notification = runtimeActiveStatusNotificationIfChanged(
+            threadID: threadID,
+            previousFlags: previousFlags
+        ) {
+            await sendRuntimeNotification(notification, threadID: threadID)
+        }
+    }
+
+    private func releaseRuntimeUserInputRequested(threadID: String) async {
+        let previousFlags = runtimeActiveFlags(threadID: threadID)
+        decrementRuntimePendingCount(&runtimePendingUserInputCounts, threadID: threadID)
+        if let notification = runtimeActiveStatusNotificationIfChanged(
+            threadID: threadID,
+            previousFlags: previousFlags
+        ) {
+            await sendRuntimeNotification(notification, threadID: threadID)
+        }
+    }
+
+    private func decrementRuntimePendingCount(_ counts: inout [String: Int], threadID: String) {
+        guard let count = counts[threadID] else {
+            return
+        }
+        if count <= 1 {
+            counts.removeValue(forKey: threadID)
+        } else {
+            counts[threadID] = count - 1
+        }
     }
 
     private func runtimeActiveStatusNotificationIfChanged(
