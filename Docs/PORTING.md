@@ -908,7 +908,10 @@ Recent upstream audit checkpoint:
   children beyond normal turn completion: errored, shutdown, and not-found
   terminal statuses enqueue the same `<subagent_notification>` envelope to the
   direct parent mailbox and wake `wait_agent` through the mailbox-change path.
-  Full ThreadManager-backed `AgentControl` remains pending.
+  Anonymous not-found thread-spawn children without an `agent_path` now also
+  mirror Rust's fallback parent injection path by queueing a user-role
+  `<subagent_notification>` with the child thread id as `agent_path`. Full
+  ThreadManager-backed `AgentControl` remains pending.
 - 2026-05-18: Swift live app-server MultiAgentV2 now routes `spawn_agent`
   calls through the live runtime: Rust v2 arguments decode with the same
   `fork_context` rejection and `fork_turns` validation, spawn begin/end events

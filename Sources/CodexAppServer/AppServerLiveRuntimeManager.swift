@@ -2742,20 +2742,34 @@ private actor AppServerLiveRuntimeState {
 
     private func maybeNotifyParentOfFinalStatus(threadID: String, status: AgentStatus) {
         guard status.isFinal,
-              case let .subagent(.threadSpawn(parentThreadID, _, childAgentPath, _, _)) = sessionSources[threadID],
-              let childAgentPath,
-              let parentAgentPath = Self.parentAgentPath(of: childAgentPath)
+              case let .subagent(.threadSpawn(parentThreadID, _, childAgentPath, _, _)) = sessionSources[threadID]
         else {
             return
         }
         guard agentStatus(threadID: parentThreadID.description) != .notFound else {
             return
         }
+        guard let childAgentPath else {
+            queueResponseItemsForNextTurn(
+                threadID: parentThreadID.description,
+                items: [.message(
+                    role: "user",
+                    content: [.inputText(text: Self.subagentNotificationMessage(
+                        agentReference: threadID,
+                        status: status
+                    ))]
+                )]
+            )
+            return
+        }
+        guard let parentAgentPath = Self.parentAgentPath(of: childAgentPath) else {
+            return
+        }
         let communication = InterAgentCommunication(
             author: childAgentPath,
             recipient: parentAgentPath,
             content: Self.subagentNotificationMessage(
-                agentPath: childAgentPath,
+                agentReference: childAgentPath.description,
                 status: status
             ),
             triggerTurn: false
@@ -2776,11 +2790,11 @@ private actor AppServerLiveRuntimeState {
         return try? AgentPath(validating: String(path[..<slashIndex]))
     }
 
-    private static func subagentNotificationMessage(agentPath: AgentPath, status: AgentStatus) -> String {
+    private static func subagentNotificationMessage(agentReference: String, status: AgentStatus) -> String {
         let statusData = (try? JSONEncoder().encode(status)) ?? Data()
         let statusJSON = String(data: statusData, encoding: .utf8)?.replacingOccurrences(of: "\\/", with: "/")
             ?? "null"
-        let body = #"{"agent_path":"\#(agentPath.description)","status":\#(statusJSON)}"#
+        let body = #"{"agent_path":"\#(agentReference)","status":\#(statusJSON)}"#
         return "<subagent_notification>\n\(body)\n</subagent_notification>"
     }
 

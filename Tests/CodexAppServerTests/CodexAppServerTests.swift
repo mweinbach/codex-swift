@@ -13911,6 +13911,50 @@ final class CodexAppServerTests: XCTestCase {
         ])
     }
 
+    func testLiveRuntimeAnonymousMissingChildQueuesParentNotificationLikeRustAgentControl() async throws {
+        let temp = try TemporaryDirectory()
+        let parentThreadID = ThreadId()
+        let childThreadID = ThreadId()
+        let manager = AppServerLiveRuntimeManager(
+            configuration: testConfiguration(codexHome: temp.url, requiresOpenAIAuth: false)
+        )
+        defer {
+            manager.shutdown()
+        }
+        await manager.recordSessionSource(
+            threadID: childThreadID.description,
+            source: .subagent(.threadSpawn(
+                parentThreadID: parentThreadID,
+                depth: 1,
+                agentPath: nil,
+                agentRole: "explorer"
+            ))
+        )
+
+        _ = try manager.submitCoreOp(
+            requestID: .string("shutdown-anonymous-missing"),
+            threadID: childThreadID.description,
+            op: .shutdown
+        )
+
+        let parentMailbox = await manager.takeMailboxCommunications(threadID: parentThreadID.description)
+        XCTAssertEqual(parentMailbox, [])
+        let queuedParentInput = await manager.takeQueuedResponseItemsForNextTurn(threadID: parentThreadID.description)
+        XCTAssertEqual(queuedParentInput.count, 1)
+        guard case let .message(role, content, phase) = queuedParentInput[0] else {
+            return XCTFail("expected anonymous child completion to queue a user message")
+        }
+        XCTAssertEqual(role, "user")
+        XCTAssertNil(phase)
+        XCTAssertEqual(content, [
+            .inputText(text: """
+            <subagent_notification>
+            {"agent_path":"\(childThreadID.description)","status":"not_found"}
+            </subagent_notification>
+            """)
+        ])
+    }
+
     func testLiveRuntimeInterruptedSubagentTurnDoesNotQueueParentNotificationLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let parentThreadID = ThreadId()
