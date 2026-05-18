@@ -21760,7 +21760,7 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(turnAgentTexts(turns[1]), ["Explicit reply"])
     }
 
-    func testThreadReadPreservesEmptyExplicitInProgressTurnLikeRust() throws {
+    func testThreadReadAndTurnsListInterruptStaleInProgressTurnLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let threadID = try writeRollout(
             codexHome: temp.url,
@@ -21785,19 +21785,57 @@ final class CodexAppServerTests: XCTestCase {
             ]
         )
 
-        let response = try appServerResponse(
-            #"{"id":1,"method":"thread/read","params":{"threadId":"\#(threadID)","includeTurns":true}}"#,
-            codexHome: temp.url
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            experimentalAPIEnabled: true
         )
+        let response = try decode(processor.processLine(Data(
+            #"{"id":1,"method":"thread/read","params":{"threadId":"\#(threadID)","includeTurns":true}}"#.utf8
+        )))
 
         let result = try XCTUnwrap(response["result"] as? [String: Any])
         let thread = try XCTUnwrap(result["thread"] as? [String: Any])
         let turns = try XCTUnwrap(thread["turns"] as? [[String: Any]])
+        let status = try XCTUnwrap(thread["status"] as? [String: Any])
+        XCTAssertEqual(status["type"] as? String, "notLoaded")
         XCTAssertEqual(turns.count, 2)
         XCTAssertEqual(turns[1]["id"] as? String, "turn-empty")
-        XCTAssertEqual(turns[1]["status"] as? String, "inProgress")
+        XCTAssertEqual(turns[1]["status"] as? String, "interrupted")
         XCTAssertEqual(turns[1]["startedAt"] as? Int, 2_000)
         XCTAssertEqual((turns[1]["items"] as? [[String: Any]])?.count, 0)
+
+        let listed = try decode(processor.processLine(Data(
+            #"{"id":2,"method":"thread/turns/list","params":{"threadId":"\#(threadID)","sortDirection":"asc","itemsView":"full"}}"#.utf8
+        )))
+        let listedResult = try XCTUnwrap(listed["result"] as? [String: Any])
+        let listedTurns = try XCTUnwrap(listedResult["data"] as? [[String: Any]])
+        XCTAssertEqual(listedTurns.last?["id"] as? String, "turn-empty")
+        XCTAssertEqual(listedTurns.last?["status"] as? String, "interrupted")
+
+        _ = try decode(processor.processLine(Data(
+            #"{"id":3,"method":"thread/resume","params":{"threadId":"\#(threadID)"}}"#.utf8
+        )))
+        await processor.handleRuntimeEvent(
+            threadID: threadID,
+            turnID: "turn-empty",
+            event: .taskStarted(TaskStartedEvent(
+                turnID: "turn-empty",
+                startedAt: 2_000,
+                modelContextWindow: nil,
+                collaborationModeKind: nil
+            ))
+        )
+
+        let activeRead = try decode(processor.processLine(Data(
+            #"{"id":4,"method":"thread/read","params":{"threadId":"\#(threadID)","includeTurns":true}}"#.utf8
+        )))
+        let activeResult = try XCTUnwrap(activeRead["result"] as? [String: Any])
+        let activeThread = try XCTUnwrap(activeResult["thread"] as? [String: Any])
+        let activeStatus = try XCTUnwrap(activeThread["status"] as? [String: Any])
+        let activeTurns = try XCTUnwrap(activeThread["turns"] as? [[String: Any]])
+        XCTAssertEqual(activeStatus["type"] as? String, "active")
+        XCTAssertEqual(activeTurns.last?["id"] as? String, "turn-empty")
+        XCTAssertEqual(activeTurns.last?["status"] as? String, "inProgress")
     }
 
     func testThreadResumeRejectsMissingRollout() throws {
