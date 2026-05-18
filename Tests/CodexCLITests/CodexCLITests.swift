@@ -1937,8 +1937,17 @@ final class CodexCLITests: XCTestCase {
                 return CodexCLI.CommandExecutionResult(exitCode: 0)
             }
         )
-        XCTAssertEqual(missingEnvExit, 64)
-        XCTAssertEqual(missingEnvStderr, ["codex-swift: missing required option for command 'cloud exec': --env <ENV_ID>"])
+        XCTAssertEqual(missingEnvExit, 2)
+        XCTAssertEqual(missingEnvStderr, [
+            """
+            error: the following required arguments were not provided:
+              --env <ENV_ID>
+
+            Usage: codex cloud exec --env <ENV_ID> [QUERY]
+
+            For more information, try '--help'.
+            """
+        ])
 
         var invalidAttemptsStderr: [String] = []
         let invalidAttemptsExit = await CodexCLI().runAsync(

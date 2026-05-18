@@ -8634,6 +8634,47 @@ public struct CodexCLI: Sendable {
         return .failure("codex-swift: unexpected argument for command 'debug \(subcommand)': \(argument)", 64)
     }
 
+    private func clapMissingRequired<Success>(_ displays: [String], usage: String) -> ParseResult<Success> {
+        let renderedArguments = displays
+            .map { "  \($0)" }
+            .joined(separator: "\n")
+        return .failure(
+            """
+            error: the following required arguments were not provided:
+            \(renderedArguments)
+
+            Usage: \(usage)
+
+            For more information, try '--help'.
+            """,
+            2
+        )
+    }
+
+    private func clapMissingValue<Success>(option: String, valueDisplay: String) -> ParseResult<Success> {
+        .failure(
+            """
+            error: a value is required for '\(option) \(valueDisplay)' but none was supplied
+
+            For more information, try '--help'.
+            """,
+            2
+        )
+    }
+
+    private func clapUnexpectedArgument<Success>(_ argument: String, usage: String) -> ParseResult<Success> {
+        .failure(
+            """
+            error: unexpected argument '\(argument)' found
+
+            Usage: \(usage)
+
+            For more information, try '--help'.
+            """,
+            2
+        )
+    }
+
     private func parseMcpCommandAction(_ arguments: [String]) -> ParseResult<McpCommandAction> {
         guard let subcommand = arguments.first else {
             return .failure("codex-swift: missing required subcommand for command 'mcp': list|get|add|remove|login|logout", 64)
@@ -8668,7 +8709,7 @@ public struct CodexCLI: Sendable {
             if argument.hasPrefix("-") {
                 return .failure("codex-swift: unsupported option for command 'mcp list': \(argument)", 64)
             }
-            return .failure("codex-swift: unexpected argument for command 'mcp list': \(argument)", 64)
+            return clapUnexpectedArgument(argument, usage: "codex mcp list [OPTIONS]")
         }
         return .success(.list(json: json))
     }
@@ -8690,14 +8731,17 @@ public struct CodexCLI: Sendable {
             name = argument
         }
         guard let name else {
-            return .failure("codex-swift: missing required argument for command 'mcp get': <NAME>", 64)
+            return clapMissingRequired(["<NAME>"], usage: "codex mcp get <NAME>")
         }
         return .success(.get(name: name, json: json))
     }
 
     private func parseMcpAdd(_ arguments: [String]) -> ParseResult<McpCommandAction> {
         guard let name = arguments.first, !name.hasPrefix("-") else {
-            return .failure("codex-swift: missing required argument for command 'mcp add': <NAME>", 64)
+            return clapMissingRequired(
+                ["<COMMAND|--url <URL>>", "<NAME>"],
+                usage: "codex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)"
+            )
         }
 
         var env: [McpEnvPair] = []
@@ -8714,7 +8758,7 @@ public struct CodexCLI: Sendable {
             }
             if argument == "--env" {
                 guard index + 1 < arguments.count else {
-                    return .failure("codex-swift: missing value for --env", 64)
+                    return clapMissingValue(option: "--env", valueDisplay: "<KEY=VALUE>")
                 }
                 switch parseMcpEnvPair(arguments[index + 1]) {
                 case let .success(pair):
@@ -8740,7 +8784,7 @@ public struct CodexCLI: Sendable {
                     return .failure("codex-swift: duplicate option for command 'mcp add': --url", 64)
                 }
                 guard index + 1 < arguments.count else {
-                    return .failure("codex-swift: missing value for --url", 64)
+                    return clapMissingValue(option: "--url", valueDisplay: "<URL>")
                 }
                 url = arguments[index + 1]
                 index += 2
@@ -8805,7 +8849,10 @@ public struct CodexCLI: Sendable {
             return .failure("codex-swift: --bearer-token-env-var requires --url", 64)
         }
         guard !command.isEmpty else {
-            return .failure("codex-swift: missing required argument for command 'mcp add': <COMMAND>", 64)
+            return clapMissingRequired(
+                ["<COMMAND|--url <URL>>"],
+                usage: "codex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)"
+            )
         }
         return .success(.add(name: name, transport: .stdio(command: command, env: env)))
     }
@@ -8818,7 +8865,7 @@ public struct CodexCLI: Sendable {
         while let argument = iterator.next() {
             if argument == "--scopes" {
                 guard let value = iterator.next() else {
-                    return .failure("codex-swift: missing value for --scopes", 64)
+                    return clapMissingValue(option: "--scopes", valueDisplay: "<SCOPE,SCOPE>")
                 }
                 scopes.append(contentsOf: value.split(separator: ",").map(String.init))
                 continue
@@ -8838,7 +8885,7 @@ public struct CodexCLI: Sendable {
         }
 
         guard let name else {
-            return .failure("codex-swift: missing required argument for command 'mcp login': <NAME>", 64)
+            return clapMissingRequired(["<NAME>"], usage: "codex mcp login <NAME>")
         }
         return .success(.login(name: name, scopes: scopes))
     }
@@ -8855,7 +8902,7 @@ public struct CodexCLI: Sendable {
             name = argument
         }
         guard let name else {
-            return .failure("codex-swift: missing required argument for command 'mcp \(subcommand)': <NAME>", 64)
+            return clapMissingRequired(["<NAME>"], usage: "codex mcp \(subcommand) <NAME>")
         }
         return .success(name)
     }
@@ -8920,7 +8967,7 @@ public struct CodexCLI: Sendable {
             }
             if argument == "--env" {
                 guard let value = iterator.next() else {
-                    return .failure("codex-swift: missing value for --env", 64)
+                    return clapMissingValue(option: "--env", valueDisplay: "<ENV>")
                 }
                 environment = value
                 continue
@@ -8931,7 +8978,7 @@ public struct CodexCLI: Sendable {
             }
             if argument == "--limit" {
                 guard let value = iterator.next() else {
-                    return .failure("codex-swift: missing value for --limit", 64)
+                    return clapMissingValue(option: "--limit", valueDisplay: "<N>")
                 }
                 switch parseCloudListLimit(value) {
                 case let .success(parsed):
@@ -8953,7 +9000,7 @@ public struct CodexCLI: Sendable {
             }
             if argument == "--cursor" {
                 guard let value = iterator.next() else {
-                    return .failure("codex-swift: missing value for --cursor", 64)
+                    return clapMissingValue(option: "--cursor", valueDisplay: "<CURSOR>")
                 }
                 cursor = value
                 continue
@@ -8969,7 +9016,7 @@ public struct CodexCLI: Sendable {
             if argument.hasPrefix("-") {
                 return .failure("codex-swift: unsupported option for command 'cloud list': \(argument)", 64)
             }
-            return .failure("codex-swift: unexpected argument for command 'cloud list': \(argument)", 64)
+            return clapUnexpectedArgument(argument, usage: "codex cloud list [OPTIONS]")
         }
 
         return .success(.list(environment: environment, limit: limit, cursor: cursor, json: json))
@@ -9002,7 +9049,7 @@ public struct CodexCLI: Sendable {
         }
 
         guard let taskID else {
-            return .failure("codex-swift: missing required argument for command 'cloud \(command)': <TASK_ID>", 64)
+            return clapMissingRequired(["<TASK_ID>"], usage: "codex cloud \(command) <TASK_ID>")
         }
         return .success(taskID)
     }
@@ -9026,7 +9073,7 @@ public struct CodexCLI: Sendable {
             }
             if argument == "--attempt" {
                 guard index + 1 < arguments.count else {
-                    return .failure("codex-swift: missing value for --attempt", 64)
+                    return clapMissingValue(option: "--attempt", valueDisplay: "<N>")
                 }
                 switch parseCloudAttempt(arguments[index + 1]) {
                 case let .success(parsed):
@@ -9059,7 +9106,7 @@ public struct CodexCLI: Sendable {
         }
 
         guard let taskID else {
-            return .failure("codex-swift: missing required argument for command 'cloud \(command)': <TASK_ID>", 64)
+            return clapMissingRequired(["<TASK_ID>"], usage: "codex cloud \(command) <TASK_ID>")
         }
         return .success((taskID: taskID, attempt: attempt))
     }
@@ -9085,7 +9132,7 @@ public struct CodexCLI: Sendable {
             }
             if argument == "--env" {
                 guard index + 1 < arguments.count else {
-                    return .failure("codex-swift: missing value for --env", 64)
+                    return clapMissingValue(option: "--env", valueDisplay: "<ENV_ID>")
                 }
                 environment = arguments[index + 1]
                 index += 2
@@ -9098,7 +9145,7 @@ public struct CodexCLI: Sendable {
             }
             if argument == "--branch" {
                 guard index + 1 < arguments.count else {
-                    return .failure("codex-swift: missing value for --branch", 64)
+                    return clapMissingValue(option: "--branch", valueDisplay: "<BRANCH>")
                 }
                 branch = arguments[index + 1]
                 index += 2
@@ -9111,7 +9158,7 @@ public struct CodexCLI: Sendable {
             }
             if argument == "--attempts" {
                 guard index + 1 < arguments.count else {
-                    return .failure("codex-swift: missing value for --attempts", 64)
+                    return clapMissingValue(option: "--attempts", valueDisplay: "<N>")
                 }
                 switch parseCloudAttempt(arguments[index + 1]) {
                 case let .success(parsed):
@@ -9144,7 +9191,7 @@ public struct CodexCLI: Sendable {
         }
 
         guard let environment else {
-            return .failure("codex-swift: missing required option for command 'cloud exec': --env <ENV_ID>", 64)
+            return clapMissingRequired(["--env <ENV_ID>"], usage: "codex cloud exec --env <ENV_ID> [QUERY]")
         }
         return .success(.exec(query: query, environment: environment, branch: branch, attempts: attempts))
     }
@@ -9215,7 +9262,7 @@ public struct CodexCLI: Sendable {
                     return .failure(message, code)
                 }
                 guard let value = iterator.next() else {
-                    return .failure("codex-swift: missing value for --marketplace", 64)
+                    return clapMissingValue(option: "--marketplace", valueDisplay: "<MARKETPLACE>")
                 }
                 marketplaceName = value
                 continue
@@ -9240,7 +9287,10 @@ public struct CodexCLI: Sendable {
         }
 
         guard let plugin else {
-            return .failure("codex-swift: missing required argument for command '\(commandName)': <PLUGIN[@MARKETPLACE]>", 64)
+            return clapMissingRequired(
+                ["<PLUGIN[@MARKETPLACE]>"],
+                usage: "codex \(commandName) <PLUGIN[@MARKETPLACE]>"
+            )
         }
         return .success(action(plugin, marketplaceName))
     }
@@ -9267,7 +9317,7 @@ public struct CodexCLI: Sendable {
                     return .failure(message, code)
                 }
                 guard let value = iterator.next() else {
-                    return .failure("codex-swift: missing value for --marketplace", 64)
+                    return clapMissingValue(option: "--marketplace", valueDisplay: "<MARKETPLACE>")
                 }
                 marketplaceName = value
                 continue
@@ -9334,7 +9384,7 @@ public struct CodexCLI: Sendable {
                     return .failure(message, code)
                 }
                 guard let value = iterator.next() else {
-                    return .failure("codex-swift: missing value for --ref", 64)
+                    return clapMissingValue(option: "--ref", valueDisplay: "<REF>")
                 }
                 refName = value
                 continue
@@ -9351,7 +9401,7 @@ public struct CodexCLI: Sendable {
             }
             if argument == "--sparse" {
                 guard let value = iterator.next() else {
-                    return .failure("codex-swift: missing value for --sparse", 64)
+                    return clapMissingValue(option: "--sparse", valueDisplay: "<PATH>")
                 }
                 sparsePaths.append(value)
                 continue
@@ -9370,7 +9420,7 @@ public struct CodexCLI: Sendable {
         }
 
         guard let source else {
-            return .failure("codex-swift: missing required argument for command 'plugin marketplace add': <SOURCE>", 64)
+            return clapMissingRequired(["<SOURCE>"], usage: "codex plugin marketplace add <SOURCE>")
         }
         return .success(.marketplaceAdd(source: source, refName: refName, sparsePaths: sparsePaths))
     }
@@ -9381,7 +9431,7 @@ public struct CodexCLI: Sendable {
             if argument.hasPrefix("-") {
                 return .failure("codex-swift: unsupported option for command 'plugin marketplace list': \(argument)", 64)
             }
-            return .failure("codex-swift: unexpected argument for command 'plugin marketplace list': \(argument)", 64)
+            return clapUnexpectedArgument(argument, usage: "codex plugin marketplace list [OPTIONS]")
         }
         return .success(.marketplaceList)
     }
@@ -9412,7 +9462,10 @@ public struct CodexCLI: Sendable {
             name = argument
         }
         guard let name else {
-            return .failure("codex-swift: missing required argument for command 'plugin marketplace remove': <NAME>", 64)
+            return clapMissingRequired(
+                ["<MARKETPLACE_NAME>"],
+                usage: "codex plugin marketplace remove <MARKETPLACE_NAME>"
+            )
         }
         return .success(.marketplaceRemove(name: name))
     }

@@ -115,62 +115,109 @@ final class PluginCLITests: XCTestCase {
     }
 
     func testRunAsyncPluginMarketplaceRejectsInvalidFormsBeforeRunner() async {
-        let cases: [([String], String)] = [
+        let cases: [([String], Int32, String)] = [
             (
                 ["plugin", "install"],
+                64,
                 "codex-swift: unsupported plugin subcommand: install"
             ),
             (
                 ["plugin", "add"],
-                "codex-swift: missing required argument for command 'plugin add': <PLUGIN[@MARKETPLACE]>"
+                2,
+                """
+                error: the following required arguments were not provided:
+                  <PLUGIN[@MARKETPLACE]>
+
+                Usage: codex plugin add <PLUGIN[@MARKETPLACE]>
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["plugin", "add", "weather", "--marketplace", "debug", "--marketplace=other"],
+                64,
                 "codex-swift: duplicate option for command 'plugin add': --marketplace"
             ),
             (
                 ["plugin", "add", "weather", "extra"],
+                64,
                 "codex-swift: unexpected argument for command 'plugin add': extra"
             ),
             (
                 ["plugin", "list", "extra"],
+                64,
                 "codex-swift: unexpected argument for command 'plugin list': extra"
             ),
             (
                 ["plugin", "list", "--marketplace", "debug", "-m", "other"],
+                64,
                 "codex-swift: duplicate option for command 'plugin list': --marketplace"
             ),
             (
                 ["plugin", "remove"],
-                "codex-swift: missing required argument for command 'plugin remove': <PLUGIN[@MARKETPLACE]>"
+                2,
+                """
+                error: the following required arguments were not provided:
+                  <PLUGIN[@MARKETPLACE]>
+
+                Usage: codex plugin remove <PLUGIN[@MARKETPLACE]>
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["plugin", "marketplace", "add"],
-                "codex-swift: missing required argument for command 'plugin marketplace add': <SOURCE>"
+                2,
+                """
+                error: the following required arguments were not provided:
+                  <SOURCE>
+
+                Usage: codex plugin marketplace add <SOURCE>
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["plugin", "marketplace", "add", "owner/repo", "extra"],
+                64,
                 "codex-swift: unexpected argument for command 'plugin marketplace add': extra"
             ),
             (
                 ["plugin", "marketplace", "add", "--ref", "main", "owner/repo", "--ref=next"],
+                64,
                 "codex-swift: duplicate option for command 'plugin marketplace add': --ref"
             ),
             (
                 ["plugin", "marketplace", "upgrade", "--all"],
+                64,
                 "codex-swift: unsupported option for command 'plugin marketplace upgrade': --all"
             ),
             (
                 ["plugin", "marketplace", "list", "extra"],
-                "codex-swift: unexpected argument for command 'plugin marketplace list': extra"
+                2,
+                """
+                error: unexpected argument 'extra' found
+
+                Usage: codex plugin marketplace list [OPTIONS]
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["plugin", "marketplace", "remove"],
-                "codex-swift: missing required argument for command 'plugin marketplace remove': <NAME>"
+                2,
+                """
+                error: the following required arguments were not provided:
+                  <MARKETPLACE_NAME>
+
+                Usage: codex plugin marketplace remove <MARKETPLACE_NAME>
+
+                For more information, try '--help'.
+                """
             )
         ]
 
-        for (arguments, expectedMessage) in cases {
+        for (arguments, expectedExitCode, expectedMessage) in cases {
             var stderr: [String] = []
             let exitCode = await CodexCLI().runAsync(
                 arguments: arguments,
@@ -182,7 +229,7 @@ final class PluginCLITests: XCTestCase {
                 }
             )
 
-            XCTAssertEqual(exitCode, 64, "\(arguments)")
+            XCTAssertEqual(exitCode, expectedExitCode, "\(arguments)")
             XCTAssertEqual(stderr, [expectedMessage], "\(arguments)")
         }
     }

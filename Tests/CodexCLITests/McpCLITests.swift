@@ -112,29 +112,49 @@ final class McpCLITests: XCTestCase {
     }
 
     func testRunAsyncMcpRejectsInvalidFormsBeforeRunner() async {
-        let cases: [([String], String)] = [
+        let cases: [([String], Int32, String)] = [
             (
                 ["mcp", "bogus"],
+                64,
                 "codex-swift: unsupported mcp subcommand: bogus"
             ),
             (
                 ["mcp", "get"],
-                "codex-swift: missing required argument for command 'mcp get': <NAME>"
+                2,
+                """
+                error: the following required arguments were not provided:
+                  <NAME>
+
+                Usage: codex mcp get <NAME>
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["mcp", "add", "docs"],
-                "codex-swift: missing required argument for command 'mcp add': <COMMAND>"
+                2,
+                """
+                error: the following required arguments were not provided:
+                  <COMMAND|--url <URL>>
+
+                Usage: codex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)
+
+                For more information, try '--help'.
+                """
             ),
             (
                 ["mcp", "add", "docs", "--url", "https://example.com/mcp", "--", "echo"],
+                64,
                 "codex-swift: exactly one of command or --url must be provided"
             ),
             (
                 ["mcp", "add", "docs", "--env", "BROKEN"],
+                64,
                 "environment entries must be in KEY=VALUE form"
             ),
             (
                 ["mcp", "add", "docs", "--url", "https://one.example/mcp", "--url=https://two.example/mcp"],
+                64,
                 "codex-swift: duplicate option for command 'mcp add': --url"
             ),
             (
@@ -148,11 +168,12 @@ final class McpCLITests: XCTestCase {
                     "TOKEN_A",
                     "--bearer-token-env-var=TOKEN_B"
                 ],
+                64,
                 "codex-swift: duplicate option for command 'mcp add': --bearer-token-env-var"
             )
         ]
 
-        for (arguments, expectedMessage) in cases {
+        for (arguments, expectedExitCode, expectedMessage) in cases {
             var stderr: [String] = []
             let exitCode = await CodexCLI().runAsync(
                 arguments: arguments,
@@ -164,7 +185,7 @@ final class McpCLITests: XCTestCase {
                 }
             )
 
-            XCTAssertEqual(exitCode, 64, "\(arguments)")
+            XCTAssertEqual(exitCode, expectedExitCode, "\(arguments)")
             XCTAssertEqual(stderr, [expectedMessage], "\(arguments)")
         }
     }

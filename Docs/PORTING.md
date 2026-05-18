@@ -12,6 +12,11 @@ Source baseline inspected for this scaffold:
 
 Recent upstream audit checkpoint:
 
+- 2026-05-18: tightened CLI ordinary parse-failure parity for representative
+  MCP, plugin, and Codex Cloud paths. Swift now exits 2 and emits Rust/Clap
+  diagnostics for missing required arguments, missing option values, and
+  unexpected positional arguments in the covered child commands, backed by a
+  runtime-oracle matrix against Rust.
 - 2026-05-18: tightened CLI missing-child subcommand parity at the Clap
   boundary. Swift now exits 2 and prints Rust's short parent-command help to
   stderr for command groups invoked without a required child, including `mcp`,
