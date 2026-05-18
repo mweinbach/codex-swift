@@ -227,6 +227,12 @@ Recent upstream audit checkpoint:
   transport errors, durations, arguments, and MCP app resource URIs. The
   app-server item result follows Rust's v2 projection by omitting the lower-level
   MCP `isError` field and carrying failure through `status`.
+- 2026-05-18: matched Rust's client `tool_search` handler validation failure
+  shape from `codex-rs/core/src/tools/handlers/tool_search.rs` and
+  `codex-rs/core/src/tools/parallel.rs`. Empty-query and zero-limit
+  `tool_search` calls now produce an empty `tool_search_output` with
+  `status: "completed"` and `execution: "client"` instead of a generic
+  function-call error output.
 - 2026-05-18: matched Rust's blank-argument MCP tool-call parsing from
   `codex-rs/core/src/mcp_tool_call.rs`. Swift's shared
   `NonInteractiveExec.ToolRouter` now treats whitespace-only MCP function-call

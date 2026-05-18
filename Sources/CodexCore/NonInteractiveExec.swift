@@ -1539,6 +1539,13 @@ public enum NonInteractiveExec {
                     execution: "client",
                     tools: try toolSearchIndex.search(arguments: arguments)
                 ))
+            } catch ToolSearchError.emptyQuery, ToolSearchError.invalidLimit {
+                return executed(.toolSearchOutput(
+                    callID: callID,
+                    status: "completed",
+                    execution: "client",
+                    tools: []
+                ))
             } catch {
                 return executed(functionOutput(callID: callID, content: String(describing: error), success: false))
             }

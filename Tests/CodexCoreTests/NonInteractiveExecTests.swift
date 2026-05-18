@@ -2921,6 +2921,44 @@ final class NonInteractiveExecTests: XCTestCase {
         XCTAssertEqual(result.transcriptItems.last, .message(role: "assistant", content: [.outputText(text: "done")]))
     }
 
+    func testClientToolSearchValidationFailureReturnsEmptySearchOutputLikeRust() async throws {
+        let emptyQueryOutput = await NonInteractiveExec.executeFunctionCall(
+            .toolSearchCall(
+                callID: "search-empty",
+                execution: "client",
+                arguments: .object(["query": .string("   ")])
+            ),
+            cwd: URL(fileURLWithPath: "/tmp", isDirectory: true),
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .zsh, shellPath: "/bin/zsh"),
+            truncationPolicy: .bytes(10_000),
+            toolSearchIndex: Self.makeToolSearchIndex()
+        )
+        let invalidLimitOutput = await NonInteractiveExec.executeFunctionCall(
+            .toolSearchCall(
+                callID: "search-limit",
+                execution: "client",
+                arguments: .object(["query": .string("calendar"), "limit": .integer(0)])
+            ),
+            cwd: URL(fileURLWithPath: "/tmp", isDirectory: true),
+            approvalPolicy: .never,
+            sandboxPolicy: .dangerFullAccess,
+            shell: Shell(shellType: .zsh, shellPath: "/bin/zsh"),
+            truncationPolicy: .bytes(10_000),
+            toolSearchIndex: Self.makeToolSearchIndex()
+        )
+
+        XCTAssertEqual(
+            emptyQueryOutput,
+            .toolSearchOutput(callID: "search-empty", status: "completed", execution: "client", tools: [])
+        )
+        XCTAssertEqual(
+            invalidLimitOutput,
+            .toolSearchOutput(callID: "search-limit", status: "completed", execution: "client", tools: [])
+        )
+    }
+
     func testResponsesLoopRunsToolPreExecutionHandlerBeforeExecutorWithCurrentTokenUsageLikeRustGoalRuntime() async throws {
         let initial = Prompt(input: [
             .message(role: "user", content: [.inputText(text: "run echo")])
