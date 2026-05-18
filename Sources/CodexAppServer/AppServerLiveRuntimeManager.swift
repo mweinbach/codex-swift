@@ -341,8 +341,20 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
         }
     }
 
+    func reserveLiveAgentPath(threadID: String, agentPath: AgentPath) async throws {
+        do {
+            try await state.reserveAgentPath(threadID: threadID, agentPath: agentPath)
+        } catch AppServerLiveRuntimeState.AgentPathReservationError.alreadyExists {
+            throw AppServerLiveMultiAgentToolError(message: "agent path `\(agentPath)` already exists")
+        }
+    }
+
     func releaseLiveSpawnSlots(threadIDs: [String]) async {
         await state.releaseSpawnSlots(threadIDs: threadIDs)
+    }
+
+    func releaseLiveAgentPaths(threadIDs: [String]) async {
+        await state.releaseAgentPaths(threadIDs: threadIDs)
     }
 
     func reserveLiveAgentNickname(settings: CodexRuntimeConfig, agentRole: String?) async -> String? {
@@ -894,6 +906,10 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             maxThreads: setup.settings.agents.maxThreads
         )
         do {
+            try await reserveLiveAgentPath(
+                threadID: childThreadID.description,
+                agentPath: request.childAgentPath
+            )
             return try await spawnLiveAgentAfterSlotReservation(
                 request,
                 parentThreadID: parentThreadID,
@@ -905,6 +921,7 @@ public final class AppServerLiveRuntimeManager: AppServerRuntimeManaging, @unche
             )
         } catch {
             await releaseLiveSpawnSlots(threadIDs: [childThreadID.description])
+            await releaseLiveAgentPaths(threadIDs: [childThreadID.description])
             throw error
         }
     }
@@ -2210,6 +2227,10 @@ private actor AppServerLiveRuntimeState {
         case limitReached
     }
 
+    enum AgentPathReservationError: Error {
+        case alreadyExists
+    }
+
     private var eventSink: AppServerRuntimeEventSink?
     private var runningTurns: [String: RunningTurn] = [:]
     private var approvalContinuations: [String: CheckedContinuation<ReviewDecision, Never>] = [:]
@@ -2227,6 +2248,8 @@ private actor AppServerLiveRuntimeState {
     private var agentStatuses: [String: AgentStatus] = [:]
     private var sessionSources: [String: SessionSource] = [:]
     private var reservedSpawnThreadIDs: Set<String> = []
+    private var reservedAgentPathThreadIDs: [String: String] = [:]
+    private var reservedAgentPathsByThreadID: [String: String] = [:]
     private var usedAgentNicknames: Set<String> = []
     private var nicknameResetCount: Int = 0
     private var emittedAbortKeys: Set<String> = []
@@ -2296,8 +2319,33 @@ private actor AppServerLiveRuntimeState {
         }
     }
 
+    func reserveAgentPath(threadID: String, agentPath: AgentPath) throws {
+        let path = agentPath.description
+        if let reservedThreadID = reservedAgentPathThreadIDs[path], reservedThreadID != threadID {
+            throw AgentPathReservationError.alreadyExists
+        }
+        if let previousPath = reservedAgentPathsByThreadID[threadID], previousPath != path {
+            reservedAgentPathThreadIDs.removeValue(forKey: previousPath)
+        }
+        reservedAgentPathThreadIDs[path] = threadID
+        reservedAgentPathsByThreadID[threadID] = path
+    }
+
+    func releaseAgentPaths(threadIDs: [String]) {
+        for threadID in threadIDs {
+            releaseAgentPath(threadID: threadID)
+        }
+    }
+
     func recordSessionSource(threadID: String, source: SessionSource) {
         sessionSources[threadID] = source
+        if let agentPath = source.agentPath, !agentPath.isRoot {
+            let path = agentPath.description
+            if reservedAgentPathThreadIDs[path] == nil {
+                reservedAgentPathThreadIDs[path] = threadID
+                reservedAgentPathsByThreadID[threadID] = path
+            }
+        }
         if let nickname = source.nickname {
             usedAgentNicknames.insert(nickname)
         }
@@ -2489,6 +2537,7 @@ private actor AppServerLiveRuntimeState {
         agentStatuses[threadID] = status
         maybeNotifyParentOfFinalStatus(threadID: threadID, status: status)
         reservedSpawnThreadIDs.remove(threadID)
+        releaseAgentPath(threadID: threadID)
         sessionSources.removeValue(forKey: threadID)
         idlePendingInput.removeValue(forKey: threadID)
         activePendingInput.removeValue(forKey: threadID)
@@ -2512,6 +2561,8 @@ private actor AppServerLiveRuntimeState {
         agentStatuses.removeAll()
         sessionSources.removeAll()
         reservedSpawnThreadIDs.removeAll()
+        reservedAgentPathThreadIDs.removeAll()
+        reservedAgentPathsByThreadID.removeAll()
         idlePendingInput.removeAll()
         activePendingInput.removeAll()
         mailboxCommunications.removeAll()
@@ -2723,6 +2774,13 @@ private actor AppServerLiveRuntimeState {
             ?? "null"
         let body = #"{"agent_path":"\#(agentPath.description)","status":\#(statusJSON)}"#
         return "<subagent_notification>\n\(body)\n</subagent_notification>"
+    }
+
+    private func releaseAgentPath(threadID: String) {
+        guard let path = reservedAgentPathsByThreadID.removeValue(forKey: threadID) else {
+            return
+        }
+        reservedAgentPathThreadIDs.removeValue(forKey: path)
     }
 
     private static func formatAgentNickname(_ name: String, resetCount: Int) -> String {

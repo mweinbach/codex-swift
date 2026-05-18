@@ -13651,6 +13651,31 @@ final class CodexAppServerTests: XCTestCase {
         try await manager.reserveLiveSpawnSlot(threadID: unboundedThreadID, maxThreads: nil)
     }
 
+    func testLiveRuntimeReservesRustSpawnAgentPathsUntilReleased() async throws {
+        let temp = try TemporaryDirectory()
+        let manager = AppServerLiveRuntimeManager(
+            configuration: testConfiguration(codexHome: temp.url, requiresOpenAIAuth: false)
+        )
+        defer {
+            manager.shutdown()
+        }
+
+        let workerPath = try AgentPath.root.join("worker")
+        let firstThreadID = ThreadId().description
+        let duplicateThreadID = ThreadId().description
+        try await manager.reserveLiveAgentPath(threadID: firstThreadID, agentPath: workerPath)
+        try await manager.reserveLiveAgentPath(threadID: firstThreadID, agentPath: workerPath)
+        do {
+            try await manager.reserveLiveAgentPath(threadID: duplicateThreadID, agentPath: workerPath)
+            XCTFail("expected duplicate live agent path reservation to fail")
+        } catch let error as AppServerLiveMultiAgentToolError {
+            XCTAssertEqual(error.message, "agent path `/root/worker` already exists")
+        }
+
+        await manager.releaseLiveAgentPaths(threadIDs: [firstThreadID])
+        try await manager.reserveLiveAgentPath(threadID: duplicateThreadID, agentPath: workerPath)
+    }
+
     func testLiveRuntimeTerminalSubagentTurnQueuesDirectParentNotificationLikeRust() async throws {
         let temp = try TemporaryDirectory()
         let parentThreadID = ThreadId()
