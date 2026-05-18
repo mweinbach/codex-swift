@@ -16506,7 +16506,7 @@ public enum CodexAppServer {
                 "tool": item.tool,
                 "status": item.status.rawValue,
                 "arguments": jsonObject(from: item.arguments),
-                "result": item.result.map { encodableJSONObject($0.truncatedForEvent()) } ?? NSNull(),
+                "result": item.result.map(mcpToolCallResultObject) ?? NSNull(),
                 "error": item.error
                     .map { mcpToolCallErrorObject(McpToolCallError(
                         message: Truncation.truncateText(
@@ -16700,6 +16700,15 @@ public enum CodexAppServer {
 
     private static func mcpToolCallErrorObject(_ error: McpToolCallError) -> [String: Any] {
         ["message": error.message]
+    }
+
+    private static func mcpToolCallResultObject(_ result: McpCallToolResult) -> [String: Any] {
+        let truncated = result.truncatedForEvent()
+        return [
+            "content": truncated.content.map(encodableJSONObject),
+            "structuredContent": truncated.structuredContent.map(jsonObject(from:)) ?? NSNull(),
+            "_meta": truncated.meta.map(jsonObject(from:)) ?? NSNull()
+        ]
     }
 
     fileprivate static func durationMilliseconds(_ duration: ProtocolDuration) -> Int64 {
@@ -17339,6 +17348,60 @@ public enum CodexAppServer {
             return terminalInteractionNotification(threadID: threadID, turnID: turnID, event: event)
         case let .patchApplyUpdated(event):
             return fileChangePatchUpdatedNotification(threadID: threadID, turnID: turnID, event: event)
+        case let .mcpToolCallBegin(event):
+            return itemStartedNotification(
+                threadID: threadID,
+                turnID: turnID,
+                event: ItemStartedEvent(
+                    threadID: (try? ConversationId(string: threadID)) ?? ConversationId(),
+                    turnID: turnID,
+                    item: .mcpToolCall(McpToolCallItem(
+                        id: event.callID,
+                        server: event.invocation.server,
+                        tool: event.invocation.tool,
+                        arguments: event.invocation.arguments ?? .null,
+                        mcpAppResourceURI: event.mcpAppResourceURI,
+                        status: .inProgress
+                    )),
+                    startedAtMilliseconds: currentUnixTimestampMilliseconds()
+                )
+            )
+        case let .mcpToolCallEnd(event):
+            let item: McpToolCallItem
+            switch event.result {
+            case let .ok(result):
+                item = McpToolCallItem(
+                    id: event.callID,
+                    server: event.invocation.server,
+                    tool: event.invocation.tool,
+                    arguments: event.invocation.arguments ?? .null,
+                    mcpAppResourceURI: event.mcpAppResourceURI,
+                    status: event.isSuccess ? .completed : .failed,
+                    result: result,
+                    duration: event.duration
+                )
+            case let .err(message):
+                item = McpToolCallItem(
+                    id: event.callID,
+                    server: event.invocation.server,
+                    tool: event.invocation.tool,
+                    arguments: event.invocation.arguments ?? .null,
+                    mcpAppResourceURI: event.mcpAppResourceURI,
+                    status: .failed,
+                    error: McpToolCallError(message: message),
+                    duration: event.duration
+                )
+            }
+            return itemCompletedNotification(
+                threadID: threadID,
+                turnID: turnID,
+                event: ItemCompletedEvent(
+                    threadID: (try? ConversationId(string: threadID)) ?? ConversationId(),
+                    turnID: turnID,
+                    item: .mcpToolCall(item),
+                    completedAtMilliseconds: currentUnixTimestampMilliseconds()
+                )
+            )
         case let .itemStarted(event):
             return itemStartedNotification(threadID: threadID, turnID: turnID, event: event)
         case let .itemCompleted(event):

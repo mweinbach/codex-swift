@@ -7688,6 +7688,107 @@ final class CodexAppServerTests: XCTestCase {
         XCTAssertEqual(item["durationMs"] as? Int, 1)
     }
 
+    func testRuntimeMcpToolCallEventsProjectRustItemLifecycle() async throws {
+        let temp = try TemporaryDirectory()
+        let notificationCapture = AppServerNotificationCapture()
+        let processor = try initializedProcessor(
+            configuration: testConfiguration(codexHome: temp.url),
+            notificationSink: { data in await notificationCapture.append(data) }
+        )
+
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .mcpToolCallBegin(McpToolCallBeginEvent(
+                callID: "mcp-1",
+                invocation: McpInvocation(
+                    server: "docs",
+                    tool: "lookup",
+                    arguments: .object(["query": .string("swift")])
+                ),
+                mcpAppResourceURI: "app://docs"
+            ))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .mcpToolCallEnd(McpToolCallEndEvent(
+                callID: "mcp-1",
+                invocation: McpInvocation(
+                    server: "docs",
+                    tool: "lookup",
+                    arguments: .object(["query": .string("swift")])
+                ),
+                mcpAppResourceURI: "app://docs",
+                duration: ProtocolDuration(secs: 0, nanos: 42_000_000),
+                result: .ok(McpCallToolResult(
+                    content: [.text(McpTextContent(text: "failed but returned a result"))],
+                    isError: true,
+                    structuredContent: .object(["reason": .string("tool reported failure")])
+                ))
+            ))
+        )
+        await processor.handleRuntimeEvent(
+            threadID: "thread-1",
+            turnID: "turn-1",
+            event: .mcpToolCallEnd(McpToolCallEndEvent(
+                callID: "mcp-2",
+                invocation: McpInvocation(
+                    server: "docs",
+                    tool: "lookup",
+                    arguments: nil
+                ),
+                duration: ProtocolDuration(secs: 0, nanos: 1_000_000),
+                result: .err("transport failed")
+            ))
+        )
+
+        let startedMessages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        let startedParams = try XCTUnwrap(startedMessages[0]["params"] as? [String: Any])
+        XCTAssertEqual(startedMessages[0]["method"] as? String, "item/started")
+        XCTAssertEqual(startedParams["threadId"] as? String, "thread-1")
+        XCTAssertEqual(startedParams["turnId"] as? String, "turn-1")
+        XCTAssertNotNil(startedParams["startedAtMs"] as? Int)
+        let startedItem = try XCTUnwrap(startedParams["item"] as? [String: Any])
+        XCTAssertEqual(startedItem["type"] as? String, "mcpToolCall")
+        XCTAssertEqual(startedItem["id"] as? String, "mcp-1")
+        XCTAssertEqual(startedItem["server"] as? String, "docs")
+        XCTAssertEqual(startedItem["tool"] as? String, "lookup")
+        XCTAssertEqual(startedItem["status"] as? String, "inProgress")
+        XCTAssertEqual(startedItem["mcpAppResourceUri"] as? String, "app://docs")
+        XCTAssertEqual((startedItem["arguments"] as? [String: Any])?["query"] as? String, "swift")
+        XCTAssertTrue(startedItem["result"] is NSNull)
+        XCTAssertTrue(startedItem["error"] is NSNull)
+
+        let completedMessages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        let completedParams = try XCTUnwrap(completedMessages[0]["params"] as? [String: Any])
+        XCTAssertEqual(completedMessages[0]["method"] as? String, "item/completed")
+        XCTAssertEqual(completedParams["threadId"] as? String, "thread-1")
+        XCTAssertEqual(completedParams["turnId"] as? String, "turn-1")
+        XCTAssertNotNil(completedParams["completedAtMs"] as? Int)
+        let completedItem = try XCTUnwrap(completedParams["item"] as? [String: Any])
+        XCTAssertEqual(completedItem["type"] as? String, "mcpToolCall")
+        XCTAssertEqual(completedItem["id"] as? String, "mcp-1")
+        XCTAssertEqual(completedItem["status"] as? String, "failed")
+        XCTAssertEqual(completedItem["durationMs"] as? Int, 42)
+        XCTAssertTrue(completedItem["error"] is NSNull)
+        let result = try XCTUnwrap(completedItem["result"] as? [String: Any])
+        XCTAssertNil(result["isError"])
+        XCTAssertEqual((result["structuredContent"] as? [String: Any])?["reason"] as? String, "tool reported failure")
+        let content = try XCTUnwrap(result["content"] as? [[String: Any]])
+        XCTAssertEqual(content[0]["text"] as? String, "failed but returned a result")
+
+        let failedMessages = try decodeMessages(try await nextNotificationPayload(notificationCapture))
+        let failedParams = try XCTUnwrap(failedMessages[0]["params"] as? [String: Any])
+        let failedItem = try XCTUnwrap(failedParams["item"] as? [String: Any])
+        XCTAssertEqual(failedItem["id"] as? String, "mcp-2")
+        XCTAssertEqual(failedItem["status"] as? String, "failed")
+        XCTAssertTrue(failedItem["result"] is NSNull)
+        XCTAssertEqual((failedItem["error"] as? [String: Any])?["message"] as? String, "transport failed")
+        XCTAssertEqual(failedItem["durationMs"] as? Int, 1)
+        XCTAssertTrue(failedItem["arguments"] is NSNull)
+    }
+
     func testRuntimeItemLifecycleSerializesRustCoreThreadItemVariants() async throws {
         let temp = try TemporaryDirectory()
         let notificationCapture = AppServerNotificationCapture()
