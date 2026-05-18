@@ -831,8 +831,11 @@ public struct CodexCLI: Sendable {
             case .root:
                 return .version
             case let .command(spec, arguments):
-                if spec.name == "exec" || spec.name == "cloud" {
+                switch spec.name {
+                case "exec", "resume", "fork", "cloud":
                     return .commandVersion(spec)
+                default:
+                    break
                 }
                 let flag = arguments.first(where: { $0 == "--version" || $0 == "-V" }) ?? "--version"
                 return .commandUnsupportedVersion(spec, flag: flag)
@@ -1185,6 +1188,10 @@ public struct CodexCLI: Sendable {
         switch spec.name {
         case "exec":
             return "codex-cli-exec \(Self.version)"
+        case "resume":
+            return "codex-cli-resume \(Self.version)"
+        case "fork":
+            return "codex-cli-fork \(Self.version)"
         case "cloud":
             return "codex-cli-cloud \(Self.version)"
         default:

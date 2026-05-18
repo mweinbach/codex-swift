@@ -664,6 +664,22 @@ final class CodexCLITests: XCTestCase {
             CodexCLI().parseInvocation(arguments: ["exec", "-V"]),
             .commandVersion(execSpec)
         )
+        let resumeSpec = CommandSpec(
+            name: "resume",
+            summary: "Resume a previous interactive session."
+        )
+        XCTAssertEqual(
+            CodexCLI().parseInvocation(arguments: ["resume", "--version"]),
+            .commandVersion(resumeSpec)
+        )
+        let forkSpec = CommandSpec(
+            name: "fork",
+            summary: "Fork a previous interactive session (picker by default; use --last to fork the most recent)."
+        )
+        XCTAssertEqual(
+            CodexCLI().parseInvocation(arguments: ["fork", "-V"]),
+            .commandVersion(forkSpec)
+        )
         let cloudSpec = CommandSpec(
             name: "cloud",
             aliases: ["cloud-tasks"],
@@ -696,6 +712,26 @@ final class CodexCLITests: XCTestCase {
 
         XCTAssertEqual(exitCode, 0)
         XCTAssertEqual(stdout, ["codex-cli-exec \(CodexBuildMetadata.version)"])
+
+        stdout.removeAll()
+        let resumeExitCode = await CodexCLI().runAsync(
+            arguments: ["resume", "--version"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(resumeExitCode, 0)
+        XCTAssertEqual(stdout, ["codex-cli-resume \(CodexBuildMetadata.version)"])
+
+        stdout.removeAll()
+        let forkExitCode = await CodexCLI().runAsync(
+            arguments: ["fork", "--version"],
+            stdout: { stdout.append($0) },
+            stderr: { _ in XCTFail("stderr should not be written") }
+        )
+
+        XCTAssertEqual(forkExitCode, 0)
+        XCTAssertEqual(stdout, ["codex-cli-fork \(CodexBuildMetadata.version)"])
 
         stdout.removeAll()
         let cloudExitCode = await CodexCLI().runAsync(

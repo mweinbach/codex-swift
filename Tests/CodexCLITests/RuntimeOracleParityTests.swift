@@ -517,6 +517,27 @@ final class RuntimeOracleParityTests: XCTestCase {
         XCTAssertEqual(normalizedVersionLine(swift.stdout), normalizedVersionLine(rust.stdout))
     }
 
+    func testInteractivePickerVersionCommandsMatchRustOracleModuloVersionNumber() throws {
+        let oracle = try RuntimeOracle.required()
+        let commands = [
+            ["resume", "--version"],
+            ["fork", "--version"]
+        ]
+
+        for arguments in commands {
+            let rust = try oracle.run(.rust, arguments: arguments)
+            let swift = try oracle.run(.swift, arguments: arguments)
+
+            XCTAssertEqual(rust.exitCode, 0, rust.stderr)
+            XCTAssertEqual(swift.exitCode, 0, swift.stderr)
+            XCTAssertEqual(
+                normalizedVersionLine(swift.stdout),
+                normalizedVersionLine(rust.stdout),
+                arguments.joined(separator: " ")
+            )
+        }
+    }
+
     func testReviewVersionRejectionMatchesRustOracle() throws {
         let oracle = try RuntimeOracle.required()
         let codexHome = try RuntimeOracleTemporaryDirectory(prefix: "codex-runtime-oracle-home")
